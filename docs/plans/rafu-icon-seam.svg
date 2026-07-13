@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>Rafu app icon — the seam</title>
+  <rect x="0" y="0" width="512" height="512" rx="116" fill="#151A24"/>
+  <rect x="96" y="102" width="143" height="307" rx="27" fill="#1E2634"/>
+  <rect x="273" y="102" width="143" height="307" rx="27" fill="#1E2634"/>
+  <polyline points="218,137 294,178 218,219 294,260 218,301 294,342 218,376"
+            fill="none" stroke="#E3A857" stroke-width="19"
+            stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

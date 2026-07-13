@@ -1,0 +1,3314 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="indigo">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rafu (રફૂ) — Native macOS Repository Editor · Plan v0.4</title>
+<style>
+  /* ============ Themes: Indigo (dark) & Khadi (light) ============ */
+  :root{
+    --radius: 8px;
+    --mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    --serif: "New York", ui-serif, Georgia, "Times New Roman", serif;
+  }
+  html[data-theme="indigo"]{
+    --bg-app:#10141C; --bg-editor:#151A24; --bg-elev:#1B212D; --bg-hover:#1D2431;
+    --bg-sel:#242C3C; --border:#262E3E; --border-strong:#333D52;
+    --text:#E7EAF2; --text-2:#9AA3B8; --text-3:#67718A;
+    --accent:#E3A857; --accent-hover:#EDB96F; --on-accent:#201709;
+    --err:#E06C75; --warn:#D4A24E; --info:#82A7F0; --ok:#7CC08A;
+    --code-kw:#9D8CE8; --code-str:#9FC98F; --code-fn:#74BFCB; --code-ty:#82A7F0;
+    --diff-add:#142E1D; --diff-del:#331D20;
+    color-scheme: dark;
+  }
+  html[data-theme="khadi"]{
+    --bg-app:#F1EDE3; --bg-editor:#FAF7F0; --bg-elev:#FFFFFF; --bg-hover:#EFE9DB;
+    --bg-sel:#E7E0CE; --border:#E3DCCB; --border-strong:#CFC6B0;
+    --text:#2B2F3A; --text-2:#5D6474; --text-3:#8A90A0;
+    --accent:#A2701F; --accent-hover:#8A5D14; --on-accent:#FFF9EE;
+    --err:#B3362E; --warn:#8F6A10; --info:#3557B7; --ok:#2E7D46;
+    --code-kw:#6C4FC4; --code-str:#4E7D45; --code-fn:#1E7A87; --code-ty:#3557B7;
+    --diff-add:#E3F2E6; --diff-del:#FBE6E4;
+    color-scheme: light;
+  }
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none !important} }
+  body{
+    margin:0; background:var(--bg-app); color:var(--text);
+    font-family:var(--sans); font-size:15.5px; line-height:1.65;
+    transition: background .25s ease, color .25s ease;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ============ Stitch motif ============ */
+  .stitch{ border:none; border-top:2px dashed var(--border-strong); margin:3.2rem 0; position:relative; }
+
+  /* ============ Header ============ */
+  header.masthead{
+    border-bottom:2px dashed var(--border-strong);
+    background:var(--bg-app);
+    padding: 2.6rem 1.5rem 2rem;
+  }
+  .masthead-inner{max-width:1160px; margin:0 auto; display:flex; flex-wrap:wrap; gap:1.2rem; align-items:flex-end; justify-content:space-between;}
+  .wordmark{ font-family:var(--serif); font-weight:700; font-size: clamp(2.6rem, 6vw, 4rem); letter-spacing:-0.015em; line-height:1; margin:0;}
+  .wordmark .thread{ color:var(--accent); }
+  .wordmark .gujarati{ font-size:.45em; font-weight:600; vertical-align:.28em; letter-spacing:0; }
+  .wordmark-under{ display:inline-block; border-bottom:3px dashed var(--accent); padding-bottom:.35rem;}
+  .tagline{ color:var(--text-2); margin:.9rem 0 0; font-size:1.05rem; max-width:46rem;}
+  .meta-row{ display:flex; gap:.6rem; align-items:center; flex-wrap:wrap;}
+  .pill{ font-family:var(--mono); font-size:.72rem; letter-spacing:.06em; color:var(--text-2);
+    border:1px solid var(--border-strong); border-radius:999px; padding:.28rem .7rem; background:var(--bg-elev);}
+  .pill b{color:var(--accent); font-weight:600;}
+  #themeToggle{
+    font-family:var(--sans); font-size:.82rem; font-weight:600; cursor:pointer;
+    color:var(--on-accent); background:var(--accent); border:none; border-radius:999px;
+    padding:.5rem 1rem; transition: background .15s ease;
+  }
+  #themeToggle:hover{ background:var(--accent-hover); }
+  #themeToggle:focus-visible{ outline:2px solid var(--accent); outline-offset:3px; }
+
+  /* ============ Layout: TOC + content ============ */
+  .frame{ max-width:1160px; margin:0 auto; padding:0 1.5rem 5rem; display:grid; grid-template-columns: 250px minmax(0,1fr); gap:2.6rem;}
+  nav.toc{ position:sticky; top:1.2rem; align-self:start; max-height:calc(100vh - 2.4rem); overflow:auto;
+    padding:1.1rem 0 1.1rem; font-size:.83rem;}
+  nav.toc .toc-title{ font-family:var(--mono); font-size:.68rem; letter-spacing:.14em; text-transform:uppercase; color:var(--text-3); margin:0 0 .7rem;}
+  nav.toc a{ display:block; color:var(--text-2); text-decoration:none; padding:.26rem .6rem; border-left:2px solid transparent; border-radius:0 6px 6px 0;}
+  nav.toc a:hover{ color:var(--text); background:var(--bg-hover);}
+  nav.toc a.active{ color:var(--accent); border-left-color:var(--accent); font-weight:600;}
+  main{ min-width:0; padding-top:2.4rem;}
+
+  /* ============ Content typography ============ */
+  main h1{ display:none; } /* wordmark replaces it */
+  main h2{
+    font-family:var(--serif); font-weight:700; font-size:1.75rem; letter-spacing:-0.01em;
+    margin:3.4rem 0 1rem; padding-top:1.6rem; border-top:2px dashed var(--border-strong); scroll-margin-top:1rem;
+  }
+  main h2:first-of-type{ border-top:none; margin-top:1.4rem; padding-top:0;}
+  main h3{ font-family:var(--sans); font-weight:700; font-size:1.12rem; margin:2.2rem 0 .6rem; scroll-margin-top:1rem;}
+  main h4{ font-family:var(--mono); font-weight:600; font-size:.82rem; letter-spacing:.08em; text-transform:uppercase; color:var(--accent); margin:1.8rem 0 .5rem;}
+  main p{ margin:.75rem 0; max-width:76ch;}
+  main a{ color:var(--accent); text-decoration:underline; text-decoration-style:dotted; text-underline-offset:3px;}
+  main a:hover{ color:var(--accent-hover);}
+  main blockquote{
+    margin:1.2rem 0; padding:.8rem 1.2rem; border-left:3px solid var(--accent);
+    background:var(--bg-elev); border-radius:0 var(--radius) var(--radius) 0; color:var(--text-2);
+    font-family:var(--serif); font-size:1.06rem;
+  }
+  main ul, main ol{ padding-left:1.4rem; max-width:76ch;}
+  main li{ margin:.3rem 0;}
+  main strong{ font-weight:650;}
+  del{ color:var(--text-3);}
+
+  /* ============ Code ============ */
+  code{ font-family:var(--mono); font-size:.86em; background:var(--bg-elev);
+    border:1px solid var(--border); border-radius:5px; padding:.1em .4em; color:var(--text);}
+  pre{ background:var(--bg-editor); border:1px solid var(--border); border-radius:var(--radius);
+    padding:1rem 1.2rem; overflow-x:auto; line-height:1.55; margin:1.1rem 0;}
+  pre code{ background:none; border:none; padding:0; font-size:.82rem; color:var(--text);}
+  html[data-theme="indigo"] pre{ background:#151A24;}
+  html[data-theme="khadi"] pre{ background:#FAF7F0;}
+
+  /* ============ Tables ============ */
+  table{ border-collapse:collapse; width:100%; margin:1.2rem 0; font-size:.88rem; display:block; overflow-x:auto;}
+  th, td{ border:1px solid var(--border); padding:.55rem .75rem; text-align:left; vertical-align:top;}
+  th{ background:var(--bg-elev); font-family:var(--mono); font-size:.72rem; letter-spacing:.06em; text-transform:uppercase; color:var(--text-2);}
+  tbody tr:hover{ background:var(--bg-hover);}
+
+  /* Hex swatch chips (auto-injected) */
+  .swatch{ display:inline-block; width:.85em; height:.85em; border-radius:3px; margin-right:.4em;
+    vertical-align:-0.08em; border:1px solid var(--border-strong);}
+
+  /* ============ Footer ============ */
+  footer{ border-top:2px dashed var(--border-strong); color:var(--text-3); font-size:.8rem;
+    padding:1.6rem 1.5rem 2.4rem; text-align:center; font-family:var(--mono);}
+
+  /* ============ Responsive ============ */
+  @media (max-width: 900px){
+    .frame{ grid-template-columns: 1fr; gap:0;}
+    nav.toc{ position:static; max-height:none; border-bottom:1px solid var(--border); margin-top:1rem; padding-bottom:1rem;}
+    nav.toc a{ display:inline-block; border-left:none; border:1px solid var(--border); border-radius:999px; margin:.15rem .2rem .15rem 0; padding:.25rem .7rem; font-size:.76rem;}
+    nav.toc a.active{ border-color:var(--accent);}
+  }
+</style>
+</head>
+<body>
+<header class="masthead">
+  <div class="masthead-inner">
+    <div>
+      <div style="display:flex; align-items:center; gap:1.1rem;">
+      <svg width="56" height="56" viewBox="0 0 150 150" role="img" aria-label="Rafu app icon" style="flex:none;"><rect x="0" y="0" width="150" height="150" rx="34" fill="#151A24" stroke="#333D52" stroke-width="1"/><rect x="28" y="30" width="42" height="90" rx="8" fill="#1E2634"/><rect x="80" y="30" width="42" height="90" rx="8" fill="#1E2634"/><polyline points="64,40 86,52 64,64 86,76 64,88 86,100 64,110" fill="none" stroke="#E3A857" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <h1 class="wordmark"><span class="wordmark-under">Rafu <span class="thread gujarati">રફૂ</span></span></h1>
+      </div>
+      <p class="tagline">A native macOS repository editor for the small mends — the agent weaves the cloth, you rafu the holes. Product, design, theming, SSH, CLI, architecture, and delivery plan.</p>
+    </div>
+    <div class="meta-row">
+      <span class="pill">v<b>0.4</b></span>
+      <span class="pill">July 12, 2026</span>
+      <button id="themeToggle" aria-pressed="false" title="Switch between the app's two bundled themes">Khadi ☀︎</button>
+    </div>
+  </div>
+</header>
+
+<div class="frame">
+  <nav class="toc" aria-label="Table of contents">
+    <p class="toc-title">Sections</p>
+    <div id="tocLinks"></div>
+  </nav>
+  <main id="content">
+<h1 id="rafu">Rafu</h1>
+<h2
+id="a-native-macos-repository-editor--product-design-theming-ssh-cli-architecture-and-delivery-plan">A
+Native macOS Repository Editor — Product, Design, Theming, SSH, CLI,
+Architecture, and Delivery Plan</h2>
+<p><strong>Status:</strong> Working product and engineering plan<br />
+<strong>Version:</strong> 0.4<br />
+<strong>Date:</strong> July 12, 2026<br />
+<strong>Relationship to v0.2/v0.3:</strong> This document is additive
+and corrective. It retains the SwiftUI/AppKit editor, syntax, Git, AI
+commit-message, SSH, CLI, performance, and security direction, and adds
+the following:</p>
+<ul>
+<li><strong>Name decision.</strong> The product is named
+<strong>Rafu</strong> (રફૂ — darning) with the CLI command
+<code>rafu</code> (section 2.4). v0.3's interim name "Darn" is
+superseded; Rafu is the same idea in the founder's own language.</li>
+<li><strong>Theme system.</strong> JSON-defined themes covering fonts,
+UI colors, editor colors, Git semantics, and syntax highlighting, in the
+style of Obsidian/Zed theme files — data only, no code (sections
+4.5–4.6). Two bundled themes ship from day one: <strong>Indigo</strong>
+(dark) and <strong>Khadi</strong> (light), joined by a
+<strong>zari-gold</strong> accent.</li>
+<li><strong>Markdown preview.</strong> Markdown files open with edit and
+native preview by default, rendered without a per-document WebView
+(section 7.7).</li>
+<li><strong>Sequencing correction.</strong> Phase 1A (local-only) is now
+an explicitly shippable internal v0.1 gate before SSH work begins in
+earnest, since the founding daily pain — touching <code>.env</code>,
+Compose, and config files next to a coding agent — is local (section
+15).</li>
+<li><strong>Editor-core de-risking.</strong> Evaluate STTextView /
+CodeEdit's source editor as a TextKit 2 foundation before committing to
+a fully bespoke <code>NSTextView</code> subclass (section 7.1).</li>
+</ul>
+<hr />
+<h2 id="1-executive-decision">1. Executive decision</h2>
+<p>Build a <strong>native macOS repository companion editor</strong>
+with two workspace types:</p>
+<ol type="1">
+<li><strong>Local workspace</strong> — a folder or Git worktree on the
+Mac.</li>
+<li><strong>SSH workspace</strong> — a folder that remains on a remote
+machine selected through the user's OpenSSH configuration.</li>
+</ol>
+<p>Each workspace opens in an independent macOS window. The application
+UI, editor buffers, syntax parsing, and unsaved changes remain local.
+For an SSH workspace, a small versioned helper runs on the remote
+machine over a standard SSH channel and performs file-system and, later,
+Git operations.</p>
+<p>The implementation should be:</p>
+<ul>
+<li><strong>SwiftUI</strong> for the application shell, windows,
+toolbar, settings, source-control views, sheets, and state
+composition.</li>
+<li><strong>AppKit/TextKit 2</strong> for the code editor, selection
+behavior, line layout, undo, input methods, and high-performance text
+editing.</li>
+<li><strong>Tree-sitter</strong> for bundled incremental syntax
+highlighting.</li>
+<li><strong>System OpenSSH</strong> (<code>/usr/bin/ssh</code>) for
+remote authentication and transport, so existing
+<code>~/.ssh/config</code>, <code>Include</code>,
+<code>ProxyJump</code>, identity files, security keys, agents, and
+<code>known_hosts</code> behavior continue to work.</li>
+<li>A small <strong>Rust remote agent</strong> for reliable remote file
+operations over SSH. The macOS product remains a native Swift
+application; the helper is a headless implementation detail, not another
+desktop application.</li>
+<li>A small signed <strong>command-line launcher</strong> bundled with
+the app, installed under a product-specific command such as
+<code>rafu</code>.</li>
+<li>The installed <strong>Git executable</strong> locally, and the
+remote machine's Git executable for SSH workspaces.</li>
+<li>Direct <code>URLSession</code> integration for OpenAI-compatible
+commit-message generation, with user credentials in Keychain.</li>
+</ul>
+<p>The defining product flow is:</p>
+<pre class="text"><code>Open a local or SSH repository
+        ↓
+Review files changed by Codex or Claude Code
+        ↓
+Make focused edits without launching a large IDE
+        ↓
+Review and stage Git changes
+        ↓
+Generate an editable commit subject/body from an explicit diff scope
+        ↓
+Commit</code></pre>
+<hr />
+<h2 id="2-product-position">2. Product position</h2>
+<h3 id="21-product-statement">2.1 Product statement</h3>
+<blockquote>
+<p>A fast, native macOS editor for opening local and SSH repositories,
+making focused code or configuration edits, reviewing Git changes, and
+producing accurate commit messages without an extension host, embedded
+agent, or full IDE runtime.</p>
+</blockquote>
+<h3 id="22-primary-user">2.2 Primary user</h3>
+<p>A developer who:</p>
+<ul>
+<li>Uses Codex, Claude Code, or another terminal-based coding agent for
+most implementation work.</li>
+<li>Frequently needs to inspect or adjust generated files, Dockerfiles,
+Compose files, <code>.env</code> files, scripts, manifests, and source
+code.</li>
+<li>Wants a small editor with high-quality native text editing and Git
+review.</li>
+<li>Works across both local repositories and remote Linux or macOS
+machines.</li>
+<li>Values predictable memory use more than a broad extension
+ecosystem.</li>
+</ul>
+<h3 id="23-product-principles">2.3 Product principles</h3>
+<ol type="1">
+<li><strong>Purpose over breadth.</strong> Every feature must support
+opening, editing, reviewing, or committing a repository.</li>
+<li><strong>Local responsiveness.</strong> Typing, selection, search
+within an open buffer, undo, and syntax presentation must never wait on
+SSH or an AI service.</li>
+<li><strong>User agency.</strong> No automatic commit, no automatic
+transmission of diffs, no silent overwrite of external changes, and no
+silent host-key acceptance.</li>
+<li><strong>Familiar macOS behavior.</strong> Native windows, menus,
+keyboard shortcuts, sheets, focus, drag and drop, accessibility, and
+standard text behaviors.</li>
+<li><strong>One mental model.</strong> Local and SSH workspaces should
+share the same editor, file-tree, tab, Git, and AI surfaces. Differences
+appear only where connection state or remote latency matters.</li>
+<li><strong>No extension platform.</strong> Languages and features are
+built in and deliberately limited.</li>
+<li><strong>Measure, do not assume.</strong> Native technology creates
+an opportunity for a smaller footprint; disciplined buffer ownership,
+lazy loading, and profiling determine whether that opportunity is
+realized.</li>
+</ol>
+<h3 id="24-name-rafu">2.4 Name: Rafu</h3>
+<p><strong>Rafu (રફૂ / रफ़ू)</strong> — darning. The word (from Persian
+<em>rafū</em>) is the everyday Gujarati/Hindi/Urdu term for mending a
+small hole in otherwise good fabric, and the <em>rafugar</em> — the
+craftsperson whose repairs are meant to be invisible — is the product's
+exact job description: the coding agent weaves the cloth; Rafu is what
+you reach for to mend the hole in the <code>.env</code>, the Dockerfile,
+the manifest.</p>
+<p>Why not the earlier candidates:</p>
+<ul>
+<li><strong>Patch</strong> — a POSIX command (<code>patch(1)</code>); an
+unshippable CLI collision.</li>
+<li><strong>Seam</strong> — already an established macOS app (a
+notch/Dynamic Island utility, Homebrew cask <code>seam-app</code>) plus
+Seam the IoT API company.</li>
+<li><strong>Darn</strong> — the right meaning, but in English; Rafu says
+the same thing in the founder's own language, is shorter as a CLI, and
+remains effortlessly pronounceable everywhere (<em>rah-foo</em>).</li>
+</ul>
+<p><code>rafu</code> checks out as a name: it is not a POSIX utility,
+not a shell builtin, not a Homebrew formula, and nothing in the
+developer-tool space uses it (the Rafu Shimpo, a Los Angeles
+Japanese-language newspaper, is an unrelated category). Verify
+<code>brew search rafu</code> and an App Store search once more
+immediately before public release.</p>
+<table>
+<thead>
+<tr class="header">
+<th>Item</th>
+<th>Decision</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Product name</td>
+<td>Rafu</td>
+</tr>
+<tr class="even">
+<td>CLI command</td>
+<td><code>rafu</code></td>
+</tr>
+<tr class="odd">
+<td>Bundle identifier</td>
+<td>Personal reverse-DNS, e.g. <code>dev.vatsalsaglani.rafu</code>
+(final: pick before Phase 0 signing)</td>
+</tr>
+<tr class="even">
+<td>Bundled themes</td>
+<td><strong>Indigo</strong> (dark) and <strong>Khadi</strong> (light) —
+indigo-dyed and undyed handspun cloth; both names have Indian textile
+roots, matching the product's</td>
+</tr>
+<tr class="odd">
+<td>Accent</td>
+<td><strong>Zari gold</strong> — the metallic thread of Indian
+embroidery; Surat, in Gujarat, is its historic center</td>
+</tr>
+<tr class="even">
+<td>Remote agent binary</td>
+<td><code>rafu-agent</code></td>
+</tr>
+<tr class="odd">
+<td>App icon</td>
+<td><strong>The seam</strong> — two indigo cloth panels laced together
+by a zari-gold zigzag thread (see the icon spec below)</td>
+</tr>
+</tbody>
+</table>
+<p>Alternates kept in reserve if a late conflict appears:
+<strong>Sandho</strong> (સાંધો, the seam/joint), <strong>Tanko</strong>
+(ટાંકો, a stitch), <strong>Thigdu</strong> (થીગડું, the patch).</p>
+<h4 id="app-icon-the-seam">App icon: the seam</h4>
+<p>Two indigo cloth panels, laced together by a single zari-gold zigzag
+thread, on the standard macOS squircle. The mark encodes the product
+three times over: the lacing is the mend (rafu), the two panels are the
+split editor and side-by-side diff, and the joined halves are the
+local↔︎SSH workspace pair stitched by one seam.</p>
+<p>Production rules:</p>
+<ul>
+<li>Build as a layered icon in Icon Composer: background cloth layer,
+panel layer, thread layer. Let macOS generate the dark and tinted
+appearances from the layers; the gold thread survives tinting.</li>
+<li>Colors are the brand palette: panels <code>#1E2634</code> on
+<code>#151A24</code>, thread <code>#E3A857</code> (Indigo) /
+<code>#A2701F</code> on <code>#FAF7F0</code> (Khadi/light variant).</li>
+<li>Small sizes: at 32 px the zigzag keeps three to four bends; at 16 px
+it may relax to a straight gold seam line between the two blocks. The
+two-panels-plus-gold-seam silhouette is the invariant.</li>
+<li>A monochrome template glyph (black panels and thread on transparent)
+is reserved for any future menu-bar presence.</li>
+<li>Source asset: <code>rafu-icon-seam.svg</code>.</li>
+</ul>
+<p>Rejected and reassigned concepts: a woven gold hash (too close to a
+hashtag and to Slack's fourfold-symmetric mark), the khadi patch with
+running stitch (kept as fallback — most legible of all at 16 px), and
+the રફૂ monogram (reserved for the About window and the wordmark, where
+the script has room to breathe).</p>
+<hr />
+<h2 id="3-scope">3. Scope</h2>
+<h3 id="31-first-complete-product">3.1 First complete product</h3>
+<table>
+<thead>
+<tr class="header">
+<th>Area</th>
+<th>Included</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Workspaces</td>
+<td>Local folders, Git repositories, worktrees, and SSH folders</td>
+</tr>
+<tr class="even">
+<td>Windows</td>
+<td>Multiple independent workspace windows</td>
+</tr>
+<tr class="odd">
+<td>File management</td>
+<td>Lazy tree, open, create, rename, delete, move, reveal locally, copy
+path</td>
+</tr>
+<tr class="even">
+<td>Editing</td>
+<td>Tabs, line numbers, undo/redo, find/replace, go to line,
+indentation, line operations, brackets, multiple selections, soft
+wrap</td>
+</tr>
+<tr class="odd">
+<td>Syntax</td>
+<td>A fixed bundled language set using Tree-sitter</td>
+</tr>
+<tr class="even">
+<td>External changes</td>
+<td>Detect files changed by terminal agents, Git, or another
+process</td>
+</tr>
+<tr class="odd">
+<td>SSH</td>
+<td>Read OpenSSH config, connect through system SSH, browse and edit
+remote folders, reconnect safely</td>
+</tr>
+<tr class="even">
+<td>Git</td>
+<td>Status, diffs, file-level stage/unstage, editable commit form,
+commit</td>
+</tr>
+<tr class="odd">
+<td>AI</td>
+<td>Generate commit subject/body from staged, selected, or all
+changes</td>
+</tr>
+<tr class="even">
+<td>CLI</td>
+<td><code>rafu .</code>, file opening, line/column navigation, SSH
+workspace opening, and <code>--wait</code></td>
+</tr>
+<tr class="odd">
+<td>Settings</td>
+<td>Editor, appearance, Git, AI provider, SSH, and command-line
+installation</td>
+</tr>
+<tr class="even">
+<td>Icons</td>
+<td>SF Symbols plus a small bundled filename/extension mapping</td>
+</tr>
+<tr class="odd">
+<td>Markdown</td>
+<td>Edit and native preview by default: Edit / Split / Preview per
+document, GFM subset, no per-document WebView</td>
+</tr>
+<tr class="even">
+<td>Theming</td>
+<td>JSON theme files (fonts, UI colors, editor colors, Git colors,
+syntax); bundled Indigo (dark) and Khadi (light); user themes
+folder</td>
+</tr>
+</tbody>
+</table>
+<h3 id="32-explicit-non-goals-for-the-initial-product">3.2 Explicit
+non-goals for the initial product</h3>
+<ul>
+<li>Extension marketplace or third-party plugin runtime</li>
+<li>Embedded terminal</li>
+<li>Debugger</li>
+<li>Collaboration</li>
+<li>AI chat, inline generation, or autonomous agents</li>
+<li>Full language-server ecosystem</li>
+<li>Remote containers, Kubernetes, WSL, or dev-container
+orchestration</li>
+<li>GitHub pull-request UI</li>
+<li>Rebase UI, history browser, blame, or advanced conflict
+resolution</li>
+<li>Hunk-level staging in the first Git release</li>
+<li>Remote Windows hosts in the first SSH release</li>
+<li>A custom SSH implementation</li>
+</ul>
+<h3 id="33-optional-future-scope">3.3 Optional future scope</h3>
+<p>Only after the core product is stable:</p>
+<ul>
+<li>A small number of optional built-in language servers, disabled by
+default</li>
+<li>Hunk staging</li>
+<li>Remote terminal handoff to Terminal/iTerm rather than an embedded
+terminal</li>
+<li>Remote port-forward management</li>
+<li>Read-only Git history and blame</li>
+<li>Built-in formatting for selected languages</li>
+<li>Workspace tasks, without an extension platform</li>
+</ul>
+<hr />
+<h2 id="4-design-direction">4. Design direction</h2>
+<p>The design guidance in <code>emilkowalski/skills</code> is primarily
+expressed for web interfaces. Use its underlying principles, but
+<strong>do not transplant the CSS implementation literally into a macOS
+app</strong>. Native AppKit and SwiftUI controls already provide pointer
+states, focus, animation, accessibility, vibrancy, and platform-specific
+behavior.</p>
+<h3 id="41-principles-adopted-from-the-skills-and-apple-guidance">4.1
+Principles adopted from the skills and Apple guidance</h3>
+<h4 id="immediate-response">Immediate response</h4>
+<ul>
+<li>Text insertion, cursor motion, selection, tab changes, quick open,
+and command-palette invocation respond immediately.</li>
+<li>Keyboard-initiated, high-frequency actions do not receive decorative
+open/close animations.</li>
+<li>Show a local state change before starting slow work. For example,
+Stage immediately enters an in-progress state while Git executes.</li>
+</ul>
+<h4 id="spatial-consistency">Spatial consistency</h4>
+<ul>
+<li>A popover comes from the toolbar item or row that opened it.</li>
+<li>A sidebar collapses back toward its original edge.</li>
+<li>Authentication and connection errors belong to the affected
+workspace window, not a global modal over every window.</li>
+<li>A diff opens in the editor area because it is document content, not
+in a floating inspector detached from the file that caused it.</li>
+</ul>
+<h4 id="restraint">Restraint</h4>
+<ul>
+<li>The editor canvas is opaque, calm, and optimized for text
+contrast.</li>
+<li>Materials and Liquid Glass are used by standard system
+chrome—toolbar, sidebar, menus, and sheets—not as stacked cards behind
+code, diffs, or file rows.</li>
+<li>Color is reserved for semantic states: modification, addition,
+deletion, warning, error, connection state, and a true primary
+action.</li>
+</ul>
+<h4 id="familiarity">Familiarity</h4>
+<ul>
+<li>Standard macOS menu structure and shortcuts are the source of
+truth.</li>
+<li>Destructive actions use standard confirmation only when undo or
+recovery is not reasonable.</li>
+<li>File and folder selection follows Finder conventions.</li>
+<li>Multiple windows use normal macOS window behavior rather than tabs
+inside one global super-window.</li>
+</ul>
+<h4 id="agency-and-responsibility">Agency and responsibility</h4>
+<ul>
+<li>The exact AI diff scope is visible before transmission.</li>
+<li>Sensitive files are excluded by default and require explicit
+override.</li>
+<li>Unknown SSH host keys require a meaningful confirmation; changed
+host keys block the connection.</li>
+<li>Unsaved changes remain available after a remote disconnect.</li>
+<li>External file changes never silently replace a dirty buffer.</li>
+</ul>
+<h4 id="accessibility">Accessibility</h4>
+<ul>
+<li>Respect Reduce Motion, Reduce Transparency, Increase Contrast,
+VoiceOver, Full Keyboard Access, and system accent color.</li>
+<li>Use system typography for app UI. The editor font is
+user-configurable and monospaced by default.</li>
+<li>Do not encode Git state or connectivity using color alone.</li>
+<li>Keep all commands reachable through menus, not only contextual
+icons.</li>
+</ul>
+<h3 id="42-window-anatomy">4.2 Window anatomy</h3>
+<pre class="text"><code>┌─────────────────────────────────────────────────────────────────────┐
+│ Toolbar: Sidebar | Quick Open | Search | Git summary | Remote state │
+├─────────────────┬───────────────────────────────────────────────────┤
+│ Sidebar         │ Tab strip                                         │
+│                 ├───────────────────────────────────────────────────┤
+│ Files / Changes │ Editor or diff                                    │
+│                 │                                                   │
+│ Native outline  │                                                   │
+│ and sections    │                                                   │
+│                 │                                                   │
+├─────────────────┴───────────────────────────────────────────────────┤
+│ Status: branch · SSH alias · line:column · spaces · encoding       │
+└─────────────────────────────────────────────────────────────────────┘</code></pre>
+<p>Recommended behavior:</p>
+<ul>
+<li>Use one sidebar with two primary modes: <strong>Files</strong> and
+<strong>Changes</strong>.</li>
+<li>Avoid a permanent VS Code-style activity rail unless later usability
+testing proves it necessary.</li>
+<li>Keep the toolbar sparse. Group related actions by function and
+frequency; put secondary actions under a More menu.</li>
+<li>A remote workspace title should read something like
+<code>api — prod</code> and include a subtle remote indicator.</li>
+<li>Connection loss appears as an inline, nonblocking banner with
+Reconnect and Details.</li>
+<li>Git and AI progress should be visible but not take focus from the
+editor.</li>
+</ul>
+<h3 id="43-motion-rules">4.3 Motion rules</h3>
+<table>
+<thead>
+<tr class="header">
+<th>Interaction</th>
+<th>Motion policy</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Quick Open / command palette from keyboard</td>
+<td>No decorative animation</td>
+</tr>
+<tr class="even">
+<td>Tab selection</td>
+<td>Immediate</td>
+</tr>
+<tr class="odd">
+<td>Cursor and selection</td>
+<td>Native text-system behavior</td>
+</tr>
+<tr class="even">
+<td>Sidebar show/hide</td>
+<td>Native window/sidebar transition</td>
+</tr>
+<tr class="odd">
+<td>Toolbar popover</td>
+<td>Native source-anchored presentation</td>
+</tr>
+<tr class="even">
+<td>Sheet</td>
+<td>Native sheet transition</td>
+</tr>
+<tr class="odd">
+<td>Toast/status confirmation</td>
+<td>Short and subtle, no bounce</td>
+</tr>
+<tr class="even">
+<td>Drag-and-drop reordering</td>
+<td>Direct manipulation with native feedback</td>
+</tr>
+<tr class="odd">
+<td>Commit success</td>
+<td>Status/check indicator, no celebration animation</td>
+</tr>
+</tbody>
+</table>
+<h3 id="44-native-control-policy">4.4 Native control policy</h3>
+<ul>
+<li>Prefer standard <code>ToolbarItem</code>,
+<code>NavigationSplitView</code>/AppKit split views where suitable,
+<code>Menu</code>, <code>Table</code>, <code>OutlineGroup</code> or
+<code>NSOutlineView</code>, sheets, alerts, and
+<code>NSTextView</code>.</li>
+<li>Do not manually recreate Liquid Glass with custom blur layers.</li>
+<li>Let newer macOS versions provide their system appearance
+automatically.</li>
+<li>Gate explicit newer visual APIs with availability checks and provide
+ordinary material/opaque fallbacks.</li>
+<li>Use custom drawing only where the product genuinely needs it: code
+editor decorations, line-number gutter, diff markers, minimap if ever
+added, and syntax attributes.</li>
+</ul>
+<h3 id="45-theme-system">4.5 Theme system</h3>
+<p>Themes are <strong>data-only JSON files</strong> — fonts, colors, and
+syntax styles. No scripting, no CSS, no code. This gives users
+Obsidian/Zed-style personalization without violating the
+no-extension-runtime principle (D-008): a theme cannot execute
+anything.</p>
+<h4 id="locations-and-lifecycle">Locations and lifecycle</h4>
+<pre class="text"><code>Bundled:  Rafu.app/Contents/Resources/Themes/indigo.json, khadi.json
+User:     ~/Library/Application Support/Rafu/Themes/*.json</code></pre>
+<ul>
+<li>The app follows the <strong>system appearance by default</strong>:
+Indigo in dark mode, Khadi in light mode. The user can pin any theme per
+appearance, or one theme for both.</li>
+<li>User theme files are watched and <strong>hot-reloaded</strong> on
+save, so iterating on a theme is edit → save → see.</li>
+<li>The schema is versioned (<code>"version": 1</code>). Unknown keys
+are ignored; a malformed theme falls back to the bundled default for the
+current appearance with a nonblocking warning, never a blank
+editor.</li>
+<li>Themes are validated on load: every color must be
+<code>#RRGGBB</code> or <code>#RRGGBBAA</code>; missing tokens inherit
+from the bundled theme of the same appearance, so partial themes are
+legal.</li>
+</ul>
+<h4 id="performance-rule">Performance rule</h4>
+<p>Theme JSON is parsed <strong>once</strong> into cached
+<code>NSColor</code> / <code>NSFont</code> / attribute-dictionary tables
+keyed by semantic token. The syntax highlighter and renderers consume
+those tables; nothing on the typing path touches JSON, string keys, or
+color parsing. A theme change or hot reload swaps the tables and
+invalidates visible attributes only.</p>
+<h4 id="schema-shape">Schema shape</h4>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode json"><code class="sourceCode json"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;$schema&quot;</span><span class="fu">:</span> <span class="st">&quot;https://rafu.dev/schemas/theme/v1.json&quot;</span><span class="fu">,</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;version&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;Indigo&quot;</span><span class="fu">,</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;id&quot;</span><span class="fu">:</span> <span class="st">&quot;dev.rafu.theme.indigo&quot;</span><span class="fu">,</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;appearance&quot;</span><span class="fu">:</span> <span class="st">&quot;dark&quot;</span><span class="fu">,</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;fonts&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;editor&quot;</span><span class="fu">:</span>  <span class="fu">{</span> <span class="dt">&quot;family&quot;</span><span class="fu">:</span> <span class="st">&quot;SF Mono&quot;</span><span class="fu">,</span> <span class="dt">&quot;fallback&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;JetBrains Mono&quot;</span><span class="ot">,</span> <span class="st">&quot;Menlo&quot;</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a>                 <span class="dt">&quot;size&quot;</span><span class="fu">:</span> <span class="dv">13</span><span class="fu">,</span> <span class="dt">&quot;lineHeightMultiple&quot;</span><span class="fu">:</span> <span class="fl">1.5</span><span class="fu">,</span> <span class="dt">&quot;ligatures&quot;</span><span class="fu">:</span> <span class="kw">false</span> <span class="fu">},</span></span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;ui&quot;</span><span class="fu">:</span>      <span class="fu">{</span> <span class="dt">&quot;family&quot;</span><span class="fu">:</span> <span class="st">&quot;system&quot;</span><span class="fu">,</span> <span class="dt">&quot;size&quot;</span><span class="fu">:</span> <span class="dv">13</span> <span class="fu">},</span></span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;markdownPreview&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;prose&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;family&quot;</span><span class="fu">:</span> <span class="st">&quot;New York&quot;</span><span class="fu">,</span> <span class="dt">&quot;fallback&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;Georgia&quot;</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a>                 <span class="dt">&quot;size&quot;</span><span class="fu">:</span> <span class="dv">15</span><span class="fu">,</span> <span class="dt">&quot;lineHeightMultiple&quot;</span><span class="fu">:</span> <span class="fl">1.6</span> <span class="fu">},</span></span>
+<span id="cb4-14"><a href="#cb4-14" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;code&quot;</span><span class="fu">:</span>  <span class="st">&quot;editor&quot;</span></span>
+<span id="cb4-15"><a href="#cb4-15" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="cb4-16"><a href="#cb4-16" aria-hidden="true" tabindex="-1"></a>  <span class="fu">},</span></span>
+<span id="cb4-17"><a href="#cb4-17" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;ui&quot;</span><span class="fu">:</span>     <span class="fu">{</span> <span class="dt">&quot;appBackground&quot;</span><span class="fu">:</span> <span class="st">&quot;#10141C&quot;</span><span class="fu">,</span> <span class="dt">&quot;accent&quot;</span><span class="fu">:</span> <span class="st">&quot;#E3A857&quot;</span><span class="fu">,</span> <span class="dt">&quot;…&quot;</span><span class="fu">:</span> <span class="st">&quot;…&quot;</span> <span class="fu">},</span></span>
+<span id="cb4-18"><a href="#cb4-18" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;editor&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;background&quot;</span><span class="fu">:</span> <span class="st">&quot;#151A24&quot;</span><span class="fu">,</span> <span class="dt">&quot;cursor&quot;</span><span class="fu">:</span> <span class="st">&quot;#E3A857&quot;</span><span class="fu">,</span> <span class="dt">&quot;…&quot;</span><span class="fu">:</span> <span class="st">&quot;…&quot;</span> <span class="fu">},</span></span>
+<span id="cb4-19"><a href="#cb4-19" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;git&quot;</span><span class="fu">:</span>    <span class="fu">{</span> <span class="dt">&quot;added&quot;</span><span class="fu">:</span> <span class="st">&quot;#7CC08A&quot;</span><span class="fu">,</span> <span class="dt">&quot;modified&quot;</span><span class="fu">:</span> <span class="st">&quot;#D2B958&quot;</span><span class="fu">,</span> <span class="dt">&quot;…&quot;</span><span class="fu">:</span> <span class="st">&quot;…&quot;</span> <span class="fu">},</span></span>
+<span id="cb4-20"><a href="#cb4-20" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;diff&quot;</span><span class="fu">:</span>   <span class="fu">{</span> <span class="dt">&quot;addedBackground&quot;</span><span class="fu">:</span> <span class="st">&quot;#142E1D&quot;</span><span class="fu">,</span> <span class="dt">&quot;…&quot;</span><span class="fu">:</span> <span class="st">&quot;…&quot;</span> <span class="fu">},</span></span>
+<span id="cb4-21"><a href="#cb4-21" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;syntax&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb4-22"><a href="#cb4-22" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;keyword&quot;</span><span class="fu">:</span>  <span class="fu">{</span> <span class="dt">&quot;color&quot;</span><span class="fu">:</span> <span class="st">&quot;#9D8CE8&quot;</span> <span class="fu">},</span></span>
+<span id="cb4-23"><a href="#cb4-23" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;comment&quot;</span><span class="fu">:</span>  <span class="fu">{</span> <span class="dt">&quot;color&quot;</span><span class="fu">:</span> <span class="st">&quot;#5F6980&quot;</span><span class="fu">,</span> <span class="dt">&quot;fontStyle&quot;</span><span class="fu">:</span> <span class="st">&quot;italic&quot;</span> <span class="fu">},</span></span>
+<span id="cb4-24"><a href="#cb4-24" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;…&quot;</span><span class="fu">:</span> <span class="st">&quot;…&quot;</span></span>
+<span id="cb4-25"><a href="#cb4-25" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="cb4-26"><a href="#cb4-26" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<h4 id="semantic-token-model-and-tree-sitter-mapping">Semantic token
+model and Tree-sitter mapping</h4>
+<p>Syntax tokens are semantic, not per-language. Tree-sitter
+highlight-query captures map onto them centrally:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Tree-sitter capture</th>
+<th>Theme token</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>@comment</code>, <code>@comment.documentation</code></td>
+<td><code>comment</code></td>
+</tr>
+<tr class="even">
+<td><code>@string</code>, <code>@string.special</code></td>
+<td><code>string</code></td>
+</tr>
+<tr class="odd">
+<td><code>@string.escape</code></td>
+<td><code>escape</code></td>
+</tr>
+<tr class="even">
+<td><code>@number</code>, <code>@float</code></td>
+<td><code>number</code></td>
+</tr>
+<tr class="odd">
+<td><code>@constant</code>, <code>@constant.builtin</code>,
+<code>@boolean</code></td>
+<td><code>constant</code></td>
+</tr>
+<tr class="even">
+<td><code>@keyword</code>, <code>@keyword.*</code></td>
+<td><code>keyword</code></td>
+</tr>
+<tr class="odd">
+<td><code>@operator</code></td>
+<td><code>operator</code></td>
+</tr>
+<tr class="even">
+<td><code>@punctuation.*</code></td>
+<td><code>punctuation</code></td>
+</tr>
+<tr class="odd">
+<td><code>@function</code>, <code>@function.call</code>,
+<code>@function.method</code></td>
+<td><code>function</code></td>
+</tr>
+<tr class="even">
+<td><code>@type</code>, <code>@type.builtin</code></td>
+<td><code>type</code></td>
+</tr>
+<tr class="odd">
+<td><code>@variable</code></td>
+<td><code>variable</code></td>
+</tr>
+<tr class="even">
+<td><code>@variable.parameter</code></td>
+<td><code>parameter</code></td>
+</tr>
+<tr class="odd">
+<td><code>@property</code>, <code>@field</code></td>
+<td><code>property</code></td>
+</tr>
+<tr class="even">
+<td><code>@tag</code></td>
+<td><code>tag</code></td>
+</tr>
+<tr class="odd">
+<td><code>@attribute</code>, <code>@tag.attribute</code></td>
+<td><code>attribute</code></td>
+</tr>
+<tr class="even">
+<td><code>@namespace</code>, <code>@module</code></td>
+<td><code>namespace</code></td>
+</tr>
+<tr class="odd">
+<td><code>@markup.heading</code></td>
+<td><code>markup.heading</code></td>
+</tr>
+<tr class="even">
+<td><code>@markup.bold</code> / <code>@markup.italic</code></td>
+<td><code>markup.bold</code> / <code>markup.italic</code></td>
+</tr>
+<tr class="odd">
+<td><code>@markup.link</code>, <code>@markup.link.url</code></td>
+<td><code>markup.link</code></td>
+</tr>
+<tr class="even">
+<td><code>@markup.raw</code></td>
+<td><code>markup.code</code></td>
+</tr>
+<tr class="odd">
+<td><code>@markup.quote</code></td>
+<td><code>markup.quote</code></td>
+</tr>
+<tr class="even">
+<td><code>@markup.list</code></td>
+<td><code>markup.list</code></td>
+</tr>
+</tbody>
+</table>
+<p>UI, Git, and diff tokens are consumed by the sidebar, tab strip,
+gutter, status bar, diff viewer, and markdown preview so a theme
+restyles the whole window coherently, not just the code canvas.</p>
+<h3 id="46-bundled-palettes-indigo-and-khadi">4.6 Bundled palettes:
+Indigo and Khadi</h3>
+<p>The two bundled themes are one identity in two appearances:
+<strong>indigo-dyed cloth</strong> for dark, <strong>undyed khadi
+cotton</strong> for light, with a shared <strong>zari-gold
+accent</strong> — the visible mending thread. Every name is native to
+the product's roots: indigo dyeing is historically Indian and Gujarat
+was a hub of its trade, khadi is handspun Indian cloth, and zari —
+metallic gold thread — has its center in Surat. Gold-on-indigo is
+deliberately not the ubiquitous blue-accent editor look, and both
+palettes reserve strong color for semantic states, per section 4.1.</p>
+<h4 id="indigo-dark">Indigo (dark)</h4>
+<table>
+<thead>
+<tr class="header">
+<th>Token</th>
+<th>Value</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>ui.appBackground</code> / sidebar</td>
+<td><code>#10141C</code></td>
+<td>Deep indigo-ink</td>
+</tr>
+<tr class="even">
+<td><code>ui.editorBackground</code></td>
+<td><code>#151A24</code></td>
+<td>Slightly lifted canvas</td>
+</tr>
+<tr class="odd">
+<td><code>ui.elevated</code> (popover/sheet)</td>
+<td><code>#1B212D</code></td>
+<td></td>
+</tr>
+<tr class="even">
+<td><code>ui.selection</code> / <code>ui.hover</code></td>
+<td><code>#242C3C</code> / <code>#1D2431</code></td>
+<td></td>
+</tr>
+<tr class="odd">
+<td><code>ui.borderSubtle</code> / strong</td>
+<td><code>#262E3E</code> / <code>#333D52</code></td>
+<td></td>
+</tr>
+<tr class="even">
+<td><code>ui.textPrimary</code> / secondary / muted</td>
+<td><code>#E7EAF2</code> / <code>#9AA3B8</code> /
+<code>#67718A</code></td>
+<td></td>
+</tr>
+<tr class="odd">
+<td><code>ui.accent</code> / hover / onAccent</td>
+<td><code>#E3A857</code> / <code>#EDB96F</code> /
+<code>#201709</code></td>
+<td>Zari gold</td>
+</tr>
+<tr class="even">
+<td><code>ui.error</code> / warning / info / success</td>
+<td><code>#E06C75</code> / <code>#D4A24E</code> / <code>#82A7F0</code> /
+<code>#7CC08A</code></td>
+<td></td>
+</tr>
+<tr class="odd">
+<td><code>editor.cursor</code></td>
+<td><code>#E3A857</code></td>
+<td></td>
+</tr>
+<tr class="even">
+<td><code>editor.selectionBackground</code></td>
+<td><code>#2C3A55</code></td>
+<td>Indigo selection</td>
+</tr>
+<tr class="odd">
+<td><code>editor.lineHighlight</code></td>
+<td><code>#1A2030</code></td>
+<td></td>
+</tr>
+<tr class="even">
+<td><code>editor.gutterForeground</code> / active</td>
+<td><code>#4B5670</code> / <code>#9AA3B8</code></td>
+<td></td>
+</tr>
+<tr class="odd">
+<td><code>git.added</code> / modified / deleted</td>
+<td><code>#7CC08A</code> / <code>#D2B958</code> /
+<code>#E06C75</code></td>
+<td></td>
+</tr>
+<tr class="even">
+<td><code>git.untracked</code> / ignored / conflict</td>
+<td><code>#6FAECB</code> / <code>#67718A</code> /
+<code>#C678DD</code></td>
+<td></td>
+</tr>
+<tr class="odd">
+<td><code>diff.addedBackground</code> / removedBackground</td>
+<td><code>#142E1D</code> / <code>#331D20</code></td>
+<td></td>
+</tr>
+<tr class="even">
+<td><code>syntax.comment</code></td>
+<td><code>#5F6980</code> <em>italic</em></td>
+<td></td>
+</tr>
+<tr class="odd">
+<td><code>syntax.string</code> / escape</td>
+<td><code>#9FC98F</code> / <code>#74BFCB</code></td>
+<td></td>
+</tr>
+<tr class="even">
+<td><code>syntax.number</code> / constant</td>
+<td><code>#E0B36A</code> / <code>#E3A857</code></td>
+<td>Constants tie to accent</td>
+</tr>
+<tr class="odd">
+<td><code>syntax.keyword</code></td>
+<td><code>#9D8CE8</code></td>
+<td>Wisteria violet</td>
+</tr>
+<tr class="even">
+<td><code>syntax.function</code></td>
+<td><code>#74BFCB</code></td>
+<td>Moonlit teal</td>
+</tr>
+<tr class="odd">
+<td><code>syntax.type</code></td>
+<td><code>#82A7F0</code></td>
+<td>Indigo blue</td>
+</tr>
+<tr class="even">
+<td><code>syntax.variable</code> / parameter / property</td>
+<td><code>#E7EAF2</code> / <code>#C9D2E6</code> /
+<code>#B8C2DC</code></td>
+<td></td>
+</tr>
+<tr class="odd">
+<td><code>syntax.operator</code> / punctuation</td>
+<td><code>#98A6C4</code> / <code>#6E7A94</code></td>
+<td></td>
+</tr>
+<tr class="even">
+<td><code>syntax.tag</code> / attribute / namespace</td>
+<td><code>#E08D8D</code> / <code>#D2B958</code> /
+<code>#A9B4CE</code></td>
+<td></td>
+</tr>
+<tr class="odd">
+<td><code>markup.heading</code> / link / code</td>
+<td><code>#E3A857</code> <strong>bold</strong> / <code>#74BFCB</code> /
+<code>#9FC98F</code> on <code>#1B212D</code></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="khadi-light">Khadi (light)</h4>
+<table>
+<thead>
+<tr class="header">
+<th>Token</th>
+<th>Value</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>ui.appBackground</code> / sidebar</td>
+<td><code>#F1EDE3</code></td>
+<td>Warm khadi cotton</td>
+</tr>
+<tr class="even">
+<td><code>ui.editorBackground</code></td>
+<td><code>#FAF7F0</code></td>
+<td>Paper canvas, not stark white</td>
+</tr>
+<tr class="odd">
+<td><code>ui.elevated</code></td>
+<td><code>#FFFFFF</code></td>
+<td></td>
+</tr>
+<tr class="even">
+<td><code>ui.selection</code> / <code>ui.hover</code></td>
+<td><code>#E7E0CE</code> / <code>#EFE9DB</code></td>
+<td></td>
+</tr>
+<tr class="odd">
+<td><code>ui.borderSubtle</code> / strong</td>
+<td><code>#E3DCCB</code> / <code>#CFC6B0</code></td>
+<td></td>
+</tr>
+<tr class="even">
+<td><code>ui.textPrimary</code> / secondary / muted</td>
+<td><code>#2B2F3A</code> / <code>#5D6474</code> /
+<code>#8A90A0</code></td>
+<td>Indigo-ink text</td>
+</tr>
+<tr class="odd">
+<td><code>ui.accent</code> / hover / onAccent</td>
+<td><code>#A2701F</code> / <code>#8A5D14</code> /
+<code>#FFF9EE</code></td>
+<td>Deep zari gold</td>
+</tr>
+<tr class="even">
+<td><code>ui.error</code> / warning / info / success</td>
+<td><code>#B3362E</code> / <code>#8F6A10</code> / <code>#3557B7</code> /
+<code>#2E7D46</code></td>
+<td></td>
+</tr>
+<tr class="odd">
+<td><code>editor.cursor</code></td>
+<td><code>#A2701F</code></td>
+<td></td>
+</tr>
+<tr class="even">
+<td><code>editor.selectionBackground</code></td>
+<td><code>#D8E1F2</code></td>
+<td>Indigo-tinted</td>
+</tr>
+<tr class="odd">
+<td><code>editor.lineHighlight</code></td>
+<td><code>#F2EDE1</code></td>
+<td></td>
+</tr>
+<tr class="even">
+<td><code>editor.gutterForeground</code> / active</td>
+<td><code>#A8ABB6</code> / <code>#5D6474</code></td>
+<td></td>
+</tr>
+<tr class="odd">
+<td><code>git.added</code> / modified / deleted</td>
+<td><code>#2E7D46</code> / <code>#8F6A10</code> /
+<code>#B3362E</code></td>
+<td></td>
+</tr>
+<tr class="even">
+<td><code>git.untracked</code> / ignored / conflict</td>
+<td><code>#23708A</code> / <code>#8A90A0</code> /
+<code>#8B3FA8</code></td>
+<td></td>
+</tr>
+<tr class="odd">
+<td><code>diff.addedBackground</code> / removedBackground</td>
+<td><code>#E3F2E6</code> / <code>#FBE6E4</code></td>
+<td></td>
+</tr>
+<tr class="even">
+<td><code>syntax.comment</code></td>
+<td><code>#8C8776</code> <em>italic</em></td>
+<td>Warm greige</td>
+</tr>
+<tr class="odd">
+<td><code>syntax.string</code> / escape</td>
+<td><code>#4E7D45</code> / <code>#1E7A87</code></td>
+<td></td>
+</tr>
+<tr class="even">
+<td><code>syntax.number</code> / constant</td>
+<td><code>#9A5F12</code> / <code>#A2701F</code></td>
+<td></td>
+</tr>
+<tr class="odd">
+<td><code>syntax.keyword</code></td>
+<td><code>#6C4FC4</code></td>
+<td>Violet ink</td>
+</tr>
+<tr class="even">
+<td><code>syntax.function</code></td>
+<td><code>#1E7A87</code></td>
+<td>Teal ink</td>
+</tr>
+<tr class="odd">
+<td><code>syntax.type</code></td>
+<td><code>#3557B7</code></td>
+<td>Indigo ink</td>
+</tr>
+<tr class="even">
+<td><code>syntax.variable</code> / parameter / property</td>
+<td><code>#2B2F3A</code> / <code>#4A5568</code> /
+<code>#52608F</code></td>
+<td></td>
+</tr>
+<tr class="odd">
+<td><code>syntax.operator</code> / punctuation</td>
+<td><code>#55617A</code> / <code>#7A8294</code></td>
+<td></td>
+</tr>
+<tr class="even">
+<td><code>syntax.tag</code> / attribute / namespace</td>
+<td><code>#AD3B3B</code> / <code>#8F6A10</code> /
+<code>#5C6474</code></td>
+<td></td>
+</tr>
+<tr class="odd">
+<td><code>markup.heading</code> / link / code</td>
+<td><code>#8A5D14</code> <strong>bold</strong> / <code>#1E7A87</code> /
+<code>#4E7D45</code> on <code>#F1EDE3</code></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>Contrast requirements: body text and syntax tokens meet WCAG AA (≥
+4.5:1) against their editor background; verify accent-as-text usage with
+Increase Contrast enabled and never encode Git state with color alone
+(section 4.1). The full machine-readable palettes ship as
+<code>indigo.json</code> and <code>khadi.json</code>.</p>
+<hr />
+<h2 id="5-core-architecture">5. Core architecture</h2>
+<h3 id="51-high-level-system">5.1 High-level system</h3>
+<pre class="text"><code>┌──────────────────────────────── Native macOS app ────────────────────────────────┐
+│                                                                                  │
+│  SwiftUI/AppKit UI                                                               │
+│  ├── Window coordinator                                                          │
+│  ├── WorkspaceSession per window                                                 │
+│  ├── File tree / source control / settings                                       │
+│  └── NSTextView + TextKit 2 editor                                               │
+│                                                                                  │
+│  Local services                                                                  │
+│  ├── Tree-sitter syntax sessions                                                 │
+│  ├── LocalFileSystemClient                                                       │
+│  ├── LocalGitClient                                                              │
+│  ├── SSHConnectionManager ── /usr/bin/ssh ───────────────┐                       │
+│  ├── AICommitMessageProvider                              │                       │
+│  ├── KeychainStore                                       │                       │
+│  └── LauncherIPCServer ◀──── Unix socket ◀──── CLI tool  │                       │
+└───────────────────────────────────────────────────────────┼───────────────────────┘
+                                                            │ encrypted SSH channel
+                                                            ▼
+                                              ┌───────────────────────────┐
+                                              │ Remote machine            │
+                                              │                           │
+                                              │ Versioned headless agent  │
+                                              │ ├── file operations       │
+                                              │ ├── file watches          │
+                                              │ ├── directory listing     │
+                                              │ └── Git operations later  │
+                                              │                           │
+                                              │ Repository remains remote │
+                                              └───────────────────────────┘</code></pre>
+<h3 id="52-technology-choices">5.2 Technology choices</h3>
+<table>
+<thead>
+<tr class="header">
+<th>Concern</th>
+<th>Choice</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>App lifecycle and shell</td>
+<td>SwiftUI</td>
+</tr>
+<tr class="even">
+<td>Text editor</td>
+<td>AppKit <code>NSTextView</code>, TextKit 2</td>
+</tr>
+<tr class="odd">
+<td>State model</td>
+<td>Swift Observation with narrow ownership</td>
+</tr>
+<tr class="even">
+<td>Syntax</td>
+<td>Tree-sitter through a maintained Swift wrapper</td>
+</tr>
+<tr class="odd">
+<td>Local file events</td>
+<td>FSEvents / appropriate Foundation-AppKit APIs</td>
+</tr>
+<tr class="even">
+<td>Remote transport</td>
+<td>System OpenSSH subprocess</td>
+</tr>
+<tr class="odd">
+<td>Remote operations</td>
+<td>Versioned Rust agent over SSH stdio</td>
+</tr>
+<tr class="even">
+<td>Local Git</td>
+<td>Git executable via <code>Foundation.Process</code></td>
+</tr>
+<tr class="odd">
+<td>Remote Git</td>
+<td>Git invoked by remote agent</td>
+</tr>
+<tr class="even">
+<td>AI networking</td>
+<td><code>URLSession</code></td>
+</tr>
+<tr class="odd">
+<td>Secrets</td>
+<td>macOS Keychain</td>
+</tr>
+<tr class="even">
+<td>Preferences</td>
+<td><code>UserDefaults</code> / <code>@AppStorage</code> for nonsecret
+values</td>
+</tr>
+<tr class="odd">
+<td>CLI IPC</td>
+<td>Unix-domain socket with peer validation</td>
+</tr>
+<tr class="even">
+<td>Distribution</td>
+<td>Developer ID signing and notarized direct download first</td>
+</tr>
+</tbody>
+</table>
+<h3 id="53-deployment-recommendation">5.3 Deployment recommendation</h3>
+<ul>
+<li>Compile with the current stable Xcode/macOS SDK.</li>
+<li>A reasonable first public deployment target is <strong>macOS 15 or
+newer</strong>.</li>
+<li>For a strictly personal build, raising the deployment target to the
+oldest macOS version on your own machines is a valid
+simplification.</li>
+<li>Use standard controls so current and future macOS design behavior
+arrives automatically; avoid making the entire architecture depend on
+one generation of visual APIs.</li>
+</ul>
+<hr />
+<h2 id="6-state-and-ownership">6. State and ownership</h2>
+<h3 id="61-global-application-services">6.1 Global application
+services</h3>
+<pre class="text"><code>AppServices
+├── SettingsStore
+├── KeychainStore
+├── RecentWorkspaceStore
+├── LanguageRegistry
+├── SSHHostCatalog
+├── SSHConnectionPool
+├── AIProviderFactory
+└── LauncherIPCServer</code></pre>
+<p>Shared services are injected through the environment where they are
+genuinely app-wide. Feature-specific dependencies are passed
+explicitly.</p>
+<h3 id="62-per-window-state">6.2 Per-window state</h3>
+<p>Every window owns one <code>WorkspaceSession</code>:</p>
+<pre class="text"><code>WorkspaceSession
+├── WorkspaceDescriptor
+├── WorkspaceFileSystem
+├── open EditorBuffers
+├── selected tab and pane layout
+├── FileTreeModel
+├── RepositoryState
+├── connection state
+└── restoration state</code></pre>
+<p><code>WorkspaceSession</code> is <code>@MainActor</code> because it
+coordinates UI-visible state. File I/O, parsing, Git, SSH, and AI work
+run in actors or cancellable tasks outside the main actor.</p>
+<h3 id="63-workspace-identity">6.3 Workspace identity</h3>
+<p>The earlier URL-only buffer model must be generalized for SSH:</p>
+<div class="sourceCode" id="cb8"><pre
+class="sourceCode swift"><code class="sourceCode swift"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="kw">enum</span> WorkspaceLocation<span class="op">:</span> <span class="dt">Hashable</span><span class="op">,</span> <span class="dt">Codable</span><span class="op">,</span> <span class="dt">Sendable</span> <span class="op">{</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> local<span class="op">(</span>LocalWorkspaceReference<span class="op">)</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> ssh<span class="op">(</span>SSHWorkspaceReference<span class="op">)</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a><span class="kw">struct</span> SSHWorkspaceReference<span class="op">:</span> <span class="dt">Hashable</span><span class="op">,</span> <span class="dt">Codable</span><span class="op">,</span> <span class="dt">Sendable</span> <span class="op">{</span></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="va">hostAlias</span><span class="op">:</span> String</span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="va">root</span><span class="op">:</span> RemotePath</span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a><span class="kw">struct</span> WorkspaceFileID<span class="op">:</span> <span class="dt">Hashable</span><span class="op">,</span> <span class="dt">Sendable</span> <span class="op">{</span></span>
+<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="va">workspaceID</span><span class="op">:</span> UUID</span>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="va">path</span><span class="op">:</span> WorkspacePath</span>
+<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>A remote file is not represented internally as a <code>file://</code>
+URL. Commands that require a local URL are explicitly unavailable or use
+a temporary exported copy.</p>
+<h3 id="64-file-system-protocol">6.4 File-system protocol</h3>
+<div class="sourceCode" id="cb9"><pre
+class="sourceCode swift"><code class="sourceCode swift"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="kw">protocol</span> WorkspaceFileSystem<span class="op">:</span> <span class="dt">Sendable</span> <span class="op">{</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">func</span> <span class="fu">listDirectory</span><span class="op">(</span><span class="va">_</span> <span class="va">path</span><span class="op">:</span> <span class="dt">WorkspacePath</span><span class="op">)</span> <span class="fu">async</span> <span class="kw">throws</span> -&gt; [<span class="fu">FileEntry</span>]</span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">func</span> <span class="fu">metadata</span><span class="op">(</span><span class="va">for</span> <span class="va">path</span><span class="op">:</span> <span class="dt">WorkspacePath</span><span class="op">)</span> <span class="fu">async</span> <span class="kw">throws</span> -&gt; <span class="fu">FileMetadata</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">func</span> <span class="fu">readFile</span><span class="op">(</span><span class="va">_</span> <span class="va">path</span><span class="op">:</span> <span class="dt">WorkspacePath</span><span class="op">)</span> <span class="fu">async</span> <span class="kw">throws</span> -&gt; <span class="fu">FileSnapshot</span></span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">func</span> <span class="fu">writeFile</span><span class="op">(</span></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>        <span class="va">_</span> <span class="va">path</span><span class="op">:</span> <span class="dt">WorkspacePath</span><span class="op">,</span></span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a>        <span class="va">contents</span><span class="op">:</span> <span class="dt">Data</span><span class="op">,</span></span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a>        <span class="va">expectedVersion</span><span class="op">:</span> <span class="dt">FileVersion</span><span class="op">?</span></span>
+<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a>    <span class="op">)</span> <span class="fu">async</span> <span class="kw">throws</span> -&gt; <span class="fu">FileSnapshot</span></span>
+<span id="cb9-10"><a href="#cb9-10" aria-hidden="true" tabindex="-1"></a>    <span class="kw">func</span> <span class="fu">createDirectory</span><span class="op">(</span><span class="va">_</span> <span class="va">path</span><span class="op">:</span> <span class="dt">WorkspacePath</span><span class="op">)</span> <span class="fu">async</span> <span class="kw">throws</span></span>
+<span id="cb9-11"><a href="#cb9-11" aria-hidden="true" tabindex="-1"></a>    <span class="kw">func</span> <span class="fu">move</span><span class="op">(</span><span class="va">_</span> <span class="va">source</span><span class="op">:</span> <span class="dt">WorkspacePath</span><span class="op">,</span> <span class="va">to</span> <span class="va">destination</span><span class="op">:</span> <span class="dt">WorkspacePath</span><span class="op">)</span> <span class="fu">async</span> <span class="kw">throws</span></span>
+<span id="cb9-12"><a href="#cb9-12" aria-hidden="true" tabindex="-1"></a>    <span class="kw">func</span> <span class="fu">remove</span><span class="op">(</span><span class="va">_</span> <span class="va">path</span><span class="op">:</span> <span class="dt">WorkspacePath</span><span class="op">,</span> <span class="va">recursively</span><span class="op">:</span> <span class="dt">Bool</span><span class="op">)</span> <span class="fu">async</span> <span class="kw">throws</span></span>
+<span id="cb9-13"><a href="#cb9-13" aria-hidden="true" tabindex="-1"></a>    <span class="kw">func</span> <span class="fu">watch</span><span class="op">(</span><span class="va">_</span> <span class="va">request</span><span class="op">:</span> <span class="dt">WatchRequest</span><span class="op">)</span> <span class="fu">async</span> <span class="kw">throws</span> -&gt; <span class="fu">AsyncThrowingStream</span><span class="op">&lt;</span><span class="dt">FileEvent</span>, <span class="dt">Error</span><span class="op">&gt;</span></span>
+<span id="cb9-14"><a href="#cb9-14" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div>
+<p>Implementations:</p>
+<ul>
+<li><code>LocalWorkspaceFileSystem</code></li>
+<li><code>RemoteWorkspaceFileSystem</code></li>
+</ul>
+<p>The UI and editor should depend on this protocol, not branch on local
+versus remote throughout the view hierarchy.</p>
+<h3 id="65-editor-buffer-rule">6.5 Editor buffer rule</h3>
+<p><strong>Do not put the full document string in SwiftUI observable
+state.</strong></p>
+<pre class="text"><code>File system snapshot
+        ↓
+EditorBuffer metadata
+├── file identity
+├── dirty state
+├── revision
+├── disk/remote version
+├── encoding and line endings
+└── selection metadata
+        ↓
+NSTextStorage / NSTextView owns live text
+        ↓
+Tree-sitter actor receives edit deltas</code></pre>
+<p>This limits copying and invalidation. SwiftUI observes small
+metadata, not every character.</p>
+<hr />
+<h2 id="7-editor-implementation">7. Editor implementation</h2>
+<h3 id="71-editor-control">7.1 Editor control</h3>
+<pre class="text"><code>NSScrollView
+├── LineNumberRulerView
+└── CodeTextView: NSTextView
+    ├── TextKit 2 layout
+    ├── native input methods
+    ├── undo manager
+    ├── selection-set command layer
+    ├── bracket/current-line decorations
+    └── syntax attributes</code></pre>
+<p>Before committing to a fully bespoke <code>NSTextView</code>
+subclass, evaluate <strong>STTextView</strong> and the <strong>CodeEdit
+source editor</strong> (both MIT, both TextKit 2) as a foundation or, at
+minimum, a reference implementation for ruler views, invisible
+characters, TextKit 2 edge cases, and IME handling. Adopting one does
+not change the architecture above; it changes how much of it is written
+from scratch. Audit memory behavior and keep the dependency surgically
+replaceable — the buffer-ownership rule in section 6.5 must hold either
+way.</p>
+<h3 id="72-phase-1-editing-baseline">7.2 Phase 1 editing baseline</h3>
+<ul>
+<li>Open and save UTF-8 text files</li>
+<li>Preserve LF versus CRLF</li>
+<li>Native undo/redo</li>
+<li>Cut/copy/paste/select all</li>
+<li>Line numbers</li>
+<li>Current-line highlight</li>
+<li>Find and replace</li>
+<li>Go to line and column</li>
+<li>Tabs versus spaces and tab width</li>
+<li>Indent/outdent</li>
+<li>Auto-indent on return</li>
+<li>Toggle comments for supported languages</li>
+<li>Move and duplicate lines</li>
+<li>Soft-wrap toggle</li>
+<li>Dirty tab indicator</li>
+<li>External modification handling</li>
+<li>Binary and unsupported-encoding warning</li>
+<li>Core bundled syntax highlighting</li>
+</ul>
+<h3 id="73-phase-2-editor-completeness">7.3 Phase 2 editor
+completeness</h3>
+<ul>
+<li>Select next occurrence</li>
+<li>Multiple cursors/selections</li>
+<li>Bracket matching and auto-closing pairs</li>
+<li>Quick file open</li>
+<li>Project-wide search</li>
+<li>Horizontal and vertical splits</li>
+<li>Restore tabs, selections, and scroll positions</li>
+<li>Configurable shortcuts</li>
+<li>Large-file mode</li>
+<li>Status bar details</li>
+<li>Optional code outline from Tree-sitter captures</li>
+</ul>
+<h3 id="74-syntax-language-set">7.4 Syntax language set</h3>
+<p>Initial bundled languages:</p>
+<pre class="text"><code>Plain text
+.env / dotenv
+Bash
+Dockerfile
+JSON
+YAML
+TOML
+Markdown
+Swift
+Python
+JavaScript
+TypeScript</code></pre>
+<p>Detection combines extensions and exact filenames:</p>
+<pre class="text"><code>Dockerfile
+Dockerfile.*
+Makefile
+.env
+.env.local
+.env.production
+.gitignore
+Package.swift
+compose.yaml
+docker-compose.yml</code></pre>
+<h3 id="75-syntax-pipeline">7.5 Syntax pipeline</h3>
+<ol type="1">
+<li><code>NSTextView</code> applies an edit locally.</li>
+<li>Record edited UTF-16 range, inserted bytes, removed bytes, and
+document revision.</li>
+<li>Send a compact delta to a per-buffer syntax actor.</li>
+<li>Update the existing syntax tree incrementally.</li>
+<li>Reparse and query only changed or visible ranges.</li>
+<li>Return highlight spans tagged with the source revision.</li>
+<li>Discard stale results.</li>
+<li>Apply attributes on the main actor without creating undo
+entries.</li>
+</ol>
+<h3 id="76-large-file-policy">7.6 Large-file policy</h3>
+<p>Thresholds are tuned through profiling, but the behavior is defined
+in advance:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Size/complexity</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Normal</td>
+<td>Full syntax and editing features</td>
+</tr>
+<tr class="even">
+<td>Medium-large</td>
+<td>Visible-range highlighting; disable expensive structure</td>
+</tr>
+<tr class="odd">
+<td>Very large</td>
+<td>Plain text, no wrap, reduced decorations</td>
+</tr>
+<tr class="even">
+<td>Extreme or binary</td>
+<td>Read-only warning or external-app suggestion</td>
+</tr>
+</tbody>
+</table>
+<h3 id="77-markdown-edit-and-preview-by-default">7.7 Markdown: edit and
+preview by default</h3>
+<p>Markdown is a first-class document type.
+<code>.md</code>/<code>.markdown</code> files open with <strong>both
+editing and preview available by default</strong> via a per-document
+mode control:</p>
+<pre class="text"><code>[ Edit | Split | Preview ]        toggle: ⇧⌘V (verify against final menu map)</code></pre>
+<ul>
+<li><strong>Default mode: Split</strong> (source left, live preview
+right), collapsing automatically to Edit below a window-width threshold.
+The default is configurable in Settings (Edit / Split / Preview) and the
+last mode is remembered per file in restoration state.</li>
+<li><strong>Rendering is native.</strong> Parse with
+<strong>cmark-gfm</strong> (or <code>swift-markdown</code>, which wraps
+it) and render to an attributed string in a TextKit 2 view. <strong>No
+per-document <code>WKWebView</code></strong>: each WebView adds a
+content process worth tens of MB, which the section 14 budget cannot
+absorb, and a web surface reopens script/CSP questions the product
+otherwise avoids.</li>
+<li><strong>GFM subset:</strong> headings, emphasis, lists, task lists,
+tables, block quotes, fenced code, strikethrough, autolinks, thematic
+breaks. Fenced code blocks are highlighted through the same Tree-sitter
+registry and theme syntax tokens as the editor.</li>
+<li><strong>Raw HTML blocks are not rendered</strong> — they display as
+code. No script execution of any kind.</li>
+<li><strong>Images:</strong> local workspace-relative images load
+(size-capped, decoded lazily); remote images are <strong>blocked by
+default</strong> with a per-document allow action, consistent with the
+no-silent-network principle. In SSH workspaces, images resolve through
+<code>WorkspaceFileSystem</code> chunked reads with a bounded
+cache.</li>
+<li><strong>Split-mode scroll sync</strong> maps source blocks to
+rendered blocks (heading/block anchor map); best-effort, never blocking
+typing.</li>
+<li><strong>Incremental updates:</strong> re-render is debounced (~100
+ms) and prioritizes the visible range for large documents; the editor
+pane always stays responsive per section 2.3.</li>
+<li><strong>Theming:</strong> preview typography and colors come from
+the theme's <code>markdownPreview</code> and <code>markup.*</code>
+tokens (Indigo/Khadi ship serif-prose previews via New York with the
+editor's mono for code).</li>
+<li>Preview participates in the large-file policy (section 7.6): very
+large markdown falls back to Edit-only with a notice.</li>
+</ul>
+<p>Budget: preview overhead for a typical README-sized document should
+stay under roughly 15 MB, measured in the section 14 fixtures.</p>
+<hr />
+<h2 id="8-ssh-workspaces">8. SSH workspaces</h2>
+<h3 id="81-product-behavior">8.1 Product behavior</h3>
+<p>The app provides:</p>
+<ul>
+<li><strong>File → Open SSH Folder…</strong></li>
+<li>A searchable picker of concrete aliases found in
+<code>~/.ssh/config</code> and included files</li>
+<li>A manual host field for aliases or <code>user@host</code></li>
+<li>Recent remote workspaces</li>
+<li>A remote folder browser after authentication</li>
+<li>Connection status and reconnect controls scoped to the workspace
+window</li>
+<li>CLI equivalents such as <code>rafu --ssh prod /srv/api</code></li>
+</ul>
+<p>The window should feel like a normal workspace after connection. The
+fact that it is remote remains visible in the title/status area but does
+not dominate the interface.</p>
+<h3 id="82-why-use-the-system-openssh-client">8.2 Why use the system
+OpenSSH client</h3>
+<p>Do not implement SSH configuration or authentication in a Swift SSH
+library for the first product. The user's actual SSH behavior may
+include:</p>
+<ul>
+<li><code>Host</code> and <code>Match</code> rules</li>
+<li><code>Include</code> files and globs</li>
+<li><code>ProxyJump</code> or <code>ProxyCommand</code></li>
+<li>Multiple <code>IdentityFile</code> entries</li>
+<li><code>IdentityAgent</code> and <code>ssh-agent</code></li>
+<li>Security keys and PKCS#11 providers</li>
+<li>Certificates</li>
+<li>Custom <code>UserKnownHostsFile</code></li>
+<li>Hostname canonicalization</li>
+<li>Enterprise authentication</li>
+</ul>
+<p>The app should execute the same host alias the user already runs in
+Terminal. OpenSSH remains the authority for configuration evaluation and
+security behavior.</p>
+<h3 id="83-host-catalog-versus-configuration-resolution">8.3 Host
+catalog versus configuration resolution</h3>
+<p>Two separate responsibilities are required:</p>
+<h4 id="host-catalog">Host catalog</h4>
+<p>A lightweight parser discovers concrete host aliases for display:</p>
+<pre class="sshconfig"><code>Host prod-api
+    HostName 10.0.0.8
+    User deploy
+
+Host staging-*
+    User ubuntu</code></pre>
+<p>The picker can list <code>prod-api</code>; it cannot enumerate every
+possible value represented by <code>staging-*</code>. Wildcard-only
+entries still affect connections entered manually.</p>
+<p>The catalog parser should:</p>
+<ul>
+<li>Read <code>~/.ssh/config</code>.</li>
+<li>Follow <code>Include</code> directives and globs.</li>
+<li>Watch relevant files for changes.</li>
+<li>Extract only concrete, non-negated aliases for the picker.</li>
+<li>Avoid pretending it has fully evaluated <code>Match</code>, token
+expansion, or precedence.</li>
+</ul>
+<h4 id="effective-resolution">Effective resolution</h4>
+<p>For diagnostics and preview, run:</p>
+<div class="sourceCode" id="cb16"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="ex">/usr/bin/ssh</span> <span class="at">-G</span> prod-api</span></code></pre></div>
+<p>This returns the configuration after OpenSSH evaluates
+<code>Host</code> and <code>Match</code>. The actual connection still
+invokes <code>ssh prod-api</code>; parsed preview data never replaces
+OpenSSH as the source of truth.</p>
+<h3 id="84-safe-connection-command">8.4 Safe connection command</h3>
+<p>The process runner passes an executable and argument array, never a
+shell string. A conceptual connection looks like:</p>
+<div class="sourceCode" id="cb17"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="ex">/usr/bin/ssh</span> <span class="dt">\</span></span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">-T</span> <span class="dt">\</span></span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">-S</span> <span class="op">&lt;</span>app-control-socket<span class="op">&gt;</span> <span class="dt">\</span></span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">-o</span> ControlMaster=auto <span class="dt">\</span></span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">-o</span> ControlPersist=60 <span class="dt">\</span></span>
+<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">-o</span> RequestTTY=no <span class="dt">\</span></span>
+<span id="cb17-7"><a href="#cb17-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">-o</span> RemoteCommand=none <span class="dt">\</span></span>
+<span id="cb17-8"><a href="#cb17-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">-o</span> PermitLocalCommand=no <span class="dt">\</span></span>
+<span id="cb17-9"><a href="#cb17-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">-o</span> ClearAllForwardings=yes <span class="dt">\</span></span>
+<span id="cb17-10"><a href="#cb17-10" aria-hidden="true" tabindex="-1"></a>  prod-api <span class="dt">\</span></span>
+<span id="cb17-11"><a href="#cb17-11" aria-hidden="true" tabindex="-1"></a>  <span class="op">&lt;</span>fixed-agent-command<span class="op">&gt;</span></span></code></pre></div>
+<p>Exact options must be verified against supported macOS OpenSSH
+versions. Important policies:</p>
+<ul>
+<li>Preserve authentication, proxies, identity, certificates, and
+known-host behavior from user config.</li>
+<li>Disable unrelated configured local/remote forwards for the editor's
+agent session.</li>
+<li>Disable configured remote commands and local commands that could
+prevent or alter agent startup.</li>
+<li>Do not allocate a pseudo-terminal.</li>
+<li>Use an app-owned control socket in a user-only directory.</li>
+<li>Never invoke a general-purpose shell with user-controlled command
+text.</li>
+</ul>
+<h3 id="85-connection-multiplexing">8.5 Connection multiplexing</h3>
+<p>Maintain an app-owned SSH control master per effective host identity,
+or initially per remote workspace if that is simpler. Use a control path
+under a directory with mode <code>0700</code>, such as:</p>
+<pre class="text"><code>~/Library/Caches/&lt;bundle-id&gt;/ssh/&lt;hash&gt;/control.sock</code></pre>
+<p>Benefits:</p>
+<ul>
+<li>Authentication occurs once for related sessions.</li>
+<li>Agent bootstrap and subsequent commands avoid repeated
+handshakes.</li>
+<li>Multiple remote windows can share the transport when safe.</li>
+</ul>
+<p>The pool must close idle masters and remove stale sockets.</p>
+<h3 id="86-authentication-and-askpass">8.6 Authentication and
+askpass</h3>
+<p>Because the app launches SSH without an interactive terminal, bundle
+a tiny <code>ssh-askpass</code> helper.</p>
+<pre class="text"><code>ssh process
+   │ invokes SSH_ASKPASS with prompt
+   ▼
+bundled askpass helper
+   │ private Unix-socket request
+   ▼
+SSHAskpassBroker in app
+   │ window-attached native sheet
+   ▼
+user response
+   │ returned only through private IPC/stdout
+   ▼
+ssh process</code></pre>
+<p>Environment:</p>
+<pre class="text"><code>SSH_ASKPASS=&lt;path to signed helper&gt;
+SSH_ASKPASS_REQUIRE=force</code></pre>
+<p>Rules:</p>
+<ul>
+<li>Passwords and passphrases are never logged or persisted by the
+app.</li>
+<li>Prefer the user's existing agent/Keychain/security-key setup.</li>
+<li>The relevant workspace window owns the prompt.</li>
+<li>Cancellation terminates the connection attempt cleanly.</li>
+<li>The prompt text is treated as untrusted display text.</li>
+<li>Only one sensitive prompt is active per connection attempt.</li>
+</ul>
+<h3 id="87-host-key-policy">8.7 Host-key policy</h3>
+<ul>
+<li>Keep OpenSSH's normal <code>known_hosts</code> behavior.</li>
+<li>Never set <code>StrictHostKeyChecking=no</code>.</li>
+<li>For an unknown host, show the host, resolved destination where
+available, key type, and fingerprint from the OpenSSH prompt, then allow
+Connect or Cancel.</li>
+<li>Let OpenSSH update the configured known-hosts file after
+confirmation.</li>
+<li>A changed host key is a blocking security error. Do not offer a
+one-click “ignore and continue.” Provide diagnostic guidance and a way
+to reveal the relevant known-hosts entry.</li>
+</ul>
+<h3 id="88-remote-agent-architecture">8.8 Remote agent architecture</h3>
+<h4 id="purpose">Purpose</h4>
+<p>A persistent agent prevents the app from running a new remote shell
+command for every file read, directory expansion, save, watch event, or
+Git query.</p>
+<h4 id="language">Language</h4>
+<p>Use Rust for the first remote agent because it can produce small,
+predictable headless binaries for Linux and macOS, including static
+Linux builds. The main app remains Swift/AppKit/SwiftUI.</p>
+<h4 id="transport">Transport</h4>
+<ul>
+<li>The agent communicates through stdin/stdout of the SSH exec
+channel.</li>
+<li>It opens no TCP listening port.</li>
+<li>It runs as the authenticated remote user.</li>
+<li>Stderr is reserved for structured diagnostics and never mixed into
+protocol frames.</li>
+</ul>
+<h4 id="installation-layout">Installation layout</h4>
+<pre class="text"><code>${XDG_CACHE_HOME:-$HOME/.cache}/&lt;product&gt;/agent/
+└── &lt;agent-version&gt;/
+    └── &lt;target-triple&gt;/
+        └── rafu-agent</code></pre>
+<p>Permissions:</p>
+<ul>
+<li>Directories private to the remote user where possible.</li>
+<li>Agent binary mode <code>0700</code>.</li>
+<li>Temporary upload followed by an atomic rename.</li>
+<li>A per-host custom install directory setting for <code>noexec</code>
+home/cache environments.</li>
+</ul>
+<h4 id="bootstrap">Bootstrap</h4>
+<ol type="1">
+<li>Connect with system SSH.</li>
+<li>Detect remote OS, architecture, shell availability, and home/cache
+path using a fixed script.</li>
+<li>Check the installed agent version and protocol compatibility.</li>
+<li>Upload the matching signed/release binary over the encrypted channel
+if missing or mismatched.</li>
+<li>Verify transfer/build identity.</li>
+<li>Start <code>rafu-agent --stdio</code> using a fixed, app-controlled
+remote command.</li>
+<li>Complete a versioned capability handshake, then send the selected
+workspace root as raw path data inside the protocol. Never interpolate a
+user-selected remote path into the SSH remote-command string.</li>
+</ol>
+<p>Initial targets:</p>
+<pre class="text"><code>Linux x86_64
+Linux arm64
+macOS x86_64
+macOS arm64</code></pre>
+<p>Remote Windows is deferred.</p>
+<h3 id="89-remote-protocol">8.9 Remote protocol</h3>
+<p>Use a small, versioned, length-prefixed binary protocol such as CBOR
+or MessagePack.</p>
+<pre class="text"><code>4-byte big-endian frame length
+        ↓
+encoded message</code></pre>
+<p>Every request contains:</p>
+<ul>
+<li>Protocol version</li>
+<li>Request ID</li>
+<li>Operation</li>
+<li>Workspace-relative path or parameters</li>
+<li>Optional expected file version</li>
+</ul>
+<p>Every response contains:</p>
+<ul>
+<li>Matching request ID</li>
+<li>Result or structured error</li>
+<li>Remote metadata/version</li>
+</ul>
+<p>The protocol also supports unsolicited events for:</p>
+<ul>
+<li>File-system changes</li>
+<li>Watch overflow</li>
+<li>Git-state invalidation</li>
+<li>Agent shutdown</li>
+</ul>
+<p>Capabilities in Phase 1:</p>
+<pre class="text"><code>handshake
+list directory
+stat/lstat
+read file in chunks
+atomic write
+create directory
+rename/move
+delete
+watch paths
+cancel request
+ping</code></pre>
+<p>Later capabilities:</p>
+<pre class="text"><code>Git status/diff/stage/unstage/commit
+project search
+optional formatters/language tools</code></pre>
+<h3 id="810-remote-paths">8.10 Remote paths</h3>
+<p>Unix filenames are byte sequences, not guaranteed UTF-8. Define a
+<code>RemotePath</code> that can preserve raw bytes:</p>
+<div class="sourceCode" id="cb26"><pre
+class="sourceCode swift"><code class="sourceCode swift"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a><span class="kw">struct</span> RemotePath<span class="op">:</span> <span class="dt">Hashable</span><span class="op">,</span> <span class="dt">Codable</span><span class="op">,</span> <span class="dt">Sendable</span> <span class="op">{</span></span>
+<span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="va">rawComponents</span><span class="op">:</span> <span class="op">[</span>Data<span class="op">]</span></span>
+<span id="cb26-3"><a href="#cb26-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="va">displayString</span><span class="op">:</span> String</span>
+<span id="cb26-4"><a href="#cb26-4" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>The protocol sends raw path bytes. The UI uses a lossless escaped
+display for invalid UTF-8. Do not silently replace bytes and then write
+to a different filename.</p>
+<h3 id="811-remote-read-and-save-semantics">8.11 Remote read and save
+semantics</h3>
+<h4 id="read">Read</h4>
+<p>A <code>FileSnapshot</code> contains:</p>
+<ul>
+<li>Contents or streamed chunks</li>
+<li>Size</li>
+<li>Permissions/mode</li>
+<li>Modification time</li>
+<li>File identity where available</li>
+<li>A version token derived from stable metadata and/or content
+hash</li>
+<li>Encoding and line-ending detection results</li>
+</ul>
+<h4 id="save">Save</h4>
+<ol type="1">
+<li>Compare the expected version from the opened snapshot with the
+current remote version.</li>
+<li>If it differs and the buffer is dirty, return a conflict rather than
+overwrite.</li>
+<li>Write to a temporary file in the same directory.</li>
+<li>Preserve appropriate permissions.</li>
+<li>Flush as required.</li>
+<li>Atomically rename over the destination.</li>
+<li>Return the new metadata/version.</li>
+</ol>
+<p>This prevents partial writes and reduces the chance of overwriting
+changes made by an agent or another SSH session.</p>
+<h3 id="812-remote-file-watching">8.12 Remote file watching</h3>
+<p>The remote agent watches:</p>
+<ul>
+<li>Open files</li>
+<li>Expanded directories</li>
+<li>Workspace metadata needed for refresh</li>
+<li><code>.git</code> metadata relevant to status, once Git is
+added</li>
+</ul>
+<p>Use native mechanisms through a Rust watcher abstraction—such as
+inotify on Linux and FSEvents on macOS—then debounce bursts before
+sending them to the app. Do not recursively watch every directory in a
+huge repository by default. If an event stream overflows, invalidate the
+affected model and perform a bounded refresh.</p>
+<h3 id="813-disconnection-behavior">8.13 Disconnection behavior</h3>
+<table>
+<thead>
+<tr class="header">
+<th>State</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Clean buffer, connection drops</td>
+<td>Keep local snapshot, mark unavailable, reconnect automatically with
+bounded backoff</td>
+</tr>
+<tr class="even">
+<td>Dirty buffer, connection drops</td>
+<td>Keep every unsaved edit locally; never close the tab</td>
+</tr>
+<tr class="odd">
+<td>Reconnected, remote unchanged</td>
+<td>Resume normally</td>
+</tr>
+<tr class="even">
+<td>Reconnected, remote changed</td>
+<td>Show Compare / Keep Mine / Reload decision</td>
+</tr>
+<tr class="odd">
+<td>Agent version mismatch</td>
+<td>Restart or reinstall agent, preserving buffers</td>
+</tr>
+<tr class="even">
+<td>Host unavailable</td>
+<td>Nonblocking banner with Retry and diagnostics</td>
+</tr>
+<tr class="odd">
+<td>Authentication expires</td>
+<td>Prompt in the workspace window</td>
+</tr>
+</tbody>
+</table>
+<p>Unsaved remote buffers should also participate in local crash
+restoration, encrypted or protected using standard application storage
+permissions.</p>
+<h3 id="814-remote-workspace-trust">8.14 Remote workspace trust</h3>
+<p>Introduce a simple trust state for local and remote folders:</p>
+<ul>
+<li><strong>Untrusted:</strong> editing and viewing are allowed;
+executable features are disabled.</li>
+<li><strong>Trusted:</strong> Git commit hooks and any later
+tasks/language tools may execute.</li>
+</ul>
+<p>The initial app has no extension or task system, so the risk is
+narrower. However, <code>git commit</code> can execute repository hooks.
+Explain this at the moment the first commit is attempted rather than
+presenting a vague startup warning.</p>
+<hr />
+<h2 id="9-command-line-launcher">9. Command-line launcher</h2>
+<p>The command is <strong><code>rafu</code></strong>, matching the
+product name. A collision check against POSIX utilities, common Homebrew
+formulae and casks, and shipping macOS developer tools found no
+conflicts (see section 2.4).</p>
+<h3 id="91-command-surface">9.1 Command surface</h3>
+<div class="sourceCode" id="cb27"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Open current local directory</span></span>
+<span id="cb27-2"><a href="#cb27-2" aria-hidden="true" tabindex="-1"></a><span class="ex">rafu</span> .</span>
+<span id="cb27-3"><a href="#cb27-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb27-4"><a href="#cb27-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Open a local file</span></span>
+<span id="cb27-5"><a href="#cb27-5" aria-hidden="true" tabindex="-1"></a><span class="ex">rafu</span> README.md</span>
+<span id="cb27-6"><a href="#cb27-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb27-7"><a href="#cb27-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Open in a new workspace window</span></span>
+<span id="cb27-8"><a href="#cb27-8" aria-hidden="true" tabindex="-1"></a><span class="ex">rafu</span> <span class="at">--new-window</span> .</span>
+<span id="cb27-9"><a href="#cb27-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb27-10"><a href="#cb27-10" aria-hidden="true" tabindex="-1"></a><span class="co"># Reuse the best matching existing window</span></span>
+<span id="cb27-11"><a href="#cb27-11" aria-hidden="true" tabindex="-1"></a><span class="ex">rafu</span> <span class="at">--reuse-window</span> .</span>
+<span id="cb27-12"><a href="#cb27-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb27-13"><a href="#cb27-13" aria-hidden="true" tabindex="-1"></a><span class="co"># Open a file at line and column</span></span>
+<span id="cb27-14"><a href="#cb27-14" aria-hidden="true" tabindex="-1"></a><span class="ex">rafu</span> <span class="at">--goto</span> Sources/App.swift:42:8</span>
+<span id="cb27-15"><a href="#cb27-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb27-16"><a href="#cb27-16" aria-hidden="true" tabindex="-1"></a><span class="co"># Wait until the file or workspace is closed</span></span>
+<span id="cb27-17"><a href="#cb27-17" aria-hidden="true" tabindex="-1"></a><span class="ex">rafu</span> <span class="at">--wait</span> README.md</span>
+<span id="cb27-18"><a href="#cb27-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb27-19"><a href="#cb27-19" aria-hidden="true" tabindex="-1"></a><span class="co"># Open a remote folder using an SSH config alias</span></span>
+<span id="cb27-20"><a href="#cb27-20" aria-hidden="true" tabindex="-1"></a><span class="ex">rafu</span> <span class="at">--ssh</span> prod-api /srv/api</span>
+<span id="cb27-21"><a href="#cb27-21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb27-22"><a href="#cb27-22" aria-hidden="true" tabindex="-1"></a><span class="co"># Open a remote file at a location</span></span>
+<span id="cb27-23"><a href="#cb27-23" aria-hidden="true" tabindex="-1"></a><span class="ex">rafu</span> <span class="at">--ssh</span> prod-api <span class="at">--goto</span> /srv/api/Sources/main.py:42:8</span>
+<span id="cb27-24"><a href="#cb27-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb27-25"><a href="#cb27-25" aria-hidden="true" tabindex="-1"></a><span class="co"># URI form for scripts and links</span></span>
+<span id="cb27-26"><a href="#cb27-26" aria-hidden="true" tabindex="-1"></a><span class="ex">rafu</span> <span class="st">&#39;ssh://prod-api/srv/api&#39;</span></span>
+<span id="cb27-27"><a href="#cb27-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb27-28"><a href="#cb27-28" aria-hidden="true" tabindex="-1"></a><span class="co"># Diagnostics</span></span>
+<span id="cb27-29"><a href="#cb27-29" aria-hidden="true" tabindex="-1"></a><span class="ex">rafu</span> <span class="at">--list-ssh-hosts</span></span>
+<span id="cb27-30"><a href="#cb27-30" aria-hidden="true" tabindex="-1"></a><span class="ex">rafu</span> <span class="at">--status</span></span>
+<span id="cb27-31"><a href="#cb27-31" aria-hidden="true" tabindex="-1"></a><span class="ex">rafu</span> <span class="at">--version</span></span>
+<span id="cb27-32"><a href="#cb27-32" aria-hidden="true" tabindex="-1"></a><span class="ex">rafu</span> <span class="at">--help</span></span></code></pre></div>
+<h3 id="92-cli-target">9.2 CLI target</h3>
+<p>Add a separate Xcode command-line-tool target:</p>
+<pre class="text"><code>RafuLauncher
+├── argument parser
+├── path resolver
+├── app locator
+├── IPC client
+└── wait-session handling</code></pre>
+<p>The launcher should be small, signed, and bundled under the app's
+<code>Contents/SharedSupport/bin</code> directory.</p>
+<h3 id="93-installation">9.3 Installation</h3>
+<p>Provide <strong>Settings → General → Command Line Tool →
+Install…</strong></p>
+<p>Preferred first implementation:</p>
+<ol type="1">
+<li>Copy the signed launcher binary to
+<code>~/.local/bin/rafu</code>.</li>
+<li>If <code>~/.local/bin</code> is not on <code>PATH</code>, show the
+exact one-line shell configuration for the detected shell.</li>
+<li>Also offer a user-directed destination such as
+<code>/usr/local/bin</code> when it already exists and is writable.</li>
+<li>Avoid a privileged helper in the first release.</li>
+<li>Provide Uninstall and Verify buttons.</li>
+</ol>
+<p>Do not make the installed command a fragile absolute symlink into an
+app bundle that may later move. The launcher should locate the app by
+bundle identifier through Launch Services.</p>
+<h3 id="94-local-ipc">9.4 Local IPC</h3>
+<p>Use a Unix-domain socket:</p>
+<pre class="text"><code>~/Library/Caches/&lt;bundle-id&gt;/ipc/launcher.sock</code></pre>
+<p>Security and lifecycle:</p>
+<ul>
+<li>Parent directory mode <code>0700</code>; socket accessible only to
+the user.</li>
+<li>Validate peer credentials and same user ID where supported.</li>
+<li>Version every request.</li>
+<li>Validate message sizes and all paths.</li>
+<li>Remove stale sockets on startup.</li>
+<li>Use one app-level server that routes requests to the correct
+workspace window.</li>
+</ul>
+<p>Conceptual request:</p>
+<div class="sourceCode" id="cb30"><pre
+class="sourceCode swift"><code class="sourceCode swift"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a><span class="kw">struct</span> LauncherRequest<span class="op">:</span> <span class="dt">Codable</span><span class="op">,</span> <span class="dt">Sendable</span> <span class="op">{</span></span>
+<span id="cb30-2"><a href="#cb30-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="va">protocolVersion</span><span class="op">:</span> Int</span>
+<span id="cb30-3"><a href="#cb30-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="va">requestID</span><span class="op">:</span> UUID</span>
+<span id="cb30-4"><a href="#cb30-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="va">operation</span><span class="op">:</span> LauncherOperation</span>
+<span id="cb30-5"><a href="#cb30-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="va">activationPolicy</span><span class="op">:</span> ActivationPolicy</span>
+<span id="cb30-6"><a href="#cb30-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="va">wait</span><span class="op">:</span> Bool</span>
+<span id="cb30-7"><a href="#cb30-7" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb30-8"><a href="#cb30-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb30-9"><a href="#cb30-9" aria-hidden="true" tabindex="-1"></a><span class="kw">enum</span> LauncherOperation<span class="op">:</span> <span class="dt">Codable</span><span class="op">,</span> <span class="dt">Sendable</span> <span class="op">{</span></span>
+<span id="cb30-10"><a href="#cb30-10" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> openLocal<span class="op">(</span>paths<span class="op">:</span> <span class="op">[</span>String<span class="op">],</span> locations<span class="op">:</span> <span class="op">[</span>SourceLocation<span class="op">])</span></span>
+<span id="cb30-11"><a href="#cb30-11" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> openSSH<span class="op">(</span>hostAlias<span class="op">:</span> String<span class="op">,</span> path<span class="op">:</span> RemotePath<span class="op">,</span> location<span class="op">:</span> SourceLocation<span class="op">?)</span></span>
+<span id="cb30-12"><a href="#cb30-12" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> listSSHHosts</span>
+<span id="cb30-13"><a href="#cb30-13" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> status</span>
+<span id="cb30-14"><a href="#cb30-14" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<h3 id="95-startup-behavior">9.5 Startup behavior</h3>
+<ol type="1">
+<li>CLI resolves relative local paths against its current working
+directory.</li>
+<li>It attempts to connect to the app socket.</li>
+<li>If unavailable, it launches the app by bundle identifier using
+Launch Services.</li>
+<li>It waits for the versioned socket handshake.</li>
+<li>It sends the open request.</li>
+<li>The app acknowledges only after the workspace/file has been accepted
+or a concrete error is known.</li>
+</ol>
+<p>Do not use only <code>open --args</code>; argument delivery is
+unreliable for a long-running app and cannot implement robust
+<code>--wait</code> behavior.</p>
+<h3 id="96-window-routing">9.6 Window routing</h3>
+<ul>
+<li><code>--new-window</code>: always create a workspace window.</li>
+<li><code>--reuse-window</code>: reuse a window already rooted at the
+same local folder or SSH host/root.</li>
+<li>Default: reuse an exact existing workspace; otherwise create a new
+window.</li>
+<li>Opening a file inside an existing workspace focuses that window and
+opens a tab.</li>
+<li>Opening a path outside every workspace opens its containing folder
+or a lightweight standalone file window, depending on the final product
+decision.</li>
+</ul>
+<h3 id="97---wait">9.7 <code>--wait</code></h3>
+<p>The app returns a wait token. The CLI keeps its socket request alive
+or subscribes using that token until:</p>
+<ul>
+<li>The specific file tab closes, for a file request; or</li>
+<li>The workspace window closes, for a folder request.</li>
+</ul>
+<p>Signals terminate the wait cleanly without closing the editor
+window.</p>
+<hr />
+<h2 id="10-file-tree-and-external-changes">10. File tree and external
+changes</h2>
+<h3 id="101-loading-strategy">10.1 Loading strategy</h3>
+<ul>
+<li>Enumerate directory children only when expanded.</li>
+<li>Never preload an entire remote repository tree.</li>
+<li>Hide <code>.git</code> internals.</li>
+<li>Hide common generated directories by default, with Show Excluded
+Files.</li>
+<li>Continue to show useful ignored leaf files such as
+<code>.env</code>, dimmed and marked ignored.</li>
+<li>Do not recursively follow directory symlinks without loop
+detection.</li>
+</ul>
+<h3 id="102-external-modification-policy">10.2 External modification
+policy</h3>
+<table>
+<thead>
+<tr class="header">
+<th>Buffer state</th>
+<th>External event</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Not open</td>
+<td>Refresh relevant tree and Git status</td>
+</tr>
+<tr class="even">
+<td>Open and clean</td>
+<td>Reload automatically, preserving selection when practical</td>
+</tr>
+<tr class="odd">
+<td>Open and dirty</td>
+<td>Show Compare, Reload from Source, or Keep My Version</td>
+</tr>
+<tr class="even">
+<td>Deleted externally</td>
+<td>Mark deleted; offer Save As or Close</td>
+</tr>
+<tr class="odd">
+<td>Renamed externally</td>
+<td>Reassociate by file identity when reliable; otherwise
+delete/create</td>
+</tr>
+</tbody>
+</table>
+<p>This policy applies equally to local events and events reported by
+the remote agent.</p>
+<h3 id="103-file-icons">10.3 File icons</h3>
+<p>Use a small semantic registry rather than a large branded icon
+pack:</p>
+<pre class="text"><code>folder
+source
+configuration
+markup
+image
+archive
+database
+text
+binary
+unknown</code></pre>
+<p>Add exact-name overrides for Docker, Compose, <code>.env</code>, Git,
+package manifests, and lockfiles. Use SF Symbols for general chrome and
+bundled vector assets only where a distinct file mark materially
+improves scanning.</p>
+<hr />
+<h2 id="11-git-architecture-local-and-remote-parity">11. Git
+architecture: local and remote parity</h2>
+<h3 id="111-shared-domain-layer">11.1 Shared domain layer</h3>
+<div class="sourceCode" id="cb32"><pre
+class="sourceCode swift"><code class="sourceCode swift"><span id="cb32-1"><a href="#cb32-1" aria-hidden="true" tabindex="-1"></a><span class="kw">protocol</span> RepositoryClient<span class="op">:</span> <span class="dt">Sendable</span> <span class="op">{</span></span>
+<span id="cb32-2"><a href="#cb32-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">func</span> <span class="fu">status</span><span class="op">()</span> <span class="fu">async</span> <span class="kw">throws</span> -&gt; <span class="fu">RepositoryStatus</span></span>
+<span id="cb32-3"><a href="#cb32-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">func</span> <span class="fu">diff</span><span class="op">(</span><span class="va">_</span> <span class="va">request</span><span class="op">:</span> <span class="dt">DiffRequest</span><span class="op">)</span> <span class="fu">async</span> <span class="kw">throws</span> -&gt; <span class="fu">DiffResult</span></span>
+<span id="cb32-4"><a href="#cb32-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">func</span> <span class="fu">stage</span><span class="op">(</span><span class="va">paths</span><span class="op">:</span> [<span class="dt">WorkspacePath</span>]<span class="op">)</span> <span class="fu">async</span> <span class="kw">throws</span></span>
+<span id="cb32-5"><a href="#cb32-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">func</span> <span class="fu">unstage</span><span class="op">(</span><span class="va">paths</span><span class="op">:</span> [<span class="dt">WorkspacePath</span>]<span class="op">)</span> <span class="fu">async</span> <span class="kw">throws</span></span>
+<span id="cb32-6"><a href="#cb32-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">func</span> <span class="fu">commit</span><span class="op">(</span><span class="va">message</span><span class="op">:</span> <span class="dt">CommitMessage</span><span class="op">)</span> <span class="fu">async</span> <span class="kw">throws</span> -&gt; <span class="fu">CommitResult</span></span>
+<span id="cb32-7"><a href="#cb32-7" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div>
+<p>Implementations:</p>
+<ul>
+<li><code>LocalGitClient</code> runs local Git through
+<code>Foundation.Process</code>.</li>
+<li><code>RemoteGitClient</code> sends typed requests to the remote
+agent, which runs Git in the remote workspace.</li>
+</ul>
+<p>The SwiftUI source-control UI consumes the same models in both
+cases.</p>
+<h3 id="112-git-commands-and-parsing">11.2 Git commands and parsing</h3>
+<p>Use stable, machine-oriented output:</p>
+<div class="sourceCode" id="cb33"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> status <span class="at">--porcelain</span><span class="op">=</span>v2 <span class="at">-z</span> <span class="at">--branch</span></span>
+<span id="cb33-2"><a href="#cb33-2" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> diff <span class="at">--no-color</span> <span class="at">--no-ext-diff</span> <span class="at">--</span> <span class="op">&lt;</span>paths<span class="op">&gt;</span></span>
+<span id="cb33-3"><a href="#cb33-3" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> diff <span class="at">--cached</span> <span class="at">--no-color</span> <span class="at">--no-ext-diff</span> <span class="at">--</span> <span class="op">&lt;</span>paths<span class="op">&gt;</span></span>
+<span id="cb33-4"><a href="#cb33-4" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> add <span class="at">--</span> <span class="op">&lt;</span>paths<span class="op">&gt;</span></span>
+<span id="cb33-5"><a href="#cb33-5" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> commit <span class="at">-F</span> <span class="at">-</span></span></code></pre></div>
+<p>Rules:</p>
+<ul>
+<li>Pass arguments directly; never construct a shell command.</li>
+<li>Use <code>--</code> before path arguments.</li>
+<li>Parse NUL-delimited output as bytes.</li>
+<li>Drain stdout and stderr concurrently.</li>
+<li>Support cancellation and a bounded timeout.</li>
+<li>Serialize index-changing operations per repository.</li>
+<li>Preserve and display Git hook output.</li>
+</ul>
+<h3 id="113-initial-source-control-ui">11.3 Initial source-control
+UI</h3>
+<pre class="text"><code>SOURCE CONTROL
+
+Staged Changes
+  M  Sources/App.swift
+  A  Sources/SSHConnection.swift
+
+Changes
+  M  Dockerfile
+  M  .env
+  ?? compose.local.yaml
+
+[Generate Commit Message ▾]
+
+Subject
+[Add SSH-backed workspace support                  ]
+
+Body
+[Describe remote transport and reconnect handling ]
+
+[Commit]</code></pre>
+<p>Initial Git release supports file-level staging only.</p>
+<h3 id="114-cases-to-test">11.4 Cases to test</h3>
+<ul>
+<li>Repository without an initial commit</li>
+<li>Detached HEAD</li>
+<li>Worktree with <code>.git</code> as a file</li>
+<li>Rename/delete/untracked files</li>
+<li>Merge conflict status</li>
+<li>Submodules</li>
+<li>Mixed staged and unstaged changes in one file</li>
+<li>Unicode and newline-containing filenames</li>
+<li>Git executable missing locally/remotely</li>
+<li>Hooks that fail, prompt, or take too long</li>
+<li>Connection loss during a remote operation</li>
+</ul>
+<hr />
+<h2 id="12-ai-commit-message-generation">12. AI commit-message
+generation</h2>
+<h3 id="121-feature-boundary">12.1 Feature boundary</h3>
+<p>AI generates editable text. It does not stage files, run commands, or
+commit automatically.</p>
+<p>Scopes:</p>
+<ol type="1">
+<li><strong>Staged changes</strong> — default</li>
+<li><strong>Selected files</strong></li>
+<li><strong>All changes</strong></li>
+</ol>
+<p>Always show:</p>
+<ul>
+<li>Scope name</li>
+<li>File count and filenames</li>
+<li>Approximate payload size</li>
+<li>Sensitive-file exclusions/redactions</li>
+<li>A warning when generated scope differs from the staged commit
+scope</li>
+</ul>
+<h3 id="122-provider-abstraction">12.2 Provider abstraction</h3>
+<div class="sourceCode" id="cb35"><pre
+class="sourceCode swift"><code class="sourceCode swift"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a><span class="kw">protocol</span> CommitMessageProvider<span class="op">:</span> <span class="dt">Sendable</span> <span class="op">{</span></span>
+<span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">func</span> <span class="fu">generate</span><span class="op">(</span><span class="va">_</span> <span class="va">request</span><span class="op">:</span> <span class="dt">CommitMessageRequest</span><span class="op">)</span> <span class="fu">async</span> <span class="kw">throws</span> -&gt; <span class="fu">CommitSuggestion</span></span>
+<span id="cb35-3"><a href="#cb35-3" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb35-4"><a href="#cb35-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb35-5"><a href="#cb35-5" aria-hidden="true" tabindex="-1"></a><span class="kw">struct</span> <span class="fu">CommitMessageRequest</span><span class="op">:</span> <span class="dt">Sendable</span> <span class="op">{</span></span>
+<span id="cb35-6"><a href="#cb35-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="va">repositoryName</span><span class="op">:</span> String</span>
+<span id="cb35-7"><a href="#cb35-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="va">branchName</span><span class="op">:</span> String<span class="op">?</span></span>
+<span id="cb35-8"><a href="#cb35-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="va">workspaceLocation</span><span class="op">:</span> WorkspaceLocationSummary</span>
+<span id="cb35-9"><a href="#cb35-9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="va">scope</span><span class="op">:</span> CommitScope</span>
+<span id="cb35-10"><a href="#cb35-10" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="va">sanitizedDiff</span><span class="op">:</span> String</span>
+<span id="cb35-11"><a href="#cb35-11" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="va">style</span><span class="op">:</span> CommitStyle</span>
+<span id="cb35-12"><a href="#cb35-12" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="va">customInstructions</span><span class="op">:</span> String<span class="op">?</span></span>
+<span id="cb35-13"><a href="#cb35-13" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb35-14"><a href="#cb35-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb35-15"><a href="#cb35-15" aria-hidden="true" tabindex="-1"></a><span class="kw">struct</span> CommitSuggestion<span class="op">:</span> <span class="dt">Decodable</span><span class="op">,</span> <span class="dt">Sendable</span> <span class="op">{</span></span>
+<span id="cb35-16"><a href="#cb35-16" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="va">subject</span><span class="op">:</span> String</span>
+<span id="cb35-17"><a href="#cb35-17" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="va">body</span><span class="op">:</span> String<span class="op">?</span></span>
+<span id="cb35-18"><a href="#cb35-18" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>First implementation:
+<code>OpenAICompatibleCommitProvider</code>.</p>
+<p>Settings:</p>
+<pre class="text"><code>Provider display name
+Base URL
+API mode: Responses / Chat Completions compatibility
+Model identifier
+API key
+Commit style: Plain / Conventional Commits
+Custom instructions
+Request timeout and payload limit</code></pre>
+<h3 id="123-api-behavior">12.3 API behavior</h3>
+<ul>
+<li>Prefer the Responses API for OpenAI endpoints.</li>
+<li>Use a strict structured-output schema for
+<code>{ subject, body }</code> when supported.</li>
+<li>Provide Chat Completions and plain-JSON fallback modes for
+compatible base URLs.</li>
+<li>Validate output locally before placing it into the commit form.</li>
+<li>Keep the request stateless and tool-free.</li>
+</ul>
+<h3 id="124-remote-diff-flow">12.4 Remote diff flow</h3>
+<pre class="text"><code>Remote Git creates diff
+        ↓ encrypted SSH
+Native app receives diff
+        ↓ local secret scanner/redactor
+User previews exact payload
+        ↓ HTTPS to configured provider
+Structured subject/body
+        ↓ editable form
+User explicitly commits</code></pre>
+<p>The remote agent never receives the API key. The configured AI
+provider never receives SSH credentials.</p>
+<h3 id="125-sensitive-file-policy">12.5 Sensitive-file policy</h3>
+<p>Default AI exclusions:</p>
+<pre class="text"><code>.env
+.env.*
+*.pem
+*.key
+*.p12
+id_rsa
+credentials*
+secrets*
+*token*</code></pre>
+<p>Local redaction detects likely assignments and headers:</p>
+<pre class="text"><code>API_KEY=...
+PASSWORD=...
+SECRET=...
+TOKEN=...
+Authorization: Bearer ...</code></pre>
+<p>Replace values with <code>&lt;redacted&gt;</code> while retaining
+enough context to describe the type of change.</p>
+<p>Other requirements:</p>
+<ul>
+<li>Require HTTPS for nonlocalhost endpoints.</li>
+<li>Do not log request bodies or full diffs.</li>
+<li>Do not persist generated diff payloads.</li>
+<li>Never send binary content.</li>
+<li>Require a narrower selection when the diff exceeds the configured
+payload limit; do not silently truncate arbitrary sections.</li>
+<li>Store a user-provided key in Keychain.</li>
+<li>Never ship a shared vendor API key inside the desktop app. A
+product-funded shared key requires a backend service.</li>
+</ul>
+<hr />
+<h2 id="13-security-model">13. Security model</h2>
+<h3 id="131-assets">13.1 Assets</h3>
+<ul>
+<li>Local and remote source files</li>
+<li>Unsaved buffers</li>
+<li>SSH keys and authentication responses</li>
+<li>OpenAI-compatible API keys</li>
+<li>Diff contents and secrets within them</li>
+<li>Git credentials and hooks</li>
+<li>Local CLI IPC</li>
+<li>Remote agent binary and protocol</li>
+</ul>
+<h3 id="132-trust-boundaries">13.2 Trust boundaries</h3>
+<pre class="text"><code>CLI process → native app IPC
+Native app → system SSH process
+System SSH → remote host
+Native app → AI provider
+Workspace files → Git hooks / future executable features</code></pre>
+<h3 id="133-required-controls">13.3 Required controls</h3>
+<h4 id="ssh">SSH</h4>
+<ul>
+<li>System SSH and existing known-hosts files remain authoritative.</li>
+<li>No automatic disabling of host-key verification.</li>
+<li>Private askpass IPC; no credential logging.</li>
+<li>App-owned control sockets in user-only directories.</li>
+<li>Fixed executable paths and argument arrays.</li>
+<li>Remote command content fixed or strongly encoded; no interpolation
+of arbitrary shell text.</li>
+</ul>
+<h4 id="remote-agent">Remote agent</h4>
+<ul>
+<li>No listening network socket.</li>
+<li>Runs with user privileges only.</li>
+<li>Versioned protocol and maximum frame size.</li>
+<li>Workspace-root capability selected through the binary protocol—not
+the remote shell command—and path traversal protection.</li>
+<li>Safe symlink policy.</li>
+<li>Atomic writes and expected-version conflict checks.</li>
+<li>Release manifests/checksums and build identifiers.</li>
+<li>Bounded concurrency and resource limits.</li>
+</ul>
+<h4 id="cli">CLI</h4>
+<ul>
+<li>Socket owner and peer validation.</li>
+<li>Versioned, size-bounded messages.</li>
+<li>Canonicalize local paths before routing.</li>
+<li>Treat all CLI arguments as untrusted.</li>
+<li>No remote command execution surface in the launcher protocol.</li>
+</ul>
+<h4 id="ai">AI</h4>
+<ul>
+<li>Keychain for user secrets.</li>
+<li>Local redaction and explicit preview.</li>
+<li>Sensitive files excluded by default.</li>
+<li>No automatic request.</li>
+<li>Endpoint validation and TLS policy.</li>
+</ul>
+<h4 id="git">Git</h4>
+<ul>
+<li>Argument arrays and <code>--</code> path separator.</li>
+<li>Repository trust prompt before the first hook-capable action.</li>
+<li>Clear display of hook output and failures.</li>
+<li>No destructive reset/clean UI in the initial release.</li>
+</ul>
+<hr />
+<h2 id="14-performance-architecture-and-budgets">14. Performance
+architecture and budgets</h2>
+<p>These are initial engineering budgets, not promises. Record baselines
+in Release builds and keep regression fixtures.</p>
+<table>
+<thead>
+<tr class="header">
+<th>Metric</th>
+<th>Initial budget</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Idle local workspace resident memory</td>
+<td>Target below roughly 150 MB</td>
+</tr>
+<tr class="even">
+<td>Additional idle remote-workspace client overhead</td>
+<td>Target below roughly 20–40 MB beyond open buffers</td>
+</tr>
+<tr class="odd">
+<td>Remote agent idle memory</td>
+<td>Target below roughly 25 MB</td>
+</tr>
+<tr class="even">
+<td>Typing latency</td>
+<td>p95 edit handling within one display frame</td>
+</tr>
+<tr class="odd">
+<td>Persistent local Git subprocesses</td>
+<td>Zero</td>
+</tr>
+<tr class="even">
+<td>Remote repository preloading</td>
+<td>None</td>
+</tr>
+<tr class="odd">
+<td>Syntax parsing</td>
+<td>Open buffers only</td>
+</tr>
+<tr class="even">
+<td>File tree</td>
+<td>Lazy children</td>
+</tr>
+<tr class="odd">
+<td>Git refresh</td>
+<td>Debounced and cancellable</td>
+</tr>
+<tr class="even">
+<td>Remote saves</td>
+<td>Asynchronous; never block typing</td>
+</tr>
+<tr class="odd">
+<td>AI network activity</td>
+<td>Explicit user action only</td>
+</tr>
+</tbody>
+</table>
+<h3 id="141-performance-rules">14.1 Performance rules</h3>
+<ul>
+<li>No full document in SwiftUI state.</li>
+<li>No entire repository index in memory for Phase 1.</li>
+<li>Stable identifiers in all file lists.</li>
+<li>No expensive sorting, icon generation, parsing, or path formatting
+in SwiftUI <code>body</code>.</li>
+<li>Cancel stale directory, syntax, diff, and search requests.</li>
+<li>Coalesce file events.</li>
+<li>Cache only bounded metadata and icons.</li>
+<li>Release closed buffers after a restoration snapshot is written.</li>
+<li>Measure local and remote scenarios with Instruments and
+signposts.</li>
+</ul>
+<h3 id="142-regression-fixtures">14.2 Regression fixtures</h3>
+<ul>
+<li>50,000+ file repository</li>
+<li>Deep directory hierarchy</li>
+<li>100 open tabs</li>
+<li>Large minified JSON</li>
+<li>Multi-megabyte diff</li>
+<li>Emoji, combining marks, CJK input methods</li>
+<li>Invalid UTF-8 remote filename</li>
+<li>Agent modifying an open file once per second</li>
+<li>High-latency SSH connection</li>
+<li>Disconnect during read, save, directory listing, and Git
+operation</li>
+<li>Remote inotify/watch overflow</li>
+</ul>
+<hr />
+<h2 id="15-delivery-phases">15. Delivery phases</h2>
+<p>The inclusion of SSH in Phase 1 materially increases risk. Keep it in
+Phase 1 as requested, but divide the phase into explicit internal gates
+so the team does not build the entire application on an unproven remote
+layer.</p>
+<p><strong>v0.3 sequencing correction:</strong> the founding use case —
+quick edits to <code>.env</code>, Docker, Compose, and config files
+beside a running coding agent — is local. Therefore <strong>Phase 1A
+concludes with a shippable internal v0.1</strong> (local workspaces,
+editing baseline, themes, markdown preview) that goes into genuine daily
+use <em>before</em> Phase 1B lands. This yields real-usage feedback on
+the editor core while the SSH/agent layer is still being proven, and
+guarantees a useful product exists even if the remote layer slips. SSH
+remains in scope for the Phase 1 public release; only the internal
+gating order is being made explicit.</p>
+<hr />
+<h3 id="phase-0--technical-feasibility-and-architecture-locks">Phase 0 —
+Technical feasibility and architecture locks</h3>
+<p><strong>Goal:</strong> Prove the three highest-risk foundations
+before product breadth.</p>
+<h4 id="workstream-a-editor-core">Workstream A: editor core</h4>
+<ul>
+<li>Wrap TextKit 2 <code>NSTextView</code> in SwiftUI.</li>
+<li>Open, edit, save, undo, and line numbers.</li>
+<li>Implement one Tree-sitter language incrementally.</li>
+<li>Verify IME, Unicode, large-file behavior, and no full-string SwiftUI
+observation.</li>
+</ul>
+<h4 id="workstream-b-ssh-transport">Workstream B: SSH transport</h4>
+<ul>
+<li>Discover concrete SSH aliases including <code>Include</code>
+files.</li>
+<li>Run <code>ssh -G</code> for diagnostics.</li>
+<li>Establish a connection through <code>/usr/bin/ssh</code> using the
+user's config.</li>
+<li>Build askpass broker and unknown-host-key flow.</li>
+<li>Start a prototype remote helper over stdio.</li>
+<li>Read and atomically write one remote file.</li>
+<li>Disconnect and reconnect without losing a dirty local buffer.</li>
+</ul>
+<h4 id="workstream-c-cli">Workstream C: CLI</h4>
+<ul>
+<li>Build launcher target.</li>
+<li>Launch the app by bundle identifier.</li>
+<li>Send one <code>open local folder</code> request over a Unix
+socket.</li>
+<li>Validate stale-socket recovery and same-user security.</li>
+</ul>
+<h4 id="exit-criteria">Exit criteria</h4>
+<pre class="text"><code>One local file can be edited and saved.
+One remote file can be edited and saved through an SSH config alias.
+Unsaved remote edits survive a connection drop.
+rafu . launches or focuses the app and opens a folder.
+Baseline memory and typing traces are recorded.</code></pre>
+<p>No file tree, Git UI, or visual polish proceeds until this gate
+passes.</p>
+<hr />
+<h3 id="phase-1--usable-local-and-ssh-workspace-release">Phase 1 —
+Usable local and SSH workspace release</h3>
+<p><strong>Goal:</strong> Deliver the smallest coherent editor that can
+replace opening a large IDE for focused local or remote edits.</p>
+<h4 id="phase-1a-local-workspace-shell">Phase 1A: local workspace
+shell</h4>
+<ul>
+<li>Multi-window <code>WindowGroup</code> architecture</li>
+<li>One workspace per window</li>
+<li>Open Folder and recent workspaces</li>
+<li>Lazy local file tree</li>
+<li>Tabs and editor-buffer registry</li>
+<li>Save, Save All, dirty state, and restoration</li>
+<li>External local file events</li>
+<li>Create, rename, move, and delete</li>
+<li>Core syntax set</li>
+<li>Baseline editing commands</li>
+<li>Native menus and keyboard shortcuts</li>
+<li>JSON theme engine with bundled Indigo and Khadi themes, following
+system appearance</li>
+<li>Markdown edit + native preview (Edit / Split / Preview) with
+theme-driven typography</li>
+<li><strong>Gate: internal v0.1</strong> — daily-driver use of the local
+build begins here</li>
+</ul>
+<h4 id="phase-1b-ssh-workspace-parity">Phase 1B: SSH workspace
+parity</h4>
+<ul>
+<li>Open SSH Folder flow</li>
+<li>Searchable config-alias picker</li>
+<li>Manual alias/host entry</li>
+<li>Effective configuration diagnostics</li>
+<li>Askpass authentication UI</li>
+<li>Host-key confirmation and changed-key blocking</li>
+<li>App-owned ControlMaster lifecycle</li>
+<li>Remote OS/architecture detection</li>
+<li>Versioned agent install/update</li>
+<li>Remote directory browser and lazy file tree</li>
+<li>Chunked remote file reads</li>
+<li>Atomic writes with conflict detection</li>
+<li>Remote create/rename/delete</li>
+<li>Remote watch events</li>
+<li>Reconnect state machine</li>
+<li>Remote workspace restoration and recents</li>
+<li>Linux x86_64/arm64 and macOS x86_64/arm64 support</li>
+</ul>
+<h4 id="phase-1c-cli-and-integration">Phase 1C: CLI and integration</h4>
+<ul>
+<li>Settings-based CLI installation/verification/uninstall</li>
+<li><code>rafu .</code></li>
+<li>Local file open and <code>--goto</code></li>
+<li><code>--new-window</code> and <code>--reuse-window</code></li>
+<li><code>--wait</code></li>
+<li><code>rafu --ssh &lt;alias&gt; &lt;path&gt;</code></li>
+<li>SSH URI parsing</li>
+<li>App-running and app-not-running paths</li>
+<li>Correct routing among multiple windows</li>
+<li>Finder drag/drop and Open With integration where practical</li>
+</ul>
+<h4 id="phase-1-design-pass">Phase 1 design pass</h4>
+<ul>
+<li>Standard toolbar and menu hierarchy</li>
+<li>Files/Changes sidebar container, with Changes disabled until Phase
+3</li>
+<li>Remote title/status treatment</li>
+<li>Window-scoped connection and authentication sheets</li>
+<li>Accessibility labels, keyboard traversal, contrast and motion
+checks</li>
+<li>No decorative animation for frequent keyboard actions</li>
+</ul>
+<h4 id="phase-1-exit-criteria">Phase 1 exit criteria</h4>
+<pre class="text"><code>rafu . opens a local repository in an independent window.
+rafu --ssh prod /srv/app opens a remote folder through ~/.ssh/config.
+Two local/remote workspaces operate independently in separate windows.
+Files can be opened, edited, saved, created, renamed, and deleted locally and remotely.
+Changes made by Codex/Claude Code or another remote process are detected.
+A dirty buffer survives disconnect and app relaunch recovery.
+Unknown host keys require confirmation; changed keys are blocked.
+Typing remains entirely local and responsive under high SSH latency.
+A markdown file opens in Split mode with an accurate native preview.
+Both bundled themes render correctly and track the system appearance; a user theme JSON hot-reloads.</code></pre>
+<h4 id="explicit-phase-1-exclusions">Explicit Phase 1 exclusions</h4>
+<ul>
+<li>Git UI</li>
+<li>AI commit generation</li>
+<li>Project-wide remote search</li>
+<li>Split panes</li>
+<li>Multiple cursors</li>
+<li>Language servers</li>
+<li>Embedded terminal</li>
+</ul>
+<p>The architecture for these features exists, but the release remains
+focused.</p>
+<hr />
+<h3 id="phase-2--editing-completeness-and-performance">Phase 2 — Editing
+completeness and performance</h3>
+<p><strong>Goal:</strong> Make ordinary code/config editing comfortable
+enough that another editor is rarely needed.</p>
+<h4 id="features">Features</h4>
+<ul>
+<li>Multiple selections and select-next-occurrence</li>
+<li>Bracket matching and auto-closing pairs</li>
+<li>Quick Open</li>
+<li>Local and agent-backed remote project search</li>
+<li>Replace in files with preview</li>
+<li>Split panes</li>
+<li>Move/duplicate/delete line commands</li>
+<li>Restore selection and scroll state</li>
+<li>Configurable keyboard shortcuts</li>
+<li>Status bar details</li>
+<li>Large-file mode</li>
+<li>Optional Tree-sitter outline</li>
+<li>Drag files between folders</li>
+</ul>
+<h4 id="engineering">Engineering</h4>
+<ul>
+<li>Central selection-set and edit transaction engine</li>
+<li>Reverse-order multi-range edits in one undo group</li>
+<li>Search index strategy that does not preload repository contents</li>
+<li>Instruments performance pass</li>
+<li>Remote latency and cancellation tests</li>
+<li>Memory regression suite</li>
+</ul>
+<h4 id="exit-criteria-1">Exit criteria</h4>
+<pre class="text"><code>Normal edits to source, Docker, Compose, environment, and manifest files do not require another editor.
+Quick Open and command surfaces feel instantaneous.
+Large repositories remain lazy and responsive.
+Local and remote editing use the same commands and visual model.</code></pre>
+<hr />
+<h3 id="phase-3--git-for-local-and-ssh-workspaces">Phase 3 — Git for
+local and SSH workspaces</h3>
+<p><strong>Goal:</strong> Complete the edit-review-stage-commit loop in
+either workspace type.</p>
+<h4 id="features-1">Features</h4>
+<ul>
+<li>Repository detection</li>
+<li>Branch and detached-state display</li>
+<li>Porcelain-v2 status parser</li>
+<li>Changes and Staged Changes sections</li>
+<li>Unified diff viewer</li>
+<li>Open changed file from source control</li>
+<li>File-level stage/unstage</li>
+<li>Editable subject/body</li>
+<li>Commit through stdin</li>
+<li>Refresh after external Git commands</li>
+<li>Readable conflict state</li>
+<li>Worktree and submodule awareness</li>
+</ul>
+<h4 id="remote-behavior">Remote behavior</h4>
+<ul>
+<li>All remote Git commands execute on the remote host through the
+agent.</li>
+<li>Only structured status and requested diff content cross SSH.</li>
+<li>Git executable/version diagnostics are per workspace.</li>
+<li>Remote connection loss cancels cleanly without corrupting UI
+state.</li>
+</ul>
+<h4 id="exit-criteria-2">Exit criteria</h4>
+<pre class="text"><code>Local: edit → review → stage → commit succeeds.
+SSH: edit → review → stage → commit succeeds on the remote repository.
+Mixed staged/unstaged files are represented accurately.
+Hooks and failures are visible and do not freeze the UI.</code></pre>
+<hr />
+<h3 id="phase-4--ai-generated-commit-messages">Phase 4 — AI-generated
+commit messages</h3>
+<p><strong>Goal:</strong> Add a narrow, safe AI accelerator to the
+existing Git flow.</p>
+<h4 id="features-2">Features</h4>
+<ul>
+<li>OpenAI-compatible provider settings</li>
+<li>Base URL, API mode, model, and API key</li>
+<li>Keychain storage</li>
+<li>Responses API adapter</li>
+<li>Chat Completions compatibility adapter</li>
+<li>Structured subject/body output</li>
+<li>Staged, selected-file, and all-change scopes</li>
+<li>Exact payload preview</li>
+<li>Sensitive-file exclusion and secret redaction</li>
+<li>Scope mismatch warning</li>
+<li>Retry and cancellation</li>
+<li>Plain and Conventional Commit styles</li>
+<li>Editable result; no automatic commit</li>
+</ul>
+<h4 id="exit-criteria-3">Exit criteria</h4>
+<pre class="text"><code>A user can preview the exact sanitized local or remote diff sent to the provider.
+.env and likely-secret files are excluded by default.
+The generated message accurately corresponds to its displayed scope.
+The user edits or rejects it before committing.
+No API credential is sent to the remote agent.</code></pre>
+<hr />
+<h3 id="phase-5--hardening-and-distribution">Phase 5 — Hardening and
+distribution</h3>
+<p><strong>Goal:</strong> Make the app reliable enough for daily use and
+external distribution.</p>
+<h4 id="reliability">Reliability</h4>
+<ul>
+<li>Crash restoration for local and remote buffers</li>
+<li>Agent rollback on incompatible update</li>
+<li>Corrupt upload and noexec-directory recovery</li>
+<li>Watch overflow recovery</li>
+<li>Disk-full and permission-error flows</li>
+<li>Network transitions and sleep/wake</li>
+<li>Stale SSH control socket recovery</li>
+<li>Moved/renamed app and CLI verification</li>
+</ul>
+<h4 id="security">Security</h4>
+<ul>
+<li>Documented threat model</li>
+<li>Fuzz/negative tests for CLI and remote protocol frames</li>
+<li>Path traversal and symlink tests</li>
+<li>Host-key and askpass review</li>
+<li>Secret scanner fixtures</li>
+<li>Dependency and release-signing process</li>
+</ul>
+<h4 id="accessibility-and-design">Accessibility and design</h4>
+<ul>
+<li>VoiceOver audit</li>
+<li>Full Keyboard Access audit</li>
+<li>Reduce Motion/Transparency and Increase Contrast</li>
+<li>Light/dark and accent-color verification</li>
+<li>Localization readiness</li>
+<li>Toolbar customization and compact-window checks</li>
+</ul>
+<h4 id="distribution">Distribution</h4>
+<ul>
+<li>Developer ID signing</li>
+<li>Notarization</li>
+<li>Signed agent release manifest and checksums</li>
+<li>Direct updater only after core release reliability is
+established</li>
+<li>Privacy policy explaining remote agent and AI data flow</li>
+</ul>
+<h4 id="exit-criteria-4">Exit criteria</h4>
+<pre class="text"><code>Notarized build installs cleanly.
+CLI installation is reversible and survives normal app updates.
+Supported remote targets receive the correct verified agent.
+Recovery paths preserve user work.
+Performance and accessibility gates pass on supported macOS versions.</code></pre>
+<hr />
+<h3 id="phase-6--optional-controlled-expansion">Phase 6 — Optional
+controlled expansion</h3>
+<p>Only consider items that maintain the product's small-runtime
+premise:</p>
+<ul>
+<li>Built-in formatter integrations</li>
+<li>A few opt-in bundled language servers</li>
+<li>Hunk staging</li>
+<li>Read-only Git history/blame</li>
+<li>Open remote shell in external Terminal</li>
+<li>Remote port-forward UI</li>
+<li>Workspace tasks with explicit trust</li>
+</ul>
+<p>Do not add a general extension host unless the product strategy
+intentionally changes.</p>
+<hr />
+<h2 id="16-phase-1-implementation-backlog">16. Phase 1 implementation
+backlog</h2>
+<h3 id="foundation">Foundation</h3>
+<ol type="1">
+<li>Create app, editor, launcher, protocol, and remote-agent
+targets.</li>
+<li>Define <code>WorkspaceLocation</code>, <code>WorkspaceFileID</code>,
+<code>WorkspacePath</code>, and <code>RemotePath</code>.</li>
+<li>Define <code>WorkspaceFileSystem</code> and test doubles.</li>
+<li>Build <code>WorkspaceSession</code> ownership and multi-window
+routing.</li>
+<li>Add structured logging with privacy redaction and signposts.</li>
+</ol>
+<h3 id="editor">Editor</h3>
+<ol start="6" type="1">
+<li>Implement <code>CodeTextView</code> and SwiftUI bridge.</li>
+<li>Implement buffer registry and text-storage ownership.</li>
+<li>Add line-number ruler, dirty state, save, and undo.</li>
+<li>Add command routing through native menus.</li>
+<li>Add syntax registry and first Tree-sitter grammar.</li>
+<li>Add find/replace, go-to-line, indentation, and soft wrap.</li>
+<li>Add external-change conflict banner.</li>
+</ol>
+<h3 id="local-workspace">Local workspace</h3>
+<ol start="13" type="1">
+<li>Implement lazy local directory listing.</li>
+<li>Implement local file read/write/version tokens.</li>
+<li>Add local file watcher and event coalescing.</li>
+<li>Add create/rename/delete with undo where feasible.</li>
+<li>Add recent workspace and restoration records.</li>
+</ol>
+<h3 id="ssh-1">SSH</h3>
+<ol start="18" type="1">
+<li>Implement SSH config catalog and <code>Include</code>
+traversal.</li>
+<li>Implement <code>ssh -G</code> parser for diagnostics.</li>
+<li>Implement <code>SSHProcessRunner</code> with concurrent
+stdout/stderr draining.</li>
+<li>Implement askpass helper and broker.</li>
+<li>Implement host-key prompt classification and UI.</li>
+<li>Implement control-master pool and stale-socket cleanup.</li>
+<li>Define remote protocol framing and handshake.</li>
+<li>Implement Rust agent metadata/list/read/write operations.</li>
+<li>Implement agent bootstrap and target selection.</li>
+<li>Implement remote file-system client.</li>
+<li>Implement remote watcher events.</li>
+<li>Implement reconnect and expected-version conflict handling.</li>
+<li>Add remote folder browser and recent paths.</li>
+</ol>
+<h3 id="cli-1">CLI</h3>
+<ol start="31" type="1">
+<li>Build command-line argument parser.</li>
+<li>Implement Launch Services app discovery/start.</li>
+<li>Implement app Unix-socket server and peer validation.</li>
+<li>Implement local folder/file requests.</li>
+<li>Implement SSH requests and URI parsing.</li>
+<li>Implement line/column navigation.</li>
+<li>Implement <code>--wait</code> lifecycle.</li>
+<li>Implement installation, verification, and removal UI.</li>
+</ol>
+<h3
+id="designaccessibilityperformance">Design/accessibility/performance</h3>
+<ol start="39" type="1">
+<li>Build native toolbar/sidebar anatomy.</li>
+<li>Add remote and connection status presentation.</li>
+<li>Add keyboard-focus and VoiceOver identifiers.</li>
+<li>Add Reduce Motion/Transparency behavior checks.</li>
+<li>Capture Release-build memory, hang, and time-profiler
+baselines.</li>
+<li>Add large-repository and high-latency automated fixtures.</li>
+</ol>
+<h3 id="theming-and-markdown">Theming and markdown</h3>
+<ol start="45" type="1">
+<li>Define the theme JSON schema, parser, validation, and fallback
+rules.</li>
+<li>Implement the theme store: bundled/user discovery, appearance
+following, hot reload, cached attribute tables.</li>
+<li>Author and contrast-check the Indigo and Khadi theme files,
+including <code>markup.*</code> and diff tokens.</li>
+<li>Implement the cmark-gfm → attributed-string markdown renderer with
+fenced-code highlighting.</li>
+<li>Implement the Edit / Split / Preview document mode control, scroll
+sync, and per-file mode restoration.</li>
+<li>Implement image policy (local allowed and size-capped, remote
+blocked with per-document allow) across local and SSH workspaces.</li>
+</ol>
+<hr />
+<h2 id="17-suggested-source-layout">17. Suggested source layout</h2>
+<pre class="text"><code>Rafu/
+├── App/
+│   ├── RafuApp.swift
+│   ├── AppServices.swift
+│   ├── AppCommands.swift
+│   ├── WindowCoordinator.swift
+│   └── LauncherIPCServer.swift
+├── DesignSystem/
+│   ├── AppMetrics.swift
+│   ├── SemanticStyles.swift
+│   ├── ConnectionStatusView.swift
+│   └── AccessibilitySupport.swift
+├── Workspace/
+│   ├── WorkspaceSession.swift
+│   ├── WorkspaceDescriptor.swift
+│   ├── WorkspaceLocation.swift
+│   ├── WorkspaceFileID.swift
+│   ├── WorkspaceWindowView.swift
+│   ├── WorkspaceRestoration.swift
+│   └── RecentWorkspaceStore.swift
+├── EditorCore/
+│   ├── EditorBuffer.swift
+│   ├── EditorBufferRegistry.swift
+│   ├── CodeTextView.swift
+│   ├── CodeTextViewRepresentable.swift
+│   ├── EditorSelectionSet.swift
+│   ├── EditorCommand.swift
+│   ├── LineNumberRulerView.swift
+│   └── FindController.swift
+├── FileSystem/
+│   ├── WorkspaceFileSystem.swift
+│   ├── WorkspacePath.swift
+│   ├── FileSnapshot.swift
+│   ├── FileVersion.swift
+│   ├── LocalWorkspaceFileSystem.swift
+│   ├── LocalFileWatcher.swift
+│   └── FileTreeModel.swift
+├── Remote/
+│   ├── SSHHostCatalog.swift
+│   ├── SSHConfigParser.swift
+│   ├── SSHResolvedConfig.swift
+│   ├── SSHProcessRunner.swift
+│   ├── SSHControlMasterPool.swift
+│   ├── SSHAskpassBroker.swift
+│   ├── RemoteAgentInstaller.swift
+│   ├── RemoteAgentClient.swift
+│   ├── RemoteProtocol.swift
+│   ├── RemotePath.swift
+│   └── RemoteWorkspaceFileSystem.swift
+├── Syntax/
+│   ├── LanguageRegistry.swift
+│   ├── LanguageConfiguration.swift
+│   ├── SyntaxSession.swift
+│   └── HighlightSpan.swift
+├── Theming/
+│   ├── Theme.swift
+│   ├── ThemeSchema.swift
+│   ├── ThemeParser.swift
+│   ├── ThemeStore.swift
+│   ├── ThemeAttributeCache.swift
+│   └── CaptureTokenMap.swift
+├── Markdown/
+│   ├── MarkdownRenderer.swift
+│   ├── MarkdownPreviewView.swift
+│   ├── MarkdownDocumentModeView.swift
+│   ├── MarkdownScrollSync.swift
+│   └── MarkdownImagePolicy.swift
+├── Git/
+│   ├── RepositoryClient.swift
+│   ├── LocalGitClient.swift
+│   ├── RemoteGitClient.swift
+│   ├── ProcessRunner.swift
+│   ├── GitStatusParser.swift
+│   ├── RepositoryState.swift
+│   └── DiffModel.swift
+├── CommitAI/
+│   ├── CommitMessageProvider.swift
+│   ├── OpenAICompatibleProvider.swift
+│   ├── CommitPromptBuilder.swift
+│   ├── DiffSanitizer.swift
+│   └── CommitSuggestion.swift
+├── Security/
+│   ├── KeychainStore.swift
+│   ├── WorkspaceTrustStore.swift
+│   └── SensitiveValueRedactor.swift
+├── Settings/
+│   ├── SettingsStore.swift
+│   ├── SettingsView.swift
+│   ├── SSHSettingsView.swift
+│   └── CommandLineToolSettingsView.swift
+├── Launcher/
+│   ├── main.swift
+│   ├── LauncherArguments.swift
+│   ├── LauncherIPCClient.swift
+│   └── WaitSession.swift
+└── Tests/
+    ├── EditorTests/
+    ├── FileSystemTests/
+    ├── SSHConfigTests/
+    ├── RemoteProtocolTests/
+    ├── GitParserTests/
+    ├── LauncherTests/
+    └── PerformanceFixtures/
+
+remote-agent/
+├── Cargo.toml
+├── protocol/
+│   └── src/
+├── agent/
+│   └── src/
+├── integration-tests/
+└── release-manifest/</code></pre>
+<p>Keep these as folders in a manageable project initially. Extract
+Swift packages only when boundaries stabilize or independent
+testing/build speed justifies it.</p>
+<hr />
+<h2 id="18-testing-matrix">18. Testing matrix</h2>
+<h3 id="181-editor">18.1 Editor</h3>
+<ul>
+<li>ASCII, emoji, combining characters, RTL samples, and CJK IME</li>
+<li>Undo grouping for indentation and line operations</li>
+<li>LF/CRLF preservation</li>
+<li>External modification while clean and dirty</li>
+<li>Large and minified files</li>
+<li>Rapid tab close/open and restoration</li>
+</ul>
+<h3 id="182-ssh-configuration">18.2 SSH configuration</h3>
+<ul>
+<li>Basic alias</li>
+<li><code>Include</code> relative paths, absolute paths, globs, and
+nested includes</li>
+<li>Wildcard <code>Host</code></li>
+<li>Negated host patterns</li>
+<li><code>Match</code> blocks</li>
+<li><code>ProxyJump</code></li>
+<li><code>ProxyCommand</code></li>
+<li>Multiple identities</li>
+<li><code>IdentityAgent</code></li>
+<li>Security key prompts</li>
+<li>Custom known-hosts file</li>
+<li>Config syntax error</li>
+<li>Missing config</li>
+</ul>
+<h3 id="183-authentication-and-trust">18.3 Authentication and trust</h3>
+<ul>
+<li>Agent authentication</li>
+<li>Key passphrase</li>
+<li>Password</li>
+<li>Multi-step/MFA-style prompts</li>
+<li>Unknown host key accepted/canceled</li>
+<li>Changed host key</li>
+<li>Canceled askpass</li>
+<li>App window closed during prompt</li>
+</ul>
+<h3 id="184-remote-agent">18.4 Remote agent</h3>
+<ul>
+<li>Linux and macOS, x86_64 and arm64</li>
+<li>Missing cache directory</li>
+<li><code>noexec</code> home/cache</li>
+<li>Permission denied</li>
+<li>Disk full</li>
+<li>Corrupt or partial binary upload</li>
+<li>Protocol mismatch</li>
+<li>Agent crash and restart</li>
+<li>Remote shell with unusual startup files</li>
+<li>Path containing spaces, quotes, Unicode, newline, and invalid
+UTF-8</li>
+<li>Symlink inside/outside root</li>
+<li>Watch event overflow</li>
+<li>Network loss during each operation</li>
+</ul>
+<h3 id="185-cli">18.5 CLI</h3>
+<ul>
+<li>App closed/running</li>
+<li>Stale socket</li>
+<li>Multiple installed app copies</li>
+<li>App moved after CLI installation</li>
+<li>Relative and absolute paths</li>
+<li>Symlinks</li>
+<li><code>--goto</code> validation</li>
+<li><code>--wait</code> and signals</li>
+<li>Local and SSH window routing</li>
+<li>Concurrent CLI requests</li>
+<li>Unsupported protocol version</li>
+</ul>
+<h3 id="186-git-and-ai">18.6 Git and AI</h3>
+<ul>
+<li>All Git repository edge cases listed earlier</li>
+<li>Remote Git under latency/disconnection</li>
+<li>Diff containing prompt-injection text</li>
+<li>Secret redaction false positives/negatives</li>
+<li>Provider timeout/rate limit/schema error</li>
+<li>Custom base URL path joining</li>
+<li>Scope mismatch</li>
+<li>Binary and huge diffs</li>
+</ul>
+<hr />
+<h2 id="19-decision-register">19. Decision register</h2>
+<table>
+<thead>
+<tr class="header">
+<th>ID</th>
+<th>Decision</th>
+<th>Rationale</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>D-001</td>
+<td>SwiftUI shell + AppKit/TextKit editor</td>
+<td>Native window composition without putting high-frequency text
+editing in SwiftUI state</td>
+</tr>
+<tr class="even">
+<td>D-002</td>
+<td>Workspace-per-window</td>
+<td>Matches repository mental model and isolates connection/Git
+state</td>
+</tr>
+<tr class="odd">
+<td>D-003</td>
+<td>Local UI and buffers for SSH</td>
+<td>Typing remains responsive and dirty edits survive network loss</td>
+</tr>
+<tr class="even">
+<td>D-004</td>
+<td>System OpenSSH</td>
+<td>Reuses actual user config, agents, proxies, certificates, and host
+verification</td>
+</tr>
+<tr class="odd">
+<td>D-005</td>
+<td>Versioned remote agent over stdio</td>
+<td>Efficient, typed remote operations without a listening port or
+repeated shells</td>
+</tr>
+<tr class="even">
+<td>D-006</td>
+<td>Rust remote helper</td>
+<td>Practical small cross-platform headless binaries; desktop app
+remains native Swift</td>
+</tr>
+<tr class="odd">
+<td>D-007</td>
+<td>CLI through Unix-socket IPC</td>
+<td>Reliable with a running app and supports <code>--wait</code> and
+window routing</td>
+</tr>
+<tr class="even">
+<td>D-008</td>
+<td>No extension host</td>
+<td>Protects scope, memory, security, and product identity</td>
+</tr>
+<tr class="odd">
+<td>D-009</td>
+<td>Local and remote Git share one model</td>
+<td>Keeps UI behavior consistent; execution occurs where repository
+lives</td>
+</tr>
+<tr class="even">
+<td>D-010</td>
+<td>AI runs locally against an explicit sanitized diff</td>
+<td>Keeps SSH credentials remote, API credentials local, and user in
+control</td>
+</tr>
+<tr class="odd">
+<td>D-011</td>
+<td>Direct notarized distribution first</td>
+<td>Simplifies arbitrary local folders, CLI integration, system Git, and
+SSH subprocess use</td>
+</tr>
+<tr class="even">
+<td>D-012</td>
+<td>Standard system design before custom glass</td>
+<td>Better compatibility, accessibility, performance, and future macOS
+adaptation</td>
+</tr>
+<tr class="odd">
+<td>D-013</td>
+<td>Product name <strong>Rafu</strong> (રફૂ, darning), CLI
+<code>rafu</code></td>
+<td>Exact mending metaphor in the founder's own language; short,
+globally pronounceable; no POSIX/Homebrew/macOS-app collision, unlike
+Patch (POSIX) and Seam (existing macOS app)</td>
+</tr>
+<tr class="even">
+<td>D-014</td>
+<td>Data-only JSON theme files</td>
+<td>Obsidian/Zed-style personalization with zero code execution;
+preserves D-008's no-extension-runtime principle</td>
+</tr>
+<tr class="odd">
+<td>D-015</td>
+<td>Native TextKit markdown preview; no per-document WebView</td>
+<td>Protects the memory budget and avoids a script/CSP surface; the GFM
+subset covers repository documentation</td>
+</tr>
+<tr class="even">
+<td>D-016</td>
+<td>Phase 1A exits as shippable internal v0.1 before Phase 1B</td>
+<td>The founding pain is local; guarantees a usable product independent
+of remote-layer risk</td>
+</tr>
+<tr class="odd">
+<td>D-017</td>
+<td>"Seam" laced-panels app icon</td>
+<td>Avoids hashtag/Slack fourfold symmetry; triple encoding (mend,
+split/diff view, local↔︎remote join); silhouette survives 16 px</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="20-open-product-decisions">20. Open product decisions</h2>
+<p>These do not block Phase 0 but should be resolved before Phase 1
+polish:</p>
+<ol type="1">
+<li><del>Product name, bundle identifier, and noncolliding CLI
+command.</del> <strong>Resolved: Rafu / <code>rafu</code></strong>
+(section 2.4); final bundle identifier (e.g.
+<code>dev.vatsalsaglani.rafu</code>) still to be fixed before Phase 0
+signing.</li>
+<li>Minimum deployment target: broad macOS 15+ versus
+personal/current-version-only.</li>
+<li>Whether a file outside any folder opens a lightweight standalone
+window or its containing folder.</li>
+<li>Whether remote agent installation is automatic after host trust or
+requires a one-time explanatory confirmation.</li>
+<li>Whether app-owned SSH control masters are shared per host or
+isolated per workspace in the first release.</li>
+<li>Exact remote symlink policy.</li>
+<li>Maximum Phase 1 file size and remote chunk size.</li>
+<li>Whether source-control Changes mode is visible-but-disabled before
+Phase 3 or hidden entirely.</li>
+<li>Whether the app stores crash-restoration snapshots of dirty remote
+buffers by default and how clearly this is disclosed.</li>
+<li>Which filename/icon mapping is included without becoming a theme
+ecosystem.</li>
+<li>Final markdown preview toggle shortcut (⇧⌘V candidate) after
+auditing the complete menu/shortcut map.</li>
+<li>Whether user-theme hot reload stays always-on in release builds or
+moves behind a developer setting.</li>
+<li>Whether file icons ever become themable (recommended: no in v1 —
+icons stay a fixed semantic set; themes control color and type
+only).</li>
+</ol>
+<hr />
+<h2 id="21-recommended-first-vertical-slice">21. Recommended first
+vertical slice</h2>
+<p>Build this exact path before adding broad editor commands:</p>
+<pre class="text"><code>Terminal: rafu .
+        ↓
+Native app opens one local workspace window
+        ↓
+Open, edit, and save a file
+        ↓
+File modified externally and clean buffer reloads
+        ↓
+Terminal: rafu --ssh prod /srv/app
+        ↓
+App uses ~/.ssh/config and authenticates through native sheet
+        ↓
+Remote agent starts and lists the folder lazily
+        ↓
+Open, edit, and atomically save one remote file
+        ↓
+Disconnect network while buffer is dirty
+        ↓
+Reconnect; buffer remains and conflict behavior is correct</code></pre>
+<p>Once this succeeds with measured memory and latency, finish the rest
+of Phase 1. Git and AI should be built only after the local/remote
+file-system abstraction has proven that both workspace types behave
+consistently.</p>
+<hr />
+<h2 id="22-references-reviewed">22. References reviewed</h2>
+<h3 id="design">Design</h3>
+<ul>
+<li>Emil Kowalski skills repository: <a
+href="https://github.com/emilkowalski/skills">https://github.com/emilkowalski/skills</a></li>
+<li>Apple-design skill: <a
+href="https://github.com/emilkowalski/skills/blob/main/skills/apple-design/SKILL.md">https://github.com/emilkowalski/skills/blob/main/skills/apple-design/SKILL.md</a></li>
+<li>Emil design-engineering skill: <a
+href="https://github.com/emilkowalski/skills/blob/main/skills/emil-design-eng/SKILL.md">https://github.com/emilkowalski/skills/blob/main/skills/emil-design-eng/SKILL.md</a></li>
+<li>Apple, “Meet Liquid Glass”: <a
+href="https://developer.apple.com/videos/play/wwdc2025/219/">https://developer.apple.com/videos/play/wwdc2025/219/</a></li>
+<li>Apple, “Get to know the new design system”: <a
+href="https://developer.apple.com/videos/play/wwdc2025/356/">https://developer.apple.com/videos/play/wwdc2025/356/</a></li>
+<li>Apple Human Interface Guidelines: <a
+href="https://developer.apple.com/design/human-interface-guidelines/">https://developer.apple.com/design/human-interface-guidelines/</a></li>
+</ul>
+<h3 id="ssh-and-remote-architecture">SSH and remote architecture</h3>
+<ul>
+<li>OpenSSH <code>ssh(1)</code>: <a
+href="https://man.openbsd.org/ssh">https://man.openbsd.org/ssh</a></li>
+<li>OpenSSH <code>ssh_config(5)</code>: <a
+href="https://man.openbsd.org/ssh_config">https://man.openbsd.org/ssh_config</a></li>
+<li>Zed remote development architecture: <a
+href="https://zed.dev/docs/remote-development">https://zed.dev/docs/remote-development</a></li>
+</ul>
+<h3 id="ai-integration">AI integration</h3>
+<ul>
+<li>OpenAI text generation guide: <a
+href="https://developers.openai.com/api/docs/guides/text">https://developers.openai.com/api/docs/guides/text</a></li>
+<li>OpenAI structured outputs guide: <a
+href="https://developers.openai.com/api/docs/guides/structured-outputs">https://developers.openai.com/api/docs/guides/structured-outputs</a></li>
+<li>OpenAI API-key safety guidance: <a
+href="https://help.openai.com/en/articles/5112595-best-practices-for-api-key-safety">https://help.openai.com/en/articles/5112595-best-practices-for-api-key-safety</a></li>
+</ul>
+<h3 id="editor-and-git-foundations">Editor and Git foundations</h3>
+<ul>
+<li>Tree-sitter documentation: <a
+href="https://tree-sitter.github.io/tree-sitter/">https://tree-sitter.github.io/tree-sitter/</a></li>
+<li>cmark-gfm (GitHub-flavored CommonMark): <a
+href="https://github.com/github/cmark-gfm">https://github.com/github/cmark-gfm</a></li>
+<li>swift-markdown: <a
+href="https://github.com/swiftlang/swift-markdown">https://github.com/swiftlang/swift-markdown</a></li>
+<li>STTextView (TextKit 2 text view): <a
+href="https://github.com/krzyzanowskim/STTextView">https://github.com/krzyzanowskim/STTextView</a></li>
+<li>CodeEdit source editor: <a
+href="https://github.com/CodeEditApp/CodeEditSourceEditor">https://github.com/CodeEditApp/CodeEditSourceEditor</a></li>
+<li>Git porcelain status documentation: <a
+href="https://git-scm.com/docs/git-status">https://git-scm.com/docs/git-status</a></li>
+<li>Apple Keychain Services: <a
+href="https://developer.apple.com/documentation/security/keychain-services">https://developer.apple.com/documentation/security/keychain-services</a></li>
+</ul>
+<hr />
+<h2 id="23-final-recommendation">23. Final recommendation</h2>
+<p>Proceed with the product, but treat <strong>TextKit editor behavior,
+SSH/askpass/remote-agent lifecycle, and CLI-to-app IPC as the three
+architectural gates</strong>. SSH belongs in Phase 1 as requested, yet
+it should be built behind the same file-system protocol as local editing
+from the first day. That prevents remote support from becoming a second
+editor implementation.</p>
+<p>The best product distinction is not merely “written in Swift.” It
+is:</p>
+<ul>
+<li>no extension runtime,</li>
+<li>no embedded coding agent,</li>
+<li>no remote repository mirror,</li>
+<li>no background language servers by default,</li>
+<li>local typing and unsaved buffers,</li>
+<li>explicit Git and AI actions,</li>
+<li>native macOS interaction and accessibility,</li>
+<li>and a small, observable set of processes and caches.</li>
+</ul>
+<p>That combination gives the project a credible path to the calm,
+low-overhead repository companion you described.</p>
+
+  </main>
+</div>
+
+<footer>rafu (રફૂ) — this page is rendered in the app's own bundled themes: Indigo (dark) · Khadi (light)</footer>
+
+<script>
+(function(){
+  // Theme: follow system initially; toggle in memory only (no storage APIs).
+  var root = document.documentElement;
+  var btn = document.getElementById('themeToggle');
+  function apply(theme){
+    root.setAttribute('data-theme', theme);
+    var toKhadi = theme === 'indigo';
+    btn.textContent = toKhadi ? 'Khadi ☀︎' : 'Indigo ☾';
+    btn.setAttribute('aria-pressed', String(theme === 'khadi'));
+  }
+  var prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+  apply(prefersLight ? 'khadi' : 'indigo');
+  btn.addEventListener('click', function(){
+    apply(root.getAttribute('data-theme') === 'indigo' ? 'khadi' : 'indigo');
+  });
+
+  // TOC from h2s
+  var toc = document.getElementById('tocLinks');
+  var heads = document.querySelectorAll('#content h2');
+  heads.forEach(function(h){
+    if(!h.id){ h.id = h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,''); }
+    var a = document.createElement('a');
+    a.href = '#' + h.id;
+    a.textContent = h.textContent.replace(/^\d+\.\s*/, function(m){ return m; });
+    toc.appendChild(a);
+  });
+  // Active-section highlight
+  if('IntersectionObserver' in window){
+    var links = toc.querySelectorAll('a');
+    var map = {};
+    links.forEach(function(a){ map[a.getAttribute('href').slice(1)] = a; });
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting){
+          links.forEach(function(a){ a.classList.remove('active'); });
+          var a = map[e.target.id]; if(a) a.classList.add('active');
+        }
+      });
+    }, {rootMargin:'0px 0px -75% 0px'});
+    heads.forEach(function(h){ io.observe(h); });
+  }
+
+  // Hex swatches: decorate `#RRGGBB(AA)` codes in tables
+  document.querySelectorAll('#content table code').forEach(function(c){
+    var m = c.textContent.trim().match(/^#([0-9A-Fa-f]{6})([0-9A-Fa-f]{2})?$/);
+    if(m){
+      var s = document.createElement('span');
+      s.className = 'swatch';
+      s.style.background = c.textContent.trim();
+      c.insertBefore(s, c.firstChild);
+    }
+  });
+})();
+</script>
+</body>
+</html>

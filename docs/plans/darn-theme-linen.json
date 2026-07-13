@@ -1,0 +1,119 @@
+{
+  "$schema": "https://darn.dev/schemas/theme/v1.json",
+  "version": 1,
+  "name": "Linen",
+  "id": "dev.darn.theme.linen",
+  "appearance": "light",
+  "author": "Darn",
+  "description": "Undyed linen in daylight, indigo-ink text, thread-gold mending. Darn's bundled light theme.",
+  "fonts": {
+    "editor": {
+      "family": "SF Mono",
+      "fallback": ["JetBrains Mono", "Menlo"],
+      "size": 13,
+      "weight": "regular",
+      "lineHeightMultiple": 1.5,
+      "ligatures": false
+    },
+    "ui": {
+      "family": "system",
+      "size": 13
+    },
+    "markdownPreview": {
+      "prose": {
+        "family": "New York",
+        "fallback": ["Georgia"],
+        "size": 15,
+        "lineHeightMultiple": 1.6
+      },
+      "code": "editor"
+    }
+  },
+  "ui": {
+    "appBackground": "#F1EDE3",
+    "sidebarBackground": "#F1EDE3",
+    "editorBackground": "#FAF7F0",
+    "elevatedBackground": "#FFFFFF",
+    "statusBarBackground": "#F1EDE3",
+    "tabBarBackground": "#F1EDE3",
+    "tabActiveBackground": "#FAF7F0",
+    "selection": "#E7E0CE",
+    "hover": "#EFE9DB",
+    "borderSubtle": "#E3DCCB",
+    "borderStrong": "#CFC6B0",
+    "textPrimary": "#2B2F3A",
+    "textSecondary": "#5D6474",
+    "textMuted": "#8A90A0",
+    "accent": "#A2701F",
+    "accentHover": "#8A5D14",
+    "onAccent": "#FFF9EE",
+    "focusRing": "#A2701F55",
+    "error": "#B3362E",
+    "warning": "#8F6A10",
+    "info": "#3557B7",
+    "success": "#2E7D46",
+    "remoteIndicator": "#1E7A87"
+  },
+  "editor": {
+    "background": "#FAF7F0",
+    "foreground": "#2B2F3A",
+    "cursor": "#A2701F",
+    "selectionBackground": "#D8E1F2",
+    "inactiveSelectionBackground": "#E7E9EE",
+    "lineHighlight": "#F2EDE1",
+    "gutterBackground": "#FAF7F0",
+    "gutterForeground": "#A8ABB6",
+    "gutterActiveForeground": "#5D6474",
+    "indentGuide": "#E7E1D2",
+    "indentGuideActive": "#CFC6B0",
+    "matchingBracketBorder": "#A2701F",
+    "findMatchBackground": "#E3A85752",
+    "findMatchActiveBackground": "#E3A85785",
+    "whitespace": "#DAD4C4",
+    "rulerBorder": "#E3DCCB"
+  },
+  "git": {
+    "added": "#2E7D46",
+    "modified": "#8F6A10",
+    "deleted": "#B3362E",
+    "renamed": "#1E7A87",
+    "untracked": "#23708A",
+    "ignored": "#8A90A0",
+    "conflict": "#8B3FA8",
+    "staged": "#2E7D46"
+  },
+  "diff": {
+    "addedBackground": "#E3F2E6",
+    "removedBackground": "#FBE6E4",
+    "addedGutter": "#2E7D46",
+    "removedGutter": "#B3362E",
+    "addedWordBackground": "#C8E6CF",
+    "removedWordBackground": "#F5CFCB"
+  },
+  "syntax": {
+    "comment":     { "color": "#8C8776", "fontStyle": "italic" },
+    "docComment":  { "color": "#7E7B6C", "fontStyle": "italic" },
+    "string":      { "color": "#4E7D45" },
+    "escape":      { "color": "#1E7A87" },
+    "number":      { "color": "#9A5F12" },
+    "constant":    { "color": "#A2701F" },
+    "keyword":     { "color": "#6C4FC4" },
+    "operator":    { "color": "#55617A" },
+    "punctuation": { "color": "#7A8294" },
+    "function":    { "color": "#1E7A87" },
+    "type":        { "color": "#3557B7" },
+    "variable":    { "color": "#2B2F3A" },
+    "parameter":   { "color": "#4A5568" },
+    "property":    { "color": "#52608F" },
+    "tag":         { "color": "#AD3B3B" },
+    "attribute":   { "color": "#8F6A10" },
+    "namespace":   { "color": "#5C6474" },
+    "markup.heading": { "color": "#8A5D14", "fontStyle": "bold" },
+    "markup.bold":    { "fontStyle": "bold" },
+    "markup.italic":  { "fontStyle": "italic" },
+    "markup.link":    { "color": "#1E7A87", "underline": true },
+    "markup.code":    { "color": "#4E7D45", "background": "#F1EDE3" },
+    "markup.quote":   { "color": "#5D6474", "fontStyle": "italic" },
+    "markup.list":    { "color": "#55617A" }
+  }
+}

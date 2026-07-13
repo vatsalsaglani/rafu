@@ -1,0 +1,119 @@
+{
+  "$schema": "https://darn.dev/schemas/theme/v1.json",
+  "version": 1,
+  "name": "Indigo",
+  "id": "dev.darn.theme.indigo",
+  "appearance": "dark",
+  "author": "Darn",
+  "description": "Indigo-dyed cloth at night, mended with thread gold. Darn's bundled dark theme.",
+  "fonts": {
+    "editor": {
+      "family": "SF Mono",
+      "fallback": ["JetBrains Mono", "Menlo"],
+      "size": 13,
+      "weight": "regular",
+      "lineHeightMultiple": 1.5,
+      "ligatures": false
+    },
+    "ui": {
+      "family": "system",
+      "size": 13
+    },
+    "markdownPreview": {
+      "prose": {
+        "family": "New York",
+        "fallback": ["Georgia"],
+        "size": 15,
+        "lineHeightMultiple": 1.6
+      },
+      "code": "editor"
+    }
+  },
+  "ui": {
+    "appBackground": "#10141C",
+    "sidebarBackground": "#10141C",
+    "editorBackground": "#151A24",
+    "elevatedBackground": "#1B212D",
+    "statusBarBackground": "#10141C",
+    "tabBarBackground": "#10141C",
+    "tabActiveBackground": "#151A24",
+    "selection": "#242C3C",
+    "hover": "#1D2431",
+    "borderSubtle": "#262E3E",
+    "borderStrong": "#333D52",
+    "textPrimary": "#E7EAF2",
+    "textSecondary": "#9AA3B8",
+    "textMuted": "#67718A",
+    "accent": "#E3A857",
+    "accentHover": "#EDB96F",
+    "onAccent": "#201709",
+    "focusRing": "#E3A85766",
+    "error": "#E06C75",
+    "warning": "#D4A24E",
+    "info": "#82A7F0",
+    "success": "#7CC08A",
+    "remoteIndicator": "#74BFCB"
+  },
+  "editor": {
+    "background": "#151A24",
+    "foreground": "#E7EAF2",
+    "cursor": "#E3A857",
+    "selectionBackground": "#2C3A55",
+    "inactiveSelectionBackground": "#232C3E",
+    "lineHighlight": "#1A2030",
+    "gutterBackground": "#151A24",
+    "gutterForeground": "#4B5670",
+    "gutterActiveForeground": "#9AA3B8",
+    "indentGuide": "#232B3B",
+    "indentGuideActive": "#3A455C",
+    "matchingBracketBorder": "#E3A857",
+    "findMatchBackground": "#E3A8573D",
+    "findMatchActiveBackground": "#E3A85766",
+    "whitespace": "#2C3547",
+    "rulerBorder": "#262E3E"
+  },
+  "git": {
+    "added": "#7CC08A",
+    "modified": "#D2B958",
+    "deleted": "#E06C75",
+    "renamed": "#74BFCB",
+    "untracked": "#6FAECB",
+    "ignored": "#67718A",
+    "conflict": "#C678DD",
+    "staged": "#7CC08A"
+  },
+  "diff": {
+    "addedBackground": "#142E1D",
+    "removedBackground": "#331D20",
+    "addedGutter": "#7CC08A",
+    "removedGutter": "#E06C75",
+    "addedWordBackground": "#1E4A2C",
+    "removedWordBackground": "#4E2A2E"
+  },
+  "syntax": {
+    "comment":     { "color": "#5F6980", "fontStyle": "italic" },
+    "docComment":  { "color": "#6E7890", "fontStyle": "italic" },
+    "string":      { "color": "#9FC98F" },
+    "escape":      { "color": "#74BFCB" },
+    "number":      { "color": "#E0B36A" },
+    "constant":    { "color": "#E3A857" },
+    "keyword":     { "color": "#9D8CE8" },
+    "operator":    { "color": "#98A6C4" },
+    "punctuation": { "color": "#6E7A94" },
+    "function":    { "color": "#74BFCB" },
+    "type":        { "color": "#82A7F0" },
+    "variable":    { "color": "#E7EAF2" },
+    "parameter":   { "color": "#C9D2E6" },
+    "property":    { "color": "#B8C2DC" },
+    "tag":         { "color": "#E08D8D" },
+    "attribute":   { "color": "#D2B958" },
+    "namespace":   { "color": "#A9B4CE" },
+    "markup.heading": { "color": "#E3A857", "fontStyle": "bold" },
+    "markup.bold":    { "fontStyle": "bold" },
+    "markup.italic":  { "fontStyle": "italic" },
+    "markup.link":    { "color": "#74BFCB", "underline": true },
+    "markup.code":    { "color": "#9FC98F", "background": "#1B212D" },
+    "markup.quote":   { "color": "#9AA3B8", "fontStyle": "italic" },
+    "markup.list":    { "color": "#98A6C4" }
+  }
+}
