@@ -1,0 +1,78 @@
+{
+  "originHash" : "4aacc250a42a905ca0a7291f45367efbd62967f4b246d8a93753a65b3ec31aeb",
+  "pins" : [
+    {
+      "identity" : "neon",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ChimeHQ/Neon.git",
+      "state" : {
+        "revision" : "7df7d080a271cfa4dc87f94cccc024665a75047e",
+        "version" : "0.6.0"
+      }
+    },
+    {
+      "identity" : "networkimage",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/gonzalezreal/NetworkImage",
+      "state" : {
+        "revision" : "2849f5323265386e200484b0d0f896e73c3411b9",
+        "version" : "6.0.1"
+      }
+    },
+    {
+      "identity" : "rearrange",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ChimeHQ/Rearrange",
+      "state" : {
+        "revision" : "5ff7f3363f7a08f77e0d761e38e6add31c2136e1",
+        "version" : "1.8.1"
+      }
+    },
+    {
+      "identity" : "swift-argument-parser",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-argument-parser",
+      "state" : {
+        "revision" : "6a52f3251125d74daf04fcbd5e6f08a75d074382",
+        "version" : "1.8.2"
+      }
+    },
+    {
+      "identity" : "swift-cmark",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swiftlang/swift-cmark",
+      "state" : {
+        "revision" : "924936d0427cb25a61169739a7660230bffa6ea6",
+        "version" : "0.8.0"
+      }
+    },
+    {
+      "identity" : "swift-markdown-ui",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/gonzalezreal/swift-markdown-ui.git",
+      "state" : {
+        "revision" : "5f613358148239d0292c0cef674a3c2314737f9e",
+        "version" : "2.4.1"
+      }
+    },
+    {
+      "identity" : "swiftterm",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/migueldeicaza/SwiftTerm.git",
+      "state" : {
+        "revision" : "849e8a4f3d6f79ddee07152400137f1370c32621",
+        "version" : "1.14.0"
+      }
+    },
+    {
+      "identity" : "swifttreesitter",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ChimeHQ/SwiftTreeSitter",
+      "state" : {
+        "revision" : "2599e95310b3159641469d8a21baf2d3d200e61f",
+        "version" : "0.8.0"
+      }
+    }
+  ],
+  "version" : 3
+}
