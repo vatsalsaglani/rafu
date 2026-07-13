@@ -1,0 +1,28 @@
+import Foundation
+
+enum GitInspectorSection: String, CaseIterable, Sendable {
+    case changes
+    case history
+
+    var title: String { rawValue.capitalized }
+}
+
+/// Persisted (`@AppStorage`) Source Control Changes presentation.
+enum GitChangesViewMode: String, CaseIterable, Sendable {
+    case flat
+    case tree
+}
+
+struct GitOpenDiff: Identifiable, Sendable {
+    let id: String
+    let title: String
+    let subtitle: String
+    let diff: GitFileDiff
+
+    init(title: String, subtitle: String, diff: GitFileDiff, identity: String) {
+        id = identity
+        self.title = title
+        self.subtitle = subtitle
+        self.diff = diff
+    }
+}
