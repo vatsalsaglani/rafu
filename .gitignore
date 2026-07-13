@@ -1,0 +1,16 @@
+.DS_Store
+.build/
+.swiftpm/
+dist/
+DerivedData/
+remote-agent/target/
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+*.trace
+*.log
+
+# Local credentials and environment overrides
+.env
+.env.*
+!.env.example
