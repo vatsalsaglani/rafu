@@ -1,0 +1,1251 @@
+import AppKit
+import SwiftUI
+import UniformTypeIdentifiers
+
+struct EditorCanvasView: View {
+    @Environment(\.rafuTheme) private var theme
+    @Bindable var session: WorkspaceSession
+    let openFolder: () -> Void
+
+    var body: some View {
+        ZStack {
+            if session.descriptor == nil {
+                WorkspaceWelcomeView(session: session, openFolder: openFolder)
+            } else if session.openDocuments.isEmpty && session.gitOpenDiff == nil {
+                EmptyEditorView(
+                    workspaceName: session.descriptor?.displayName ?? "Workspace",
+                    session: session
+                )
+            } else if let openDiff = session.gitOpenDiff, session.selectedDocumentID == nil {
+                GitStandaloneDiffCanvas(openDiff: openDiff, session: session)
+            } else {
+                EditorLayoutTreeView(node: session.editorLayout.root, session: session)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(theme.palette.editorBackground)
+        .alert("Save changes before closing?", isPresented: closeAlertBinding) {
+            Button("Save and Close") { session.saveAndClosePendingDocument() }
+            Button("Discard", role: .destructive) { session.discardAndClosePendingDocument() }
+            Button("Cancel", role: .cancel) { session.pendingCloseDocument = nil }
+        } message: {
+            Text("\(session.pendingCloseDocument?.displayName ?? "This file") has unsaved changes.")
+        }
+    }
+
+    private var closeAlertBinding: Binding<Bool> {
+        Binding(
+            get: { session.pendingCloseDocument != nil },
+            set: { if !$0 { session.pendingCloseDocument = nil } }
+        )
+    }
+}
+
+private struct EditorLayoutTreeView: View {
+    let node: EditorLayoutNode
+    @Bindable var session: WorkspaceSession
+
+    var body: some View {
+        renderedNode
+    }
+
+    private var renderedNode: AnyView {
+        switch node {
+        case .group(let group):
+            AnyView(EditorGroupView(group: group, session: session))
+        case .split(_, let axis, _, let first, let second):
+            switch axis {
+            case .horizontal:
+                AnyView(
+                    HSplitView {
+                        EditorLayoutTreeView(node: first, session: session).frame(minWidth: 220)
+                        EditorLayoutTreeView(node: second, session: session).frame(minWidth: 220)
+                    })
+            case .vertical:
+                AnyView(
+                    VSplitView {
+                        EditorLayoutTreeView(node: first, session: session).frame(minHeight: 150)
+                        EditorLayoutTreeView(node: second, session: session).frame(minHeight: 150)
+                    })
+            }
+        }
+    }
+}
+
+private struct EditorGroupView: View {
+    @State private var hoveredDropEdge: EditorSplitEdge?
+    @State private var isDropTargeted = false
+
+    let group: EditorGroupState
+    @Bindable var session: WorkspaceSession
+
+    var body: some View {
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                EditorGroupTabBar(group: group, session: session)
+                Divider()
+                if let document = selectedDocument {
+                    EditorBreadcrumbView(session: session, document: document)
+                }
+                if isFindPresented, let document = selectedDocument {
+                    DocumentFindBar(
+                        state: session.findState(for: document),
+                        showsReplace: $session.isDocumentReplacePresented,
+                        close: session.dismissDocumentFind
+                    )
+                    Divider()
+                }
+                if let document = selectedDocument {
+                    EditorDocumentView(
+                        document: document,
+                        findState: session.findState(for: document),
+                        gitLineChangesProvider: { [weak session, weak document] in
+                            guard let session, let document else { return nil }
+                            return await session.gutterLineChanges(for: document)
+                        },
+                        dropForwarding: dropForwarding
+                    )
+                    .id(document.id)
+                } else {
+                    ContentUnavailableView(
+                        "Empty Editor Group",
+                        systemImage: "rectangle.split.2x1",
+                        description: Text("Drag a tab here or open a file from the sidebar.")
+                    )
+                }
+            }
+            .overlay {
+                if isDropTargeted {
+                    EditorSplitPreviewOverlay(edge: hoveredDropEdge)
+                }
+            }
+            .onDrop(
+                of: [.rafuEditorDrag],
+                delegate: EditorDropDelegate(
+                    groupID: group.id,
+                    size: proxy.size,
+                    hoveredEdge: $hoveredDropEdge,
+                    isTargeted: $isDropTargeted,
+                    session: session
+                )
+            )
+        }
+    }
+
+    private var selectedDocument: EditorDocument? {
+        guard let selectedTabID = group.selectedTabID,
+            let tab = group.tabs.first(where: { $0.id == selectedTabID })
+        else { return nil }
+        return session.document(for: tab)
+    }
+
+    private var isFindPresented: Bool {
+        session.isDocumentFindPresented && session.isFocusedGroup(group.id)
+    }
+
+    /// Forwards drag events from the AppKit editor scroll view into the same
+    /// overlay state and drop handling the group's SwiftUI `.onDrop` uses.
+    /// AppKit routes a drag to the deepest registered NSView under the
+    /// pointer, so without this the preview only appeared over the thin
+    /// SwiftUI chrome strip (tab bar/breadcrumb) and vanished over the text.
+    private var dropForwarding: EditorDropForwarding {
+        EditorDropForwarding(
+            updated: { location, size in
+                let edge = EditorDropGeometry.target(at: location, in: size)
+                isDropTargeted = true
+                if edge != hoveredDropEdge {
+                    withAnimation(.spring(duration: 0.22)) { hoveredDropEdge = edge }
+                }
+            },
+            exited: {
+                isDropTargeted = false
+                hoveredDropEdge = nil
+            },
+            perform: { location, size, pasteboardPayload in
+                let edge = EditorDropGeometry.target(at: location, in: size)
+                isDropTargeted = false
+                hoveredDropEdge = nil
+                guard let payload = session.activeEditorDrag ?? pasteboardPayload else {
+                    return false
+                }
+                session.clearEditorDrag()
+                switch payload {
+                case .tab(let id):
+                    session.handleEditorTabDrop(id, on: group.id, edge: edge)
+                case .file(let path):
+                    session.handleEditorFileDrop(path: path, on: group.id, edge: edge)
+                }
+                return true
+            }
+        )
+    }
+}
+
+/// Tracks the pointer during a tab or sidebar-file drag and reports the
+/// nearest split edge (or `nil` for the central "open/move in place" zone)
+/// so the overlay can preview the resulting pane before the drop happens.
+/// Shared by every editor group and the empty-editor placeholder so tabs and
+/// files get identical drop behavior.
+private struct EditorDropDelegate: DropDelegate {
+    let groupID: EditorGroupID
+    /// `nil` for a container with no meaningful split geometry (the empty
+    /// editor placeholder), which always resolves to the center zone.
+    let size: CGSize?
+    @Binding var hoveredEdge: EditorSplitEdge?
+    @Binding var isTargeted: Bool
+    let session: WorkspaceSession
+
+    func dropEntered(info: DropInfo) {
+        isTargeted = true
+        hoveredEdge = edge(for: info.location)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        let edge = edge(for: info.location)
+        // dropEntered/dropExited pairing is unreliable when bodies re-evaluate
+        // mid-drag (the delegate value is recreated); treat every update as
+        // proof the drag is over this target.
+        isTargeted = true
+        if edge != hoveredEdge {
+            withAnimation(.spring(duration: 0.22)) { hoveredEdge = edge }
+        }
+        // SwiftUI's macOS drag source mask can reject a `.move` proposal
+        // from an `.onDrag`-originated session; `.copy` is the operation
+        // that reliably validates. It's cosmetic — the underlying action is
+        // always a layout move/split, never a data copy.
+        return DropProposal(operation: .copy)
+    }
+
+    func dropExited(info: DropInfo) {
+        isTargeted = false
+        hoveredEdge = nil
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let resolvedEdge = edge(for: info.location)
+        isTargeted = false
+        hoveredEdge = nil
+
+        guard info.itemProviders(for: [.rafuEditorDrag]).first != nil else { return false }
+
+        // Same-process fast path: the payload is already known from the
+        // drag's origin, no async pasteboard round trip needed.
+        if let payload = session.activeEditorDrag {
+            session.clearEditorDrag()
+            apply(payload, edge: resolvedEdge)
+            return true
+        }
+
+        // Cross-window (or cross-process) fallback: decode the pre-encoded
+        // JSON `Data` asynchronously. `action` is a `@MainActor @Sendable`
+        // closure that closes over only `session` and `groupID` (not
+        // `self`, which isn't `Sendable`) — safe to hand to the off-actor
+        // load handler because it only ever executes after hopping back
+        // onto the main actor, where touching `session` is legal even
+        // though `WorkspaceSession` itself isn't `Sendable`.
+        let action: @MainActor @Sendable (EditorDragPayload) -> Void = {
+            [session, groupID] payload in
+            session.clearEditorDrag()
+            switch payload {
+            case .tab(let id):
+                session.handleEditorTabDrop(id, on: groupID, edge: resolvedEdge)
+            case .file(let path):
+                session.handleEditorFileDrop(path: path, on: groupID, edge: resolvedEdge)
+            }
+        }
+        let providers = info.itemProviders(for: [.rafuEditorDrag])
+        guard let provider = providers.first else { return false }
+        _ = provider.loadDataRepresentation(for: .rafuEditorDrag) { data, _ in
+            guard let data, let payload = try? EditorDragPayload(data: data) else { return }
+            Task { @MainActor in
+                action(payload)
+            }
+        }
+        return true
+    }
+
+    private func edge(for location: CGPoint) -> EditorSplitEdge? {
+        guard let size else { return nil }
+        return EditorDropGeometry.target(at: location, in: size)
+    }
+
+    private func apply(_ payload: EditorDragPayload, edge: EditorSplitEdge?) {
+        switch payload {
+        case .tab(let id):
+            session.handleEditorTabDrop(id, on: groupID, edge: edge)
+        case .file(let path):
+            session.handleEditorFileDrop(path: path, on: groupID, edge: edge)
+        }
+    }
+}
+
+/// Translucent preview of the pane a dragged tab would occupy — the current
+/// content visually yields half the group instead of showing arrow buttons.
+private struct EditorSplitPreviewOverlay: View {
+    @Environment(\.rafuTheme) private var theme
+    let edge: EditorSplitEdge?
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: alignment) {
+                theme.palette.appBackground.opacity(0.25)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(theme.palette.accent.opacity(0.16))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(
+                                theme.palette.accent.opacity(0.85),
+                                style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
+                            )
+                    )
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                    .frame(
+                        width: previewSize(in: proxy.size).width,
+                        height: previewSize(in: proxy.size).height
+                    )
+                    .padding(5)
+            }
+            .animation(.spring(duration: 0.22), value: edge)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private var alignment: Alignment {
+        switch edge {
+        case .leading: .leading
+        case .trailing: .trailing
+        case .top: .top
+        case .bottom: .bottom
+        case nil: .center
+        }
+    }
+
+    private func previewSize(in size: CGSize) -> CGSize {
+        switch edge {
+        case .leading, .trailing:
+            CGSize(width: max(0, size.width / 2 - 10), height: max(0, size.height - 10))
+        case .top, .bottom:
+            CGSize(width: max(0, size.width - 10), height: max(0, size.height / 2 - 10))
+        case nil:
+            CGSize(width: max(0, size.width - 10), height: max(0, size.height - 10))
+        }
+    }
+}
+
+private struct WorkspaceWelcomeView: View {
+    @Environment(\.rafuTheme) private var theme
+    @Bindable var session: WorkspaceSession
+    let openFolder: () -> Void
+
+    var body: some View {
+        VStack(spacing: 20) {
+            RafuBrandMarkView().frame(width: 96, height: 96)
+            VStack(spacing: 7) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text("Rafu").font(.system(size: 38, weight: .semibold, design: .serif))
+                        .foregroundStyle(theme.palette.textPrimary)
+                    Text("રફૂ").font(.system(size: 27, weight: .medium, design: .serif))
+                        .foregroundStyle(theme.palette.textSecondary)
+                }
+                .overlay(alignment: .bottom) { DarnedUnderline().offset(y: 7) }
+                Text("A native place for focused repository mending.")
+                    .foregroundStyle(theme.palette.textSecondary)
+            }
+            Button("Open Folder…", systemImage: "folder.badge.plus", action: openFolder)
+                .buttonStyle(RafuProminentButtonStyle())
+                .controlSize(.large)
+            if !recents.isEmpty {
+                recentList
+            }
+            WelcomeShortcutHints()
+        }
+        .padding(40)
+        .modifier(WelcomeGlassSurface())
+        .task { recents = recentsStore.load() }
+    }
+
+    @State private var recents: [RecentWorkspaceEntry] = []
+    private let recentsStore = RecentWorkspacesStore()
+
+    private var recentList: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Recent")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(theme.palette.textMuted)
+                .textCase(.uppercase)
+                .kerning(0.6)
+                .padding(.bottom, 4)
+            ForEach(recents.prefix(4)) { entry in
+                recentRow(entry)
+            }
+        }
+        .frame(maxWidth: 340)
+    }
+
+    private func recentRow(_ entry: RecentWorkspaceEntry) -> some View {
+        Button {
+            do {
+                let url = try recentsStore.resolve(entry)
+                session.openLocalWorkspace(at: url)
+            } catch {
+                recentsStore.remove(rootPath: entry.rootPath)
+                recents = recentsStore.load()
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "folder")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.palette.accent)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(entry.displayName)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(theme.palette.textPrimary)
+                    Text((entry.rootPath as NSString).abbreviatingWithTildeInPath)
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.palette.textMuted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        }
+        .buttonStyle(WelcomeRecentButtonStyle())
+    }
+}
+
+private struct WelcomeRecentButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        StyleBody(configuration: configuration)
+    }
+
+    private struct StyleBody: View {
+        let configuration: Configuration
+        @Environment(\.rafuTheme) private var theme
+        @State private var isHovering = false
+
+        var body: some View {
+            configuration.label
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(
+                            configuration.isPressed
+                                ? theme.palette.selection
+                                : isHovering ? theme.palette.hover : .clear
+                        )
+                )
+                .onHover { isHovering = $0 }
+                .animation(.easeOut(duration: 0.12), value: isHovering)
+        }
+    }
+}
+
+private struct WelcomeShortcutHints: View {
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            hint("Go to File", keys: "⌘P")
+            hint("Command Palette", keys: "⌘⇧P")
+            hint("Search Workspace", keys: "⌘⇧F")
+            hint("Source Control", keys: "⌘⇧G")
+        }
+        .padding(.top, 6)
+    }
+
+    private func hint(_ title: String, keys: String) -> some View {
+        HStack(spacing: 10) {
+            Text(keys)
+                .font(.caption.monospaced())
+                .foregroundStyle(theme.palette.textSecondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(theme.palette.elevatedBackground)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .strokeBorder(theme.palette.borderSubtle)
+                )
+                .frame(width: 64, alignment: .center)
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(theme.palette.textMuted)
+        }
+    }
+}
+
+private struct EmptyEditorView: View {
+    @Environment(\.rafuTheme) private var theme
+    @State private var isDropTargeted = false
+    let workspaceName: String
+    @Bindable var session: WorkspaceSession
+
+    var body: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.system(size: 34, weight: .light))
+                .foregroundStyle(theme.palette.textMuted)
+            VStack(spacing: 5) {
+                Text("\(workspaceName) is open")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(theme.palette.textPrimary)
+                Text("Double-click a file in the sidebar, or press ⌘⇧P for commands.")
+                    .font(.callout)
+                    .foregroundStyle(theme.palette.textSecondary)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay {
+            if isDropTargeted {
+                EditorSplitPreviewOverlay(edge: nil)
+            }
+        }
+        .onDrop(
+            of: [.rafuEditorDrag],
+            delegate: EditorDropDelegate(
+                groupID: session.editorLayout.focusedGroupID,
+                size: nil,
+                hoveredEdge: .constant(nil),
+                isTargeted: $isDropTargeted,
+                session: session
+            )
+        )
+    }
+}
+
+private struct EditorGroupTabBar: View {
+    @Environment(\.rafuTheme) private var theme
+    let group: EditorGroupState
+    @Bindable var session: WorkspaceSession
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ScrollView(.horizontal) {
+                HStack(spacing: 0) {
+                    ForEach(group.tabs) { tab in
+                        if let document = session.document(for: tab) {
+                            EditorTabItem(
+                                tabID: tab.id,
+                                groupID: group.id,
+                                document: document,
+                                isSelected: tab.id == group.selectedTabID,
+                                session: session
+                            )
+                        }
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+            if let document = selectedDocument, document.supportsPresentationModes {
+                Divider().frame(height: 20)
+                MarkdownModeControl(
+                    mode: Binding(
+                        get: { document.markdownMode },
+                        set: {
+                            document.markdownMode = $0
+                            UserDefaults.standard.set(
+                                $0.rawValue, forKey: "markdownDefaultMode")
+                        }
+                    )
+                )
+                .padding(.horizontal, 6)
+            }
+        }
+        .frame(height: 34)
+        .background(theme.palette.tabBarBackground.opacity(0.92))
+        .overlay(alignment: .bottom) { Divider().overlay(theme.palette.borderSubtle) }
+    }
+
+    private var selectedDocument: EditorDocument? {
+        guard let selectedTabID = group.selectedTabID,
+            let tab = group.tabs.first(where: { $0.id == selectedTabID })
+        else { return nil }
+        return session.document(for: tab)
+    }
+}
+
+/// Dashed accent line marking the active tab — Rafu's stitched seam motif.
+private struct StitchedUnderline: View {
+    let color: Color
+
+    var body: some View {
+        Canvas { context, size in
+            var path = Path()
+            path.move(to: CGPoint(x: 2, y: size.height / 2))
+            path.addLine(to: CGPoint(x: size.width - 2, y: size.height / 2))
+            context.stroke(
+                path, with: .color(color),
+                style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [5, 3.5]))
+        }
+        .frame(height: 2)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct GitStandaloneDiffCanvas: View {
+    @Environment(\.rafuTheme) private var theme
+    let openDiff: GitOpenDiff
+    @Bindable var session: WorkspaceSession
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                GitDiffTabItem(
+                    openDiff: openDiff,
+                    isSelected: true,
+                    select: session.selectGitDiff,
+                    close: session.closeGitDiff
+                )
+                Spacer()
+            }
+            .frame(height: 34)
+            .background(theme.palette.tabBarBackground.opacity(0.92))
+            Divider().overlay(theme.palette.borderSubtle)
+            GitSideBySideDiffView(openDiff: openDiff)
+        }
+    }
+}
+
+private struct GitDiffTabItem: View {
+    @Environment(\.rafuTheme) private var theme
+    @State private var isHovering = false
+
+    let openDiff: GitOpenDiff
+    let isSelected: Bool
+    let select: () -> Void
+    let close: () -> Void
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Button(action: select) {
+                HStack(spacing: 7) {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.palette.info)
+                    Text(openDiff.title)
+                        .lineLimit(1)
+                        .foregroundStyle(theme.palette.textPrimary)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            Button("Close", systemImage: "xmark", action: close)
+                .buttonStyle(RafuIconButtonStyle(size: 18, iconSize: 9))
+                .opacity(isHovering || isSelected ? 1 : 0)
+        }
+        .font(.callout)
+        .padding(.horizontal, 10)
+        .frame(height: 33)
+        .background {
+            if isSelected {
+                theme.palette.tabActiveBackground
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if isSelected { StitchedUnderline(color: theme.palette.accent) }
+        }
+        .overlay(alignment: .trailing) {
+            Divider().frame(height: 18).overlay(theme.palette.borderSubtle)
+        }
+        .onHover { isHovering = $0 }
+        .help(openDiff.subtitle)
+    }
+}
+
+private struct GitSideBySideDiffView: View {
+    @Environment(\.rafuTheme) private var theme
+    let openDiff: GitOpenDiff
+
+    var body: some View {
+        VStack(spacing: 0) {
+            diffHeader
+            Divider().overlay(theme.palette.borderSubtle)
+
+            if openDiff.diff.isBinary {
+                ContentUnavailableView(
+                    "Binary file",
+                    systemImage: "doc.zipper",
+                    description: Text(
+                        "Rafu cannot render a textual side-by-side diff for this file.")
+                )
+            } else if openDiff.diff.hunks.isEmpty {
+                ContentUnavailableView(
+                    "No textual changes",
+                    systemImage: "checkmark.circle",
+                    description: Text("Git reported no line changes for this selection.")
+                )
+            } else {
+                diffTable
+            }
+        }
+        .background(theme.palette.editorBackground)
+    }
+
+    private var diffHeader: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.left.arrow.right")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(theme.palette.info)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(openDiff.title)
+                    .font(.headline)
+                    .foregroundStyle(theme.palette.textPrimary)
+                    .lineLimit(1)
+                Text(openDiff.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            diffStats
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 46)
+        .background(theme.palette.elevatedBackground.opacity(0.6))
+    }
+
+    private var diffStats: some View {
+        let additions = openDiff.diff.hunks
+            .flatMap(\.rows)
+            .count { $0.newLine != nil && ($0.kind == .addition || $0.kind == .modification) }
+        let deletions = openDiff.diff.hunks
+            .flatMap(\.rows)
+            .count { $0.oldLine != nil && ($0.kind == .deletion || $0.kind == .modification) }
+        return HStack(spacing: 8) {
+            Text("+\(additions)")
+                .foregroundStyle(theme.palette.gitAdded)
+            Text("−\(deletions)")
+                .foregroundStyle(theme.palette.gitDeleted)
+        }
+        .font(.caption.monospacedDigit().weight(.semibold))
+    }
+
+    private var diffTable: some View {
+        // A both-axes ScrollView centers content smaller than the viewport;
+        // stretch the table to at least the viewport size, pinned top-leading.
+        GeometryReader { viewport in
+            ScrollView([.horizontal, .vertical]) {
+                LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    Section {
+                        ForEach(openDiff.diff.hunks) { hunk in
+                            hunkHeader(hunk)
+                            ForEach(hunk.rows) { row in
+                                GitSideBySideDiffRow(row: row)
+                            }
+                        }
+                    } header: {
+                        HStack(spacing: 0) {
+                            diffColumnTitle("Before", symbol: "minus")
+                            Divider().overlay(theme.palette.borderSubtle)
+                            diffColumnTitle("After", symbol: "plus")
+                        }
+                        .frame(height: 28)
+                        .background(theme.palette.tabBarBackground.opacity(0.97))
+                    }
+                }
+                .frame(
+                    minWidth: max(900, viewport.size.width),
+                    minHeight: viewport.size.height,
+                    alignment: .topLeading
+                )
+            }
+            .scrollIndicators(.visible)
+        }
+    }
+
+    private func hunkHeader(_ hunk: GitDiffHunk) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "ellipsis")
+                .font(.caption2)
+                .foregroundStyle(theme.palette.textMuted)
+            Text(hunk.header)
+                .font(.caption.monospaced())
+                .foregroundStyle(theme.palette.accent)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .frame(height: 24)
+        .background(theme.palette.selection.opacity(0.45))
+        .overlay(alignment: .top) { Divider().overlay(theme.palette.borderSubtle) }
+        .overlay(alignment: .bottom) { Divider().overlay(theme.palette.borderSubtle) }
+    }
+
+    private func diffColumnTitle(_ title: String, symbol: String) -> some View {
+        Label(title, systemImage: symbol)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(theme.palette.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+    }
+}
+
+private struct GitSideBySideDiffRow: View {
+    @Environment(\.rafuTheme) private var theme
+    let row: GitDiffRow
+
+    var body: some View {
+        let spans =
+            row.kind == .modification
+            ? IntralineDiff.changedSpans(
+                old: row.oldLine?.content ?? "",
+                new: row.newLine?.content ?? ""
+            )
+            : nil
+        HStack(spacing: 0) {
+            GitDiffCell(
+                line: row.oldLine, side: .old, rowKind: row.kind,
+                changedSpan: spans?.old
+            )
+            Divider().overlay(theme.palette.borderSubtle.opacity(0.6))
+            GitDiffCell(
+                line: row.newLine, side: .new, rowKind: row.kind,
+                changedSpan: spans?.new
+            )
+        }
+        .frame(minHeight: 21)
+    }
+}
+
+private struct GitDiffCell: View {
+    enum Side { case old, new }
+
+    @Environment(\.rafuTheme) private var theme
+    let line: GitDiffLine?
+    let side: Side
+    let rowKind: GitDiffRowKind
+    var changedSpan: Range<Int>?
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text(line.map { String($0.number) } ?? "")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(gutterColor)
+                .frame(width: 42, alignment: .trailing)
+                .padding(.trailing, 6)
+                .frame(maxHeight: .infinity)
+                .background(gutterBackground)
+            Text(marker)
+                .font(.caption.monospaced().weight(.semibold))
+                .foregroundStyle(markerColor)
+                .frame(width: 16)
+            Text(attributedContent)
+                .font(.system(size: 12, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.trailing, 8)
+        }
+        .frame(maxWidth: .infinity, minHeight: 21, alignment: .leading)
+        .background(backgroundColor)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var attributedContent: AttributedString {
+        guard let line else { return AttributedString("") }
+        var text = AttributedString(line.content)
+        text.foregroundColor = theme.palette.textPrimary
+        if let changedSpan, isChanged, !changedSpan.isEmpty,
+            changedSpan.upperBound <= line.content.count
+        {
+            let start = text.index(text.startIndex, offsetByCharacters: changedSpan.lowerBound)
+            let end = text.index(text.startIndex, offsetByCharacters: changedSpan.upperBound)
+            text[start..<end].backgroundColor =
+                side == .old
+                ? theme.palette.diffRemovedWordBackground
+                : theme.palette.diffAddedWordBackground
+        }
+        return text
+    }
+
+    private var isChanged: Bool {
+        side == .old
+            ? rowKind == .deletion || rowKind == .modification
+            : rowKind == .addition || rowKind == .modification
+    }
+
+    private var marker: String {
+        guard line != nil, isChanged else { return "" }
+        return side == .old ? "−" : "+"
+    }
+
+    private var markerColor: Color {
+        side == .old ? theme.palette.diffRemovedGutter : theme.palette.diffAddedGutter
+    }
+
+    private var gutterColor: Color {
+        guard line != nil else { return theme.palette.gutterForeground.opacity(0.4) }
+        return isChanged ? markerColor : theme.palette.gutterForeground
+    }
+
+    private var gutterBackground: Color {
+        guard line != nil, isChanged else { return .clear }
+        return
+            (side == .old
+            ? theme.palette.diffRemovedBackground
+            : theme.palette.diffAddedBackground)
+            .opacity(0.8)
+    }
+
+    private var backgroundColor: Color {
+        guard line != nil else {
+            return theme.palette.appBackground.opacity(0.35)
+        }
+        guard isChanged else { return .clear }
+        return side == .old
+            ? theme.palette.diffRemovedBackground
+            : theme.palette.diffAddedBackground
+    }
+
+    private var accessibilityText: String {
+        guard let line else { return "No corresponding line" }
+        let change = marker == "+" ? "Added" : marker == "−" ? "Removed" : "Context"
+        return "\(change), line \(line.number): \(line.content)"
+    }
+}
+
+private struct EditorTabItem: View {
+    @Environment(\.rafuTheme) private var theme
+    @State private var isHovering = false
+
+    let tabID: EditorTabID
+    let groupID: EditorGroupID
+    let document: EditorDocument
+    let isSelected: Bool
+    @Bindable var session: WorkspaceSession
+
+    var body: some View {
+        let icon = FileIconProvider.fileIcon(named: document.displayName)
+        HStack(spacing: 7) {
+            Button {
+                session.selectEditorTab(tabID, in: groupID)
+            } label: {
+                HStack(spacing: 7) {
+                    FileIconView(icon: icon, size: 11)
+                    Text(document.displayName)
+                        .lineLimit(1)
+                        .foregroundStyle(
+                            isSelected
+                                ? theme.palette.textPrimary
+                                : theme.palette.textSecondary
+                        )
+                    if document.isDirty {
+                        Circle().fill(theme.palette.accent).frame(width: 6, height: 6)
+                            .accessibilityLabel("Unsaved changes")
+                    }
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+
+            Button("Close", systemImage: "xmark") { session.requestClose(document) }
+                .buttonStyle(RafuIconButtonStyle(size: 18, iconSize: 9))
+                .opacity(isHovering || isSelected ? 1 : 0)
+                .help("Close \(document.displayName)")
+        }
+        .font(.callout)
+        .padding(.horizontal, 10)
+        .frame(height: 33)
+        .background {
+            if isSelected {
+                theme.palette.tabActiveBackground
+            } else if isHovering {
+                theme.palette.hover.opacity(0.6)
+            } else {
+                Color.clear
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if isSelected { StitchedUnderline(color: theme.palette.accent) }
+        }
+        .overlay(alignment: .trailing) {
+            Divider().frame(height: 18).overlay(theme.palette.borderSubtle)
+        }
+        .onHover { isHovering = $0 }
+        .onDrag { session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString)) }
+        .contextMenu {
+            Button("Split Left", systemImage: "rectangle.split.2x1") {
+                session.splitEditorTab(tabID, at: .leading)
+            }
+            Button("Split Right", systemImage: "rectangle.split.2x1") {
+                session.splitEditorTab(tabID, at: .trailing)
+            }
+            Button("Split Up", systemImage: "rectangle.split.1x2") {
+                session.splitEditorTab(tabID, at: .top)
+            }
+            Button("Split Down", systemImage: "rectangle.split.1x2") {
+                session.splitEditorTab(tabID, at: .bottom)
+            }
+            Divider()
+            Button("Close") { session.requestClose(document) }
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+private struct EditorDocumentView: View {
+    @Environment(\.rafuTheme) private var theme
+    @Bindable var document: EditorDocument
+    let findState: DocumentFindState
+    let gitLineChangesProvider: (@MainActor () async -> GitGutterLineChanges?)?
+    var dropForwarding: EditorDropForwarding? = nil
+
+    var body: some View {
+        Group {
+            if document.isBitmapImage {
+                ImagePreviewView(url: document.url)
+            } else if document.isMarkdown || document.isSVG {
+                MarkdownEditorPresentation(
+                    document: document,
+                    findState: findState,
+                    theme: theme,
+                    gitLineChangesProvider: gitLineChangesProvider,
+                    dropForwarding: dropForwarding
+                )
+            } else {
+                CodeEditorView(
+                    document: document,
+                    theme: theme,
+                    findState: findState,
+                    gitLineChangesProvider: gitLineChangesProvider,
+                    dropForwarding: dropForwarding
+                )
+            }
+        }
+        .alert("Editor Error", isPresented: errorBinding) {
+            Button("OK", role: .cancel) { document.errorMessage = nil }
+        } message: {
+            Text(document.errorMessage ?? "The editor encountered an error.")
+        }
+    }
+
+    private var errorBinding: Binding<Bool> {
+        Binding(
+            get: { document.errorMessage != nil },
+            set: { if !$0 { document.errorMessage = nil } }
+        )
+    }
+}
+
+private struct MarkdownEditorPresentation: View {
+    @Bindable var document: EditorDocument
+    let findState: DocumentFindState
+    let theme: RafuTheme
+    let gitLineChangesProvider: (@MainActor () async -> GitGutterLineChanges?)?
+    var dropForwarding: EditorDropForwarding? = nil
+
+    var body: some View {
+        switch document.markdownMode {
+        case .edit:
+            editor
+        case .preview:
+            renderedPreview
+        case .split:
+            HSplitView {
+                editor.frame(minWidth: 220)
+                renderedPreview
+                    .frame(minWidth: 220)
+            }
+        }
+    }
+
+    private var editor: some View {
+        CodeEditorView(
+            document: document,
+            theme: theme,
+            findState: findState,
+            gitLineChangesProvider: gitLineChangesProvider,
+            dropForwarding: dropForwarding
+        )
+    }
+
+    @ViewBuilder
+    private var renderedPreview: some View {
+        if document.isSVG {
+            ImagePreviewView(url: document.url)
+                .id(document.id)
+        } else {
+            MarkdownPreviewView(document: document)
+                .id(document.id)
+        }
+    }
+}
+
+private struct DocumentFindBar: View {
+    @Environment(\.rafuTheme) private var theme
+    @Bindable var state: DocumentFindState
+    @Binding var showsReplace: Bool
+    let close: () -> Void
+
+    @FocusState private var focusedField: Field?
+
+    private enum Field: Hashable {
+        case query
+        case replacement
+    }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                TextField("Find", text: $state.query)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focusedField, equals: .query)
+                    .onSubmit { state.findNext() }
+                Text(matchSummary).font(.caption.monospacedDigit())
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .frame(minWidth: 48)
+                Button("Previous Match", systemImage: "chevron.up") { state.findPrevious() }
+                    .buttonStyle(RafuIconButtonStyle(size: 22))
+                    .help("Previous Match")
+                Button("Next Match", systemImage: "chevron.down") { state.findNext() }
+                    .buttonStyle(RafuIconButtonStyle(size: 22))
+                    .help("Next Match")
+                findOptionButton("Case Sensitive", symbol: "textformat", option: .caseSensitive)
+                findOptionButton("Whole Word", symbol: "character.cursor.ibeam", option: .wholeWord)
+                findOptionButton(
+                    "Regular Expression", symbol: "asterisk", option: .regularExpression)
+                Button(
+                    showsReplace ? "Hide Replace" : "Show Replace",
+                    systemImage: showsReplace ? "chevron.down" : "chevron.right"
+                ) { showsReplace.toggle() }
+                .buttonStyle(RafuIconButtonStyle(isActive: showsReplace, size: 22))
+                .help(showsReplace ? "Hide Replace" : "Show Replace")
+                Button("Close Find", systemImage: "xmark", action: close)
+                    .buttonStyle(RafuIconButtonStyle(size: 22))
+                    .help("Close Find")
+            }
+            if showsReplace {
+                HStack(spacing: 6) {
+                    TextField("Replace", text: $state.replacement)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($focusedField, equals: .replacement)
+                        .onSubmit { state.replaceCurrent() }
+                    Button("Replace") { state.replaceCurrent() }
+                        .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+                    Button("Replace All") { state.replaceAll() }
+                        .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+                }
+            }
+            if let errorMessage = state.errorMessage {
+                Text(errorMessage).font(.caption).foregroundStyle(theme.palette.error)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(theme.palette.elevatedBackground.opacity(0.65))
+        .defaultFocus($focusedField, .query)
+    }
+
+    private var matchSummary: String {
+        guard state.matchCount > 0 else { return "No results" }
+        return "\((state.currentMatchIndex ?? 0) + 1) of \(state.matchCount)"
+    }
+
+    private func findOptionButton(
+        _ title: String,
+        symbol: String,
+        option: TextSearchOptions
+    ) -> some View {
+        let selected = state.options.contains(option)
+        return Button(title, systemImage: symbol) {
+            if selected {
+                state.options.remove(option)
+            } else {
+                state.options.insert(option)
+            }
+        }
+        .buttonStyle(RafuIconButtonStyle(isActive: selected, size: 22))
+        .help(title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+private struct MarkdownModeControl: View {
+    @Environment(\.rafuTheme) private var theme
+    @Binding var mode: MarkdownPresentationMode
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(MarkdownPresentationMode.allCases, id: \.rawValue) { item in
+                modeButton(item)
+            }
+        }
+        .padding(2)
+        .background(theme.palette.appBackground.opacity(0.55), in: .rect(cornerRadius: 7))
+        .overlay(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .strokeBorder(theme.palette.borderSubtle)
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Markdown presentation")
+    }
+
+    private func modeButton(_ item: MarkdownPresentationMode) -> some View {
+        Button(item.title, systemImage: item.symbolName) {
+            withAnimation(.spring(duration: 0.22)) { mode = item }
+        }
+        .buttonStyle(
+            RafuIconButtonStyle(isActive: item == mode, size: 24, iconSize: 11)
+        )
+        .help(item.title)
+        .accessibilityAddTraits(item == mode ? .isSelected : [])
+    }
+}
+
+struct RafuBrandMarkView: View {
+    var body: some View {
+        if let image = Self.image {
+            Image(nsImage: image).resizable().scaledToFit().accessibilityLabel("Rafu seam mark")
+        } else {
+            Image(systemName: "scribble.variable").resizable().scaledToFit().foregroundStyle(
+                .secondary
+            )
+            .accessibilityLabel("Rafu seam mark")
+        }
+    }
+
+    private static let image: NSImage? = {
+        let candidates = [
+            Bundle.main.url(
+                forResource: "rafu-icon-seam", withExtension: "svg", subdirectory: "AppIcon"),
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appending(
+                path: "Resources/AppIcon/rafu-icon-seam.svg"),
+        ]
+        return candidates.compactMap { $0 }.compactMap(NSImage.init(contentsOf:)).first
+    }()
+}
+
+private struct DarnedUnderline: View {
+    @Environment(\.rafuTheme) private var theme
+    var body: some View {
+        Canvas { context, size in
+            var path = Path()
+            path.move(to: CGPoint(x: 0, y: size.height / 2))
+            path.addCurve(
+                to: CGPoint(x: size.width, y: size.height / 2),
+                control1: CGPoint(x: size.width * 0.3, y: 0),
+                control2: CGPoint(x: size.width * 0.65, y: size.height)
+            )
+            context.stroke(
+                path, with: .color(theme.palette.accent),
+                style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [7, 4]))
+        }
+        .frame(height: 8).accessibilityHidden(true)
+    }
+}
+
+private struct WelcomeGlassSurface: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.glassEffect(.regular, in: .rect(cornerRadius: 28)).padding(24)
+        } else {
+            content.background(.ultraThinMaterial, in: .rect(cornerRadius: 28)).padding(24)
+        }
+    }
+}
