@@ -1,0 +1,23 @@
+{
+  "$schema": "https://rafu.dev/schemas/theme/v1.json", "version": 1,
+  "name": "GitHub Dark", "id": "dev.rafu.theme.github-dark", "appearance": "dark",
+  "ui": {
+    "appBackground": "#0D1117", "editorBackground": "#0D1117",
+    "elevatedBackground": "#161B22", "textPrimary": "#E6EDF3",
+    "textSecondary": "#8B949E", "accent": "#2F81F7",
+    "borderSubtle": "#30363D", "selection": "#1F3A5F"
+  },
+  "editor": {
+    "background": "#0D1117", "foreground": "#E6EDF3", "cursor": "#58A6FF",
+    "selectionBackground": "#264F78", "lineHighlight": "#161B22"
+  },
+  "syntax": {
+    "comment": {"color": "#8B949E", "fontStyle": "italic"},
+    "string": {"color": "#A5D6FF"}, "number": {"color": "#79C0FF"},
+    "keyword": {"color": "#FF7B72"}, "function": {"color": "#D2A8FF"},
+    "type": {"color": "#FFA657"},
+    "markup.heading": {"color": "#E6EDF3", "fontStyle": "bold"},
+    "markup.code": {"color": "#E6EDF3", "background": "#161B22"},
+    "markup.link": {"color": "#58A6FF", "underline": true}
+  }
+}

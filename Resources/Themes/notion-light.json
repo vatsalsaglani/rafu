@@ -1,0 +1,23 @@
+{
+  "$schema": "https://rafu.dev/schemas/theme/v1.json", "version": 1,
+  "name": "Notion Light", "id": "dev.rafu.theme.notion-light", "appearance": "light",
+  "ui": {
+    "appBackground": "#F7F6F3", "editorBackground": "#FFFFFF",
+    "elevatedBackground": "#F1F1EF", "textPrimary": "#37352F",
+    "textSecondary": "#787774", "accent": "#2383E2",
+    "borderSubtle": "#E3E2DE", "selection": "#E7F3FF"
+  },
+  "editor": {
+    "background": "#FFFFFF", "foreground": "#37352F", "cursor": "#2383E2",
+    "selectionBackground": "#DDEBFA", "lineHighlight": "#F7F6F3"
+  },
+  "syntax": {
+    "comment": {"color": "#9B9A97", "fontStyle": "italic"},
+    "string": {"color": "#448361"}, "number": {"color": "#A45A22"},
+    "keyword": {"color": "#9065B0"}, "function": {"color": "#0B6E99"},
+    "type": {"color": "#337EA9"},
+    "markup.heading": {"color": "#37352F", "fontStyle": "bold"},
+    "markup.code": {"color": "#EB5757", "background": "#F1F1EF"},
+    "markup.link": {"color": "#2383E2", "underline": true}
+  }
+}

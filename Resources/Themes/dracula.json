@@ -1,0 +1,26 @@
+{
+  "$schema": "https://rafu.dev/schemas/theme/v1.json",
+  "version": 1,
+  "name": "Dracula",
+  "id": "dev.rafu.theme.dracula",
+  "appearance": "dark",
+  "ui": {
+    "appBackground": "#282A36", "editorBackground": "#282A36",
+    "elevatedBackground": "#343746", "textPrimary": "#F8F8F2",
+    "textSecondary": "#B8B8C5", "accent": "#BD93F9",
+    "borderSubtle": "#44475A", "selection": "#44475A"
+  },
+  "editor": {
+    "background": "#282A36", "foreground": "#F8F8F2", "cursor": "#F8F8F0",
+    "selectionBackground": "#44475A", "lineHighlight": "#30323E"
+  },
+  "syntax": {
+    "comment": {"color": "#6272A4", "fontStyle": "italic"},
+    "string": {"color": "#F1FA8C"}, "number": {"color": "#BD93F9"},
+    "keyword": {"color": "#FF79C6"}, "function": {"color": "#50FA7B"},
+    "type": {"color": "#8BE9FD"},
+    "markup.heading": {"color": "#BD93F9", "fontStyle": "bold"},
+    "markup.code": {"color": "#F1FA8C", "background": "#343746"},
+    "markup.link": {"color": "#8BE9FD", "underline": true}
+  }
+}
