@@ -156,6 +156,35 @@ struct GitServiceTests {
         }
     }
 
+    @Test("Merge state is detected while a merge is in progress and clears after")
+    func mergeStateDetection() async throws {
+        try await withRepository { root in
+            try write("base\n", to: root.appending(path: "file.txt"))
+            try runGit(["add", "file.txt"], at: root)
+            try runGit(["commit", "-m", "Base"], at: root)
+            try runGit(["checkout", "-b", "side"], at: root)
+            try write("side\n", to: root.appending(path: "side.txt"))
+            try runGit(["add", "side.txt"], at: root)
+            try runGit(["commit", "-m", "Side"], at: root)
+            try runGit(["checkout", "main"], at: root)
+            try write("main\n", to: root.appending(path: "main.txt"))
+            try runGit(["add", "main.txt"], at: root)
+            try runGit(["commit", "-m", "Main"], at: root)
+
+            let service = GitService()
+            #expect(try await service.mergeState(at: root) == nil)
+
+            try runGit(["merge", "side", "--no-commit", "--no-ff"], at: root)
+            let state = try #require(try await service.mergeState(at: root))
+            #expect(state.headline.hasPrefix("Merge"))
+            #expect(state.defaultMessage.hasPrefix("Merge"))
+            #expect(!state.defaultMessage.contains("#"))
+
+            _ = try await service.commit(message: state.defaultMessage, at: root)
+            #expect(try await service.mergeState(at: root) == nil)
+        }
+    }
+
     @Test("Fetch, pull, push, upstream, and ahead/behind state work with a local remote")
     func remoteOperations() async throws {
         let sandbox = try makeTemporaryDirectory()

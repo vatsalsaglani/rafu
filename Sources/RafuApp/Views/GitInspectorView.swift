@@ -16,6 +16,9 @@ struct GitInspectorView: View {
     var body: some View {
         VStack(spacing: 0) {
             repositoryHeader
+            if let mergeState = session.gitMergeState {
+                mergeBanner(mergeState)
+            }
             Divider()
             RafuSegmentedPicker(
                 items: GitInspectorSection.allCases,
@@ -32,6 +35,7 @@ struct GitInspectorView: View {
             }
         }
         .frame(minWidth: 250, idealWidth: 310)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay {
             if session.isGitBusy {
                 ProgressView().controlSize(.small).padding(10)
@@ -65,6 +69,31 @@ struct GitInspectorView: View {
         } message: {
             Text("Git may stop for conflicts. Rafu will show conflicted files in Changes.")
         }
+    }
+
+    private func mergeBanner(_ mergeState: GitMergeState) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.triangle.merge")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(theme.palette.info)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Merge in progress")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(theme.palette.textPrimary)
+                Text(mergeState.headline)
+                    .font(.caption2)
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity)
+        .background(theme.palette.info.opacity(0.10))
+        .overlay(alignment: .top) { Divider().overlay(theme.palette.borderSubtle) }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Merge in progress: \(mergeState.headline)")
     }
 
     private var repositoryHeader: some View {
@@ -186,11 +215,14 @@ struct GitInspectorView: View {
     private var changesView: some View {
         VStack(spacing: 0) {
             if snapshot.changes.isEmpty {
+                // Expand so the commit composer pins to the panel bottom
+                // instead of floating mid-panel with dead space beneath.
                 ContentUnavailableView(
                     "Working tree clean",
                     systemImage: "checkmark.circle",
                     description: Text("There are no local changes.")
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 changesHeader
                 List(selection: $session.gitSelectedChangeIDs) {

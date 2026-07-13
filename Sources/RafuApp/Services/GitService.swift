@@ -426,6 +426,31 @@ nonisolated struct GitService: Sendable {
         guard output.terminationStatus == 0 else { throw GitServiceError.invalidRemote(name) }
     }
 
+    /// Detects an in-progress merge: one `rev-parse --git-path` process to
+    /// locate MERGE_HEAD/MERGE_MSG (worktree-safe), then plain file reads.
+    /// Returns nil when no merge is in progress.
+    @concurrent
+    func mergeState(at repositoryRoot: URL) async throws -> GitMergeState? {
+        let output = try await checkedRun(
+            ["rev-parse", "--git-path", "MERGE_HEAD", "--git-path", "MERGE_MSG"],
+            at: repositoryRoot,
+            maximumOutputBytes: 16 * 1_024
+        )
+        let lines = output.stdout
+            .split(separator: "\n")
+            .map { String($0) }
+        guard lines.count >= 2 else { return nil }
+        func absolute(_ path: String) -> URL {
+            path.hasPrefix("/")
+                ? URL(fileURLWithPath: path)
+                : repositoryRoot.appending(path: path)
+        }
+        let mergeHeadURL = absolute(lines[0])
+        guard FileManager.default.fileExists(atPath: mergeHeadURL.path) else { return nil }
+        let rawMessage = try? String(contentsOf: absolute(lines[1]), encoding: .utf8)
+        return GitMergeState(rawMergeMessage: rawMessage)
+    }
+
     private func checkedRun(
         _ arguments: [String],
         at repositoryRoot: URL,

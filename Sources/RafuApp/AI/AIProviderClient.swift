@@ -52,10 +52,7 @@ nonisolated struct AIProviderClient: Sendable {
         input: AICommitPromptInput
     ) throws -> AsyncThrowingStream<String, Error> {
         let prompt = try promptBuilder.makePrompt(input: input)
-        let instructions =
-            input.summaries.isEmpty && input.overflowFileCount == 0
-            ? promptBuilder.instruction
-            : promptBuilder.summarizingInstruction
+        let instructions = promptBuilder.instructions(for: input)
         return try makeTextStream(
             configuration: configuration,
             apiKey: apiKey,

@@ -326,3 +326,29 @@ nonisolated struct GitOperationResult: Hashable, Sendable {
     let standardOutput: String
     let standardError: String
 }
+
+/// An in-progress merge (MERGE_HEAD exists). `headline` is the first content
+/// line of MERGE_MSG ("Merge branch 'x' into y"); `defaultMessage` is the
+/// full message with git's '#' comment lines stripped, suitable for
+/// prefilling the commit box.
+nonisolated struct GitMergeState: Equatable, Sendable {
+    let headline: String
+    let defaultMessage: String
+
+    /// Strips '#' comment lines and surrounding blank space from a raw
+    /// MERGE_MSG. Pure for testability.
+    static func cleaned(message: String) -> String {
+        message
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("#") }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    init?(rawMergeMessage: String?) {
+        let cleaned = Self.cleaned(message: rawMergeMessage ?? "")
+        defaultMessage = cleaned.isEmpty ? "Merge" : cleaned
+        headline =
+            cleaned.split(separator: "\n").first.map(String.init) ?? "Merge in progress"
+    }
+}

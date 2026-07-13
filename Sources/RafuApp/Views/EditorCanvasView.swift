@@ -385,10 +385,13 @@ private struct WorkspaceWelcomeView: View {
 
     private func recentRow(_ entry: RecentWorkspaceEntry) -> some View {
         Button {
+            NSLog("RAFU-DEBUG recent row clicked: %@", entry.rootPath)
             do {
                 let url = try recentsStore.resolve(entry)
+                NSLog("RAFU-DEBUG resolved: %@", url.path)
                 session.openLocalWorkspace(at: url)
             } catch {
+                NSLog("RAFU-DEBUG resolve failed: %@", String(describing: error))
                 recentsStore.remove(rootPath: entry.rootPath)
                 recents = recentsStore.load()
             }

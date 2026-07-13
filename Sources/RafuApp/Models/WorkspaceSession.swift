@@ -61,6 +61,7 @@ final class WorkspaceSession {
     var isGitHistoryDetailLoading = false
     var gitInspectorSection: GitInspectorSection = .changes
     var gitOpenDiff: GitOpenDiff?
+    var gitMergeState: GitMergeState?
     var gitCommitMessage = ""
     var isGeneratingAICommitMessage = false
     var aiCommitGenerationError: String?
@@ -199,7 +200,9 @@ final class WorkspaceSession {
     }
 
     func openLocalWorkspace(at url: URL) {
+        NSLog("RAFU-DEBUG openLocalWorkspace: %@", url.path)
         guard url.startAccessingSecurityScopedResource() else {
+            NSLog("RAFU-DEBUG scope access DENIED for: %@", url.path)
             reportOpenFolderError(WorkspaceOpenError.securityScopedAccessDenied)
             return
         }
@@ -271,6 +274,10 @@ final class WorkspaceSession {
     func refreshWorkspace() async {
         guard let rootURL else { return }
         isLoadingTree = true
+        // The early cancellation return must still clear the loading flag or
+        // the sidebar shows "Loading files…" forever after a superseded
+        // refresh (e.g. rapid branch switches).
+        defer { isLoadingTree = false }
         do {
             async let tree = fileService.tree(rootURL: rootURL)
             async let git = gitService.snapshot(at: rootURL)
@@ -283,7 +290,6 @@ final class WorkspaceSession {
         } catch {
             reportOpenFolderError(error)
         }
-        isLoadingTree = false
     }
 
     func refreshGit() async {
@@ -295,9 +301,20 @@ final class WorkspaceSession {
             }
             async let branches = gitService.branches(at: rootURL)
             async let history = gitService.history(at: rootURL, limit: 100)
+            async let merge = gitService.mergeState(at: rootURL)
             gitSnapshot = snapshot
             gitBranchSnapshot = try await branches
             gitHistoryPage = try await history
+            let previousMergeState = gitMergeState
+            gitMergeState = (try? await merge) ?? nil
+            // Prefill the commit box with git's default merge message the
+            // moment a merge is first detected — but never stomp user edits.
+            if let mergeState = gitMergeState,
+                previousMergeState == nil,
+                gitCommitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                gitCommitMessage = mergeState.defaultMessage
+            }
             reconcileGitSelection()
         } catch {
             reportOpenFolderError(error)
@@ -922,11 +939,12 @@ final class WorkspaceSession {
                 throw AIProviderError.missingAPIKey
             }
 
-            let input = try await budgetedCommitPromptInput(
+            var input = try await budgetedCommitPromptInput(
                 changes: changes,
                 rootURL: rootURL,
                 stagedDiffsOnly: resolution.stagedDiffsOnly
             )
+            input.mergeContext = gitMergeState?.headline
 
             let stream = try aiProviderClient.generateCommitMessage(
                 configuration: configuration,
@@ -1051,6 +1069,11 @@ final class WorkspaceSession {
     }
 
     func reportOpenFolderError(_ error: any Error) {
+        // Superseded/cancelled tasks are routine (rapid refreshes during a
+        // branch switch or FSEvents storm) and must never surface as a
+        // user-facing failure alert.
+        if error is CancellationError { return }
+        if let urlError = error as? URLError, urlError.code == .cancelled { return }
         openFolderErrorMessage = error.localizedDescription
         isOpenFolderErrorPresented = true
     }
@@ -1154,6 +1177,7 @@ final class WorkspaceSession {
         gitHistoryCommitChanges = []
         isGitHistoryDetailLoading = false
         gitOpenDiff = nil
+        gitMergeState = nil
     }
 
     private static func boundedAIErrorMessage(_ error: any Error) -> String {

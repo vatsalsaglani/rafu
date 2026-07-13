@@ -190,3 +190,25 @@ func commitScopePrecedence() {
     #expect(everything.changes.count == 2)
     #expect(!everything.stagedDiffsOnly)
 }
+
+@Test("Merge context switches instruction and embeds a merge block")
+func mergeContextPrompt() throws {
+    let builder = AICommitPromptBuilder()
+    var input = AICommitPromptInput(
+        fullDiffs: [
+            AISelectedDiff(path: "a.swift", patch: "+let a = 1", isTruncated: false)
+        ]
+    )
+    #expect(!builder.instructions(for: input).contains("Merge"))
+
+    input.mergeContext = "Merge branch 'staging' into main"
+    let instructions = builder.instructions(for: input)
+    #expect(instructions.contains("MUST begin with \"Merge\""))
+    let prompt = try builder.makePrompt(input: input)
+    #expect(prompt.contains("<merge-context>"))
+    #expect(prompt.contains("Merge branch 'staging' into main"))
+
+    let cleaned = GitMergeState.cleaned(
+        message: "Merge branch 'staging'\n# comment line\n\nbody text\n")
+    #expect(cleaned == "Merge branch 'staging'\n\nbody text")
+}
