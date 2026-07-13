@@ -7,14 +7,16 @@ GUI_PRODUCT="RafuApp"
 CLI_PRODUCT="rafu"
 BUNDLE_ID="dev.vatsalsaglani.rafu"
 MIN_SYSTEM_VERSION="15.0"
-VERSION="0.1.0"
+# Overridable so the release workflow can stamp the branch-derived version
+# into the bundle without editing this script.
+VERSION="${RAFU_VERSION:-0.1.0}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
 STAGE_ONLY=false
 
 if [[ $# -gt 1 ]]; then
-  echo "usage: $0 [run|--stage|--debug|--logs|--telemetry|--verify]" >&2
+  echo "usage: $0 [run|--stage|--package|--debug|--logs|--telemetry|--verify]" >&2
   exit 2
 fi
 
@@ -22,10 +24,10 @@ case "$MODE" in
   --stage|stage)
     STAGE_ONLY=true
     ;;
-  run|--debug|debug|--logs|logs|--telemetry|telemetry|--verify|verify)
+  run|--package|package|--debug|debug|--logs|logs|--telemetry|telemetry|--verify|verify)
     ;;
   *)
-    echo "usage: $0 [run|--stage|--debug|--logs|--telemetry|--verify]" >&2
+    echo "usage: $0 [run|--stage|--package|--debug|--logs|--telemetry|--verify]" >&2
     exit 2
     ;;
 esac
@@ -95,6 +97,19 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$MIN_SYSTEM_VERSION</string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Folder</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>public.folder</string>
+      </array>
+    </dict>
+  </array>
   <key>UTExportedTypeDeclarations</key>
   <array>
     <dict>
@@ -142,6 +157,10 @@ open_app() {
 case "$MODE" in
   --stage|stage)
     rm -rf "$APP_BUNDLE"
+    ;;
+  --package|package)
+    # CI packaging: stage dist/Rafu.app, verify, never launch, keep the bundle.
+    echo "Packaged $APP_BUNDLE (version $VERSION)"
     ;;
   run)
     open_app

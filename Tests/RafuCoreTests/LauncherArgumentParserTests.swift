@@ -1,3 +1,4 @@
+import Foundation
 import RafuCore
 import Testing
 
@@ -65,4 +66,14 @@ struct LauncherArgumentParserTests {
             try parser.parse(["--goto", "--new-window"])
         }
     }
+}
+
+@Test("App locator resolves the bundle enclosing the bundled CLI")
+func appLocatorResolvesBundle() {
+    let cli = URL(fileURLWithPath: "/Users/x/dist/Rafu.app/Contents/SharedSupport/bin/rafu")
+    let bundle = LauncherAppLocator.appBundle(forCLIExecutable: cli, requireOnDisk: false)
+    #expect(bundle?.path == "/Users/x/dist/Rafu.app")
+
+    let stray = URL(fileURLWithPath: "/usr/local/bin/rafu")
+    #expect(LauncherAppLocator.appBundle(forCLIExecutable: stray, requireOnDisk: false) == nil)
 }

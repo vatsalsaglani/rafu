@@ -79,3 +79,21 @@ theme-JSON check.
 - [GitHub checkout action](https://github.com/actions/checkout)
 
 The staged `dist/Rafu.app` is a local development artifact. SwiftPM's executable signature is not a sealed, Developer ID-signed application bundle, so it must never be uploaded as a release. Phase 5 owns nested-code signing, resource sealing, hardened runtime, notarization, and Gatekeeper validation.
+
+## Packaging and releases
+
+- `./script/build_and_run.sh --package` stages `dist/Rafu.app` without
+  launching or deleting it — the mode CI uses to produce release artifacts.
+- `RAFU_VERSION=<semver>` overrides the Info.plist bundle version at staging
+  time; the release workflow also stamps the same version into
+  `Sources/RafuCore/BuildInformation.swift` before building.
+- `.github/workflows/release.yml`: pushing a `release/v<semver>` branch
+  builds, verifies, zips, and publishes a GitHub release named for that
+  version (the `v<semver>` tag is created automatically by the release — no
+  manual tag management). A hyphenated version (e.g. `v0.1.0-beta`) publishes
+  as a pre-release. The workflow refuses to run unless the latest completed
+  CI run on `main` succeeded. Release notes include the
+  `xattr -dr com.apple.quarantine` step required for the unsigned build.
+- The generated Info.plist declares `CFBundleDocumentTypes` for
+  `public.folder` so `open -a Rafu <folder>` (the CLI's mechanism) routes as
+  a document-open event.

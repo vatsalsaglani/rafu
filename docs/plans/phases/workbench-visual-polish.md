@@ -203,6 +203,21 @@ Principles:
       fixed latent glob-matching bug for names like `[a].txt`). Notes in
       `docs/references/git-process-and-parsing.md`.
 
+- [x] Branch-driven releases: `.github/workflows/release.yml` publishes a
+      GitHub release from any `release/v*` push (pre-release when the version
+      carries a suffix), gated on green CI on `main`; `--package` mode and
+      `RAFU_VERSION` added to `build_and_run.sh`; notes include the
+      quarantine-removal command.
+- [x] `rafu <path>` now opens the folder in the app: CLI locates its
+      enclosing bundle (`LauncherAppLocator`) and launches it via
+      `/usr/bin/open -a`; the app consumes the open event through
+      `RafuAppDelegate`/`ExternalOpenRequests` (key window wins; a fresh
+      launch skips restoration in favor of the requested folder).
+      `openLocalWorkspace` now accepts scope-less but readable directories.
+- [x] "New Workspace Window" no longer re-opens the same folder: last-
+      workspace restoration is gated to once per app launch
+      (`WorkspaceRestorationGate`).
+
 ## Still open / next agent
 
 - Editor gutter (line numbers), indent guides, and find-match colors decode

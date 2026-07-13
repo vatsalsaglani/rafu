@@ -65,7 +65,7 @@ struct WorkspaceWindowView: View {
                 session.reportOpenFolderError(error)
             }
         }
-        .alert("Unable to Open Folder", isPresented: $session.isOpenFolderErrorPresented) {
+        .alert(session.openFolderErrorTitle, isPresented: $session.isOpenFolderErrorPresented) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(session.openFolderErrorMessage)

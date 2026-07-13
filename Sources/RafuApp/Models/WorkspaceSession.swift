@@ -75,6 +75,7 @@ final class WorkspaceSession {
     var isQuitConfirmationPresented = false
     var cliInstallMessage: String?
     var isOpenFolderErrorPresented = false
+    var openFolderErrorTitle = "Unable to Open Folder"
     var openFolderErrorMessage = ""
 
     let workspaceSearch = WorkspaceSearchModel()
@@ -200,18 +201,28 @@ final class WorkspaceSession {
     }
 
     func openLocalWorkspace(at url: URL) {
-        NSLog("RAFU-DEBUG openLocalWorkspace: %@", url.path)
-        guard url.startAccessingSecurityScopedResource() else {
-            NSLog("RAFU-DEBUG scope access DENIED for: %@", url.path)
-            reportOpenFolderError(WorkspaceOpenError.securityScopedAccessDenied)
-            return
+        // URLs from the file importer or bookmarks carry a security scope;
+        // URLs from the rafu CLI / Finder open events do not. Without a
+        // scope, plain readability is sufficient (and all this build can
+        // rely on outside the sandbox).
+        let hasSecurityScope = url.startAccessingSecurityScopedResource()
+        if !hasSecurityScope {
+            var isDirectory: ObjCBool = false
+            guard
+                FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+                isDirectory.boolValue,
+                FileManager.default.isReadableFile(atPath: url.path)
+            else {
+                reportOpenFolderError(WorkspaceOpenError.securityScopedAccessDenied)
+                return
+            }
         }
 
         liveness.stop()
         let previousSecurityScopedURL = securityScopedURL
         let name = url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent
 
-        securityScopedURL = url
+        securityScopedURL = hasSecurityScope ? url : nil
         descriptor = WorkspaceDescriptor(
             displayName: name,
             location: .local(LocalWorkspaceReference(path: url.path))
@@ -317,7 +328,7 @@ final class WorkspaceSession {
             }
             reconcileGitSelection()
         } catch {
-            reportOpenFolderError(error)
+            reportGitError(error)
         }
     }
 
@@ -673,7 +684,7 @@ final class WorkspaceSession {
         do {
             try await gitService.setStaged(staged, path: change.path, at: rootURL)
             await refreshGit()
-        } catch { reportOpenFolderError(error) }
+        } catch { reportGitError(error) }
     }
 
     /// Batch stage/unstage in one Git process, used by the Source Control
@@ -685,7 +696,7 @@ final class WorkspaceSession {
         do {
             try await gitService.setStaged(staged, paths: paths, at: rootURL)
             await refreshGit()
-        } catch { reportOpenFolderError(error) }
+        } catch { reportGitError(error) }
     }
 
     func stageAll() async {
@@ -695,7 +706,7 @@ final class WorkspaceSession {
         do {
             try await gitService.stageAll(at: rootURL)
             await refreshGit()
-        } catch { reportOpenFolderError(error) }
+        } catch { reportGitError(error) }
     }
 
     func commit() async {
@@ -706,7 +717,7 @@ final class WorkspaceSession {
             _ = try await gitService.commit(message: gitCommitMessage, at: rootURL)
             gitCommitMessage = ""
             await refreshGit()
-        } catch { reportOpenFolderError(error) }
+        } catch { reportGitError(error) }
     }
 
     func gitOpenChangeDiff(_ change: GitChange, scope: GitDiffScope) async {
@@ -730,7 +741,7 @@ final class WorkspaceSession {
         } catch is CancellationError {
             return
         } catch {
-            reportOpenFolderError(error)
+            reportGitError(error)
         }
     }
 
@@ -751,7 +762,7 @@ final class WorkspaceSession {
         } catch is CancellationError {
             return
         } catch {
-            reportOpenFolderError(error)
+            reportGitError(error)
         }
     }
 
@@ -775,7 +786,7 @@ final class WorkspaceSession {
         } catch is CancellationError {
             return
         } catch {
-            reportOpenFolderError(error)
+            reportGitError(error)
         }
     }
 
@@ -799,7 +810,7 @@ final class WorkspaceSession {
         do {
             try await gitService.createBranch(named: name, at: rootURL)
             await refreshGit()
-        } catch { reportOpenFolderError(error) }
+        } catch { reportGitError(error) }
     }
 
     func gitCheckoutBranch(named name: String) async {
@@ -810,7 +821,7 @@ final class WorkspaceSession {
             try await gitService.checkout(branch: name, at: rootURL)
             await refreshWorkspace()
             await refreshGit()
-        } catch { reportOpenFolderError(error) }
+        } catch { reportGitError(error) }
     }
 
     func gitMergeBranch(named name: String) async {
@@ -823,7 +834,7 @@ final class WorkspaceSession {
             await refreshGit()
         } catch {
             await refreshGit()
-            reportOpenFolderError(error)
+            reportGitError(error)
         }
     }
 
@@ -834,7 +845,7 @@ final class WorkspaceSession {
         do {
             _ = try await gitService.fetch(GitFetchRequest(remote: remote), at: rootURL)
             await refreshGit()
-        } catch { reportOpenFolderError(error) }
+        } catch { reportGitError(error) }
     }
 
     func gitPull(strategy: GitPullStrategy = .merge) async {
@@ -845,7 +856,7 @@ final class WorkspaceSession {
             _ = try await gitService.pull(GitPullRequest(strategy: strategy), at: rootURL)
             await refreshWorkspace()
             await refreshGit()
-        } catch { reportOpenFolderError(error) }
+        } catch { reportGitError(error) }
     }
 
     func gitPush(remote: String? = nil) async {
@@ -853,10 +864,19 @@ final class WorkspaceSession {
         isGitBusy = true
         defer { isGitBusy = false }
         do {
+            // A plain Push on a branch without an upstream would fail with
+            // git's "no upstream branch" fatal even though a remote exists —
+            // auto-publish instead ("origin" preferred, else the sole/first
+            // remote), matching what git itself suggests.
+            var resolvedRemote = remote
+            if resolvedRemote == nil, gitBranchSnapshot?.upstream == nil {
+                resolvedRemote =
+                    gitRemoteNames.contains("origin") ? "origin" : gitRemoteNames.first
+            }
             let request: GitPushRequest
-            if let remote, let branch = gitBranchSnapshot?.currentBranch {
+            if let resolvedRemote, let branch = gitBranchSnapshot?.currentBranch {
                 request = GitPushRequest(
-                    remote: remote,
+                    remote: resolvedRemote,
                     branch: branch,
                     setUpstream: gitBranchSnapshot?.upstream == nil
                 )
@@ -865,7 +885,7 @@ final class WorkspaceSession {
             }
             _ = try await gitService.push(request, at: rootURL)
             await refreshGit()
-        } catch { reportOpenFolderError(error) }
+        } catch { reportGitError(error) }
     }
 
     /// Per-line Git gutter markers for one open buffer. Returns `nil` when
@@ -1068,12 +1088,22 @@ final class WorkspaceSession {
         return values?.fileSize
     }
 
+    /// Git operation failures share the error alert but carry an honest
+    /// title instead of "Unable to Open Folder".
+    func reportGitError(_ error: any Error) {
+        if error is CancellationError { return }
+        openFolderErrorTitle = "Git Operation Failed"
+        openFolderErrorMessage = error.localizedDescription
+        isOpenFolderErrorPresented = true
+    }
+
     func reportOpenFolderError(_ error: any Error) {
         // Superseded/cancelled tasks are routine (rapid refreshes during a
         // branch switch or FSEvents storm) and must never surface as a
         // user-facing failure alert.
         if error is CancellationError { return }
         if let urlError = error as? URLError, urlError.code == .cancelled { return }
+        openFolderErrorTitle = "Unable to Open Folder"
         openFolderErrorMessage = error.localizedDescription
         isOpenFolderErrorPresented = true
     }

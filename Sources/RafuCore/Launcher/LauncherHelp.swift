@@ -2,7 +2,8 @@ public enum LauncherHelp {
     public static let text = """
         OVERVIEW: Open a local or SSH workspace in Rafu.
 
-        The bootstrap CLI currently validates requests. App activation and IPC are
+        `rafu <path>` opens the folder in Rafu by launching the app bundle that
+        ships this CLI. Status and SSH commands still validate only; full IPC is
         delivered by product Phase 0 and Phase 1C.
 
         USAGE:
