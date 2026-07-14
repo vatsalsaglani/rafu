@@ -6,7 +6,7 @@ Rafu is a small, native macOS repository companion for focused edits beside term
 
 The repository is currently at the **pre-initial-push workbench checkpoint**. The active acceptance contract is [`docs/plans/phases/pre-initial-push-workbench.md`](docs/plans/phases/pre-initial-push-workbench.md). It intentionally pulls polished local editing, search, Markdown, Git, themes, provider-backed commit drafting, restoration, and workbench navigation forward before the user creates the first commit in Rafu. SSH and distribution remain later phases.
 
-Explicit initial-product non-goals include an extension host, embedded coding agent, debugger, collaboration, full LSP ecosystem, custom SSH stack, and per-document web views. The embedded terminal was originally a non-goal; the user reversed that in ADR 0004 — one lazy, bounded SwiftTerm panel per window, no task runners or automatic command execution.
+Explicit initial-product non-goals include an extension host, embedded coding agent, debugger, collaboration, full LSP ecosystem, custom SSH stack, and per-document web views. The embedded terminal was originally a non-goal; the user reversed that in ADR 0004 — one lazy, bounded SwiftTerm panel per window, no task runners or automatic command execution. Language servers were likewise excluded under the "full LSP ecosystem" non-goal; the user narrowed that in ADR 0005 — an opt-in, memory-bounded LSP client with a transparent, user-controlled server registry over Tree-sitter fallbacks, no extension host and no always-on servers (see [`docs/plans/phases/language-intelligence.md`](docs/plans/phases/language-intelligence.md)).
 
 ## Sources of truth
 
