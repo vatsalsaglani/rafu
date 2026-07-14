@@ -84,3 +84,30 @@ func classifierHandlesMixedBatches() {
     #expect(changes.gitChanged)
     #expect(changes.changedDocumentPaths == [openPath])
 }
+
+@Test("Changed directory paths are workspace-relative, keyed by parent")
+func classifierComputesChangedDirectoryRelativePaths() {
+    let classifier = WorkspaceChangeClassifier()
+
+    let topLevel = classifier.classify(
+        paths: ["\(root)/README.md"], rootPath: root, openDocumentPaths: [])
+    #expect(topLevel.changedDirectoryRelativePaths == [""])
+
+    let nested = classifier.classify(
+        paths: ["\(root)/Sources/App/Main.swift"], rootPath: root, openDocumentPaths: [])
+    #expect(nested.changedDirectoryRelativePaths == ["Sources/App"])
+
+    let rootItself = classifier.classify(paths: [root], rootPath: root, openDocumentPaths: [])
+    #expect(rootItself.changedDirectoryRelativePaths == [""])
+
+    let noise = classifier.classify(
+        paths: ["\(root)/.build/debug/junk"], rootPath: root, openDocumentPaths: [])
+    #expect(noise.changedDirectoryRelativePaths.isEmpty)
+
+    let mixed = classifier.classify(
+        paths: ["\(root)/Sources/App/Main.swift", "\(root)/Sources/App/View.swift"],
+        rootPath: root,
+        openDocumentPaths: []
+    )
+    #expect(mixed.changedDirectoryRelativePaths == ["Sources/App"])
+}
