@@ -9,7 +9,7 @@ struct CommandPaletteView: View {
     @Bindable var session: WorkspaceSession
     @State private var query = ""
     @State private var selectedIndex = 0
-    @State private var fileEntries: [PaletteFileEntry] = []
+    @State private var fileMatches: [String] = []
     @State private var symbolScan = SymbolScanState.idle
     @FocusState private var searchFocused: Bool
 
@@ -22,11 +22,27 @@ struct CommandPaletteView: View {
         case ready([BufferSymbol])
     }
 
+    /// Keys the file-mode query task off both the search term and the
+    /// index-build generation: a build that completes while the palette is
+    /// open (or was already open when it started) must re-run the query, or
+    /// results stay empty forever until the next keystroke.
+    private struct FileQueryKey: Equatable {
+        let term: String
+        let generation: Int
+    }
+
     var body: some View {
         let parsed = PaletteQueryParser.parse(query)
         let rows = rows(for: parsed)
         VStack(spacing: 0) {
             paletteHeader(parsed: parsed, rows: rows)
+            if let caption = fileIndexCaption(for: parsed) {
+                Text(caption)
+                    .font(.caption2)
+                    .foregroundStyle(theme.palette.textMuted)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 6)
+            }
             Divider().overlay(theme.palette.borderSubtle)
             if rows.isEmpty {
                 emptyState(for: parsed)
@@ -53,9 +69,16 @@ struct CommandPaletteView: View {
         .onChange(of: parsed.mode) { _, newMode in
             if newMode == .symbols { prepareSymbolsIfNeeded() }
         }
+        .task(
+            id: FileQueryKey(
+                term: PaletteQueryParser.parse(query).term,
+                generation: session.fileIndexGeneration
+            )
+        ) {
+            await runFileQuery(term: PaletteQueryParser.parse(query).term)
+        }
         .task {
             query = session.commandPaletteSeed
-            fileEntries = PaletteFileEntry.flatten(session.fileTree)
             if PaletteQueryParser.parse(session.commandPaletteSeed).mode == .symbols {
                 prepareSymbolsIfNeeded()
             }
@@ -107,7 +130,14 @@ struct CommandPaletteView: View {
         case .commands:
             return "No matching commands"
         case .files:
-            return fileEntries.isEmpty ? "Open a folder to search its files" : "No matching files"
+            switch session.fileIndexState {
+            case .idle:
+                return "Open a folder to search its files"
+            case .building where fileMatches.isEmpty:
+                return "Indexing files…"
+            case .building, .ready:
+                return "No matching files"
+            }
         case .symbols:
             switch symbolScan {
             case .idle, .scanning:
@@ -215,26 +245,46 @@ struct CommandPaletteView: View {
         }
     }
 
+    /// `fileMatches` is already ranked and top-N limited by the background
+    /// index query (`runFileQuery`); this only turns the relative paths it
+    /// found into rows.
     private func fileRows(matching term: String) -> [PaletteRow] {
-        let indices = CommandPaletteMatcher.rank(
-            query: term,
-            candidates: fileEntries.map(\.searchText)
-        )
-        return indices.prefix(Self.maximumFileRows).map { index in
-            let node = fileEntries[index].node
-            let icon = FileIconProvider.fileIcon(named: node.name)
+        fileMatches.map { relativePath in
+            let name = (relativePath as NSString).lastPathComponent
+            let icon = FileIconProvider.fileIcon(named: name)
             return PaletteRow(
-                id: "file:\(node.url.path)",
+                id: "file:\(relativePath)",
                 symbolName: icon.symbol,
                 iconTint: icon.tint,
                 fileIcon: icon,
-                title: node.name,
-                detail: node.relativePath == node.name ? nil : node.relativePath
+                title: name,
+                detail: relativePath == name ? nil : relativePath
             ) {
                 dismiss()
-                session.open(node)
+                session.openFile(atRelativePath: relativePath)
             }
         }
+    }
+
+    /// Queries the background file-name index off-main; superseded by the
+    /// next keystroke or index rebuild via `.task(id:)` cancellation.
+    private func runFileQuery(term: String) async {
+        do {
+            let results = try await session.queryFileIndex(term: term, limit: Self.maximumFileRows)
+            fileMatches = results
+        } catch is CancellationError {
+        } catch {
+            fileMatches = []
+        }
+    }
+
+    private func fileIndexCaption(for parsed: PaletteQueryParser.ParsedQuery) -> String? {
+        guard parsed.mode == .files, case .ready(_, true) = session.fileIndexState else {
+            return nil
+        }
+        return
+            "Showing top \(Self.maximumFileRows) matches — file index truncated at "
+            + "\(WorkspaceFileNameIndex.maximumEntries) files"
     }
 
     private func commandRows(matching term: String) -> [PaletteRow] {
@@ -417,37 +467,6 @@ private struct PaletteCommand {
     var searchText: String { ([title, detail ?? ""] + keywords).joined(separator: " ") }
 }
 
-/// Flattened, files-only view of the workspace tree, built once per
-/// palette presentation.
-private struct PaletteFileEntry {
-    let node: WorkspaceFileNode
-    let searchText: String
-
-    init(node: WorkspaceFileNode) {
-        self.node = node
-        searchText = node.name + " " + node.relativePath
-    }
-
-    static func flatten(_ nodes: [WorkspaceFileNode]) -> [PaletteFileEntry] {
-        var entries: [PaletteFileEntry] = []
-        appendFiles(from: nodes, into: &entries)
-        return entries
-    }
-
-    private static func appendFiles(
-        from nodes: [WorkspaceFileNode],
-        into entries: inout [PaletteFileEntry]
-    ) {
-        for node in nodes {
-            if node.isDirectory {
-                appendFiles(from: node.children ?? [], into: &entries)
-            } else {
-                entries.append(PaletteFileEntry(node: node))
-            }
-        }
-    }
-}
-
 /// Splits a palette query into its mode prefix and search term: plain text
 /// searches files, ">" prefixes commands, "@" prefixes active-buffer symbols.
 nonisolated enum PaletteQueryParser {
@@ -476,6 +495,54 @@ nonisolated enum PaletteQueryParser {
 }
 
 nonisolated enum CommandPaletteMatcher {
+    /// A tier above any full-path substring score, so a filename match
+    /// always outranks a same-strength path match (e.g. typing "view" finds
+    /// `Sources/RafuApp/Views/CommandPaletteView.swift` ahead of a file that
+    /// merely lives under a `View`-named directory).
+    private static let filenameBonus = 6_000
+
+    /// Ranks full workspace-relative file paths for the command palette's
+    /// file mode. Unlike `rank`, this scores the filename (last path
+    /// component) and the full path independently and keeps the higher of
+    /// the two (filename boosted), so a strong filename match always beats
+    /// a weaker path-only match regardless of nesting depth. Runs inside
+    /// `WorkspaceFileNameIndex`, checking for cancellation periodically so a
+    /// keystroke supersedes an in-flight rank over a large index.
+    static func rankFiles(query: String, paths: [String], limit: Int) async throws -> [String] {
+        let needle = normalized(query).filter { !$0.isWhitespace }
+        guard !needle.isEmpty else { return Array(paths.prefix(max(0, limit))) }
+
+        var scored: [(score: Int, index: Int)] = []
+        scored.reserveCapacity(paths.count)
+        for (index, path) in paths.enumerated() {
+            if index.isMultiple(of: 4_096) { try Task.checkCancellation() }
+            guard let matchScore = fileScore(needle: needle, path: path) else { continue }
+            scored.append((matchScore, index))
+        }
+
+        scored.sort { lhs, rhs in
+            if lhs.score != rhs.score { return lhs.score > rhs.score }
+            let lhsPath = paths[lhs.index]
+            let rhsPath = paths[rhs.index]
+            if lhsPath.count != rhsPath.count { return lhsPath.count < rhsPath.count }
+            return lhsPath < rhsPath
+        }
+        return scored.prefix(max(0, limit)).map { paths[$0.index] }
+    }
+
+    private static func fileScore(needle: String, path: String) -> Int? {
+        let fullPathScore = score(needle: needle, candidate: normalized(path))
+        let fileName = (path as NSString).lastPathComponent
+        let filenameScore = score(needle: needle, candidate: normalized(fileName))
+            .map { $0 + filenameBonus }
+        switch (filenameScore, fullPathScore) {
+        case (.some(let a), .some(let b)): return max(a, b)
+        case (.some(let a), nil): return a
+        case (nil, .some(let b)): return b
+        case (nil, nil): return nil
+        }
+    }
+
     static func rank(query: String, candidates: [String]) -> [Int] {
         let needle = normalized(query).filter { !$0.isWhitespace }
         guard !needle.isEmpty else { return Array(candidates.indices) }

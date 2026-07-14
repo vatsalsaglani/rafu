@@ -371,6 +371,9 @@ struct CodeEditorView: NSViewRepresentable {
                 if editedMask.contains(.editedCharacters) {
                     gutterRuler?.invalidateLineIndex()
                 }
+                if editedMask.contains(.editedCharacters), !isLoading {
+                    document.recordEditDelta(editedRange: editedRange, changeInLength: delta)
+                }
             }
         }
     }

@@ -50,6 +50,18 @@ final class EditorDocument: Identifiable {
     @ObservationIgnored
     var textSnapshotProvider: (() -> String)?
 
+    /// One `AsyncStream` continuation per active `editDeltas()` subscriber,
+    /// keyed by a fresh id minted for each call. Multicast: every
+    /// subscriber (there may be several — e.g. the future syntax actor and
+    /// the future LSP client) receives every delta.
+    @ObservationIgnored
+    private var editDeltaContinuations: [UUID: AsyncStream<DocumentEditDelta>.Continuation] = [:]
+
+    /// Monotonic per-edit counter, independent of `revision` (which only
+    /// increments on save and external reload, never per keystroke).
+    @ObservationIgnored
+    private var editVersion = 0
+
     init(url: URL) {
         id = UUID()
         self.url = url
@@ -79,4 +91,40 @@ final class EditorDocument: Identifiable {
     }
     /// Documents that offer the Edit/Preview/Split mode control.
     var supportsPresentationModes: Bool { isMarkdown || isSVG }
+
+    /// Mints a fresh multicast stream of this document's edit deltas. Each
+    /// call registers a new subscriber under its own id; the stream ends
+    /// when the subscriber's consuming task is cancelled. Used by
+    /// `LanguageIntelligenceCoordinator` to observe live edits without
+    /// putting document text in SwiftUI-observable state.
+    func editDeltas() -> AsyncStream<DocumentEditDelta> {
+        let id = UUID()
+        return AsyncStream { continuation in
+            editDeltaContinuations[id] = continuation
+            continuation.onTermination = { [weak self] _ in
+                Task { @MainActor in
+                    self?.editDeltaContinuations[id] = nil
+                }
+            }
+        }
+    }
+
+    /// Records one buffer mutation and multicasts it to every open
+    /// `editDeltas()` subscriber. Called from `CodeEditorView.Coordinator`'s
+    /// `NSTextStorageDelegate` hook; never called during the initial
+    /// document load.
+    func recordEditDelta(editedRange: NSRange, changeInLength: Int) {
+        editVersion += 1
+        let delta = DocumentEditDelta(
+            range: NSRange(
+                location: editedRange.location,
+                length: editedRange.length - changeInLength
+            ),
+            replacementLength: editedRange.length,
+            version: editVersion
+        )
+        for continuation in editDeltaContinuations.values {
+            continuation.yield(delta)
+        }
+    }
 }

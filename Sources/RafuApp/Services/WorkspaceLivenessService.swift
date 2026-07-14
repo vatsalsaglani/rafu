@@ -7,6 +7,11 @@ nonisolated struct WorkspaceChangeSet: Equatable, Sendable {
     var gitChanged = false
     /// Standardized absolute paths of open documents whose files changed.
     var changedDocumentPaths: Set<String> = []
+    /// Workspace-relative paths ("" for the root) of directories whose
+    /// direct listing may have changed. Lets the lazy tree re-list only
+    /// materialized (already-expanded) directories instead of the whole
+    /// workspace.
+    var changedDirectoryRelativePaths: Set<String> = []
 
     var isEmpty: Bool {
         !treeChanged && !gitChanged && changedDocumentPaths.isEmpty
@@ -39,6 +44,7 @@ nonisolated struct WorkspaceChangeClassifier: Sendable {
             }
             if path == rootPath {
                 changes.treeChanged = true
+                changes.changedDirectoryRelativePaths.insert("")
                 continue
             }
             guard path.hasPrefix(rootPath + "/") else { continue }
@@ -49,6 +55,8 @@ nonisolated struct WorkspaceChangeClassifier: Sendable {
                 })
             else { continue }
             changes.treeChanged = true
+            let parentRelativePath = relativeComponents.dropLast().joined(separator: "/")
+            changes.changedDirectoryRelativePaths.insert(parentRelativePath)
             if openDocumentPaths.contains(path) {
                 changes.changedDocumentPaths.insert(path)
             }

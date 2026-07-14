@@ -45,6 +45,13 @@ struct RafuSettingsView: View {
                 }
                 .formStyle(.grouped)
             }
+
+            Tab("Language Servers", systemImage: "server.rack") {
+                Form {
+                    LanguageServersSettingsSection()
+                }
+                .formStyle(.grouped)
+            }
         }
         .environment(\.rafuTheme, activeTheme)
         .preferredColorScheme(preferredColorScheme)

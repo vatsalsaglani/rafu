@@ -8,10 +8,21 @@ nonisolated struct WorkspaceFileService: Sendable {
         ".git", ".build", ".swiftpm", "dist", "DerivedData", "node_modules",
     ]
 
+    /// Lists exactly one directory level: the workspace root when
+    /// `relativeDirectoryPath` is empty, or the directory at that
+    /// workspace-relative path otherwise. Never recurses — the sidebar and
+    /// index build up their view of the tree by calling this per expanded
+    /// or indexed directory instead of loading everything eagerly.
     @concurrent
-    func tree(rootURL: URL) async throws -> [WorkspaceFileNode] {
+    func listDirectory(
+        rootURL: URL,
+        relativeDirectoryPath: String
+    ) async throws -> [WorkspaceFileNode] {
         try Task.checkCancellation()
-        return try children(of: rootURL, rootURL: rootURL)
+        let directory =
+            relativeDirectoryPath.isEmpty
+            ? rootURL : rootURL.appending(path: relativeDirectoryPath, directoryHint: .isDirectory)
+        return try children(of: directory, rootURL: rootURL)
     }
 
     @concurrent
@@ -88,8 +99,7 @@ nonisolated struct WorkspaceFileService: Sendable {
             return WorkspaceFileNode(
                 url: url,
                 relativePath: relative,
-                isDirectory: isDirectory,
-                children: isDirectory ? (try? children(of: url, rootURL: rootURL)) ?? [] : nil
+                isDirectory: isDirectory
             )
         }
         .sorted {

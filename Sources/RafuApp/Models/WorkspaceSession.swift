@@ -37,7 +37,24 @@ final class WorkspaceSession {
     var navigatorMode: WorkspaceNavigatorMode = .files {
         didSet { persistWorkspaceState() }
     }
-    var fileTree: [WorkspaceFileNode] = []
+    /// One materialized directory level per key, keyed by workspace-relative
+    /// path ("" for the root). Populated on demand as the sidebar expands
+    /// directories instead of eagerly recursing the whole workspace.
+    var loadedChildren: [String: [WorkspaceFileNode]] = [:]
+    /// Workspace-relative paths of directories the sidebar currently shows
+    /// expanded. Drives which `loadedChildren` entries stay populated and
+    /// which materialized directories get re-listed on external changes.
+    var expandedDirectories: Set<String> = []
+    /// Workspace-relative paths of directories with a listing fetch
+    /// in flight, so the sidebar can show a per-row loading state and avoid
+    /// duplicate concurrent fetches for the same directory.
+    var loadingDirectories: Set<String> = []
+    var fileIndexState: WorkspaceFileNameIndex.State = .idle
+    /// Bumped every time a file-name index build completes. The command
+    /// palette keys its file-mode query task off this so a build that
+    /// finishes while the palette is open, or was open before the build
+    /// started, is never stuck showing empty results.
+    var fileIndexGeneration = 0
     var openDocuments: [EditorDocument] = []
     var editorLayout = EditorLayoutState()
     var selectedDocumentID: UUID?
@@ -90,6 +107,15 @@ final class WorkspaceSession {
     private let fileService = WorkspaceFileService()
 
     @ObservationIgnored
+    private let fileIndex = WorkspaceFileNameIndex()
+
+    @ObservationIgnored
+    private var indexRebuildTask: Task<Void, Never>?
+
+    @ObservationIgnored
+    private var indexRebuildQueued = false
+
+    @ObservationIgnored
     private let gitService = GitService()
 
     @ObservationIgnored
@@ -112,6 +138,12 @@ final class WorkspaceSession {
 
     @ObservationIgnored
     private let liveness = WorkspaceLivenessService()
+
+    /// Lane 2's only access into this session: workspace/document lifecycle
+    /// hooks (see `LanguageIntelligenceCoordinator`'s doc comment). Lane 2
+    /// never edits this file directly.
+    @ObservationIgnored
+    let languageIntelligence = LanguageIntelligenceCoordinator()
 
     func toggleUtilityPane(_ mode: WorkspaceNavigatorMode) {
         navigatorMode = navigatorMode == mode ? .files : mode
@@ -235,11 +267,14 @@ final class WorkspaceSession {
         selectedDocumentID = nil
         selectedTreePath = nil
         resetGitWorkbenchState()
+        resetFileTreeState()
         isTerminalPresented = false
         terminal.shutdownAll()
+        languageIntelligence.workspaceDidClose()
         RecentWorkspacesStore().record(url: url, displayName: name)
         Task { await refreshWorkspace() }
         startFileWatcher()
+        languageIntelligence.workspaceDidOpen(root: url)
         persistWorkspaceState()
 
         previousSecurityScopedURL?.stopAccessingSecurityScopedResource()
@@ -263,7 +298,17 @@ final class WorkspaceSession {
     }
 
     private func handleExternalChanges(_ changes: WorkspaceChangeSet) async {
-        if changes.treeChanged { await refreshWorkspace() }
+        if changes.treeChanged {
+            // A working-tree edit (no `.git/HEAD` or `.git/index` touch)
+            // still changes `git status`, so the lightweight snapshot
+            // refreshes alongside every tree change, not only `gitChanged`
+            // ones (which drive the heavier branch/history/merge refresh).
+            async let directories: Void = refreshChangedDirectories(
+                changes.changedDirectoryRelativePaths)
+            async let gitSnapshotRefresh: Void = refreshGitSnapshotOnly()
+            _ = await (directories, gitSnapshotRefresh)
+            requestFileIndexRebuild()
+        }
         if changes.gitChanged { await refreshGit() }
         guard !changes.changedDocumentPaths.isEmpty else { return }
         for document in openDocuments where !document.isDirty {
@@ -282,6 +327,11 @@ final class WorkspaceSession {
         }
     }
 
+    /// Re-lists the workspace root plus every directory the sidebar has
+    /// already materialized (rename, create, checkout, pull, merge,
+    /// replacement, restore, and the initial open all funnel through here).
+    /// Bounded by expansion: a directory the sidebar has never opened is
+    /// never listed, matching `loadChildrenIfNeeded`.
     func refreshWorkspace() async {
         guard let rootURL else { return }
         isLoadingTree = true
@@ -290,16 +340,179 @@ final class WorkspaceSession {
         // refresh (e.g. rapid branch switches).
         defer { isLoadingTree = false }
         do {
-            async let tree = fileService.tree(rootURL: rootURL)
+            async let tree: Void = reloadMaterializedDirectories(rootURL: rootURL)
             async let git = gitService.snapshot(at: rootURL)
-            fileTree = try await tree
+            try await tree
             gitSnapshot = try await git
+            if gitSnapshot == nil { resetGitWorkbenchState() }
+            reconcileGitSelection()
+            requestFileIndexRebuild()
+        } catch is CancellationError {
+            return
+        } catch {
+            reportOpenFolderError(error)
+        }
+    }
+
+    /// Loads one directory level on demand — called when the sidebar
+    /// expands a directory that has not been materialized yet. A no-op if
+    /// the directory is already loaded or a fetch for it is in flight.
+    func loadChildrenIfNeeded(_ relativeDirectoryPath: String) {
+        guard loadedChildren[relativeDirectoryPath] == nil,
+            !loadingDirectories.contains(relativeDirectoryPath)
+        else { return }
+        Task { await loadChildren(relativeDirectoryPath) }
+    }
+
+    /// Expands and loads every ancestor directory of `path` (workspace root
+    /// or a folder breadcrumb segment, always a directory) so the sidebar
+    /// shows it. Scrolling the row into view is deferred future work.
+    func revealInSidebar(path: String) {
+        selectedTreePath = path
+        guard let rootURL else { return }
+        let rootPath = rootURL.path
+        guard path == rootPath || path.hasPrefix(rootPath + "/") else { return }
+        let relative = String(path.dropFirst(rootPath.count)).trimmingCharacters(
+            in: CharacterSet(charactersIn: "/")
+        )
+        let components = relative.isEmpty ? [] : relative.split(separator: "/").map(String.init)
+        Task { await expandAndLoadAncestors(components) }
+    }
+
+    /// Opens a file at a workspace-relative path — used by the command
+    /// palette, which resolves file mode against the background name index
+    /// rather than the sidebar's materialized tree.
+    func openFile(atRelativePath relativePath: String) {
+        guard let rootURL else { return }
+        let url = rootURL.appending(path: relativePath)
+        open(WorkspaceFileNode(url: url, relativePath: relativePath, isDirectory: false))
+    }
+
+    /// Ranks the background file-name index against `term`, off-main and
+    /// cancellable. An empty term returns the first `limit` indexed paths.
+    func queryFileIndex(term: String, limit: Int) async throws -> [String] {
+        try await fileIndex.query(term: term, limit: limit)
+    }
+
+    private func expandAndLoadAncestors(_ components: [String]) async {
+        expandedDirectories.insert("")
+        await loadChildren("")
+        var currentRelativePath = ""
+        for component in components {
+            currentRelativePath =
+                currentRelativePath.isEmpty ? component : currentRelativePath + "/" + component
+            expandedDirectories.insert(currentRelativePath)
+            await loadChildren(currentRelativePath)
+        }
+    }
+
+    private func loadChildren(_ relativeDirectoryPath: String) async {
+        guard let rootURL, loadedChildren[relativeDirectoryPath] == nil else { return }
+        guard !loadingDirectories.contains(relativeDirectoryPath) else { return }
+        loadingDirectories.insert(relativeDirectoryPath)
+        defer { loadingDirectories.remove(relativeDirectoryPath) }
+        do {
+            let children = try await fileService.listDirectory(
+                rootURL: rootURL, relativeDirectoryPath: relativeDirectoryPath)
+            loadedChildren[relativeDirectoryPath] = children
+        } catch is CancellationError {
+            return
+        } catch {
+            reportOpenFolderError(error)
+        }
+    }
+
+    private func reloadMaterializedDirectories(rootURL: URL) async throws {
+        var relativePaths = Set(loadedChildren.keys)
+        relativePaths.insert("")
+        var updated: [String: [WorkspaceFileNode]] = [:]
+        for relativePath in relativePaths {
+            try Task.checkCancellation()
+            if let children = try? await fileService.listDirectory(
+                rootURL: rootURL, relativeDirectoryPath: relativePath)
+            {
+                updated[relativePath] = children
+            }
+        }
+        loadedChildren = updated
+        expandedDirectories.formIntersection(Set(updated.keys))
+    }
+
+    /// FSEvents path: re-lists only the changed directories the sidebar has
+    /// already materialized, pruning a directory (and every materialized
+    /// descendant, by relative-path prefix) that no longer lists.
+    private func refreshChangedDirectories(_ changedDirectoryRelativePaths: Set<String>) async {
+        guard let rootURL else { return }
+        let materializedChanged = changedDirectoryRelativePaths.filter {
+            loadedChildren[$0] != nil
+        }
+        for relativePath in materializedChanged {
+            do {
+                let children = try await fileService.listDirectory(
+                    rootURL: rootURL, relativeDirectoryPath: relativePath)
+                loadedChildren[relativePath] = children
+            } catch is CancellationError {
+                return
+            } catch {
+                pruneMaterializedSubtree(rootedAt: relativePath)
+            }
+        }
+    }
+
+    private func pruneMaterializedSubtree(rootedAt relativePath: String) {
+        let prefix = relativePath.isEmpty ? nil : relativePath + "/"
+        loadedChildren = loadedChildren.filter { key, _ in
+            key != relativePath && !(prefix.map(key.hasPrefix) ?? false)
+        }
+        expandedDirectories = expandedDirectories.filter { key in
+            key != relativePath && !(prefix.map(key.hasPrefix) ?? false)
+        }
+    }
+
+    private func refreshGitSnapshotOnly() async {
+        guard let rootURL else { return }
+        do {
+            gitSnapshot = try await gitService.snapshot(at: rootURL)
             if gitSnapshot == nil { resetGitWorkbenchState() }
             reconcileGitSelection()
         } catch is CancellationError {
             return
         } catch {
             reportOpenFolderError(error)
+        }
+    }
+
+    private func resetFileTreeState() {
+        loadedChildren = [:]
+        expandedDirectories = []
+        loadingDirectories = []
+        indexRebuildTask?.cancel()
+        indexRebuildTask = nil
+        indexRebuildQueued = false
+        fileIndexState = .idle
+        Task { await fileIndex.reset() }
+    }
+
+    /// Coalesces index rebuild requests to one build in flight plus at most
+    /// one trailing rebuild, so FSEvents storms and back-to-back Git
+    /// operations never pile up overlapping `git ls-files`/enumerator work.
+    private func requestFileIndexRebuild() {
+        guard let rootURL else { return }
+        if indexRebuildTask != nil {
+            indexRebuildQueued = true
+            return
+        }
+        fileIndexState = .building
+        indexRebuildTask = Task(name: "Rebuild file name index") { [weak self] in
+            guard let self else { return }
+            await fileIndex.build(rootURL: rootURL)
+            fileIndexState = await fileIndex.currentState
+            fileIndexGeneration += 1
+            indexRebuildTask = nil
+            if indexRebuildQueued {
+                indexRebuildQueued = false
+                requestFileIndexRebuild()
+            }
         }
     }
 
@@ -338,10 +551,21 @@ final class WorkspaceSession {
             select(existing)
             return
         }
-        let document = EditorDocument(url: node.url)
+        let document = trackNewDocument(url: node.url)
+        select(document)
+    }
+
+    /// Creates and registers a brand-new `EditorDocument`: appends it to
+    /// `openDocuments`, seeds its find state, and notifies
+    /// `languageIntelligence`. Every document-creation site in this file
+    /// routes through here so lane 2 always learns about a new document,
+    /// regardless of which UI path opened it.
+    private func trackNewDocument(url: URL) -> EditorDocument {
+        let document = EditorDocument(url: url)
         openDocuments.append(document)
         documentFindStates[document.id] = DocumentFindState()
-        select(document)
+        languageIntelligence.documentDidOpen(document)
+        return document
     }
 
     func select(_ document: EditorDocument) {
@@ -392,6 +616,7 @@ final class WorkspaceSession {
             _ = editorLayout.closeTab(tab.id)
         }
         documentFindStates[document.id] = nil
+        languageIntelligence.documentDidClose(document)
         synchronizeSelectionFromLayout(
             fallback: openDocuments.indices.contains(index)
                 ? openDocuments[index] : openDocuments.last
@@ -530,9 +755,7 @@ final class WorkspaceSession {
         if let existing = openDocuments.first(where: { $0.url == url }) {
             document = existing
         } else {
-            document = EditorDocument(url: url)
-            openDocuments.append(document)
-            documentFindStates[document.id] = DocumentFindState()
+            document = trackNewDocument(url: url)
         }
 
         let targetGroupID: EditorGroupID
@@ -570,9 +793,7 @@ final class WorkspaceSession {
         if let existing = openDocuments.first(where: { $0.url == fileURL }) {
             document = existing
         } else {
-            document = EditorDocument(url: fileURL)
-            openDocuments.append(document)
-            documentFindStates[document.id] = DocumentFindState()
+            document = trackNewDocument(url: fileURL)
         }
         select(document)
         let state = findState(for: document)
@@ -660,8 +881,7 @@ final class WorkspaceSession {
                     WorkspaceFileNode(
                         url: url,
                         relativePath: relativePath(for: url),
-                        isDirectory: false,
-                        children: nil
+                        isDirectory: false
                     )
                 )
             }
@@ -1111,6 +1331,8 @@ final class WorkspaceSession {
     isolated deinit {
         liveness.stop()
         restorationTask?.cancel()
+        indexRebuildTask?.cancel()
+        languageIntelligence.workspaceDidClose()
         stopAccessingSecurityScopedURL()
     }
 
@@ -1138,15 +1360,15 @@ final class WorkspaceSession {
             )
             navigatorMode = restored.navigatorMode
             workspaceSearch.loadHistory(for: resolved.url)
+            resetFileTreeState()
             startFileWatcher()
             await refreshWorkspace()
 
+            languageIntelligence.workspaceDidOpen(root: resolved.url)
             for relativePath in restored.openRelativePaths {
                 let url = resolved.url.appending(path: relativePath)
                 guard FileManager.default.fileExists(atPath: url.path) else { continue }
-                let document = EditorDocument(url: url)
-                openDocuments.append(document)
-                documentFindStates[document.id] = DocumentFindState()
+                _ = trackNewDocument(url: url)
             }
             restoreEditorLayout(restored.editorLayout, from: restored.rootPath, to: resolved.url)
             if let selected = restored.selectedRelativePath,

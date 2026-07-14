@@ -4,7 +4,6 @@ nonisolated struct WorkspaceFileNode: Identifiable, Hashable, Sendable {
     let url: URL
     let relativePath: String
     let isDirectory: Bool
-    let children: [WorkspaceFileNode]?
 
     var id: String { url.path }
     var name: String { url.lastPathComponent }

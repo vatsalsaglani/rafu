@@ -27,8 +27,13 @@ struct WorkspaceSidebarView: View {
                     Text("Open a folder to begin")
                         .foregroundStyle(theme.palette.textSecondary)
                 } else {
-                    OutlineGroup(session.fileTree, children: \.children) { node in
-                        row(for: node)
+                    ForEach(session.loadedChildren[""] ?? [], id: \.id) { node in
+                        WorkspaceFileTreeItem(
+                            session: session,
+                            node: node,
+                            renameNode: $renameNode,
+                            renameText: $renameText
+                        )
                     }
                 }
             }
@@ -85,11 +90,90 @@ struct WorkspaceSidebarView: View {
         Binding(get: { renameNode != nil }, set: { if !$0 { renameNode = nil } })
     }
 
+    private var creationBinding: Binding<Bool> {
+        Binding(
+            get: { session.pendingFileCreation != nil },
+            set: { if !$0 { session.pendingFileCreation = nil } }
+        )
+    }
+}
+
+/// One row of the lazy file tree. A directory wraps its row in a
+/// `DisclosureGroup` bound to `session.expandedDirectories`, loading its
+/// children on demand (`session.loadChildrenIfNeeded`) the moment it is
+/// expanded — including by `session.revealInSidebar`, which expands every
+/// ancestor of a breadcrumb click. A file row is a leaf with no group.
+///
+/// `DisclosureGroup` recursion (instead of `OutlineGroup`) is required by
+/// the lazy tree: `OutlineGroup` needs a fully materialized `children`
+/// key path up front, which is exactly what per-directory loading avoids.
+private struct WorkspaceFileTreeItem: View {
+    @Bindable var session: WorkspaceSession
+    let node: WorkspaceFileNode
+    @Binding var renameNode: WorkspaceFileNode?
+    @Binding var renameText: String
+
+    var body: some View {
+        if node.isDirectory {
+            DisclosureGroup(isExpanded: expandedBinding) {
+                directoryContent
+            } label: {
+                row
+            }
+            .onChange(of: expandedBinding.wrappedValue, initial: true) { _, isExpanded in
+                if isExpanded { session.loadChildrenIfNeeded(node.relativePath) }
+            }
+        } else {
+            row
+        }
+    }
+
+    @ViewBuilder
+    private var directoryContent: some View {
+        if let children = session.loadedChildren[node.relativePath] {
+            if children.isEmpty {
+                Text("No items")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .listRowBackground(Color.clear)
+            } else {
+                ForEach(children, id: \.id) { child in
+                    WorkspaceFileTreeItem(
+                        session: session,
+                        node: child,
+                        renameNode: $renameNode,
+                        renameText: $renameText
+                    )
+                }
+            }
+        } else {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.mini)
+                Text("Loading…").font(.caption)
+            }
+            .foregroundStyle(.secondary)
+            .listRowBackground(Color.clear)
+        }
+    }
+
+    private var expandedBinding: Binding<Bool> {
+        Binding(
+            get: { session.expandedDirectories.contains(node.relativePath) },
+            set: { isExpanded in
+                if isExpanded {
+                    session.expandedDirectories.insert(node.relativePath)
+                } else {
+                    session.expandedDirectories.remove(node.relativePath)
+                }
+            }
+        )
+    }
+
     /// A file row gets `.onDrag` so it can be dropped into the editor area
     /// (same private drag type and live preview as tab drags); directories
     /// never drag. The single- and double-click gestures are unaffected.
     @ViewBuilder
-    private func row(for node: WorkspaceFileNode) -> some View {
+    private var row: some View {
         let base =
             FileTreeRow(
                 node: node,
@@ -102,7 +186,7 @@ struct WorkspaceSidebarView: View {
                     session.selectedTreePath = node.url.path
                 }
             )
-            .contextMenu { contextMenu(for: node) }
+            .contextMenu { contextMenu }
             .listRowBackground(Color.clear)
         if node.isDirectory {
             base
@@ -112,7 +196,7 @@ struct WorkspaceSidebarView: View {
     }
 
     @ViewBuilder
-    private func contextMenu(for node: WorkspaceFileNode) -> some View {
+    private var contextMenu: some View {
         if !node.isDirectory {
             Button("Open") { session.open(node) }
             Divider()
@@ -129,13 +213,6 @@ struct WorkspaceSidebarView: View {
         Button("Copy Relative Path") { copyString(node.relativePath) }
         Button("Copy Absolute Path") { copyString(node.url.path) }
         Button("Copy File") { copyFile(node.url) }
-    }
-
-    private var creationBinding: Binding<Bool> {
-        Binding(
-            get: { session.pendingFileCreation != nil },
-            set: { if !$0 { session.pendingFileCreation = nil } }
-        )
     }
 
     private func copyString(_ value: String) {

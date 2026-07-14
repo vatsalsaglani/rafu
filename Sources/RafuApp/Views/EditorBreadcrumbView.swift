@@ -119,7 +119,7 @@ struct EditorBreadcrumbView: View {
         case .workspace, .folder:
             Button(segment.title) {
                 if let path = segment.path {
-                    session.selectedTreePath = path
+                    session.revealInSidebar(path: path)
                 }
             }
             .buttonStyle(BreadcrumbSegmentButtonStyle())
