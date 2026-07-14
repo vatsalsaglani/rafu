@@ -26,9 +26,13 @@ Follow this exact sequence:
    a final read-only review.
 8. If the advisor identifies a concrete defect, send only those actionable
    findings back to the implementor.
-9. Return the final implementation summary, verification results, deviations,
-   and unresolved concerns.
+9. Send the implementor's report, your verification results, and any durable
+   nuances or decisions to the `documentor` agent to update
+   docs/references/, docs/decisions/, and the active phase document per the
+   AGENTS.md standing learning rule. Review its diff.
+10. Return the final implementation summary, verification results,
+    deviations, documentation updates, and unresolved concerns.
 
-Do not allow the advisor to edit files.
+Do not allow the advisor or documentor to edit implementation files.
 Do not claim that tests passed unless their commands were actually run.
 Do not commit or push unless the user explicitly requests it.

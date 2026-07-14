@@ -4,7 +4,7 @@ description: >
   Implementation specialist. Use after the advisor has produced an approved
   implementation brief. Makes focused code changes and verifies them.
 tools: Read, Grep, Glob, Edit, Write, Bash
-model: sonnet
+model: claude-sonnet-5
 permissionMode: acceptEdits
 effort: high
 maxTurns: 160
