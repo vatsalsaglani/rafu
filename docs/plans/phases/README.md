@@ -35,6 +35,15 @@ Bootstrap itself did **not** claim TextKit editing, Tree-sitter, SSH, launcher I
 | [Phase 4](phase-4-ai-commit-messages.md) | Planned | Phase 3 | Safe, editable AI commit suggestions |
 | [Phase 5](phase-5-hardening-distribution.md) | Planned | Phase 4 feature set | Reliable notarized distribution |
 | [Phase 6](phase-6-controlled-expansion.md) | Deferred | Phase 5 plus explicit approval | Only approved bounded additions |
+| [Memory resilience](memory-resilience.md) | Planned | Initial push; interleaves with feature phases | Budgets hold under abuse, with recorded Release evidence |
+| [Language intelligence](language-intelligence.md) | Planned | Initial push; ADR 0005; Resources surface for Stage C | Ladder navigation (Tree-sitter → symbols → opt-in LSP) shipped in bounded stages |
+
+Memory resilience and language intelligence execute as the two-lane worktree
+split defined in `language-intelligence.md`: lane 1
+([`lane-1-memory-and-syntax-plan.md`](lane-1-memory-and-syntax-plan.md), main
+checkout) and lane 2
+([`lane-2-lsp-plan.md`](lane-2-lsp-plan.md), dedicated worktree created only
+after lane 1's contract commit lands).
 
 Phase 1C may develop late in parallel with Phase 1B after shared routing contracts stabilize, but the Phase 1 public gate requires 1A, 1B, and 1C together. Hardening and tests are continuous; Phase 5 is the dedicated release gate.
 
@@ -77,7 +86,7 @@ Before spawning a phase's worktrees, the integration owner must replace any stil
 - CLI requests use versioned same-user Unix-domain socket IPC; do not use `open --args` as the protocol.
 - Git and process invocations use executable argument arrays, never shell command strings.
 - AI is explicit, sanitized, previewed, editable, and never commits automatically.
-- No extension host, embedded terminal, general LSP ecosystem, custom SSH stack, or per-document WebView.
+- No extension host, custom SSH stack, or per-document WebView. The embedded terminal (ADR 0004) and an opt-in, bounded LSP client (ADR 0005) are deliberate recorded reversals; a general LSP ecosystem and marketplace remain excluded.
 - Standard macOS controls and behavior come before custom glass or decorative motion.
 - Record Release-build memory and latency evidence; native implementation alone is not proof of efficiency.
 

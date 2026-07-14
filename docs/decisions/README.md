@@ -14,6 +14,7 @@ Accepted ADRs take precedence over older plan suggestions when they explicitly s
 | [0002](0002-native-workbench-navigation.md) | Partially superseded by 0003 | Use one native workbench Navigator and editor-hosted details |
 | [0003](0003-files-left-utility-right.md) | Accepted | Files-only left sidebar; Search and Source Control in a right utility panel |
 | [0004](0004-embedded-terminal.md) | Accepted | Adopt a lazy, bounded embedded terminal panel built on SwiftTerm |
+| [0005](0005-language-intelligence-and-lsp.md) | Accepted | Tree-sitter as the real syntax engine plus an opt-in, memory-bounded LSP client with a transparent, user-controlled server registry |
 
 Unresolved choices are tracked in [`open-decisions.md`](open-decisions.md).
 

@@ -218,6 +218,18 @@ Principles:
       workspace restoration is gated to once per app launch
       (`WorkspaceRestorationGate`).
 
+- [x] Memory + indexing package (advisor→implementor): eager recursive file
+      tree replaced with lazy per-directory loading (`listDirectory`,
+      `loadedChildren`/`expandedDirectories`, DisclosureGroup sidebar,
+      breadcrumb reveal-with-expansion); FSEvents re-lists only materialized
+      changed directories; ⌘P now queries a background
+      `WorkspaceFileNameIndex` actor (git ls-files fast path,
+      .gitignore-aware, 200k cap, off-main filename-over-path ranking with
+      per-keystroke cancellation, Indexing/truncation states). Measured on a
+      synthetic 100k-file monorepo (debug, directional): ~47–49 MB idle vs
+      the reported ~900 MB–1 GB before. Numbers + procedure in
+      `docs/references/memory-and-file-indexing.md`.
+
 ## Still open / next agent
 
 - Editor gutter (line numbers), indent guides, and find-match colors decode
@@ -225,6 +237,12 @@ Principles:
 - Tree-sitter remains the documented upgrade path behind
   `SyntaxHighlighter.tokenApplication` (Neon token source); each grammar is a
   C dependency needing license + memory review.
+- 2026-07-14: the Tree-sitter upgrade, workspace symbol navigation, and an
+  opt-in LSP client are now formally planned — ADR 0005 plus
+  `docs/plans/phases/language-intelligence.md`. Proactive memory hardening
+  (large-file guard mode, Resources surface, tab hibernation, watcher storm
+  breaker, pressure response) is planned in
+  `docs/plans/phases/memory-resilience.md`.
 - Terminal memory should be re-measured in a Release build with the panel
   open before distribution (ADR 0004 expectation: tens of MB after first
   open, zero before).

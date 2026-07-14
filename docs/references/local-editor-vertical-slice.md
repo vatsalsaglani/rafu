@@ -17,6 +17,8 @@
   useful dotfiles such as `.env`, `.gitignore`, `.github`, and `.swift-format`.
   One unreadable child directory produces an empty node rather than discarding the
   entire workspace tree. UTF-8 editing is capped at 4 MB for this checkpoint.
+  The sidebar tree is lazy and expansion-driven, not eagerly recursive — see
+  [`memory-and-file-indexing.md`](memory-and-file-indexing.md).
 - Markdown preview is a native block renderer. The Mermaid checkpoint supports
   flowchart edges and sequence participants/messages; unsupported Mermaid syntax
   degrades to the parsed subset instead of instantiating a web view.
