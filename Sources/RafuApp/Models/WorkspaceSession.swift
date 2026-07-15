@@ -667,10 +667,15 @@ final class WorkspaceSession {
     /// Constructs the navigation ladder for `rootURL`. The syntactic tier sits
     /// above the bounded text tier.
     private func makeNavigationLadder(rootURL: URL) -> NavigationLadder {
-        NavigationLadder(providers: [
-            // Lane-2 LSP insertion point: a language-server-backed provider
-            // belongs here, at index 0 above the syntactic tier, once lane 2
-            // lands. Do NOT add it in lane 1.
+        let coordinator = languageIntelligence
+        return NavigationLadder(providers: [
+            // LSP tier (lane 2): a trusted, running language server answers
+            // first, labeled "via <server>". It declines — falling through to
+            // the syntactic then text tiers — when no server is installed or
+            // trusted for the language, or a request fails/times out.
+            LSPNavigationProvider(rootURL: rootURL) { languageID in
+                await coordinator.session(forLanguageID: languageID)
+            },
             SyntacticNavigationProvider(index: symbolIndex, rootURL: rootURL),
             TextSearchNavigationProvider(rootURL: rootURL),
         ])

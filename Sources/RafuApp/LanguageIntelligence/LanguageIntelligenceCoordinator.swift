@@ -183,6 +183,10 @@ final class LanguageIntelligenceCoordinator {
         layout = InstallLayout()
         manager = LanguageServerManager(
             resolver: DynamicLanguageServerResolver(box: box),
+            // Post-merge integration: register language-server pids into the
+            // process-wide shared registry so lane 1's Resources surface
+            // attributes their memory alongside terminal shells.
+            registry: ProcessResourceRegistry.shared,
             statusSink: { status in
                 store.update(status)
             },
