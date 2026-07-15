@@ -111,3 +111,57 @@ func classifierComputesChangedDirectoryRelativePaths() {
     )
     #expect(mixed.changedDirectoryRelativePaths == ["Sources/App"])
 }
+
+@Test("A large single-directory batch is a storm and clears changed directories")
+func classifierDetectsStormBySurvivingPathCount() {
+    let classifier = WorkspaceChangeClassifier()
+    let paths = (0..<1_001).map { "\(root)/dir/f\($0).swift" }
+    let changes = classifier.classify(paths: paths, rootPath: root, openDocumentPaths: [])
+    #expect(changes.isStorm)
+    #expect(changes.treeChanged)
+    #expect(changes.changedDirectoryRelativePaths.isEmpty)
+}
+
+@Test("A batch touching many distinct directories is a storm even under the path threshold")
+func classifierDetectsStormByChangedDirectoryCount() {
+    let classifier = WorkspaceChangeClassifier()
+    let paths = (0...200).map { "\(root)/d\($0)/f.swift" }
+    let changes = classifier.classify(paths: paths, rootPath: root, openDocumentPaths: [])
+    #expect(changes.isStorm)
+    #expect(changes.changedDirectoryRelativePaths.isEmpty)
+}
+
+@Test("Exactly 1,000 paths in one directory is not a storm")
+func classifierBoundaryNotStormBySurvivingPathCount() {
+    let classifier = WorkspaceChangeClassifier()
+    let paths = (0..<1_000).map { "\(root)/dir/f\($0).swift" }
+    let changes = classifier.classify(paths: paths, rootPath: root, openDocumentPaths: [])
+    #expect(!changes.isStorm)
+    #expect(changes.changedDirectoryRelativePaths == ["dir"])
+}
+
+@Test("Exactly 200 single-file directories is not a storm")
+func classifierBoundaryNotStormByChangedDirectoryCount() {
+    let classifier = WorkspaceChangeClassifier()
+    let paths = (0..<200).map { "\(root)/d\($0)/f.swift" }
+    let changes = classifier.classify(paths: paths, rootPath: root, openDocumentPaths: [])
+    #expect(!changes.isStorm)
+    #expect(changes.changedDirectoryRelativePaths.count == 200)
+}
+
+@Test("A small classify result is not a storm and matches a memberwise literal")
+func classifierSmallBatchIsNotStorm() {
+    let classifier = WorkspaceChangeClassifier()
+    let changes = classifier.classify(
+        paths: ["\(root)/README.md"], rootPath: root, openDocumentPaths: [])
+    #expect(!changes.isStorm)
+    #expect(
+        changes
+            == WorkspaceChangeSet(
+                treeChanged: true,
+                gitChanged: false,
+                changedDocumentPaths: [],
+                changedDirectoryRelativePaths: [""],
+                isStorm: false
+            ))
+}

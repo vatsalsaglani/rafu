@@ -123,6 +123,66 @@ func workspaceReplacementDetectsExternalChange() async throws {
     #expect(try String(contentsOf: file, encoding: .utf8) == "externally changed")
 }
 
+@Test("Workspace search truncates once the maximumFiles visited cap is hit")
+func workspaceSearchTruncatesAtMaximumFilesCap() async throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    for index in 0..<5 {
+        try Data("Rafu".utf8).write(to: root.appending(path: "file\(index).txt"))
+    }
+    var limits = WorkspaceSearchLimits.standard
+    limits.maximumFiles = 2
+
+    let result = try await WorkspaceSearchService().search(
+        WorkspaceSearchRequest(rootURL: root, query: "Rafu", limits: limits))
+
+    #expect(result.isTruncated)
+    #expect(result.groups.count <= 2)
+}
+
+@Test("Workspace search skips a file over maximumFileBytes without reading it")
+func workspaceSearchSkipsFilesOverMaximumFileBytesCap() async throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("Rafu".utf8).write(to: root.appending(path: "small.txt"))
+    let oversizedContent = String(repeating: "Rafu ", count: 10)
+    try Data(oversizedContent.utf8).write(to: root.appending(path: "large.txt"))
+    var limits = WorkspaceSearchLimits.standard
+    limits.maximumFileBytes = 10
+
+    let result = try await WorkspaceSearchService().search(
+        WorkspaceSearchRequest(rootURL: root, query: "Rafu", limits: limits))
+
+    #expect(result.groups.map(\.relativePath) == ["small.txt"])
+    #expect(result.statistics.skippedLargeFiles == 1)
+    #expect(!result.isTruncated)
+}
+
+/// Service-level analog of `WorkspaceSearchModel`'s cancel-safety: the model
+/// only assigns `self?.result` after `try Task.checkCancellation()` post
+/// -await, so a cancelled search task never publishes stale/partial results.
+/// This exercises the guarantee that backs it — `scan`'s
+/// `Task.checkCancellation()` at the top of its enumeration loop throws
+/// before any group is produced, so there is nothing left to publish.
+@Test("A cancelled search throws before producing any result to publish")
+func workspaceSearchCancellationNeverReturnsAResult() async throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    for index in 0..<5_000 {
+        try Data("Rafu".utf8).write(to: root.appending(path: "file\(index).txt"))
+    }
+
+    let service = WorkspaceSearchService()
+    let task = Task {
+        try await service.search(WorkspaceSearchRequest(rootURL: root, query: "Rafu"))
+    }
+    task.cancel()
+
+    await #expect(throws: CancellationError.self) {
+        try await task.value
+    }
+}
+
 private func temporaryDirectory() throws -> URL {
     let url = FileManager.default.temporaryDirectory.appending(
         path: UUID().uuidString,

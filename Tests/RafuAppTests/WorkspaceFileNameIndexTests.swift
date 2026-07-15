@@ -134,6 +134,22 @@ func fileNameIndexQueryIsCancellable() async throws {
     }
 }
 
+@Test("Shedding the index clears its state back to idle, exactly like reset")
+func fileNameIndexShedReturnsToIdle() async throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try write("hello", to: root.appending(path: "Main.swift"))
+
+    let index = WorkspaceFileNameIndex()
+    await index.build(rootURL: root)
+    #expect(await index.currentState != .idle)
+
+    await index.shed()
+    #expect(await index.currentState == .idle)
+    let results = try await index.query(term: "", limit: 10)
+    #expect(results.isEmpty)
+}
+
 private func makeTemporaryDirectory() throws -> URL {
     let url = FileManager.default.temporaryDirectory.appending(
         path: "rafu-file-index-tests-\(UUID().uuidString)",

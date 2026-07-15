@@ -107,3 +107,102 @@ func workspaceRestorationPreservesEditorLayout() throws {
 
     #expect(try decoded.editorLayout?.restoredLayout() == layout)
 }
+
+@MainActor
+@Test("visibleDocumentIDs is the selected tab's document in every group")
+func visibleDocumentIDsAcrossGroups() {
+    let session = WorkspaceSession()
+    let urlA = URL(fileURLWithPath: "/tmp/a.swift")
+    let urlB = URL(fileURLWithPath: "/tmp/b.swift")
+    let docA = EditorDocument(url: urlA)
+    let docB = EditorDocument(url: urlB)
+    session.openDocuments = [docA, docB]
+
+    let tabA = EditorTabState(resource: .file(urlA))
+    let tabB = EditorTabState(resource: .file(urlB))
+
+    // One group holding both tabs with A selected: only A is visible.
+    let singleGroup = EditorGroupState(tabs: [tabA, tabB], selectedTabID: tabA.id)
+    session.editorLayout = EditorLayoutState(
+        root: .group(singleGroup), focusedGroupID: singleGroup.id)
+    #expect(session.visibleDocumentIDs == Set([docA.id]))
+
+    // Split into two groups, each showing one tab: both documents visible.
+    let groupA = EditorGroupState(tabs: [tabA], selectedTabID: tabA.id)
+    let groupB = EditorGroupState(tabs: [tabB], selectedTabID: tabB.id)
+    session.editorLayout = EditorLayoutState(
+        root: .split(
+            id: EditorSplitID(), axis: .horizontal, fraction: 0.5,
+            first: .group(groupA), second: .group(groupB)),
+        focusedGroupID: groupA.id)
+    #expect(session.visibleDocumentIDs == Set([docA.id, docB.id]))
+}
+
+@MainActor
+@Test(
+    "Restored placeholders: only the selected tab of a single group loads; the rest hibernate"
+)
+func restoredPlaceholdersHibernateNonVisibleTabsInSingleGroup() {
+    let session = WorkspaceSession()
+    let urlA = URL(fileURLWithPath: "/tmp/a.swift")
+    let urlB = URL(fileURLWithPath: "/tmp/b.swift")
+    let urlC = URL(fileURLWithPath: "/tmp/c.swift")
+    let docA = EditorDocument(url: urlA)
+    let docB = EditorDocument(url: urlB)
+    let docC = EditorDocument(url: urlC)
+    session.openDocuments = [docA, docB, docC]
+
+    let tabA = EditorTabState(resource: .file(urlA))
+    let tabB = EditorTabState(resource: .file(urlB))
+    let tabC = EditorTabState(resource: .file(urlC))
+    // Fewer than DocumentHibernationPolicy.keepLoadedLimit (8) tabs, which
+    // is exactly the case where the pre-increment-5 restore left every
+    // restored tab loaded via the newest-N grace.
+    let group = EditorGroupState(tabs: [tabA, tabB, tabC], selectedTabID: tabB.id)
+    session.editorLayout = EditorLayoutState(root: .group(group), focusedGroupID: group.id)
+
+    session.applyRestoredHibernationPlaceholders()
+
+    #expect(docB.loadState == .loaded)
+    #expect(docA.loadState == .hibernated)
+    #expect(docC.loadState == .hibernated)
+
+    // Selecting a hibernated restored tab re-materializes it via the normal
+    // hibernated -> refocus path.
+    session.select(docA)
+    #expect(docA.loadState == .loaded)
+}
+
+@MainActor
+@Test("Restored placeholders: each group's selected tab stays loaded across a split layout")
+func restoredPlaceholdersKeepEachGroupsSelectedTabLoaded() {
+    let session = WorkspaceSession()
+    let urlA = URL(fileURLWithPath: "/tmp/a.swift")
+    let urlB = URL(fileURLWithPath: "/tmp/b.swift")
+    let urlC = URL(fileURLWithPath: "/tmp/c.swift")
+    let urlD = URL(fileURLWithPath: "/tmp/d.swift")
+    let docA = EditorDocument(url: urlA)
+    let docB = EditorDocument(url: urlB)
+    let docC = EditorDocument(url: urlC)
+    let docD = EditorDocument(url: urlD)
+    session.openDocuments = [docA, docB, docC, docD]
+
+    let tabA = EditorTabState(resource: .file(urlA))
+    let tabB = EditorTabState(resource: .file(urlB))
+    let tabC = EditorTabState(resource: .file(urlC))
+    let tabD = EditorTabState(resource: .file(urlD))
+    let groupLeft = EditorGroupState(tabs: [tabA, tabB], selectedTabID: tabA.id)
+    let groupRight = EditorGroupState(tabs: [tabC, tabD], selectedTabID: tabD.id)
+    session.editorLayout = EditorLayoutState(
+        root: .split(
+            id: EditorSplitID(), axis: .horizontal, fraction: 0.5,
+            first: .group(groupLeft), second: .group(groupRight)),
+        focusedGroupID: groupLeft.id)
+
+    session.applyRestoredHibernationPlaceholders()
+
+    #expect(docA.loadState == .loaded)
+    #expect(docD.loadState == .loaded)
+    #expect(docB.loadState == .hibernated)
+    #expect(docC.loadState == .hibernated)
+}
