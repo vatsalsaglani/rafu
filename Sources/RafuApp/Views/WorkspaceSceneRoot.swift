@@ -20,6 +20,7 @@ struct WorkspaceSceneRoot: View {
             .environment(\.rafuTheme, theme)
             .preferredColorScheme(preferredColorScheme)
             .task {
+                MemoryPressureMonitor.shared.register(session)
                 // An externally requested folder (rafu CLI / Finder) wins
                 // over last-workspace restoration for a fresh window.
                 if let url = ExternalOpenRequests.shared.take() {

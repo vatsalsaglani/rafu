@@ -45,7 +45,10 @@ struct WorkspaceWindowView: View {
             .navigationSplitViewStyle(.balanced)
 
             Divider()
-            WorkspaceStatusBar(descriptor: session.descriptor)
+            WorkspaceStatusBar(
+                descriptor: session.descriptor,
+                isResourcesPresented: $session.isResourcesPresented
+            )
         }
         .frame(minWidth: 720, minHeight: 480)
         .navigationTitle(session.windowTitle)
@@ -72,6 +75,9 @@ struct WorkspaceWindowView: View {
         }
         .sheet(isPresented: $session.isCommandPalettePresented) {
             CommandPaletteView(session: session)
+        }
+        .sheet(isPresented: $session.isNavigationPeekPresented) {
+            NavigationPeekView(session: session)
         }
         .sheet(isPresented: $session.isQuitConfirmationPresented) {
             EmptyWindowQuitConfirmationView()

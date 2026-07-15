@@ -75,6 +75,34 @@ struct RafuAppCommands: Commands {
             }
             .keyboardShortcut("`", modifiers: [.control, .shift])
 
+            Button("Show Resources") {
+                workspaceSession?.showResources()
+            }
+            .accessibilityIdentifier(NavigationCommandID.showResources)
+            .disabled(workspaceSession == nil)
+
+            Divider()
+
+            Button("Go to Definition") {
+                workspaceSession?.navigate(kind: .definition)
+            }
+            .keyboardShortcut("j", modifiers: [.control, .command])
+            .accessibilityIdentifier(NavigationCommandID.goToDefinition)
+            .disabled(workspaceSession?.selectedDocument == nil)
+
+            Button("Go to Declaration") {
+                workspaceSession?.navigate(kind: .declaration)
+            }
+            .accessibilityIdentifier(NavigationCommandID.goToDeclaration)
+            .disabled(workspaceSession?.selectedDocument == nil)
+
+            Button("Find References") {
+                workspaceSession?.navigate(kind: .references)
+            }
+            .keyboardShortcut("r", modifiers: [.control, .command])
+            .accessibilityIdentifier(NavigationCommandID.findReferences)
+            .disabled(workspaceSession?.selectedDocument == nil)
+
             Divider()
 
             Button("Close Editor") {

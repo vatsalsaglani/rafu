@@ -55,6 +55,11 @@ final class WorkspaceSession {
     /// finishes while the palette is open, or was open before the build
     /// started, is never stuck showing empty results.
     var fileIndexGeneration = 0
+    var symbolIndexState: WorkspaceSymbolIndex.State = .idle
+    /// Bumped every time a workspace-symbol index build or incremental update
+    /// completes. The command palette keys its `#`-mode query task off this,
+    /// exactly like `fileIndexGeneration` for file mode.
+    var symbolIndexGeneration = 0
     var openDocuments: [EditorDocument] = []
     var editorLayout = EditorLayoutState()
     var selectedDocumentID: UUID?
@@ -90,6 +95,13 @@ final class WorkspaceSession {
     var isDocumentFindPresented = false
     var isDocumentReplacePresented = false
     var isQuitConfirmationPresented = false
+    var isResourcesPresented = false
+    /// `true` while `NavigationPeekView` is presented — either a genuine
+    /// multi-candidate peek, an in-progress index build, or a "nothing
+    /// found" message. `navigate(kind:)` and `navigateToSymbolCandidate(_:)`
+    /// are the only writers of this pair; see their doc comments.
+    var isNavigationPeekPresented = false
+    var navigationPeekContent: NavigationPeekContent?
     var cliInstallMessage: String?
     var isOpenFolderErrorPresented = false
     var openFolderErrorTitle = "Unable to Open Folder"
@@ -114,6 +126,30 @@ final class WorkspaceSession {
 
     @ObservationIgnored
     private var indexRebuildQueued = false
+
+    @ObservationIgnored
+    private let symbolIndex = WorkspaceSymbolIndex()
+
+    @ObservationIgnored
+    private var symbolIndexRebuildTask: Task<Void, Never>?
+
+    @ObservationIgnored
+    private var symbolIndexRebuildQueued = false
+
+    /// The navigation ladder for the open workspace: syntactic tier over the
+    /// symbol index, then the bounded text-search fallback. Rebuilt whenever a
+    /// workspace opens (a fresh `rootURL`). The editor-cursor seam that RUNS
+    /// this ladder arrives in increment 10b; 10a only owns and constructs it.
+    @ObservationIgnored
+    private(set) var navigationLadder: NavigationLadder?
+
+    /// The in-flight `navigate(kind:)` request. A second navigation call
+    /// cancels this before starting its own — e.g. Go to Definition fired
+    /// twice in a row, or the caret moving to a different identifier before
+    /// a slow text-tier lookup finishes — so a superseded answer can never
+    /// land after a newer one.
+    @ObservationIgnored
+    private var navigationTask: Task<Void, Never>?
 
     @ObservationIgnored
     private let gitService = GitService()
@@ -184,6 +220,115 @@ final class WorkspaceSession {
 
     var selectedDocument: EditorDocument? {
         openDocuments.first { $0.id == selectedDocumentID }
+    }
+
+    /// Ids of documents whose editor is currently visible: the selected tab
+    /// of every group across the split layout. Drives the "never hibernate a
+    /// visible document" rule in `DocumentHibernationPolicy`.
+    var visibleDocumentIDs: Set<UUID> {
+        var ids = Set<UUID>()
+        for groupID in editorLayout.groupIDs {
+            guard let group = editorLayout.group(id: groupID),
+                let selectedTabID = group.selectedTabID,
+                let tab = group.tabs.first(where: { $0.id == selectedTabID }),
+                let document = document(for: tab)
+            else { continue }
+            ids.insert(document.id)
+        }
+        return ids
+    }
+
+    /// Monotonic access counter feeding each document's `accessSequence`.
+    @ObservationIgnored
+    private var accessSequenceCounter = 0
+
+    /// Assigns the next access rank to a document as it becomes selected, so
+    /// the newest-N grace in `DocumentHibernationPolicy` reflects real use.
+    private func recordAccess(_ document: EditorDocument) {
+        accessSequenceCounter += 1
+        document.accessSequence = accessSequenceCounter
+    }
+
+    /// Recomputes the bounded editor working set and flips each open
+    /// document's `loadState`. Called from every path that changes document
+    /// visibility or the open-document set. Passes `bypassNewestGrace` (the
+    /// policy's `underMemoryPressure`) through as `false` by default; the
+    /// memory-pressure source arrives in a later increment. `true` drops the
+    /// newest-N grace so only the currently visible documents stay loaded —
+    /// used by `applyRestoredHibernationPlaceholders()`.
+    private func updateHibernationStates(bypassNewestGrace: Bool = false) {
+        let visibleIDs = visibleDocumentIDs
+        let inputs = openDocuments.map { document in
+            DocumentHibernationInput(
+                id: document.id,
+                isVisible: visibleIDs.contains(document.id),
+                isDirty: document.isDirty,
+                accessSequence: document.accessSequence
+            )
+        }
+        let hibernating = DocumentHibernationPolicy.hibernating(
+            documents: inputs, underMemoryPressure: bypassNewestGrace)
+        for document in openDocuments {
+            if hibernating.contains(document.id) {
+                document.markHibernated()
+            } else {
+                document.markLoaded()
+            }
+        }
+    }
+
+    /// Applied once, at the end of `restoreLastWorkspaceIfAvailable()`. A
+    /// just-restored, never-focused tab is a placeholder, not a loaded
+    /// editor: only each group's visible tab should read its file and mount
+    /// an `NSTextView` at launch. Every other clean restored document starts
+    /// `.hibernated` and materializes through the normal hibernated→refocus
+    /// reload path (see `DocumentHibernationPolicy`) the first time the user
+    /// selects it. Reuses the memory-pressure branch of
+    /// `updateHibernationStates`, which already drops the newest-N grace and
+    /// hibernates every non-visible, non-dirty document — exactly the
+    /// restoration-placeholder rule, and safe because that branch never
+    /// touches a dirty or visible document.
+    func applyRestoredHibernationPlaceholders() {
+        updateHibernationStates(bypassNewestGrace: true)
+    }
+
+    /// Invoked by `MemoryPressureMonitor` on macOS warning/critical memory
+    /// pressure. Hibernates every eligible open document immediately (grace
+    /// bypassed — reuses the exact policy branch
+    /// `applyRestoredHibernationPlaceholders()` uses) and sheds this
+    /// session's largest cache outside open documents, the background
+    /// filename index. Never touches a dirty or visible document; see
+    /// `DocumentHibernationPolicy`.
+    ///
+    /// The shed index is not rebuilt here — a rebuild-on-demand happens the
+    /// next time the command palette actually queries files
+    /// (`ensureFileIndexReady()`), so sustained pressure never triggers a
+    /// rebuild storm on its own.
+    func respondToMemoryPressure() {
+        updateHibernationStates(bypassNewestGrace: true)
+
+        indexRebuildTask?.cancel()
+        indexRebuildTask = nil
+        indexRebuildQueued = false
+        fileIndexState = .idle
+        Task { await fileIndex.shed() }
+        // Bumped even though the shed above is a fire-and-forget actor call:
+        // it always wins the race against a later `requestFileIndexRebuild`
+        // enqueued from `ensureFileIndexReady`, because actor calls on
+        // `fileIndex` execute in submission order.
+        fileIndexGeneration += 1
+
+        // Shed the workspace-symbol index alongside the filename index: it is
+        // this session's other large cache outside open documents. Same
+        // rebuild-on-demand contract — `ensureSymbolIndexReady()` rebuilds it
+        // the next time the palette's `#` mode queries, so sustained pressure
+        // never triggers a rebuild storm on its own.
+        symbolIndexRebuildTask?.cancel()
+        symbolIndexRebuildTask = nil
+        symbolIndexRebuildQueued = false
+        symbolIndexState = .idle
+        Task { await symbolIndex.shed() }
+        symbolIndexGeneration += 1
     }
 
     var aiCommitGenerationScopeDescription: String {
@@ -259,6 +404,7 @@ final class WorkspaceSession {
             displayName: name,
             location: .local(LocalWorkspaceReference(path: url.path))
         )
+        navigationLadder = makeNavigationLadder(rootURL: url)
         openDocuments = []
         editorLayout = EditorLayoutState()
         documentFindStates = [:]
@@ -298,7 +444,13 @@ final class WorkspaceSession {
     }
 
     private func handleExternalChanges(_ changes: WorkspaceChangeSet) async {
-        if changes.treeChanged {
+        if changes.isStorm {
+            // A large debounced batch (branch checkout, npm install, mass
+            // touch) collapses into one coalesced full refresh instead of
+            // per-changed-directory work, which already includes the git
+            // snapshot and a single index rebuild.
+            await refreshWorkspace()
+        } else if changes.treeChanged {
             // A working-tree edit (no `.git/HEAD` or `.git/index` touch)
             // still changes `git status`, so the lightweight snapshot
             // refreshes alongside every tree change, not only `gitChanged`
@@ -308,6 +460,8 @@ final class WorkspaceSession {
             async let gitSnapshotRefresh: Void = refreshGitSnapshotOnly()
             _ = await (directories, gitSnapshotRefresh)
             requestFileIndexRebuild()
+            requestSymbolIndexIncrementalUpdate(
+                changedDirectoryRelativePaths: changes.changedDirectoryRelativePaths)
         }
         if changes.gitChanged { await refreshGit() }
         guard !changes.changedDocumentPaths.isEmpty else { return }
@@ -347,6 +501,7 @@ final class WorkspaceSession {
             if gitSnapshot == nil { resetGitWorkbenchState() }
             reconcileGitSelection()
             requestFileIndexRebuild()
+            requestSymbolIndexRebuild()
         } catch is CancellationError {
             return
         } catch {
@@ -388,10 +543,137 @@ final class WorkspaceSession {
         open(WorkspaceFileNode(url: url, relativePath: relativePath, isDirectory: false))
     }
 
+    /// Opens the file at a workspace-relative path and selects `range` — the
+    /// command palette's `#` workspace-symbol jump. Mirrors `openFile` plus a
+    /// find-state range selection, without touching the workspace-search find
+    /// query the way `openSearchLocation` does.
+    func openWorkspaceSymbol(relativePath: String, range: NSRange) {
+        guard let rootURL else { return }
+        let url = rootURL.appending(path: relativePath)
+        let document: EditorDocument
+        if let existing = openDocuments.first(where: { $0.url == url }) {
+            document = existing
+        } else {
+            document = trackNewDocument(url: url)
+        }
+        select(document)
+        findState(for: document).select(range)
+    }
+
+    /// Caret-driven navigation entry point for the "Go to Definition"/"Go to
+    /// Declaration"/"Find References" menu commands. Builds a
+    /// `NavigationRequest` from the active editor's caret and identifier,
+    /// runs it through `navigationLadder`, and either jumps straight to a
+    /// sole candidate or presents a peek. A no-op when there is no selected
+    /// document, its editor is not mounted (hibernated/preview-only), or no
+    /// workspace is open — all three leave the UI exactly as it was.
+    func navigate(kind: NavigationTargetKind) {
+        guard let document = selectedDocument,
+            let snapshotProvider = document.textSnapshotProvider,
+            let selectionProvider = document.selectionProvider,
+            let ladder = navigationLadder
+        else { return }
+
+        let selection = selectionProvider()
+        guard
+            let identifier = IdentifierUnderCaret.word(
+                in: snapshotProvider(), at: selection.location)
+        else {
+            presentNavigationPeek(.empty(kind))
+            return
+        }
+
+        let languageID =
+            GrammarLanguageID.languageID(
+                forExtension: document.url.pathExtension.lowercased(),
+                fileName: document.url.lastPathComponent
+            )?.rawValue ?? document.url.pathExtension.lowercased()
+        let request = NavigationRequest(
+            documentURL: document.url,
+            position: identifier.position,
+            languageID: languageID,
+            kind: kind,
+            symbolName: identifier.word
+        )
+
+        // The syntactic tier reads the workspace-symbol index; make sure an
+        // idle (e.g. memory-pressure-shed) index rebuilds before resolving,
+        // exactly like the command palette's `#` mode.
+        ensureSymbolIndexReady()
+
+        navigationTask?.cancel()
+        navigationTask = Task(name: "Navigate \(kind)") { [weak self] in
+            guard let self else { return }
+            let answer = try? await ladder.resolve(request)
+            if Task.isCancelled { return }
+            switch NavigationPresentation.outcome(for: answer, kind: kind) {
+            case .jump(let candidate):
+                navigateToSymbolCandidate(candidate)
+            case .peek(let content):
+                presentNavigationPeek(content)
+            }
+        }
+    }
+
+    /// Jumps straight to a resolved navigation candidate — used both for a
+    /// single-candidate `navigate(kind:)` outcome and for a row selected from
+    /// `NavigationPeekView`. Dismisses the peek (a no-op if it was never
+    /// presented) before opening, mirroring `openWorkspaceSymbol`'s jump.
+    func navigateToSymbolCandidate(_ candidate: SymbolCandidate) {
+        isNavigationPeekPresented = false
+        openWorkspaceSymbol(relativePath: candidate.relativePath, range: candidate.range)
+    }
+
+    private func presentNavigationPeek(_ content: NavigationPeekContent) {
+        navigationPeekContent = content
+        isNavigationPeekPresented = true
+    }
+
     /// Ranks the background file-name index against `term`, off-main and
     /// cancellable. An empty term returns the first `limit` indexed paths.
     func queryFileIndex(term: String, limit: Int) async throws -> [String] {
         try await fileIndex.query(term: term, limit: limit)
+    }
+
+    /// Idempotent rebuild trigger for an idle file-name index — a no-op
+    /// unless there is a workspace root, the index is `.idle`, and no
+    /// rebuild is already in flight. Called before every command-palette
+    /// file query so an index a memory-pressure shed emptied transparently
+    /// rebuilds the moment the palette needs it again, without a background
+    /// poll or an extra timer. `requestFileIndexRebuild()` flips
+    /// `fileIndexState` to `.building` synchronously, before this returns, so
+    /// the palette's idle-state message never flashes "Open a folder" first.
+    func ensureFileIndexReady() {
+        guard rootURL != nil, fileIndexState == .idle, indexRebuildTask == nil else { return }
+        requestFileIndexRebuild()
+    }
+
+    /// Ranks the background workspace-symbol index against `term`, off-main
+    /// and cancellable. An empty term returns the first `limit` symbols.
+    func queryWorkspaceSymbols(term: String, limit: Int) async throws -> [WorkspaceSymbolMatch] {
+        try await symbolIndex.query(term: term, limit: limit)
+    }
+
+    /// Symbol-index counterpart to `ensureFileIndexReady()`: rebuilds an idle
+    /// index (e.g. one a memory-pressure shed emptied) the moment the
+    /// palette's `#` mode needs it again, with no background poll or timer.
+    func ensureSymbolIndexReady() {
+        guard rootURL != nil, symbolIndexState == .idle, symbolIndexRebuildTask == nil else {
+            return
+        }
+        requestSymbolIndexRebuild()
+    }
+
+    /// Constructs the navigation ladder for `rootURL`. The syntactic tier sits
+    /// above the bounded text tier.
+    private func makeNavigationLadder(rootURL: URL) -> NavigationLadder {
+        NavigationLadder(providers: [
+            // Lane-2 LSP insertion point: a language-server-backed provider
+            // belongs here, at index 0 above the syntactic tier, once lane 2
+            // lands. Do NOT add it in lane 1.
+            SyntacticNavigationProvider(index: symbolIndex, rootURL: rootURL),
+            TextSearchNavigationProvider(rootURL: rootURL),
+        ])
     }
 
     private func expandAndLoadAncestors(_ components: [String]) async {
@@ -486,11 +768,20 @@ final class WorkspaceSession {
         loadedChildren = [:]
         expandedDirectories = []
         loadingDirectories = []
+        navigationTask?.cancel()
+        navigationTask = nil
+        isNavigationPeekPresented = false
+        navigationPeekContent = nil
         indexRebuildTask?.cancel()
         indexRebuildTask = nil
         indexRebuildQueued = false
         fileIndexState = .idle
         Task { await fileIndex.reset() }
+        symbolIndexRebuildTask?.cancel()
+        symbolIndexRebuildTask = nil
+        symbolIndexRebuildQueued = false
+        symbolIndexState = .idle
+        Task { await symbolIndex.reset() }
     }
 
     /// Coalesces index rebuild requests to one build in flight plus at most
@@ -512,6 +803,61 @@ final class WorkspaceSession {
             if indexRebuildQueued {
                 indexRebuildQueued = false
                 requestFileIndexRebuild()
+            }
+        }
+    }
+
+    /// Full workspace-symbol rebuild, coalescing exactly like
+    /// `requestFileIndexRebuild()`: one build in flight plus at most one
+    /// trailing rebuild, so FSEvents storms and back-to-back Git operations
+    /// never pile up overlapping parses.
+    private func requestSymbolIndexRebuild() {
+        guard let rootURL else { return }
+        if symbolIndexRebuildTask != nil {
+            symbolIndexRebuildQueued = true
+            return
+        }
+        symbolIndexState = .building
+        symbolIndexRebuildTask = Task(name: "Rebuild workspace symbol index") { [weak self] in
+            guard let self else { return }
+            await symbolIndex.build(rootURL: rootURL)
+            symbolIndexState = await symbolIndex.currentState
+            symbolIndexGeneration += 1
+            symbolIndexRebuildTask = nil
+            if symbolIndexRebuildQueued {
+                symbolIndexRebuildQueued = false
+                requestSymbolIndexRebuild()
+            }
+        }
+    }
+
+    /// Incrementally patches the symbol index for a non-storm working-tree
+    /// change. When a (re)build is already in flight, it queues a trailing
+    /// full rebuild rather than racing a patch against it; when the index is
+    /// not yet `.ready` (never built or shed), it requests a full build, which
+    /// is the correct response and is coalesced.
+    private func requestSymbolIndexIncrementalUpdate(
+        changedDirectoryRelativePaths dirs: Set<String>
+    ) {
+        guard let rootURL else { return }
+        if symbolIndexRebuildTask != nil {
+            symbolIndexRebuildQueued = true
+            return
+        }
+        guard case .ready = symbolIndexState else {
+            requestSymbolIndexRebuild()
+            return
+        }
+        symbolIndexRebuildTask = Task(name: "Update workspace symbol index") { [weak self] in
+            guard let self else { return }
+            await symbolIndex.applyChanges(
+                changedDirectoryRelativePaths: dirs, rootURL: rootURL)
+            symbolIndexState = await symbolIndex.currentState
+            symbolIndexGeneration += 1
+            symbolIndexRebuildTask = nil
+            if symbolIndexRebuildQueued {
+                symbolIndexRebuildQueued = false
+                requestSymbolIndexRebuild()
             }
         }
     }
@@ -585,6 +931,8 @@ final class WorkspaceSession {
         editorLayout.select(tab.id, in: groupID)
         selectedDocumentID = document.id
         selectedTreePath = document.url.path
+        recordAccess(document)
+        updateHibernationStates()
         persistWorkspaceState()
     }
 
@@ -621,6 +969,7 @@ final class WorkspaceSession {
             fallback: openDocuments.indices.contains(index)
                 ? openDocuments[index] : openDocuments.last
         )
+        updateHibernationStates()
         persistWorkspaceState()
     }
 
@@ -658,6 +1007,12 @@ final class WorkspaceSession {
         isCommandPalettePresented = true
     }
 
+    /// Presents the Resources popover (app resident memory plus every
+    /// Rafu-spawned process).
+    func showResources() {
+        isResourcesPresented = true
+    }
+
     func showDocumentFind(includeReplace: Bool = false) {
         guard let selectedDocument else { return }
         isDocumentFindPresented = true
@@ -684,6 +1039,8 @@ final class WorkspaceSession {
         editorLayout.select(tabID, in: groupID)
         selectedDocumentID = document.id
         selectedTreePath = document.url.path
+        recordAccess(document)
+        updateHibernationStates()
         persistWorkspaceState()
     }
 
@@ -692,12 +1049,14 @@ final class WorkspaceSession {
             editorLayout.split(group: groupID, at: edge, moving: tabID) != nil
         else { return }
         synchronizeSelectionFromLayout()
+        updateHibernationStates()
         persistWorkspaceState()
     }
 
     func moveEditorTab(_ tabID: EditorTabID, to groupID: EditorGroupID) {
         guard editorLayout.moveTab(tabID, to: groupID) else { return }
         synchronizeSelectionFromLayout()
+        updateHibernationStates()
         persistWorkspaceState()
     }
 
@@ -772,6 +1131,8 @@ final class WorkspaceSession {
         editorLayout.select(tab.id, in: targetGroupID)
         selectedDocumentID = document.id
         selectedTreePath = document.url.path
+        recordAccess(document)
+        updateHibernationStates()
         persistWorkspaceState()
     }
 
@@ -1331,7 +1692,9 @@ final class WorkspaceSession {
     isolated deinit {
         liveness.stop()
         restorationTask?.cancel()
+        navigationTask?.cancel()
         indexRebuildTask?.cancel()
+        symbolIndexRebuildTask?.cancel()
         languageIntelligence.workspaceDidClose()
         stopAccessingSecurityScopedURL()
     }
@@ -1358,6 +1721,7 @@ final class WorkspaceSession {
                 displayName: resolved.url.lastPathComponent,
                 location: .local(LocalWorkspaceReference(path: resolved.url.path))
             )
+            navigationLadder = makeNavigationLadder(rootURL: resolved.url)
             navigatorMode = restored.navigatorMode
             workspaceSearch.loadHistory(for: resolved.url)
             resetFileTreeState()
@@ -1380,6 +1744,7 @@ final class WorkspaceSession {
             } else if let first = openDocuments.first {
                 select(first)
             }
+            applyRestoredHibernationPlaceholders()
 
             if resolved.isStale { persistWorkspaceState() }
         } catch {

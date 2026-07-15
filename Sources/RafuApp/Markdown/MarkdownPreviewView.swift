@@ -50,6 +50,8 @@ struct MarkdownPreviewView: View {
                             }
                             .tint(Color(rafuHex: theme.ui.accent))
                             .textSelection(.enabled)
+                            .markdownCodeSyntaxHighlighter(
+                                TreeSitterCodeSyntaxHighlighter(theme: theme))
 
                     case .mermaid(let diagram):
                         MermaidDiagramView(diagram: diagram)

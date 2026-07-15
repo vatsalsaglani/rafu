@@ -74,6 +74,9 @@ struct CodeEditorView: NSViewRepresentable {
         context.coordinator.load()
         document.saveAction = { [weak coordinator = context.coordinator] in coordinator?.save() }
         document.textSnapshotProvider = { [weak textView] in textView?.string ?? "" }
+        document.selectionProvider = { [weak textView] in
+            textView?.selectedRange() ?? NSRange(location: 0, length: 0)
+        }
         document.toggleCommentAction = { [weak coordinator = context.coordinator] in
             coordinator?.toggleLineComment()
         }
@@ -88,6 +91,7 @@ struct CodeEditorView: NSViewRepresentable {
         context.coordinator.updateFindState(findState)
         context.coordinator.applyThemeDecorations()
         context.coordinator.reloadIfNeeded()
+        context.coordinator.syncGuardSuppression()
         scrollView.backgroundColor = NSColor(rafuHex: theme.editor.background)
         guard let textView = scrollView.documentView as? NSTextView else { return }
         textView.backgroundColor = NSColor(rafuHex: theme.editor.background)
@@ -96,17 +100,38 @@ struct CodeEditorView: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
+        // Capture selection and scroll BEFORE tearing anything down so a
+        // hibernation remount restores where the user was. Safe on any
+        // dismantle (hibernation, close, window teardown); a dirty document
+        // is never hibernated, so its live text is never released here.
+        coordinator.captureViewState(from: nsView)
+        // A dirty document can still be torn down by a STRUCTURAL SwiftUI
+        // remount (splitting or moving a tab reshapes the erased view tree
+        // and rebuilds every editor in it, not just the tab that moved — see
+        // `EditorDocument.pendingDirtyText`). Hand off the live text so the
+        // next `load()` seeds from it instead of disk, preserving the
+        // unsaved edits that would otherwise be silently discarded.
+        if coordinator.document.isDirty {
+            coordinator.document.pendingDirtyText = coordinator.textView?.string
+        }
         coordinator.loadTask?.cancel()
         coordinator.gitMarkersTask?.cancel()
+        coordinator.tearDownSyntaxPipeline()
         coordinator.textView?.textStorage?.delegate = nil
         coordinator.uninstallFindController()
         coordinator.document.saveAction = nil
         coordinator.document.textSnapshotProvider = nil
+        coordinator.document.selectionProvider = nil
         coordinator.document.toggleCommentAction = nil
     }
 
     @MainActor
     final class Coordinator: NSObject, NSTextStorageDelegate, NSTextViewDelegate {
+        /// Cap on retained undo groups per editor. Bounds the memory a single
+        /// long-lived buffer's undo stack can consume without meaningfully
+        /// limiting interactive undo.
+        static let undoLevelCap = 200
+
         let document: EditorDocument
         var theme: RafuTheme
         weak var textView: RafuTextView?
@@ -119,13 +144,32 @@ struct CodeEditorView: NSViewRepresentable {
         private var syntaxPipeline: NeonSyntaxHighlightingPipeline?
         private var isLoading = true
         private var canSave = true
+        /// Cached mirror of `document.suppressesSyntax`, compared by
+        /// `syncGuardSuppression()` to detect a banner override.
+        private var appliedSuppression = false
         private var loadedRevision: Int?
         private let fileService = WorkspaceFileService()
+
+        /// Capped undo manager vended to the text view via
+        /// `undoManager(for:)`. Lazily built so its `levelsOfUndo` cap is set
+        /// once and shared for this editor's lifetime.
+        private lazy var cappedUndoManager: UndoManager = {
+            let manager = UndoManager()
+            manager.levelsOfUndo = Self.undoLevelCap
+            return manager
+        }()
 
         init(document: EditorDocument, theme: RafuTheme, findState: DocumentFindState?) {
             self.document = document
             self.theme = theme
             self.findState = findState
+        }
+
+        /// Supplies the capped undo manager so the buffer's undo stack cannot
+        /// grow without bound. Named action support (`⌘Z` labels, the ⌘/
+        /// comment action name) works unchanged through this manager.
+        func undoManager(for view: NSTextView) -> UndoManager? {
+            cappedUndoManager
         }
 
         func load() {
@@ -136,13 +180,42 @@ struct CodeEditorView: NSViewRepresentable {
             loadTask = Task(name: "Load \(document.displayName)") { [weak self] in
                 guard let self else { return }
                 do {
-                    let text = try await fileService.readText(at: document.url)
+                    // A pending dirty hand-off (see `EditorDocument.pendingDirtyText`)
+                    // always wins over the disk read: it means this mount is
+                    // rebuilding a still-dirty document after a structural
+                    // remount, and reading disk here would silently discard
+                    // unsaved edits. The disk read is skipped entirely in
+                    // that case, so no late-arriving disk content can clobber
+                    // the seeded text.
+                    let seededDirtyText = document.pendingDirtyText
+                    let text: String
+                    if let seededDirtyText {
+                        text = seededDirtyText
+                    } else {
+                        text = try await fileService.readText(at: document.url)
+                    }
+                    try Task.checkCancellation()
+                    // Computed once per load, off-main; never re-evaluated
+                    // per keystroke. Only an explicit banner override or the
+                    // next load changes guard state afterward. Runs on the
+                    // seeded dirty text too, so guard mode still reflects
+                    // what's actually in the buffer.
+                    let decision = await DocumentGuardPolicy.decide(for: text)
                     try Task.checkCancellation()
                     textView?.string = text
                     gutterRuler?.invalidateLineIndex()
+                    document.applyGuardDecision(decision)
                     highlight()
                     textView?.undoManager?.removeAllActions()
+                    restoreViewState()
                     recordDiskModificationDate()
+                    if seededDirtyText != nil {
+                        // Keep the document dirty (its content still differs
+                        // from disk) and clear the hand-off immediately so it
+                        // can never leak into a later, unrelated load.
+                        document.isDirty = true
+                        document.pendingDirtyText = nil
+                    }
                     isLoading = false
                     findState?.refresh()
                     refreshSelectionDecorations()
@@ -158,6 +231,56 @@ struct CodeEditorView: NSViewRepresentable {
             }
         }
 
+        /// Records the current selection and vertical scroll fraction on the
+        /// document so a later reload can restore them. Called from
+        /// `dismantleNSView` before teardown.
+        func captureViewState(from scrollView: NSScrollView) {
+            guard let textView else { return }
+            document.captureViewState(
+                selection: textView.selectedRange(),
+                scrollFraction: Self.scrollFraction(of: scrollView)
+            )
+        }
+
+        /// Vertical scroll position as a [0, 1] fraction of the scrollable
+        /// range: `visibleOrigin.y / max(1, contentHeight - visibleHeight)`.
+        private static func scrollFraction(of scrollView: NSScrollView) -> CGFloat {
+            let visible = scrollView.documentVisibleRect
+            let contentHeight = scrollView.documentView?.bounds.height ?? 0
+            let denominator = max(1, contentHeight - visible.height)
+            return min(max(visible.origin.y / denominator, 0), 1)
+        }
+
+        /// Reapplies the document's saved selection (clamped to the reloaded
+        /// text) and scroll fraction after `load()` replaces the buffer, then
+        /// clears them so a later external reload does not resurrect a stale
+        /// position. Fixes the cursor/scroll reset on a hibernation remount.
+        private func restoreViewState() {
+            guard let textView else { return }
+            let selection = document.restoredSelection
+            let scrollFraction = document.restoredScrollFraction
+            document.captureViewState(selection: nil, scrollFraction: nil)
+
+            let textLength = (textView.string as NSString).length
+            if let clamped = EditorDocument.clampSelection(selection, textLength: textLength) {
+                textView.setSelectedRange(clamped)
+                textView.scrollRangeToVisible(clamped)
+            }
+            if let scrollFraction, let scrollView = textView.enclosingScrollView {
+                applyScrollFraction(scrollFraction, in: scrollView)
+            }
+        }
+
+        private func applyScrollFraction(_ fraction: CGFloat, in scrollView: NSScrollView) {
+            guard let documentView = scrollView.documentView else { return }
+            let contentHeight = documentView.bounds.height
+            let visibleHeight = scrollView.contentView.bounds.height
+            let maxOffset = max(0, contentHeight - visibleHeight)
+            let y = min(max(fraction, 0), 1) * maxOffset
+            documentView.scroll(NSPoint(x: 0, y: y))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+
         func textDidChange(_ notification: Notification) {
             guard !isLoading else { return }
             document.isDirty = true
@@ -166,8 +289,26 @@ struct CodeEditorView: NSViewRepresentable {
 
         func highlight() {
             let selection = textView?.selectedRanges
-            syntaxPipeline?.applyBaseStyleAndInvalidate()
+            syncGuardSuppression(forceRepaint: true)
             if let selection { textView?.selectedRanges = selection }
+        }
+
+        /// Single chokepoint for guard-mode suppression. Reads
+        /// `document.suppressesSyntax`; when it differs from the cached
+        /// value (or `forceRepaint` is set, as at load), flips
+        /// `syntaxPipeline.isSuppressed` and repaints: base style only when
+        /// suppression turns on, base style plus a full re-tokenize when it
+        /// turns off (the banner's "Enable Highlighting" override) or when
+        /// forced (a fresh load's new content). Called from the end of
+        /// `load()` via `highlight()` and from `updateNSView`, so an
+        /// override made through `EditorDocumentView`'s banner button is
+        /// picked up on the next SwiftUI update pass.
+        func syncGuardSuppression(forceRepaint: Bool = false) {
+            let suppressed = document.suppressesSyntax
+            guard forceRepaint || suppressed != appliedSuppression else { return }
+            appliedSuppression = suppressed
+            syntaxPipeline?.isSuppressed = suppressed
+            syntaxPipeline?.applyBaseStyleAndInvalidate()
         }
 
         func save() {
@@ -208,8 +349,17 @@ struct CodeEditorView: NSViewRepresentable {
                 textView: textView,
                 theme: theme,
                 fileExtension: document.url.pathExtension.lowercased(),
-                fileName: document.url.lastPathComponent
+                fileName: document.url.lastPathComponent,
+                grammarRegistry: .shared
             )
+        }
+
+        /// Cancels the grammar actor bring-up, any in-flight reparse, and
+        /// releases the parser/tree. Called from `dismantleNSView` so a
+        /// closed, hibernated, or structurally remounted editor does not leak
+        /// syntax work.
+        func tearDownSyntaxPipeline() {
+            syntaxPipeline?.tearDown()
         }
 
         func updateSyntaxPipeline() {

@@ -11,6 +11,7 @@ struct CommandPaletteView: View {
     @State private var selectedIndex = 0
     @State private var fileMatches: [String] = []
     @State private var symbolScan = SymbolScanState.idle
+    @State private var workspaceSymbolMatches: [WorkspaceSymbolMatch] = []
     @FocusState private var searchFocused: Bool
 
     private static let maximumFileRows = 100
@@ -27,6 +28,16 @@ struct CommandPaletteView: View {
     /// open (or was already open when it started) must re-run the query, or
     /// results stay empty forever until the next keystroke.
     private struct FileQueryKey: Equatable {
+        let term: String
+        let generation: Int
+    }
+
+    /// Keys the workspace-symbol query task off the search term, the symbol
+    /// index generation, and whether `#` mode is active — the last so that
+    /// switching INTO `#` mode with an already-typed term still fires the
+    /// query, and switching out stops re-querying.
+    private struct WorkspaceSymbolQueryKey: Equatable {
+        let isActive: Bool
         let term: String
         let generation: Int
     }
@@ -77,6 +88,15 @@ struct CommandPaletteView: View {
         ) {
             await runFileQuery(term: PaletteQueryParser.parse(query).term)
         }
+        .task(
+            id: WorkspaceSymbolQueryKey(
+                isActive: PaletteQueryParser.parse(query).mode == .workspaceSymbols,
+                term: PaletteQueryParser.parse(query).term,
+                generation: session.symbolIndexGeneration
+            )
+        ) {
+            await runWorkspaceSymbolQuery(parsed: PaletteQueryParser.parse(query))
+        }
         .task {
             query = session.commandPaletteSeed
             if PaletteQueryParser.parse(session.commandPaletteSeed).mode == .symbols {
@@ -94,11 +114,13 @@ struct CommandPaletteView: View {
             Image(systemName: headerSymbolName(for: parsed.mode))
                 .frame(width: 18)
                 .foregroundStyle(theme.palette.accent)
-            TextField("Go to file… type > for commands, @ for symbols", text: $query)
-                .textFieldStyle(.plain)
-                .font(.system(size: 15))
-                .focused($searchFocused)
-                .onSubmit { run(rows, at: selectedIndex) }
+            TextField(
+                "Go to file… > commands, @ file symbols, # workspace symbols", text: $query
+            )
+            .textFieldStyle(.plain)
+            .font(.system(size: 15))
+            .focused($searchFocused)
+            .onSubmit { run(rows, at: selectedIndex) }
             Text("⌘P").font(.caption.monospaced())
                 .foregroundStyle(theme.palette.textMuted)
         }
@@ -111,6 +133,7 @@ struct CommandPaletteView: View {
         case .files: "doc.text.magnifyingglass"
         case .commands: "command"
         case .symbols: "at"
+        case .workspaceSymbols: "number.square"
         }
     }
 
@@ -146,6 +169,15 @@ struct CommandPaletteView: View {
                 return message
             case .ready(let symbols):
                 return symbols.isEmpty ? "No symbols found in this file" : "No matching symbols"
+            }
+        case .workspaceSymbols:
+            switch session.symbolIndexState {
+            case .idle:
+                return "Open a folder to search its symbols"
+            case .building where workspaceSymbolMatches.isEmpty:
+                return "Indexing symbols…"
+            case .building, .ready:
+                return "No matching symbols"
             }
         }
     }
@@ -242,6 +274,7 @@ struct CommandPaletteView: View {
         case .files: fileRows(matching: parsed.term)
         case .commands: commandRows(matching: parsed.term)
         case .symbols: symbolRows(matching: parsed.term)
+        case .workspaceSymbols: workspaceSymbolRows(matching: parsed.term)
         }
     }
 
@@ -268,7 +301,10 @@ struct CommandPaletteView: View {
 
     /// Queries the background file-name index off-main; superseded by the
     /// next keystroke or index rebuild via `.task(id:)` cancellation.
+    /// `ensureFileIndexReady()` transparently rebuilds an index a
+    /// memory-pressure shed emptied — a no-op the rest of the time.
     private func runFileQuery(term: String) async {
+        session.ensureFileIndexReady()
         do {
             let results = try await session.queryFileIndex(term: term, limit: Self.maximumFileRows)
             fileMatches = results
@@ -279,12 +315,66 @@ struct CommandPaletteView: View {
     }
 
     private func fileIndexCaption(for parsed: PaletteQueryParser.ParsedQuery) -> String? {
-        guard parsed.mode == .files, case .ready(_, true) = session.fileIndexState else {
+        switch parsed.mode {
+        case .files:
+            guard case .ready(_, true) = session.fileIndexState else { return nil }
+            return
+                "Showing top \(Self.maximumFileRows) matches — file index truncated at "
+                + "\(WorkspaceFileNameIndex.maximumEntries) files"
+        case .workspaceSymbols:
+            guard case .ready(_, true) = session.symbolIndexState else { return nil }
+            return
+                "Showing top \(Self.maximumFileRows) matches — symbol index truncated at "
+                + "\(WorkspaceSymbolIndex.maximumSymbols) symbols"
+        case .commands, .symbols:
             return nil
         }
-        return
-            "Showing top \(Self.maximumFileRows) matches — file index truncated at "
-            + "\(WorkspaceFileNameIndex.maximumEntries) files"
+    }
+
+    /// `workspaceSymbolMatches` is already ranked and top-N limited by the
+    /// background index query (`runWorkspaceSymbolQuery`); this only turns the
+    /// matches into rows. Selection jumps directly to the declaration (no peek
+    /// UI this increment — that is 10b).
+    private func workspaceSymbolRows(matching term: String) -> [PaletteRow] {
+        workspaceSymbolMatches.map { match in
+            PaletteRow(
+                id: "wsymbol:\(match.relativePath):\(match.range.location):\(match.name)",
+                symbolName: Self.symbolIcon(for: match.kind),
+                iconTint: .accent,
+                title: match.name,
+                detail: "\(match.relativePath) · \(match.kind)"
+            ) {
+                dismiss()
+                session.openWorkspaceSymbol(relativePath: match.relativePath, range: match.range)
+            }
+        }
+    }
+
+    /// Queries the background workspace-symbol index off-main; superseded by
+    /// the next keystroke or index rebuild via `.task(id:)` cancellation. Only
+    /// runs while `#` mode is active. `ensureSymbolIndexReady()` transparently
+    /// rebuilds an index a memory-pressure shed emptied.
+    private func runWorkspaceSymbolQuery(parsed: PaletteQueryParser.ParsedQuery) async {
+        guard parsed.mode == .workspaceSymbols else { return }
+        session.ensureSymbolIndexReady()
+        do {
+            workspaceSymbolMatches = try await session.queryWorkspaceSymbols(
+                term: parsed.term, limit: Self.maximumFileRows)
+        } catch is CancellationError {
+        } catch {
+            workspaceSymbolMatches = []
+        }
+    }
+
+    private static func symbolIcon(for kind: String) -> String {
+        switch kind {
+        case "function", "method": "function"
+        case "class", "interface": "cube"
+        case "property": "circle"
+        case "constant": "number"
+        case "module": "shippingbox"
+        default: "curlybraces"
+        }
     }
 
     private func commandRows(matching term: String) -> [PaletteRow] {
@@ -296,7 +386,7 @@ struct CommandPaletteView: View {
         return indices.map { index in
             let command = commands[index]
             return PaletteRow(
-                id: "command:\(command.title)",
+                id: command.id ?? "command:\(command.title)",
                 symbolName: command.symbolName,
                 iconTint: nil,
                 title: command.title,
@@ -341,6 +431,10 @@ struct CommandPaletteView: View {
             symbolScan = .unavailable("Symbols are unavailable for this view")
             return
         }
+        guard !document.suppressesSyntax else {
+            symbolScan = .unavailable("Symbols are off for this large file")
+            return
+        }
         let text = provider()
         let fileExtension = document.url.pathExtension.lowercased()
         symbolScan = .scanning
@@ -349,9 +443,20 @@ struct CommandPaletteView: View {
         }
     }
 
+    /// Grammar-backed extraction (increment 9) wins when the file maps to a
+    /// packaged grammar with a vendored `tags.scm` and one-shot parsing
+    /// succeeds; `nil` from `scanUsingGrammar` (no grammar, no `tags.scm`,
+    /// parser rejection) falls back to the regex `BufferSymbolScanner` —
+    /// e.g. Markdown headings, and any language without a packaged grammar.
     @concurrent
     private static func scanSymbols(text: String, fileExtension: String) async -> [BufferSymbol] {
-        BufferSymbolScanner.scan(text: text, fileExtension: fileExtension)
+        if let grammarID = GrammarLanguageID.languageID(forExtension: fileExtension, fileName: ""),
+            let symbols = await BufferSymbolScanner.scanUsingGrammar(
+                text: text, grammarID: grammarID)
+        {
+            return symbols
+        }
+        return BufferSymbolScanner.scan(text: text, fileExtension: fileExtension)
     }
 
     // MARK: - Commands
@@ -427,6 +532,14 @@ struct CommandPaletteView: View {
                 dismiss()
                 session.installCLI()
             },
+            .init(
+                id: NavigationCommandID.showResources,
+                title: "Show Resources", symbolName: "memorychip",
+                keywords: ["memory", "process", "resources"]
+            ) {
+                dismiss()
+                session.showResources()
+            },
         ]
         for choice in RafuThemeChoice.allCases {
             commands.append(
@@ -458,6 +571,11 @@ private struct PaletteRow: Identifiable {
 }
 
 private struct PaletteCommand {
+    /// Stable identifier for commands that also have a menu/status-item
+    /// counterpart (e.g. `NavigationCommandID.showResources`). `nil` for
+    /// commands only reachable from the palette, which fall back to a
+    /// title-derived row id.
+    var id: String?
     let title: String
     var detail: String?
     let symbolName: String
@@ -474,6 +592,7 @@ nonisolated enum PaletteQueryParser {
         case files
         case commands
         case symbols
+        case workspaceSymbols
     }
 
     struct ParsedQuery: Equatable, Sendable {
@@ -491,7 +610,9 @@ nonisolated enum PaletteQueryParser {
         return ParsedQuery(mode: .files, term: query.trimmingCharacters(in: .whitespaces))
     }
 
-    private static let prefixModes: [Character: Mode] = [">": .commands, "@": .symbols]
+    private static let prefixModes: [Character: Mode] = [
+        ">": .commands, "@": .symbols, "#": .workspaceSymbols,
+    ]
 }
 
 nonisolated enum CommandPaletteMatcher {

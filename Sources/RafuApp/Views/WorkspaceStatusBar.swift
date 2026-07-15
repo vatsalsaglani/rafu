@@ -6,6 +6,7 @@ struct WorkspaceStatusBar: View {
     @Environment(\.rafuTheme) private var theme
     @State private var memorySample: ProcessMemorySample?
     let descriptor: WorkspaceDescriptor?
+    @Binding var isResourcesPresented: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -23,6 +24,19 @@ struct WorkspaceStatusBar: View {
                 Label(memorySample.formatted, systemImage: "memorychip")
                     .foregroundStyle(theme.palette.textMuted)
                     .help("Rafu process resident memory. This is shared by all windows.")
+            }
+
+            Button {
+                isResourcesPresented.toggle()
+            } label: {
+                Image(systemName: "memorychip")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(theme.palette.textMuted)
+            .accessibilityLabel("Show Resources")
+            .help("Show Resources")
+            .popover(isPresented: $isResourcesPresented) {
+                ResourcesView()
             }
 
             Text(descriptor == nil ? "Ready" : "Local editor")

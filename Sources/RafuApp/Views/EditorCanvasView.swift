@@ -95,23 +95,40 @@ private struct EditorGroupView: View {
                     )
                     Divider()
                 }
-                if let document = selectedDocument {
-                    EditorDocumentView(
-                        document: document,
-                        findState: session.findState(for: document),
-                        gitLineChangesProvider: { [weak session, weak document] in
-                            guard let session, let document else { return nil }
-                            return await session.gutterLineChanges(for: document)
-                        },
-                        dropForwarding: dropForwarding
-                    )
-                    .id(document.id)
-                } else {
+                if loadedDocuments.isEmpty {
                     ContentUnavailableView(
                         "Empty Editor Group",
                         systemImage: "rectangle.split.2x1",
                         description: Text("Drag a tab here or open a file from the sidebar.")
                     )
+                } else {
+                    // The bounded working set: every LOADED document in this
+                    // group stays mounted so TextKit keeps owning its live
+                    // text (dirty non-visible buffers included — the
+                    // data-safety invariant). Only the selected editor is
+                    // visible and interactive; the rest are inert (invisible,
+                    // no hit testing, no first-responder path, accessibility
+                    // hidden, no drop forwarding) but mounted. Hibernated
+                    // documents are omitted entirely and remount from disk on
+                    // reselection.
+                    ZStack {
+                        ForEach(loadedDocuments) { document in
+                            let isActive = document.id == selectedDocument?.id
+                            EditorDocumentView(
+                                document: document,
+                                findState: session.findState(for: document),
+                                gitLineChangesProvider: { [weak session, weak document] in
+                                    guard let session, let document else { return nil }
+                                    return await session.gutterLineChanges(for: document)
+                                },
+                                dropForwarding: isActive ? dropForwarding : nil
+                            )
+                            .id(document.id)
+                            .opacity(isActive ? 1 : 0)
+                            .allowsHitTesting(isActive)
+                            .accessibilityHidden(!isActive)
+                        }
+                    }
                 }
             }
             .overlay {
@@ -137,6 +154,16 @@ private struct EditorGroupView: View {
             let tab = group.tabs.first(where: { $0.id == selectedTabID })
         else { return nil }
         return session.document(for: tab)
+    }
+
+    /// This group's documents whose editor should stay mounted. The selected
+    /// tab's document is always loaded (visible documents never hibernate), so
+    /// a non-empty group always yields a non-empty set that includes the
+    /// selected document.
+    private var loadedDocuments: [EditorDocument] {
+        group.tabs
+            .compactMap { session.document(for: $0) }
+            .filter { $0.loadState == .loaded }
     }
 
     private var isFindPresented: Bool {
@@ -996,25 +1023,30 @@ private struct EditorDocumentView: View {
     var dropForwarding: EditorDropForwarding? = nil
 
     var body: some View {
-        Group {
-            if document.isBitmapImage {
-                ImagePreviewView(url: document.url)
-            } else if document.isMarkdown || document.isSVG {
-                MarkdownEditorPresentation(
-                    document: document,
-                    findState: findState,
-                    theme: theme,
-                    gitLineChangesProvider: gitLineChangesProvider,
-                    dropForwarding: dropForwarding
-                )
-            } else {
-                CodeEditorView(
-                    document: document,
-                    theme: theme,
-                    findState: findState,
-                    gitLineChangesProvider: gitLineChangesProvider,
-                    dropForwarding: dropForwarding
-                )
+        VStack(spacing: 0) {
+            if document.suppressesSyntax {
+                GuardBannerView(document: document)
+            }
+            Group {
+                if document.isBitmapImage {
+                    ImagePreviewView(url: document.url)
+                } else if document.isMarkdown || document.isSVG {
+                    MarkdownEditorPresentation(
+                        document: document,
+                        findState: findState,
+                        theme: theme,
+                        gitLineChangesProvider: gitLineChangesProvider,
+                        dropForwarding: dropForwarding
+                    )
+                } else {
+                    CodeEditorView(
+                        document: document,
+                        theme: theme,
+                        findState: findState,
+                        gitLineChangesProvider: gitLineChangesProvider,
+                        dropForwarding: dropForwarding
+                    )
+                }
             }
         }
         .alert("Editor Error", isPresented: errorBinding) {
@@ -1029,6 +1061,51 @@ private struct EditorDocumentView: View {
             get: { document.errorMessage != nil },
             set: { if !$0 { document.errorMessage = nil } }
         )
+    }
+}
+
+/// Shown above a guarded document's editor: explains why highlighting and
+/// symbols are off (via icon and text, never color alone) and offers a
+/// one-click override for the rest of this session.
+///
+/// Deferred: dedicated menu/palette override command; the banner button is
+/// this increment's sole override path.
+private struct GuardBannerView: View {
+    @Environment(\.rafuTheme) private var theme
+    let document: EditorDocument
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(theme.palette.warning)
+            Text(message)
+                .font(.system(size: 12))
+                .foregroundStyle(theme.palette.textPrimary)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Button("Enable Highlighting") { document.overrideGuard() }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 32)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.palette.tabBarBackground)
+        .overlay(alignment: .bottom) { Divider().overlay(theme.palette.borderSubtle) }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(message) Enable Highlighting")
+    }
+
+    private var message: String {
+        guard case .guarded(let reason) = document.guardState else {
+            return "Highlighting and symbols are off for this large file."
+        }
+        switch reason {
+        case .tooLarge:
+            return "Highlighting and symbols are off for this large file."
+        case .longLine:
+            return "Highlighting and symbols are off because this file has a very long line."
+        }
     }
 }
 

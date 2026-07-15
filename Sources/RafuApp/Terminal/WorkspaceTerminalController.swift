@@ -120,6 +120,21 @@ final class WorkspaceTerminalController: Identifiable {
         )
         isRunning = true
         terminalView = view
+
+        let shellPid = view.process.shellPid
+        if shellPid != 0 {
+            let controllerID = id
+            let controllerIndex = index
+            Task {
+                await ProcessResourceRegistry.shared.register(
+                    id: controllerID,
+                    name: "Terminal \(controllerIndex)",
+                    kind: .terminalShell,
+                    pid: shellPid
+                )
+            }
+        }
+
         return view
     }
 
@@ -135,6 +150,11 @@ final class WorkspaceTerminalController: Identifiable {
         delegateProxy = nil
         appliedStyleSignature = ""
         isRunning = false
+
+        let controllerID = id
+        Task {
+            await ProcessResourceRegistry.shared.unregister(id: controllerID)
+        }
     }
 
     func applyTheme(_ theme: RafuTheme, to view: LocalProcessTerminalView) {

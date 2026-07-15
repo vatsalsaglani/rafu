@@ -34,8 +34,14 @@ final class ExternalOpenRequests {
 }
 
 /// Receives `application(_:open:)` for folders passed by `open -a` (the CLI
-/// path) or Finder and routes them to `ExternalOpenRequests`.
+/// path) or Finder and routes them to `ExternalOpenRequests`. Also starts the
+/// app-level memory-pressure monitor exactly once, at launch, regardless of
+/// how many workspace windows subsequently open.
 final class RafuAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        MemoryPressureMonitor.shared.start()
+    }
+
     func application(_ application: NSApplication, open urls: [URL]) {
         ExternalOpenRequests.shared.enqueue(urls)
         NSApp.activate(ignoringOtherApps: true)

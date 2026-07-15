@@ -12,6 +12,9 @@ nonisolated struct WorkspaceChangeSet: Equatable, Sendable {
     /// materialized (already-expanded) directories instead of the whole
     /// workspace.
     var changedDirectoryRelativePaths: Set<String> = []
+    /// True when the batch is large enough to skip per-directory work and
+    /// force one coalesced full refresh.
+    var isStorm = false
 
     var isEmpty: Bool {
         !treeChanged && !gitChanged && changedDocumentPaths.isEmpty
@@ -26,6 +29,16 @@ nonisolated struct WorkspaceChangeClassifier: Sendable {
     static let noisePathComponents: Set<String> =
         WorkspaceFileService.excludedDirectories.union([".DS_Store"])
 
+    /// Above this many surviving (non-noise, non-`.git`-internal) event
+    /// occurrences in one batch, the batch is a storm. Strict `>` so a batch
+    /// at exactly the threshold still takes the per-directory path — this is
+    /// a bounded single-pass coalescing decision, not a hard cap.
+    static let stormSurvivingPathThreshold = 1_000
+    /// Above this many distinct changed directories in one batch, the batch
+    /// is a storm even if the surviving-path count stays under its
+    /// threshold. Strict `>` for the same reason as above.
+    static let stormChangedDirectoryThreshold = 200
+
     func classify(
         paths: [String],
         rootPath: String,
@@ -33,6 +46,10 @@ nonisolated struct WorkspaceChangeClassifier: Sendable {
     ) -> WorkspaceChangeSet {
         var changes = WorkspaceChangeSet()
         let gitDirectoryPath = rootPath + "/.git"
+        // Counts surviving event occurrences, not unique paths — a path
+        // repeated across the batch counts each time. That only makes storm
+        // detection more eager, never less, which is the safe direction.
+        var survivingPathCount = 0
         for rawPath in paths {
             let path = rawPath.hasSuffix("/") ? String(rawPath.dropLast()) : rawPath
             if path == gitDirectoryPath || path.hasPrefix(gitDirectoryPath + "/") {
@@ -45,6 +62,7 @@ nonisolated struct WorkspaceChangeClassifier: Sendable {
             if path == rootPath {
                 changes.treeChanged = true
                 changes.changedDirectoryRelativePaths.insert("")
+                survivingPathCount += 1
                 continue
             }
             guard path.hasPrefix(rootPath + "/") else { continue }
@@ -57,10 +75,17 @@ nonisolated struct WorkspaceChangeClassifier: Sendable {
             changes.treeChanged = true
             let parentRelativePath = relativeComponents.dropLast().joined(separator: "/")
             changes.changedDirectoryRelativePaths.insert(parentRelativePath)
+            survivingPathCount += 1
             if openDocumentPaths.contains(path) {
                 changes.changedDocumentPaths.insert(path)
             }
         }
+        // Computed before clearing changedDirectoryRelativePaths below, since
+        // the directory-count threshold reads it.
+        changes.isStorm =
+            survivingPathCount > Self.stormSurvivingPathThreshold
+            || changes.changedDirectoryRelativePaths.count > Self.stormChangedDirectoryThreshold
+        if changes.isStorm { changes.changedDirectoryRelativePaths = [] }
         return changes
     }
 }

@@ -7,6 +7,12 @@ import Foundation
 /// so registration from the terminal controller and sampling from the
 /// Resources view never race.
 actor ProcessResourceRegistry {
+    /// The process-wide instance. Canonical for cross-lane use: lane 1
+    /// registers terminal shells here, and lane 2 will register language
+    /// servers into this same instance so the Resources surface stays a
+    /// single source of truth for every process Rafu spawns.
+    static let shared = ProcessResourceRegistry()
+
     nonisolated enum ProcessKind: Sendable {
         case terminalShell
         case git

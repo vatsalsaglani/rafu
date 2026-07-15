@@ -63,6 +63,15 @@ actor WorkspaceFileNameIndex {
         state = .idle
     }
 
+    /// Clears the index back to `.idle` under memory pressure
+    /// (`MemoryPressureMonitor` / `WorkspaceSession.respondToMemoryPressure`).
+    /// Identical to `reset()`; kept as a distinct name so a pressure-driven
+    /// shed reads clearly at its call site, separate from the "opening a new
+    /// workspace" reset path.
+    func shed() {
+        reset()
+    }
+
     /// Ranks the index against `term`, filename-over-path, off-main and
     /// cancellable. An empty term returns the first `limit` paths.
     func query(term: String, limit: Int) async throws -> [String] {
