@@ -14,3 +14,4 @@ remote-agent/target/
 .env
 .env.*
 !.env.example
+.claude/worktrees
