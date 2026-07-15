@@ -70,6 +70,20 @@ chmod +x "$APP_BINARY" "$CLI_BINARY"
 if [[ -d "$ROOT_DIR/Resources" ]]; then
   cp -R "$ROOT_DIR/Resources/." "$APP_RESOURCES/"
 fi
+
+# Stage the SwiftPM resource bundle (vendored tree-sitter highlights.scm) at
+# the .app TOP LEVEL — beside Contents, NOT inside Contents/Resources — which
+# is where `Bundle.module` resolves it via `Bundle.main.bundleURL`. SPM emits a
+# FLAT bundle, so SwiftTreeSitter's own bundle resolver never finds these; we
+# load them directly with `Bundle.module`. See
+# Sources/RafuApp/Resources/Grammars/README.md.
+# SPM names the bundle "<PackageName>_<TargetName>.bundle" — here Rafu_RafuApp.
+RESOURCE_BUNDLE_NAME="Rafu_${GUI_PRODUCT}.bundle"
+if [[ -d "$BUILD_BIN_DIR/$RESOURCE_BUNDLE_NAME" ]]; then
+  rm -rf "$APP_BUNDLE/$RESOURCE_BUNDLE_NAME"
+  cp -R "$BUILD_BIN_DIR/$RESOURCE_BUNDLE_NAME" "$APP_BUNDLE/$RESOURCE_BUNDLE_NAME"
+fi
+
 "$ROOT_DIR/script/generate_app_icon.sh" "$APP_ICON"
 
 cat >"$INFO_PLIST" <<PLIST
@@ -144,6 +158,10 @@ test -f "$APP_RESOURCES/Themes/notion-light.json"
 test -f "$APP_RESOURCES/Themes/notion-dark.json"
 test -f "$APP_RESOURCES/Themes/github-light.json"
 test -f "$APP_RESOURCES/Themes/github-dark.json"
+# The vendored tree-sitter query bundle must land at the .app top level (where
+# Bundle.module resolves it) with its grammar subdirectories intact.
+test -d "$APP_BUNDLE/Rafu_${GUI_PRODUCT}.bundle"
+test -f "$APP_BUNDLE/Rafu_${GUI_PRODUCT}.bundle/Grammars/Swift/highlights.scm"
 test -f "$APP_RESOURCES/AppIcon/rafu-icon-seam.svg"
 test -f "$APP_RESOURCES/FileIcons/claude.svg"
 test -f "$APP_RESOURCES/FileIcons/codex.svg"
