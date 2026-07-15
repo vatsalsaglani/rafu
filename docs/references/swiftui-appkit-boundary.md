@@ -7,7 +7,7 @@
 
 Use SwiftUI to own scenes and small UI-visible metadata. Each `WindowGroup` instance creates one `WorkspaceSession`; do not place window selection, tabs, drafts, or connection errors in a global singleton.
 
-Use AppKit only for capabilities that genuinely require it. The editor boundary is an `NSViewRepresentable` around `NSTextView`/TextKit. SwiftUI passes stable configuration and metadata into the bridge; the text system owns the mutable document storage and high-frequency selection/editing behavior. Open tab views remain mounted while hidden so tab selection cannot destroy an unsaved buffer.
+Use AppKit only for capabilities that genuinely require it. The editor boundary is an `NSViewRepresentable` around `NSTextView`/TextKit. SwiftUI passes stable configuration and metadata into the bridge; the text system owns the mutable document storage and high-frequency selection/editing behavior. A bounded editor working set keeps a document's `NSTextView` mounted when the document is visible in any editor group, marked dirty, or among the newest eight by access order; all other documents hibernate (text storage released), reloading from disk on refocus with restored selection and scroll position. Dirty documents are never hibernated. See [`editor-working-set-and-hibernation.md`](editor-working-set-and-hibernation.md) for the full design, data-loss fixes, and transient-text-snapshot exception.
 
 ## Non-negotiable buffer rule
 

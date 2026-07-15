@@ -61,6 +61,26 @@ New files under `Sources/RafuApp/LanguageIntelligence/`:
 Tests: framing round-trips, partial/multi-message chunk reassembly, id
 correlation, cancellation, teardown. All pure or in-memory.
 
+### Completion record — C0 delivered & verified (2026-07-15)
+
+**Status:** COMPLETE. `swift build` clean; `swift test` 186 tests pass; format lint clean; zero forbidden-path edits; no new package dependencies.
+
+**Changed paths:** All new files under `Sources/RafuApp/LanguageIntelligence/`:
+- `JSONRPC/JSONRPCMessage.swift`, `JSONRPCFraming.swift`, `JSONRPCConnection.swift`
+- `Transport/LanguageServerTransportProtocol.swift`, `LanguageServerProcessTransport.swift`
+- Test files: `Tests/RafuAppTests/InMemoryLanguageServerTransport.swift`, `JSONRPCMessageTests.swift`, `JSONRPCFramingTests.swift`, `JSONRPCConnectionTests.swift`, `LanguageServerProcessTransportTests.swift`
+
+**Key C1-facing contracts (implement depends on these):**
+1. `JSONRPCConnection.start()` **must be called** before sending requests; without it, the read loop never drains responses and all requests hang.
+2. **Concurrent-request write-ordering caveat:** `sendRequest(_:)` defers transport writes to an unstructured `Task`; concurrent callers have no wire ordering guarantee. Sequential `await` of send operations (e.g., `didOpen` then `didChange`) preserves order.
+3. `handleIncomingRequest(_:)` (currently auto-replying `-32601` not-implemented) is the designed seam C1 replaces to implement request dispatch.
+
+**Verified nuances documented for future reference:**
+- Explicit `nonisolated` required on all new types (actor + nested) due to `.defaultIsolation(MainActor.self)` in RafuApp target.
+- `Data` slice index hazard: slice retains parent indices; body extraction must copy and re-base.
+- `"result": null` vs missing `result`: envelope uses `container.contains(.result)` flag to distinguish explicit null from protocol violation.
+- `Synchronization.Mutex` (macOS 15+) safely gates off-actor stderr ring-buffer appends from `Process` readability handler.
+
 ## C1 — LSP protocol layer and server session
 
 - `LSP/LSPTypes.swift` — only the needed subset: initialize handshake types

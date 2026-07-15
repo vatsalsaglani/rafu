@@ -3,7 +3,7 @@
 - **Applies to:** the Files sidebar tree, `WorkspaceSession` tree/index state,
   `WorkspaceFileService`, `WorkspaceFileNameIndex`, the command palette's file
   mode, and FSEvents-driven refresh
-- **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-14
+- **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-15
 
 ## Rule or observed behavior
 
@@ -19,6 +19,16 @@
   (`WorkspaceFileTreeItem` in `WorkspaceSidebarView.swift`), not an
   `OutlineGroup`, because `OutlineGroup` needs a fully materialized
   `children` key path up front — exactly what lazy loading avoids.
+- **Git monorepo optimization (user/system-side):** on very large Git
+  monorepos, `git ls-files` performance can be accelerated by setting
+  `core.fsmonitor = true` (to use the system's native file-monitor daemon
+  instead of `lstat` stat calls) and `core.untrackedCache = true` (to cache
+  untracked-file enumeration across status calls). Rafu does not set these
+  automatically; they are repository-specific tuning options that must be
+  configured by the workspace owner. Users experiencing slow Git status
+  refresh on a 50k+ file monorepo should consider `git config core.fsmonitor
+  true && git config core.untrackedCache true` in the repo root to avoid
+  repeated full filesystem scans during `git ls-files` index builds.
 - `refreshWorkspace()` re-lists the root plus every already-materialized
   directory (the keys of `loadedChildren`), never anything the sidebar
   hasn't opened. FSEvents batches carry a new
@@ -27,7 +37,22 @@
   for root-level changes); `WorkspaceSession` re-lists only the changed
   directories that are materialized, and prunes a directory (and every
   materialized descendant, matched by relative-path prefix) that fails to
-  re-list because it no longer exists.
+  re-list because it no longer exists. **Storm circuit breaker:** on a
+  burst of filesystem activity, `WorkspaceChangeClassifier` detects a storm
+  when event occurrences pass the `stormSurvivingPathThreshold` (strict `>`
+  1,000 surviving paths at both treeChanged sites) OR the
+  `stormChangedDirectoryThreshold` (strict `>` 200 distinct changed
+  directories). The isStorm flag is computed **before** clearing
+  `changedDirectoryRelativePaths` (order is critical — clearing first makes
+  the directory threshold incapable of firing); on a storm, the directory
+  set is cleared to keep the change set bounded and signal "full refresh".
+  `WorkspaceSession.handleExternalChanges` then does exactly one
+  `await refreshWorkspace()` (root + materialized-directory re-list + prune
+  + git snapshot + single coalesced index rebuild) instead of the
+  per-changed-directory `refreshChangedDirectories` loop. The non-storm path
+  is byte-for-byte unchanged; gitChanged and open-document-reload tails run
+  identically in both paths. This design keeps memory cost bounded regardless
+  of batch size.
 - ⌘P's file mode is backed by a separate, dedicated actor,
   `WorkspaceFileNameIndex`, holding one compact `[String]` of
   workspace-relative paths — never the sidebar's `WorkspaceFileNode` tree.
@@ -106,6 +131,10 @@ are directional, not a Release/Instruments measurement.
 | After a `⌘P`-directed keystroke via System Events (best-effort; the test host's screen was locked, so this is unconfirmed visually) | ~34 MB |
 | Peak during a 2,000-file `touch` burst across ~1,000 directories (FSEvents debounce + coalesced index rebuild) | ~70 MB |
 | Settled ~10 s after the burst | ~36 MB |
+| Peak during a 2,000-file `touch` burst across ~700 directories on a 1,129-dir/3,300-file synthetic repo (storm circuit breaker active; debug build) | ~67 MB (~0.6 MB rise over pre-burst ~67 MB baseline) |
+| Settled ~10 s after storm burst | ~61 MB |
+| Symbol-index build on 28,000-file repo (8,000 .swift files ~40,000 declarations; 20,000 .txt filler; debug build; 2026-07-15) — peak during parse | ~137 MB |
+| Symbol-index settled after build | ~129 MB |
 
 All points stayed well under the 150 MB budget; no crash, fault, or error
 appeared in `log show --predicate 'process == "Rafu"'` across the run. The

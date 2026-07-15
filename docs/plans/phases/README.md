@@ -35,8 +35,8 @@ Bootstrap itself did **not** claim TextKit editing, Tree-sitter, SSH, launcher I
 | [Phase 4](phase-4-ai-commit-messages.md) | Planned | Phase 3 | Safe, editable AI commit suggestions |
 | [Phase 5](phase-5-hardening-distribution.md) | Planned | Phase 4 feature set | Reliable notarized distribution |
 | [Phase 6](phase-6-controlled-expansion.md) | Deferred | Phase 5 plus explicit approval | Only approved bounded additions |
-| [Memory resilience](memory-resilience.md) | Planned | Initial push; interleaves with feature phases | Budgets hold under abuse, with recorded Release evidence |
-| [Language intelligence](language-intelligence.md) | Planned | Initial push; ADR 0005; Resources surface for Stage C | Ladder navigation (Tree-sitter → symbols → opt-in LSP) shipped in bounded stages |
+| [Memory resilience](memory-resilience.md) | Lane 1 COMPLETE (2026-07-15); Stage C at lane-2 merge | Initial push; interleaves with feature phases | Budgets hold under abuse, with recorded Release evidence |
+| [Language intelligence](language-intelligence.md) | Lane 1 COMPLETE (2026-07-15); Stage C at lane-2 merge | Initial push; ADR 0005; Resources surface for Stage C | Ladder navigation (Tree-sitter → symbols → opt-in LSP) shipped in bounded stages |
 
 Memory resilience and language intelligence execute as the two-lane worktree
 split defined in `language-intelligence.md`: lane 1

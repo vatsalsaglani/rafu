@@ -2,7 +2,7 @@
 
 - **Applies to:** navigation types and providers, document edit deltas, the
   Language Intelligence subsystem seam, and process resource registration
-- **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-14
+- **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-15
 
 ## Rules and observed behavior
 
@@ -79,6 +79,37 @@ Darwin's `proc_pid_rusage` family, not subprocess invocation:
   terminations without losing context.
 - This avoids spawning `ps` or other tools for every sample and keeps
   sampling off the main actor.
+- **Verified measurement (lane 1, increment 1, 2026-07-15):** for a running
+  Rafu app process, `proc_pid_rusage` `ri_resident_size` = `ps -o rss=` to
+  byte-exact accuracy (ratio 1.000). Sample method: app at idle with one
+  terminal shell registered; `ProcessResourceRegistry.sample()` called via
+  the Resources surface popover (sample-while-visible pattern: a `.task` loop
+  that sleeps 2 seconds per iteration and exits on `Task.isCancelled`, no
+  standing timers). This confirms the registry's Darwin-based measurement is
+  honest against the system `ps` output and can be trusted for memory budgeting.
+
+### ProcessResourceRegistry.shared — canonical cross-lane process registry
+
+Both lane 1 and lane 2 must use the same `ProcessResourceRegistry.shared`
+singleton instance to register and unregister child process IDs:
+
+- This is the **only** canonical source of truth for process-level resource
+  tracking. Do not create a second registry or duplicate process-tracking state
+  in lane 2.
+- Lane 1 registers terminal shell pids (`kind: .terminalShell`) when
+  `WorkspaceTerminalController` spawns a shell (guarded on
+  `shellPid != 0` via SwiftTerm's `view.process.shellPid`) and unregisters
+  on shell shutdown.
+- Lane 2 registers language-server pids (`kind: .languageServer`) when
+  spawning servers and unregisters when servers exit or are terminated.
+- Git subprocesses are **deliberately not registered** because they are
+  short-lived batch operations; this is an intentional non-action, not an
+  oversight. It reduces registration churn and keeps the Resources surface
+  focused on long-lived services.
+- The single `Resources` surface (lane 1's `ResourcesView`) displays all
+  registered processes from `ProcessResourceRegistry.shared.sample()`, so
+  both lanes' processes are visible in one place without duplication or
+  synchronization overhead.
 
 ### Swift format lint enforcer: synthesized initializer rule
 

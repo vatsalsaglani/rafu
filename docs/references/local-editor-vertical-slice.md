@@ -6,10 +6,13 @@
 
 ## Rules and observed behavior
 
-- Keep every open tab's `NSTextView` alive when selection changes. Recreating the
-  representable reloads disk content and can discard an unsaved TextKit buffer.
-  Rafu changes visibility and hit testing instead of conditionally removing
-  unselected editors.
+- A bounded working set keeps documents' `NSTextView` instances mounted: visible
+  in any editor group, marked dirty, or among the newest eight accessed. Other
+  documents hibernate (text storage released), reloading from disk on refocus
+  with restored selection and scroll position; dirty documents never hibernate.
+  Dirty text captured during a structural remount (group split/tab move) survives
+  the SwiftUI subtree teardown via `pendingDirtyText`. See
+  [`editor-working-set-and-hibernation.md`](editor-working-set-and-hibernation.md).
 - Live text stays in `NSTextStorage`. SwiftUI observes identity, dirty state,
   revision, preview mode, and errors only. Syntax attributes are debounced and
   applied without replacing the underlying string or selection.

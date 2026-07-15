@@ -19,10 +19,15 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`memory-and-file-indexing.md`](memory-and-file-indexing.md) | Changing the lazy sidebar tree, the background ⌘P file-name index, `WorkspaceChangeSet` directory tracking, or file-ranking behavior |
 | [`navigation-and-lsp-contracts.md`](navigation-and-lsp-contracts.md) | Changing the navigation ladder, document edit deltas, language intelligence seams, or process resource tracking |
 | [`editor-dependencies.md`](editor-dependencies.md) | Changing Markdown rendering, syntax highlighting, package pins, or editor memory behavior |
+| [`large-file-guard-mode.md`](large-file-guard-mode.md) | Understanding large-file thresholds, guard-mode design, suppression chokepoint, known limitations, or deferred override commands |
+| [`editor-working-set-and-hibernation.md`](editor-working-set-and-hibernation.md) | Understanding document hibernation, bounded working set (visible ∪ dirty ∪ newest-8), tab/split data-loss fixes, `pendingDirtyText` exception, undo cap, and known limitations |
+| [`memory-caps-and-pressure.md`](memory-caps-and-pressure.md) | App-level memory-pressure monitoring, document hibernation + filename-index shedding on warnings, resource caps (Git/AI/search buffers), polling-audit findings, and cap values table |
 | [`ai-provider-rest-contracts.md`](ai-provider-rest-contracts.md) | Changing provider endpoints, streaming, Keychain secrets, connection tests, or commit generation |
 | [`git-process-and-parsing.md`](git-process-and-parsing.md) | Changing Git capture, porcelain parsing, unborn repositories, diffs, history, branch operations, batch staging, or the Source Control tree view |
 | [`editor-search-and-restoration.md`](editor-search-and-restoration.md) | Changing file/workspace find, replacement, undo grouping, editor splits, or restoration |
 | [`drag-and-drop-custom-uttype.md`](drag-and-drop-custom-uttype.md) | Adding or changing `.onDrag`/`.onDrop` with a private `UTType`, `NSItemProvider` registration, or `NSTextView` drag acceptance |
+| [`tree-sitter-highlighting.md`](tree-sitter-highlighting.md) | Tree-sitter full-parse syntax highlighting, SyntaxParsingActor, query loading, router fallback, and the 8a/8b split |
+| [`workspace-symbol-index.md`](workspace-symbol-index.md) | Workspace symbol index design (grammar filtering, parser reuse, caps, incremental updates), SyntacticNavigationProvider tier behavior, NavigationLadder with LSP insertion point, navigation UI flow (cursor seam, IdentifierUnderCaret, NavigationPresentation, peek view, menu commands, deferred ⌘-click), and the /var symlink resolution nuance |
 | [`skill-routing.md`](skill-routing.md) | Selecting a local skill or Build macOS Apps capability |
 
 ## Reference-note template
