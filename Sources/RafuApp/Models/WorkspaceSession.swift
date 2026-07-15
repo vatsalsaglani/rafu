@@ -583,8 +583,15 @@ final class WorkspaceSession {
             return
         }
 
+        // The LSP tier is the only consumer of `languageID`, so use lane 2's
+        // canonical LSP id (`.tsx` → "typescriptreact", `.rs` → "rust", …) so
+        // a request keys to the same server the coordinator opened the
+        // document under. The syntactic/text tiers ignore this field (they key
+        // off `symbolName`); the grammar id / extension is a harmless fallback
+        // for an extension no language server recognizes.
         let languageID =
-            GrammarLanguageID.languageID(
+            LanguageIdentifier.forURL(document.url)
+            ?? GrammarLanguageID.languageID(
                 forExtension: document.url.pathExtension.lowercased(),
                 fileName: document.url.lastPathComponent
             )?.rawValue ?? document.url.pathExtension.lowercased()
