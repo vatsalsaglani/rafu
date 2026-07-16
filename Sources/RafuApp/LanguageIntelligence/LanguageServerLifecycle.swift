@@ -80,4 +80,26 @@ nonisolated struct LanguageServerStatus: Sendable, Equatable {
     let phase: Phase
     let residentBytes: UInt64?
     let consecutiveCrashes: Int
+
+    /// Whether an edit-subscription loop should copy the document's full
+    /// text and forward a change to `LanguageServerManager` for a
+    /// languageID currently at `phase` (`nil` when no status has ever been
+    /// published for it). Forwarding is worthwhile only while a server is
+    /// live or on its way to being live — `.starting` is included
+    /// deliberately: it is pushed at the very top of `ensureSession`,
+    /// before the process spawns, so a store read that only recognized
+    /// `.ready` would still copy-and-drop every keystroke during the
+    /// startup window. `.idle`/`.backingOff`/`.dead`/`.ceilingKilled` (and
+    /// no status at all) mean there is nowhere for the change to go right
+    /// now; `LanguageServerManager` replays full `didOpen` snapshots for
+    /// every open URI when a server later starts, so skipped deltas are
+    /// never needed.
+    nonisolated static func forwardsDocumentChanges(phase: Phase?) -> Bool {
+        switch phase {
+        case .starting, .ready, .warmingUp:
+            return true
+        case .idle, .backingOff, .dead, .ceilingKilled, nil:
+            return false
+        }
+    }
 }

@@ -73,6 +73,14 @@ final class LanguageServerStatusStore {
         statuses[status.languageID] = status
     }
 
+    /// Clears a single languageID's status — used to drop a stale
+    /// terminal (`.dead`/`.ceilingKilled`) row the instant a restart is
+    /// requested, so the UI doesn't show a crashed row while the restart
+    /// is in flight.
+    func remove(_ languageID: String) {
+        statuses.removeValue(forKey: languageID)
+    }
+
     func clear() {
         statuses.removeAll()
     }
@@ -267,15 +275,43 @@ final class LanguageIntelligenceCoordinator {
         openDocuments.register(uri: uri, document: document, languageID: languageID)
 
         let manager = manager
-        let initialText = document.textSnapshotProvider?() ?? ""
+        // The editor may not be mounted yet when this fires (documents are
+        // tracked before the canvas attaches its live-text provider), so
+        // `textSnapshotProvider` is often still `nil` here. Fall back to an
+        // off-main disk read rather than opening the server session on an
+        // empty buffer.
+        let providerText = document.textSnapshotProvider?()
+        let documentURL = document.url
         Task {
+            let initialText: String
+            if let providerText {
+                initialText = providerText
+            } else {
+                initialText = (try? await WorkspaceFileService().readText(at: documentURL)) ?? ""
+            }
             await manager.documentOpened(
                 snapshot: LanguageServerManager.DocumentSnapshot(
                     uri: uri, languageID: languageID, text: initialText))
         }
 
+        // Captured as a local (not `self`) so the loop below never keeps
+        // the coordinator alive and never needs a `self` hop — the store
+        // is `@MainActor @Observable` and this `Task` inherits the
+        // isolation of `documentDidOpen`'s caller (`@MainActor`), so the
+        // read is synchronous.
+        let statusStore = servers
         let task = Task {
             for await delta in document.editDeltas() {
+                // Skip the full-buffer copy entirely when no server is
+                // live or starting for this languageID — see
+                // `LanguageServerStatus.forwardsDocumentChanges`.
+                // `LanguageServerManager` replays a full `didOpen`
+                // snapshot for every open URI when a server later starts,
+                // so a skipped delta is never needed.
+                guard
+                    LanguageServerStatus.forwardsDocumentChanges(
+                        phase: statusStore.statuses[languageID]?.phase)
+                else { continue }
                 guard let text = document.textSnapshotProvider?() else { continue }
                 await manager.documentChanged(
                     uri: uri, languageID: languageID, delta: delta, newFullText: text)
@@ -333,6 +369,25 @@ final class LanguageIntelligenceCoordinator {
     func declineTrust(_ request: TrustRequest) {
         declinedServerIDs.insert(request.serverID)
         pendingTrustRequest = nil
+    }
+
+    /// The Resources popover's "Restart" action for a crashed
+    /// (`.dead`/`.ceilingKilled`) server row. Clears the stale terminal
+    /// status immediately (so the row disappears rather than showing a
+    /// dead server while the restart is in flight), then tears the old
+    /// session down and eagerly starts a fresh one so the row reflects
+    /// honest, current status rather than waiting for the next lazy
+    /// `ensureSession` call from navigation. If the eager start declines
+    /// (e.g. trust was revoked or the workspace changed underneath it),
+    /// `manager.restart` publishes nothing further and the row simply
+    /// stays cleared.
+    func restartServer(languageID: String) {
+        let manager = manager
+        servers.remove(languageID)
+        Task {
+            await manager.restart(languageID: languageID)
+            _ = await manager.ensureSession(languageID: languageID)
+        }
     }
 
     // MARK: - Resolver snapshot

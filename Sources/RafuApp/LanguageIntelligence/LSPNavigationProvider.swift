@@ -88,7 +88,7 @@ nonisolated struct LSPNavigationProvider: NavigationTierProvider {
         switch request.kind {
         case .hover:
             guard let hover = await session.hover(uri: uri, utf16Offset: request.position),
-                let text = flattenedHover(hover.contents)
+                let text = flattenedHoverMultiline(hover.contents)
             else { return nil }
             let candidate = SymbolCandidate(
                 relativePath: relativePath(forTargetPath: request.documentURL.path),
@@ -118,8 +118,20 @@ nonisolated struct LSPNavigationProvider: NavigationTierProvider {
     }
 
     /// `nil` locations = the session declined (return `nil`, fall through). A
-    /// non-`nil` (even empty) array is authoritative: map each `Location`,
-    /// skipping any target that can't be read, and answer `.ready`.
+    /// non-`nil` (even empty) array is authoritative for `.definition` and
+    /// `.declaration`: map each `Location`, skipping any target that can't be
+    /// read, and answer `.ready` — an empty answer there legitimately means
+    /// "no definition here".
+    ///
+    /// `.references` is the ONE exception. A server without a built index
+    /// (e.g. sourcekit-lsp with no `initializationOptions` index store)
+    /// answers `textDocument/references` with a non-`nil` but EMPTY array,
+    /// which would otherwise win the ladder as an authoritative "No
+    /// references" and block the bounded text tier that can still find
+    /// whole-word occurrences. So a `.references` request whose candidate list
+    /// ends up empty declines (returns `nil`) and falls through. The check is
+    /// post-build, so a references answer whose every target was unreadable
+    /// also falls through rather than presenting an empty peek.
     private func locationAnswer(
         _ locations: [Location]?, request: NavigationRequest, serverName: String,
         encoding: PositionEncoding
@@ -134,6 +146,7 @@ nonisolated struct LSPNavigationProvider: NavigationTierProvider {
                 candidates.append(candidate)
             }
         }
+        if request.kind == .references, candidates.isEmpty { return nil }
         return NavigationAnswer(
             tier: .lsp(serverName: serverName), candidates: candidates, state: .ready)
     }
@@ -221,9 +234,11 @@ nonisolated struct LSPNavigationProvider: NavigationTierProvider {
 
     // MARK: - Hover flattening
 
-    /// Flattens `Hover.contents` to a single trimmed, bounded preview line.
-    /// `nil` when there's no usable text (an empty hover is a decline, not an
-    /// empty answer).
+    /// Flattens `Hover.contents` to a single trimmed, bounded preview LINE —
+    /// the compact 240-char single-line contract for any caller that wants a
+    /// one-line summary. The hover tooltip itself uses `flattenedHoverMultiline`
+    /// instead; this remains the single-line preview form. `nil` when there's
+    /// no usable text (an empty hover is a decline, not an empty answer).
     private func flattenedHover(_ contents: HoverContents) -> String? {
         let raw: String
         switch contents {
@@ -244,6 +259,29 @@ nonisolated struct LSPNavigationProvider: NavigationTierProvider {
         return String(text.prefix(Self.maximumPreviewCharacters))
     }
 
+    /// Flattens `Hover.contents` to a bounded, multi-LINE preview for the
+    /// hover-tooltip surface, keeping the server's signature/docstring across
+    /// several lines (the tooltip scrolls when long) rather than collapsing to
+    /// one line like `flattenedHover`. Trims surrounding blank lines and hard-
+    /// caps the total length so a pathologically large hover payload can never
+    /// balloon the tooltip or its retained string. `nil` when there's no
+    /// usable text — an empty hover is a decline, not an empty tooltip.
+    /// The returned text is never logged.
+    private func flattenedHoverMultiline(_ contents: HoverContents) -> String? {
+        let raw: String
+        switch contents {
+        case .markup(let markup):
+            raw = markup.value
+        case .markedString(let marked):
+            raw = markedStringText(marked)
+        case .markedStrings(let markedStrings):
+            raw = markedStrings.map(markedStringText).joined(separator: "\n")
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return String(trimmed.prefix(Self.maximumHoverCharacters))
+    }
+
     private func markedStringText(_ marked: MarkedString) -> String {
         switch marked {
         case .plain(let text): return text
@@ -261,6 +299,12 @@ nonisolated struct LSPNavigationProvider: NavigationTierProvider {
     }
 
     private static let maximumPreviewCharacters = 240
+
+    /// Upper bound on the multi-line hover-tooltip payload. Larger than the
+    /// single-line preview cap because the tooltip keeps several lines and
+    /// scrolls, but still bounded so a huge hover response can't balloon the
+    /// retained string.
+    private static let maximumHoverCharacters = 2_000
 
     // MARK: - Timeout race
 
