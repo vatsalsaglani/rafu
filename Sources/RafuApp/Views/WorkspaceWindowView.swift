@@ -47,7 +47,8 @@ struct WorkspaceWindowView: View {
             Divider()
             WorkspaceStatusBar(
                 descriptor: session.descriptor,
-                isResourcesPresented: $session.isResourcesPresented
+                isResourcesPresented: $session.isResourcesPresented,
+                languageIntelligence: session.languageIntelligence
             )
         }
         .frame(minWidth: 720, minHeight: 480)
@@ -82,6 +83,13 @@ struct WorkspaceWindowView: View {
         .sheet(isPresented: $session.isQuitConfirmationPresented) {
             EmptyWindowQuitConfirmationView()
         }
+        .sheet(item: trustPromptBinding) { request in
+            LanguageServerTrustPromptView(
+                request: request,
+                onApprove: { session.languageIntelligence.approveTrust($0) },
+                onDecline: { session.languageIntelligence.declineTrust($0) }
+            )
+        }
         .alert("Command Line Tool", isPresented: cliMessageBinding) {
             Button("OK", role: .cancel) { session.cliInstallMessage = nil }
         } message: {
@@ -108,6 +116,25 @@ struct WorkspaceWindowView: View {
         Binding(
             get: { session.cliInstallMessage != nil },
             set: { if !$0 { session.cliInstallMessage = nil } }
+        )
+    }
+
+    /// Presents `session.languageIntelligence.pendingTrustRequest` as a
+    /// sheet. `pendingTrustRequest` is read-only from outside the
+    /// coordinator, so an interactive dismissal (Escape, click-outside)
+    /// routes through the setter to `declineTrust(_:)` — guarded so it only
+    /// fires when a request is still pending, keeping an explicit
+    /// `approveTrust`/`declineTrust` call (which already cleared it) from
+    /// triggering a redundant, no-op decline.
+    private var trustPromptBinding: Binding<TrustRequest?> {
+        Binding(
+            get: { session.languageIntelligence.pendingTrustRequest },
+            set: { newValue in
+                guard newValue == nil,
+                    let pending = session.languageIntelligence.pendingTrustRequest
+                else { return }
+                session.languageIntelligence.declineTrust(pending)
+            }
         )
     }
 }

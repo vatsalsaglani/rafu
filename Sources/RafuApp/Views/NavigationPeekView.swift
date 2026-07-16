@@ -68,7 +68,7 @@ struct NavigationPeekView: View {
     private var content: some View {
         switch session.navigationPeekContent {
         case .results(let answer):
-            candidateList(answer.candidates)
+            candidateList(answer)
         case .indexing:
             message("Indexing symbols…")
         case .empty(let kind):
@@ -105,8 +105,9 @@ struct NavigationPeekView: View {
         return answer.tier.label
     }
 
-    private func candidateList(_ candidates: [SymbolCandidate]) -> some View {
-        ScrollViewReader { proxy in
+    private func candidateList(_ answer: NavigationAnswer) -> some View {
+        let candidates = answer.candidates
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 1) {
                     ForEach(Array(candidates.enumerated()), id: \.element.id) { index, candidate in
@@ -116,6 +117,9 @@ struct NavigationPeekView: View {
                                 if hovering { selectedIndex = index }
                             }
                     }
+                    if isTruncated(answer) {
+                        truncationFooter
+                    }
                 }
                 .padding(6)
             }
@@ -123,6 +127,30 @@ struct NavigationPeekView: View {
                 proxy.scrollTo(newValue, anchor: nil)
             }
         }
+    }
+
+    /// Whether `answer` may have more matches than were returned: a
+    /// heuristic keyed on the text tier's candidate count exactly reaching
+    /// its bounded search cap. `NavigationAnswer` carries no explicit
+    /// truncation flag (see `TextSearchNavigationProvider.referencesResultCap`),
+    /// so this under-discloses per-file truncation below the cap and can
+    /// show the footer for a genuinely exact-cap match count.
+    private func isTruncated(_ answer: NavigationAnswer) -> Bool {
+        answer.tier == .text
+            && answer.candidates.count == TextSearchNavigationProvider.referencesResultCap
+    }
+
+    private var truncationFooter: some View {
+        Text("Showing first \(TextSearchNavigationProvider.referencesResultCap) matches")
+            .font(.caption)
+            .foregroundStyle(theme.palette.textMuted)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel(
+                "Showing only the first \(TextSearchNavigationProvider.referencesResultCap) "
+                    + "matches; some results may not be shown."
+            )
     }
 
     private func candidateRow(_ candidate: SymbolCandidate, isSelected: Bool) -> some View {

@@ -121,7 +121,15 @@ private struct EditorGroupView: View {
                                     guard let session, let document else { return nil }
                                     return await session.gutterLineChanges(for: document)
                                 },
-                                dropForwarding: isActive ? dropForwarding : nil
+                                dropForwarding: isActive ? dropForwarding : nil,
+                                navigate: { [weak session] kind in
+                                    session?.navigate(kind: kind)
+                                },
+                                hover: { [weak session, weak document] offset in
+                                    guard let session, let document else { return nil }
+                                    return await session.hoverInfo(
+                                        at: document.url, utf16Offset: offset)
+                                }
                             )
                             .id(document.id)
                             .opacity(isActive ? 1 : 0)
@@ -1021,6 +1029,8 @@ private struct EditorDocumentView: View {
     let findState: DocumentFindState
     let gitLineChangesProvider: (@MainActor () async -> GitGutterLineChanges?)?
     var dropForwarding: EditorDropForwarding? = nil
+    var navigate: (@MainActor (NavigationTargetKind) -> Void)? = nil
+    var hover: (@MainActor (Int) async -> EditorHoverInfo?)? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1036,7 +1046,9 @@ private struct EditorDocumentView: View {
                         findState: findState,
                         theme: theme,
                         gitLineChangesProvider: gitLineChangesProvider,
-                        dropForwarding: dropForwarding
+                        dropForwarding: dropForwarding,
+                        navigate: navigate,
+                        hover: hover
                     )
                 } else {
                     CodeEditorView(
@@ -1044,7 +1056,9 @@ private struct EditorDocumentView: View {
                         theme: theme,
                         findState: findState,
                         gitLineChangesProvider: gitLineChangesProvider,
-                        dropForwarding: dropForwarding
+                        dropForwarding: dropForwarding,
+                        navigate: navigate,
+                        hover: hover
                     )
                 }
             }
@@ -1115,6 +1129,8 @@ private struct MarkdownEditorPresentation: View {
     let theme: RafuTheme
     let gitLineChangesProvider: (@MainActor () async -> GitGutterLineChanges?)?
     var dropForwarding: EditorDropForwarding? = nil
+    var navigate: (@MainActor (NavigationTargetKind) -> Void)? = nil
+    var hover: (@MainActor (Int) async -> EditorHoverInfo?)? = nil
 
     var body: some View {
         switch document.markdownMode {
@@ -1137,7 +1153,9 @@ private struct MarkdownEditorPresentation: View {
             theme: theme,
             findState: findState,
             gitLineChangesProvider: gitLineChangesProvider,
-            dropForwarding: dropForwarding
+            dropForwarding: dropForwarding,
+            navigate: navigate,
+            hover: hover
         )
     }
 

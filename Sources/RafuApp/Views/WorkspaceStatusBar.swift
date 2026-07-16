@@ -7,6 +7,7 @@ struct WorkspaceStatusBar: View {
     @State private var memorySample: ProcessMemorySample?
     let descriptor: WorkspaceDescriptor?
     @Binding var isResourcesPresented: Bool
+    let languageIntelligence: LanguageIntelligenceCoordinator
 
     var body: some View {
         HStack(spacing: 8) {
@@ -36,7 +37,7 @@ struct WorkspaceStatusBar: View {
             .accessibilityLabel("Show Resources")
             .help("Show Resources")
             .popover(isPresented: $isResourcesPresented) {
-                ResourcesView()
+                ResourcesView(coordinator: languageIntelligence)
             }
 
             Text(descriptor == nil ? "Ready" : "Local editor")

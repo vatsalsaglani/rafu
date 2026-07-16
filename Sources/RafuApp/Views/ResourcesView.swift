@@ -18,15 +18,67 @@ nonisolated enum ResourceMemoryFormat {
     }
 }
 
+/// Pure state → icon/label/restart-eligibility mapping for one language
+/// server's `LanguageServerStatus.Phase`, mirroring `ResourceMemoryFormat`.
+/// State is always conveyed by an SF Symbol (shape-distinct per phase) plus
+/// a text label — never by color alone.
+nonisolated enum LanguageServerStatusPresentation {
+    static func stateLabel(_ phase: LanguageServerStatus.Phase) -> String {
+        switch phase {
+        case .starting: return "Starting"
+        case .ready: return "Ready"
+        case .idle: return "Idle"
+        case .warmingUp: return "Indexing"
+        case .backingOff: return "Restarting…"
+        case .dead: return "Stopped"
+        case .ceilingKilled: return "Stopped — memory limit"
+        }
+    }
+
+    /// Whether a "Restart" action should be offered for `phase`. Only
+    /// terminal, non-recovering states qualify: `.dead` (backoff
+    /// exhausted, manual restart only) and `.ceilingKilled` (the RSS
+    /// watchdog killed it, ADR 0005's "kill + notify, offer restart").
+    /// `.backingOff` already auto-retries on its own schedule, and every
+    /// live phase has nothing to restart.
+    static func showsRestart(_ phase: LanguageServerStatus.Phase) -> Bool {
+        switch phase {
+        case .dead, .ceilingKilled: return true
+        case .starting, .ready, .idle, .warmingUp, .backingOff: return false
+        }
+    }
+
+    /// Shape-distinct (not color-dependent) SF Symbols per phase.
+    static func symbol(_ phase: LanguageServerStatus.Phase) -> String {
+        switch phase {
+        case .starting: return "circle.dotted"
+        case .ready: return "checkmark.circle"
+        case .idle: return "pause.circle"
+        case .warmingUp: return "hourglass"
+        case .backingOff: return "arrow.clockwise"
+        case .dead: return "exclamationmark.triangle"
+        case .ceilingKilled: return "exclamationmark.triangle"
+        }
+    }
+}
+
 /// Rafu's honest process memory: its own resident size plus one row per
 /// Rafu-spawned process tracked in `ProcessResourceRegistry` (terminal
-/// shells today; language servers in lane 2). Samples only while this
-/// popover is visible — the `.task` loop sleeps and is cancelled when the
-/// view disappears, so there is no standing timer.
+/// shells today; language servers in lane 2), plus a "Language Servers"
+/// section surfacing each server's status and a manual restart action
+/// (ADR 0005: the RSS-ceiling watchdog "kills and notifies, offers
+/// restart" — this is that surface). Samples only while this popover is
+/// visible — the `.task` loop sleeps and is cancelled when the view
+/// disappears, so there is no standing timer.
 struct ResourcesView: View {
     @Environment(\.rafuTheme) private var theme
     @State private var appSample: ProcessMemorySample?
     @State private var rows: [ProcessResourceRegistry.ProcessResourceSample] = []
+    let coordinator: LanguageIntelligenceCoordinator
+
+    private var serverStatuses: [LanguageServerStatus] {
+        coordinator.servers.statuses.values.sorted { $0.languageID < $1.languageID }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -44,6 +96,20 @@ struct ResourcesView: View {
                     } else {
                         ForEach(rows, id: \.id) { row in
                             processRow(row)
+                        }
+                    }
+
+                    Divider().overlay(theme.palette.borderSubtle).padding(.vertical, 4)
+                    Text("Language Servers")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(theme.palette.textMuted)
+                    if serverStatuses.isEmpty {
+                        Text("No language servers running.")
+                            .font(.caption)
+                            .foregroundStyle(theme.palette.textMuted)
+                    } else {
+                        ForEach(serverStatuses, id: \.languageID) { status in
+                            languageServerRow(status)
                         }
                     }
                 }
@@ -108,5 +174,29 @@ struct ResourcesView: View {
         case .languageServer: return "cpu"
         case .other: return "gearshape"
         }
+    }
+
+    private func languageServerRow(_ status: LanguageServerStatus) -> some View {
+        let stateLabel = LanguageServerStatusPresentation.stateLabel(status.phase)
+        let showsRestart = LanguageServerStatusPresentation.showsRestart(status.phase)
+        return HStack {
+            Label(
+                status.serverName,
+                systemImage: LanguageServerStatusPresentation.symbol(status.phase))
+            Spacer()
+            Text(stateLabel)
+                .foregroundStyle(theme.palette.textMuted)
+            if showsRestart {
+                Button("Restart") {
+                    coordinator.restartServer(languageID: status.languageID)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.palette.accent)
+                .accessibilityLabel("Restart \(status.serverName)")
+            }
+        }
+        .font(.caption)
+        .accessibilityElement(children: showsRestart ? .contain : .combine)
+        .accessibilityLabel("\(status.serverName), \(stateLabel)")
     }
 }
