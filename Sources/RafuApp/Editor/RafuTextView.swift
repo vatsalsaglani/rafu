@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 
 /// TextKit 1 editor text view that draws Rafu's per-buffer decorations —
 /// current-line highlight, indent guides, and matched-bracket boxes — in
@@ -70,6 +71,239 @@ final class RafuTextView: NSTextView {
 
     var matchedBracketRanges: [NSRange] = [] {
         didSet { if oldValue != matchedBracketRanges { setNeedsDisplay(visibleRect) } }
+    }
+
+    /// Caret-driven navigation entry point, shared by ⌘-click and the editor
+    /// context menu. Called after the caret has been moved to the clicked
+    /// character, with the requested `NavigationTargetKind`. `nil` (the
+    /// default) leaves ⌘-click as an ordinary click and suppresses the
+    /// navigation context-menu items, e.g. for a document type
+    /// `CodeEditorView` never wires this for.
+    var navigateAction: (@MainActor (NavigationTargetKind) -> Void)?
+
+    /// Resolves an LSP hover for the identifier at a UTF-16 offset, for the
+    /// hover tooltip. `nil` (the default) disables hover entirely — no
+    /// tracking-area tooltip machinery runs. LSP-only: it returns `nil` when
+    /// no live, trusted server answers, so the tooltip silently no-ops.
+    var hoverAction: (@MainActor (Int) async -> EditorHoverInfo?)?
+
+    // MARK: - Hover tooltip state
+
+    /// The single in-flight hover debounce task. Cancelled and replaced on
+    /// every pointer move so only the latest hover position is ever resolved
+    /// (no repeating timer).
+    private var hoverDebounceTask: Task<Void, Never>?
+    /// The UTF-16 offset the pending/shown hover targets, compared after the
+    /// async resolve so a stale result never shows over a newer position.
+    private var hoverTargetOffset: Int?
+    private var hoverPopover: NSPopover?
+    private var hoverTrackingArea: NSTrackingArea?
+    /// Observer on the enclosing clip view's bounds, so any scroll (including
+    /// inertial/programmatic, which `scrollWheel` alone would miss) dismisses
+    /// the tooltip.
+    private var hoverClipObserver: NSObjectProtocol?
+
+    private static let hoverDelay = Duration.milliseconds(450)
+
+    /// ⌘-click "go to definition". Only intercepts when `.command` is held
+    /// and an action is wired; every other click (plain, drag, other
+    /// modifiers) falls through to `super` unchanged, so command-drag
+    /// selection and ordinary editing are unaffected. Any click also dismisses
+    /// a shown hover tooltip.
+    override func mouseDown(with event: NSEvent) {
+        dismissHover()
+        guard event.modifierFlags.contains(.command), let navigateAction else {
+            super.mouseDown(with: event)
+            return
+        }
+        let point = convert(event.locationInWindow, from: nil)
+        let index = characterIndexForInsertion(at: point)
+        setSelectedRange(NSRange(location: index, length: 0))
+        navigateAction(.definition)
+    }
+
+    // MARK: - Hover tracking
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+            self.hoverTrackingArea = nil
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        guard hoverAction != nil else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        scheduleHover(at: point)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        // Only cancel a still-pending resolve. A SHOWN tooltip is left to the
+        // popover's `.semitransient` behavior (outside click / scroll), so the
+        // pointer can travel into it to reach the "Go to Declaration" button.
+        hoverDebounceTask?.cancel()
+        hoverDebounceTask = nil
+        hoverTargetOffset = nil
+    }
+
+    override func keyDown(with event: NSEvent) {
+        // Any keystroke (including Escape) dismisses a shown tooltip before the
+        // edit/command is processed.
+        dismissHover()
+        super.keyDown(with: event)
+    }
+
+    /// Debounced hover resolve. Cancels the prior task, then — only when the
+    /// pointer is actually over an identifier — schedules a `hoverDelay` wait
+    /// followed by an LSP resolve. Cancellation is checked after the sleep AND
+    /// after the resolve, and the resolved offset is compared against the still-
+    /// current target, so a superseded position never shows a tooltip.
+    private func scheduleHover(at point: NSPoint) {
+        hoverDebounceTask?.cancel()
+        guard let hoverAction else { return }
+        let index = characterIndexForInsertion(at: point)
+        let length = (string as NSString).length
+        guard index >= 0, index <= length,
+            IdentifierUnderCaret.word(in: string, at: index) != nil
+        else {
+            hoverTargetOffset = nil
+            return
+        }
+        hoverTargetOffset = index
+        hoverDebounceTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.hoverDelay)
+            if Task.isCancelled { return }
+            guard let self, self.hoverTargetOffset == index else { return }
+            let info = await hoverAction(index)
+            if Task.isCancelled { return }
+            guard let info, self.hoverTargetOffset == index else { return }
+            self.showHoverTooltip(info, at: index)
+        }
+    }
+
+    private func showHoverTooltip(_ info: EditorHoverInfo, at offset: Int) {
+        guard let layoutManager, let textContainer,
+            let word = IdentifierUnderCaret.word(in: string, at: offset)
+        else { return }
+        let range = NSRange(location: word.position, length: (word.word as NSString).length)
+        let glyphRange = layoutManager.glyphRange(
+            forCharacterRange: range, actualCharacterRange: nil)
+        var anchorRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+        let origin = textContainerOrigin
+        anchorRect.origin.x += origin.x
+        anchorRect.origin.y += origin.y
+
+        closeHoverPopover()
+
+        let popover = NSPopover()
+        popover.behavior = .semitransient
+        popover.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let tooltip = EditorHoverTooltipView(info: info) { [weak self] in
+            self?.goToDeclarationFromHover(at: offset)
+        }
+        popover.contentViewController = NSHostingController(rootView: tooltip)
+        popover.show(relativeTo: anchorRect, of: self, preferredEdge: .maxY)
+        hoverPopover = popover
+        observeClipViewForHoverDismissal()
+    }
+
+    private func goToDeclarationFromHover(at offset: Int) {
+        dismissHover()
+        setSelectedRange(NSRange(location: offset, length: 0))
+        navigateAction?(.declaration)
+    }
+
+    /// Dismisses the tooltip and cancels any pending resolve. Called on edit
+    /// (from the storage delegate), keystroke, scroll, click, and teardown.
+    func dismissHover() {
+        hoverDebounceTask?.cancel()
+        hoverDebounceTask = nil
+        hoverTargetOffset = nil
+        closeHoverPopover()
+    }
+
+    private func closeHoverPopover() {
+        // Synchronous `close()` rather than the animated `performClose(_:)`:
+        // this also runs from `dismantleNSView`, and an in-flight close
+        // animation could outlive the positioning view (this text view) as
+        // SwiftUI drops the scroll view during teardown.
+        hoverPopover?.close()
+        hoverPopover = nil
+        if let hoverClipObserver {
+            NotificationCenter.default.removeObserver(hoverClipObserver)
+            self.hoverClipObserver = nil
+        }
+    }
+
+    private func observeClipViewForHoverDismissal() {
+        guard let clipView = enclosingScrollView?.contentView else { return }
+        clipView.postsBoundsChangedNotifications = true
+        hoverClipObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification, object: clipView, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.dismissHover() }
+        }
+    }
+
+    // MARK: - Context menu
+
+    /// Augments the default editor context menu (copy/paste/lookup, from
+    /// `super`) with Go to Definition / Declaration / Find References at the
+    /// top, followed by a separator. The clicked character is selected first so
+    /// the caret-driven `navigateAction` targets the symbol under the pointer,
+    /// exactly like ⌘-click. The items are only inserted when a `navigateAction`
+    /// is wired AND the click landed on an identifier, so a right-click on
+    /// whitespace or in a non-navigable editor shows only the default menu.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let baseMenu = super.menu(for: event)
+        guard navigateAction != nil else { return baseMenu }
+        let point = convert(event.locationInWindow, from: nil)
+        let index = characterIndexForInsertion(at: point)
+        guard IdentifierUnderCaret.word(in: string, at: index) != nil else { return baseMenu }
+        setSelectedRange(NSRange(location: index, length: 0))
+
+        let menu = baseMenu ?? NSMenu()
+        let items = [
+            navigationMenuItem(title: "Go to Definition", kind: .definition, keyEquivalent: "j"),
+            navigationMenuItem(title: "Go to Declaration", kind: .declaration, keyEquivalent: ""),
+            navigationMenuItem(title: "Find References", kind: .references, keyEquivalent: "r"),
+        ]
+        var insertionIndex = 0
+        for item in items {
+            menu.insertItem(item, at: insertionIndex)
+            insertionIndex += 1
+        }
+        menu.insertItem(.separator(), at: insertionIndex)
+        return menu
+    }
+
+    private func navigationMenuItem(
+        title: String, kind: NavigationTargetKind, keyEquivalent: String
+    ) -> NSMenuItem {
+        let item = NSMenuItem(
+            title: title, action: #selector(navigateMenuItem(_:)), keyEquivalent: keyEquivalent)
+        if !keyEquivalent.isEmpty {
+            item.keyEquivalentModifierMask = [.control, .command]
+        }
+        item.target = self
+        item.representedObject = kind
+        return item
+    }
+
+    @objc private func navigateMenuItem(_ sender: NSMenuItem) {
+        guard let kind = sender.representedObject as? NavigationTargetKind else { return }
+        navigateAction?(kind)
     }
 
     private static let indentColumns = 4

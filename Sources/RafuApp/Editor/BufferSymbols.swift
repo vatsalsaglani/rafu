@@ -1,17 +1,20 @@
 import Foundation
-import SwiftTreeSitter
 
 /// A lightweight symbol extracted from an open editor buffer.
 nonisolated struct BufferSymbol: Hashable, Sendable {
     enum Kind: Hashable, Sendable {
         case function
         case type
+        case property
+        case constant
         case heading(level: Int)
 
         var symbolName: String {
             switch self {
             case .function: "function"
             case .type: "cube"
+            case .property: "p.square"
+            case .constant: "c.square"
             case .heading: "number"
             }
         }
@@ -53,84 +56,44 @@ nonisolated enum BufferSymbolScanner {
     /// empty array is a legitimate "parsed fine, no definitions found"
     /// result and must not be confused with "try the regex path instead".
     ///
-    /// One-shot: builds its own `Parser` and parses `text` once (lane-1
-    /// increment 9 deliberately does not reuse the live editor's incremental
-    /// `SyntaxParsingActor` tree — out of scope here). `tags.scm` predicates
-    /// (`#not-eq? @name "constructor"`, `#not-match? @name "^(require)$"`,
-    /// …) ARE evaluated: `cursor.resolve(with:)` (the non-deprecated
-    /// `ResolvingQueryMatchSequence` API) is prepared with a
-    /// `Predicate.Context(string:)` text provider over the same snapshot, so
-    /// a JavaScript/TypeScript constructor or `require()` reference is
-    /// correctly excluded rather than showing up as a false symbol.
+    /// Delegates the actual tree-sitter work to
+    /// `WorkspaceSymbolExtractor.extract`, which dedups by `(name, range)`
+    /// (fixing the duplicate-Swift-method wart this scanner used to have)
+    /// and keeps every `@definition.*` kind, including property/constant —
+    /// only `@definition.module` (and anything future grammars add outside
+    /// `BufferSymbol.Kind`) is skipped here.
     static func scanUsingGrammar(
         text: String,
         grammarID: GrammarLanguageID,
         limit: Int = symbolLimit
     ) async -> [BufferSymbol]? {
-        guard limit > 0, !text.isEmpty else { return [] }
-
-        guard let query = await GrammarRegistry.shared.tagsQuery(for: grammarID),
-            let configuration = try? await GrammarRegistry.shared.configuration(for: grammarID)
+        guard
+            let extracted = await WorkspaceSymbolExtractor.extract(
+                text: text, grammarID: grammarID, limit: limit)
         else { return nil }
-
-        // Everything from here is synchronous, non-`Sendable` tree-sitter
-        // work confined to this call — no further `await` touches `parser`,
-        // `tree`, or `query`.
-        let parser = Parser()
-        guard (try? parser.setLanguage(configuration.language)) != nil,
-            let tree = parser.parse(text)
-        else { return nil }
-
-        let cursor = query.execute(in: tree)
-        let context = Predicate.Context(string: text)
-        let nsText = text as NSString
-
-        var symbols: [BufferSymbol] = []
-        for match in cursor.resolve(with: context) {
-            guard let symbol = symbol(from: match, text: nsText) else { continue }
-            symbols.append(symbol)
-            if symbols.count >= limit { break }
+        return extracted.compactMap { symbol in
+            guard let kind = kind(forDefinitionSuffix: symbol.kind) else { return nil }
+            return BufferSymbol(
+                name: symbol.name, detail: symbol.kind, kind: kind, range: symbol.range)
         }
-        return symbols
     }
 
-    /// Builds a `BufferSymbol` from one resolved `tags.scm` match, or `nil`
-    /// when the match has no `@name` capture, no `@definition.*` capture, or
-    /// its definition kind isn't one `BufferSymbol.Kind` covers.
-    /// `@reference.*` matches (call sites, type references, `new` targets)
-    /// and `@definition.property`/`.constant`/`.module` are intentionally
-    /// skipped — `BufferSymbol.Kind` stays function/type/heading this
-    /// increment (see the phase plan's noted outline gap).
-    private static func symbol(from match: QueryMatch, text: NSString) -> BufferSymbol? {
-        guard let nameCapture = match.captures(named: "name").first else { return nil }
-        guard
-            let definitionCapture = match.captures.first(where: {
-                $0.name?.hasPrefix("definition.") == true
-            }),
-            let definitionName = definitionCapture.name
-        else { return nil }
-
-        let kindSuffix = String(definitionName.dropFirst("definition.".count))
-        let kind: BufferSymbol.Kind
-        switch kindSuffix {
+    /// Maps an `ExtractedSymbol`'s raw `@definition.` suffix to a
+    /// `BufferSymbol.Kind`, or `nil` for a suffix this scanner has no icon
+    /// for (`module`, and anything a future grammar adds).
+    private static func kind(forDefinitionSuffix suffix: String) -> BufferSymbol.Kind? {
+        switch suffix {
         case "function", "method":
-            kind = .function
+            return .function
         case "class", "interface":
-            kind = .type
+            return .type
+        case "property":
+            return .property
+        case "constant":
+            return .constant
         default:
-            // property/constant/module (and anything future grammars add)
-            // are skipped rather than mis-kinded.
             return nil
         }
-
-        let range = nameCapture.range
-        guard range.location != NSNotFound, NSMaxRange(range) <= text.length else { return nil }
-        return BufferSymbol(
-            name: text.substring(with: range),
-            detail: kindSuffix,
-            kind: kind,
-            range: range
-        )
     }
 
     // MARK: - Declarations

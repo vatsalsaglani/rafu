@@ -47,34 +47,10 @@ nonisolated enum GrammarLanguageID: String, Sendable, CaseIterable {
     static func languageID(forExtension fileExtension: String, fileName: String)
         -> GrammarLanguageID?
     {
-        let normalizedName = fileName.lowercased()
-        if normalizedName == "dockerfile" || normalizedName.hasPrefix("dockerfile.") {
-            return .dockerfile
+        if let fileNameMapping = LanguageCatalog.mapping(forFileName: fileName.lowercased()) {
+            return fileNameMapping.grammarID
         }
-        switch fileExtension.lowercased() {
-        case "swift":
-            return .swift
-        case "py", "pyw":
-            return .python
-        case "js", "jsx", "mjs", "cjs":
-            return .javascript
-        case "ts":
-            return .typescript
-        case "tsx":
-            return .tsx
-        case "json", "jsonc":
-            return .json
-        case "yaml", "yml":
-            return .yaml
-        case "toml":
-            return .toml
-        case "sh", "bash", "zsh":
-            return .bash
-        case "md", "markdown":
-            return .markdown
-        default:
-            return nil
-        }
+        return LanguageCatalog.byExtension[fileExtension.lowercased()]?.grammarID
     }
 
     /// Maps a Markdown fenced-code-block info string (the text after the
@@ -86,28 +62,7 @@ nonisolated enum GrammarLanguageID: String, Sendable, CaseIterable {
     /// unknown or unmapped info string; the fence then renders as plain,
     /// theme-styled text.
     static func languageID(forInfoString infoString: String) -> GrammarLanguageID? {
-        switch infoString.trimmingCharacters(in: .whitespaces).lowercased() {
-        case "swift":
-            return .swift
-        case "python", "py":
-            return .python
-        case "javascript", "js", "jsx":
-            return .javascript
-        case "typescript", "ts":
-            return .typescript
-        case "tsx":
-            return .tsx
-        case "json":
-            return .json
-        case "yaml", "yml":
-            return .yaml
-        case "toml":
-            return .toml
-        case "bash", "sh", "shell":
-            return .bash
-        default:
-            return nil
-        }
+        LanguageCatalog.byInfoString[infoString.trimmingCharacters(in: .whitespaces).lowercased()]
     }
 }
 

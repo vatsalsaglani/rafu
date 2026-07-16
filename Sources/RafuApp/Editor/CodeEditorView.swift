@@ -7,19 +7,25 @@ struct CodeEditorView: NSViewRepresentable {
     let findState: DocumentFindState?
     let gitLineChangesProvider: (@MainActor () async -> GitGutterLineChanges?)?
     let dropForwarding: EditorDropForwarding?
+    let navigate: (@MainActor (NavigationTargetKind) -> Void)?
+    let hover: (@MainActor (Int) async -> EditorHoverInfo?)?
 
     init(
         document: EditorDocument,
         theme: RafuTheme,
         findState: DocumentFindState? = nil,
         gitLineChangesProvider: (@MainActor () async -> GitGutterLineChanges?)? = nil,
-        dropForwarding: EditorDropForwarding? = nil
+        dropForwarding: EditorDropForwarding? = nil,
+        navigate: (@MainActor (NavigationTargetKind) -> Void)? = nil,
+        hover: (@MainActor (Int) async -> EditorHoverInfo?)? = nil
     ) {
         self.document = document
         self.theme = theme
         self.findState = findState
         self.gitLineChangesProvider = gitLineChangesProvider
         self.dropForwarding = dropForwarding
+        self.navigate = navigate
+        self.hover = hover
     }
 
     func makeCoordinator() -> Coordinator {
@@ -53,6 +59,8 @@ struct CodeEditorView: NSViewRepresentable {
             .backgroundColor: NSColor(rafuHex: theme.editor.selectionBackground)
         ]
         textView.delegate = context.coordinator
+        textView.navigateAction = navigate
+        textView.hoverAction = hover
         scrollView.documentView = textView
 
         let gutter = EditorGutterRulerView(
@@ -93,10 +101,12 @@ struct CodeEditorView: NSViewRepresentable {
         context.coordinator.reloadIfNeeded()
         context.coordinator.syncGuardSuppression()
         scrollView.backgroundColor = NSColor(rafuHex: theme.editor.background)
-        guard let textView = scrollView.documentView as? NSTextView else { return }
+        guard let textView = scrollView.documentView as? RafuTextView else { return }
         textView.backgroundColor = NSColor(rafuHex: theme.editor.background)
         textView.textColor = NSColor(rafuHex: theme.editor.foreground)
         textView.insertionPointColor = NSColor(rafuHex: theme.editor.cursor)
+        textView.navigateAction = navigate
+        textView.hoverAction = hover
     }
 
     static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
@@ -119,6 +129,9 @@ struct CodeEditorView: NSViewRepresentable {
         coordinator.tearDownSyntaxPipeline()
         coordinator.textView?.textStorage?.delegate = nil
         coordinator.uninstallFindController()
+        coordinator.textView?.dismissHover()
+        coordinator.textView?.navigateAction = nil
+        coordinator.textView?.hoverAction = nil
         coordinator.document.saveAction = nil
         coordinator.document.textSnapshotProvider = nil
         coordinator.document.selectionProvider = nil
@@ -520,6 +533,9 @@ struct CodeEditorView: NSViewRepresentable {
                 )
                 if editedMask.contains(.editedCharacters) {
                     gutterRuler?.invalidateLineIndex()
+                    // A text edit invalidates any shown hover tooltip (its
+                    // anchored range and payload may no longer be valid).
+                    textView?.dismissHover()
                 }
                 if editedMask.contains(.editedCharacters), !isLoading {
                     document.recordEditDelta(editedRange: editedRange, changeInLength: delta)
