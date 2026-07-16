@@ -21,6 +21,31 @@ This is a per-target setting. Never infer another target's isolation from app be
 - Subprocess wrappers must drain stdout and stderr concurrently without blocking an actor or the main thread.
 - Never introduce `@unchecked Sendable` merely to silence strict-concurrency diagnostics.
 
+## GCD DispatchSource handler isolation under default-MainActor
+
+- Applies to: `Sources/RafuApp/Services/MemoryPressureMonitor.swift` and any closure passed to `DispatchSource.setEventHandler`, `dispatch_source_set_event_handler`, or similar C-callback APIs
+- Last verified: Swift 6.2.4, macOS 26.1 on 2026-07-16
+
+Under a target's default `MainActor` isolation (such as `RafuApp`), a bare closure passed to `DispatchSource.setEventHandler(_:)` is inferred to be `@MainActor`-isolated by the type checker. However, DispatchSource invokes the handler on its target queue (a private serial queue), NOT the main actor. At runtime, Swift 6's strict executor check (`swift_task_isCurrentExecutor`) trips `dispatch_assert_queue` and kills the process with `EXC_BREAKPOINT (SIGTRAP)`.
+
+The compiler does not flag this because the Dispatch handler parameter is not strongly typed to reject a MainActor closure — the mismatch is only detected at runtime when the event fires. CI and unit tests typically miss it because they trigger handlers via testable seams (direct `broadcast()` calls) or do not wait long enough for real system events (memory pressure) to fire.
+
+**Fix:** Mark the handler closure explicitly `@Sendable` (which makes it non-isolated) and hop to the main actor internally:
+
+```swift
+newSource.setEventHandler { @Sendable [weak newSource] in
+  // Handler runs on the private queue; do non-blocking work here
+  Task { @MainActor in
+    // Transition to main actor to touch @MainActor state
+    self.broadcast(...)
+  }
+}
+```
+
+**Contrast:** A `NotificationCenter.addObserver(forName:object:queue:using:)` block with `queue: .main` DOES run on the main thread, so `MainActor.assumeIsolated { }` there is safe and correct. The navigation-features implementation relies on exactly this (clip-view scroll observer on `.main` queue).
+
+**Why it matters:** This is a platform-specific isolation trap that evades compile-time detection and reproduces only under real system conditions. Existing codebase grep for `DispatchSource.setEventHandler` is the verification method; MemoryPressureMonitor was the only instance.
+
 ## FSEvents bridging under strict concurrency
 
 - Applies to: `Sources/RafuApp/Services/WorkspaceLivenessService.swift`

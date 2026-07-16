@@ -15,9 +15,11 @@ Key capacity rules:
 - **Global cap:** 500,000 symbols with truncation disclosure (`isTruncated` flag).
 - **Preview laziness:** `previewLine` (the matched line's text) is computed **only at candidate-build time** when the user selects a symbol, not stored for all symbols (would consume ~30–40 MB at the 500k cap).
 
-### Grammar-covered parsing and deduplication
+### Grammar-covered parsing and unified buffer symbol extraction (post-merge validation fix D3, 2026-07-15)
 
-`WorkspaceSymbolExtractor` reuses `SyntaxHighlighter`'s `scanUsingGrammar` mechanics (Parser + cursor.resolve honoring tree-sitter predicates like `#not-eq?`) but keeps **all** `@definition.*` capture kinds (function, method, class, interface, property, constant, module) and deduplicates by (name, range). This fixes both the pre-increment-10 duplicate-Swift-method artifact **and** the property/constant outline gap in `BufferSymbols` — though `BufferSymbols` itself was not edited (its @-symbol mode still has the gap; the workspace index is separate).
+`WorkspaceSymbolExtractor` reuses `SyntaxHighlighter`'s `scanUsingGrammar` mechanics (Parser + cursor.resolve honoring tree-sitter predicates like `#not-eq?`) but keeps **all** `@definition.*` capture kinds (function, method, class, interface, property, constant, module) and deduplicates by (name, range).
+
+Buffer symbol extraction now delegates to `WorkspaceSymbolExtractor.extract` (dedup by (name, range) + all @definition.* kinds), fixing both the duplicate-Swift-method wart AND the property/constant gap. `BufferSymbol.Kind` gained `.property` and `.constant` kinds with SF Symbols and VoiceOver labels; the 2,000 cap and regex fallback remain intact. `CommandPaletteView` reads kind.symbolName generically, so new kinds are displayed automatically.
 
 Non-grammar files are skipped by a cheap extension check, making the index affordable on large monorepos: in testing, 20,000 non-grammar `.txt` files cost almost nothing; only the ~8,000 `.swift` files dominated the build.
 
@@ -46,7 +48,7 @@ Non-Sendable tree-sitter types (Parser, Tree, QueryCursor) never cross an await 
 `SyntacticNavigationProvider` implements `NavigationTierProvider` over the symbol index and:
 - **.definition** / **.declaration** requests: exact-name lookup; candidates ranked same-file first, then same-directory (proximity), then lexicographic. An index that exists and returns no match is an authoritative empty answer (`NavigationAnswer(tier: .syntactic, candidates: [])`, not a decline).
 - **.references** / **.hover** requests: returns `nil` (decline), falling through to the text-search navigation tier. The index deliberately stores no `@reference.*` captures (to stay bounded); precise reference and hover are lane 2's LSP responsibility.
-- **.building** state: returns `NavigationAnswer(state: .indexing)` while the index rebuild is in flight.
+- **.building** and **.idle** states: returns `NavigationAnswer(state: .indexing)` in both cases. An index that is `.idle` (cold start, or after memory pressure sheds it) has never been built and is not an authoritative "no match", so awaiting the build is correct. Previously only `.building` was treated as indexing, causing `.idle` to block the text tier.
 
 ### NavigationLadder and LSP insertion point
 
@@ -138,9 +140,11 @@ This decision is testable (6 tests) and independent of which tier answered the r
 
 The method is a no-op if the active editor is not mounted (hibernated or preview-only) or no workspace is open. It resets peek state in `resetFileTreeState()` and cancels the navigation task in the isolated `deinit`.
 
-### Navigation peek view
+### Navigation peek view and reference ranking/disclosure (post-merge validation fix D2, 2026-07-15)
 
 `NavigationPeekView` is a candidate list sheet mirroring `CommandPaletteView`'s keyboard navigation pattern (`@State selectedIndex`, arrow keys, return, `ScrollViewReader`). It shows `NavigationAnswer.tier.label` for provenance (LSP/syntactic/text) but never branches on the `NavigationTier` case, ensuring lane-2 LSP answers render through the same row layout unchanged. VoiceOver labels are applied per row (name/kind/path) and on the header (title + tier). The `.indexing` and `.empty(kind)` outcomes show a brief message with a Close button.
+
+References ranking: `TextSearchNavigationProvider.answer` now ranks candidates same-file → same-directory → path order, reusing a pure shared helper (`NavigationCandidateRanking.isOrderedBefore`). The `referencesResultCap = 200` is exposed as a named constant. When candidates count equals the cap, the peek footer shows "Showing first 200 matches" — a disclosure that is truncating but accurate for the text tier. **Residual (accepted):** the footer heuristic under-discloses per-file truncation below the 200 total and shows for a genuine exactly-200 count (NavigationAnswer remains frozen, so no per-tier cap field was added).
 
 ### Menu commands and keyboard shortcuts
 
@@ -151,14 +155,9 @@ The method is a no-op if the active editor is not mounted (hibernated or preview
 
 Each command has its `NavigationCommandID` accessibility identifier and is disabled when no document is selected (`workspaceSession?.selectedDocument == nil`).
 
-### Command-click (deferred)
+### Command-click navigation (post-merge validation fix D4, 2026-07-15)
 
-⌘-click navigation is recorded for later implementation (beyond 10b). The AGENTS.md rule that "every core action needs a visible UI path and a menu/keyboard path" is satisfied by the ⌃⌘J shortcut and menu entry, so ⌘-click is additive convenience. The planned approach (for later pickup):
-- `RafuTextView.mouseDown(with:)` checks `event.modifierFlags.contains(.command)`.
-- On a command-click, resolve the clicked character index via the existing `characterIndexForInsertion(for:)` helper.
-- Invoke `WorkspaceSession.navigate(kind: .definition)` at that position instead of the live selection.
-- Requires a pointing-hand cursor affordance over an identifier while ⌘ is held.
-- Plain command-click-to-place-cursor (the default AppKit behavior when the click lands outside an identifier) must still work.
+⌘-click is now implemented and fully functional. `RafuTextView.mouseDown(with:)` intercepts `.command` clicks, resolves the clicked character index via `characterIndexForInsertion(at:)`, and invokes a plumbed closure (pattern: `saveAction`) that calls `session.navigate(kind: .definition)`. The closure is set/cleared in `CodeEditorView.makeNSView`/`dismantleNSView`. Plain clicks, drags, and text selection are untouched (command-flag check first; `super` for all other cases). **Caveat (multi-group behavior):** navigate operates on `session.selectedDocument` and only the active/hit-testable editor per group receives the click, so ⌘-click on a non-focused split pane behaves like the existing menu command (no worse). Select-clicked-document-first was intentionally not implemented (out of scope).
 
 ## Related code, ADRs, and phases
 

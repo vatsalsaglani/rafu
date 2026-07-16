@@ -376,7 +376,7 @@ the lane-2 worktree is created from this commit.**
 
 ## Exit
 
-**Lane 1 COMPLETE (2026-07-15).** All increments 0–10b verified and passing (271/271 tests across 4 suites). Stages A/B gates hold; lane is merge-ready. Memory resilience and Tree-sitter syntax pipeline ready for integration with lane 2.
+**Lane 1 COMPLETE (2026-07-15).** All increments 0–10b verified and passing (271/271 tests across 4 suites). Stages A/B gates hold; lane is merge-ready. Memory resilience and Tree-sitter syntax pipeline ready for integration with lane 2. Post-merge validation fixes (batches A–E) complete 2026-07-15; 485 tests; see post-merge-validation-fixes.md for detailed findings and remaining manual items.
 
 Running totals:
 - **Tests:** 271 passing (incremented: 150 → 156 → 166 → 171 → 184 → 186 → 197 → 210 → 216 → 238 → 255 → 271).

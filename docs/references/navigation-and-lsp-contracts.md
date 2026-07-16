@@ -2,7 +2,7 @@
 
 - **Applies to:** navigation types and providers, document edit deltas, the
   Language Intelligence subsystem seam, and process resource registration
-- **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-15
+- **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-16
 
 ## Rules and observed behavior
 
@@ -88,6 +88,10 @@ Darwin's `proc_pid_rusage` family, not subprocess invocation:
   standing timers). This confirms the registry's Darwin-based measurement is
   honest against the system `ps` output and can be trusted for memory budgeting.
 
+### Language server status surface and restart affordance (post-merge validation fix B1, 2026-07-15)
+
+ADR 0005 requires the RSS-ceiling watchdog to kill servers AND notify the user, offering restart. `ResourcesView` now displays a "Language Servers" section listing per-server status from `session.languageIntelligence.servers.statuses`. Each server row shows language, display name, and a pure `LanguageServerStatusPresentation` (stateLabel text, showsRestart button, SF Symbol icon) — state is never conveyed by color alone (accessible to VoiceOver). A Restart button calls a thin `LanguageIntelligenceCoordinator.restartServer(languageID:)` passthrough, which clears the stale status row (new `LanguageServerStatusStore.remove`), then restarts + eager `ensureSession` for observable feedback. The plumbing chain is: `WorkspaceWindowView` → `WorkspaceStatusBar` → `ResourcesView`, with the session (or coordinator) passed down from the window.
+
 ### ProcessResourceRegistry.shared — canonical cross-lane process registry
 
 Both lane 1 and lane 2 must use the same `ProcessResourceRegistry.shared`
@@ -125,6 +129,67 @@ The repository uses `swift format lint --strict`, which enforces the
 - This applies to all value types (`struct`, not `class`). The linter catches
   this automatically in the CI format check.
 
+### Trust prompt mount and language-server lifecycle (post-merge validation fix A1, 2026-07-15)
+
+The language-server trust gate must be presented to the user to be meaningful. When a language server is installed, `LanguageIntelligenceCoordinator.pendingTrustRequest` is published as an observable state. `WorkspaceWindowView` presents `LanguageServerTrustPromptView` as a `.sheet(item:)` driven by this state, wiring user actions to `approveTrust(_:)` / `declineTrust(_:)` callbacks. After approval, the pending navigation is NOT automatically retried (the user re-invokes Go to Definition); this deferred-retry approach avoids complexity in the request flow without a loss of functionality. The sheet supports VoiceOver labels and keyboard paths (Escape dismisses as decline; default/cancel key equivalents follow standard sheet conventions).
+
+### SyntacticNavigationProvider idle-state handling (post-merge validation fix A2, 2026-07-15)
+
+`SyntacticNavigationProvider.answer(_:)` must treat BOTH `.building` and `.idle` index states as `.indexing`. An index that is `.idle` (cold start, or after memory pressure sheds it) has never been built and is not an authoritative "no match" — awaiting the build is the correct response. Previously only `.building` was treated as indexing, causing `.idle` to return an authoritative-empty answer that blocked the text tier.
+
+### DocumentDidOpen disk-read fallback (post-merge validation fix A3, 2026-07-15)
+
+When `LanguageIntelligenceCoordinator.documentDidOpen` runs synchronously before the editor mounts, `document.textSnapshotProvider` is `nil`. Rather than send an empty `didOpen` payload to the language server (which would cause an authoritative-empty LSP answer to block syntactic fallback on immediate Go to Definition), the coordinator now reads the document text from disk off-main (respecting the 4 MB cap; oversized/unreadable files fall back to `""`). The disk read is the truth because the document was just opened clean. When the provider IS available (editor mounted), behavior is unchanged.
+
+### Edit-forwarding gate and LanguageServerStatus.forwardsDocumentChanges (post-merge validation fix B2, 2026-07-15)
+
+Per-keystroke edit-delta forwarding to the language server must not proceed without a live server. `documentDidOpen`'s edit-subscription task now gates the full-document snapshot on `LanguageServerStatus.forwardsDocumentChanges(phase:)` — a pure method that returns `true` only for `.starting`, `.ready`, and `.warmingUp` states, skipping `.idle`, `.backingOff`, `.dead`, `.ceilingKilled`, and `nil`. This eliminates a wasted full-document copy and actor hop per keystroke when no server is active. **Residual race (documented):** an extraordinarily narrow race for `.incremental-sync` servers could momentarily desync the server's view of a document if an edit arrives between `.starting` state publication and the first keystroke, healing on the next `.full` fallback. A zero-window `await manager.hasLiveServer(languageID:)` check is the documented alternative if ever needed.
+
+### Hover tooltip: LSP-only, debounced, side-effect-free (post-fix increment, 2026-07-16)
+
+Mouse-hover over an identifier resolves LSP hover through the navigation ladder (LSP tier only; syntactic and text tiers decline `.hover`) and shows a bounded, scrollable, monospaced `.semitransient` NSPopover with the server's signature/docstring + a "Go to Declaration" button. New `WorkspaceSession.hoverInfo(at:utf16Offset:)` is offset-explicit (the mouse point, not the caret) and side-effect-free, reusing an extracted `resolveLanguageID(for:)` helper.
+
+**Debounce:** A 450 ms cancellable `Task`-based debounce (no timer) fires only if the mouse stays over the same identifier long enough. Moving the mouse to a different identifier or leaving the hover area cancels the pending resolve.
+
+**Tooltip lifecycle:** dismisses on text edit (via `Coordinator.textStorage editedCharacters` callback), scroll (clip-view `boundsDidChange` observer on the main queue), keyDown, Escape, or outside-click. `mouseExited` only cancels a **pending** resolve; if a tooltip is already shown, the pointer can reach the "Go to Declaration" button. `dismantleNSView` tears everything down: `close()` the popover, cancel the task, remove the observer.
+
+**Reduce Motion:** `popover.animates = false` when accessibility setting is active.
+
+**Hover text:** uses a new `flattenedHoverMultiline` (bounded 2000 chars, preserving line structure) for `.hover` only; the existing `flattenedHover`/240 char single-line path stays unchanged for other navigation purposes.
+
+**Side effects:** hover never moves the caret, never indexes, never modifies selection; it is a read-only lookup operation.
+
+Hover text and tooltip rendering use new `EditorHoverInfo` (Sendable) and `EditorHoverTooltipView` types.
+
+### References fall-through on empty candidates (post-fix increment, 2026-07-16)
+
+`LSPNavigationProvider.locationAnswer` now **declines** (returns `nil`) when a `.references` query yields an empty candidate list or all-unreadable targets, allowing the navigation ladder to fall through to the syntactic tier (which also declines `.references`), then to the bounded text tier. This graceful degradation shows textual ("text match") results as the fallback.
+
+**Exception scope:** The empty-decline rule applies **only** to `.references`. `.definition` and `.declaration` answers remain authoritative-empty (they return an empty `.ready` answer, blocking the ladder). This preserves correct behavior for definition/declaration while allowing references to fall back to text search.
+
+**Text tier change:** `TextSearchNavigationProvider` now also declines `.hover`, ensuring hover is truly LSP-only (no syntactic or text tier fallback for hover).
+
+**Note on true cross-file references:** sourcekit-lsp returns an empty array for `.references` without a project-wide index. The proper fix is enabling sourcekit-lsp's index store via the `ServerDescriptor.initializationOptions` (which flows into the LSP `initialize` handshake) **AND** a project build that produces the index. The curated `sourceKitLSP` descriptor currently sets `initializationOptions: nil` in `Registry/CuratedCatalog.swift`. This is the **real follow-up** for true cross-file references; the fall-through is the pragmatic interim for the current coordinator-verified state.
+
+### Context menu with navigation commands (post-fix increment, 2026-07-16)
+
+`RafuTextView.menu(for:)` augments the default copy/paste/lookup menu with navigation commands at the top:
+- Go to Definition (⌃⌘J)
+- Go to Declaration
+- Find References (⌃⌘R)
+Followed by a separator, gated on both a wired `navigateAction` AND an identifier at the click position. The command menu selects the clicked symbol and invokes `session.navigate(kind:)`. `super.menu(for:)` is preserved and always called (nil-tolerant).
+
+### Navigation action plumbing: generalized and hooked (post-fix increment, 2026-07-16)
+
+`RafuTextView.goToDefinitionAction` was generalized to a public `navigateAction: (NavigationTargetKind) -> Void` closure, serving both ⌘-click and the context menu. A separate `hoverAction: (Int) async -> EditorHoverInfo?` closure handles hover resolution.
+
+Both closures are:
+- Set in `CodeEditorView.makeNSView` and `updateNSView` with `[weak session]` captures
+- Cleared in `dismantleNSView`
+- Wired through `EditorGroupView` (the composition layer) into both `EditorDocumentView` (code editor) and `MarkdownEditorPresentation` (markdown preview), so both code and markdown-edit contexts get navigation and hover
+
+Closure construction captures the session weakly to avoid retain cycles. New `EditorHoverInfo` (Sendable) carries tooltip payload. No `NavigationRequest`/`NavigationAnswer` shape changes; the new closures integrate at the UI boundary.
+
 ### Lane 2 seam: session lifecycle only
 
 The seam between lane 1 (`WorkspaceSession`) and lane 2 (Language Intelligence)
@@ -155,6 +220,14 @@ ensure that:
 - Requests can degrade gracefully through the navigation tiers without
   conflating identifier matching (text/syntactic) with position-based lookup
   (LSP).
+- Hover is a read-only tooltip facility (no side effects, no indexing, no
+  caret movement), debounced to avoid spurious server calls on rapid mouse
+  motion, and can be dismissed without blocking user edits.
+- References naturally fall back to bounded text search when LSP cannot
+  provide a project-wide index (interim pragmatic behavior until
+  initializationOptions wiring enables true cross-file references).
+- Context menus and ⌘-click navigation surface the full navigation ladder
+  without duplicating decision logic.
 - The document's true per-keystroke signals (`editDeltas`) remain distinct from
   its save-point identity (`revision`), so UI consumers keying off `revision`
   (preview, restoration) are not constantly invalidated.
@@ -168,17 +241,10 @@ ensure that:
 
 ## Reproduction and evidence
 
-All contract types exist and compile in the lane-1 Increment 0 commit:
+All contract types exist and compile:
 
-- `Sources/RafuApp/Navigation/NavigationTypes.swift`: `NavigationRequest`
-  definition with `position: Int` and `symbolName: String?`.
-- `Sources/RafuApp/Editor/DocumentEditDelta.swift`: delta shape with
-  `editVersion` counter.
-- `Sources/RafuApp/Models/EditorDocument.swift`: publishes deltas via
-  `editDeltas()` and maintains the continuation registry.
-- `Sources/RafuApp/Services/ProcessResourceRegistry.swift`: uses `proc_pid_rusage`.
-- `Sources/RafuApp/Models/WorkspaceSession.swift`: owns
-  `LanguageIntelligenceCoordinator` and calls the four lifecycle methods.
+- Lane-1 Increment 0: `Sources/RafuApp/Navigation/NavigationTypes.swift` (`NavigationRequest` with `position: Int` and `symbolName: String?`); `Sources/RafuApp/Editor/DocumentEditDelta.swift`; `Sources/RafuApp/Models/EditorDocument.swift` (delta publishing); `Sources/RafuApp/Services/ProcessResourceRegistry.swift`; `Sources/RafuApp/Models/WorkspaceSession.swift`.
+- Post-fix increment (2026-07-16): `Sources/RafuApp/Services/MemoryPressureMonitor.swift` (@Sendable DispatchSource handler); hover/context-menu integration in `Sources/RafuApp/Views/CodeEditorView.swift`, `EditorGroupView.swift`, `MarkdownEditorPresentation.swift`, `RafuTextView.swift`; `EditorHoverInfo` and `EditorHoverTooltipView` new types; `WorkspaceSession.hoverInfo(at:utf16Offset:)` new method; `LSPNavigationProvider` and `TextSearchNavigationProvider` empty-decline changes.
 
 The format lint rule is standard Swift format behavior, verified by the
 `./script/format.sh --lint` check.
@@ -192,22 +258,26 @@ swift test
 ./script/build_and_run.sh --verify
 ```
 
-All contract types compile, pass the focused tests (NavigationLadderTests,
-ProcessResourceRegistryTests, EditorDocumentDeltaTests), and the app launches
-without error. The seam rule is enforced at review time (no `documentDidChange`
-call from session to coordinator) and verified by the fact that lane 2's
-coordinator initializes document subscriptions in its `documentDidOpen` handler
-alone.
+Lane-1 Increment 0: All contract types compile, pass focused tests (NavigationLadderTests, ProcessResourceRegistryTests, EditorDocumentDeltaTests), and the app launches without error. The seam rule is enforced at review time.
+
+Post-fix increment (2026-07-16): Build clean, `swift test` 489/489 passing (485 baseline + 4 new: MemoryPressureMonitor isolation, hover debounce/dismissal, references fall-through, context menu). `./script/format.sh --lint` clean. `./script/build_and_run.sh --verify` green. Advisor final review of the navigation features: **ALL 8 correctness areas CONFIRMED-SAFE** (hover debounce race, retain cycles/leaks, tooltip dismissal, references fall-through, hoverInfo side-effect-freeness, menu, concurrency/isolation, no payload logging). One optional teardown hardening (performClose→close) applied. No defects found.
 
 ## Related code, ADRs, and phases
 
 - `Sources/RafuApp/Navigation/`
 - `Sources/RafuApp/Editor/DocumentEditDelta.swift`
 - `Sources/RafuApp/Services/ProcessResourceRegistry.swift`
+- `Sources/RafuApp/Services/MemoryPressureMonitor.swift` (GCD handler isolation)
 - `Sources/RafuApp/LanguageIntelligence/LanguageIntelligenceCoordinator.swift`
 - `Sources/RafuApp/Models/EditorDocument.swift`
 - `Sources/RafuApp/Models/WorkspaceSession.swift`
+- `Sources/RafuApp/Views/CodeEditorView.swift` (navigateAction/hoverAction plumbing)
+- `Sources/RafuApp/Views/EditorGroupView.swift` (closure threading)
+- `Sources/RafuApp/Views/MarkdownEditorPresentation.swift` (markdown hover/navigation)
+- `Sources/RafuApp/Views/RafuTextView.swift` (menu(for:), hoverAction integration)
 - [`docs/decisions/0005-language-intelligence-and-lsp.md`](../decisions/0005-language-intelligence-and-lsp.md)
 - [`docs/plans/phases/language-intelligence.md`](../plans/phases/language-intelligence.md)
 - [`docs/plans/phases/lane-1-memory-and-syntax-plan.md`](../plans/phases/lane-1-memory-and-syntax-plan.md)
 - [`docs/plans/phases/lane-2-lsp-plan.md`](../plans/phases/lane-2-lsp-plan.md)
+- [`docs/plans/phases/post-merge-validation-fixes.md`](../plans/phases/post-merge-validation-fixes.md)
+- [`docs/references/concurrency.md`](concurrency.md) (GCD DispatchSource handler isolation)

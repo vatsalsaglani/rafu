@@ -71,6 +71,14 @@ Named constant `undoLevelCap = 200` set in CodeEditorView.undoManager(for:).
 
 Verified by: typing 250+ characters/operations in a single buffer and confirming ⌘Z caps at 200.
 
+## Hibernated documents remain LSP-open (deliberate, post-merge validation 2026-07-15)
+
+Hibernation unmounts the `NSTextView` and text storage from memory (freeing ~100+ KB per document), but does NOT send `didClose` to the language server. Hibernated documents are LSP-open by design: no `didClose` event is ever sent when a document hibernates, so a running language server retains its understanding of the document's text state (mirrored via prior deltas) and can answer requests about it on demand.
+
+Why this matters: A user may hibernate a document (by leaving it non-visible and non-dirty for 8+ tab accesses), then immediately ⌘-click in another editor to navigate to that hibernated document. If `didClose` had been sent, the server would have zero knowledge of it; the user would need to wait for the document to re-mount and send a fresh `didOpen`. Instead, the server keeps the document open, and navigation resolves instantly.
+
+The RSS ceiling (via memory-pressure shedding and hibernation itself) is the natural bound on long-lived LSP document count. Sending `didClose` would save no memory (the server's per-document state is server-determined, not controlled by Rafu), only incur the cost of re-opening on navigation.
+
 ## Known limitations
 
 1. **Theoretical dual-remount race**: If the same document undergoes two structural remounts within a single `await DocumentGuardPolicy.decide` async gap, `pendingDirtyText` could be overwritten. In practice, this does not occur because no user edits happen during automated remounts, so the snapshot text is identical. A guard against the race (e.g., async-lock or timestamp) is unnecessary at this checkpoint.

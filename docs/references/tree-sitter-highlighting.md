@@ -125,3 +125,9 @@ To verify queries load in the staged app:
 **GrammarLanguageID visibility:** Increment 9 widened `GrammarLanguageID.language` and `GrammarLanguageID.configurationName` from fileprivate to internal so the fence highlighter cache can build a Parser and compile highlights.scm without duplicating the Language switch logic.
 
 **Notes for increment 10:** The tags.scm extraction data seeded into workspace symbol queries (dedupe by range is a polish for the index phase).
+
+## Deliberate deferrals (post-merge validation, 2026-07-15)
+
+### MarkdownInline code injections remain deferred
+
+Markdown fence syntax highlighting is fully implemented via `TreeSitterCodeSyntaxHighlighter`. Inline code spans (backtick-delimited text like `variable` within prose) do NOT receive tree-sitter highlighting in this phase. This is a deliberate feature deferral, not a defect: inline code often appears in comments, lists, and documentation where precise syntax coloring is less critical than rendering readability, and the scope of MarkdownUI's `CodeSyntaxHighlighter` protocol is fence-only. Adding inline-span discovery (regex or tree-sitter AST traversal) and per-span highlighting would require changes to MarkdownUI's rendering or custom prose paragraph reconstruction, both out of scope for this checkpoint. The deferral does not impair usability — users see plain-text inline code with theme markup, and fence code (the primary embedded-code surface) highlights correctly.
