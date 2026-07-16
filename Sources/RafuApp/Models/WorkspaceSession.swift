@@ -583,18 +583,7 @@ final class WorkspaceSession {
             return
         }
 
-        // The LSP tier is the only consumer of `languageID`, so use lane 2's
-        // canonical LSP id (`.tsx` → "typescriptreact", `.rs` → "rust", …) so
-        // a request keys to the same server the coordinator opened the
-        // document under. The syntactic/text tiers ignore this field (they key
-        // off `symbolName`); the grammar id / extension is a harmless fallback
-        // for an extension no language server recognizes.
-        let languageID =
-            LanguageIdentifier.forURL(document.url)
-            ?? GrammarLanguageID.languageID(
-                forExtension: document.url.pathExtension.lowercased(),
-                fileName: document.url.lastPathComponent
-            )?.rawValue ?? document.url.pathExtension.lowercased()
+        let languageID = resolveLanguageID(for: document.url)
         let request = NavigationRequest(
             documentURL: document.url,
             position: identifier.position,
@@ -620,6 +609,58 @@ final class WorkspaceSession {
                 presentNavigationPeek(content)
             }
         }
+    }
+
+    /// The LSP tier is the only consumer of `languageID`, so this returns
+    /// lane 2's canonical LSP id (`.tsx` → "typescriptreact", `.rs` → "rust",
+    /// …) so a request keys to the same server the coordinator opened the
+    /// document under. The syntactic/text tiers ignore this field (they key
+    /// off `symbolName`); the grammar id / extension is a harmless fallback
+    /// for an extension no language server recognizes. Shared by
+    /// `navigate(kind:)` and `hoverInfo(at:utf16Offset:)`.
+    private func resolveLanguageID(for url: URL) -> String {
+        LanguageIdentifier.forURL(url)
+            ?? GrammarLanguageID.languageID(
+                forExtension: url.pathExtension.lowercased(),
+                fileName: url.lastPathComponent
+            )?.rawValue ?? url.pathExtension.lowercased()
+    }
+
+    /// Resolves an LSP hover for the identifier at `utf16Offset` in the active
+    /// document, for the editor's hover tooltip. Deliberately LSP-only: it
+    /// runs the same `NavigationLadder` with a `.hover` request, but the
+    /// syntactic and text tiers both decline `.hover`, so a language with no
+    /// live, trusted server yields `nil` and the caller shows no tooltip.
+    ///
+    /// Unlike `navigate(kind:)` this is a pure, side-effect-free read: it does
+    /// NOT cancel `navigationTask`, does NOT rebuild the symbol index, and
+    /// never touches peek state or the caret — hovering must never move the
+    /// user or disturb an in-flight explicit navigation. Returns `nil` when
+    /// there is no mounted active document, the hovered offset is not on an
+    /// identifier, or every tier declines. The returned hover text is a
+    /// redaction-sensitive server payload and is never logged.
+    func hoverInfo(at documentURL: URL, utf16Offset: Int) async -> EditorHoverInfo? {
+        guard let document = selectedDocument,
+            document.url == documentURL,
+            let snapshotProvider = document.textSnapshotProvider,
+            let ladder = navigationLadder
+        else { return nil }
+
+        let snapshot = snapshotProvider()
+        // Nil-tolerant: the LSP resolves hover by position, so a missing
+        // identifier (e.g. hovering an operator) still lets the server answer;
+        // the name is carried only for the tooltip's accessibility label.
+        let symbolName = IdentifierUnderCaret.word(in: snapshot, at: utf16Offset)?.word
+        let request = NavigationRequest(
+            documentURL: document.url,
+            position: utf16Offset,
+            languageID: resolveLanguageID(for: document.url),
+            kind: .hover,
+            symbolName: symbolName
+        )
+        let answer = try? await ladder.resolve(request)
+        guard let text = answer?.candidates.first?.previewLine, !text.isEmpty else { return nil }
+        return EditorHoverInfo(text: text, symbolName: symbolName)
     }
 
     /// Jumps straight to a resolved navigation candidate — used both for a
