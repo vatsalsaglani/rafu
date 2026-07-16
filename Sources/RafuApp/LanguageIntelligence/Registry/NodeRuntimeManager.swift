@@ -12,16 +12,15 @@ actor NodeRuntimeManager {
     /// has no live network access to verify it at implementation time.
     static let pinnedVersion = "22.11.0"
 
-    /// A SHA-256 digest for `node-v22.11.0-darwin-arm64.tar.gz`, matched
-    /// against Node's own published `SHASUMS256.txt` for this release. This
-    /// is a PLACEHOLDER value — it has not been confirmed against a live
-    /// download of that file (no network access at implementation time)
-    /// and MUST be replaced with the real published digest before this
-    /// pinned version ships. Passing `nil` here instead would silently
-    /// disable verification, which is worse than an honestly-wrong
-    /// placeholder that a reviewer must explicitly replace.
-    static let pinnedChecksumPlaceholder =
-        "0000000000000000000000000000000000000000000000000000000000000000"
+    /// SHA-256 of `node-v22.11.0-darwin-arm64.tar.gz`, from Node's published
+    /// `SHASUMS256.txt` for this release and confirmed against a live
+    /// download of the tarball (both equal this digest). When bumping
+    /// `pinnedVersion`, re-pin this from
+    /// `https://nodejs.org/dist/v<version>/SHASUMS256.txt`; never set it to
+    /// `nil` (that would silently disable verification of the downloaded
+    /// runtime).
+    static let pinnedChecksum =
+        "2e89afe6f4e3aa6c7e21c560d8a0453d84807e97850bbb819b998531a22bdfde"
 
     private let downloader: any AssetDownloading
     private let layout: InstallLayout
@@ -32,7 +31,7 @@ actor NodeRuntimeManager {
         downloader: any AssetDownloading = URLSessionAssetDownloader(),
         layout: InstallLayout = InstallLayout(),
         fileManager: FileManager = .default,
-        expectedChecksum: String? = NodeRuntimeManager.pinnedChecksumPlaceholder
+        expectedChecksum: String? = NodeRuntimeManager.pinnedChecksum
     ) {
         self.downloader = downloader
         self.layout = layout
