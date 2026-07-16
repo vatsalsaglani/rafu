@@ -6,6 +6,7 @@ import SwiftUI
 /// wires their button actions to `beginX()` model calls.
 struct LanguageServersSettingsSection: View {
     @State private var model = LanguageServersCatalogModel()
+    @State private var trustModel = WorkspaceTrustSettingsModel()
 
     var body: some View {
         @Bindable var model = model
@@ -62,6 +63,39 @@ struct LanguageServersSettingsSection: View {
             } header: {
                 Text("Custom Servers")
             }
+
+            Section {
+                if trustModel.rows.isEmpty {
+                    Text("No workspaces have approved a language server yet.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(trustModel.rows) { row in
+                        WorkspaceTrustApprovalRow(row: row, onRevoke: { trustModel.revoke(row) })
+                    }
+                }
+            } header: {
+                Text("Workspace Trust")
+            } footer: {
+                Text(
+                    "Revoking takes effect the next time the workspace is reopened; a server "
+                        + "already running for that workspace keeps running until it idles out "
+                        + "or the workspace reopens."
+                )
+            }
+        }
+        .task { await trustModel.load() }
+        .alert(
+            "Workspace Trust Error",
+            isPresented: Binding(
+                get: { trustModel.presentedError != nil },
+                set: { isPresented in
+                    if !isPresented { trustModel.presentedError = nil }
+                }
+            )
+        ) {
+            Button("OK") { trustModel.presentedError = nil }
+        } message: {
+            Text(trustModel.presentedError ?? "")
         }
         .sheet(isPresented: $model.isPresentingEntryForm) {
             UserServerEntryForm(model: model)
@@ -92,5 +126,36 @@ struct LanguageServersSettingsSection: View {
             Text(model.presentedError ?? "")
         }
         .task { await model.load() }
+    }
+}
+
+/// One workspace's approval of one server id: the workspace's last path
+/// component prominently, its full path as secondary text, the approved
+/// server id, and a destructive "Revoke" action. Pure display plus a
+/// button action — no I/O.
+private struct WorkspaceTrustApprovalRow: View {
+    let row: WorkspaceTrustSettingsModel.TrustApprovalRow
+    let onRevoke: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(row.workspaceDisplayName)
+                    .font(.body.weight(.medium))
+                Text(row.workspaceKey)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(row.serverID)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Revoke", role: .destructive) { onRevoke() }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text("\(row.workspaceDisplayName), approved \(row.serverID)"))
+        .accessibilityValue(Text(row.workspaceKey))
     }
 }
