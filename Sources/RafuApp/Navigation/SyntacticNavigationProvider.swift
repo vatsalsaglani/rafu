@@ -35,11 +35,15 @@ nonisolated struct SyntacticNavigationProvider: NavigationTierProvider {
 
         try Task.checkCancellation()
 
-        if await index.currentState == .building {
+        switch await index.currentState {
+        case .idle, .building:
             return NavigationAnswer(tier: .syntactic, candidates: [], state: .indexing)
+        case .ready:
+            break
         }
 
-        let requestRelativePath = Self.relativePath(for: request.documentURL, rootURL: rootURL)
+        let requestRelativePath = NavigationCandidateRanking.relativePath(
+            for: request.documentURL, rootURL: rootURL)
         let matches = try await index.lookup(name: symbolName)
         let ranked = Self.rank(matches, requestRelativePath: requestRelativePath)
         let candidates = ranked.map { match in
@@ -58,24 +62,20 @@ nonisolated struct SyntacticNavigationProvider: NavigationTierProvider {
 
     /// Ranks exact-name matches: the request's own file first, then files in
     /// the same directory (proximity), then lexicographic by path and offset.
+    /// Thin wrapper over `NavigationCandidateRanking.isOrderedBefore`, the
+    /// pure comparator every ranked navigation tier shares.
     static func rank(
         _ matches: [WorkspaceSymbolMatch],
         requestRelativePath: String
     ) -> [WorkspaceSymbolMatch] {
-        let requestDirectory = (requestRelativePath as NSString).deletingLastPathComponent
-        return matches.sorted { lhs, rhs in
-            let lhsSameFile = lhs.relativePath == requestRelativePath
-            let rhsSameFile = rhs.relativePath == requestRelativePath
-            if lhsSameFile != rhsSameFile { return lhsSameFile }
-
-            let lhsSameDirectory =
-                (lhs.relativePath as NSString).deletingLastPathComponent == requestDirectory
-            let rhsSameDirectory =
-                (rhs.relativePath as NSString).deletingLastPathComponent == requestDirectory
-            if lhsSameDirectory != rhsSameDirectory { return lhsSameDirectory }
-
-            if lhs.relativePath != rhs.relativePath { return lhs.relativePath < rhs.relativePath }
-            return lhs.range.location < rhs.range.location
+        matches.sorted { lhs, rhs in
+            NavigationCandidateRanking.isOrderedBefore(
+                lhsRelativePath: lhs.relativePath,
+                lhsOffset: lhs.range.location,
+                rhsRelativePath: rhs.relativePath,
+                rhsOffset: rhs.range.location,
+                requestRelativePath: requestRelativePath
+            )
         }
     }
 
@@ -94,15 +94,5 @@ nonisolated struct SyntacticNavigationProvider: NavigationTierProvider {
         let lineRange = nsText.lineRange(
             for: NSRange(location: match.range.location, length: 0))
         return nsText.substring(with: lineRange).trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private static func relativePath(for url: URL, rootURL: URL) -> String {
-        let filePath = url.resolvingSymlinksInPath().standardizedFileURL.path
-        let rootPath = rootURL.resolvingSymlinksInPath().standardizedFileURL.path
-        guard filePath == rootPath || filePath.hasPrefix(rootPath + "/") else {
-            return url.lastPathComponent
-        }
-        return String(filePath.dropFirst(rootPath.count)).trimmingCharacters(
-            in: CharacterSet(charactersIn: "/"))
     }
 }

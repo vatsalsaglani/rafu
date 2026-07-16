@@ -46,7 +46,22 @@ nonisolated struct TextSearchNavigationProvider: NavigationTierProvider {
         maximumPreviewCharacters: 240
     )
 
+    /// The bounded total-match cap this tier's search runs under. Exposed so
+    /// `NavigationPeekView` can disclose truncation: a candidate count that
+    /// exactly equals this cap means the underlying search may have more
+    /// matches than were returned. This is a heuristic, not an exact signal —
+    /// `NavigationAnswer` carries no truncation flag, so a genuinely
+    /// exactly-200-match symbol also shows the footer, and per-file
+    /// truncation below a 200 total isn't disclosed at all.
+    static let referencesResultCap = limits.maximumTotalMatches
+
     func answer(_ request: NavigationRequest) async throws -> NavigationAnswer? {
+        // A whole-word text search can locate definitions/declarations/
+        // references, but it cannot produce a `.hover` docstring/signature.
+        // Hover is deliberately LSP-only: declining here keeps the ladder from
+        // surfacing a raw source line as if it were hover documentation, so a
+        // language with no live server yields no tooltip at all.
+        guard request.kind != .hover else { return nil }
         guard
             let symbolName = request.symbolName?.trimmingCharacters(in: .whitespacesAndNewlines),
             !symbolName.isEmpty
@@ -59,6 +74,8 @@ nonisolated struct TextSearchNavigationProvider: NavigationTierProvider {
             limits: Self.limits
         )
         let result = try await searchService.search(searchRequest)
+        let requestRelativePath = NavigationCandidateRanking.relativePath(
+            for: request.documentURL, rootURL: rootURL)
         let candidates = result.groups.flatMap { group in
             group.matches.map { match in
                 SymbolCandidate(
@@ -69,6 +86,14 @@ nonisolated struct TextSearchNavigationProvider: NavigationTierProvider {
                     previewLine: match.preview
                 )
             }
+        }.sorted { lhs, rhs in
+            NavigationCandidateRanking.isOrderedBefore(
+                lhsRelativePath: lhs.relativePath,
+                lhsOffset: lhs.range.location,
+                rhsRelativePath: rhs.relativePath,
+                rhsOffset: rhs.range.location,
+                requestRelativePath: requestRelativePath
+            )
         }
         return NavigationAnswer(tier: .text, candidates: candidates, state: .ready)
     }
