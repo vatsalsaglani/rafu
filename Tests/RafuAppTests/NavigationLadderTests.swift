@@ -85,6 +85,41 @@ func ladderFallsThroughOnAllDeclines() async throws {
     #expect(called == [.lsp(serverName: "sourcekit-lsp"), .syntactic])
 }
 
+// Models the Feature-1 references fall-through end to end at the ladder level:
+// once `LSPNavigationProvider` maps an empty references array to a decline
+// (`nil`), and the syntactic tier declines `.references` too, the bounded text
+// tier must be the one that finally answers.
+@Test("Empty-LSP-references declines fall through to the text tier")
+func referencesFallThroughToText() async throws {
+    let recorder = CallRecorder()
+    // LSP maps empty references → decline; syntactic declines .references.
+    let lsp = MockNavigationProvider(
+        tier: .lsp(serverName: "sourcekit-lsp"), answerToReturn: nil, recorder: recorder)
+    let syntactic = MockNavigationProvider(
+        tier: .syntactic, answerToReturn: nil, recorder: recorder)
+    let textAnswer = NavigationAnswer(
+        tier: .text,
+        candidates: [
+            SymbolCandidate(
+                relativePath: "File.swift", range: NSRange(location: 0, length: 3),
+                name: "foo", kindLabel: "text", previewLine: "foo()")
+        ],
+        state: .ready)
+    let text = MockNavigationProvider(
+        tier: .text, answerToReturn: textAnswer, recorder: recorder)
+
+    let ladder = NavigationLadder(providers: [lsp, syntactic, text])
+    let request = NavigationRequest(
+        documentURL: URL(fileURLWithPath: "/tmp/File.swift"),
+        position: 0, languageID: "swift", kind: .references, symbolName: "foo")
+    let result = try await ladder.resolve(request)
+
+    #expect(result?.tier == .text)
+    #expect(result?.candidates.count == 1)
+    let called = await recorder.calledTiers
+    #expect(called == [.lsp(serverName: "sourcekit-lsp"), .syntactic, .text])
+}
+
 @Test("Ladder stops before the next provider once its task is cancelled")
 func ladderPropagatesCancellation() async throws {
     let recorder = CallRecorder()

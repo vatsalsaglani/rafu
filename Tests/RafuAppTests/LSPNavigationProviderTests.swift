@@ -330,6 +330,73 @@ func emptyResult_authoritativeReady() async throws {
     }
 }
 
+// An empty references array is NOT authoritative: sourcekit-lsp without a
+// built index answers `textDocument/references` with `[]`, which must fall
+// through (nil) to the bounded text tier rather than winning the ladder as a
+// misleading "No references". Definition/declaration keep authoritative-empty
+// (see `emptyResult_authoritativeReady`).
+@Test("empty references ([]) declines (nil), falling through to a lower tier")
+func emptyReferences_declines() async throws {
+    try await withTemporaryDirectory { root in
+        let text = "let x = 1\n"
+        let url = root.appending(path: "a.swift")
+        try write(text, to: url)
+
+        let scripted = try await makeReadySession(rootURI: fileURI(forPath: root.path))
+        let session = scripted.session
+        try await openDocument(url, text: text, on: scripted)
+
+        let provider = LSPNavigationProvider(rootURL: root) { _ in session }
+        let request = NavigationRequest(
+            documentURL: url, position: 0, languageID: "swift", kind: .references)
+
+        async let answerCall = provider.answer(request)
+        let decoded = try JSONDecoder().decode(
+            DecodedRequest<TextDocumentPositionParams>.self,
+            from: await scripted.reader.nextFrame())
+        #expect(decoded.method == "textDocument/references")
+        try await serverSend(
+            JSONEncoder().encode(ResultResponse(id: decoded.id, result: [Location]())),
+            via: scripted.server)
+
+        #expect(try await answerCall == nil)
+    }
+}
+
+// A references answer whose every target is unreadable collapses to empty and
+// must also decline (post-build check), rather than presenting an empty peek.
+@Test("references with only unreadable targets declines (nil)")
+func referencesAllUnreadable_declines() async throws {
+    try await withTemporaryDirectory { root in
+        let text = "let x = 1\n"
+        let url = root.appending(path: "a.swift")
+        try write(text, to: url)
+
+        let scripted = try await makeReadySession(rootURI: fileURI(forPath: root.path))
+        let session = scripted.session
+        try await openDocument(url, text: text, on: scripted)
+
+        let provider = LSPNavigationProvider(rootURL: root) { _ in session }
+        let request = NavigationRequest(
+            documentURL: url, position: 0, languageID: "swift", kind: .references)
+
+        async let answerCall = provider.answer(request)
+        let decoded = try JSONDecoder().decode(
+            DecodedRequest<TextDocumentPositionParams>.self,
+            from: await scripted.reader.nextFrame())
+        let missing = fileURI(forPath: root.appending(path: "does-not-exist.swift").path)
+        let location = Location(
+            uri: missing,
+            range: LSPRange(
+                start: Position(line: 0, character: 0), end: Position(line: 0, character: 1)))
+        try await serverSend(
+            JSONEncoder().encode(ResultResponse(id: decoded.id, result: [location])),
+            via: scripted.server)
+
+        #expect(try await answerCall == nil)
+    }
+}
+
 // MARK: - Decline paths
 
 @Test("a server without referencesProvider declines (nil), falling through")

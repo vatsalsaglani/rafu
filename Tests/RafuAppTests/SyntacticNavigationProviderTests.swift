@@ -107,6 +107,28 @@ func syntacticProviderDeclinesHoverAndMissingName() async throws {
     #expect(try await provider.answer(missingName) == nil)
 }
 
+@Test("Provider reports indexing (not authoritative) for a fresh, unbuilt index")
+func syntacticProviderFreshIndexIsIndexing() async throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try write("func target() {}\n", to: root.appending(path: "A.swift"))
+
+    // Deliberately never `build(rootURL:)`ed — the index starts `.idle`.
+    let index = WorkspaceSymbolIndex()
+
+    let provider = SyntacticNavigationProvider(index: index, rootURL: root)
+    let request = NavigationRequest(
+        documentURL: root.appending(path: "A.swift"),
+        position: 0,
+        languageID: "swift",
+        kind: .definition,
+        symbolName: "target"
+    )
+    let answer = try #require(try await provider.answer(request))
+    #expect(answer.state == .indexing)
+    #expect(answer.candidates.isEmpty)
+}
+
 @Test("Provider is authoritative for a ready index with no matching declaration")
 func syntacticProviderReadyWithNoMatchIsAuthoritative() async throws {
     let root = try makeTemporaryDirectory()

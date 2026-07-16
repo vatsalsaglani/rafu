@@ -40,3 +40,23 @@ func rssCeilingBreachesOnlyAboveCeiling() {
     #expect(RSSCeilingDecision.exceedsCeiling(residentBytes: 100, ceiling: 100) == false)
     #expect(RSSCeilingDecision.exceedsCeiling(residentBytes: 101, ceiling: 100) == true)
 }
+
+@Test("forwardsDocumentChanges forwards while a server is live or starting")
+func forwardsDocumentChangesForwardsLiveOrStartingPhases() {
+    #expect(LanguageServerStatus.forwardsDocumentChanges(phase: .starting) == true)
+    #expect(LanguageServerStatus.forwardsDocumentChanges(phase: .ready) == true)
+    #expect(LanguageServerStatus.forwardsDocumentChanges(phase: .warmingUp) == true)
+}
+
+@Test("forwardsDocumentChanges skips while no server is usable")
+func forwardsDocumentChangesSkipsUnusablePhases() {
+    #expect(LanguageServerStatus.forwardsDocumentChanges(phase: .idle) == false)
+    #expect(LanguageServerStatus.forwardsDocumentChanges(phase: .backingOff) == false)
+    #expect(LanguageServerStatus.forwardsDocumentChanges(phase: .dead) == false)
+    #expect(LanguageServerStatus.forwardsDocumentChanges(phase: .ceilingKilled) == false)
+}
+
+@Test("forwardsDocumentChanges skips when no status has ever been published")
+func forwardsDocumentChangesSkipsNilPhase() {
+    #expect(LanguageServerStatus.forwardsDocumentChanges(phase: nil) == false)
+}

@@ -77,7 +77,7 @@ func bufferSymbolScannerCap() {
 
 // MARK: - Grammar-backed extraction (increment 9)
 
-@Test("Grammar-backed scan finds Swift types, protocols, and methods; skips properties")
+@Test("Grammar-backed scan finds Swift types, protocols, methods, and properties; dedups methods")
 func bufferSymbolScannerSwiftGrammar() async throws {
     let text = """
         struct Palette {
@@ -104,12 +104,11 @@ func bufferSymbolScannerSwiftGrammar() async throws {
     #expect(symbols.contains { $0.name == "topLevel" && $0.kind == .function })
     // The vendored `tags.scm` matches a class-body method against BOTH the
     // nested `definition.method` pattern and the generic top-level
-    // `definition.function` pattern; both entries survive as separate
-    // symbols — this increment does not deduplicate.
-    #expect(symbols.filter { $0.name == "rank" }.count == 2)
-    // `var count` is `@definition.property`, intentionally skipped
-    // (`BufferSymbol.Kind` stays function/type/heading this increment).
-    #expect(!symbols.contains { $0.name == "count" })
+    // `definition.function` pattern, but `WorkspaceSymbolExtractor.extract`
+    // dedups by `(name, range)`, so only one `rank` entry survives.
+    #expect(symbols.filter { $0.name == "rank" }.count == 1)
+    // `var count` is `@definition.property`, kept as `.property`.
+    #expect(symbols.contains { $0.name == "count" && $0.kind == .property })
 
     let nsText = text as NSString
     for symbol in symbols {
@@ -117,7 +116,7 @@ func bufferSymbolScannerSwiftGrammar() async throws {
     }
 }
 
-@Test("Grammar-backed scan finds Python classes and functions, skipping module constants")
+@Test("Grammar-backed scan finds Python classes, functions, and module constants")
 func bufferSymbolScannerPythonGrammar() async throws {
     let text = """
         class Report:
@@ -132,12 +131,12 @@ func bufferSymbolScannerPythonGrammar() async throws {
     let symbols = try #require(
         await BufferSymbolScanner.scanUsingGrammar(text: text, grammarID: .python))
 
-    #expect(symbols.map(\.name) == ["Report", "compute_totals", "top_level"])
+    #expect(symbols.map(\.name) == ["Report", "compute_totals", "top_level", "CONST"])
     #expect(symbols[0].kind == .type)
     #expect(symbols[1].kind == .function)
     #expect(symbols[2].kind == .function)
-    // `CONST = 1` is `@definition.constant`, intentionally skipped.
-    #expect(!symbols.contains { $0.name == "CONST" })
+    // `CONST = 1` is `@definition.constant`, kept as `.constant`.
+    #expect(symbols.contains { $0.name == "CONST" && $0.kind == .constant })
 }
 
 @Test("Grammar-backed scan excludes JavaScript constructors and require() references")

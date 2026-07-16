@@ -17,12 +17,14 @@ private struct RecordedChange: Equatable {
 
 private actor TestServerHandle {
     private(set) var didOpenURIs: [String] = []
+    private(set) var didOpenCalls: [RecordedChange] = []
     private(set) var didChangeCalls: [RecordedChange] = []
     private var terminationContinuations: [CheckedContinuation<Void, Never>] = []
     private var hasTerminated = false
 
-    func recordDidOpen(uri: String) {
+    func recordDidOpen(uri: String, text: String) {
         didOpenURIs.append(uri)
+        didOpenCalls.append(RecordedChange(uri: uri, text: text))
     }
 
     func recordDidChange(uri: String, text: String) {
@@ -80,14 +82,6 @@ private func idFragment(_ id: JSONRPCID) -> String {
     }
 }
 
-private func extractURI(from params: JSONValue?) -> String? {
-    guard case .object(let root)? = params,
-        case .object(let textDocument)? = root["textDocument"],
-        case .string(let uri)? = textDocument["uri"]
-    else { return nil }
-    return uri
-}
-
 private func extractDidChange(from params: JSONValue?) -> (uri: String, text: String)? {
     guard case .object(let root)? = params,
         case .object(let textDocument)? = root["textDocument"],
@@ -95,6 +89,15 @@ private func extractDidChange(from params: JSONValue?) -> (uri: String, text: St
         case .array(let changes)? = root["contentChanges"],
         case .object(let change)? = changes.first,
         case .string(let text)? = change["text"]
+    else { return nil }
+    return (uri, text)
+}
+
+private func extractDidOpen(from params: JSONValue?) -> (uri: String, text: String)? {
+    guard case .object(let root)? = params,
+        case .object(let textDocument)? = root["textDocument"],
+        case .string(let uri)? = textDocument["uri"],
+        case .string(let text)? = textDocument["text"]
     else { return nil }
     return (uri, text)
 }
@@ -117,8 +120,8 @@ private func runScriptedServer(server: InMemoryLanguageServerTransport, handle: 
                 #"{"jsonrpc":"2.0","id":\#(idFragment(request.id)),"result":null}"#.utf8)
             try? await server.send(JSONRPCFrameEncoder.encode(body: responseBody))
         case .notification(let notification) where notification.method == "textDocument/didOpen":
-            if let uri = extractURI(from: notification.params) {
-                await handle.recordDidOpen(uri: uri)
+            if let opened = extractDidOpen(from: notification.params) {
+                await handle.recordDidOpen(uri: opened.uri, text: opened.text)
             }
         case .notification(let notification)
         where notification.method == "textDocument/didChange":
@@ -222,9 +225,17 @@ func editDeltaForwardsCurrentTextAndURI() async {
     let resolver = TestLanguageServerResolver(entries: [
         "swift": makeResolvedServer(languageID: "swift")
     ])
-    let manager = LanguageServerManager(resolver: resolver, spawner: spawner)
-    let coordinator = LanguageIntelligenceCoordinator(
-        manager: manager, servers: LanguageServerStatusStore())
+    let servers = LanguageServerStatusStore()
+    // B2's edit-forwarding gate reads `servers.statuses[languageID]`
+    // before copying any text, so this test's manager must actually push
+    // its status into the same store the coordinator reads through — a
+    // real `LanguageIntelligenceCoordinator` wires this in `init()`, but
+    // the test-seam initializer takes an already-built `manager` and
+    // can't retrofit that wiring after the fact.
+    let manager = LanguageServerManager(
+        resolver: resolver, spawner: spawner,
+        statusSink: { status in servers.update(status) })
+    let coordinator = LanguageIntelligenceCoordinator(manager: manager, servers: servers)
 
     coordinator.workspaceDidOpen(root: URL(fileURLWithPath: "/workspace"))
 
@@ -234,6 +245,8 @@ func editDeltaForwardsCurrentTextAndURI() async {
     // `snapshotProvider` this test doesn't configure).
     let session = await waitForSession(coordinator: coordinator, languageID: "swift")
     #expect(session != nil)
+    let statusReady = await waitUntil { servers.statuses["swift"]?.phase == .ready }
+    #expect(statusReady)
 
     let documentURL = URL(fileURLWithPath: "/workspace/main.swift")
     let document = EditorDocument(url: documentURL)
@@ -313,4 +326,133 @@ func unknownExtensionDocumentNeverSubscribed() async {
     try? await Task.sleep(for: .milliseconds(50))
     #expect(servers.statuses.isEmpty)
     #expect(await spawner.spawnCount == 0)
+}
+
+@Test(
+    "documentDidOpen reads disk text off-main when the editor hasn't mounted a snapshot provider yet"
+)
+@MainActor
+func documentDidOpenReadsDiskTextWhenProviderIsNil() async throws {
+    let root = FileManager.default.temporaryDirectory.appending(
+        path: "rafu-language-intel-tests-\(UUID().uuidString)", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let documentURL = root.appending(path: "main.swift")
+    let diskContents = "let value = 42\n"
+    try Data(diskContents.utf8).write(to: documentURL)
+
+    let spawner = TestLanguageServerSpawner()
+    let resolver = TestLanguageServerResolver(entries: [
+        "swift": makeResolvedServer(languageID: "swift")
+    ])
+    let servers = LanguageServerStatusStore()
+    // See `editDeltaForwardsCurrentTextAndURI`: wired so B2's gate sees a
+    // live status once the pre-warmed session is up.
+    let manager = LanguageServerManager(
+        resolver: resolver, spawner: spawner,
+        statusSink: { status in servers.update(status) })
+    let coordinator = LanguageIntelligenceCoordinator(manager: manager, servers: servers)
+
+    coordinator.workspaceDidOpen(root: root)
+
+    // Pre-warm a live session before opening the document, exactly like
+    // `editDeltaForwardsCurrentTextAndURI`, so `didOpen` is delivered
+    // directly rather than through a lazy-start replay.
+    let session = await waitForSession(coordinator: coordinator, languageID: "swift")
+    #expect(session != nil)
+    let statusReady = await waitUntil { servers.statuses["swift"]?.phase == .ready }
+    #expect(statusReady)
+
+    // The editor has not mounted for this document: `textSnapshotProvider`
+    // stays `nil`, matching `WorkspaceSession.trackNewDocument`'s ordering.
+    let document = EditorDocument(url: documentURL)
+    #expect(document.textSnapshotProvider == nil)
+    coordinator.documentDidOpen(document)
+
+    let expectedURI = fileURI(forPath: documentURL.path)
+    let recorded = await waitUntil {
+        guard let handle = await spawner.handle(serverName: "swift") else { return false }
+        return await handle.didOpenCalls.contains(
+            RecordedChange(uri: expectedURI, text: diskContents))
+    }
+    #expect(recorded)
+
+    coordinator.documentDidClose(document)
+}
+
+@Test(
+    "restartServer clears the stale status row synchronously, then tears down and eagerly re-establishes a live session"
+)
+@MainActor
+func restartServerClearsStaleRowAndReestablishesSession() async {
+    let spawner = TestLanguageServerSpawner()
+    let resolver = TestLanguageServerResolver(entries: [
+        "swift": makeResolvedServer(languageID: "swift")
+    ])
+    let servers = LanguageServerStatusStore()
+    let manager = LanguageServerManager(
+        resolver: resolver, spawner: spawner,
+        statusSink: { status in servers.update(status) })
+    let coordinator = LanguageIntelligenceCoordinator(manager: manager, servers: servers)
+
+    coordinator.workspaceDidOpen(root: URL(fileURLWithPath: "/workspace"))
+    let session = await waitForSession(coordinator: coordinator, languageID: "swift")
+    #expect(session != nil)
+    let becameReady = await waitUntil { servers.statuses["swift"]?.phase == .ready }
+    #expect(becameReady)
+    #expect(await spawner.spawnCount == 1)
+
+    coordinator.restartServer(languageID: "swift")
+    // `servers.remove` runs synchronously in `restartServer`, before the
+    // teardown/eager-restart `Task` is even scheduled — the stale row
+    // must already be gone the instant this call returns.
+    #expect(servers.statuses["swift"] == nil)
+
+    let respawned = await waitUntil { (await spawner.spawnCount) == 2 }
+    #expect(respawned)
+    let readyAgain = await waitUntil { servers.statuses["swift"]?.phase == .ready }
+    #expect(readyAgain)
+}
+
+@Test(
+    "An editDeltas subscription skips forwarding entirely when no status has ever been published for the languageID — no full-buffer copy, no spawn"
+)
+@MainActor
+func editDeltaSkipsForwardingWithNoLiveOrStartingServer() async {
+    let spawner = TestLanguageServerSpawner()
+    // "swift" resolves to a real server descriptor — this is not an
+    // unrecognized-extension case (that path is covered by
+    // `unknownExtensionDocumentNeverSubscribed`) — but nothing in this
+    // test ever calls `ensureSession`/`session(forLanguageID:)`, so no
+    // status is ever pushed and the store stays empty for it.
+    let resolver = TestLanguageServerResolver(entries: [
+        "swift": makeResolvedServer(languageID: "swift")
+    ])
+    let servers = LanguageServerStatusStore()
+    let manager = LanguageServerManager(
+        resolver: resolver, spawner: spawner,
+        statusSink: { status in servers.update(status) })
+    let coordinator = LanguageIntelligenceCoordinator(manager: manager, servers: servers)
+
+    coordinator.workspaceDidOpen(root: URL(fileURLWithPath: "/workspace"))
+    #expect(servers.statuses["swift"] == nil)
+
+    let documentURL = URL(fileURLWithPath: "/workspace/main.swift")
+    let document = EditorDocument(url: documentURL)
+    var currentText = "let value = 1"
+    document.textSnapshotProvider = { currentText }
+    coordinator.documentDidOpen(document)
+
+    try? await Task.sleep(for: .milliseconds(20))
+    currentText = "let value = 2"
+    document.recordEditDelta(editedRange: NSRange(location: 12, length: 1), changeInLength: 0)
+
+    // Give a (incorrectly) forwarding subscription a real chance to reach
+    // the manager before asserting it never did.
+    try? await Task.sleep(for: .milliseconds(100))
+    #expect(await spawner.spawnCount == 0)
+    #expect(await spawner.handle(serverName: "swift") == nil)
+
+    coordinator.documentDidClose(document)
 }
