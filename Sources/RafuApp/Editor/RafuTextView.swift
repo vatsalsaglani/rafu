@@ -87,6 +87,14 @@ final class RafuTextView: NSTextView {
     /// no live, trusted server answers, so the tooltip silently no-ops.
     var hoverAction: (@MainActor (Int) async -> EditorHoverInfo?)?
 
+    /// The theme the hover tooltip renders with. `CodeEditorView` sets this
+    /// from its own `theme` on `makeNSView`/`updateNSView`; `NSHostingController`
+    /// does not inherit the SwiftUI environment, so `EditorHoverTooltipView`
+    /// cannot read `\.rafuTheme` and needs the value passed explicitly. `nil`
+    /// (before the first `updateNSView`, or after teardown) falls back to a
+    /// sensible default theme rather than rendering unthemed.
+    var hoverTheme: RafuTheme?
+
     // MARK: - Hover tooltip state
 
     /// The single in-flight hover debounce task. Cancelled and replaced on
@@ -209,10 +217,18 @@ final class RafuTextView: NSTextView {
         let popover = NSPopover()
         popover.behavior = .semitransient
         popover.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        let tooltip = EditorHoverTooltipView(info: info) { [weak self] in
+        let tooltip = EditorHoverTooltipView(
+            info: info, theme: hoverTheme ?? RafuThemeCatalog.indigo
+        ) { [weak self] in
             self?.goToDeclarationFromHover(at: offset)
         }
-        popover.contentViewController = NSHostingController(rootView: tooltip)
+        let hostingController = NSHostingController(rootView: tooltip)
+        // Track the SwiftUI view's ideal size so the popover sizes itself to
+        // content (small for a short signature, capped by the tooltip's own
+        // scroll-when-long layout for a long one) instead of inflating to
+        // whatever a greedy child view would otherwise claim.
+        hostingController.sizingOptions = [.preferredContentSize]
+        popover.contentViewController = hostingController
         popover.show(relativeTo: anchorRect, of: self, preferredEdge: .maxY)
         hoverPopover = popover
         observeClipViewForHoverDismissal()

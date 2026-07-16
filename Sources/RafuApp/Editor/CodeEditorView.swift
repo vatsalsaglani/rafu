@@ -61,6 +61,7 @@ struct CodeEditorView: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.navigateAction = navigate
         textView.hoverAction = hover
+        textView.hoverTheme = theme
         scrollView.documentView = textView
 
         let gutter = EditorGutterRulerView(
@@ -107,6 +108,7 @@ struct CodeEditorView: NSViewRepresentable {
         textView.insertionPointColor = NSColor(rafuHex: theme.editor.cursor)
         textView.navigateAction = navigate
         textView.hoverAction = hover
+        textView.hoverTheme = theme
     }
 
     static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
@@ -132,6 +134,7 @@ struct CodeEditorView: NSViewRepresentable {
         coordinator.textView?.dismissHover()
         coordinator.textView?.navigateAction = nil
         coordinator.textView?.hoverAction = nil
+        coordinator.textView?.hoverTheme = nil
         coordinator.document.saveAction = nil
         coordinator.document.textSnapshotProvider = nil
         coordinator.document.selectionProvider = nil

@@ -660,7 +660,19 @@ final class WorkspaceSession {
         )
         let answer = try? await ladder.resolve(request)
         guard let text = answer?.candidates.first?.previewLine, !text.isEmpty else { return nil }
-        return EditorHoverInfo(text: text, symbolName: symbolName)
+        // The LSP hover contract doesn't carry the server's `MarkupContent.kind`
+        // this far (see `LSPNavigationProvider.flattenedHoverMultiline`), so the
+        // tooltip renderer always treats the flattened text as Markdown — the
+        // common case for language servers, and harmless for a plaintext hover
+        // (no fences to find, so it falls through to plain documentation).
+        let parsed = HoverMarkdownParser.parse(text, isMarkdown: true)
+        return EditorHoverInfo(
+            text: text,
+            symbolName: symbolName,
+            signature: parsed.signature,
+            documentation: parsed.documentation,
+            isMarkdown: true
+        )
     }
 
     /// Jumps straight to a resolved navigation candidate — used both for a
