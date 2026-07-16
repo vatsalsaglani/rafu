@@ -24,6 +24,50 @@ actor FixtureAssetDownloader: AssetDownloading {
     }
 }
 
+/// A one-shot latch that lets a test hold an install mid-flight so a
+/// transient in-progress state (`row.progressActive == true`) is
+/// deterministically observable instead of racing a near-instant fixture
+/// install. `wait()` suspends until `release()`; a `release()` that arrives
+/// before any `wait()` is remembered, so a later `wait()` returns at once.
+actor DownloadGate {
+    private var released = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if released { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func release() {
+        released = true
+        let pending = waiters
+        waiters.removeAll()
+        for continuation in pending { continuation.resume() }
+    }
+}
+
+/// A `FixtureAssetDownloader` variant whose `download(from:)` suspends on a
+/// `DownloadGate` before copying, so a test can observe an install's
+/// in-progress state before letting it complete. Removes the timing race in
+/// which a fixture install finishes before the test reads `progressActive`.
+actor GatedFixtureDownloader: AssetDownloading {
+    private let fixtureURL: URL
+    private let gate: DownloadGate
+
+    init(fixtureURL: URL, gate: DownloadGate) {
+        self.fixtureURL = fixtureURL
+        self.gate = gate
+    }
+
+    func download(from url: URL) async throws -> URL {
+        await gate.wait()
+        let destination = FileManager.default.temporaryDirectory.appending(
+            path: "rafu-lsp-test-download-\(UUID().uuidString)")
+        try FileManager.default.copyItem(at: fixtureURL, to: destination)
+        return destination
+    }
+}
+
 /// Builds small, real archive fixtures (`.gz`, `.zip`, `.tar.gz`) using the
 /// same system tools (`/usr/bin/gzip`, `/usr/bin/ditto`, `/usr/bin/tar`)
 /// `ServerInstaller` unpacks with, entirely inside a caller-supplied

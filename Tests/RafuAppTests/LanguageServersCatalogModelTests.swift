@@ -64,10 +64,11 @@ struct LanguageServersCatalogModelTests {
                 let fixtureBinary = fixtures.appending(path: "marksman-macos")
                 try Data("#!/bin/sh\necho marksman\n".utf8).write(to: fixtureBinary)
 
+                let gate = DownloadGate()
                 let model = await LanguageServersCatalogModel(
                     userEntryStore: UserEntryStore(baseDirectory: directory),
                     layout: InstallLayout(baseDirectory: directory),
-                    downloader: FixtureAssetDownloader(fixtureURL: fixtureBinary)
+                    downloader: GatedFixtureDownloader(fixtureURL: fixtureBinary, gate: gate)
                 )
                 await model.load()
 
@@ -78,9 +79,15 @@ struct LanguageServersCatalogModelTests {
                 await model.confirmInstall()
                 let consentAfterConfirm = await model.presentedConsent
                 #expect(consentAfterConfirm == nil)
+                // The install is parked inside the gated downloader, so the
+                // row's in-progress flag is deterministically observable here
+                // (it can't flip to `false` until the install completes, which
+                // it cannot until `gate.release()` below).
                 let progressWhileInstalling = await model.rows.first { $0.id == "marksman" }?
                     .progressActive
                 #expect(progressWhileInstalling == true)
+
+                await gate.release()
 
                 let installed = await waitUntil {
                     if case .installed = model.rows.first(where: { $0.id == "marksman" })?
