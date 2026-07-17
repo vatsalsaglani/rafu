@@ -53,8 +53,8 @@ struct MarkdownPreviewView: View {
                             .markdownCodeSyntaxHighlighter(
                                 TreeSitterCodeSyntaxHighlighter(theme: theme))
 
-                    case .mermaid(let diagram):
-                        MermaidDiagramView(diagram: diagram)
+                    case .mermaid(let result):
+                        MermaidDiagramView(result: result)
                     }
                 }
             }
@@ -81,7 +81,7 @@ struct MarkdownPreviewView: View {
 nonisolated struct MarkdownPreviewSegment: Identifiable, Sendable {
     enum Content: Sendable {
         case markdown(String)
-        case mermaid(MermaidDiagram)
+        case mermaid(MermaidParseResult)
     }
 
     let id = UUID()
@@ -133,64 +133,5 @@ nonisolated struct MarkdownPreviewSegmentParser: Sendable {
             }
         }
         return result
-    }
-}
-
-struct MermaidDiagramView: View {
-    @Environment(\.rafuTheme) private var theme
-    let diagram: MermaidDiagram
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Mermaid", systemImage: "point.3.connected.trianglepath.dotted")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Color(rafuHex: theme.ui.accent))
-            switch diagram.kind {
-            case .flow:
-                ForEach(diagram.edges, id: \.id) { edge in
-                    HStack(spacing: 10) {
-                        node(diagram.nodes[edge.from] ?? edge.from)
-                        Image(systemName: "arrow.right")
-                            .foregroundStyle(Color(rafuHex: theme.ui.accent))
-                        if !edge.label.isEmpty {
-                            Text(edge.label).font(.caption).foregroundStyle(.secondary)
-                        }
-                        node(diagram.nodes[edge.to] ?? edge.to)
-                    }
-                }
-            case .sequence:
-                HStack {
-                    ForEach(diagram.participants, id: \.self) {
-                        node($0).frame(maxWidth: .infinity)
-                    }
-                }
-                ForEach(diagram.messages, id: \.id) { message in
-                    HStack {
-                        Text(message.from).font(.caption)
-                        Image(systemName: "arrow.right")
-                        Text(message.to).font(.caption)
-                        Text(message.label).foregroundStyle(.secondary)
-                    }
-                }
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            Color(rafuHex: theme.ui.elevatedBackground),
-            in: .rect(cornerRadius: 12)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(rafuHex: theme.ui.borderSubtle))
-        }
-    }
-
-    private func node(_ label: String) -> some View {
-        Text(label)
-            .font(.callout.weight(.medium))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color(rafuHex: theme.ui.selection), in: Capsule())
     }
 }
