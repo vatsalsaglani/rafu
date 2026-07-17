@@ -22,6 +22,12 @@ struct CuratedCatalogTests {
         #expect(pyright.archive?.npmPackageRoot == nil)
     }
 
+    @Test("sourcekit-lsp requests background indexing via initializationOptions")
+    func sourceKitLSPRequestsBackgroundIndexing() throws {
+        let sourceKit = try #require(CuratedCatalog.servers.first { $0.id == "sourcekit-lsp" })
+        #expect(sourceKit.initializationOptions == .object(["backgroundIndexing": .bool(true)]))
+    }
+
     @Test("Every real catalog entry names a unique, non-empty id and languageIDs")
     func realCatalogEntriesAreWellFormed() {
         let ids = CuratedCatalog.servers.map(\.id)

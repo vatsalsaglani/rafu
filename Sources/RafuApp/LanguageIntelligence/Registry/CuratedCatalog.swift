@@ -179,7 +179,11 @@ nonisolated enum CuratedCatalog {
         source: nil,
         launchArguments: [],
         archive: nil,
-        initializationOptions: nil,
+        // Requests background indexing so cross-file symbol data becomes
+        // available without an editor-driven build. Older sourcekit-lsp
+        // builds ignore unknown initializationOptions keys harmlessly; the
+        // exact key name is re-confirmed against the shipped toolchain in P5.
+        initializationOptions: .object(["backgroundIndexing": .bool(true)]),
         prerequisites: [.xcodeToolchain]
     )
 
