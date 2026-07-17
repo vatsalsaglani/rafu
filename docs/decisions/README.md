@@ -16,6 +16,7 @@ Accepted ADRs take precedence over older plan suggestions when they explicitly s
 | [0004](0004-embedded-terminal.md) | Accepted | Adopt a lazy, bounded embedded terminal panel built on SwiftTerm |
 | [0005](0005-language-intelligence-and-lsp.md) | Accepted | Tree-sitter as the real syntax engine plus an opt-in, memory-bounded LSP client with a transparent, user-controlled server registry |
 | [0006](0006-editor-working-set-hibernation.md) | Accepted | Bounded editor working set: keep visible/dirty/newest-8 tabs mounted, hibernate the rest, with a transient dirty-text snapshot for structural remounts |
+| [0007](0007-cli-app-location-symlink.md) | Accepted | Install the `rafu` CLI as an in-bundle symlink and locate `Rafu.app` from the real executable path (`_NSGetExecutablePath`), not `argv[0]` |
 
 Unresolved choices are tracked in [`open-decisions.md`](open-decisions.md).
 

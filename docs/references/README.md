@@ -15,6 +15,7 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`swiftui-appkit-boundary.md`](swiftui-appkit-boundary.md) | Changing scenes, per-window state, the editor bridge, commands, or native controls |
 | [`concurrency.md`](concurrency.md) | Adding actors, tasks, process I/O, cancellation, streams, or cross-actor models |
 | [`launcher-cli.md`](launcher-cli.md) | Changing CLI grammar, validation, exit codes, IPC drafts, or command help |
+| [`cli-app-location.md`](cli-app-location.md) | How `rafu <path>` finds Rafu.app: real executable path via `_NSGetExecutablePath` (not argv[0]), symlink-based install, dangling-link handling, and the argv[0]/PATH gotcha |
 | [`local-editor-vertical-slice.md`](local-editor-vertical-slice.md) | Changing local file trees, open buffers, Markdown/Mermaid preview, JSON themes, or Git capture |
 | [`memory-and-file-indexing.md`](memory-and-file-indexing.md) | Changing the lazy sidebar tree, the background ⌘P file-name index, `WorkspaceChangeSet` directory tracking, or file-ranking behavior |
 | [`navigation-and-lsp-contracts.md`](navigation-and-lsp-contracts.md) | Changing the navigation ladder, document edit deltas, language intelligence seams, or process resource tracking |
@@ -30,6 +31,7 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`workspace-symbol-index.md`](workspace-symbol-index.md) | Workspace symbol index design (grammar filtering, parser reuse, caps, incremental updates), SyntacticNavigationProvider tier behavior (including idle-as-indexing), NavigationLadder with LSP insertion point, navigation UI flow (cursor seam, IdentifierUnderCaret, NavigationPresentation, peek view with reference ranking/disclosure, menu commands, ⌘-click implementation), unified buffer symbols, and the /var symlink resolution nuance |
 | [`language-catalog-consolidation.md`](language-catalog-consolidation.md) | Canonical language identification mapping (extensions/info-strings/filenames to grammar and LSP IDs), consolidation of parallel mappings, cross-consistency verification, and intentional regex-highlighter separation |
 | [`workspace-trust-and-lsp-settings.md`](workspace-trust-and-lsp-settings.md) | Workspace trust approval/revocation in Settings, trust store persistence, end-to-end trust flow with UI prompt mounting, and deferred live-teardown design choice |
+| [`language-server-install-staging.md`](language-server-install-staging.md) | StagingValidator's zip-slip symlink policy (allow within-staging targets, reject escapes via lexical resolution), why the managed Node runtime's internal bin/ symlinks require it, error-message mapping, and the fixture relative-symlink caveat |
 | [`skill-routing.md`](skill-routing.md) | Selecting a local skill or Build macOS Apps capability |
 
 ## Reference-note template

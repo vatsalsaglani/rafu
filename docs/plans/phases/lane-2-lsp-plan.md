@@ -436,9 +436,16 @@ drafted for the post-merge integration round (this lane may not edit the shared
   resolver refuses to build a launch spec unless a server is installed on disk
   **and** trusted for the workspace.
 - **Zip-slip** — archives unpack only into isolated staging; `StagingValidator`
-  rejects the whole install on any symlink or any real-path escaping staging,
-  before anything moves into place — layered atop bsdtar/ditto's own `..`/
-  absolute-path defenses.
+  rejects the whole install on any real-path escaping staging — including a
+  symlink whose declared target (resolved lexically against the link's real
+  parent, so the check holds even if the target does not exist yet) points
+  outside staging — before anything moves into place, layered atop
+  bsdtar/ditto's own `..`/absolute-path defenses. It does **not** reject every
+  symlink: the managed Node runtime tarball legitimately ships internal
+  `bin/npm`, `bin/npx`, and `bin/corepack` links pointing back inside its own
+  directory, and a blanket symlink rejection broke every `nodeHosted` install
+  (Pyright, typescript-language-server) with a generic "The operation failed."
+  See [`docs/references/language-server-install-staging.md`](../../references/language-server-install-staging.md).
 
 **Known security residuals / deferred (recorded, not blocking C3):**
 

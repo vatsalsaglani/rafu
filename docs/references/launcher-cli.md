@@ -14,6 +14,14 @@ Keep these result classes distinct:
 - A valid request whose transport is unavailable exits with `EX_UNAVAILABLE` (69) during bootstrap.
 - Product Phase 0 replaces the valid-but-unavailable branch with versioned IPC acknowledgement.
 
+Local folder opening (`rafu <path>`) is now implemented without IPC: the CLI
+locates its enclosing `Rafu.app` and runs `open -a <bundle> <folder>`. How it
+finds the bundle (real executable path, not `argv[0]`; symlink install) is its
+own concern — see [`cli-app-location.md`](cli-app-location.md) and
+[ADR 0007](../decisions/0007-cli-app-location-symlink.md). Richer request
+handoff (`--goto`, `--new-window` against an already-running window) remains the
+future IPC work above.
+
 ## Why it matters
 
 Misclassifying `rafu --ssh --wait` as host alias `--wait` makes invalid input look like a transport failure and can later route a request to the wrong workspace. Side effects must begin only after grammar and path/location validation succeeds.
