@@ -145,16 +145,63 @@ consolidated M6/M7 GUI pass.
 
 ## M2 — Flow model + parser upgrade
 
-- Extend the flow model: node-shape enum (`[]` rect, `()` round, `{}`
-  diamond, `(())` circle, `[[]]` subroutine, `[/ /]` parallelogram, `>]`
-  flag), edge kind (solid/dotted/thick; arrow-head variants `-->`, `--o`,
-  `--x`, `<-->`), edge labels, chained-edge expansion (`A-->B-->C`), `&`
-  grouping, `subgraph`/`end` nesting, direction capture (LR/RL/TD/BT).
-- Tests: fixtures asserting exact node/edge/subgraph graphs
-  (order-independent where appropriate); distinct identity for repeated
-  edges.
+**Status: Complete (2026-07-17)**
 
-Gate: parser fixtures green; no rendering change yet.
+### Implementation
+
+- `Sources/RafuApp/Markdown/MarkdownModels.swift` extended `MermaidFlow`:
+  - `Direction` enum (TD/LR/BT/RL; default TD if header line omitted).
+  - `nodesByID: [UUID: Node]` replacing the old flat `nodes: [String: String]`; 
+    `Node` holds ID, text label, and `NodeShape` (rectangle, round, diamond, circle,
+    subroutine, parallelogram, flag). Shape detection by bracket syntax 
+    (`[]`, `()`, `{}`, `(())`, `[[]]`, `[/ /]`, `>]`).
+  - `Edge` enriched with `EdgeLine` (solid/dotted/thick) and `EdgeHead` 
+    (none/arrow/circle/cross) on both start and end; bidirectional edges represented
+    as start + end arrows. Preserved `Edge.label` field for M4 renderer compat.
+  - `Subgraph` as a nested tree: `subgraphsByID: [UUID: Subgraph]`, each carrying 
+    ID, label, child node/edge UUIDs, and durable identity across parses.
+- `parseFlow` rewritten as a **bracket/quote-depth-aware tokenizer**:
+  - Shape detection using double-before-single delimiter heuristic (`--` before `-`,
+    `---` before `--` before `-`, etc.).
+  - Connector parsing: solid `-->`, dotted `-.-`, thick `===`, etc., mapped to
+    `EdgeLine`/`EdgeHead` tuples; bidirectional `<-->` and variants parsed as
+    start+end arrows.
+  - Label precedence: `|piped label|` wins over inline solid `-- label --` (both
+    parsed; pipe takes priority). Dotted/thick inline mid-labels (`-. label .-`,
+    `== label ==`) are recognized but not parsed into labels (M7 enhancement).
+  - Chained-edge expansion (`A-->B-->C` becomes two edges, each with a fresh UUID)
+    and `&` cross-product expansion (each product edge gets a fresh UUID).
+  - Nested `subgraph`/`end` membership and scope nesting.
+  - Header-line direction capture (LR/TD/etc.) and fallback to TD.
+  - **Frontmatter-aware**: YAML frontmatter and comment lines now skipped in body
+    parsing (M1 limitation fixed).
+- M4 compatibility preserved: `raw`, `nodes: [String:String]`, and `edges` fields
+  still populated from the new model, ensuring the M1 renderer compiles unchanged.
+- Tests: `Tests/RafuAppTests/MermaidParserTests.swift` extended with fixtures
+  asserting exact node/edge/subgraph structure (order-independent where appropriate);
+  distinct UUID identity for repeated edges and cross-product expansions.
+
+### Verification
+
+- `swift build` — clean, no new dependency.
+- `swift test` — 523 tests pass (new M2 fixtures included).
+- `./script/format.sh --lint` — clean.
+- `./script/build_and_run.sh --verify` — **deferred** to M4/M6/M7 (no rendering
+  change in M2; layout and render arrive in M4/M6).
+- Diff limited to `MarkdownModels.swift` + `MermaidParserTests.swift`.
+
+### Known M2 limitations
+
+1. **Per-subgraph direction lines:** recognized and skipped (e.g. `subgraph x LR`),
+   but no per-scope direction modeled — all edges within subgraphs use the
+   root-level direction. Full per-subgraph direction support deferred.
+
+2. **Dotted/thick inline mid-labels:** `A-. label .--> B` and `A== label ==> B`
+   are tokenized correctly but the label is not extracted — only solid ` -- label -- `
+   inline and `|piped|` labels are captured. Mid-label full support deferred.
+
+Gate: parser fixtures green ✓; no rendering change yet; M4-compat preserved.
+  Branch-clean for M3 layout work.
 
 ## M3 — Flow layout (pure)
 

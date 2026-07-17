@@ -62,6 +62,79 @@ source (line 0 of the raw input) as the header.
 This is **not a regression** — it matches prior behavior. M2/M5 rewrite the body
 parsers and will handle frontmatter/comment-skipping in the body parse too.
 
+### Flow model contract and parsing (M2)
+
+**Model shape:** `MermaidFlow` now carries:
+- `Direction` enum: TD (default), LR, BT, RL; extracted from the header line or 
+  defaulted if omitted.
+- `nodesByID: [UUID: Node]` replacing flat `nodes: [String: String]`. Each `Node` 
+  holds a durable UUID, text label, and `NodeShape`: rectangle (`[]`), round (`()`), 
+  diamond (`{}`), circle (`(())`), subroutine (`[[]]`), parallelogram (`[/ /]`), 
+  flag (`>]`).
+- `Edge` with `EdgeLine` (solid/dotted/thick) and `EdgeHead` (none/arrow/circle/cross) 
+  on start and end; bidirectional edges as start + end arrows. `Edge.label` preserved 
+  for M4 compat.
+- `subgraphsByID: [UUID: Subgraph]` tree; each `Subgraph` carries ID, label, child 
+  node/edge UUIDs, durable identity.
+
+**Tokenizing rule:** `parseFlow` is now **bracket/quote-depth-aware**: in-bracket 
+or in-quoted strings, characters like `-->`, `&`, `|` do not split tokens. Example: 
+`A[x --> y] --> B` is one node (text `x --> y`) plus one edge. Double-before-single 
+delimiter heuristic detects shapes (`--` before `-`, `---` before `--`, etc.).
+
+**Connector parsing table:**
+
+| Spelling | EdgeLine | EdgeHead start | EdgeHead end |
+|----------|----------|----------------|--------------|
+| `-->` | solid | none | arrow |
+| `--->` | solid | none | arrow |
+| `--` | solid | none | none |
+| `-.-` or `-...-` | dotted | none | none |
+| `-.->` or `-...->` | dotted | none | arrow |
+| `===` | thick | none | none |
+| `===>` | thick | none | arrow |
+| `--o` | solid | none | circle |
+| `--x` | solid | none | cross |
+| `<-->` | solid | arrow | arrow |
+| `o--o` | solid | circle | circle |
+| `x--x` | solid | cross | cross |
+
+**Label precedence:** `|piped label|` wins over inline solid `-- label --`. Both are parsed; 
+if both appear on one edge, the pipe label is used. Dotted (`-. label .-`) and thick 
+(`== label ==`) inline mid-labels are tokenized but not extracted into labels (known 
+limitation).
+
+**Chained-edge expansion:** `A --> B --> C` expands to two edges (`A → B` and `B → C`), 
+each assigned a fresh UUID (not derived from content). Cross-product `&` expansion 
+(`{A,B} & {X,Y}` shorthand) similarly assigns fresh UUIDs to each product edge.
+
+**Frontmatter and nested scopes:** YAML frontmatter (`---...---`) and comment lines 
+(`%%...`) are now skipped during parsing (M1 limitation fixed). Nested `subgraph`/`end` 
+blocks establish scope; membership is tracked by child UUIDs.
+
+**Two known limitations:**
+1. Per-subgraph `direction` lines (e.g. `subgraph x LR ... end`) are recognized but 
+   direction is not modeled per scope — all edges use root direction.
+2. Dotted and thick inline mid-labels (`-. label .-`, `== label ==`) are not extracted 
+   into `Edge.label`.
+
+### Swift Testing and enum comparison (M2 nuance)
+
+In Swift Testing (and Swift generally), when an optional enum type is unwrapped and 
+compared against a bare `.none`, the comparison resolves to `Optional.none` (nil), 
+**not** the specific enum's `.none` case (if it has one).
+
+**Why it matters:** If `EdgeHead` defines a `.none` case and a test unwraps 
+`edgeHead?` then asserts `XCTAssertEqual(edgeHead, .none)`, the comparison silently 
+matches `Optional.none` instead of `EdgeHead.none`, masking type confusion or 
+incomplete unwrapping.
+
+**Workaround:** Always fully qualify the enum case (`EdgeHead.none`) or unwrap the 
+optional explicitly before comparison.
+
+**Evidence:** Hit during M2 edge-head fixture tests; subsequent assertions using 
+`EdgeHead.none` passed cleanly after qualification.
+
 ## Why it matters
 
 Dishonest type detection silently produces broken diagrams, confusing users about
