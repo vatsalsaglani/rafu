@@ -38,6 +38,18 @@ struct RafuAppCommands: Commands {
             Button("Toggle Line Comment") { workspaceSession?.toggleLineComment() }
                 .keyboardShortcut("/", modifiers: .command)
                 .disabled(workspaceSession?.selectedDocument == nil)
+            Button("Select Next Occurrence") { workspaceSession?.selectNextOccurrence() }
+                .keyboardShortcut("d", modifiers: .command)
+                .disabled(workspaceSession?.selectedDocument == nil)
+            Button("Select All Occurrences") { workspaceSession?.selectAllOccurrences() }
+                .keyboardShortcut("l", modifiers: [.command, .shift])
+                .disabled(workspaceSession?.selectedDocument == nil)
+            Button("Add Caret Above") { workspaceSession?.addCaretAbove() }
+                .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+                .disabled(workspaceSession?.selectedDocument == nil)
+            Button("Add Caret Below") { workspaceSession?.addCaretBelow() }
+                .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+                .disabled(workspaceSession?.selectedDocument == nil)
             Divider()
             Button("Find in File…") { workspaceSession?.showDocumentFind() }
                 .keyboardShortcut("f", modifiers: .command)

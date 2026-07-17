@@ -1097,6 +1097,22 @@ final class WorkspaceSession {
         selectedDocument?.toggleCommentAction?()
     }
 
+    func selectNextOccurrence() {
+        selectedDocument?.selectNextOccurrenceAction?()
+    }
+
+    func selectAllOccurrences() {
+        selectedDocument?.selectAllOccurrencesAction?()
+    }
+
+    func addCaretAbove() {
+        selectedDocument?.addCaretAboveAction?()
+    }
+
+    func addCaretBelow() {
+        selectedDocument?.addCaretBelowAction?()
+    }
+
     func selectEditorTab(_ tabID: EditorTabID, in groupID: EditorGroupID) {
         guard let tab = editorLayout.group(id: groupID)?.tabs.first(where: { $0.id == tabID }),
             let document = document(for: tab)
