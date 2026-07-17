@@ -507,6 +507,11 @@ struct CodeEditorView: NSViewRepresentable {
             shouldChangeTextIn affectedCharRange: NSRange,
             replacementString: String?
         ) -> Bool {
+            if let textView = textView as? RafuTextView,
+                textView.isPerformingMultiCaretEdit
+            {
+                return true
+            }
             // Auto-indent typed newlines only: a plain "\n" landing at the
             // caret with no marked text (IME) in play. Programmatic edits and
             // find-and-replace pass through untouched.

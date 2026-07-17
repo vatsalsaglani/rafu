@@ -175,6 +175,17 @@ Gate: one ⌘Z reverts the whole batch, one ⌘⇧Z redoes it; no undo-group
 exception; 200-cap respected; tree-sitter highlighting correct after batch
 edits in a Swift buffer and a regex-fallback buffer.
 
+Execution record (2026-07-17): **MC3 complete, with interactive syntax checks
+deferred to MC6 by explicit coordinator direction.** `insertText`, backward and
+forward delete, and paste all bail to `super` at one caret or during marked-text
+composition. Multi-edit sub-edits run in reverse order inside one explicitly
+named undo group; two-caret probes prove two storage callbacks and one-step
+undo/redo while preserving composed emoji. The existing single-caret
+auto-indent branch is bypassed only during a multi-caret batch, documenting the
+v1 no-per-caret-auto-indent limitation. `swift build`, the full 525-test suite,
+formatter fix, and lint are green. Live Swift and regex-fallback highlighting,
+IME, and GUI undo/redo remain on the consolidated MC6 checklist.
+
 ## MC4 — Gestures and view-level commands
 
 - `mouseDown` (:121): before the ⌘-click branch, ⌥-click (without ⌘)

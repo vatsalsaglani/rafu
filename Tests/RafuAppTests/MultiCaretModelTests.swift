@@ -338,3 +338,100 @@ func overlayHonorsReduceMotion() {
     #expect(!overlay.isBlinking)
     #expect(overlay.caretsVisible)
 }
+
+@MainActor
+@Test("One multi-caret insertion is one undo group and emits one delta per caret")
+func multiCaretInsertionUndoGroup() {
+    let textView = RafuTextView.makeTextKit1()
+    let probe = MultiCaretEditingProbe()
+    textView.delegate = probe
+    textView.textStorage?.delegate = probe
+    textView.allowsUndo = true
+    textView.string = "abcd"
+    probe.processedCharacterEdits = 0
+    textView.applyCaretRanges(
+        [NSRange(location: 1, length: 0), NSRange(location: 3, length: 0)]
+    )
+
+    textView.insertText("X", replacementRange: NSRange(location: NSNotFound, length: 0))
+
+    #expect(textView.string == "aXbcXd")
+    #expect(
+        textView.currentCaretRanges == [
+            NSRange(location: 2, length: 0),
+            NSRange(location: 5, length: 0),
+        ])
+    #expect(probe.processedCharacterEdits == 2)
+    #expect(probe.manager.undoActionName == "Multi-Cursor Edit")
+
+    probe.manager.undo()
+    #expect(textView.string == "abcd")
+    #expect(probe.manager.redoActionName == "Multi-Cursor Edit")
+
+    probe.manager.redo()
+    #expect(textView.string == "aXbcXd")
+}
+
+@MainActor
+@Test("Multi-caret backward delete preserves composed characters")
+func multiCaretBackwardDelete() {
+    let textView = RafuTextView.makeTextKit1()
+    let probe = MultiCaretEditingProbe()
+    textView.delegate = probe
+    textView.textStorage?.delegate = probe
+    textView.allowsUndo = true
+    textView.string = "a😀 bc"
+    probe.processedCharacterEdits = 0
+    textView.applyCaretRanges(
+        [NSRange(location: 3, length: 0), NSRange(location: 6, length: 0)]
+    )
+
+    textView.deleteBackward(nil)
+
+    #expect(textView.string == "a b")
+    #expect(
+        textView.currentCaretRanges == [
+            NSRange(location: 1, length: 0),
+            NSRange(location: 3, length: 0),
+        ])
+    #expect(probe.processedCharacterEdits == 2)
+    probe.manager.undo()
+    #expect(textView.string == "a😀 bc")
+}
+
+@MainActor
+private final class MultiCaretEditingProbe: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
+    let manager: UndoManager = {
+        let manager = UndoManager()
+        manager.groupsByEvent = false
+        manager.levelsOfUndo = CodeEditorView.Coordinator.undoLevelCap
+        return manager
+    }()
+
+    var processedCharacterEdits = 0
+
+    func undoManager(for view: NSTextView) -> UndoManager? {
+        manager
+    }
+
+    func textView(
+        _ textView: NSTextView,
+        shouldChangeTextIn affectedCharRange: NSRange,
+        replacementString: String?
+    ) -> Bool {
+        true
+    }
+
+    nonisolated func textStorage(
+        _ textStorage: NSTextStorage,
+        didProcessEditing editedMask: NSTextStorageEditActions,
+        range editedRange: NSRange,
+        changeInLength delta: Int
+    ) {
+        MainActor.assumeIsolated {
+            if editedMask.contains(.editedCharacters) {
+                processedCharacterEdits += 1
+            }
+        }
+    }
+}

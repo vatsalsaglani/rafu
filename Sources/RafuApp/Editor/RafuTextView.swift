@@ -21,6 +21,8 @@ final class RafuTextView: NSTextView {
     private var isSynchronizingNativeSelection = false
     private var multiCaretOverlay: MultiCaretOverlayView?
 
+    private(set) var isPerformingMultiCaretEdit = false
+
     var hasMultipleCarets: Bool { caretRanges.count > 1 }
 
     var currentCaretRanges: [NSRange] {
@@ -29,6 +31,14 @@ final class RafuTextView: NSTextView {
 
     var primaryCaretRange: NSRange {
         hasMultipleCarets ? caretRanges[primaryCaretIndex] : super.selectedRange()
+    }
+
+    var currentCaretModel: MultiCaretModel {
+        MultiCaretModel(
+            ranges: currentCaretRanges,
+            primaryIndex: hasMultipleCarets ? primaryCaretIndex : 0,
+            textLength: (string as NSString).length
+        )
     }
 
     /// Builds the TextKit 1 stack explicitly (storage → layout manager →
@@ -213,7 +223,10 @@ final class RafuTextView: NSTextView {
     /// change. Internal `setSelectedRanges` notifications are ignored; a real
     /// click or drag collapses the authoritative set to the new native range.
     func collapseCaretSetToNativeSelectionIfNeeded() {
-        guard hasMultipleCarets, !isSynchronizingNativeSelection else { return }
+        guard hasMultipleCarets,
+            !isSynchronizingNativeSelection,
+            !isPerformingMultiCaretEdit
+        else { return }
         caretRanges = [super.selectedRange()]
         primaryCaretIndex = 0
         updateMultiCaretOverlay()
@@ -223,6 +236,61 @@ final class RafuTextView: NSTextView {
     func refreshMultiCaretOverlay() {
         guard hasMultipleCarets else { return }
         updateMultiCaretOverlay()
+    }
+
+    override func insertText(_ insertString: Any, replacementRange: NSRange) {
+        guard hasMultipleCarets, !hasMarkedText() else {
+            super.insertText(insertString, replacementRange: replacementRange)
+            return
+        }
+        let replacement: String
+        if let string = insertString as? String {
+            replacement = string
+        } else if let attributedString = insertString as? NSAttributedString {
+            replacement = attributedString.string
+        } else {
+            NSSound.beep()
+            return
+        }
+        performMultiCaretEdit(
+            currentCaretModel.applyingReplacement(
+                replacement,
+                at: (string as NSString).length
+            )
+        )
+    }
+
+    override func deleteBackward(_ sender: Any?) {
+        guard hasMultipleCarets, !hasMarkedText() else {
+            super.deleteBackward(sender)
+            return
+        }
+        performMultiCaretEdit(currentCaretModel.applyingDeletion(.backward, in: string))
+    }
+
+    override func deleteForward(_ sender: Any?) {
+        guard hasMultipleCarets, !hasMarkedText() else {
+            super.deleteForward(sender)
+            return
+        }
+        performMultiCaretEdit(currentCaretModel.applyingDeletion(.forward, in: string))
+    }
+
+    override func paste(_ sender: Any?) {
+        guard hasMultipleCarets, !hasMarkedText() else {
+            super.paste(sender)
+            return
+        }
+        guard let replacement = NSPasteboard.general.string(forType: .string) else {
+            NSSound.beep()
+            return
+        }
+        performMultiCaretEdit(
+            currentCaretModel.applyingReplacement(
+                replacement,
+                at: (string as NSString).length
+            )
+        )
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -254,6 +322,46 @@ final class RafuTextView: NSTextView {
             stillSelecting: false
         )
         updateMultiCaretOverlay()
+    }
+
+    private func performMultiCaretEdit(_ result: MultiCaretEditResult) {
+        guard isEditable, let textStorage else { return }
+        let edits = result.edits.filter { $0.range.length > 0 || !$0.replacement.isEmpty }
+        guard !edits.isEmpty else {
+            applyCaretRanges(result.model)
+            return
+        }
+
+        let undoManager = undoManager
+        isPerformingMultiCaretEdit = true
+        undoManager?.beginUndoGrouping()
+
+        var appliedCount = 0
+        for edit in edits {
+            guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else {
+                break
+            }
+            textStorage.replaceCharacters(in: edit.range, with: edit.replacement)
+            didChangeText()
+            appliedCount += 1
+        }
+
+        if appliedCount > 0 {
+            // AppKit raises an invalid-group exception when a closed explicit
+            // undo group is named, so this must precede `endUndoGrouping()`.
+            undoManager?.setActionName("Multi-Cursor Edit")
+        }
+        undoManager?.endUndoGrouping()
+        isPerformingMultiCaretEdit = false
+
+        if appliedCount == edits.count {
+            applyCaretRanges(result.model)
+        } else {
+            // Rafu's delegate accepts every multi-caret sub-edit. If a future
+            // delegate rejects one after earlier reverse-order edits applied,
+            // do not install caret coordinates computed for the full batch.
+            collapseCaretSetToNativeSelectionIfNeeded()
+        }
     }
 
     private func updateMultiCaretOverlay() {

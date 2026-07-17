@@ -30,6 +30,33 @@ The nonisolated timer callback enters `MainActor` before touching the view; an
 Reduce Motion disables the timer and leaves every overlay caret steadily
 visible.
 
+## Batch edit and undo rule
+
+Typing, backward delete, forward delete, and paste enter the multi-caret path
+only when more than one caret is authoritative and no marked-text composition
+is active. One model operation produces sub-edits sorted from the highest
+UTF-16 location to the lowest, so each `NSTextStorage` replacement leaves every
+not-yet-applied lower offset valid. Empty-caret deletion expands with
+`rangeOfComposedCharacterSequence` before sorting, so emoji and other grapheme
+clusters are never split.
+
+One user gesture opens one explicit undo group. Every accepted sub-edit follows
+`shouldChangeText` → `replaceCharacters` → `didChangeText`. The action is named
+`Multi-Cursor Edit` **before** `endUndoGrouping()`; naming the closed group is an
+AppKit invalid-group exception. A future delegate rejection after earlier
+sub-edits never installs the full batch's planned caret coordinates; Rafu
+collapses to the remaining native selection instead.
+
+Each sub-edit intentionally produces one
+`textStorage(_:didProcessEditing:range:changeInLength:)` callback. Therefore an
+N-caret gesture yields N ordered `EditorDocument.recordEditDelta` calls and N
+ordered enqueues into the existing non-cancelling serial syntax reparse chain.
+No syntax or language-intelligence consumer changes are needed.
+
+The newline delegate's single-caret auto-indent path is bypassed during a
+multi-caret batch. Newlines are inserted literally at every caret in v1; there
+is no per-caret auto-indent.
+
 ## Runtime spike findings
 
 ### Spike A — multiple zero-length selections
@@ -82,7 +109,7 @@ swift test
 ./script/format.sh --lint
 ```
 
-MC2 completed with 523 tests green. Per the lane coordinator's explicit run
+MC3 completed with 525 tests green. Per the lane coordinator's explicit run
 direction, `./script/build_and_run.sh --verify` and the interactive blink,
 gesture, IME, accessibility, hibernation, and second-window checks are deferred
 to one consolidated MC6 pass.
