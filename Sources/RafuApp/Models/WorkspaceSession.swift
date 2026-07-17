@@ -1486,7 +1486,7 @@ final class WorkspaceSession {
     // MARK: - Hunk staging (stub — filled in by the git-depth lane's G1 increment)
 
     /// Stages one hunk of the currently open working-tree diff via
-    /// `git apply --cached`.
+    /// `git apply --cached`. No-op until G1 lands `GitHunkPatchBuilder`.
     func stageHunk(_ hunk: GitDiffHunk) async {
         guard let rootURL,
             let openDiff = gitOpenDiff,
@@ -1526,7 +1526,8 @@ final class WorkspaceSession {
     }
 
     /// Unstages one hunk of the currently open staged diff via
-    /// `git apply --cached --reverse`.
+    /// `git apply --cached --reverse`. No-op until G1 lands
+    /// `GitHunkPatchBuilder`.
     func unstageHunk(_ hunk: GitDiffHunk) async {
         guard let rootURL,
             let openDiff = gitOpenDiff,
