@@ -308,10 +308,81 @@ Gate: build/tests/lint green ✓; `--verify` manual pass deferred to M6/M7.
 
 ## M5 — Sequence model + parser upgrade
 
-- Activations (`activate`/`deactivate`, `+`/`-` suffixes), `alt`/`opt`/
-  `loop`/`par`/`else` blocks with nested messages, `Note over/left of/right
-  of`, `actor` vs `participant`, self-messages.
-- Tests: nested-block fixtures; durable identity for block-nested messages.
+**Status: Complete (2026-07-17)**
+
+### Implementation
+
+- `Sources/RafuApp/Markdown/MarkdownModels.swift` extended `MermaidSequence`:
+  - `Event` enum: `.message(Message)`, `.note(Note)`, `.blockStart(Block)`,
+    `.blockDivider(Block, kind)`, `.blockEnd(UUID)`, `.activate(from:UUID)`,
+    `.deactivate(to:UUID)`. Single ordered `events: [Event]` stream forms the
+    canonical parse representation — block frames must span their contiguous
+    nested-content range, so the stream + block-id stack naturally feeds M6 geometry.
+  - `Message` enriched: `arrow: Arrow` (solid/solidArrow/dotted/dottedArrow;
+    non-`>` arrows like `-x`, `--x`, `-)` still ignored), `activatesTarget`
+    (Boolean; `True` iff message `+` suffix), `deactivatesSource` (Boolean; `True`
+    iff message `-` suffix), computed `isSelfMessage` (from == to). Durable `UUID`
+    per instance.
+  - `Note` + `NotePlacement` enum (over, leftOf, rightOf).
+  - `Block` + `BlockKind` (alt/opt/loop/par); each block carries durable `UUID` and
+    child block/message UUIDs.
+  - `participantKinds: [String: ParticipantKind]` (participant/actor) and
+    `participantDisplay: [String: String]` (left token → right alias). Canonical
+    participant list derived from event order.
+  - **Behavior change (correctness fix):** `participant X as Y` and `actor X as Y`
+    now resolve identity to the LEFT token `X`. The RIGHT token `Y` (alias) is stored
+    in `participantDisplay[X]` for display only. `participants` list and message
+    `from`/`to` fields carry the identity `X`. This matches Mermaid semantics; prior
+    code incorrectly used the alias `Y` for identity. No prior test covered aliasing.
+    M6 rendering must use `participantDisplay[id]` for human-readable names while
+    using `id` (the left token) for lookups and identity.
+  - `participants: [String]` (participant identities in document order) and
+    `messages: [Message]` (flat derived list, document order including block-nested)
+    remain populated to preserve M3 `layout(_ sequence:)` helper byte-compatibility.
+- `parseSequence` rewritten as a **block-aware state machine**:
+  - YAML frontmatter skip; `participant`/`actor` + `as` alias capture;
+    `activate`/`deactivate` parsed into Event enum; `+`/`-` message suffixes
+    parsed with correct semantics (`+` activates receiver `to`, `-` deactivates
+    sender `from`).
+  - `alt`/`opt`/`loop`/`par` blocks with `else`/`and` dividers and `end`
+    (nesting via block-id stack; unclosed blocks flushed with synthesized
+    `blockEnd` at EOF; stray `end` ignored).
+  - `Note over/left of/right of` parsed; `Note` placed in event stream.
+  - Self-messages (from == to) handled; all message types wired to events.
+  - Frontmatter-aware parsing.
+- M3 compat preserved: `participants` and `messages` derived from `events` so
+  `MermaidLayout.swift` and its tests remain untouched.
+- Tests: new `MermaidParserTests.swift` fixtures for nested blocks (alt/opt/loop/par with dividers),
+  `activate`/`deactivate` events, notes, actor/participant aliasing, self-messages,
+  empty blocks; durable UUID identity verified; existing `parsesSequenceDiagram`,
+  `sequenceDiagramClassifiesAsSequence`, and M3 sequence-layout tests still pass.
+
+### Verification
+
+- `swift build` — clean, no new dependency.
+- `swift test` — 546 tests pass (11 new M5 fixtures; existing parser and M3 layout tests green).
+- `./script/format.sh --lint` — clean.
+- Diff limited to `MarkdownModels.swift` + `MermaidParserTests.swift`.
+- `./script/build_and_run.sh --verify` — **deferred** to M6 (no rendering change in M5;
+  lifelines and block frames arrive in M6).
+
+### Known M5 limitations
+
+1. **Non-`>` message arrows:** `-x`, `--x`, `-)` and other non-arrow endings are still
+   ignored (parsed as notes or edge cases). Only `>` arrows (`-->`, `-.->`/dotted,
+   `..>`) are modeled. Full support deferred.
+
+2. **Empty block branches:** A branch with no messages (e.g., `alt` with an empty
+   `else`) is a degenerate geometry concern for M6 y-range calculation. Parsed
+   and preserved in the event stream; M6 will handle the rendering.
+
+Gate: parser fixtures green ✓; M3-compat verified; no rendering change yet. Branch-clean for M6 rendering.
+
+### Related learning
+
+**Participant identity semantics:** The fix to use the LEFT token (not alias) for identity is
+a reusable Mermaid-syntax fact recorded in the reference note. Future diagram types (flowchart
+subgraph ownership, actor naming) can refer to it.
 
 ## M6 — Sequence renderer
 

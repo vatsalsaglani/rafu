@@ -86,15 +86,56 @@ nonisolated struct MermaidFlow: Sendable {
 }
 
 nonisolated struct MermaidSequence: Sendable {
+    nonisolated enum ParticipantKind: Sendable, Equatable {
+        case participant, actor
+    }
+    /// `->` `->>` `-->` `-->>`, in order of increasing token length.
+    nonisolated enum Arrow: Sendable, Equatable {
+        case solid, solidArrow, dotted, dottedArrow
+    }
     nonisolated struct Message: Sendable {
         let id = UUID()
         let from: String
         let to: String
         let label: String
+        let arrow: Arrow
+        let activatesTarget: Bool
+        let deactivatesSource: Bool
+        var isSelfMessage: Bool { from == to }
+    }
+    nonisolated enum NotePlacement: Sendable, Equatable {
+        case over([String])
+        case leftOf(String)
+        case rightOf(String)
+    }
+    nonisolated struct Note: Sendable {
+        let id = UUID()
+        let placement: NotePlacement
+        let text: String
+    }
+    nonisolated enum BlockKind: Sendable, Equatable {
+        case alt, opt, loop, par
+    }
+    nonisolated struct Block: Sendable {
+        let id = UUID()
+        let kind: BlockKind
+        let title: String
+    }
+    nonisolated enum Event: Sendable {
+        case message(Message)
+        case note(Note)
+        case blockStart(Block)
+        case blockDivider(blockID: UUID, label: String)
+        case blockEnd(blockID: UUID)
+        case activate(String)
+        case deactivate(String)
     }
     let raw: String
     let participants: [String]
+    let participantKinds: [String: ParticipantKind]
+    let participantDisplay: [String: String]
     let messages: [Message]
+    let events: [Event]
 }
 
 nonisolated struct MarkdownParser: Sendable {
@@ -232,36 +273,206 @@ nonisolated struct MarkdownParser: Sendable {
         return lines[(index + 1)...].filter { !$0.isEmpty && !$0.hasPrefix("%%") }
     }
 
-    private func parseSequence(_ raw: String) -> MermaidSequence {
-        let lines = raw.components(separatedBy: .newlines).map {
-            $0.trimmingCharacters(in: .whitespaces)
-        }
-        var participants: [String] = []
-        var messages: [MermaidSequence.Message] = []
-        for line in lines.dropFirst() {
-            if line.hasPrefix("participant ") {
-                let name =
-                    String(line.dropFirst("participant ".count)).components(separatedBy: " as ")
-                    .last ?? ""
-                if !name.isEmpty { participants.append(name) }
-            } else if let arrow = ["->>", "-->>", "->", "-->"].first(where: line.contains),
-                let colon = line.firstIndex(of: ":")
-            {
-                let route = String(line[..<colon]).components(separatedBy: arrow)
-                if route.count == 2 {
-                    let from = route[0].trimmingCharacters(in: .whitespaces)
-                    let to = route[1].trimmingCharacters(in: .whitespaces)
-                    if !participants.contains(from) { participants.append(from) }
-                    if !participants.contains(to) { participants.append(to) }
-                    messages.append(
-                        .init(
-                            from: from, to: to,
-                            label: String(line[line.index(after: colon)...]).trimmingCharacters(
-                                in: .whitespaces)))
-                }
+    /// Longest-match-first sequence-diagram arrow tokens; `-->>`/`->>` must precede the
+    /// two-dash/one-dash prefixes they would otherwise be mistaken for.
+    private static let sequenceArrowTable: [(token: String, arrow: MermaidSequence.Arrow)] = [
+        ("-->>", .dottedArrow),
+        ("->>", .solidArrow),
+        ("-->", .dotted),
+        ("->", .solid),
+    ]
+
+    /// Finds the leftmost sequence-diagram arrow token (and its range) in `text`, so a
+    /// trailing `+`/`-` activation marker is always resolved from the text after the arrow.
+    private func firstSequenceArrow(in text: String) -> (
+        arrow: MermaidSequence.Arrow, range: Range<String.Index>
+    )? {
+        let chars = Array(text)
+        for index in 0..<chars.count {
+            for candidate in Self.sequenceArrowTable
+            where matchesToken(candidate.token, in: chars, at: index) {
+                let start = text.index(text.startIndex, offsetBy: index)
+                let end = text.index(start, offsetBy: candidate.token.count)
+                return (candidate.arrow, start..<end)
             }
         }
-        return MermaidSequence(raw: raw, participants: participants, messages: messages)
+        return nil
+    }
+
+    /// Parses a `Note over A,B: text` / `Note left of A: text` / `Note right of A: text` line.
+    private func parseSequenceNote(_ line: String) -> MermaidSequence.Note? {
+        guard line.lowercased().hasPrefix("note ") else { return nil }
+        let rest = String(line.dropFirst("note ".count))
+        guard let colon = rest.firstIndex(of: ":") else { return nil }
+        let head = String(rest[..<colon]).trimmingCharacters(in: .whitespaces)
+        let text = String(rest[rest.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+        let headLower = head.lowercased()
+        if headLower.hasPrefix("over ") {
+            let names =
+                head.dropFirst("over ".count)
+                .components(separatedBy: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            guard !names.isEmpty else { return nil }
+            return MermaidSequence.Note(placement: .over(names), text: text)
+        }
+        if headLower.hasPrefix("left of ") {
+            let name = head.dropFirst("left of ".count).trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { return nil }
+            return MermaidSequence.Note(placement: .leftOf(name), text: text)
+        }
+        if headLower.hasPrefix("right of ") {
+            let name = head.dropFirst("right of ".count).trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { return nil }
+            return MermaidSequence.Note(placement: .rightOf(name), text: text)
+        }
+        return nil
+    }
+
+    private func parseSequence(_ raw: String) -> MermaidSequence {
+        var participants: [String] = []
+        var kinds: [String: MermaidSequence.ParticipantKind] = [:]
+        var display: [String: String] = [:]
+        var events: [MermaidSequence.Event] = []
+        var blockStack: [UUID] = []
+
+        func ensure(_ name: String, kind: MermaidSequence.ParticipantKind = .participant) {
+            guard !name.isEmpty, !participants.contains(name) else { return }
+            participants.append(name)
+            kinds[name] = kind
+            display[name] = name
+        }
+
+        for line in bodyLines(raw) {
+            let first = String(line.prefix { !$0.isWhitespace }).lowercased()
+
+            if first == "participant" || first == "actor" {
+                let kind: MermaidSequence.ParticipantKind = first == "actor" ? .actor : .participant
+                let rest = String(line.dropFirst(first.count)).trimmingCharacters(
+                    in: .whitespaces)
+                let idName: String
+                let displayName: String
+                if let range = rest.range(of: " as ") {
+                    idName = String(rest[..<range.lowerBound]).trimmingCharacters(
+                        in: .whitespaces)
+                    displayName = String(rest[range.upperBound...]).trimmingCharacters(
+                        in: .whitespaces)
+                } else {
+                    idName = rest
+                    displayName = rest
+                }
+                guard !idName.isEmpty else { continue }
+                ensure(idName, kind: kind)
+                kinds[idName] = kind
+                display[idName] = displayName.isEmpty ? idName : displayName
+                continue
+            }
+
+            if first == "alt" || first == "opt" || first == "loop" || first == "par" {
+                let blockKind: MermaidSequence.BlockKind
+                switch first {
+                case "alt": blockKind = .alt
+                case "opt": blockKind = .opt
+                case "loop": blockKind = .loop
+                default: blockKind = .par
+                }
+                let title = String(line.dropFirst(first.count)).trimmingCharacters(
+                    in: .whitespaces)
+                let block = MermaidSequence.Block(kind: blockKind, title: title)
+                events.append(.blockStart(block))
+                blockStack.append(block.id)
+                continue
+            }
+
+            if first == "else" || first == "and" {
+                if let top = blockStack.last {
+                    let label = String(line.dropFirst(first.count)).trimmingCharacters(
+                        in: .whitespaces)
+                    events.append(.blockDivider(blockID: top, label: label))
+                }
+                continue
+            }
+
+            if line == "end" {
+                if let id = blockStack.popLast() {
+                    events.append(.blockEnd(blockID: id))
+                }
+                continue
+            }
+
+            if first == "note" {
+                if let note = parseSequenceNote(line) {
+                    switch note.placement {
+                    case .over(let names): for name in names { ensure(name) }
+                    case .leftOf(let name): ensure(name)
+                    case .rightOf(let name): ensure(name)
+                    }
+                    events.append(.note(note))
+                }
+                continue
+            }
+
+            if first == "activate" {
+                let name = String(line.dropFirst(first.count)).trimmingCharacters(
+                    in: .whitespaces)
+                guard !name.isEmpty else { continue }
+                ensure(name)
+                events.append(.activate(name))
+                continue
+            }
+
+            if first == "deactivate" {
+                let name = String(line.dropFirst(first.count)).trimmingCharacters(
+                    in: .whitespaces)
+                guard !name.isEmpty else { continue }
+                ensure(name)
+                events.append(.deactivate(name))
+                continue
+            }
+
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let routePart = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
+            let label = String(line[line.index(after: colon)...]).trimmingCharacters(
+                in: .whitespaces)
+            guard let (arrow, range) = firstSequenceArrow(in: routePart) else { continue }
+
+            let from = String(routePart[..<range.lowerBound]).trimmingCharacters(
+                in: .whitespaces)
+            var targetSide = String(routePart[range.upperBound...]).trimmingCharacters(
+                in: .whitespaces)
+            var activates = false
+            var deactivates = false
+            if targetSide.hasPrefix("+") {
+                activates = true
+                targetSide.removeFirst()
+            } else if targetSide.hasPrefix("-") {
+                deactivates = true
+                targetSide.removeFirst()
+            }
+            let to = targetSide.trimmingCharacters(in: .whitespaces)
+            guard !from.isEmpty, !to.isEmpty else { continue }
+            ensure(from)
+            ensure(to)
+            let message = MermaidSequence.Message(
+                from: from, to: to, label: label, arrow: arrow, activatesTarget: activates,
+                deactivatesSource: deactivates)
+            events.append(.message(message))
+            if activates { events.append(.activate(to)) }
+            if deactivates { events.append(.deactivate(from)) }
+        }
+
+        while let id = blockStack.popLast() {
+            events.append(.blockEnd(blockID: id))
+        }
+
+        let messages: [MermaidSequence.Message] = events.compactMap {
+            if case .message(let message) = $0 { return message }
+            return nil
+        }
+
+        return MermaidSequence(
+            raw: raw, participants: participants, participantKinds: kinds,
+            participantDisplay: display, messages: messages, events: events)
     }
 
     // MARK: - Flow parsing

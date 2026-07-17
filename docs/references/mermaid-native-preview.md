@@ -248,7 +248,51 @@ typing-path frame budget.
 carries an explicit accessibility label (e.g., node/edge counts). The render
 is static (no animation), trivially satisfying Reduce Motion.
 
+### Sequence model contract (M5)
+
+**Events-stream design:** `MermaidSequence.events` is an ordered `[Event]` stream where
+each `Event` is tagged (`.message`, `.note`, `.blockStart`, `.blockDivider`, `.blockEnd`,
+`.activate`, `.deactivate`). Block frames must span the contiguous range of their nested
+content in this stream — a multi-line `alt` block's start, its dividers, and its end are
+adjacent in sequence order. This ordered stream walked with a block-id stack is the natural
+input to M6 geometry (lifelines, block boxes, time-ordering). `messages: [String]` is
+**derived** from the events stream in document order (including block-nested messages),
+preserving a single source of truth for order and identity.
+
+**Activation semantics:** Activations are modeled as separate `.activate(from:UUID)` and
+`.deactivate(to:UUID)` events. When a message carries a `+` suffix, `message.activatesTarget`
+is `True`, and a corresponding `.activate(to:)` event is added to the stream. When a message
+carries a `-` suffix, `message.deactivatesSource` is `True`, and a corresponding
+`.deactivate(from:)` event is added. Semantics: `+` activates the receiver; `-` deactivates
+the sender. Durable `UUID` on each message ensures unique identity for repeated/similar messages.
+
+**Participant identity and aliases:** In `participant X as Y` or `actor X as Y`, the LEFT token
+`X` is the canonical identity and appears in `participants: [String]` and all message `from`/`to`
+fields. The RIGHT token `Y` (alias) is stored in `participantDisplay: [String: String]`
+where `participantDisplay[X] == Y`. M6 rendering uses `participantDisplay` for the human-readable
+name while using `X` (the identity) for lifeline layout and event routing. This matches Mermaid
+semantics and is a reusable rule for any diagram type with named participants. `participantKinds:
+[String: ParticipantKind]` (participant vs actor) is keyed by the same identity `X`.
+
+**Block balancing and nesting:** `alt`/`opt`/`loop`/`par` blocks establish nested scope via
+a block-id stack during parsing. The parser emits `.blockStart(Block)`, then child events,
+then `.blockDivider(Block, kind)` for each `else`/`and` divider, then `.blockEnd(UUID)`.
+If an `end` is missing, the parser synthesizes a `.blockEnd` before EOF or when closing the
+next scope. Stray `end` lines (closing a non-open block) are ignored. This ensures well-formed
+block nesting in the event stream, required for M6 geometry.
+
+**M3 layout compatibility:** `participants` (identity list, document order) and `messages`
+(flat derived list, document order including nested) are kept populated so the M3 helper
+`MermaidLayoutEngine.layout(_ sequence:)` and its tests remain byte-compatible. No changes
+to `MermaidLayout.swift` or `MermaidLayoutTests.swift` are needed for M5.
+
+**Known M5 limitation:** Non-`>` message arrows (`-x`, `--x`, `-)`) are not yet modeled;
+these parse as notes or edge cases and are ignored. Only solid (`-->`), dotted (`-.->`,
+`-..->`, `-.-`), and identity arrows are supported. Full arrow support deferred.
+
+**Section to be filled in M6:**
+- Sequence renderer: lifelines, activation bars, block frames.
+
 **Section to be filled in M7:**
 - Fixture policy close-out.
-- Sequence renderer (M6) patterns.
 - Verified toolchain and closure.

@@ -1,6 +1,26 @@
+import Foundation
 import Testing
 
 @testable import RafuApp
+
+private func sequence(_ source: String) -> MermaidSequence {
+    guard case .sequence(let result) = MarkdownParser().parseMermaid(source) else {
+        preconditionFailure("Expected a sequence diagram for fixture: \(source)")
+    }
+    return result
+}
+
+private func tag(_ event: MermaidSequence.Event) -> String {
+    switch event {
+    case .message: return "message"
+    case .note: return "note"
+    case .blockStart: return "blockStart"
+    case .blockDivider: return "blockDivider"
+    case .blockEnd: return "blockEnd"
+    case .activate: return "activate"
+    case .deactivate: return "deactivate"
+    }
+}
 
 @Test(
     "Mermaid diagram types outside the native flow/sequence subset render as unsupported",
@@ -328,4 +348,240 @@ func flowBracketAmpersandIsNotSplit() {
     #expect(Set(flow.nodesByID.keys) == ["A", "C", "D"])
     let pairs = Set(flow.edges.map { "\($0.from)-\($0.to)" })
     #expect(pairs == ["A-D", "C-D"])
+}
+
+// MARK: - Sequence model + parser (M5)
+
+@Test(
+    "Activation markers set message flags and emit correctly attributed activate/deactivate events")
+func sequenceActivationMarkersSetFlagsAndEvents() {
+    let seq = sequence(
+        """
+        sequenceDiagram
+        A->>+B: req
+        B-->>-A: res
+        """)
+
+    #expect(seq.messages.count == 2)
+    guard seq.messages.count == 2 else { return }
+    #expect(seq.messages[0].activatesTarget)
+    #expect(!seq.messages[0].deactivatesSource)
+    #expect(!seq.messages[1].activatesTarget)
+    #expect(seq.messages[1].deactivatesSource)
+
+    #expect(seq.events.map(tag) == ["message", "activate", "message", "deactivate"])
+    guard case .activate(let activatedName) = seq.events[1] else {
+        Issue.record("Expected an activate event")
+        return
+    }
+    #expect(activatedName == "B")
+    guard case .deactivate(let deactivatedName) = seq.events[3] else {
+        Issue.record("Expected a deactivate event")
+        return
+    }
+    #expect(deactivatedName == "B")
+}
+
+@Test("Standalone activate/deactivate statements emit their own events in document order")
+func sequenceStandaloneActivateDeactivateEmitEvents() {
+    let seq = sequence(
+        """
+        sequenceDiagram
+        participant A
+        participant B
+        activate B
+        A->>B: x
+        deactivate B
+        """)
+
+    #expect(seq.events.map(tag) == ["activate", "message", "deactivate"])
+}
+
+@Test("Nested alt/loop blocks with an else divider track titles, nesting, and matched ends")
+func sequenceNestedBlocksWithDividerAreTracked() {
+    let seq = sequence(
+        """
+        sequenceDiagram
+        alt is ok
+        A->>B: a
+        loop retry
+        A->>B: b
+        A->>B: c
+        end
+        else not ok
+        A->>B: d
+        end
+        """)
+
+    #expect(seq.messages.count == 4)
+
+    let blocks = seq.events.compactMap { event -> MermaidSequence.Block? in
+        if case .blockStart(let block) = event { return block }
+        return nil
+    }
+    #expect(blocks.count == 2)
+    let altBlock = blocks.first { $0.kind == .alt }
+    let loopBlock = blocks.first { $0.kind == .loop }
+    #expect(altBlock?.title == "is ok")
+    #expect(loopBlock?.title == "retry")
+
+    let dividers = seq.events.compactMap { event -> (blockID: UUID, label: String)? in
+        if case .blockDivider(let blockID, let label) = event { return (blockID, label) }
+        return nil
+    }
+    #expect(dividers.count == 1)
+    #expect(dividers.first?.blockID == altBlock?.id)
+    #expect(dividers.first?.label == "not ok")
+
+    let blockEndIDs = Set(
+        seq.events.compactMap { event -> UUID? in
+            if case .blockEnd(let blockID) = event { return blockID }
+            return nil
+        })
+    #expect(blockEndIDs == Set(blocks.map(\.id)))
+}
+
+@Test("Note over/left of/right of placements and text are captured")
+func sequenceNotesCapturePlacementAndText() {
+    let seq = sequence(
+        """
+        sequenceDiagram
+        Note over A,B: shared
+        Note left of A: hi
+        Note right of B: bye
+        """)
+
+    let notes = seq.events.compactMap { event -> MermaidSequence.Note? in
+        if case .note(let note) = event { return note }
+        return nil
+    }
+    #expect(notes.count == 3)
+    guard notes.count == 3 else { return }
+    #expect(notes[0].placement == .over(["A", "B"]))
+    #expect(notes[0].text == "shared")
+    #expect(notes[1].placement == .leftOf("A"))
+    #expect(notes[1].text == "hi")
+    #expect(notes[2].placement == .rightOf("B"))
+    #expect(notes[2].text == "bye")
+}
+
+@Test("Actor kind and `as` alias resolve identity from the left-hand token")
+func sequenceActorKindAndAliasResolveLeftHandIdentity() {
+    let seq = sequence(
+        """
+        sequenceDiagram
+        actor A as Alice
+        participant B
+        A->>B: x
+        """)
+
+    #expect(seq.participantKinds["A"] == .actor)
+    #expect(seq.participantKinds["B"] == .participant)
+    #expect(seq.participantDisplay["A"] == "Alice")
+    #expect(seq.participants == ["A", "B"])
+}
+
+@Test("Self-messages share the same from and to participant")
+func sequenceSelfMessageSharesFromAndTo() {
+    let seq = sequence(
+        """
+        sequenceDiagram
+        participant A
+        A->>A: loops
+        """)
+
+    #expect(seq.messages.count == 1)
+    guard let message = seq.messages.first else { return }
+    #expect(message.from == message.to)
+    #expect(message.isSelfMessage)
+}
+
+@Test("Repeated identical block-nested messages still get durable, distinct identity")
+func sequenceBlockNestedMessagesHaveDurableIdentity() {
+    let seq = sequence(
+        """
+        sequenceDiagram
+        loop x
+        A->>B: same
+        A->>B: same
+        end
+        """)
+
+    #expect(seq.messages.count == 2)
+    guard seq.messages.count == 2 else { return }
+    #expect(seq.messages[0].id != seq.messages[1].id)
+}
+
+@Test("A par block with an and divider tracks its title, branch label, and participants")
+func sequenceParBlockWithAndDividerIsTracked() {
+    let seq = sequence(
+        """
+        sequenceDiagram
+        par Alice
+        A->>B: a
+        and Bob
+        A->>C: b
+        end
+        """)
+
+    let blocks = seq.events.compactMap { event -> MermaidSequence.Block? in
+        if case .blockStart(let block) = event { return block }
+        return nil
+    }
+    #expect(blocks.count == 1)
+    #expect(blocks.first?.kind == .par)
+    #expect(blocks.first?.title == "Alice")
+
+    let dividers = seq.events.compactMap { event -> String? in
+        if case .blockDivider(_, let label) = event { return label }
+        return nil
+    }
+    #expect(dividers == ["Bob"])
+    #expect(seq.participants == ["A", "B", "C"])
+}
+
+@Test("A block missing its closing end still parses without crashing, and gets a synthesized end")
+func sequenceUnterminatedBlockIsFlushedWithoutCrashing() {
+    let seq = sequence(
+        """
+        sequenceDiagram
+        alt x
+        A->>B: hi
+        """)
+
+    #expect(seq.messages.count == 1)
+    let startCount = seq.events.filter { tag($0) == "blockStart" }.count
+    let endCount = seq.events.filter { tag($0) == "blockEnd" }.count
+    #expect(startCount == 1)
+    #expect(endCount == startCount)
+}
+
+@Test("An unbalanced end with no open block is ignored without crashing")
+func sequenceUnbalancedEndIsIgnored() {
+    let seq = sequence(
+        """
+        sequenceDiagram
+        A->>B: x
+        end
+        """)
+
+    #expect(seq.messages.count == 1)
+    #expect(!seq.events.contains { tag($0) == "blockStart" })
+    #expect(!seq.events.contains { tag($0) == "blockEnd" })
+}
+
+@Test("YAML frontmatter before sequenceDiagram does not break parsing")
+func sequenceFrontmatterIsTolerated() {
+    let seq = sequence(
+        """
+        ---
+        title: X
+        ---
+        sequenceDiagram
+        A->>B: hi
+        """)
+
+    #expect(seq.messages.count == 1)
+    #expect(seq.messages.first?.from == "A")
+    #expect(seq.messages.first?.to == "B")
 }
