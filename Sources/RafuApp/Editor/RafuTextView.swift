@@ -6,12 +6,45 @@ import SwiftUI
 /// `drawBackground(in:)`. Decorations never touch `NSTextStorage` attributes,
 /// so the Neon syntax pipeline can re-apply storage attributes freely.
 final class RafuTextView: NSTextView {
+    enum CaretDirection {
+        case above
+        case below
+    }
+
     /// Strong reference to the text storage. In a hand-built TextKit 1 stack
     /// NOTHING retains the storage (`NSLayoutManager.textStorage` is an
     /// `assign` reference and the view only retains its container), so the
     /// caller must own it or the stack reads through a dangling pointer and
     /// glyph drawing silently breaks.
     private var ownedTextStorage: NSTextStorage?
+
+    /// Authoritative multi-caret state. AppKit is allowed to retain only the
+    /// ranges it can represent; zero-length ranges it drops are rendered by
+    /// `MultiCaretOverlayView` instead.
+    private var caretRanges = [NSRange(location: 0, length: 0)]
+    private var primaryCaretIndex = 0
+    private var isSynchronizingNativeSelection = false
+    private var multiCaretOverlay: MultiCaretOverlayView?
+
+    private(set) var isPerformingMultiCaretEdit = false
+
+    var hasMultipleCarets: Bool { caretRanges.count > 1 }
+
+    var currentCaretRanges: [NSRange] {
+        hasMultipleCarets ? caretRanges : [super.selectedRange()]
+    }
+
+    var primaryCaretRange: NSRange {
+        hasMultipleCarets ? caretRanges[primaryCaretIndex] : super.selectedRange()
+    }
+
+    var currentCaretModel: MultiCaretModel {
+        MultiCaretModel(
+            ranges: currentCaretRanges,
+            primaryIndex: hasMultipleCarets ? primaryCaretIndex : 0,
+            textLength: (string as NSString).length
+        )
+    }
 
     /// Builds the TextKit 1 stack explicitly (storage → layout manager →
     /// container) so the view is deterministically TextKit 1;
@@ -113,13 +146,30 @@ final class RafuTextView: NSTextView {
 
     private static let hoverDelay = Duration.milliseconds(450)
 
-    /// ⌘-click "go to definition". Only intercepts when `.command` is held
-    /// and an action is wired; every other click (plain, drag, other
-    /// modifiers) falls through to `super` unchanged, so command-drag
+    /// ⌥-click toggles a caret and ⌘-click invokes "go to definition" when an
+    /// action is wired. Marked-text composition and every other click (plain,
+    /// drag, other modifiers) fall through to `super`, so command-drag
     /// selection and ordinary editing are unaffected. Any click also dismisses
     /// a shown hover tooltip.
     override func mouseDown(with event: NSEvent) {
         dismissHover()
+        guard !hasMarkedText() else {
+            super.mouseDown(with: event)
+            return
+        }
+        if event.modifierFlags.contains(.option),
+            !event.modifierFlags.contains(.command)
+        {
+            let point = convert(event.locationInWindow, from: nil)
+            let index = characterIndexForInsertion(at: point)
+            let model = currentCaretModel.togglingCaret(
+                at: index,
+                textLength: (string as NSString).length
+            )
+            applyCaretRanges(model)
+            scrollRangeToVisible(NSRange(location: index, length: 0))
+            return
+        }
         guard event.modifierFlags.contains(.command), let navigateAction else {
             super.mouseDown(with: event)
             return
@@ -169,7 +219,345 @@ final class RafuTextView: NSTextView {
         // Any keystroke (including Escape) dismisses a shown tooltip before the
         // edit/command is processed.
         dismissHover()
+        if event.keyCode == 53, hasMultipleCarets, !hasMarkedText() {
+            collapseToPrimaryCaret()
+            return
+        }
         super.keyDown(with: event)
+    }
+
+    // MARK: - Multi-caret ownership
+
+    func applyCaretRanges(_ ranges: [NSRange], primaryIndex: Int = 0) {
+        let model = MultiCaretModel(
+            ranges: ranges,
+            primaryIndex: primaryIndex,
+            textLength: (string as NSString).length
+        )
+        applyCaretRanges(model)
+    }
+
+    func applyCaretRanges(_ model: MultiCaretModel) {
+        let normalized = model.normalized(textLength: (string as NSString).length)
+        caretRanges = normalized.ranges
+        primaryCaretIndex = normalized.primaryIndex
+        synchronizeNativeSelection()
+        setNeedsDisplay(visibleRect)
+    }
+
+    /// Called from the text-view delegate after an ordinary AppKit selection
+    /// change. Internal `setSelectedRanges` notifications are ignored; a real
+    /// click or drag collapses the authoritative set to the new native range.
+    func collapseCaretSetToNativeSelectionIfNeeded() {
+        guard hasMultipleCarets,
+            !isSynchronizingNativeSelection,
+            !isPerformingMultiCaretEdit
+        else { return }
+        caretRanges = [super.selectedRange()]
+        primaryCaretIndex = 0
+        updateMultiCaretOverlay()
+        setNeedsDisplay(visibleRect)
+    }
+
+    func refreshMultiCaretOverlay() {
+        guard hasMultipleCarets else { return }
+        updateMultiCaretOverlay()
+    }
+
+    func selectNextOccurrence() {
+        guard !hasMarkedText() else { return }
+        let previousRanges = currentCaretModel.ranges
+        let result = currentCaretModel.selectingNextOccurrence(in: string)
+        applyCaretRanges(result)
+        let newest = result.ranges.first { !previousRanges.contains($0) } ?? result.primaryRange
+        scrollRangeToVisible(newest)
+    }
+
+    func selectAllOccurrences() {
+        guard !hasMarkedText() else { return }
+        let result = currentCaretModel.selectingAllOccurrences(in: string)
+        applyCaretRanges(result)
+        scrollRangeToVisible(result.primaryRange)
+    }
+
+    func addCaret(direction: CaretDirection) {
+        guard !hasMarkedText() else { return }
+        let content = string as NSString
+        let model = currentCaretModel
+        let primaryLine = content.lineRange(
+            for: NSRange(location: model.primaryRange.location, length: 0)
+        )
+        let goalColumn = min(
+            model.primaryRange.location - primaryLine.location,
+            lineContentLength(primaryLine, in: content)
+        )
+        let anchor = direction == .above ? model.ranges[0] : model.ranges[model.ranges.count - 1]
+        let anchorLine = content.lineRange(
+            for: NSRange(location: anchor.location, length: 0)
+        )
+
+        let targetLine: NSRange
+        switch direction {
+        case .above:
+            guard anchorLine.location > 0 else { return }
+            targetLine = content.lineRange(
+                for: NSRange(location: anchorLine.location - 1, length: 0)
+            )
+        case .below:
+            let nextLineStart = NSMaxRange(anchorLine)
+            if nextLineStart < content.length {
+                targetLine = content.lineRange(
+                    for: NSRange(location: nextLineStart, length: 0)
+                )
+            } else if nextLineStart == content.length,
+                anchorLine.location < content.length,
+                lineContentLength(anchorLine, in: content) < anchorLine.length
+            {
+                targetLine = NSRange(location: content.length, length: 0)
+            } else {
+                return
+            }
+        }
+
+        let location = MultiCaretModel.caretLocation(
+            lineStartOffset: targetLine.location,
+            lineLength: lineContentLength(targetLine, in: content),
+            goalColumn: goalColumn
+        )
+        applyCaretRanges(model.addingCaret(at: location, textLength: content.length))
+        scrollRangeToVisible(NSRange(location: location, length: 0))
+    }
+
+    func collapseToPrimaryCaret() {
+        guard hasMultipleCarets, !hasMarkedText() else { return }
+        let collapsed = currentCaretModel.collapsedToPrimary(
+            textLength: (string as NSString).length
+        )
+        applyCaretRanges(collapsed)
+        scrollRangeToVisible(collapsed.primaryRange)
+    }
+
+    override func insertText(_ insertString: Any, replacementRange: NSRange) {
+        guard hasMultipleCarets, !hasMarkedText() else {
+            super.insertText(insertString, replacementRange: replacementRange)
+            return
+        }
+        let replacement: String
+        if let string = insertString as? String {
+            replacement = string
+        } else if let attributedString = insertString as? NSAttributedString {
+            replacement = attributedString.string
+        } else {
+            NSSound.beep()
+            return
+        }
+        performMultiCaretEdit(
+            currentCaretModel.applyingReplacement(
+                replacement,
+                at: (string as NSString).length
+            )
+        )
+    }
+
+    override func deleteBackward(_ sender: Any?) {
+        guard hasMultipleCarets, !hasMarkedText() else {
+            super.deleteBackward(sender)
+            return
+        }
+        performMultiCaretEdit(currentCaretModel.applyingDeletion(.backward, in: string))
+    }
+
+    override func deleteForward(_ sender: Any?) {
+        guard hasMultipleCarets, !hasMarkedText() else {
+            super.deleteForward(sender)
+            return
+        }
+        performMultiCaretEdit(currentCaretModel.applyingDeletion(.forward, in: string))
+    }
+
+    override func paste(_ sender: Any?) {
+        guard hasMultipleCarets, !hasMarkedText() else {
+            super.paste(sender)
+            return
+        }
+        guard let replacement = NSPasteboard.general.string(forType: .string) else {
+            NSSound.beep()
+            return
+        }
+        performMultiCaretEdit(
+            currentCaretModel.applyingReplacement(
+                replacement,
+                at: (string as NSString).length
+            )
+        )
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        guard hasMultipleCarets, !hasMarkedText() else { return }
+        multiCaretOverlay?.frame = bounds
+        updateMultiCaretOverlay()
+    }
+
+    private func synchronizeNativeSelection() {
+        isSynchronizingNativeSelection = true
+        defer { isSynchronizingNativeSelection = false }
+
+        let primary = caretRanges[primaryCaretIndex]
+        let requestedRanges: [NSRange]
+        if caretRanges.allSatisfy({ $0.length == 0 }) {
+            // Spike A: AppKit sorts and coalesces multiple empty ranges down
+            // to the earliest one. Supplying only the logical primary keeps
+            // the native blinking caret at the correct location.
+            requestedRanges = [primary]
+        } else {
+            // AppKit retains multiple non-empty selections. In a mixed set it
+            // drops empty ranges; the overlay discovers and draws those below.
+            requestedRanges = caretRanges
+        }
+        super.setSelectedRanges(
+            requestedRanges.map(NSValue.init(range:)),
+            affinity: .downstream,
+            stillSelecting: false
+        )
+        updateMultiCaretOverlay()
+    }
+
+    private func performMultiCaretEdit(_ result: MultiCaretEditResult) {
+        guard isEditable, let textStorage else { return }
+        let edits = result.edits.filter { $0.range.length > 0 || !$0.replacement.isEmpty }
+        guard !edits.isEmpty else {
+            applyCaretRanges(result.model)
+            return
+        }
+
+        let undoManager = undoManager
+        isPerformingMultiCaretEdit = true
+        undoManager?.beginUndoGrouping()
+
+        var appliedCount = 0
+        for edit in edits {
+            guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else {
+                break
+            }
+            textStorage.replaceCharacters(in: edit.range, with: edit.replacement)
+            didChangeText()
+            appliedCount += 1
+        }
+
+        if appliedCount > 0 {
+            // AppKit raises an invalid-group exception when a closed explicit
+            // undo group is named, so this must precede `endUndoGrouping()`.
+            undoManager?.setActionName("Multi-Cursor Edit")
+        }
+        undoManager?.endUndoGrouping()
+        isPerformingMultiCaretEdit = false
+
+        if appliedCount == edits.count {
+            applyCaretRanges(result.model)
+        } else {
+            // Rafu's delegate accepts every multi-caret sub-edit. If a future
+            // delegate rejects one after earlier reverse-order edits applied,
+            // do not install caret coordinates computed for the full batch.
+            collapseCaretSetToNativeSelectionIfNeeded()
+        }
+    }
+
+    private func updateMultiCaretOverlay() {
+        guard hasMultipleCarets else {
+            multiCaretOverlay?.removeFromSuperview()
+            multiCaretOverlay = nil
+            return
+        }
+
+        let retainedEmptyRanges = Set(
+            super.selectedRanges.map(\.rangeValue).filter { $0.length == 0 }
+        )
+        let overlayRanges = caretRanges.filter {
+            $0.length == 0 && !retainedEmptyRanges.contains($0)
+        }
+        let rects = overlayRanges.compactMap(caretRect(for:))
+        guard !rects.isEmpty else {
+            multiCaretOverlay?.removeFromSuperview()
+            multiCaretOverlay = nil
+            return
+        }
+
+        let overlay: MultiCaretOverlayView
+        if let multiCaretOverlay {
+            overlay = multiCaretOverlay
+        } else {
+            overlay = MultiCaretOverlayView(frame: bounds)
+            overlay.autoresizingMask = [.width, .height]
+            addSubview(overlay, positioned: .above, relativeTo: nil)
+            multiCaretOverlay = overlay
+        }
+        overlay.frame = bounds
+        overlay.update(
+            caretRects: rects,
+            color: insertionPointColor,
+            reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        )
+    }
+
+    private func caretRect(for range: NSRange) -> NSRect? {
+        guard range.length == 0, let layoutManager, let textContainer else { return nil }
+        layoutManager.ensureLayout(for: textContainer)
+        let contentLength = (string as NSString).length
+        let location = min(max(range.location, 0), contentLength)
+        let origin = textContainerOrigin
+        let lineHeight = layoutManager.defaultLineHeight(
+            for: font
+                ?? NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        )
+
+        var caretRect: NSRect
+        if location == contentLength,
+            layoutManager.extraLineFragmentTextContainer === textContainer,
+            layoutManager.extraLineFragmentRect.height > 0
+        {
+            caretRect = layoutManager.extraLineFragmentRect
+        } else if location < contentLength {
+            let glyphRange = layoutManager.glyphRange(
+                forCharacterRange: NSRange(location: location, length: 1),
+                actualCharacterRange: nil
+            )
+            caretRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+            caretRect.size.width = 1
+        } else if contentLength > 0 {
+            let glyphRange = layoutManager.glyphRange(
+                forCharacterRange: NSRange(location: contentLength - 1, length: 1),
+                actualCharacterRange: nil
+            )
+            let glyphRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+            caretRect = NSRect(
+                x: glyphRect.maxX, y: glyphRect.minY, width: 1, height: glyphRect.height)
+        } else {
+            caretRect = NSRect(
+                x: textContainer.lineFragmentPadding,
+                y: 0,
+                width: 1,
+                height: lineHeight
+            )
+        }
+        caretRect.origin.x += origin.x
+        caretRect.origin.y += origin.y
+        caretRect.size.width = max(1, caretRect.width)
+        caretRect.size.height = max(lineHeight, caretRect.height)
+        return caretRect
+    }
+
+    private func lineContentLength(_ lineRange: NSRange, in content: NSString) -> Int {
+        var end = NSMaxRange(lineRange)
+        while end > lineRange.location {
+            let character = content.character(at: end - 1)
+            guard
+                character == unichar(UInt8(ascii: "\n"))
+                    || character == unichar(UInt8(ascii: "\r"))
+            else { break }
+            end -= 1
+        }
+        return end - lineRange.location
     }
 
     /// Debounced hover resolve. Cancels the prior task, then — only when the
@@ -335,6 +723,7 @@ final class RafuTextView: NSTextView {
     private func drawCurrentLineHighlight(in rect: NSRect) {
         guard let currentLineHighlightColor,
             let layoutManager, let textContainer,
+            !hasMultipleCarets,
             selectedRange().length == 0
         else { return }
         let content = string as NSString
@@ -431,6 +820,7 @@ final class RafuTextView: NSTextView {
 
     private func drawBracketBorders() {
         guard let bracketBorderColor, let layoutManager, let textContainer,
+            !hasMultipleCarets,
             !matchedBracketRanges.isEmpty
         else { return }
         let length = (string as NSString).length

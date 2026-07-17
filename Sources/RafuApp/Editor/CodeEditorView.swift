@@ -89,6 +89,18 @@ struct CodeEditorView: NSViewRepresentable {
         document.toggleCommentAction = { [weak coordinator = context.coordinator] in
             coordinator?.toggleLineComment()
         }
+        document.selectNextOccurrenceAction = { [weak textView] in
+            textView?.selectNextOccurrence()
+        }
+        document.selectAllOccurrencesAction = { [weak textView] in
+            textView?.selectAllOccurrences()
+        }
+        document.addCaretAboveAction = { [weak textView] in
+            textView?.addCaret(direction: .above)
+        }
+        document.addCaretBelowAction = { [weak textView] in
+            textView?.addCaret(direction: .below)
+        }
         return scrollView
     }
 
@@ -106,6 +118,7 @@ struct CodeEditorView: NSViewRepresentable {
         textView.backgroundColor = NSColor(rafuHex: theme.editor.background)
         textView.textColor = NSColor(rafuHex: theme.editor.foreground)
         textView.insertionPointColor = NSColor(rafuHex: theme.editor.cursor)
+        textView.refreshMultiCaretOverlay()
         textView.navigateAction = navigate
         textView.hoverAction = hover
         textView.hoverTheme = theme
@@ -139,6 +152,10 @@ struct CodeEditorView: NSViewRepresentable {
         coordinator.document.textSnapshotProvider = nil
         coordinator.document.selectionProvider = nil
         coordinator.document.toggleCommentAction = nil
+        coordinator.document.selectNextOccurrenceAction = nil
+        coordinator.document.selectAllOccurrencesAction = nil
+        coordinator.document.addCaretAboveAction = nil
+        coordinator.document.addCaretBelowAction = nil
     }
 
     @MainActor
@@ -252,6 +269,13 @@ struct CodeEditorView: NSViewRepresentable {
         /// `dismantleNSView` before teardown.
         func captureViewState(from scrollView: NSScrollView) {
             guard let textView else { return }
+            if textView.hasMultipleCarets {
+                document.captureViewState(
+                    selection: textView.primaryCaretRange,
+                    scrollFraction: Self.scrollFraction(of: scrollView)
+                )
+                return
+            }
             document.captureViewState(
                 selection: textView.selectedRange(),
                 scrollFraction: Self.scrollFraction(of: scrollView)
@@ -497,6 +521,7 @@ struct CodeEditorView: NSViewRepresentable {
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard !isLoading else { return }
+            (notification.object as? RafuTextView)?.collapseCaretSetToNativeSelectionIfNeeded()
             refreshSelectionDecorations()
         }
 
@@ -505,6 +530,11 @@ struct CodeEditorView: NSViewRepresentable {
             shouldChangeTextIn affectedCharRange: NSRange,
             replacementString: String?
         ) -> Bool {
+            if let textView = textView as? RafuTextView,
+                textView.isPerformingMultiCaretEdit
+            {
+                return true
+            }
             // Auto-indent typed newlines only: a plain "\n" landing at the
             // caret with no marked text (IME) in play. Programmatic edits and
             // find-and-replace pass through untouched.
