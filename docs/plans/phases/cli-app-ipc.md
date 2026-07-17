@@ -238,3 +238,12 @@ unchanged.
   tolerance, unknown-kind sentinel decoding, and malformed JSON. Evidence:
   `swift build`; full `swift test` (525 tests); `./script/format.sh --fix` and
   `./script/format.sh --lint` all passed.
+- **I2 — complete (2026-07-17):** Replaced the server stub with a custom actor
+  that owns listener/connection fd lifecycle, safely distinguishes a live from
+  stale socket, authenticates peers before body reads, dispatches through a
+  MainActor handler seam, and logs only kind/outcome. Socketpair tests cover
+  UID ordering, malformed/oversized rejection, typed version/kind rejection,
+  and concurrent clients; a temporary real listener test covers `0700`/`0600`
+  permissions and live-socket ownership. Evidence: `swift build`; full `swift
+  test` (531 tests); `./script/format.sh --fix` and
+  `./script/format.sh --lint` all passed.
