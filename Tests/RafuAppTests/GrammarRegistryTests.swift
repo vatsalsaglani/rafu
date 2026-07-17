@@ -37,13 +37,17 @@ func grammarLanguageSatisfiesABIGate(id: GrammarLanguageID) async throws {
 /// vendored `highlights.scm` must resolve via `Bundle.module` AND compile
 /// against its language under `swift test` (the previously-broken host). A
 /// `nil` query here means the router would silently fall back to regex, so
-/// this is a HARD pass/fail. `markdownInline` is intentionally excluded — its
-/// inline-injection query lands in increment 9.
+/// this is a HARD pass/fail. `markdownInline` was excluded through increment
+/// 8a/9 (its inline-injection query had not landed yet); the symbol-coverage
+/// lane's increment D vendors `MarkdownInline/highlights.scm`, so it is
+/// included here too — this asserts it resolves and compiles as a normal
+/// `configuration(for:)` query, independent of the injection-bundle path
+/// exercised by `markdownInlineInjectionResolvesAndCompiles` below.
 @Test(
     "Vendored grammars load a compiled highlights query",
     arguments: [
         GrammarLanguageID.swift, .python, .javascript, .typescript, .tsx, .json, .yaml,
-        .toml, .bash, .markdown, .dockerfile,
+        .toml, .bash, .markdown, .dockerfile, .markdownInline,
     ])
 func vendoredGrammarLoadsCompiledHighlightsQuery(id: GrammarLanguageID) async throws {
     let registry = GrammarRegistry()
@@ -65,6 +69,38 @@ func grammarRegistryCachesConfiguration() async throws {
 
     #expect(first.name == second.name)
     #expect(first.language.tsLanguage == second.language.tsLanguage)
+}
+
+/// The hard pass/fail proof for the symbol-coverage lane's increment D: the
+/// `markdown_inline` injection bundle (inline `Language` + compiled inline
+/// `highlights.scm` + the `(inline) @injection.content` locator compiled
+/// against the block `markdown` grammar) resolves and both queries are
+/// well-formed. A `nil` bundle or an empty query here means
+/// `SyntaxParsingActor` would silently skip the inline pass, so this is a
+/// HARD pass/fail, matching the pattern of the other vendored-query proofs
+/// in this file.
+@Test("GrammarRegistry resolves the markdownInline injection bundle with compiled queries")
+func markdownInlineInjectionResolvesAndCompiles() async throws {
+    let registry = GrammarRegistry()
+    let injection = try #require(
+        await registry.markdownInlineInjection(),
+        "markdownInlineInjection() must resolve the vendored MarkdownInline/highlights.scm and compile the locator"
+    )
+
+    #expect(injection.inlineHighlights.patternCount > 0)
+    #expect(injection.locator.patternCount > 0)
+}
+
+/// A second `markdownInlineInjection()` call returns the cached bundle
+/// instead of rebuilding it.
+@Test("GrammarRegistry caches the markdownInline injection bundle after its first build")
+func grammarRegistryCachesMarkdownInlineInjection() async throws {
+    let registry = GrammarRegistry()
+    let first = try #require(await registry.markdownInlineInjection())
+    let second = try #require(await registry.markdownInlineInjection())
+
+    #expect(first.inlineHighlights.patternCount == second.inlineHighlights.patternCount)
+    #expect(first.locator.patternCount == second.locator.patternCount)
 }
 
 @Test("languageID(forExtension:fileName:) mirrors SyntaxHighlighter's extension groups")
@@ -121,16 +157,20 @@ func markdownInlineIsInjectionOnly() async throws {
 
 // MARK: - tags.scm (increment 9)
 
-/// The hard pass/fail proof for increment 9's `@` symbol extraction:
-/// Swift/Python/JavaScript/TypeScript/TSX each vendor a `tags.scm` that
-/// resolves via `Bundle.module` AND compiles against their OWN `Language` —
-/// TypeScript and TSX both come from the `tree-sitter-typescript` checkout's
-/// single shared `queries/tags.scm`, so this specifically proves the same
-/// combined query text compiles against two different grammars.
+/// The hard pass/fail proof for increment 9's `@` symbol extraction (Bash
+/// and Dockerfile added in the symbol-coverage lane's increment A; TOML and
+/// YAML added in increment B; Markdown added in increment C):
+/// Swift/Python/JavaScript/TypeScript/TSX/Bash/Dockerfile/TOML/YAML/Markdown
+/// each vendor a `tags.scm` that resolves via `Bundle.module` AND compiles
+/// against their OWN `Language` — TypeScript and TSX both come from the
+/// `tree-sitter-typescript` checkout's single shared `queries/tags.scm`, so
+/// this specifically proves the same combined query text compiles against
+/// two different grammars.
 @Test(
     "Grammars with a vendored tags.scm produce a compiled tags query",
     arguments: [
-        GrammarLanguageID.swift, .python, .javascript, .typescript, .tsx,
+        GrammarLanguageID.swift, .python, .javascript, .typescript, .tsx, .bash, .dockerfile,
+        .toml, .yaml, .markdown,
     ])
 func vendoredGrammarsLoadCompiledTagsQuery(id: GrammarLanguageID) async throws {
     let registry = GrammarRegistry()
@@ -146,8 +186,7 @@ func vendoredGrammarsLoadCompiledTagsQuery(id: GrammarLanguageID) async throws {
 @Test(
     "Grammars without a vendored tags.scm return nil",
     arguments: [
-        GrammarLanguageID.json, .yaml, .toml, .bash, .markdown, .dockerfile,
-        .markdownInline,
+        GrammarLanguageID.json, .markdownInline,
     ])
 func grammarsWithoutTagsScmReturnNil(id: GrammarLanguageID) async throws {
     let registry = GrammarRegistry()

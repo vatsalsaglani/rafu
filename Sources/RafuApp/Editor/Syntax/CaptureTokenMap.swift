@@ -109,5 +109,18 @@ nonisolated enum CaptureTokenMap {
         "markup.raw": "markup.code",
         "markup.quote": "markup.quote",
         "markup.list": "markup.list",
+
+        // markdown_inline's `highlights.scm` (lane symbol-coverage increment
+        // D) uses the older nvim `text.*` convention rather than `markup.*`.
+        // These rows map it onto the same theme keys as the block-level
+        // `markup.*` rows above, so the injected inline pass and the block
+        // pass agree on appearance.
+        "text.emphasis": "markup.italic",
+        "text.strong": "markup.bold",
+        "text.literal": "markup.code",
+        "text.title": "markup.heading",
+        "text.uri": "markup.link",
+        "text.reference": "markup.link",
+        "text.quote": "markup.quote",
     ]
 }

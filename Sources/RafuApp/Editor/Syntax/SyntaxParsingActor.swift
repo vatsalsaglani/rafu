@@ -49,6 +49,26 @@ actor SyntaxParsingActor {
 
     private let parser: Parser
     private let query: Query
+    /// Markdown-only inline-injection pass (symbol-coverage lane increment
+    /// D): `markdown_inline` parser/query + the locator that finds `(inline)`
+    /// node spans in the block tree. All three are set together or all left
+    /// `nil` — if the inline parser rejects `injection.inlineLanguage`, the
+    /// inline pass is disabled but the outer (block) actor still initializes
+    /// normally, so a `markdown_inline` regression never blanks Markdown
+    /// buffers entirely.
+    private let inlineParser: Parser?
+    private let inlineHighlights: Query?
+    private let locator: Query?
+    /// Secondary guard on top of Neon's visible-range look-ahead/behind
+    /// bounding: `tokens(inUTF16:)` is already called only for the visible
+    /// range plus a small margin, but a single call could still contain many
+    /// small `(inline)` spans (e.g. a long list of short lines) whose
+    /// substrings sum to more than expected. Capping total inline UTF-16
+    /// units re-parsed per call keeps one `tokens` call's inline work bounded
+    /// even in that shape, independent of how large the visible window is.
+    /// 4096 UTF-16 units is comfortably above one visible screen of Markdown
+    /// prose (a few dozen lines) while still bounding worst-case work.
+    private let maxInlineUTF16PerCall = 4_096
     /// Most recent parse tree. `nil` before the first parse or when the
     /// document exceeds `maxParseUTF16Length`.
     private var tree: MutableTree?
@@ -73,7 +93,18 @@ actor SyntaxParsingActor {
 
     /// Fails when the configuration has no `highlights` query (the router then
     /// keeps the regex highlighter) or the parser rejects the language.
-    init?(configuration: LanguageConfiguration, maxParseUTF16Length: Int = 2_000_000) {
+    ///
+    /// `injection` is the Markdown-only `markdown_inline` bundle
+    /// (`GrammarRegistry.markdownInlineInjection()`), defaulted to `nil` so
+    /// every non-Markdown call site is unaffected. A failure to build the
+    /// inline `Parser` disables only the inline pass — it never fails this
+    /// initializer, since the block-level (outer grammar) highlighting is
+    /// still fully usable without it.
+    init?(
+        configuration: LanguageConfiguration,
+        maxParseUTF16Length: Int = 2_000_000,
+        injection: MarkdownInlineInjection? = nil
+    ) {
         guard let query = configuration.queries[.highlights] else { return nil }
         let parser = Parser()
         do {
@@ -84,6 +115,23 @@ actor SyntaxParsingActor {
         self.parser = parser
         self.query = query
         self.maxParseUTF16Length = maxParseUTF16Length
+
+        if let injection {
+            let inlineParser = Parser()
+            if (try? inlineParser.setLanguage(injection.inlineLanguage)) != nil {
+                self.inlineParser = inlineParser
+                self.inlineHighlights = injection.inlineHighlights
+                self.locator = injection.locator
+            } else {
+                self.inlineParser = nil
+                self.inlineHighlights = nil
+                self.locator = nil
+            }
+        } else {
+            self.inlineParser = nil
+            self.inlineHighlights = nil
+            self.locator = nil
+        }
     }
 
     /// Full reparse of `text` at `version` — the baseline used at grammar
@@ -192,7 +240,56 @@ actor SyntaxParsingActor {
             spans.append(SyntaxSpan(themeKey: key, range: namedRange.range))
         }
 
+        spans.append(contentsOf: inlineTokens(inUTF16: range, tree: tree))
+
         signposter.endInterval("query", state, "spans=\(spans.count)")
+        return spans
+    }
+
+    /// Markdown-only inline-injection pass (symbol-coverage lane increment
+    /// D): locates every `(inline)` node intersecting `range` in the block
+    /// tree, substring-parses each one with the `markdown_inline` grammar,
+    /// and remaps its highlight spans onto the outer document's absolute
+    /// UTF-16 offsets. No persistent inline tree — each call is a bounded,
+    /// synchronous, actor-confined reparse of the small substrings Neon's
+    /// visible-range window hands to `tokens(inUTF16:)`; the deferred
+    /// alternative — a persistent injection tree via tree-sitter's
+    /// `includedRanges` — is the fallback design if profiling ever demands
+    /// it (see `docs/plans/phases/symbol-coverage-and-markdown-inline.md`
+    /// increment D; the "Verified baseline" reference notes are updated
+    /// separately). Returns `[]` when the inline bundle is unavailable (not
+    /// Markdown, or the inline parser failed to build).
+    private func inlineTokens(inUTF16 range: NSRange, tree: MutableTree) -> [SyntaxSpan] {
+        guard let inlineParser, let inlineHighlights, let locator else { return [] }
+
+        let locatorCursor = locator.execute(in: tree)
+        locatorCursor.setRange(range)
+
+        var spans: [SyntaxSpan] = []
+        var consumedUTF16 = 0
+        matches: for match in locatorCursor {
+            for capture in match.captures {
+                let nodeRange = capture.node.range
+                guard nodeRange.length > 0 else { continue }
+
+                consumedUTF16 += nodeRange.length
+                guard consumedUTF16 <= maxInlineUTF16PerCall else { break matches }
+
+                let substring = (text as NSString).substring(with: nodeRange)
+                guard let inlineTree = inlineParser.parse(substring) else { continue }
+
+                let inlineCursor = inlineHighlights.execute(in: inlineTree)
+                for named in inlineCursor.highlights() {
+                    guard let key = CaptureTokenMap.themeKey(forCapture: named.name) else {
+                        continue
+                    }
+                    let absoluteRange = NSRange(
+                        location: nodeRange.location + named.range.location,
+                        length: named.range.length)
+                    spans.append(SyntaxSpan(themeKey: key, range: absoluteRange))
+                }
+            }
+        }
         return spans
     }
 

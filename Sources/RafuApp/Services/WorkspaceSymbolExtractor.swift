@@ -32,11 +32,22 @@ nonisolated enum WorkspaceSymbolExtractor {
     /// Per-file symbol cap, mirroring `BufferSymbolScanner.symbolLimit`.
     static let perFileLimit = 2_000
 
-    /// The only packaged grammars with a vendored `tags.scm` (increment 9):
+    /// The only packaged grammars with a vendored `tags.scm` (increment 9;
+    /// Bash and Dockerfile added in the symbol-coverage lane's increment A;
+    /// TOML and YAML added in increment B; Markdown added in increment C):
     /// every other extension is skipped by a cheap lookup so indexing a
     /// 100k-file monorepo never reads or parses files it has no query for.
     static let grammarsWithTags: Set<GrammarLanguageID> = [
-        .swift, .python, .javascript, .typescript, .tsx,
+        .swift, .python, .javascript, .typescript, .tsx, .bash, .dockerfile,
+        .toml, .yaml, .markdown,
+    ]
+
+    /// Kinds answerable by go-to-definition/declaration. `section` (Markdown
+    /// headings) is deliberately excluded so headings surface only in `#`
+    /// search, never as a ⌃⌘J answer. Config keys share code kinds
+    /// (property/class/constant) and remain navigable by design.
+    static let navigableKinds: Set<String> = [
+        "function", "method", "class", "interface", "property", "constant", "module",
     ]
 
     /// Maps a workspace-relative path to a packaged grammar that has a

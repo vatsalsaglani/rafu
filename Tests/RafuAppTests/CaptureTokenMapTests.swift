@@ -52,6 +52,13 @@ struct CaptureTokenMapTests {
         ("markup.raw", "markup.code"),
         ("markup.quote", "markup.quote"),
         ("markup.list", "markup.list"),
+        ("text.emphasis", "markup.italic"),
+        ("text.strong", "markup.bold"),
+        ("text.literal", "markup.code"),
+        ("text.title", "markup.heading"),
+        ("text.uri", "markup.link"),
+        ("text.reference", "markup.link"),
+        ("text.quote", "markup.quote"),
     ]
 
     @Test("Every §7.3 capture maps to its documented theme token", arguments: planRows)
@@ -103,6 +110,10 @@ struct CaptureTokenMapTests {
     func unknownCaptureReturnsNil() {
         #expect(CaptureTokenMap.themeKey(forCapture: "spell") == nil)
         #expect(CaptureTokenMap.themeKey(forCapture: "embedded") == nil)
-        #expect(CaptureTokenMap.themeKey(forCapture: "text.title.deep") == nil)
+        // Not "text.title.deep": `text.title` is now mapped (markdown_inline's
+        // `@text.title` row), so a deeper unmapped variant would resolve via
+        // the hierarchical fallback instead of staying nil. `text.diff` has no
+        // mapped prefix at any depth (`text.diff` nor bare `text`).
+        #expect(CaptureTokenMap.themeKey(forCapture: "text.diff") == nil)
     }
 }

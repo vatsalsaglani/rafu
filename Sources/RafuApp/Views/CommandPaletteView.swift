@@ -447,10 +447,15 @@ struct CommandPaletteView: View {
     /// packaged grammar with a vendored `tags.scm` and one-shot parsing
     /// succeeds; `nil` from `scanUsingGrammar` (no grammar, no `tags.scm`,
     /// parser rejection) falls back to the regex `BufferSymbolScanner` —
-    /// e.g. Markdown headings, and any language without a packaged grammar.
+    /// e.g. any language without a packaged grammar. Markdown is routed to
+    /// the regex path unconditionally (symbol-coverage lane increment C):
+    /// its `tags.scm` captures headings as a flat `section` kind for the
+    /// workspace symbol index, while `@`-mode display wants the regex
+    /// scanner's `.heading(level:)` so palette rows keep showing H1–H6.
     @concurrent
     private static func scanSymbols(text: String, fileExtension: String) async -> [BufferSymbol] {
         if let grammarID = GrammarLanguageID.languageID(forExtension: fileExtension, fileName: ""),
+            grammarID != .markdown,
             let symbols = await BufferSymbolScanner.scanUsingGrammar(
                 text: text, grammarID: grammarID)
         {
