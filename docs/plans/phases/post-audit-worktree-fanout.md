@@ -2,6 +2,25 @@
 
 ## Status
 
+**MERGED (2026-07-18).** All six lanes are integrated on `main`. Execution
+record: contract commits G0+I0 landed as `f434184`; merges proceeded by
+completion order (which this plan allows to override the default pairing) —
+Round 1: `lane/lsp-readiness` (`ca017c6`) + `lane/multi-cursor` (`8f06450`);
+Round 2: `lane/mermaid-honesty` (`9826a76`) + `lane/symbol-coverage`
+(`a0b442a`); Round 3: `lane/git-depth` (`b9ae26c`) + `lane/cli-ipc`
+(`21dc06c`). Every merge auto-merged with zero conflicts (shared-file hunks
+were disjoint as designed); gates after each merge: clean `swift build`,
+full suite green (515 → 667 tests), `format.sh --lint` clean;
+`build_and_run.sh --verify` green per round. All six lanes passed
+independent read-only pre-merge review against their plan documents. A
+post-merge integration fix pass addressed review findings (stale G0 stub
+comments, stash/hunk busy-flag gating, IPC server read-timeout +
+connection cap, doc path corrections). ADRs 0008–0011 are indexed as
+Proposed pending the user's acceptance flip. Manual GUI validation items
+remain owed per the lane rows in [`README.md`](README.md).
+
+Original coordination contract follows.
+
 Planned (2026-07-17). This is the coordination contract for the six lanes
 identified by the 2026-07-17 project-status audit. It owns: fan-out
 prerequisites, contract-first commits, lane ownership boundaries, ADR

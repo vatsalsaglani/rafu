@@ -120,11 +120,11 @@ Downloadable curated catalog entries each pin a locally-computed SHA-256 checksu
   (`NodeDependencyResolving` protocol + `NpmDependencyResolver`),
   `Sources/RafuApp/LanguageIntelligence/Registry/NodeRuntimeManager.swift`
   (`ensureInstalled` → unpack → validate),
-  `Sources/RafuApp/LanguageIntelligence/Catalog/CuratedCatalog.swift`
+  `Sources/RafuApp/LanguageIntelligence/Registry/CuratedCatalog.swift`
   (five pinned SHA-256 checksums + marksman tag/license corrections),
   `Sources/RafuApp/LanguageIntelligence/Catalog/LanguageServersCatalogModel.swift`
   (`message(for:)`, `performInstall`, `performInstallPack`, `makeDescriptor`),
-  `Sources/RafuApp/LanguageIntelligence/UI/ServerInstallConsentView.swift`
+  `Sources/RafuApp/LanguageIntelligence/Catalog/ServerInstallConsentView.swift`
   (npm install disclosure)
 - **Tests**: `Tests/RafuAppTests/ServerInstallerTests.swift` (npm integration, staging rollback),
   `Tests/RafuAppTests/CuratedCatalogTests.swift` (`downloadableEntriesPinChecksums` test),

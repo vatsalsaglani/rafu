@@ -290,8 +290,8 @@ Gate: layout tests green ✓.
 - `swift test` — 535 tests pass (M3 layout + parser tests cover geometry;
   Canvas is not pixel-testable; pixel snapshots forbidden per policy).
 - `./script/format.sh --lint` — clean.
-- Diff limited to `MermaidDiagramView.swift` (new), `MarkdownPreviewView.swift`
-  (extraction only), and `MarkdownPreviewSegmentParser.swift` (routing update).
+- Diff limited to `MermaidDiagramView.swift` (new) and `MarkdownPreviewView.swift`
+  (extraction, plus the in-file `MarkdownPreviewSegmentParser` routing update).
 - `./script/build_and_run.sh --verify` — **deferred** to consolidated M6/M7
   GUI pass per coordinator direction (other lanes share staged app). Manual
   gate checks (directional flowchart with subgraphs + edge labels renders as
@@ -421,7 +421,7 @@ subgraph ownership, actor naming) can refer to it.
 - `./script/format.sh --lint` — clean.
 - `./script/build_and_run.sh --verify` — process-level pass succeeded twice
   (implementor + coordinator): `.app` staged, Rafu process launched, exit 0.
-- Diff limited to three owned files (`MarkdownLayout.swift`, `MarkdownDiagramView.swift`,
+- Diff limited to three owned files (`MermaidLayout.swift`, `MermaidDiagramView.swift`,
   `MermaidLayoutTests.swift`).
 - **Deep visual inspection (directional flowchart with subgraphs/edge labels;
   sequence with alt/loop/activations showing lifelines/frames/bars; actor glyph;
@@ -509,12 +509,11 @@ Gate: documentation complete and internally consistent ✓.
 - `Sources/RafuApp/Markdown/MarkdownModels.swift` (MermaidParseResult enum,
   MermaidFlow/MermaidSequence models, parser implementations)
 - `Sources/RafuApp/Markdown/MarkdownPreviewView.swift` (routing for result
-  cases, badge rendering)
+  cases, badge rendering; also owns the in-file `MarkdownPreviewSegmentParser`
+  segmentation routing)
 - `Sources/RafuApp/Markdown/MermaidDiagramView.swift` (new file: Canvas
   renderers for flow and sequence)
 - `Sources/RafuApp/Markdown/MermaidLayout.swift` (new file: pure layout engine)
-- `Sources/RafuApp/Markdown/MarkdownPreviewSegmentParser.swift` (segmentation
-  routing)
 - `Tests/RafuAppTests/MarkdownParserTests.swift` (updated for new result shape)
 - `Tests/RafuAppTests/MermaidParserTests.swift` (new file: M1–M5 parser fixtures)
 - `Tests/RafuAppTests/MermaidLayoutTests.swift` (new file: M3–M6 layout

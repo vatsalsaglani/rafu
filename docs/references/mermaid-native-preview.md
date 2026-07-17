@@ -1,7 +1,8 @@
 # Mermaid native preview — honest detection and fallback
 
 - **Applies to:** Mermaid diagram parsing, classification, and rendering in
-  `MarkdownModels.swift`, `MarkdownPreviewView.swift`, and `MarkdownPreviewSegmentParser`
+  `MarkdownModels.swift` and `MarkdownPreviewView.swift` (which also owns the
+  in-file `MarkdownPreviewSegmentParser`)
 - **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-17
 
 ## Rule or observed behavior
@@ -174,8 +175,8 @@ swift test                     # 510 tests pass (all existing + new fixtures)
     `parseMermaid`, `firstHeaderLine` helper, `parseFlow`/`parseSequence`
     (bodies unchanged in M1)
   - `Sources/RafuApp/Markdown/MarkdownPreviewView.swift` — routing for result cases,
-    `MermaidUnsupportedView`, badge rendering
-  - `Sources/RafuApp/Markdown/MarkdownPreviewSegmentParser.swift` — segment parsing
+    `MermaidUnsupportedView`, badge rendering, and the in-file
+    `MarkdownPreviewSegmentParser` segment parsing
 
 - **Tests:**
   - `Tests/RafuAppTests/MermaidParserTests.swift` — classifier and fallback fixtures

@@ -1507,10 +1507,10 @@ final class WorkspaceSession {
         }
     }
 
-    // MARK: - Hunk staging (stub — filled in by the git-depth lane's G1 increment)
+    // MARK: - Hunk staging
 
     /// Stages one hunk of the currently open working-tree diff via
-    /// `git apply --cached`. No-op until G1 lands `GitHunkPatchBuilder`.
+    /// `git apply --cached`, using `GitHunkPatchBuilder` to build the patch.
     func stageHunk(_ hunk: GitDiffHunk) async {
         guard let rootURL,
             let openDiff = gitOpenDiff,
@@ -1550,8 +1550,8 @@ final class WorkspaceSession {
     }
 
     /// Unstages one hunk of the currently open staged diff via
-    /// `git apply --cached --reverse`. No-op until G1 lands
-    /// `GitHunkPatchBuilder`.
+    /// `git apply --cached --reverse`, using `GitHunkPatchBuilder` to build
+    /// the reverse patch.
     func unstageHunk(_ hunk: GitDiffHunk) async {
         guard let rootURL,
             let openDiff = gitOpenDiff,
@@ -1590,11 +1590,11 @@ final class WorkspaceSession {
         }
     }
 
-    // MARK: - Stash (stub — requires explicit user approval before G2 starts)
+    // MARK: - Stash
 
-    /// Pushes a new stash entry. No-op until G2 is approved and implemented.
+    /// Pushes a new stash entry via `git stash push`.
     func stashChanges(message: String, includeUntracked: Bool) async {
-        guard let rootURL, !isGitBusy else { return }
+        guard let rootURL, !isGitBusy, !isGitHunkActionBusy else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -1616,9 +1616,9 @@ final class WorkspaceSession {
         }
     }
 
-    /// Applies a stash entry without removing it. No-op until G2.
+    /// Applies a stash entry without removing it.
     func applyStash(_ entry: GitStashEntry) async {
-        guard let rootURL, !isGitBusy else { return }
+        guard let rootURL, !isGitBusy, !isGitHunkActionBusy else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -1648,9 +1648,9 @@ final class WorkspaceSession {
         }
     }
 
-    /// Applies a stash entry and removes it. No-op until G2.
+    /// Applies a stash entry and removes it.
     func popStash(_ entry: GitStashEntry) async {
-        guard let rootURL, !isGitBusy else { return }
+        guard let rootURL, !isGitBusy, !isGitHunkActionBusy else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -1680,9 +1680,9 @@ final class WorkspaceSession {
         }
     }
 
-    /// Discards a stash entry. No-op until G2.
+    /// Discards a stash entry.
     func dropStash(_ entry: GitStashEntry) async {
-        guard let rootURL, !isGitBusy else { return }
+        guard let rootURL, !isGitBusy, !isGitHunkActionBusy else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -1705,10 +1705,10 @@ final class WorkspaceSession {
         }
     }
 
-    // MARK: - Blame (stub — filled in by the git-depth lane's G3 increment)
+    // MARK: - Blame
 
-    /// Opens a read-only blame canvas for the selected file. No-op until G3
-    /// lands `GitBlameParser`.
+    /// Opens a read-only blame canvas for the selected file, parsing
+    /// `git blame` porcelain output via `GitBlameParser`.
     func openBlameForSelectedFile() async {
         guard let rootURL,
             let document = selectedDocument,

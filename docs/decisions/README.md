@@ -17,6 +17,10 @@ Accepted ADRs take precedence over older plan suggestions when they explicitly s
 | [0005](0005-language-intelligence-and-lsp.md) | Accepted | Tree-sitter as the real syntax engine plus an opt-in, memory-bounded LSP client with a transparent, user-controlled server registry |
 | [0006](0006-editor-working-set-hibernation.md) | Accepted | Bounded editor working set: keep visible/dirty/newest-8 tabs mounted, hibernate the rest, with a transient dirty-text snapshot for structural remounts |
 | [0007](0007-cli-app-location-symlink.md) | Accepted | Install the `rafu` CLI as an in-bundle symlink and locate `Rafu.app` from the real executable path (`_NSGetExecutablePath`), not `argv[0]` |
+| [0008](0008-mermaid-native-preview.md) | Proposed | Bounded native Mermaid renderer with honest fallback: supported subset is flowchart + sequenceDiagram, everything else falls back to a labeled code block + notice; shared-WKWebView option deferred |
+| [0009](0009-local-cli-app-ipc.md) | Proposed | Versioned same-user Unix-domain socket for local `rafu` CLI ↔ app IPC (bounded JSON framing, peer-UID auth, `open -a` as app starter only, `--wait` deferred to v2) |
+| [0010](0010-npm-supply-chain-and-checksum-policy.md) | Proposed | Accept unpinned transitive npm fetch for nodeHosted servers with mandatory `--ignore-scripts`/`--omit=dev` and explicit consent disclosure; pin locally-verified SHA-256 (trust-on-first-download) per catalog entry |
+| [0011](0011-advanced-git-hunks-stash-blame.md) | Proposed | Add explicit whole-hunk staging (verbatim rawPatch slicing via `git apply --cached`), explicit stash with drift guards, and read-only bounded blame |
 
 Unresolved choices are tracked in [`open-decisions.md`](open-decisions.md).
 

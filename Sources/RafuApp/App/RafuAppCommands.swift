@@ -110,7 +110,9 @@ struct RafuAppCommands: Commands {
                 Task { await session.stashChanges(message: "", includeUntracked: false) }
             }
             .disabled(
-                workspaceSession.map { !hasTrackedChanges(in: $0) || $0.isGitBusy } ?? true
+                workspaceSession.map {
+                    !hasTrackedChanges(in: $0) || $0.isGitBusy || $0.isGitHunkActionBusy
+                } ?? true
             )
 
             Button("Blame File") {

@@ -15,16 +15,12 @@ out. `./script/build_and_run.sh --verify` passed (exit 0): the staged
 `Bundle.module` resolves them. **Owed:** a human-eyeball confirmation of
 on-screen Markdown inline coloring (the `--verify` gate proves launch, not
 rendering) and p95 Markdown-typing latency evidence (measurement-time,
-same class as 8b). Not committed — awaiting the user.
+same class as 8b). Merged into `main` on 2026-07-18 (`a0b442a`).
 
-Planned (2026-07-17). One of six post-audit lanes defined in
-[`post-audit-worktree-fanout.md`](post-audit-worktree-fanout.md). Runs in a
-**dedicated git worktree**. Extends lane-1 increments 9–10: grammar-backed
-symbols currently cover 5 of 11 grammars; YAML/TOML/JSON/Bash/Dockerfile/
-Markdown fall to the text tier, and the packaged `markdown_inline` grammar
-is unwired. Each increment is one advisor → implementor → verification →
-documentor cycle. File:line anchors reflect the tree on 2026-07-17; the
-repository wins when they disagree.
+One of six post-audit lanes defined in
+[`post-audit-worktree-fanout.md`](post-audit-worktree-fanout.md); ran in a
+dedicated git worktree. File:line anchors below reflect the tree on
+2026-07-17; the repository wins when they disagree.
 
 ## Verified baseline
 

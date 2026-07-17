@@ -585,7 +585,8 @@ struct CommandPaletteView: View {
         }
 
         if session.gitSnapshot?.changes.contains(where: { $0.kind != .untracked }) == true,
-            !session.isGitBusy
+            !session.isGitBusy,
+            !session.isGitHunkActionBusy
         {
             commands.append(
                 .init(

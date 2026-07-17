@@ -37,13 +37,13 @@ Bootstrap itself did **not** claim TextKit editing, Tree-sitter, SSH, launcher I
 | [Phase 6](phase-6-controlled-expansion.md) | Deferred | Phase 5 plus explicit approval | Only approved bounded additions |
 | [Memory resilience](memory-resilience.md) | Lane 1 COMPLETE (2026-07-15); Stage C at lane-2 merge | Initial push; interleaves with feature phases | Budgets hold under abuse, with recorded Release evidence |
 | [Language intelligence](language-intelligence.md) | Lane 1 COMPLETE (2026-07-15); Stage C at lane-2 merge | Initial push; ADR 0005; Resources surface for Stage C | Ladder navigation (Tree-sitter → symbols → opt-in LSP) shipped in bounded stages |
-| [Post-audit fan-out](post-audit-worktree-fanout.md) | Planned (2026-07-17) | Clean working tree; contract commits G0 + I0 | Six lanes merged in three pairwise integration rounds |
-| ├ [LSP production readiness](lsp-production-readiness.md) | Planned | Fan-out prerequisites | npm-resolved TS server, verified catalog, live gopls/rust-analyzer round-trip, sourcekit-lsp references |
-| ├ [Symbol coverage + markdownInline](symbol-coverage-and-markdown-inline.md) | Planned | Fan-out prerequisites | tags.scm × 5 new grammars; inline Markdown highlighting |
-| ├ [Mermaid preview honesty](mermaid-preview-honesty.md) | Planned | Fan-out prerequisites; ADR 0008 | Honest fallback + real flow/sequence native rendering |
-| ├ [Multi-cursor editing](multi-cursor-editing.md) | Planned | Fan-out prerequisites | Bounded multi-caret v1 (⌥-click, ⌘D, ⌘⇧L, carets above/below) |
-| ├ [Git depth](git-depth-blame-stash-hunks.md) | Planned | G0 contract commit; stash needs user approval; ADR 0011 | Hunk staging, stash, blame — explicit and bounded |
-| └ [CLI ↔ app IPC v1](cli-app-ipc.md) | Planned | I0 contract commit; ADR 0009 | Socket protocol, routing, `--goto`, `--new-window`; `--wait` deferred |
+| [Post-audit fan-out](post-audit-worktree-fanout.md) | MERGED (2026-07-18): all six lanes on `main`, three integration rounds green | Clean working tree; contract commits G0 + I0 | Six lanes merged in three pairwise integration rounds |
+| ├ [LSP production readiness](lsp-production-readiness.md) | Merged (2026-07-18); P5 live server round-trip still owed manually | Fan-out prerequisites | npm-resolved TS server, verified catalog, live gopls/rust-analyzer round-trip, sourcekit-lsp references |
+| ├ [Symbol coverage + markdownInline](symbol-coverage-and-markdown-inline.md) | Merged (2026-07-18); on-screen render eyeball owed | Fan-out prerequisites | tags.scm × 5 new grammars; inline Markdown highlighting |
+| ├ [Mermaid preview honesty](mermaid-preview-honesty.md) | Merged (2026-07-18); deep visual GUI pass owed; ADR 0008 Proposed | Fan-out prerequisites; ADR 0008 | Honest fallback + real flow/sequence native rendering |
+| ├ [Multi-cursor editing](multi-cursor-editing.md) | Merged (2026-07-18); interactive gesture checklist owed | Fan-out prerequisites | Bounded multi-caret v1 (⌥-click, ⌘D, ⌘⇧L, carets above/below) |
+| ├ [Git depth](git-depth-blame-stash-hunks.md) | Merged (2026-07-18); manual stage/stash/blame UI pass owed; ADR 0011 Proposed | G0 contract commit; stash approved by user; ADR 0011 | Hunk staging, stash, blame — explicit and bounded |
+| └ [CLI ↔ app IPC v1](cli-app-ipc.md) | Merged (2026-07-18); nine-item manual checklist owed; ADR 0009 Proposed | I0 contract commit; ADR 0009 | Socket protocol, routing, `--goto`, `--new-window`; `--wait` deferred |
 
 Memory resilience and language intelligence execute as the two-lane worktree
 split defined in `language-intelligence.md`: lane 1

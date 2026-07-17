@@ -29,9 +29,21 @@ actor LauncherIPCServer {
         let task: Task<Void, Never>
     }
 
+    /// Default per-connection `SO_RCVTIMEO`/`SO_SNDTIMEO` bound. A same-user
+    /// peer that connects and never finishes sending its header (accidental
+    /// or malicious) would otherwise block its detached read task — and hold
+    /// its fd — forever.
+    static let defaultConnectionTimeout: TimeInterval = 5
+    /// Default cap on simultaneously live accepted connections, so a burst of
+    /// slow/stalled peers can never grow `connections` and its detached tasks
+    /// without bound.
+    static let defaultMaxConnections = 8
+
     private let socketURL: URL
     private let peerUID: PeerUIDProvider
     private let handler: RequestHandler
+    private let connectionTimeout: TimeInterval
+    private let maxConnections: Int
     private var listenerFileDescriptor: Int32?
     private var ownsSocketPath = false
     private var acceptTask: Task<Void, Never>?
@@ -40,11 +52,15 @@ actor LauncherIPCServer {
     init(
         socketURL: URL = LauncherIPCSocketPath.resolve(),
         peerUID: @escaping PeerUIDProvider = LauncherIPCServer.systemPeerUID,
-        handler: @escaping RequestHandler = LauncherIPCServer.defaultHandler
+        handler: @escaping RequestHandler = LauncherIPCServer.defaultHandler,
+        connectionTimeout: TimeInterval = LauncherIPCServer.defaultConnectionTimeout,
+        maxConnections: Int = LauncherIPCServer.defaultMaxConnections
     ) {
         self.socketURL = socketURL
         self.peerUID = peerUID
         self.handler = handler
+        self.connectionTimeout = connectionTimeout
+        self.maxConnections = maxConnections
     }
 
     /// Lifecycle-compatible fire-and-forget wrapper used by the frozen app
@@ -153,7 +169,11 @@ actor LauncherIPCServer {
 
     /// Headless socketpair seam. Ownership of `fileDescriptor` transfers to
     /// this method and it is closed exactly once after the response attempt.
+    /// Applies the same connection socket options (read/write timeout,
+    /// `SO_NOSIGPIPE`) as a real accepted connection so that behavior is
+    /// exercisable from this seam.
     func serveConnectionForTesting(_ fileDescriptor: Int32) async {
+        Self.configureConnection(timeout: connectionTimeout, fileDescriptor: fileDescriptor)
         await Self.processConnection(
             fileDescriptor,
             expectedUID: getuid(),
@@ -162,6 +182,11 @@ actor LauncherIPCServer {
         )
         Darwin.close(fileDescriptor)
     }
+
+    /// Test-only introspection into the live accepted-connection count, used
+    /// to deterministically await the connection-cap boundary instead of a
+    /// fixed sleep.
+    var liveConnectionCountForTesting: Int { connections.count }
 
     private nonisolated func runAcceptLoop(listener: Int32) async {
         while !Task.isCancelled {
@@ -183,6 +208,12 @@ actor LauncherIPCServer {
             Darwin.close(fileDescriptor)
             return
         }
+        guard connections.count < maxConnections else {
+            Self.logger.info("Connection rejected: live connection cap reached")
+            Darwin.close(fileDescriptor)
+            return
+        }
+        Self.configureConnection(timeout: connectionTimeout, fileDescriptor: fileDescriptor)
         let id = UUID()
         let expectedUID = getuid()
         let peerUID = peerUID
@@ -358,6 +389,51 @@ actor LauncherIPCServer {
             return
         }
         _ = Darwin.unlink(socketURL.path)
+    }
+
+    /// Bounds a same-user peer's ability to hold a connection (and its
+    /// detached read/write task) open indefinitely by sending a partial
+    /// header and nothing else. A timed-out `read`/`write` returns -1 with
+    /// `EAGAIN`/`EWOULDBLOCK`, which `readEnvelope`/`writeResponse` already
+    /// surface as a `systemCallError` — handled by `processConnection`'s
+    /// existing malformed-request path, so no retry loop or crash follows.
+    ///
+    /// Also sets `SO_NOSIGPIPE`, mirroring `LauncherIPCClient`'s outgoing
+    /// connection: without it, a `write` after the peer has already gone away
+    /// (e.g. the peer closed early, or this same connection's own `shutdown`
+    /// during `stopListening()`) raises `SIGPIPE`, whose default disposition
+    /// terminates the whole process — turning one malformed connection into
+    /// an app crash instead of a rejected request.
+    ///
+    /// A `setsockopt` failure here is logged and otherwise ignored: it leaves
+    /// the connection unbounded/unprotected rather than dropping the peer,
+    /// which is the safer failure direction for this best-effort hardening.
+    private nonisolated static func configureConnection(
+        timeout seconds: TimeInterval, fileDescriptor: Int32
+    ) {
+        var one: Int32 = 1
+        let noSigPipeResult = Darwin.setsockopt(
+            fileDescriptor, SOL_SOCKET, SO_NOSIGPIPE, &one,
+            socklen_t(MemoryLayout.size(ofValue: one)))
+
+        // Whole-second truncation would silently disable the timeout for a
+        // sub-second value: `timeval(tv_sec: 0, tv_usec: 0)` means "block
+        // forever" to the kernel, not "no wait" — so this always carries a
+        // fractional remainder into `tv_usec`.
+        let totalMicroseconds = max(0, Int(seconds * 1_000_000))
+        var timeout = timeval(
+            tv_sec: totalMicroseconds / 1_000_000,
+            tv_usec: Int32(totalMicroseconds % 1_000_000)
+        )
+        let length = socklen_t(MemoryLayout.size(ofValue: timeout))
+        let receiveResult = Darwin.setsockopt(
+            fileDescriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, length)
+        let sendResult = Darwin.setsockopt(
+            fileDescriptor, SOL_SOCKET, SO_SNDTIMEO, &timeout, length)
+        guard noSigPipeResult == 0, receiveResult == 0, sendResult == 0 else {
+            logger.error("Failed to configure accepted connection socket options")
+            return
+        }
     }
 
     private nonisolated static func systemPeerUID(_ fileDescriptor: Int32) throws -> uid_t {

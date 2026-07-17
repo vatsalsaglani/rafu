@@ -412,12 +412,29 @@ func fastCrashesEscalateToManualRestart() async {
     )
     await manager.activate(rootURI: "file:///workspace")
 
+    // Each iteration below drives a real spawn → terminate → cross-actor
+    // status-push round trip (`LanguageServerManager`'s supervision task
+    // resuming on the process-death continuation, hopping actors through
+    // `handleTermination` → `recordCrash` → `pushStatus`'s own
+    // fire-and-forget `Task`, then a `@MainActor` hop into `collector`).
+    // Measured directly under this file's full-suite parallel run, a single
+    // one of these round trips can take from single-digit milliseconds up
+    // to several hundred milliseconds under ordinary cooperative-thread-pool
+    // contention — with four crashes chained in one test, `waitUntil`'s
+    // 2-second default is not always enough headroom under heavier load,
+    // which is what previously made this specific test intermittently show
+    // "Expectation failed" with no actual product defect (the manager's own
+    // state was always correct; only this test's `#expect` outraced its
+    // async signal). `crashRoundTripTimeout` gives every poll in this test
+    // real headroom instead.
+    let crashRoundTripTimeout = Duration.seconds(5)
+
     for _ in 0..<3 {
         let session = await waitForSession(manager: manager, languageID: "swift")
         #expect(session != nil)
         let handles = await spawner.handles(serverName: "swift")
         await handles.last?.terminate()
-        let becameBackingOff = await waitUntil {
+        let becameBackingOff = await waitUntil(timeout: crashRoundTripTimeout) {
             await collector.statuses.last?.phase == .backingOff
         }
         #expect(becameBackingOff)
@@ -428,8 +445,18 @@ func fastCrashesEscalateToManualRestart() async {
     #expect(fourthSession != nil)
     let handlesBeforeDeath = await spawner.handles(serverName: "swift")
     await handlesBeforeDeath.last?.terminate()
-    let becameDead = await waitUntil {
-        await collector.statuses.last?.phase == .dead
+    // In addition to the longer timeout above: `pushStatus`'s fire-and-
+    // forget `Task`s are not guaranteed to land on `collector.statuses` in
+    // creation order once the cooperative thread pool is under contention,
+    // so `.last?.phase` could in principle observe an earlier push that
+    // actually arrives after this one. Poll for the terminal `.dead` status
+    // having been recorded at all (with the crash count this exact death
+    // produces) instead of requiring it be literally the newest array
+    // entry; the manager's own authoritative state — queried directly via
+    // `ensureSession` below — is what the rest of this test actually
+    // verifies.
+    let becameDead = await waitUntil(timeout: crashRoundTripTimeout) {
+        await collector.statuses.contains { $0.phase == .dead && $0.consecutiveCrashes == 4 }
     }
     #expect(becameDead)
 
@@ -448,7 +475,7 @@ func fastCrashesEscalateToManualRestart() async {
     // fresh `.ready` push can still be in flight the instant
     // `ensureSession` returns — poll for it rather than reading
     // `collector.statuses` once immediately.
-    let becameFreshReady = await waitUntil {
+    let becameFreshReady = await waitUntil(timeout: crashRoundTripTimeout) {
         let last = await collector.statuses.last
         return last?.phase == .ready && last?.consecutiveCrashes == 0
     }

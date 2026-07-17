@@ -305,7 +305,7 @@ struct GitInspectorView: View {
                 isStashSheetPresented = true
             }
             .buttonStyle(RafuIconButtonStyle(size: 22, iconSize: 11))
-            .disabled(snapshot.changes.isEmpty || session.isGitBusy)
+            .disabled(snapshot.changes.isEmpty || session.isGitBusy || session.isGitHunkActionBusy)
             .help("Stash working-tree changes explicitly")
             Button("Flat List", systemImage: "list.bullet") {
                 gitChangesViewModeRaw = GitChangesViewMode.flat.rawValue

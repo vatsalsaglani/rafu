@@ -189,6 +189,60 @@ struct LauncherIPCServerTests {
         Darwin.close(silentClient)
         #expect(!FileManager.default.fileExists(atPath: socketURL.path))
     }
+
+    @Test("A stuck client that sends a partial header is closed after the read timeout")
+    func timedOutConnectionIsClosedWithMalformedRejection() async throws {
+        // A short injected timeout keeps this test fast; production uses
+        // `LauncherIPCServer.defaultConnectionTimeout` (5s).
+        let server = LauncherIPCServer(connectionTimeout: 0.2)
+        let pair = try SocketPair()
+        try writeAll(Data([0x52, 0x41, 0x46]), to: pair.client)
+
+        let start = ContinuousClock.now
+        await server.serveConnectionForTesting(pair.releaseServer())
+        let elapsed = ContinuousClock.now - start
+
+        #expect(try readResponse(from: pair.client) == .rejected(reason: "malformed request"))
+        // Well below the 5s production default — confirms the injected
+        // timeout, not some unrelated bound, ended the stalled read.
+        #expect(elapsed < .seconds(2))
+    }
+
+    @Test("A connection beyond the live cap is closed immediately, not queued")
+    func connectionsAtCapAreClosedImmediately() async throws {
+        let temporaryRoot = URL(
+            fileURLWithPath: "/tmp/rafu-ipc-cap-\(UUID().uuidString.prefix(8))",
+            isDirectory: true
+        )
+        let socketURL = LauncherIPCSocketPath.resolve(baseDirectory: temporaryRoot)
+        defer { try? FileManager.default.removeItem(at: temporaryRoot) }
+
+        let server = LauncherIPCServer(
+            socketURL: socketURL, connectionTimeout: 2, maxConnections: 1)
+        try await server.startListening()
+
+        // Occupies the only connection slot by never finishing its handshake.
+        let blockedClient = try connectSocket(at: socketURL)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while await server.liveConnectionCountForTesting < 1, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(await server.liveConnectionCountForTesting == 1)
+
+        // A second connection arrives while the server is at capacity; the
+        // accept loop must close it immediately (observed here as an
+        // immediate EOF) rather than blocking or queuing it.
+        let overflowClient = try connectSocket(at: socketURL)
+        var buffer = [UInt8](repeating: 0, count: 8)
+        let readCount = buffer.withUnsafeMutableBytes { bytes in
+            Darwin.read(overflowClient, bytes.baseAddress, bytes.count)
+        }
+        #expect(readCount == 0)
+
+        Darwin.close(blockedClient)
+        Darwin.close(overflowClient)
+        await server.stopListening()
+    }
 }
 
 @Suite("Launcher request routing")
