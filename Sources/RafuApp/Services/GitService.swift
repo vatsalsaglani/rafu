@@ -218,6 +218,13 @@ nonisolated struct GitService: Sendable {
         return data
     }
 
+    private static func isSafeRelativePath(_ path: String) -> Bool {
+        guard !path.isEmpty, !path.hasPrefix("/"), !path.utf8.contains(0) else { return false }
+        return path.split(separator: "/", omittingEmptySubsequences: false).allSatisfy {
+            !$0.isEmpty && $0 != "." && $0 != ".."
+        }
+    }
+
     @concurrent
     func stageAll(at rootURL: URL) async throws {
         let repositoryRoot = try await requireRepositoryRoot(at: rootURL)
@@ -405,6 +412,20 @@ nonisolated struct GitService: Sendable {
         return GitGutterHunkParser.parse(output.stdout)
     }
 
+    /// Reads porcelain blame for exactly one repository-relative path. The
+    /// caller supplies the already-resolved repository root, keeping this to
+    /// one bounded Git process rather than paying for a second `rev-parse`.
+    @concurrent
+    func blame(forRelativePath path: String, at repositoryRoot: URL) async throws -> GitBlame {
+        guard Self.isSafeRelativePath(path) else { throw GitServiceError.invalidGitPath }
+        let output = try await checkedRun(
+            ["blame", "--porcelain", "--", path],
+            at: repositoryRoot,
+            maximumOutputBytes: 32 * 1_024 * 1_024
+        )
+        return GitBlameParser.parse(output.standardOutput)
+    }
+
     /// Added/deleted line counts per path, merged across unstaged and staged
     /// `git diff --numstat -z` output (two bounded processes total,
     /// independent of changeset size). Untracked files never appear here;
@@ -552,6 +573,7 @@ nonisolated struct GitService: Sendable {
 }
 
 nonisolated enum GitServiceError: LocalizedError, Equatable {
+    case blameRequiresSavedFile
     case branchRequiresRemote
     case captureCreationFailed
     case commandFailed(String)
@@ -559,6 +581,7 @@ nonisolated enum GitServiceError: LocalizedError, Equatable {
     case emptyCommitMessage
     case hunkContextChanged
     case invalidBranchName(String)
+    case invalidGitPath
     case invalidHistoryRange
     case invalidRemote(String)
     case invalidRevision(String)
@@ -570,6 +593,8 @@ nonisolated enum GitServiceError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
+        case .blameRequiresSavedFile:
+            "Save the file before opening blame so its line numbers match Git."
         case .branchRequiresRemote:
             "Choose a remote before specifying a branch."
         case .captureCreationFailed:
@@ -584,6 +609,8 @@ nonisolated enum GitServiceError: LocalizedError, Equatable {
             "This file changed since the diff was captured. Refresh the diff and try again."
         case .invalidBranchName(let name):
             "“\(name)” is not a valid Git branch name."
+        case .invalidGitPath:
+            "The selected file is not a valid repository-relative Git path."
         case .invalidHistoryRange:
             "Git history pages must request between 1 and 500 commits with a nonnegative offset."
         case .invalidRemote(let name):

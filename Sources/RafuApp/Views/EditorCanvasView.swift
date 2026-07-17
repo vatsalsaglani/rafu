@@ -11,10 +11,20 @@ struct EditorCanvasView: View {
         ZStack {
             if session.descriptor == nil {
                 WorkspaceWelcomeView(session: session, openFolder: openFolder)
-            } else if session.openDocuments.isEmpty && session.gitOpenDiff == nil {
+            } else if session.openDocuments.isEmpty && session.gitOpenDiff == nil
+                && session.gitOpenBlame == nil
+            {
                 EmptyEditorView(
                     workspaceName: session.descriptor?.displayName ?? "Workspace",
                     session: session
+                )
+            } else if let blame = session.gitOpenBlame,
+                let document = session.selectedDocument
+            {
+                GitStandaloneBlameCanvas(
+                    blame: blame,
+                    fileName: document.displayName,
+                    close: session.closeBlame
                 )
             } else if let openDiff = session.gitOpenDiff, session.selectedDocumentID == nil {
                 GitStandaloneDiffCanvas(openDiff: openDiff, session: session)
@@ -24,6 +34,16 @@ struct EditorCanvasView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.palette.editorBackground)
+        .onChange(of: session.selectedDocumentID) { oldValue, newValue in
+            if session.gitOpenBlame != nil, oldValue != newValue {
+                session.closeBlame()
+            }
+        }
+        .onChange(of: session.rootURL) { oldValue, newValue in
+            if session.gitOpenBlame != nil, oldValue != newValue {
+                session.closeBlame()
+            }
+        }
         .alert("Save changes before closing?", isPresented: closeAlertBinding) {
             Button("Save and Close") { session.saveAndClosePendingDocument() }
             Button("Discard", role: .destructive) { session.discardAndClosePendingDocument() }
@@ -644,6 +664,202 @@ private struct GitStandaloneDiffCanvas: View {
             Divider().overlay(theme.palette.borderSubtle)
             GitSideBySideDiffView(openDiff: openDiff, session: session)
         }
+    }
+}
+
+private struct GitStandaloneBlameCanvas: View {
+    @Environment(\.rafuTheme) private var theme
+    @State private var isHoveringTab = false
+
+    let blame: GitBlame
+    let fileName: String
+    let close: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                HStack(spacing: 7) {
+                    Image(systemName: "person.text.rectangle")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.palette.info)
+                    Text("Blame • \(fileName)")
+                        .lineLimit(1)
+                        .foregroundStyle(theme.palette.textPrimary)
+                    Button("Close Blame", systemImage: "xmark", action: close)
+                        .buttonStyle(RafuIconButtonStyle(size: 18, iconSize: 9))
+                        .opacity(isHoveringTab ? 1 : 0.75)
+                }
+                .font(.callout)
+                .padding(.horizontal, 10)
+                .frame(height: 33)
+                .background(theme.palette.tabActiveBackground)
+                .overlay(alignment: .bottom) {
+                    StitchedUnderline(color: theme.palette.accent)
+                }
+                .overlay(alignment: .trailing) {
+                    Divider().frame(height: 18).overlay(theme.palette.borderSubtle)
+                }
+                .onHover { isHoveringTab = $0 }
+                Spacer()
+            }
+            .frame(height: 34)
+            .background(theme.palette.tabBarBackground.opacity(0.92))
+            Divider().overlay(theme.palette.borderSubtle)
+            blameHeader
+            Divider().overlay(theme.palette.borderSubtle)
+            if blame.lines.isEmpty {
+                ContentUnavailableView(
+                    "No blame information",
+                    systemImage: "person.text.rectangle",
+                    description: Text("Git did not report any attributable lines for this file.")
+                )
+            } else {
+                blameTable
+            }
+        }
+        .background(theme.palette.editorBackground)
+    }
+
+    private var blameHeader: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "person.text.rectangle")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(theme.palette.info)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(fileName)
+                    .font(.headline)
+                    .foregroundStyle(theme.palette.textPrimary)
+                Text("Read-only line attribution • \(blame.lines.count) lines")
+                    .font(.caption)
+                    .foregroundStyle(theme.palette.textSecondary)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 46)
+        .background(theme.palette.elevatedBackground.opacity(0.6))
+    }
+
+    private var blameTable: some View {
+        GeometryReader { viewport in
+            ScrollView([.horizontal, .vertical]) {
+                LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    Section {
+                        ForEach(blame.lines) { line in
+                            GitBlameRow(line: line)
+                        }
+                    } header: {
+                        GitBlameTableHeader()
+                    }
+                }
+                .frame(
+                    minWidth: max(780, viewport.size.width),
+                    minHeight: viewport.size.height,
+                    alignment: .topLeading
+                )
+            }
+            .scrollIndicators(.visible)
+        }
+    }
+}
+
+private struct GitBlameTableHeader: View {
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        HStack(spacing: 0) {
+            column("Line", width: 58, alignment: .trailing)
+            column("Author", width: 170)
+            column("Commit", width: 110)
+            column("When", width: 130)
+            column("Summary", width: nil)
+        }
+        .frame(height: 28)
+        .background(theme.palette.tabBarBackground.opacity(0.97))
+        .overlay(alignment: .bottom) { Divider().overlay(theme.palette.borderSubtle) }
+    }
+
+    private func column(
+        _ title: String,
+        width: CGFloat?,
+        alignment: Alignment = .leading
+    ) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(theme.palette.textSecondary)
+            .frame(width: width, alignment: alignment)
+            .frame(
+                maxWidth: width == nil ? .infinity : nil,
+                maxHeight: .infinity,
+                alignment: alignment
+            )
+            .padding(.horizontal, 8)
+            .overlay(alignment: .trailing) { Divider().overlay(theme.palette.borderSubtle) }
+    }
+}
+
+private struct GitBlameRow: View {
+    @Environment(\.rafuTheme) private var theme
+    let line: GitBlameLine
+
+    var body: some View {
+        HStack(spacing: 0) {
+            cell("\(line.lineNumber)", width: 58, alignment: .trailing, monospaced: true)
+            cell(line.author, width: 170)
+            HStack(spacing: 4) {
+                Text(line.shortID).font(.caption.monospaced())
+                if line.isBoundary {
+                    Text("Root")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(theme.palette.selection, in: .capsule)
+                }
+            }
+            .frame(width: 110, alignment: .leading)
+            .frame(maxHeight: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .overlay(alignment: .trailing) { Divider().overlay(theme.palette.borderSubtle) }
+            Text(line.time, style: .relative)
+                .font(.caption)
+                .foregroundStyle(theme.palette.textSecondary)
+                .frame(width: 130, alignment: .leading)
+                .frame(maxHeight: .infinity, alignment: .leading)
+                .padding(.horizontal, 8)
+                .overlay(alignment: .trailing) { Divider().overlay(theme.palette.borderSubtle) }
+            cell(line.summary, width: nil)
+        }
+        .frame(minHeight: 30)
+        .overlay(alignment: .bottom) { Divider().overlay(theme.palette.borderSubtle.opacity(0.7)) }
+        .help("\(line.commitID) • \(line.summary)")
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private func cell(
+        _ value: String,
+        width: CGFloat?,
+        alignment: Alignment = .leading,
+        monospaced: Bool = false
+    ) -> some View {
+        Text(value)
+            .font(monospaced ? .caption.monospacedDigit() : .caption)
+            .foregroundStyle(theme.palette.textPrimary)
+            .lineLimit(1)
+            .frame(width: width, alignment: alignment)
+            .frame(
+                maxWidth: width == nil ? .infinity : nil,
+                maxHeight: .infinity,
+                alignment: alignment
+            )
+            .padding(.horizontal, 8)
+            .overlay(alignment: .trailing) { Divider().overlay(theme.palette.borderSubtle) }
+    }
+
+    private var accessibilityText: String {
+        let boundary = line.isBoundary ? ", root commit" : ""
+        return
+            "Line \(line.lineNumber), \(line.author), commit \(line.shortID)\(boundary), \(line.summary)"
     }
 }
 

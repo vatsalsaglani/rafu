@@ -421,6 +421,38 @@ struct GitServiceTests {
             }
         }
     }
+
+    @Test("Blame round-trip attributes a two-commit file and marks root lines as boundary")
+    func blameRoundTrip() async throws {
+        try await withRepository { root in
+            let file = root.appending(path: "owned.txt")
+            try write("root line\nshared line\n", to: file)
+            try runGit(["config", "user.name", "Root Author"], at: root)
+            try runGit(["add", "owned.txt"], at: root)
+            try runGit(["commit", "-m", "Initial ownership"], at: root)
+
+            try write("root line\nupdated line\n", to: file)
+            try runGit(["config", "user.name", "Next Author"], at: root)
+            try runGit(["add", "owned.txt"], at: root)
+            try runGit(["commit", "-m", "Update second line"], at: root)
+
+            let service = GitService()
+            let history = try await service.history(at: root, limit: 10)
+            let blame = try await service.blame(forRelativePath: "owned.txt", at: root)
+
+            #expect(blame.lines.count == 2)
+            let rootCommit = try #require(history.commits.last)
+            let nextCommit = try #require(history.commits.first)
+            #expect(blame.lines[0].commitID == rootCommit.id)
+            #expect(blame.lines[0].author == "Root Author")
+            #expect(blame.lines[0].summary == "Initial ownership")
+            #expect(blame.lines[0].isBoundary)
+            #expect(blame.lines[1].commitID == nextCommit.id)
+            #expect(blame.lines[1].author == "Next Author")
+            #expect(blame.lines[1].summary == "Update second line")
+            #expect(!blame.lines[1].isBoundary)
+        }
+    }
 }
 
 private func withRepository(

@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress (2026-07-18; G1-G2 complete). One of six post-audit lanes defined in
+In progress (2026-07-18; G1-G3 complete). One of six post-audit lanes defined in
 [`post-audit-worktree-fanout.md`](post-audit-worktree-fanout.md). Runs in a
 **dedicated git worktree** after its contract commit (G0) lands on main.
 Hunk staging and read-only blame are explicitly enumerated Phase 6
@@ -223,3 +223,18 @@ they disagree.
   fix/lint green. Test delta: +7 (five pure parser fixtures and two service
   tests, including the tracked+untracked push/apply/drop repository round-trip).
   `build_and_run.sh --verify` and manual UI checks remain consolidated at G4.
+- **G3 — complete (2026-07-18):** one bounded, cancellable
+  `git blame --porcelain -- <path>` process now parses per-line commit, author,
+  time, summary, and boundary metadata with a full-object-ID cache for Git's
+  deduplicated headers. The focused saved file opens as an editor-hosted,
+  read-only attribution table with textual root markers, a keyboard/VoiceOver
+  reachable close control, and no gutter or `Editor/**` changes; selection and
+  workspace changes discard it. G0 froze `GitBlame` as metadata-only and this
+  lane may add model types but not alter that contract, so the canvas presents
+  line/author/commit/age/summary rather than retaining source text in SwiftUI.
+  This is an intentional repository-over-stale-anchor deviation that preserves
+  line attribution, bounded memory, and the rejected-gutter decision. Verification:
+  42 Git-focused tests, 530 full tests, `swift build`, and format fix/lint green.
+  Test delta: +4 (three pure porcelain fixtures and one two-author repository
+  round-trip). `build_and_run.sh --verify` and manual UI checks remain
+  consolidated at G4.

@@ -57,6 +57,13 @@
   keeps the entry; pop and drop require confirmation because they can discard
   the reference. A conflicted apply/pop refreshes both status and the stash list
   because Git may have changed the worktree even when the command exits nonzero.
+- Blame one focused, saved file with `git blame --porcelain -- <relative-path>`
+  from the already-resolved repository root. Validate that the path is
+  nonempty, relative, NUL-free, and contains no empty, `.` or `..` components;
+  keep `--` before it. Cap stdout/stderr at 32 MiB and do not retain a Git
+  process. Porcelain may omit `author`, `author-time`, `summary`, and `boundary`
+  after the first block for a commit, so cache that metadata by the full 40- or
+  64-hex object ID and reuse it for later tab-prefixed source records.
 
 ## Why it matters
 
@@ -83,6 +90,13 @@ list shifts. The message remains ordinary argv data and is never incorporated
 into a revision or shell command. Confirmations keep destructive removal under
 explicit user control, including pop's conditional drop-on-success behavior.
 
+Blame's compact porcelain form avoids repeating commit metadata for every line,
+but a parser that treats each block as self-contained silently loses most lines.
+The SHA-keyed cache restores those lines without a second process. Rafu keeps
+only the small `GitBlameLine` attribution model for the selected saved file;
+the read-only canvas is destroyed on close, file-selection change, or workspace
+change. It labels root/boundary commits in text rather than relying on color.
+
 ## Reproduction or evidence
 
 The focused Git tests create temporary repositories covering unborn staging,
@@ -108,6 +122,11 @@ both files while retaining the entry, then drops it and verifies an empty list.
 Apple Git's actual formatted output was also checked byte-for-byte: `%gd`, `%ct`,
 and `%gs` were unit-separated and the record ended in NUL.
 
+The blame fixtures cover two commits, boundary metadata, metadata reuse after a
+deduplicated header, and malformed blocks. The repository round-trip commits a
+two-line file under two authors and verifies the exact commit IDs, authors,
+summaries, and root-boundary state returned for each final line.
+
 ## Verification
 
 Run `swift test --filter Git`. Run the full suite afterward because process
@@ -119,11 +138,13 @@ isolation and shared workspace state are integration concerns.
 - `Sources/RafuApp/Git/GitHunkPatchBuilder.swift`
 - `Sources/RafuApp/Git/GitStashParser.swift`
 - `Sources/RafuApp/Git/GitStashCoordinator.swift`
+- `Sources/RafuApp/Git/GitBlameParser.swift`
 - `Sources/RafuApp/Services/GitService.swift`
 - `Sources/RafuApp/Views/GitInspectorView.swift` (Source Control tree view)
 - `Tests/RafuAppTests/GitServiceTests.swift`
 - `Tests/RafuAppTests/GitChangeTreeTests.swift`
 - `Tests/RafuAppTests/GitHunkPatchBuilderTests.swift`
 - `Tests/RafuAppTests/GitStashParserTests.swift`
+- `Tests/RafuAppTests/GitBlameParserTests.swift`
 - `docs/plans/phases/pre-initial-push-workbench.md`
 - `docs/plans/phases/git-depth-blame-stash-hunks.md`

@@ -1685,7 +1685,43 @@ final class WorkspaceSession {
     /// Opens a read-only blame canvas for the selected file. No-op until G3
     /// lands `GitBlameParser`.
     func openBlameForSelectedFile() async {
-        guard rootURL != nil else { return }
+        guard let rootURL,
+            let document = selectedDocument,
+            let gitSnapshot,
+            let rawRepositoryRoot = gitSnapshot.repositoryRoot ?? self.rootURL,
+            !isGitBusy
+        else { return }
+        guard !document.isDirty else {
+            reportGitError(GitServiceError.blameRequiresSavedFile)
+            return
+        }
+
+        let repositoryRoot = rawRepositoryRoot.standardizedFileURL
+        let fileURL = document.url.standardizedFileURL
+        let rootPath = repositoryRoot.path
+        let filePath = fileURL.path
+        guard filePath.hasPrefix(rootPath + "/") else {
+            reportGitError(GitServiceError.invalidGitPath)
+            return
+        }
+        let relativePath = String(filePath.dropFirst(rootPath.count + 1))
+
+        isGitBusy = true
+        defer { isGitBusy = false }
+        do {
+            let blame = try await gitService.blame(
+                forRelativePath: relativePath,
+                at: repositoryRoot
+            )
+            guard self.rootURL == rootURL, selectedDocumentID == document.id else { return }
+            gitOpenDiff = nil
+            gitOpenBlame = blame
+        } catch is CancellationError {
+            return
+        } catch {
+            guard self.rootURL == rootURL else { return }
+            reportGitError(error)
+        }
     }
 
     /// Discards the retained blame data.
