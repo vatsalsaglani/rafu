@@ -251,14 +251,60 @@ Gate: layout tests green ✓.
 
 ## M4 — Flow renderer
 
-- Extract `MermaidDiagramView` into its own file; replace the flat-list flow
-  branch with a `Canvas`/`GeometryReader` render driven by `MermaidLayout`:
-  nodes by shape, directed edges with arrowheads and labels, subgraph boxes,
-  LR/TD respected. Badge retained. Accessibility label/description on the
-  drawn diagram; no decorative motion (Reduce Motion respected trivially).
+**Status: Complete (2026-07-17)**
 
-Gate: `--verify` manual pass — a directional flowchart with subgraphs and
-edge labels renders as a real 2D graph; second window checked.
+### Implementation
+
+- Extracted `MermaidDiagramView` and `MermaidUnsupportedView` into new
+  `Sources/RafuApp/Markdown/MermaidDiagramView.swift` (pure file split from
+  `MarkdownPreviewView.swift`; top-level view, segment types, segmentation
+  regex, MarkdownUI boundary, and TreeSitter routing remain byte-identical;
+  call site `MermaidDiagramView(result:)` unchanged).
+- Replaced the flat-list flow branch with a real 2D `Canvas` render via new
+  `MermaidFlowCanvas` child view:
+  - **Node rendering:** all seven shapes supported (rectangle, round, diamond,
+    circle, subroutine, parallelogram, flag) with labels centered.
+  - **Edge rendering:** styled by `EdgeLine` (solid/dotted/thick) with
+    direction-aware arrowheads (`EdgeHead`: arrow/circle/cross,
+    bidirectional). Edge labels positioned at segment midpoints.
+  - **Subgraph boxes:** depth-based dashing (outer → inner, dashed borders),
+    membership via child UUIDs.
+  - **Direction:** TD/BT/LR/RL fully direction-aware (coordinates from layout);
+    no scaling or blur.
+  - **Layout:** fixed-size `Canvas` (via `layout.canvasSize` from `MermaidFlowLayout`)
+    inside a horizontal `ScrollView` for honest sizing (user sees real 2D graph,
+    scrolls if needed; no auto-scaling).
+- Badge retained ("Simplified native preview"). `.sequence` unchanged (M6
+  renders it); `.unsupported`/`.malformed` fallback unchanged.
+- **Styling:** only existing theme tokens used (`accent`, `textPrimary`,
+  `textSecondary`, `borderSubtle`, `selection`, `elevatedBackground`);
+  no new tokens.
+- **Accessibility:** `.accessibilityElement(children:.ignore)` on Canvas +
+  accessibility label with node/edge counts + individual node labels. Canvas
+  is opaque to VoiceOver; explicit label makes diagram presence/type clear.
+  No animations; Reduce Motion trivially satisfied.
+
+### Verification
+
+- `swift build` — clean, no new dependency.
+- `swift test` — 535 tests pass (M3 layout + parser tests cover geometry;
+  Canvas is not pixel-testable; pixel snapshots forbidden per policy).
+- `./script/format.sh --lint` — clean.
+- Diff limited to `MermaidDiagramView.swift` (new), `MarkdownPreviewView.swift`
+  (extraction only), and `MarkdownPreviewSegmentParser.swift` (routing update).
+- `./script/build_and_run.sh --verify` — **deferred** to consolidated M6/M7
+  GUI pass per coordinator direction (other lanes share staged app). Manual
+  gate checks (directional flowchart with subgraphs + edge labels renders as
+  real 2D graph; second window; keyboard reachability of horizontal scroll)
+  are deferred to that consolidated pass.
+
+### Known M4 limitation
+
+Canvas visual quality is bounded native, not mermaid.js parity — the badge and
+ADR 0008 say so explicitly. Sibling subgraph boxes not guaranteed disjoint
+(M3 design choice; see layout notes).
+
+Gate: build/tests/lint green ✓; `--verify` manual pass deferred to M6/M7.
 
 ## M5 — Sequence model + parser upgrade
 

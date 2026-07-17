@@ -228,5 +228,27 @@ disjoint; only "member node frame ⊆ own subgraph frame" and "child frame ⊆ p
 frame" hold. `canvasSize` is intentionally unbounded to support dense and wide
 diagrams without forced scaling.
 
+### Flow renderer (M4)
+
+**Canvas layout computation pattern:** A `Canvas`-based diagram must compute
+its layout **outside `body` and outside the `Canvas` draw closure**. The pattern
+used in `MermaidFlowCanvas` is a child view holding `@State private var layout: MermaidFlowLayout?`,
+populated via `.task(id: flow.raw)`. The diagram's stable `raw` string (not
+`Equatable` itself on `MermaidFlow`) is the cache key. This ensures the pure
+one-shot layout computation runs once per unique diagram source and never
+per-frame or per-view-init.
+
+**Why it matters:** Ties to AGENTS invariant: layout is computed outside body,
+never per-frame in a Canvas closure. An init-computed `let` would recompute
+on every SwiftUI view re-initialization even with stable input. A `.task`-driven
+`@State` decouples layout cost from render frequency and satisfies the
+typing-path frame budget.
+
+**Accessibility and motion:** The `Canvas` is opaque to VoiceOver, so it
+carries an explicit accessibility label (e.g., node/edge counts). The render
+is static (no animation), trivially satisfying Reduce Motion.
+
 **Section to be filled in M7:**
 - Fixture policy close-out.
+- Sequence renderer (M6) patterns.
+- Verified toolchain and closure.
