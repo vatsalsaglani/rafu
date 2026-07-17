@@ -217,6 +217,68 @@ To enable real-server indexing progress, Rafu advertises `window.workDoneProgres
   which gates `forwardsDocumentChanges` to suppress keystroke forwarding during initialization.
   The P1 handshake drives the session flag only; the phase is used elsewhere for gating.
 
+### P5 live-validation checklist (G5; repeatable manual procedure, 2026-07-17)
+
+**Applies to:** end-to-end language-server navigation validation, resource monitoring, server crash/restart recovery, and initialization-progress visibility.
+
+**Last verified:** Swift 6.2.4, Xcode 26.3, macOS Darwin 25.1 on 2026-07-17 (offline suite); live GUI steps deferred to merge-round runner.
+
+**Why it matters:** P1–P4 are fully validated offline via unit tests, scripted servers, and contract assertions. However, real-world gopls, rust-analyzer, typescript-language-server, and sourcekit-lsp behavior — tier label rendering, RSS memory tracking, kill-triggered fallback, and project-build-gated cross-file references — can only be verified with live servers and user interaction. This repeatable procedure documents the exact steps, sample-repository requirements, and deferred-GUI-run constraints so the merge-round lane owner can produce reproducible evidence.
+
+**Coverage table:** Each P5 item, what standing OFFLINE test covers the underlying logic, and what still needs a live GUI run (all deferred to merge round):
+
+| P5 item | Covered offline by | Still needs live GUI (deferred) |
+|---|---|---|
+| 1. build_and_run --verify; open sample repo | n/a (harness) | App staging + launch; open a real Go module / Cargo crate |
+| 2. gopls discovered (localDiscovery); rust-analyzer consent names URL/version/size/license/checksum | InstalledServerResolverTests (gopls discovery); CuratedCatalogTests.downloadableEntriesPinChecksums + npmPackageRoot test; ServerInstallerTests checksum verify/mismatch; LanguageServersCatalogModelTests install/consent state machine | Settings ▸ Language Servers rendering; gopls shown as discovered; consent sheet visually showing all five fields |
+| 3. First navigation raises trust sheet; approve | LanguageServerTrustFlowTests (approve persists+clears+resolves; decline remembered; pending raised) | Sheet mounts in WorkspaceWindowView; approve unblocks re-invoked navigation |
+| 4. Go to Definition / Find References land; tier "via gopls"/"via rust-analyzer" | LSPNavigationProviderTests (definition + references map; tier == .lsp(serverName:)); tier label format NavigationTypes.swift:77 (`"via " + displayName`) | Real gopls/rust-analyzer answering position-based def/refs; human reading the exact tier string |
+| 5. `.indexing` shows during initial indexing (validates P1) | LSPNavigationProviderTests warming→`.indexing`; LanguageServerSessionTests $/progress begin/end flips isWarmingUp + initialize advertises window.workDoneProgress | Real server emitting workDoneProgress/create + $/progress; `.indexing` visible in UI (use a repo large enough that indexing takes a beat) |
+| 6. Resources surface shows server row with RSS | ProcessResourceRegistryTests; LanguageServerManagerTests (spawned server registers pid) | ResourcesView rendering the language-server row with live RSS |
+| 7. kill <pid> → fall-through to syntactic/text, no UI error; row shows crash/restart | LanguageServerManagerTests (crash→backingOff/dead; ceiling-kill vs crash; unregister on restart); LanguageServerLifecycleTests (backoff); LSPNavigationProviderTests references fall-through + TextSearchNavigationProviderTests; ProcessResourceRegistryTests reaped-pid row retained | Kill the real pid (taken from the Resources row, NOT a blind pgrep); observe degrade-without-error + restart affordance |
+| tsserver end-to-end (P2+P4) | ServerInstallerTests fake-resolver/staging survival; npmPackageRoot catalog shape + consent npm disclosure; CuratedCatalogTests checksum pin | Real `npm install` (network) resolving typescript deps, trust, then navigate in a TS repo (never CI-verified by design) |
+| sourcekit-lsp references after project build (P3) | LanguageServerSessionTests initialize round-trips initializationOptions backgroundIndexing=true; CuratedCatalogTests | Real sourcekit-lsp populating cross-file refs only after a project build produces the index store (key already live-confirmed) |
+
+**P3 residual resolution:** The `backgroundIndexing` initializationOptions key for sourcekit-lsp was confirmed live against the Swift 6.2.4 Xcode toolchain on 2026-07-17 via a `strings` scan of the shipped `sourcekit-lsp` binary. The scan confirms three active keys: `backgroundIndexing`, `backgroundIndexingPaused`, and `maxCoresPercentageToUseForBackgroundIndexing`. The P3 implementation sets the exact key (string `"backgroundIndexing"` with value `true`), verified by `CuratedCatalogTests` assertion and scripted-handshake round-trip. Older sourcekit-lsp versions harmlessly ignore the unknown key.
+
+**Sample repository requirements:**
+
+- **Go module:** minimal `go.mod` + two `.go` files with a cross-file symbol (function or struct). Requires gopls on PATH: `go install golang.org/x/tools/gopls@latest`.
+- **Cargo crate:** `cargo new` with a cross-file function or struct. rust-analyzer installs via Rafu's consent/download flow (P4 checksum verified).
+- **TypeScript repository:** minimal `package.json` + two `.ts` files with a cross-file import. tsserver installs via Rafu (P2 npm resolution + P4 checksum verified). Network required for npm step (never CI-verified by design).
+- **Server pid for the kill step:** taken from the Resources surface row (kind `.languageServer`), NOT a blind `pgrep` (multiple lanes/servers may run simultaneously; single-threaded `build_and_run.sh --verify` constraint).
+- **Expected tier strings:** exactly `"via gopls"`, `"via rust-analyzer"`, `"via typescript-language-server"`, `"via SourceKit-LSP"` (format is `"via " + descriptor.displayName`; Swift displayName for sourcekit-lsp is `"SourceKit-LSP"`).
+- **Observing `.indexing`:** use a repository large enough that background indexing takes measurable time (a too-small sample finishing instantly is a false negative, not a P1 regression).
+
+**Critical constraint:** `./script/build_and_run.sh --verify` kills any running staged Rafu.app and is single-threaded (only one lane at a time). ALL GUI steps in this checklist are deferred to the merge-round lane owner's run, executing in sequence without concurrent app launches. The offline suite (P1–P4 unit tests, scripted servers, contract assertions) is fully green; live evidence waits for integration.
+
+**Verification commands:**
+
+```bash
+# Verify offline suite is green (P1–P4 all code complete):
+swift build
+swift test
+
+# Verify P3 residual — strings scan of shipped sourcekit-lsp:
+strings /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/sourcekit-lsp | grep backgroundIndexing
+
+# Merge-round GUI steps (deferred, single-threaded via build_and_run.sh):
+./script/build_and_run.sh --verify
+# Then follow the P5 checklist items 1–7 above
+```
+
+**Related code, ADRs, and phases:**
+
+- P1 handshake code: `Sources/RafuApp/LanguageIntelligence/LSPTypes.swift` (WindowClientCapabilities), `LanguageServerSession.swift` (initialize), `JSONRPCMessage.swift` (JSONRPCSuccessResponseEnvelope), `JSONRPCConnection.swift` (handleIncomingRequest security dispatch)
+- P2 npm resolution: `Sources/RafuApp/LanguageIntelligence/Registry/NodeDependencyResolver.swift`, `ServerInstaller.swift`, `LanguageServersCatalogModel.swift`
+- P3 sourcekit-lsp indexing: `Sources/RafuApp/LanguageIntelligence/Registry/CuratedCatalog.swift` (initializationOptions)
+- P4 catalog checksums: `CuratedCatalog.swift` (checksum pins + license corrections)
+- Navigation and tier rendering: `Sources/RafuApp/Navigation/NavigationTypes.swift`, `LSPNavigationProvider.swift`, `TextSearchNavigationProvider.swift`
+- Resource tracking: `Sources/RafuApp/Services/ProcessResourceRegistry.swift`, `Sources/RafuApp/Views/ResourcesView.swift`
+- Trust flow: `Sources/RafuApp/LanguageIntelligence/LanguageIntelligenceCoordinator.swift`, `Sources/RafuApp/Views/LanguageServerTrustPromptView.swift`
+- [`docs/plans/phases/lsp-production-readiness.md`](../plans/phases/lsp-production-readiness.md) (P1–P5 increments, exit criteria)
+- [`docs/decisions/0005-language-intelligence-and-lsp.md`](../decisions/0005-language-intelligence-and-lsp.md)
+
 ### Lane 2 seam: session lifecycle only
 
 The seam between lane 1 (`WorkspaceSession`) and lane 2 (Language Intelligence)
