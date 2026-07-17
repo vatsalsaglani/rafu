@@ -25,6 +25,22 @@ Framing and logging remain content-free: errors retain only sizes/versions, and
 unified logs contain a stable request-kind label plus accepted/rejected outcome,
 never payloads, document text, secrets, or full paths.
 
+Window selection is split into a pure routing matrix and a MainActor effects
+bridge. Open roots are normalized and matched on path-component boundaries;
+goto chooses the deepest containing root, while folder opens require an exact
+root match. Reuse ordering is deterministic: key window first, then registry
+registration order. A goto outside every open workspace first replaces the
+selected window's workspace with the file's containing folder and applies the
+relative goto after that root is active.
+
+`WindowAccessor` captures both the concrete `NSWindow` and SwiftUI's
+`openWindow` action. The registry keeps only weak window and session references,
+prunes dead entries on every snapshot/effect, and uses SwiftUI to create the
+`workspace` scene. AppKit is limited to `NSApp.activate` and
+`makeKeyAndOrderFront` for focusing a specific surviving window. Pending gotos
+for `--new-window` carry a minimum registration order so an older same-root
+window cannot consume the new window's navigation request.
+
 In the RafuApp target's Swift 6.2 default-`MainActor` mode, declaring
 `LauncherIPCServer` as a custom `actor` gives it its own executor and is the
 explicit isolation boundary. Do not spell the type `nonisolated actor`: Swift
@@ -39,6 +55,10 @@ without killing its listener fd, leaving every later CLI invocation unable to
 reach the running app. Double-closing a recycled fd can close an unrelated
 resource. Authenticating after reading lets a foreign local user consume parser
 and memory work before rejection and violates the protocol's trust boundary.
+Component-aware root matching prevents `/work/app2` from being mistaken for a
+child of `/work/app`. Weak registry references avoid extending a window or
+workspace session lifetime, while the registration-order fence preserves
+`--new-window` semantics across asynchronous SwiftUI scene creation.
 
 ## Reproduction or evidence
 
@@ -54,6 +74,12 @@ actor LauncherIPCServer` produced “`nonisolated` on an actor's synchronous
 initializer is invalid”; the ordinary custom actor builds under strict Swift 6
 checking and keeps all mutable listener state actor-isolated.
 
+Headless router tests cover exact and nonmatching roots, component boundaries,
+deepest-root goto, containing-folder goto, deterministic reuse, forced new
+windows, unsupported targets, and injected focus/seed/goto effects. The
+window-management review verified that scene creation remains on SwiftUI's
+`openWindow` path and the AppKit escape is restricted to specific-window focus.
+
 ## Verification
 
 ```bash
@@ -68,6 +94,9 @@ swift test
 
 - `Sources/RafuCore/Launcher/IPC/LauncherIPCCodec.swift`
 - `Sources/RafuApp/Launcher/LauncherIPCServer.swift`
+- `Sources/RafuApp/Launcher/LauncherRequestRouter.swift`
+- `Sources/RafuApp/Launcher/WindowAccessor.swift`
+- `Sources/RafuApp/Launcher/WorkspaceWindowRegistry.swift`
 - `Tests/RafuCoreTests/LauncherIPCFramingTests.swift`
 - `Tests/RafuAppTests/LauncherRequestRouterTests.swift`
 - `docs/plans/phases/cli-app-ipc.md`

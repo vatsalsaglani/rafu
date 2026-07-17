@@ -6,6 +6,7 @@ import SwiftUI
 /// directly; `WorkspaceSceneRoot` uses this to give `WorkspaceWindowRegistry`
 /// a weak reference to each workspace scene's window.
 struct WindowAccessor: NSViewRepresentable {
+    @Environment(\.openWindow) private var openWindow
     let onResolve: (NSWindow) -> Void
 
     func makeNSView(context: Context) -> NSView {
@@ -23,6 +24,10 @@ struct WindowAccessor: NSViewRepresentable {
     /// `makeNSView`/`updateNSView` themselves — deferring to the next main
     /// run-loop turn is the standard way to observe it.
     private func resolve(from view: NSView) {
+        let openWindow = openWindow
+        WorkspaceWindowRegistry.shared.installOpenWorkspaceWindowAction {
+            openWindow(id: "workspace")
+        }
         DispatchQueue.main.async { [weak view] in
             guard let window = view?.window else { return }
             onResolve(window)

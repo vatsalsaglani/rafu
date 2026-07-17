@@ -386,11 +386,6 @@ actor LauncherIPCServer {
     private static func defaultHandler(
         _ envelope: LauncherIPCEnvelope
     ) async -> LauncherIPCResponse {
-        switch envelope.kind {
-        case .handshake:
-            .accepted(workspaceMatched: false, windowFocused: false, waitSupported: false)
-        case .openFolder, .goto, .unknown:
-            .rejected(reason: "request router unavailable")
-        }
+        LauncherRequestRouter.shared.handle(envelope)
     }
 }

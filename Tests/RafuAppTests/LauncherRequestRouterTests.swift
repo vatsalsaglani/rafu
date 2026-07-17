@@ -191,6 +191,267 @@ struct LauncherIPCServerTests {
     }
 }
 
+@Suite("Launcher request routing")
+struct LauncherRequestRoutingTests {
+    private let firstID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+    private let secondID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+
+    @Test("Automatic and reuse requests focus an exact workspace match")
+    func exactFolderMatch() {
+        let roots = [OpenWorkspaceRoot(windowID: firstID, rootURL: fileURL("/work/a"))]
+        for policy in [LauncherActivationPolicy.automatic, .reuseWindow] {
+            let request = openRequest("/work/a", policy: policy)
+            #expect(
+                LauncherRequestRouting.route(request: request, openRoots: roots)
+                    == .focus(windowID: firstID)
+            )
+        }
+    }
+
+    @Test("New-window bypasses an existing exact match")
+    func newWindowBypassesMatch() {
+        let roots = [OpenWorkspaceRoot(windowID: firstID, rootURL: fileURL("/work/a"))]
+        let request = openRequest("/work/a", policy: .newWindow)
+        #expect(
+            LauncherRequestRouting.route(request: request, openRoots: roots)
+                == .seedNewWindow(url: fileURL("/work/a"))
+        )
+    }
+
+    @Test("A nonmatching request reuses the first ordered window")
+    func nonMatchReusesOrderedWindow() {
+        let roots = [
+            OpenWorkspaceRoot(windowID: secondID, rootURL: fileURL("/work/b")),
+            OpenWorkspaceRoot(windowID: firstID, rootURL: fileURL("/work/a")),
+        ]
+        let request = openRequest("/work/c", policy: .automatic)
+        #expect(
+            LauncherRequestRouting.route(request: request, openRoots: roots)
+                == .focus(windowID: secondID)
+        )
+    }
+
+    @Test("No open window seeds the requested workspace")
+    func emptyRegistrySeedsWindow() {
+        let request = openRequest("/work/a")
+        #expect(
+            LauncherRequestRouting.route(request: request, openRoots: [])
+                == .seedNewWindow(url: fileURL("/work/a"))
+        )
+    }
+
+    @Test("Goto selects the deepest containing workspace and a relative file")
+    func gotoSelectsDeepestRoot() {
+        let roots = [
+            OpenWorkspaceRoot(windowID: firstID, rootURL: fileURL("/work")),
+            OpenWorkspaceRoot(windowID: secondID, rootURL: fileURL("/work/a")),
+        ]
+        let location = RafuCore.SourceLocation(line: 42, column: 8)
+        let request = gotoRequest("/work/a/Sources/main.swift", location: location)
+        #expect(
+            LauncherRequestRouting.route(request: request, openRoots: roots)
+                == .focusAndGoto(
+                    windowID: secondID,
+                    file: "Sources/main.swift",
+                    location: location
+                )
+        )
+    }
+
+    @Test("A goto outside every root reuses a window but opens its containing folder")
+    func gotoOutsideWorkspace() {
+        let roots = [OpenWorkspaceRoot(windowID: firstID, rootURL: fileURL("/work/a"))]
+        let request = gotoRequest("/other/main.swift", location: RafuCore.SourceLocation(line: 3))
+        #expect(
+            LauncherRequestRouting.route(request: request, openRoots: roots)
+                == .focus(windowID: firstID)
+        )
+        #expect(
+            LauncherRequestRouting.workspaceURL(for: request, openRoots: roots)?.path
+                == "/other"
+        )
+        #expect(
+            LauncherRequestRouting.relativeGotoPath(
+                for: request,
+                workspaceURL: fileURL("/other")
+            ) == "main.swift"
+        )
+    }
+
+    @Test("New-window goto seeds the matching root instead of the file's parent")
+    func newWindowGotoUsesMatchedRoot() {
+        let roots = [OpenWorkspaceRoot(windowID: firstID, rootURL: fileURL("/work/a"))]
+        let request = gotoRequest(
+            "/work/a/Sources/main.swift",
+            location: RafuCore.SourceLocation(line: 3),
+            policy: .newWindow
+        )
+        #expect(
+            LauncherRequestRouting.route(request: request, openRoots: roots)
+                == .seedNewWindow(url: fileURL("/work/a"))
+        )
+    }
+
+    @Test("Path-component boundaries prevent false prefix matches")
+    func pathPrefixIsNotContainment() {
+        let roots = [OpenWorkspaceRoot(windowID: firstID, rootURL: fileURL("/repo"))]
+        let request = gotoRequest("/repo2/main.swift", location: RafuCore.SourceLocation(line: 1))
+        #expect(!LauncherRequestRouting.workspaceMatched(request: request, openRoots: roots))
+    }
+
+    @Test("SSH and relative local targets are rejected by local routing")
+    func unsupportedTargets() {
+        let ssh = LauncherOpenRequest(target: .ssh(hostAlias: "prod", path: "/srv/app"))
+        let relative = LauncherOpenRequest(target: .local(path: "relative/path"))
+        #expect(LauncherRequestRouting.route(request: ssh, openRoots: []) == nil)
+        #expect(LauncherRequestRouting.route(request: relative, openRoots: []) == nil)
+    }
+
+    private func openRequest(
+        _ path: String,
+        policy: LauncherActivationPolicy = .automatic
+    ) -> LauncherOpenRequest {
+        LauncherOpenRequest(target: .local(path: path), activationPolicy: policy)
+    }
+
+    private func gotoRequest(
+        _ path: String,
+        location: RafuCore.SourceLocation,
+        policy: LauncherActivationPolicy = .automatic
+    ) -> LauncherOpenRequest {
+        LauncherOpenRequest(
+            target: .local(path: path),
+            sourceLocation: location,
+            activationPolicy: policy
+        )
+    }
+}
+
+@MainActor
+@Suite("Launcher request router effects")
+struct LauncherRequestRouterEffectTests {
+    @Test("Nonmatching reuse focuses before enqueuing the replacement folder")
+    func reuseEffects() {
+        let id = UUID()
+        var events: [String] = []
+        let router = LauncherRequestRouter(
+            dependencies: dependencies(
+                roots: [OpenWorkspaceRoot(windowID: id, rootURL: fileURL("/work/a"))],
+                focus: { focusedID in
+                    events.append("focus:\(focusedID)")
+                    return true
+                },
+                enqueue: { url in events.append("enqueue:\(url.path)") }
+            )
+        )
+        let request = LauncherOpenRequest(target: .local(path: "/work/b"))
+
+        #expect(
+            router.handle(
+                LauncherIPCEnvelope(kind: .openFolder, payload: request, requestID: "reuse")
+            )
+                == .accepted(
+                    workspaceMatched: false,
+                    windowFocused: true,
+                    waitSupported: false
+                )
+        )
+        #expect(events == ["focus:\(id)", "enqueue:/work/b"])
+    }
+
+    @Test("New-window goto queues selection before enqueue and scene creation")
+    func newWindowGotoEffects() {
+        var events: [String] = []
+        let router = LauncherRequestRouter(
+            dependencies: dependencies(
+                roots: [],
+                enqueue: { url in events.append("enqueue:\(url.path)") },
+                openWindow: {
+                    events.append("openWindow")
+                    return true
+                },
+                queueNewGoto: { root, relative, location in
+                    events.append("goto:\(root.path):\(relative):\(location.line)")
+                }
+            )
+        )
+        let request = LauncherOpenRequest(
+            target: .local(path: "/other/main.swift"),
+            sourceLocation: RafuCore.SourceLocation(line: 7, column: 2),
+            activationPolicy: .newWindow
+        )
+
+        #expect(
+            router.handle(
+                LauncherIPCEnvelope(kind: .goto, payload: request, requestID: "goto")
+            )
+                == .accepted(
+                    workspaceMatched: false,
+                    windowFocused: false,
+                    waitSupported: false
+                )
+        )
+        #expect(events == ["goto:/other:main.swift:7", "enqueue:/other", "openWindow"])
+    }
+
+    @Test("Matching goto uses the registered session directly")
+    func matchingGotoEffects() {
+        let id = UUID()
+        var received: (UUID, String, RafuCore.SourceLocation)?
+        let router = LauncherRequestRouter(
+            dependencies: dependencies(
+                roots: [OpenWorkspaceRoot(windowID: id, rootURL: fileURL("/work/a"))],
+                goto: { windowID, relative, location in
+                    received = (windowID, relative, location)
+                    return true
+                }
+            )
+        )
+        let location = RafuCore.SourceLocation(line: 9, column: 4)
+        let request = LauncherOpenRequest(
+            target: .local(path: "/work/a/main.swift"),
+            sourceLocation: location
+        )
+
+        #expect(
+            router.handle(
+                LauncherIPCEnvelope(kind: .goto, payload: request, requestID: "match")
+            )
+                == .accepted(
+                    workspaceMatched: true,
+                    windowFocused: true,
+                    waitSupported: false
+                )
+        )
+        #expect(received?.0 == id)
+        #expect(received?.1 == "main.swift")
+        #expect(received?.2 == location)
+    }
+
+    private func dependencies(
+        roots: [OpenWorkspaceRoot],
+        focus: @escaping (UUID) -> Bool = { _ in true },
+        enqueue: @escaping (URL) -> Void = { _ in },
+        openWindow: @escaping () -> Bool = { true },
+        goto: @escaping (UUID, String, RafuCore.SourceLocation) -> Bool = { _, _, _ in true },
+        queueNewGoto: @escaping (URL, String, RafuCore.SourceLocation) -> Void = { _, _, _ in }
+    ) -> LauncherRequestRouter.Dependencies {
+        LauncherRequestRouter.Dependencies(
+            snapshots: { roots },
+            focus: focus,
+            enqueueFolder: enqueue,
+            openWindow: openWindow,
+            goto: goto,
+            queueGoto: { _, _, _, _ in },
+            queueGotoForNextWindow: queueNewGoto
+        )
+    }
+}
+
+private func fileURL(_ path: String) -> URL {
+    URL(fileURLWithPath: path).standardizedFileURL
+}
+
 private final class SocketPair {
     let client: Int32
     private var server: Int32

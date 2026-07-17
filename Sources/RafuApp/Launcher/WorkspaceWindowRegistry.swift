@@ -1,46 +1,184 @@
 import AppKit
 import Observation
+import RafuCore
 
-/// The live workspace windows this app process currently has open, keyed by
-/// `WorkspaceSession` identity. Lets a future IPC router (`docs/plans/
-/// phases/cli-app-ipc.md`, I3) answer "is a window already showing this
-/// folder" and focus it, without holding a strong reference to a session or
-/// its window from a socket-listener context. Populated by
-/// `WorkspaceSceneRoot`'s appear/disappear hooks starting at I0; not yet
-/// consulted by anything — the router lands in a later increment.
+/// MainActor registry for the live SwiftUI workspace scenes. Session/window
+/// references are weak; stable IDs and registration order make pure routing
+/// deterministic while `WindowAccessor` refreshes each entry as state changes.
 @MainActor
 @Observable
 final class WorkspaceWindowRegistry {
     static let shared = WorkspaceWindowRegistry()
 
     struct Entry {
-        /// Reads the session's current workspace root on demand — a session
-        /// can open or close a folder after registration, so this is a live
-        /// query, never a cached snapshot.
+        let windowID: UUID
+        let registrationOrder: Int
         let rootURL: () -> URL?
+        let goto: (String, SourceLocation) -> Void
         weak var window: NSWindow?
     }
 
+    private struct PendingGoto {
+        let rootPath: String
+        let relativePath: String
+        let location: SourceLocation
+    }
+
+    private struct PendingNewWindowGoto {
+        let minimumRegistrationOrder: Int
+        let request: PendingGoto
+    }
+
     private(set) var entries: [ObjectIdentifier: Entry] = [:]
+    private var nextRegistrationOrder = 0
+    private var pendingByWindowID: [UUID: PendingGoto] = [:]
+    private var pendingForNewWindow: [PendingNewWindowGoto] = []
+    private var openWorkspaceWindowAction: (() -> Void)?
 
     private init() {}
 
-    /// Registers (or replaces) the entry for `session`. Call once the
-    /// scene's window becomes available (`WindowAccessor`'s callback).
-    func register(session: WorkspaceSession, window: NSWindow, rootURL: @escaping () -> URL?) {
-        entries[ObjectIdentifier(session)] = Entry(rootURL: rootURL, window: window)
+    /// The `rootURL` parameter remains part of the frozen I0 call signature;
+    /// the registry deliberately rebuilds it with a weak session capture so
+    /// the closure cannot keep a closed scene alive.
+    func register(
+        session: WorkspaceSession,
+        window: NSWindow,
+        rootURL _: @escaping () -> URL?
+    ) {
+        let key = ObjectIdentifier(session)
+        let identity: (UUID, Int)
+        if let current = entries[key] {
+            identity = (current.windowID, current.registrationOrder)
+        } else {
+            identity = (UUID(), nextRegistrationOrder)
+            nextRegistrationOrder += 1
+        }
+
+        entries[key] = Entry(
+            windowID: identity.0,
+            registrationOrder: identity.1,
+            rootURL: { [weak session] in session?.rootURL },
+            goto: { [weak session] relativePath, location in
+                session?.openFile(atRelativePath: relativePath, selecting: location)
+            },
+            window: window
+        )
+        applyPendingGotoIfReady(to: key)
     }
 
-    /// Removes `session`'s entry. Call when its scene disappears.
     func deregister(session: WorkspaceSession) {
-        entries.removeValue(forKey: ObjectIdentifier(session))
+        let key = ObjectIdentifier(session)
+        if let windowID = entries[key]?.windowID {
+            pendingByWindowID.removeValue(forKey: windowID)
+        }
+        entries.removeValue(forKey: key)
     }
 
-    /// Drops entries whose window has already been deallocated. A window
-    /// can close before its scene's `.onDisappear` runs `deregister`, so
-    /// callers that read `entries` prune first rather than trusting a weak
-    /// reference is still live.
     func pruneDeadEntries() {
+        let deadIDs = entries.values.compactMap { entry in
+            entry.window == nil ? entry.windowID : nil
+        }
         entries = entries.filter { $0.value.window != nil }
+        for id in deadIDs { pendingByWindowID.removeValue(forKey: id) }
+    }
+
+    func snapshots() -> [OpenWorkspaceRoot] {
+        pruneDeadEntries()
+        return entries.values
+            .sorted { lhs, rhs in
+                let lhsIsKey = lhs.window?.isKeyWindow == true
+                let rhsIsKey = rhs.window?.isKeyWindow == true
+                if lhsIsKey != rhsIsKey { return lhsIsKey }
+                return lhs.registrationOrder < rhs.registrationOrder
+            }
+            .map { entry in
+                OpenWorkspaceRoot(windowID: entry.windowID, rootURL: entry.rootURL())
+            }
+    }
+
+    @discardableResult
+    func focus(windowID: UUID) -> Bool {
+        pruneDeadEntries()
+        guard let window = entries.values.first(where: { $0.windowID == windowID })?.window else {
+            return false
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        return true
+    }
+
+    @discardableResult
+    func goto(windowID: UUID, relativePath: String, location: SourceLocation) -> Bool {
+        pruneDeadEntries()
+        guard let entry = entries.values.first(where: { $0.windowID == windowID }) else {
+            return false
+        }
+        entry.goto(relativePath, location)
+        return focus(windowID: windowID)
+    }
+
+    func queueGoto(
+        windowID: UUID,
+        workspaceRoot: URL,
+        relativePath: String,
+        location: SourceLocation
+    ) {
+        pendingByWindowID[windowID] = PendingGoto(
+            rootPath: Self.normalizedPath(workspaceRoot),
+            relativePath: relativePath,
+            location: location
+        )
+    }
+
+    func queueGotoForNextWindow(
+        workspaceRoot: URL,
+        relativePath: String,
+        location: SourceLocation
+    ) {
+        pendingForNewWindow.append(
+            PendingNewWindowGoto(
+                minimumRegistrationOrder: nextRegistrationOrder,
+                request: PendingGoto(
+                    rootPath: Self.normalizedPath(workspaceRoot),
+                    relativePath: relativePath,
+                    location: location
+                )
+            )
+        )
+    }
+
+    func installOpenWorkspaceWindowAction(_ action: @escaping () -> Void) {
+        openWorkspaceWindowAction = action
+    }
+
+    @discardableResult
+    func openWorkspaceWindow() -> Bool {
+        guard let openWorkspaceWindowAction else { return false }
+        openWorkspaceWindowAction()
+        return true
+    }
+
+    private func applyPendingGotoIfReady(to key: ObjectIdentifier) {
+        guard let entry = entries[key], let rootURL = entry.rootURL() else { return }
+        let rootPath = Self.normalizedPath(rootURL)
+
+        if let pending = pendingByWindowID[entry.windowID], pending.rootPath == rootPath {
+            pendingByWindowID.removeValue(forKey: entry.windowID)
+            entry.goto(pending.relativePath, pending.location)
+            return
+        }
+
+        guard
+            let index = pendingForNewWindow.firstIndex(where: {
+                entry.registrationOrder >= $0.minimumRegistrationOrder
+                    && $0.request.rootPath == rootPath
+            })
+        else { return }
+        let pending = pendingForNewWindow.remove(at: index).request
+        entry.goto(pending.relativePath, pending.location)
+    }
+
+    private static func normalizedPath(_ url: URL) -> String {
+        url.standardizedFileURL.resolvingSymlinksInPath().path
     }
 }

@@ -247,3 +247,14 @@ unchanged.
   permissions and live-socket ownership. Evidence: `swift build`; full `swift
   test` (531 tests); `./script/format.sh --fix` and
   `./script/format.sh --lint` all passed.
+- **I3 — complete (2026-07-18):** Added the pure component-aware routing
+  matrix and its MainActor effects bridge; deterministic registry snapshots
+  prefer the key window and then registration order. SwiftUI's `openWindow`
+  creates workspace scenes, while weak `NSWindow`/session references support
+  specific-window focus and stale-entry pruning. Pending goto requests cover
+  reused roots, containing-folder replacement, and a registration-order fence
+  for forced new windows. Headless router/effect tests cover the full reuse,
+  match, goto, and new-window matrix. Evidence: `swift build`; full `swift
+  test` (543 tests); `./script/format.sh --fix` and
+  `./script/format.sh --lint` all passed; window-management/AppKit review
+  confirmed the narrow focus-only escape.
