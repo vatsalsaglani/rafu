@@ -205,18 +205,49 @@ Gate: parser fixtures green ✓; no rendering change yet; M4-compat preserved.
 
 ## M3 — Flow layout (pure)
 
-- New `Sources/RafuApp/Markdown/MermaidLayout.swift`: layered (rank-based)
-  layout — rank assignment via longest-path with back-edge detection
-  (cycles broken for ranking, marked as feedback edges), in-rank ordering,
-  coordinate assignment, subgraph bounds, edge routing. Pure `Sendable`, no
-  SwiftUI import. Sequence-geometry helper (lifeline x-positions, message
-  y-positions, activation-bar spans, block frames) lands here too, unused
-  until M6.
-- Tests (`MermaidLayoutTests.swift`): ranks, in-rank ordering, subgraph
-  containment, no-overlap invariant on computed frames, cyclic fixture.
-  **No pixel snapshots** — assert topology/frame invariants only.
+**Status: Complete (2026-07-17)**
 
-Gate: layout tests green.
+### Implementation
+
+- New `Sources/RafuApp/Markdown/MermaidLayout.swift`: pure CoreGraphics-domain
+  layout engine (imports only Foundation + CoreGraphics; all types nonisolated
+  `Sendable` value types). `MermaidLayoutEngine.layout(_ flow:)` → `MermaidFlowLayout`
+  (NodeFrame with rank/order, EdgeGeometry with endpoints/arrowAnchor/
+  arrowDirection/isFeedback, SubgraphFrame with depth, canvasSize). Rank
+  assignment = longest-path DAG with iterative-DFS back-edge detection (cycles
+  broken and marked `isFeedback`, kept for routing); self-loops excluded from
+  ranking adjacency (no infinite loop) routed as right-side bulge, never
+  `isFeedback`; isolated/multi-component nodes ranked default 0. Deterministic
+  in-rank ordering (barycenter-lite, first-seen tiebreak — never iterates raw
+  Dictionary for order). Direction-aware coordinates (TD/BT/LR/RL). Bottom-up
+  subgraph bounds (children recursed first, parent unions child frames + member
+  rects — because parser lists node only in innermost subgraph; parents emitted
+  pre-order). Edge routing = generic rect-boundary intersection toward opposite
+  node center. Also `layout(_ sequence:)` → `MermaidSequenceLayout` (lifelines +
+  message rows keyed by durable Message.id; empty activations/blocks scaffold
+  for M5/M6).
+- Tests (`MermaidLayoutTests.swift`): ranks, in-rank ordering, subgraph
+  containment + nesting, node no-overlap, cyclic-terminates-with-feedback,
+  self-loop, direction-axis, empty graph, disconnected components, sequence
+  ordering/identity. **No pixel snapshots** — assert topology/frame invariants only.
+
+### Verification
+
+- `swift build` — clean, no new dependency.
+- `swift test` — 535 tests pass (12 new layout tests).
+- `./script/format.sh --lint` — clean.
+- `./script/build_and_run.sh --verify` — **deferred** to M6/M7 (no rendering
+  change in M3; layout is cached, never computed per-frame in Canvas closure).
+- Diff limited to the two new files.
+
+### Known M3 limitation
+
+Sibling subgraph boxes are not guaranteed disjoint — only "member node frame ⊆
+own subgraph frame" and "child frame ⊆ parent frame" hold. `canvasSize` is
+intentionally unbounded for dense/wide diagrams. This is a design choice, not
+a defect.
+
+Gate: layout tests green ✓.
 
 ## M4 — Flow renderer
 

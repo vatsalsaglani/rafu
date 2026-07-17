@@ -186,6 +186,47 @@ swift test                     # 510 tests pass (all existing + new fixtures)
 - **Phase:** [`docs/plans/phases/mermaid-preview-honesty.md`](../plans/phases/mermaid-preview-honesty.md)
   (M1 complete; M2–M6 add flow layout and sequence lifelines; M7 finalizes)
 
-**Sections to be filled in M3/M7:**
-- Layout algorithm and frame-invariant testing (M3).
-- Fixture policy (M7 close-out).
+### Layout engine (M3)
+
+**Purity rule:** `MermaidLayout.swift` imports only Foundation and CoreGraphics.
+CoreGraphics is a system framework with no SwiftUI dependency, and its types
+(CGRect, CGPoint, CGSize) are already `Sendable`. This purity rule ensures domain
+layout code is reusable and testable away from UI, and M4's SwiftUI Canvas consumes
+`MermaidFlowLayout`/`MermaidSequenceLayout` with zero conversion overhead.
+
+**Algorithm summary:** Flow layout is rank-based (longest-path DAG + iterative-DFS
+back-edge detection). Cycles are broken for ranking; back edges are marked
+`isFeedback` and kept for routing. Self-loops are excluded from ranking adjacency
+(preventing infinite loop) and routed as a right-side bulge. Isolated and
+multi-component nodes default to rank 0. In-rank ordering uses barycenter-lite
+heuristics with first-seen tiebreak. Coordinates are assigned direction-aware
+(TD/BT/LR/RL). Subgraph bounds are computed bottom-up (children recursed first,
+parent unions child frames + member rects, respecting the fact that the parser
+lists each node only in its innermost subgraph; parents are emitted pre-order).
+Edge routing uses generic rect-boundary intersection toward the opposite node center.
+
+**Determinism rule:** Node ordering is never derived from raw Dictionary iteration.
+Seed order for in-rank barycenter is first-appearance order across edges, then
+remaining node IDs sorted lexicographically. This ensures identical layout output
+for identical input across runs and platforms.
+
+**Caching and lifecycle:** Layout is a pure, one-shot function (`layout(_:)` → 
+`MermaidFlowLayout` or `MermaidSequenceLayout`) that M4 caches at the segment level.
+It is never computed per-frame inside a SwiftUI Canvas closure; recomputation happens
+only when the parsed model changes. This preserves the typing-path frame budget and
+decouples layout cost from rendering frequency.
+
+**Testing policy:** `MermaidLayoutTests.swift` asserts topology and frame invariants
+(ranks, ordering determinism/contiguity, subgraph containment + nesting, node
+no-overlap, cyclic-terminates-with-feedback, self-loop routing, direction-axis
+correctness, empty graph, disconnected components, sequence ordering/identity).
+**No pixel snapshots** — visual quality is asserted at M4/M6 render time via
+`--verify`, not at layout time.
+
+**Known limitation (intentional):** Sibling subgraph boxes are not guaranteed
+disjoint; only "member node frame ⊆ own subgraph frame" and "child frame ⊆ parent
+frame" hold. `canvasSize` is intentionally unbounded to support dense and wide
+diagrams without forced scaling.
+
+**Section to be filled in M7:**
+- Fixture policy close-out.
