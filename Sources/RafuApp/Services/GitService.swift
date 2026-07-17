@@ -152,6 +152,28 @@ nonisolated struct GitService: Sendable {
         try await setStaged(staged, paths: [path], at: rootURL)
     }
 
+    /// Applies one exact hunk captured from Git's raw patch to the index.
+    /// The patch is stdin-only; context mismatches fail atomically rather
+    /// than falling back to a three-way merge or adjusted line counts.
+    @concurrent
+    func applyHunk(patch: String, staging: Bool, at rootURL: URL) async throws {
+        let repositoryRoot = try await requireRepositoryRoot(at: rootURL)
+        let arguments =
+            ["apply", "--cached"]
+            + (staging ? [] : ["--reverse"])
+            + ["-"]
+        do {
+            _ = try await checkedRun(
+                arguments,
+                at: repositoryRoot,
+                standardInput: Data(patch.utf8)
+            )
+        } catch let error as GitServiceError {
+            guard case .commandFailed = error else { throw error }
+            throw GitServiceError.hunkContextChanged
+        }
+    }
+
     /// Stages or unstages every path in one Git process, regardless of count.
     /// Pathspecs are streamed over stdin (`--pathspec-from-file=- --pathspec-file-nul`)
     /// rather than passed as argv, and each is prefixed `:(literal)` so paths
@@ -480,6 +502,7 @@ nonisolated enum GitServiceError: LocalizedError, Equatable {
     case commandFailed(String)
     case couldNotLaunch(String)
     case emptyCommitMessage
+    case hunkContextChanged
     case invalidBranchName(String)
     case invalidHistoryRange
     case invalidRemote(String)
@@ -500,6 +523,8 @@ nonisolated enum GitServiceError: LocalizedError, Equatable {
             "Rafu could not launch Git: \(message)"
         case .emptyCommitMessage:
             "Enter a commit message."
+        case .hunkContextChanged:
+            "This file changed since the diff was captured. Refresh the diff and try again."
         case .invalidBranchName(let name):
             "“\(name)” is not a valid Git branch name."
         case .invalidHistoryRange:

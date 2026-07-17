@@ -2,7 +2,7 @@
 
 ## Status
 
-Planned (2026-07-17). One of six post-audit lanes defined in
+In progress (2026-07-17; G1 complete). One of six post-audit lanes defined in
 [`post-audit-worktree-fanout.md`](post-audit-worktree-fanout.md). Runs in a
 **dedicated git worktree** after its contract commit (G0) lands on main.
 Hunk staging and read-only blame are explicitly enumerated Phase 6
@@ -197,3 +197,16 @@ they disagree.
 - Blame read-only, bounded, canvas-hosted, color-honest.
 - ADR 0011 + reference note landed; all parsers pure with fixture tests;
   round-trips green in temp repos; full suite + `--verify` green.
+
+## Completion record
+
+- **G1 — complete (2026-07-17):** exact `rawPatch` hunk slicing, stdin-only
+  `git apply --cached [--reverse] -`, modified-file-only canvas controls, stale
+  context failure, and apply/refresh/re-diff session sequencing landed. The
+  overlapping-partially-staged fixture passed without narrowing v1: the selected
+  line-4 hunk alone entered the index, the distant line-20 hunk stayed in the
+  working tree, reverse apply returned the index to empty, and both working-tree
+  changes remained. Verification: 31 Git-focused tests, 519 full tests, `swift
+  build`, and format fix/lint green. Test delta: +4 (three pure builder fixtures,
+  one repository round-trip). `build_and_run.sh --verify` and manual UI checks
+  remain intentionally consolidated at G4.

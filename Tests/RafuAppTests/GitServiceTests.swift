@@ -321,6 +321,59 @@ struct GitServiceTests {
             #expect(!merged.isBinary)
         }
     }
+
+    @Test("Overlapping partially staged hunk round-trips without staging a distant hunk")
+    func overlappingPartiallyStagedHunkRoundTrip() async throws {
+        try await withRepository { root in
+            let file = root.appending(path: "partial.txt")
+            let baseLines = (1...24).map { "line \($0)" }
+            try write(baseLines.joined(separator: "\n") + "\n", to: file)
+            try runGit(["add", "partial.txt"], at: root)
+            try runGit(["commit", "-m", "Base"], at: root)
+
+            var stagedLines = baseLines
+            stagedLines[3] = "line 4 staged"
+            try write(stagedLines.joined(separator: "\n") + "\n", to: file)
+            try runGit(["add", "partial.txt"], at: root)
+
+            var workingLines = stagedLines
+            workingLines[3] = "line 4 final"
+            workingLines[19] = "line 20 working"
+            try write(workingLines.joined(separator: "\n") + "\n", to: file)
+
+            let service = GitService()
+            let working = try await service.diff(GitDiffRequest(path: "partial.txt"), at: root)
+            #expect(working.hunks.count == 2)
+            let overlappingHunk = try #require(working.hunks.first)
+            let stagePatch = try GitHunkPatchBuilder.patch(for: overlappingHunk, in: working)
+            #expect(stagePatch.contains("-line 4 staged\n+line 4 final"))
+            #expect(!stagePatch.contains("line 20 working"))
+
+            try await service.applyHunk(patch: stagePatch, staging: true, at: root)
+
+            let staged = try await service.diff(
+                GitDiffRequest(path: "partial.txt", scope: .staged), at: root)
+            let remainingWorking = try await service.diff(
+                GitDiffRequest(path: "partial.txt"), at: root)
+            #expect(staged.rawPatch.contains("+line 4 final"))
+            #expect(!staged.rawPatch.contains("line 4 staged"))
+            #expect(!staged.rawPatch.contains("line 20 working"))
+            #expect(!remainingWorking.rawPatch.contains("line 4 final"))
+            #expect(remainingWorking.rawPatch.contains("+line 20 working"))
+
+            let unstageHunk = try #require(staged.hunks.first)
+            let unstagePatch = try GitHunkPatchBuilder.patch(for: unstageHunk, in: staged)
+            try await service.applyHunk(patch: unstagePatch, staging: false, at: root)
+
+            let cleanIndex = try await service.diff(
+                GitDiffRequest(path: "partial.txt", scope: .staged), at: root)
+            let restoredWorking = try await service.diff(
+                GitDiffRequest(path: "partial.txt"), at: root)
+            #expect(cleanIndex.rawPatch.isEmpty)
+            #expect(restoredWorking.rawPatch.contains("+line 4 final"))
+            #expect(restoredWorking.rawPatch.contains("+line 20 working"))
+        }
+    }
 }
 
 private func withRepository(

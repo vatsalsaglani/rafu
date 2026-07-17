@@ -1486,16 +1486,83 @@ final class WorkspaceSession {
     // MARK: - Hunk staging (stub — filled in by the git-depth lane's G1 increment)
 
     /// Stages one hunk of the currently open working-tree diff via
-    /// `git apply --cached`. No-op until G1 lands `GitHunkPatchBuilder`.
+    /// `git apply --cached`.
     func stageHunk(_ hunk: GitDiffHunk) async {
-        guard rootURL != nil, gitOpenDiff != nil else { return }
+        guard let rootURL,
+            let openDiff = gitOpenDiff,
+            openDiff.scope == .workingTree,
+            gitSnapshot?.changes.first(where: { $0.path == openDiff.diff.path })?.kind == .modified,
+            !isGitBusy,
+            !isGitHunkActionBusy
+        else { return }
+
+        isGitHunkActionBusy = true
+        defer { isGitHunkActionBusy = false }
+        do {
+            let patch = try GitHunkPatchBuilder.patch(for: hunk, in: openDiff.diff)
+            try await gitService.applyHunk(patch: patch, staging: true, at: rootURL)
+            await refreshGit()
+            let refreshed = try await gitService.diff(
+                GitDiffRequest(path: openDiff.diff.path, scope: openDiff.scope),
+                at: rootURL
+            )
+            guard gitOpenDiff?.id == openDiff.id else { return }
+            if refreshed.isEmpty {
+                closeGitDiff()
+            } else {
+                gitOpenDiff = GitOpenDiff(
+                    title: openDiff.title,
+                    subtitle: openDiff.subtitle,
+                    diff: refreshed,
+                    identity: openDiff.id,
+                    scope: openDiff.scope
+                )
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            reportGitError(error)
+        }
     }
 
     /// Unstages one hunk of the currently open staged diff via
-    /// `git apply --cached --reverse`. No-op until G1 lands
-    /// `GitHunkPatchBuilder`.
+    /// `git apply --cached --reverse`.
     func unstageHunk(_ hunk: GitDiffHunk) async {
-        guard rootURL != nil, gitOpenDiff != nil else { return }
+        guard let rootURL,
+            let openDiff = gitOpenDiff,
+            openDiff.scope == .staged,
+            gitSnapshot?.changes.first(where: { $0.path == openDiff.diff.path })?.kind == .modified,
+            !isGitBusy,
+            !isGitHunkActionBusy
+        else { return }
+
+        isGitHunkActionBusy = true
+        defer { isGitHunkActionBusy = false }
+        do {
+            let patch = try GitHunkPatchBuilder.patch(for: hunk, in: openDiff.diff)
+            try await gitService.applyHunk(patch: patch, staging: false, at: rootURL)
+            await refreshGit()
+            let refreshed = try await gitService.diff(
+                GitDiffRequest(path: openDiff.diff.path, scope: openDiff.scope),
+                at: rootURL
+            )
+            guard gitOpenDiff?.id == openDiff.id else { return }
+            if refreshed.isEmpty {
+                closeGitDiff()
+            } else {
+                gitOpenDiff = GitOpenDiff(
+                    title: openDiff.title,
+                    subtitle: openDiff.subtitle,
+                    diff: refreshed,
+                    identity: openDiff.id,
+                    scope: openDiff.scope
+                )
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            reportGitError(error)
+        }
     }
 
     // MARK: - Stash (stub — requires explicit user approval before G2 starts)

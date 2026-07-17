@@ -1,7 +1,7 @@
 # Git process and parsing
 
 - Applies to: local Git status, diffs, history, branch operations, staging, and process capture
-- Last verified: Swift 6.2, `/usr/bin/git` (Apple Git-155, 2.50.1) on macOS, 2026-07-13
+- Last verified: Swift 6.2, `/usr/bin/git` (Apple Git-155, 2.50.1) on macOS, 2026-07-17
 
 ## Rule or observed behavior
 
@@ -36,6 +36,13 @@
   parsing misaligns every entry after a rename. Attribute counts to the new
   path. Untracked files never appear in numstat output at all (staged or not);
   callers needing an untracked file's size must read it from disk.
+- Stage or unstage a textual hunk by slicing the exact hunk block from
+  `GitFileDiff.rawPatch`, prefixing it with the exact file prologue, and passing
+  that data over stdin to `git apply --cached -` or `git apply --cached
+  --reverse -`. Never rebuild the patch from aligned display rows: alignment
+  intentionally discards `\ No newline at end of file`, so reconstruction can
+  change file contents. Do not add `--3way` or `--recount`; a context mismatch
+  must fail atomically and ask the user to refresh the diff.
 
 ## Why it matters
 
@@ -47,6 +54,14 @@ for any batch operation over user-controlled filenames — Rafu's Source Control
 tree view stages entire folders in one process, so a mismatched file would stage
 or unstage the wrong content without any error.
 
+Hunk staging is a new index write path. Keeping the Git-produced, one-file patch
+on stdin prevents shell/argv injection, and refusing fuzzy or three-way fallback
+prevents an apparently local action from merging stale context into the index.
+The captured diff is bounded before slicing, the apply process is bounded and
+cancellable, and the UI exposes the action only for modified files; added,
+deleted, renamed, untracked, binary, and historical diffs retain whole-file
+behavior.
+
 ## Reproduction or evidence
 
 The focused Git tests create temporary repositories covering unborn staging,
@@ -56,6 +71,13 @@ in one process, and merged working-tree/staged numstat line counts. A rename's
 `-z` numstat shape was verified directly against `/usr/bin/git` (`git diff
 --numstat -z --find-renames --cached`) before writing `GitNumstatParser`.
 
+The hunk fixtures verify a single hunk, the middle hunk of three, and exact
+retention of the no-newline marker. The service round-trip starts with line 4
+already staged, changes that same line again plus a distant line 20, stages only
+the overlapping working-tree hunk, then reverses the staged hunk. The staged
+patch contains `+line 4 final` and never `line 20 working`; after reverse apply,
+the staged patch is empty and the working patch contains both final changes.
+
 ## Verification
 
 Run `swift test --filter Git`. Run the full suite afterward because process
@@ -64,9 +86,11 @@ isolation and shared workspace state are integration concerns.
 ## Related code, ADRs, and phases
 
 - `Sources/RafuApp/Git/` (including `GitCommandRunner.swift`, `GitNumstatParser.swift`, `GitChangeTree.swift`)
+- `Sources/RafuApp/Git/GitHunkPatchBuilder.swift`
 - `Sources/RafuApp/Services/GitService.swift`
 - `Sources/RafuApp/Views/GitInspectorView.swift` (Source Control tree view)
 - `Tests/RafuAppTests/GitServiceTests.swift`
 - `Tests/RafuAppTests/GitChangeTreeTests.swift`
+- `Tests/RafuAppTests/GitHunkPatchBuilderTests.swift`
 - `docs/plans/phases/pre-initial-push-workbench.md`
-
+- `docs/plans/phases/git-depth-blame-stash-hunks.md`

@@ -642,7 +642,7 @@ private struct GitStandaloneDiffCanvas: View {
             .frame(height: 34)
             .background(theme.palette.tabBarBackground.opacity(0.92))
             Divider().overlay(theme.palette.borderSubtle)
-            GitSideBySideDiffView(openDiff: openDiff)
+            GitSideBySideDiffView(openDiff: openDiff, session: session)
         }
     }
 }
@@ -696,6 +696,7 @@ private struct GitDiffTabItem: View {
 private struct GitSideBySideDiffView: View {
     @Environment(\.rafuTheme) private var theme
     let openDiff: GitOpenDiff
+    @Bindable var session: WorkspaceSession
 
     var body: some View {
         VStack(spacing: 0) {
@@ -802,13 +803,64 @@ private struct GitSideBySideDiffView: View {
             Text(hunk.header)
                 .font(.caption.monospaced())
                 .foregroundStyle(theme.palette.accent)
+            Spacer(minLength: 12)
+            if let action = hunkAction {
+                Button(action.title, systemImage: action.systemImage) {
+                    perform(action, on: hunk)
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .disabled(session.isGitBusy || session.isGitHunkActionBusy)
+                .help(action.help)
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
         .padding(.horizontal, 12)
-        .frame(height: 24)
         .background(theme.palette.selection.opacity(0.45))
         .overlay(alignment: .top) { Divider().overlay(theme.palette.borderSubtle) }
         .overlay(alignment: .bottom) { Divider().overlay(theme.palette.borderSubtle) }
+        .contextMenu {
+            if let action = hunkAction {
+                Button(action.title, systemImage: action.systemImage) {
+                    perform(action, on: hunk)
+                }
+                .disabled(session.isGitBusy || session.isGitHunkActionBusy)
+            }
+        }
+    }
+
+    private var hunkAction: HunkAction? {
+        guard
+            session.gitSnapshot?.changes.first(where: { $0.path == openDiff.diff.path })?.kind
+                == .modified
+        else { return nil }
+        switch openDiff.scope {
+        case .workingTree: return .stage
+        case .staged: return .unstage
+        case .commit, .between: return nil
+        }
+    }
+
+    private func perform(_ action: HunkAction, on hunk: GitDiffHunk) {
+        Task {
+            switch action {
+            case .stage: await session.stageHunk(hunk)
+            case .unstage: await session.unstageHunk(hunk)
+            }
+        }
+    }
+
+    private enum HunkAction: Equatable {
+        case stage
+        case unstage
+
+        var title: String { self == .stage ? "Stage Hunk" : "Unstage Hunk" }
+        var systemImage: String { self == .stage ? "plus.circle" : "minus.circle" }
+        var help: String {
+            self == .stage
+                ? "Stage only this hunk in the Git index"
+                : "Remove only this hunk from the Git index"
+        }
     }
 
     private func diffColumnTitle(_ title: String, symbol: String) -> some View {
