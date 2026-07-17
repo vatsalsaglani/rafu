@@ -2,7 +2,10 @@
 
 ## Status
 
-Planned (2026-07-17). One of six post-audit lanes defined in
+Implementation complete (2026-07-18; G1-G4 complete). Automated gates are green;
+the keyboard-only, VoiceOver, and second-window manual acceptance passes remain
+deferred after the user prohibited computer-control tooling. One of six
+post-audit lanes defined in
 [`post-audit-worktree-fanout.md`](post-audit-worktree-fanout.md). Runs in a
 **dedicated git worktree** after its contract commit (G0) lands on main.
 Hunk staging and read-only blame are explicitly enumerated Phase 6
@@ -197,3 +200,57 @@ they disagree.
 - Blame read-only, bounded, canvas-hosted, color-honest.
 - ADR 0011 + reference note landed; all parsers pure with fixture tests;
   round-trips green in temp repos; full suite + `--verify` green.
+
+## Completion record
+
+- **G1 — complete (2026-07-17):** exact `rawPatch` hunk slicing, stdin-only
+  `git apply --cached [--reverse] -`, modified-file-only canvas controls, stale
+  context failure, and apply/refresh/re-diff session sequencing landed. The
+  overlapping-partially-staged fixture passed without narrowing v1: the selected
+  line-4 hunk alone entered the index, the distant line-20 hunk stayed in the
+  working tree, reverse apply returned the index to empty, and both working-tree
+  changes remained. Verification: 31 Git-focused tests, 519 full tests, `swift
+  build`, and format fix/lint green. Test delta: +4 (three pure builder fixtures,
+  one repository round-trip). `build_and_run.sh --verify` and manual UI checks
+  remain intentionally consolidated at G4.
+- **G2 — complete (2026-07-18):** user-approved explicit stash push (optional
+  message and include-untracked toggle), list/apply/pop/drop operations,
+  canonical non-negative `stash@{n}` validation, stale-entry preflight, and
+  confirmation for pop/drop landed with a GitLens-style collapsible Source
+  Control section. No auto-stash path exists. Because the G0 contract freezes
+  `WorkspaceSession.refreshGit()` outside the four stash stub bodies, a small
+  owned `GitStashCoordinator` performs initial and user-requested list refresh;
+  stash mutations refresh their own list. This intentionally deviates from the
+  stale G2 anchor while preserving its refresh intent and the hard G0 boundary.
+  Verification: 38 Git-focused tests, 526 full tests, `swift build`, and format
+  fix/lint green. Test delta: +7 (five pure parser fixtures and two service
+  tests, including the tracked+untracked push/apply/drop repository round-trip).
+  `build_and_run.sh --verify` and manual UI checks remain consolidated at G4.
+- **G3 — complete (2026-07-18):** one bounded, cancellable
+  `git blame --porcelain -- <path>` process now parses per-line commit, author,
+  time, summary, and boundary metadata with a full-object-ID cache for Git's
+  deduplicated headers. The focused saved file opens as an editor-hosted,
+  read-only attribution table with textual root markers, a keyboard/VoiceOver
+  reachable close control, and no gutter or `Editor/**` changes; selection and
+  workspace changes discard it. G0 froze `GitBlame` as metadata-only and this
+  lane may add model types but not alter that contract, so the canvas presents
+  line/author/commit/age/summary rather than retaining source text in SwiftUI.
+  This is an intentional repository-over-stale-anchor deviation that preserves
+  line attribution, bounded memory, and the rejected-gutter decision. Verification:
+  42 Git-focused tests, 530 full tests, `swift build`, and format fix/lint green.
+  Test delta: +4 (three pure porcelain fixtures and one two-author repository
+  round-trip). `build_and_run.sh --verify` and manual UI checks remain
+  consolidated at G4.
+- **G4 — complete (2026-07-18):** minimal additive menu and command-palette
+  entries expose Stage/Unstage Hunk, conservative tracked-only Stash Changes,
+  and Blame File without claiming shared keyboard shortcuts. ADR 0011 records
+  the user-approved stash expansion, exact index-write contract, bounded blame
+  canvas, rejected-for-MVP gutter alternative, and removability; the Git
+  process reference records the verified parsing and security contracts. Test
+  delta: +0. Final automated evidence: 42 Git-focused tests, 530 full tests,
+  `swift build`, format fix/lint, and `build_and_run.sh --verify` green. The G1
+  repository round-trip supplies the external `git diff --cached`/working-tree
+  evidence for exact stage/unstage behavior. Keyboard-only, VoiceOver, and
+  second-window checks are not claimed: they remain manual acceptance work
+  because the user explicitly disallowed computer-control tooling during the
+  consolidated pass.

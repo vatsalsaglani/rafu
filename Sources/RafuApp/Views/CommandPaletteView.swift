@@ -546,6 +546,80 @@ struct CommandPaletteView: View {
                 session.showResources()
             },
         ]
+
+        if let openDiff = session.gitOpenDiff,
+            !session.isGitBusy,
+            !session.isGitHunkActionBusy,
+            session.gitSnapshot?.changes.first(where: { $0.path == openDiff.diff.path })?.kind
+                == .modified
+        {
+            let action: (verb: String, symbol: String, perform: (GitDiffHunk) async -> Void)? =
+                switch openDiff.scope {
+                case .workingTree:
+                    ("Stage", "plus.circle", { await session.stageHunk($0) })
+                case .staged:
+                    ("Unstage", "minus.circle", { await session.unstageHunk($0) })
+                case .commit, .between:
+                    nil
+                }
+            if let action {
+                for (offset, hunk) in openDiff.diff.hunks.enumerated() {
+                    let title =
+                        openDiff.diff.hunks.count == 1
+                        ? "\(action.verb) Hunk"
+                        : "\(action.verb) Hunk \(offset + 1)"
+                    commands.append(
+                        .init(
+                            id: "git.\(action.verb.lowercased())-hunk.\(hunk.id)",
+                            title: title,
+                            detail: hunk.header,
+                            symbolName: action.symbol,
+                            keywords: ["git", "index", "patch"]
+                        ) {
+                            dismiss()
+                            Task { await action.perform(hunk) }
+                        }
+                    )
+                }
+            }
+        }
+
+        if session.gitSnapshot?.changes.contains(where: { $0.kind != .untracked }) == true,
+            !session.isGitBusy
+        {
+            commands.append(
+                .init(
+                    id: "git.stash-changes",
+                    title: "Stash Changes",
+                    detail: "Tracked files; Source Control has message and untracked options",
+                    symbolName: "archivebox",
+                    keywords: ["git", "save", "worktree"]
+                ) {
+                    dismiss()
+                    Task { await session.stashChanges(message: "", includeUntracked: false) }
+                }
+            )
+        }
+
+        if let document = session.selectedDocument,
+            !document.isDirty,
+            session.gitSnapshot != nil,
+            !session.isGitBusy
+        {
+            commands.append(
+                .init(
+                    id: "git.blame-file",
+                    title: "Blame File",
+                    detail: "Read-only line attribution",
+                    symbolName: "person.text.rectangle",
+                    keywords: ["git", "author", "history", "ownership"]
+                ) {
+                    dismiss()
+                    Task { await session.openBlameForSelectedFile() }
+                }
+            )
+        }
+
         for choice in RafuThemeChoice.allCases {
             commands.append(
                 .init(

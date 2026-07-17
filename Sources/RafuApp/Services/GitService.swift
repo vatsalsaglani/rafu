@@ -152,6 +152,28 @@ nonisolated struct GitService: Sendable {
         try await setStaged(staged, paths: [path], at: rootURL)
     }
 
+    /// Applies one exact hunk captured from Git's raw patch to the index.
+    /// The patch is stdin-only; context mismatches fail atomically rather
+    /// than falling back to a three-way merge or adjusted line counts.
+    @concurrent
+    func applyHunk(patch: String, staging: Bool, at rootURL: URL) async throws {
+        let repositoryRoot = try await requireRepositoryRoot(at: rootURL)
+        let arguments =
+            ["apply", "--cached"]
+            + (staging ? [] : ["--reverse"])
+            + ["-"]
+        do {
+            _ = try await checkedRun(
+                arguments,
+                at: repositoryRoot,
+                standardInput: Data(patch.utf8)
+            )
+        } catch let error as GitServiceError {
+            guard case .commandFailed = error else { throw error }
+            throw GitServiceError.hunkContextChanged
+        }
+    }
+
     /// Stages or unstages every path in one Git process, regardless of count.
     /// Pathspecs are streamed over stdin (`--pathspec-from-file=- --pathspec-file-nul`)
     /// rather than passed as argv, and each is prefixed `:(literal)` so paths
@@ -196,10 +218,67 @@ nonisolated struct GitService: Sendable {
         return data
     }
 
+    private static func isSafeRelativePath(_ path: String) -> Bool {
+        guard !path.isEmpty, !path.hasPrefix("/"), !path.utf8.contains(0) else { return false }
+        return path.split(separator: "/", omittingEmptySubsequences: false).allSatisfy {
+            !$0.isEmpty && $0 != "." && $0 != ".."
+        }
+    }
+
     @concurrent
     func stageAll(at rootURL: URL) async throws {
         let repositoryRoot = try await requireRepositoryRoot(at: rootURL)
         _ = try await checkedRun(["add", "--all"], at: repositoryRoot)
+    }
+
+    @concurrent
+    func stashList(at rootURL: URL) async throws -> [GitStashEntry] {
+        let repositoryRoot = try await requireRepositoryRoot(at: rootURL)
+        let output = try await checkedRun(
+            ["stash", "list", "-z", "--format=%gd%x1f%ct%x1f%gs"],
+            at: repositoryRoot,
+            maximumOutputBytes: 8 * 1_024 * 1_024
+        )
+        return GitStashParser.parse(output.standardOutput)
+    }
+
+    @concurrent
+    func stashPush(message: String, includeUntracked: Bool, at rootURL: URL) async throws {
+        let repositoryRoot = try await requireRepositoryRoot(at: rootURL)
+        var arguments = ["stash", "push"]
+        if includeUntracked { arguments.append("--include-untracked") }
+        let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedMessage.isEmpty {
+            arguments += ["--message", trimmedMessage]
+        }
+        _ = try await checkedRun(arguments, at: repositoryRoot)
+    }
+
+    @concurrent
+    func stashApply(index: Int, at rootURL: URL) async throws {
+        let repositoryRoot = try await requireRepositoryRoot(at: rootURL)
+        _ = try await checkedRun(
+            ["stash", "apply", try stashSelector(for: index)],
+            at: repositoryRoot
+        )
+    }
+
+    @concurrent
+    func stashPop(index: Int, at rootURL: URL) async throws {
+        let repositoryRoot = try await requireRepositoryRoot(at: rootURL)
+        _ = try await checkedRun(
+            ["stash", "pop", try stashSelector(for: index)],
+            at: repositoryRoot
+        )
+    }
+
+    @concurrent
+    func stashDrop(index: Int, at rootURL: URL) async throws {
+        let repositoryRoot = try await requireRepositoryRoot(at: rootURL)
+        _ = try await checkedRun(
+            ["stash", "drop", try stashSelector(for: index)],
+            at: repositoryRoot
+        )
     }
 
     @concurrent
@@ -333,6 +412,20 @@ nonisolated struct GitService: Sendable {
         return GitGutterHunkParser.parse(output.stdout)
     }
 
+    /// Reads porcelain blame for exactly one repository-relative path. The
+    /// caller supplies the already-resolved repository root, keeping this to
+    /// one bounded Git process rather than paying for a second `rev-parse`.
+    @concurrent
+    func blame(forRelativePath path: String, at repositoryRoot: URL) async throws -> GitBlame {
+        guard Self.isSafeRelativePath(path) else { throw GitServiceError.invalidGitPath }
+        let output = try await checkedRun(
+            ["blame", "--porcelain", "--", path],
+            at: repositoryRoot,
+            maximumOutputBytes: 32 * 1_024 * 1_024
+        )
+        return GitBlameParser.parse(output.standardOutput)
+    }
+
     /// Added/deleted line counts per path, merged across unstaged and staged
     /// `git diff --numstat -z` output (two bounded processes total,
     /// independent of changeset size). Untracked files never appear here;
@@ -426,6 +519,11 @@ nonisolated struct GitService: Sendable {
         guard output.terminationStatus == 0 else { throw GitServiceError.invalidRemote(name) }
     }
 
+    private func stashSelector(for index: Int) throws -> String {
+        guard index >= 0 else { throw GitServiceError.invalidStashIndex(index) }
+        return "stash@{\(index)}"
+    }
+
     /// Detects an in-progress merge: one `rev-parse --git-path` process to
     /// locate MERGE_HEAD/MERGE_MSG (worktree-safe), then plain file reads.
     /// Returns nil when no merge is in progress.
@@ -475,21 +573,28 @@ nonisolated struct GitService: Sendable {
 }
 
 nonisolated enum GitServiceError: LocalizedError, Equatable {
+    case blameRequiresSavedFile
     case branchRequiresRemote
     case captureCreationFailed
     case commandFailed(String)
     case couldNotLaunch(String)
     case emptyCommitMessage
+    case hunkContextChanged
     case invalidBranchName(String)
+    case invalidGitPath
     case invalidHistoryRange
     case invalidRemote(String)
     case invalidRevision(String)
+    case invalidStashIndex(Int)
     case notARepository
     case outputTooLarge(limit: Int)
+    case stashChanged
     case upstreamRequiresRemoteAndBranch
 
     var errorDescription: String? {
         switch self {
+        case .blameRequiresSavedFile:
+            "Save the file before opening blame so its line numbers match Git."
         case .branchRequiresRemote:
             "Choose a remote before specifying a branch."
         case .captureCreationFailed:
@@ -500,18 +605,26 @@ nonisolated enum GitServiceError: LocalizedError, Equatable {
             "Rafu could not launch Git: \(message)"
         case .emptyCommitMessage:
             "Enter a commit message."
+        case .hunkContextChanged:
+            "This file changed since the diff was captured. Refresh the diff and try again."
         case .invalidBranchName(let name):
             "“\(name)” is not a valid Git branch name."
+        case .invalidGitPath:
+            "The selected file is not a valid repository-relative Git path."
         case .invalidHistoryRange:
             "Git history pages must request between 1 and 500 commits with a nonnegative offset."
         case .invalidRemote(let name):
             "“\(name)” is not a configured Git remote."
         case .invalidRevision(let revision):
             "“\(revision)” does not identify a commit."
+        case .invalidStashIndex:
+            "The selected stash reference is invalid. Refresh Source Control and try again."
         case .notARepository:
             "The selected folder is not inside a Git repository."
         case .outputTooLarge(let limit):
             "Git produced more than \(limit) bytes of output. Narrow the operation and try again."
+        case .stashChanged:
+            "The stash list changed since this action was chosen. Refresh Source Control and try again."
         case .upstreamRequiresRemoteAndBranch:
             "Setting an upstream requires both a remote and a branch."
         }

@@ -1504,36 +1504,197 @@ final class WorkspaceSession {
     /// Stages one hunk of the currently open working-tree diff via
     /// `git apply --cached`. No-op until G1 lands `GitHunkPatchBuilder`.
     func stageHunk(_ hunk: GitDiffHunk) async {
-        guard rootURL != nil, gitOpenDiff != nil else { return }
+        guard let rootURL,
+            let openDiff = gitOpenDiff,
+            openDiff.scope == .workingTree,
+            gitSnapshot?.changes.first(where: { $0.path == openDiff.diff.path })?.kind == .modified,
+            !isGitBusy,
+            !isGitHunkActionBusy
+        else { return }
+
+        isGitHunkActionBusy = true
+        defer { isGitHunkActionBusy = false }
+        do {
+            let patch = try GitHunkPatchBuilder.patch(for: hunk, in: openDiff.diff)
+            try await gitService.applyHunk(patch: patch, staging: true, at: rootURL)
+            await refreshGit()
+            let refreshed = try await gitService.diff(
+                GitDiffRequest(path: openDiff.diff.path, scope: openDiff.scope),
+                at: rootURL
+            )
+            guard gitOpenDiff?.id == openDiff.id else { return }
+            if refreshed.isEmpty {
+                closeGitDiff()
+            } else {
+                gitOpenDiff = GitOpenDiff(
+                    title: openDiff.title,
+                    subtitle: openDiff.subtitle,
+                    diff: refreshed,
+                    identity: openDiff.id,
+                    scope: openDiff.scope
+                )
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            reportGitError(error)
+        }
     }
 
     /// Unstages one hunk of the currently open staged diff via
     /// `git apply --cached --reverse`. No-op until G1 lands
     /// `GitHunkPatchBuilder`.
     func unstageHunk(_ hunk: GitDiffHunk) async {
-        guard rootURL != nil, gitOpenDiff != nil else { return }
+        guard let rootURL,
+            let openDiff = gitOpenDiff,
+            openDiff.scope == .staged,
+            gitSnapshot?.changes.first(where: { $0.path == openDiff.diff.path })?.kind == .modified,
+            !isGitBusy,
+            !isGitHunkActionBusy
+        else { return }
+
+        isGitHunkActionBusy = true
+        defer { isGitHunkActionBusy = false }
+        do {
+            let patch = try GitHunkPatchBuilder.patch(for: hunk, in: openDiff.diff)
+            try await gitService.applyHunk(patch: patch, staging: false, at: rootURL)
+            await refreshGit()
+            let refreshed = try await gitService.diff(
+                GitDiffRequest(path: openDiff.diff.path, scope: openDiff.scope),
+                at: rootURL
+            )
+            guard gitOpenDiff?.id == openDiff.id else { return }
+            if refreshed.isEmpty {
+                closeGitDiff()
+            } else {
+                gitOpenDiff = GitOpenDiff(
+                    title: openDiff.title,
+                    subtitle: openDiff.subtitle,
+                    diff: refreshed,
+                    identity: openDiff.id,
+                    scope: openDiff.scope
+                )
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            reportGitError(error)
+        }
     }
 
     // MARK: - Stash (stub — requires explicit user approval before G2 starts)
 
     /// Pushes a new stash entry. No-op until G2 is approved and implemented.
     func stashChanges(message: String, includeUntracked: Bool) async {
-        guard rootURL != nil else { return }
+        guard let rootURL, !isGitBusy else { return }
+        isGitBusy = true
+        defer { isGitBusy = false }
+        do {
+            try await gitService.stashPush(
+                message: message,
+                includeUntracked: includeUntracked,
+                at: rootURL
+            )
+            guard self.rootURL == rootURL else { return }
+            await refreshGit()
+            let stashes = try await gitService.stashList(at: rootURL)
+            guard self.rootURL == rootURL else { return }
+            gitStashes = stashes
+        } catch is CancellationError {
+            return
+        } catch {
+            guard self.rootURL == rootURL else { return }
+            reportGitError(error)
+        }
     }
 
     /// Applies a stash entry without removing it. No-op until G2.
     func applyStash(_ entry: GitStashEntry) async {
-        guard rootURL != nil else { return }
+        guard let rootURL, !isGitBusy else { return }
+        isGitBusy = true
+        defer { isGitBusy = false }
+        do {
+            let current = try await gitService.stashList(at: rootURL)
+            guard current.first(where: { $0.index == entry.index }) == entry else {
+                throw GitServiceError.stashChanged
+            }
+            guard self.rootURL == rootURL else { return }
+            try await gitService.stashApply(index: entry.index, at: rootURL)
+            guard self.rootURL == rootURL else { return }
+            await refreshGit()
+            let stashes = try await gitService.stashList(at: rootURL)
+            guard self.rootURL == rootURL else { return }
+            gitStashes = stashes
+        } catch is CancellationError {
+            return
+        } catch {
+            if self.rootURL == rootURL {
+                await refreshGit()
+                if let stashes = try? await gitService.stashList(at: rootURL) {
+                    guard self.rootURL == rootURL else { return }
+                    gitStashes = stashes
+                }
+            }
+            guard self.rootURL == rootURL else { return }
+            reportGitError(error)
+        }
     }
 
     /// Applies a stash entry and removes it. No-op until G2.
     func popStash(_ entry: GitStashEntry) async {
-        guard rootURL != nil else { return }
+        guard let rootURL, !isGitBusy else { return }
+        isGitBusy = true
+        defer { isGitBusy = false }
+        do {
+            let current = try await gitService.stashList(at: rootURL)
+            guard current.first(where: { $0.index == entry.index }) == entry else {
+                throw GitServiceError.stashChanged
+            }
+            guard self.rootURL == rootURL else { return }
+            try await gitService.stashPop(index: entry.index, at: rootURL)
+            guard self.rootURL == rootURL else { return }
+            await refreshGit()
+            let stashes = try await gitService.stashList(at: rootURL)
+            guard self.rootURL == rootURL else { return }
+            gitStashes = stashes
+        } catch is CancellationError {
+            return
+        } catch {
+            if self.rootURL == rootURL {
+                await refreshGit()
+                if let stashes = try? await gitService.stashList(at: rootURL) {
+                    guard self.rootURL == rootURL else { return }
+                    gitStashes = stashes
+                }
+            }
+            guard self.rootURL == rootURL else { return }
+            reportGitError(error)
+        }
     }
 
     /// Discards a stash entry. No-op until G2.
     func dropStash(_ entry: GitStashEntry) async {
-        guard rootURL != nil else { return }
+        guard let rootURL, !isGitBusy else { return }
+        isGitBusy = true
+        defer { isGitBusy = false }
+        do {
+            let current = try await gitService.stashList(at: rootURL)
+            guard current.first(where: { $0.index == entry.index }) == entry else {
+                throw GitServiceError.stashChanged
+            }
+            guard self.rootURL == rootURL else { return }
+            try await gitService.stashDrop(index: entry.index, at: rootURL)
+            guard self.rootURL == rootURL else { return }
+            await refreshGit()
+            let stashes = try await gitService.stashList(at: rootURL)
+            guard self.rootURL == rootURL else { return }
+            gitStashes = stashes
+        } catch is CancellationError {
+            return
+        } catch {
+            guard self.rootURL == rootURL else { return }
+            reportGitError(error)
+        }
     }
 
     // MARK: - Blame (stub — filled in by the git-depth lane's G3 increment)
@@ -1541,7 +1702,43 @@ final class WorkspaceSession {
     /// Opens a read-only blame canvas for the selected file. No-op until G3
     /// lands `GitBlameParser`.
     func openBlameForSelectedFile() async {
-        guard rootURL != nil else { return }
+        guard let rootURL,
+            let document = selectedDocument,
+            let gitSnapshot,
+            let rawRepositoryRoot = gitSnapshot.repositoryRoot ?? self.rootURL,
+            !isGitBusy
+        else { return }
+        guard !document.isDirty else {
+            reportGitError(GitServiceError.blameRequiresSavedFile)
+            return
+        }
+
+        let repositoryRoot = rawRepositoryRoot.standardizedFileURL
+        let fileURL = document.url.standardizedFileURL
+        let rootPath = repositoryRoot.path
+        let filePath = fileURL.path
+        guard filePath.hasPrefix(rootPath + "/") else {
+            reportGitError(GitServiceError.invalidGitPath)
+            return
+        }
+        let relativePath = String(filePath.dropFirst(rootPath.count + 1))
+
+        isGitBusy = true
+        defer { isGitBusy = false }
+        do {
+            let blame = try await gitService.blame(
+                forRelativePath: relativePath,
+                at: repositoryRoot
+            )
+            guard self.rootURL == rootURL, selectedDocumentID == document.id else { return }
+            gitOpenDiff = nil
+            gitOpenBlame = blame
+        } catch is CancellationError {
+            return
+        } catch {
+            guard self.rootURL == rootURL else { return }
+            reportGitError(error)
+        }
     }
 
     /// Discards the retained blame data.

@@ -4,8 +4,11 @@ struct GitInspectorView: View {
     @Environment(\.rafuTheme) private var theme
     @Bindable var session: WorkspaceSession
     @State private var isCreatingBranch = false
+    @State private var isStashSheetPresented = false
+    @State private var isStashesExpanded = true
     @State private var newBranchName = ""
     @State private var pendingMergeBranch: String?
+    @State private var pendingStashAction: PendingStashAction?
     @AppStorage("gitChangesViewMode") private var gitChangesViewModeRaw =
         GitChangesViewMode.flat.rawValue
 
@@ -42,7 +45,7 @@ struct GitInspectorView: View {
                     .background(.regularMaterial, in: .rect(cornerRadius: 10))
             }
         }
-        .task(id: session.rootURL) { await session.refreshGit() }
+        .task(id: session.rootURL) { await refreshAllGitState() }
         .alert("Create Branch", isPresented: $isCreatingBranch) {
             TextField("Branch name", text: $newBranchName)
             Button("Cancel", role: .cancel) { newBranchName = "" }
@@ -68,6 +71,28 @@ struct GitInspectorView: View {
             Button("Cancel", role: .cancel) { pendingMergeBranch = nil }
         } message: {
             Text("Git may stop for conflicts. Rafu will show conflicted files in Changes.")
+        }
+        .confirmationDialog(
+            pendingStashAction?.title ?? "Update stash?",
+            isPresented: stashConfirmationBinding
+        ) {
+            if let action = pendingStashAction {
+                Button(action.confirmationLabel, role: .destructive) {
+                    pendingStashAction = nil
+                    Task {
+                        switch action {
+                        case .pop(let entry): await session.popStash(entry)
+                        case .drop(let entry): await session.dropStash(entry)
+                        }
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingStashAction = nil }
+        } message: {
+            Text(pendingStashAction?.message ?? "The stash list will remain unchanged.")
+        }
+        .sheet(isPresented: $isStashSheetPresented) {
+            GitStashChangesSheet(session: session)
         }
     }
 
@@ -103,7 +128,7 @@ struct GitInspectorView: View {
                 Spacer(minLength: 4)
                 syncMenu
                 Button("Refresh", systemImage: "arrow.clockwise") {
-                    Task { await session.refreshGit() }
+                    Task { await refreshAllGitState() }
                 }
                 .buttonStyle(RafuIconButtonStyle(size: 24))
                 .help("Refresh Source Control")
@@ -214,7 +239,8 @@ struct GitInspectorView: View {
 
     private var changesView: some View {
         VStack(spacing: 0) {
-            if snapshot.changes.isEmpty {
+            changesHeader
+            if snapshot.changes.isEmpty && session.gitStashes.isEmpty {
                 // Expand so the commit composer pins to the panel bottom
                 // instead of floating mid-panel with dead space beneath.
                 ContentUnavailableView(
@@ -224,7 +250,6 @@ struct GitInspectorView: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                changesHeader
                 List(selection: $session.gitSelectedChangeIDs) {
                     if !snapshot.conflicts.isEmpty {
                         Section("Conflicts (\(snapshot.conflicts.count))") {
@@ -257,6 +282,9 @@ struct GitInspectorView: View {
                             }
                         }
                     }
+                    if !session.gitStashes.isEmpty {
+                        stashSection
+                    }
                 }
                 .listStyle(.inset)
                 .scrollContentBackground(.hidden)
@@ -273,6 +301,12 @@ struct GitInspectorView: View {
             .font(.caption2)
             .foregroundStyle(theme.palette.textMuted)
             Spacer(minLength: 4)
+            Button("Stash Changes", systemImage: "archivebox") {
+                isStashSheetPresented = true
+            }
+            .buttonStyle(RafuIconButtonStyle(size: 22, iconSize: 11))
+            .disabled(snapshot.changes.isEmpty || session.isGitBusy)
+            .help("Stash working-tree changes explicitly")
             Button("Flat List", systemImage: "list.bullet") {
                 gitChangesViewModeRaw = GitChangesViewMode.flat.rawValue
             }
@@ -291,6 +325,38 @@ struct GitInspectorView: View {
         .padding(.horizontal, 10)
         .padding(.top, 8)
         .padding(.bottom, 2)
+    }
+
+    private var stashSection: some View {
+        Section {
+            if isStashesExpanded {
+                ForEach(session.gitStashes) { entry in
+                    GitStashRow(
+                        entry: entry,
+                        apply: { Task { await session.applyStash(entry) } },
+                        requestPop: { pendingStashAction = .pop(entry) },
+                        requestDrop: { pendingStashAction = .drop(entry) }
+                    )
+                }
+            }
+        } header: {
+            Button {
+                isStashesExpanded.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .rotationEffect(.degrees(isStashesExpanded ? 90 : 0))
+                    Label("Stashes (\(session.gitStashes.count))", systemImage: "archivebox")
+                    Spacer()
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(
+                "\(isStashesExpanded ? "Collapse" : "Expand") stashes, \(session.gitStashes.count) entries"
+            )
+        }
     }
 
     private func changeRow(_ change: GitChange, scope: GitDiffScope) -> some View {
@@ -418,6 +484,149 @@ struct GitInspectorView: View {
             get: { pendingMergeBranch != nil },
             set: { if !$0 { pendingMergeBranch = nil } }
         )
+    }
+
+    private var stashConfirmationBinding: Binding<Bool> {
+        Binding(
+            get: { pendingStashAction != nil },
+            set: { if !$0 { pendingStashAction = nil } }
+        )
+    }
+
+    private func refreshAllGitState() async {
+        await session.refreshGit()
+        await GitStashCoordinator.refresh(session: session)
+    }
+}
+
+private enum PendingStashAction: Identifiable {
+    case pop(GitStashEntry)
+    case drop(GitStashEntry)
+
+    var id: String {
+        switch self {
+        case .pop(let entry): "pop:\(entry.selector)"
+        case .drop(let entry): "drop:\(entry.selector)"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .pop: "Pop this stash?"
+        case .drop: "Drop this stash?"
+        }
+    }
+
+    var confirmationLabel: String {
+        switch self {
+        case .pop: "Pop and Remove Stash"
+        case .drop: "Drop Stash"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .pop:
+            "Git will apply these changes and remove the stash only if the apply succeeds. Conflicts may require manual resolution."
+        case .drop:
+            "This permanently removes the stash reference. The stashed changes will not be applied."
+        }
+    }
+}
+
+private struct GitStashChangesSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var session: WorkspaceSession
+    @State private var includeUntracked = false
+    @State private var message = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Stash Changes")
+                    .font(.title2.weight(.semibold))
+                Text("Save the current working tree explicitly. Rafu never stashes automatically.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Form {
+                TextField("Message (Optional)", text: $message, axis: .vertical)
+                    .lineLimit(2...4)
+                Toggle("Include untracked files", isOn: $includeUntracked)
+            }
+            .formStyle(.grouped)
+
+            HStack {
+                Button("Cancel", role: .cancel) { dismiss() }
+                Spacer()
+                Button("Stash Changes") {
+                    let submittedMessage = message
+                    let submittedIncludeUntracked = includeUntracked
+                    Task {
+                        await session.stashChanges(
+                            message: submittedMessage,
+                            includeUntracked: submittedIncludeUntracked
+                        )
+                        dismiss()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(session.gitSnapshot?.changes.isEmpty != false || session.isGitBusy)
+            }
+        }
+        .padding(20)
+        .frame(width: 440)
+    }
+}
+
+private struct GitStashRow: View {
+    let entry: GitStashEntry
+    let apply: () -> Void
+    let requestPop: () -> Void
+    let requestDrop: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "archivebox")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.message)
+                    .lineLimit(2)
+                HStack(spacing: 5) {
+                    if let branch = entry.branch {
+                        Text(branch)
+                    }
+                    Text(entry.selector)
+                    Text(entry.createdAt, style: .relative)
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(accessibilityText)
+            Spacer(minLength: 4)
+            Menu("Stash Actions", systemImage: "ellipsis.circle") {
+                actions
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+        }
+        .padding(.vertical, 2)
+        .contextMenu { actions }
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        Button("Apply Stash", systemImage: "arrow.down.doc") { apply() }
+        Button("Pop Stash…", systemImage: "arrow.down.doc.fill") { requestPop() }
+        Divider()
+        Button("Drop Stash…", systemImage: "trash", role: .destructive) { requestDrop() }
+    }
+
+    private var accessibilityText: String {
+        let branch = entry.branch.map { ", branch \($0)" } ?? ""
+        return "Stash \(entry.index), \(entry.message)\(branch)"
     }
 }
 
