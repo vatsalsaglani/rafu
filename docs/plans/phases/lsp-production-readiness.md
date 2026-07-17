@@ -2,7 +2,7 @@
 
 ## Status
 
-Planned (2026-07-17). One of six post-audit lanes defined in
+Active (2026-07-17). One of six post-audit lanes defined in
 [`post-audit-worktree-fanout.md`](post-audit-worktree-fanout.md). Runs in a
 **dedicated git worktree**. Successor to
 [`lane-2-lsp-plan.md`](lane-2-lsp-plan.md): Stage C shipped and is fully
@@ -12,6 +12,10 @@ path" to "production-usable for the curated set." Governed by
 increment is one advisor → implementor → verification → documentor cycle.
 File:line anchors reflect the tree on 2026-07-17; the repository wins when
 they disagree.
+
+### Work log
+
+- **P1 (2026-07-17):** Warm-up handshake complete. `ClientCapabilities.window.workDoneProgress` advertised; server→client `window/workDoneProgress/create` replies success (null result); `JSONRPCConnection.handleIncomingRequest` security surface locked to this method only. Scripted-server tests verify capability and reply envelope; locked-scope assertion that `workspace/configuration` still gets `-32601`. `swift test` 507/507 green (505 baseline + 2 new). Documented in `docs/references/navigation-and-lsp-contracts.md` new subsection. Ready for live validation in P5 (indexing progress via `$/progress` now surfaces).
 
 ## Verified baseline (corrects stale assumptions)
 

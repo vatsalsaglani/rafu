@@ -190,6 +190,33 @@ Both closures are:
 
 Closure construction captures the session weakly to avoid retain cycles. New `EditorHoverInfo` (Sendable) carries tooltip payload. No `NavigationRequest`/`NavigationAnswer` shape changes; the new closures integrate at the UI boundary.
 
+### Server→client request handling and work-done progress handshake (P1, 2026-07-17)
+
+To enable real-server indexing progress, Rafu advertises `window.workDoneProgress` capability and responds to server→client `window/workDoneProgress/create` requests:
+
+- **Capability advertisement:** `ClientCapabilities.window` carries an optional
+  `WindowClientCapabilities` struct with `workDoneProgress: Bool?` (optional,
+  defaults to null). `LanguageServerSession.initialize()` sends
+  `ClientCapabilities(window: WindowClientCapabilities(workDoneProgress: true))`
+  in the `initialize` handshake. Without this, most production servers (gopls,
+  rust-analyzer, sourcekit-lsp) never create a work-done token, so `$/progress`
+  (which drives `LanguageServerStatus.Phase.warmingUp`) never surfaces.
+- **Server→client request dispatch is a security surface.** `JSONRPCConnection.handleIncomingRequest`
+  (actor-isolated, line 180) replies with a null-result success envelope **only**
+  to the exact method string `window/workDoneProgress/create`. Every other method
+  receives `-32601 methodNotFound`, unchanged. No prefix matching, no conditional
+  allowlist, no expansion without an explicit ADR. Type docs and seam comments
+  document this boundary.
+- **Null-result success encoding:** `JSONRPCSuccessResponseEnvelope` encodes exactly
+  `{"jsonrpc":"2.0","id":…,"result":null}`, with `result` as an explicit JSON
+  `null` (via `encodeNil(forKey:)` in the encoder), not an omitted key. This
+  mirrors the structure of `JSONRPCErrorResponseEnvelope` and matches the LSP spec.
+- **`isWarmingUp` vs. `LanguageServerStatus.Phase.warmingUp`.** The session holds a boolean
+  flag `isWarmingUp`, which drives `LSPNavigationProvider` to return `.indexing` status.
+  This flag is distinct from and independent of `LanguageServerStatus.Phase.warmingUp`,
+  which gates `forwardsDocumentChanges` to suppress keystroke forwarding during initialization.
+  The P1 handshake drives the session flag only; the phase is used elsewhere for gating.
+
 ### Lane 2 seam: session lifecycle only
 
 The seam between lane 1 (`WorkspaceSession`) and lane 2 (Language Intelligence)
@@ -245,6 +272,7 @@ All contract types exist and compile:
 
 - Lane-1 Increment 0: `Sources/RafuApp/Navigation/NavigationTypes.swift` (`NavigationRequest` with `position: Int` and `symbolName: String?`); `Sources/RafuApp/Editor/DocumentEditDelta.swift`; `Sources/RafuApp/Models/EditorDocument.swift` (delta publishing); `Sources/RafuApp/Services/ProcessResourceRegistry.swift`; `Sources/RafuApp/Models/WorkspaceSession.swift`.
 - Post-fix increment (2026-07-16): `Sources/RafuApp/Services/MemoryPressureMonitor.swift` (@Sendable DispatchSource handler); hover/context-menu integration in `Sources/RafuApp/Views/CodeEditorView.swift`, `EditorGroupView.swift`, `MarkdownEditorPresentation.swift`, `RafuTextView.swift`; `EditorHoverInfo` and `EditorHoverTooltipView` new types; `WorkspaceSession.hoverInfo(at:utf16Offset:)` new method; `LSPNavigationProvider` and `TextSearchNavigationProvider` empty-decline changes.
+- LSP-production-readiness P1 warm-up handshake (2026-07-17): `Sources/RafuApp/LanguageIntelligence/LSPTypes.swift` (new `WindowClientCapabilities` struct, `window` field on `ClientCapabilities`, both `Codable, Sendable`); `Sources/RafuApp/LanguageIntelligence/LanguageServerSession.swift` (advertises `workDoneProgress: true` in `initialize`); `Sources/RafuApp/LanguageIntelligence/JSONRPCMessage.swift` (new `JSONRPCSuccessResponseEnvelope` with explicit null result); `Sources/RafuApp/LanguageIntelligence/JSONRPCConnection.swift` (`handleIncomingRequest` security surface: replies success only to `window/workDoneProgress/create`, `-32601` for all other methods).
 
 The format lint rule is standard Swift format behavior, verified by the
 `./script/format.sh --lint` check.
@@ -262,12 +290,18 @@ Lane-1 Increment 0: All contract types compile, pass focused tests (NavigationLa
 
 Post-fix increment (2026-07-16): Build clean, `swift test` 489/489 passing (485 baseline + 4 new: MemoryPressureMonitor isolation, hover debounce/dismissal, references fall-through, context menu). `./script/format.sh --lint` clean. `./script/build_and_run.sh --verify` green. Advisor final review of the navigation features: **ALL 8 correctness areas CONFIRMED-SAFE** (hover debounce race, retain cycles/leaks, tooltip dismissal, references fall-through, hoverInfo side-effect-freeness, menu, concurrency/isolation, no payload logging). One optional teardown hardening (performClose→close) applied. No defects found.
 
+LSP-production-readiness P1 (2026-07-17): `swift build` clean; `swift test` = 507/507 tests / 20 suites all green (505 baseline + 2 new, scripted server in-memory transport: success-envelope-not-`-32601` for `window/workDoneProgress/create`, AND locked-scope assertion that `workspace/configuration` still gets `-32601`; `initialize`-params assertion that `capabilities.window.workDoneProgress == true`). `./script/format.sh --lint` clean; zero forbidden-path diffs. Advisor final review: **CONFIRMED-SAFE on security surface, no-logging, concurrency/Sendable (no @unchecked), encoding correctness, comment truthfulness, and regression risk.**
+
 ## Related code, ADRs, and phases
 
 - `Sources/RafuApp/Navigation/`
 - `Sources/RafuApp/Editor/DocumentEditDelta.swift`
 - `Sources/RafuApp/Services/ProcessResourceRegistry.swift`
 - `Sources/RafuApp/Services/MemoryPressureMonitor.swift` (GCD handler isolation)
+- `Sources/RafuApp/LanguageIntelligence/LSPTypes.swift` (WindowClientCapabilities, ClientCapabilities.window)
+- `Sources/RafuApp/LanguageIntelligence/LanguageServerSession.swift` (initialize handshake, workDoneProgress)
+- `Sources/RafuApp/LanguageIntelligence/JSONRPCMessage.swift` (JSONRPCSuccessResponseEnvelope)
+- `Sources/RafuApp/LanguageIntelligence/JSONRPCConnection.swift` (server→client request security dispatch)
 - `Sources/RafuApp/LanguageIntelligence/LanguageIntelligenceCoordinator.swift`
 - `Sources/RafuApp/Models/EditorDocument.swift`
 - `Sources/RafuApp/Models/WorkspaceSession.swift`
@@ -279,5 +313,6 @@ Post-fix increment (2026-07-16): Build clean, `swift test` 489/489 passing (485 
 - [`docs/plans/phases/language-intelligence.md`](../plans/phases/language-intelligence.md)
 - [`docs/plans/phases/lane-1-memory-and-syntax-plan.md`](../plans/phases/lane-1-memory-and-syntax-plan.md)
 - [`docs/plans/phases/lane-2-lsp-plan.md`](../plans/phases/lane-2-lsp-plan.md)
+- [`docs/plans/phases/lsp-production-readiness.md`](../plans/phases/lsp-production-readiness.md) (P1 warm-up handshake)
 - [`docs/plans/phases/post-merge-validation-fixes.md`](../plans/phases/post-merge-validation-fixes.md)
 - [`docs/references/concurrency.md`](concurrency.md) (GCD DispatchSource handler isolation)

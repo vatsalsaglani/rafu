@@ -267,3 +267,23 @@ nonisolated struct JSONRPCErrorResponseEnvelope: Encodable {
         try container.encode(error, forKey: .error)
     }
 }
+
+/// Outgoing success-response envelope for a server-to-client request Rafu
+/// answers with a null result — currently only `window/workDoneProgress/create`,
+/// whose spec reply is `{"result": null}`.
+nonisolated struct JSONRPCSuccessResponseEnvelope: Encodable {
+    let id: JSONRPCID
+
+    private enum CodingKeys: String, CodingKey {
+        case jsonrpc
+        case id
+        case result
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode("2.0", forKey: .jsonrpc)
+        try container.encode(id, forKey: .id)
+        try container.encodeNil(forKey: .result)
+    }
+}
