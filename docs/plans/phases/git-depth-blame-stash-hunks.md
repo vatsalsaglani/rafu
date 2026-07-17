@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress (2026-07-17; G1 complete). One of six post-audit lanes defined in
+In progress (2026-07-18; G1-G2 complete). One of six post-audit lanes defined in
 [`post-audit-worktree-fanout.md`](post-audit-worktree-fanout.md). Runs in a
 **dedicated git worktree** after its contract commit (G0) lands on main.
 Hunk staging and read-only blame are explicitly enumerated Phase 6
@@ -210,3 +210,16 @@ they disagree.
   build`, and format fix/lint green. Test delta: +4 (three pure builder fixtures,
   one repository round-trip). `build_and_run.sh --verify` and manual UI checks
   remain intentionally consolidated at G4.
+- **G2 — complete (2026-07-18):** user-approved explicit stash push (optional
+  message and include-untracked toggle), list/apply/pop/drop operations,
+  canonical non-negative `stash@{n}` validation, stale-entry preflight, and
+  confirmation for pop/drop landed with a GitLens-style collapsible Source
+  Control section. No auto-stash path exists. Because the G0 contract freezes
+  `WorkspaceSession.refreshGit()` outside the four stash stub bodies, a small
+  owned `GitStashCoordinator` performs initial and user-requested list refresh;
+  stash mutations refresh their own list. This intentionally deviates from the
+  stale G2 anchor while preserving its refresh intent and the hard G0 boundary.
+  Verification: 38 Git-focused tests, 526 full tests, `swift build`, and format
+  fix/lint green. Test delta: +7 (five pure parser fixtures and two service
+  tests, including the tracked+untracked push/apply/drop repository round-trip).
+  `build_and_run.sh --verify` and manual UI checks remain consolidated at G4.

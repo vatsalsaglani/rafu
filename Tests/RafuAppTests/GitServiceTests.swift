@@ -374,6 +374,53 @@ struct GitServiceTests {
             #expect(restoredWorking.rawPatch.contains("+line 20 working"))
         }
     }
+
+    @Test("Stash push, apply, and drop round-trip tracked and explicitly included untracked files")
+    func stashRoundTrip() async throws {
+        try await withRepository { root in
+            let tracked = root.appending(path: "tracked.txt")
+            let untracked = root.appending(path: "untracked.txt")
+            try write("base\n", to: tracked)
+            try runGit(["add", "tracked.txt"], at: root)
+            try runGit(["commit", "-m", "Base"], at: root)
+            try write("changed\n", to: tracked)
+            try write("new\n", to: untracked)
+
+            let service = GitService()
+            try await service.stashPush(
+                message: "before refactor",
+                includeUntracked: true,
+                at: root
+            )
+
+            let clean = try #require(try await service.snapshot(at: root))
+            #expect(clean.changes.isEmpty)
+            #expect(!FileManager.default.fileExists(atPath: untracked.path))
+            let saved = try #require(try await service.stashList(at: root).first)
+            #expect(saved.index == 0)
+            #expect(saved.selector == "stash@{0}")
+            #expect(saved.message == "before refactor")
+            #expect(saved.branch == "main")
+
+            try await service.stashApply(index: saved.index, at: root)
+            #expect(try String(contentsOf: tracked, encoding: .utf8) == "changed\n")
+            #expect(try String(contentsOf: untracked, encoding: .utf8) == "new\n")
+            #expect(try await service.stashList(at: root).count == 1)
+
+            try await service.stashDrop(index: saved.index, at: root)
+            #expect(try await service.stashList(at: root).isEmpty)
+        }
+    }
+
+    @Test("Stash actions reject negative selectors before invoking Git")
+    func stashRejectsNegativeIndex() async throws {
+        try await withRepository { root in
+            let service = GitService()
+            await #expect(throws: GitServiceError.invalidStashIndex(-1)) {
+                try await service.stashApply(index: -1, at: root)
+            }
+        }
+    }
 }
 
 private func withRepository(

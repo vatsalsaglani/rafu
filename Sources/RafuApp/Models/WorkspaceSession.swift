@@ -1569,22 +1569,115 @@ final class WorkspaceSession {
 
     /// Pushes a new stash entry. No-op until G2 is approved and implemented.
     func stashChanges(message: String, includeUntracked: Bool) async {
-        guard rootURL != nil else { return }
+        guard let rootURL, !isGitBusy else { return }
+        isGitBusy = true
+        defer { isGitBusy = false }
+        do {
+            try await gitService.stashPush(
+                message: message,
+                includeUntracked: includeUntracked,
+                at: rootURL
+            )
+            guard self.rootURL == rootURL else { return }
+            await refreshGit()
+            let stashes = try await gitService.stashList(at: rootURL)
+            guard self.rootURL == rootURL else { return }
+            gitStashes = stashes
+        } catch is CancellationError {
+            return
+        } catch {
+            guard self.rootURL == rootURL else { return }
+            reportGitError(error)
+        }
     }
 
     /// Applies a stash entry without removing it. No-op until G2.
     func applyStash(_ entry: GitStashEntry) async {
-        guard rootURL != nil else { return }
+        guard let rootURL, !isGitBusy else { return }
+        isGitBusy = true
+        defer { isGitBusy = false }
+        do {
+            let current = try await gitService.stashList(at: rootURL)
+            guard current.first(where: { $0.index == entry.index }) == entry else {
+                throw GitServiceError.stashChanged
+            }
+            guard self.rootURL == rootURL else { return }
+            try await gitService.stashApply(index: entry.index, at: rootURL)
+            guard self.rootURL == rootURL else { return }
+            await refreshGit()
+            let stashes = try await gitService.stashList(at: rootURL)
+            guard self.rootURL == rootURL else { return }
+            gitStashes = stashes
+        } catch is CancellationError {
+            return
+        } catch {
+            if self.rootURL == rootURL {
+                await refreshGit()
+                if let stashes = try? await gitService.stashList(at: rootURL) {
+                    guard self.rootURL == rootURL else { return }
+                    gitStashes = stashes
+                }
+            }
+            guard self.rootURL == rootURL else { return }
+            reportGitError(error)
+        }
     }
 
     /// Applies a stash entry and removes it. No-op until G2.
     func popStash(_ entry: GitStashEntry) async {
-        guard rootURL != nil else { return }
+        guard let rootURL, !isGitBusy else { return }
+        isGitBusy = true
+        defer { isGitBusy = false }
+        do {
+            let current = try await gitService.stashList(at: rootURL)
+            guard current.first(where: { $0.index == entry.index }) == entry else {
+                throw GitServiceError.stashChanged
+            }
+            guard self.rootURL == rootURL else { return }
+            try await gitService.stashPop(index: entry.index, at: rootURL)
+            guard self.rootURL == rootURL else { return }
+            await refreshGit()
+            let stashes = try await gitService.stashList(at: rootURL)
+            guard self.rootURL == rootURL else { return }
+            gitStashes = stashes
+        } catch is CancellationError {
+            return
+        } catch {
+            if self.rootURL == rootURL {
+                await refreshGit()
+                if let stashes = try? await gitService.stashList(at: rootURL) {
+                    guard self.rootURL == rootURL else { return }
+                    gitStashes = stashes
+                }
+            }
+            guard self.rootURL == rootURL else { return }
+            reportGitError(error)
+        }
     }
 
     /// Discards a stash entry. No-op until G2.
     func dropStash(_ entry: GitStashEntry) async {
-        guard rootURL != nil else { return }
+        guard let rootURL, !isGitBusy else { return }
+        isGitBusy = true
+        defer { isGitBusy = false }
+        do {
+            let current = try await gitService.stashList(at: rootURL)
+            guard current.first(where: { $0.index == entry.index }) == entry else {
+                throw GitServiceError.stashChanged
+            }
+            guard self.rootURL == rootURL else { return }
+            try await gitService.stashDrop(index: entry.index, at: rootURL)
+            guard self.rootURL == rootURL else { return }
+            await refreshGit()
+            let stashes = try await gitService.stashList(at: rootURL)
+            guard self.rootURL == rootURL else { return }
+            gitStashes = stashes
+        } catch is CancellationError {
+            return
+        } catch {
+            guard self.rootURL == rootURL else { return }
+            reportGitError(error)
+        }
     }
 
     // MARK: - Blame (stub — filled in by the git-depth lane's G3 increment)

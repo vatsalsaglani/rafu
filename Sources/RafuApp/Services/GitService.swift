@@ -225,6 +225,56 @@ nonisolated struct GitService: Sendable {
     }
 
     @concurrent
+    func stashList(at rootURL: URL) async throws -> [GitStashEntry] {
+        let repositoryRoot = try await requireRepositoryRoot(at: rootURL)
+        let output = try await checkedRun(
+            ["stash", "list", "-z", "--format=%gd%x1f%ct%x1f%gs"],
+            at: repositoryRoot,
+            maximumOutputBytes: 8 * 1_024 * 1_024
+        )
+        return GitStashParser.parse(output.standardOutput)
+    }
+
+    @concurrent
+    func stashPush(message: String, includeUntracked: Bool, at rootURL: URL) async throws {
+        let repositoryRoot = try await requireRepositoryRoot(at: rootURL)
+        var arguments = ["stash", "push"]
+        if includeUntracked { arguments.append("--include-untracked") }
+        let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedMessage.isEmpty {
+            arguments += ["--message", trimmedMessage]
+        }
+        _ = try await checkedRun(arguments, at: repositoryRoot)
+    }
+
+    @concurrent
+    func stashApply(index: Int, at rootURL: URL) async throws {
+        let repositoryRoot = try await requireRepositoryRoot(at: rootURL)
+        _ = try await checkedRun(
+            ["stash", "apply", try stashSelector(for: index)],
+            at: repositoryRoot
+        )
+    }
+
+    @concurrent
+    func stashPop(index: Int, at rootURL: URL) async throws {
+        let repositoryRoot = try await requireRepositoryRoot(at: rootURL)
+        _ = try await checkedRun(
+            ["stash", "pop", try stashSelector(for: index)],
+            at: repositoryRoot
+        )
+    }
+
+    @concurrent
+    func stashDrop(index: Int, at rootURL: URL) async throws {
+        let repositoryRoot = try await requireRepositoryRoot(at: rootURL)
+        _ = try await checkedRun(
+            ["stash", "drop", try stashSelector(for: index)],
+            at: repositoryRoot
+        )
+    }
+
+    @concurrent
     func commit(message: String, at rootURL: URL) async throws -> String {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw GitServiceError.emptyCommitMessage }
@@ -448,6 +498,11 @@ nonisolated struct GitService: Sendable {
         guard output.terminationStatus == 0 else { throw GitServiceError.invalidRemote(name) }
     }
 
+    private func stashSelector(for index: Int) throws -> String {
+        guard index >= 0 else { throw GitServiceError.invalidStashIndex(index) }
+        return "stash@{\(index)}"
+    }
+
     /// Detects an in-progress merge: one `rev-parse --git-path` process to
     /// locate MERGE_HEAD/MERGE_MSG (worktree-safe), then plain file reads.
     /// Returns nil when no merge is in progress.
@@ -507,8 +562,10 @@ nonisolated enum GitServiceError: LocalizedError, Equatable {
     case invalidHistoryRange
     case invalidRemote(String)
     case invalidRevision(String)
+    case invalidStashIndex(Int)
     case notARepository
     case outputTooLarge(limit: Int)
+    case stashChanged
     case upstreamRequiresRemoteAndBranch
 
     var errorDescription: String? {
@@ -533,10 +590,14 @@ nonisolated enum GitServiceError: LocalizedError, Equatable {
             "“\(name)” is not a configured Git remote."
         case .invalidRevision(let revision):
             "“\(revision)” does not identify a commit."
+        case .invalidStashIndex:
+            "The selected stash reference is invalid. Refresh Source Control and try again."
         case .notARepository:
             "The selected folder is not inside a Git repository."
         case .outputTooLarge(let limit):
             "Git produced more than \(limit) bytes of output. Narrow the operation and try again."
+        case .stashChanged:
+            "The stash list changed since this action was chosen. Refresh Source Control and try again."
         case .upstreamRequiresRemoteAndBranch:
             "Setting an upstream requires both a remote and a branch."
         }

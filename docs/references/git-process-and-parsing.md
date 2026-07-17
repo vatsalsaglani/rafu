@@ -1,6 +1,6 @@
 # Git process and parsing
 
-- Applies to: local Git status, diffs, history, branch operations, staging, and process capture
+- Applies to: local Git status, diffs, history, branch operations, staging, stash, and process capture
 - Last verified: Swift 6.2, `/usr/bin/git` (Apple Git-155, 2.50.1) on macOS, 2026-07-17
 
 ## Rule or observed behavior
@@ -43,6 +43,20 @@
   intentionally discards `\ No newline at end of file`, so reconstruction can
   change file contents. Do not add `--3way` or `--recount`; a context mismatch
   must fail atomically and ask the user to refresh the diff.
+- List stashes with `git stash list -z
+  --format=%gd%x1f%ct%x1f%gs`: records are NUL-delimited and fields use ASCII
+  unit separator. Accept only canonical `stash@{n}` selectors whose `n` parses
+  as a non-negative `Int`; reconstruct the selector from that integer for every
+  apply, pop, or drop rather than accepting a string from UI state. Re-list and
+  compare the complete selected entry immediately before a write because a
+  stash index can shift when another process changes the list.
+- Stash is always initiated by an explicit user action. `stash push` receives
+  its optional message as a separate argv value, includes untracked files only
+  when the user enables that option, and treats Git's successful "No local
+  changes to save" result as a no-op. There is no automatic stash path. Apply
+  keeps the entry; pop and drop require confirmation because they can discard
+  the reference. A conflicted apply/pop refreshes both status and the stash list
+  because Git may have changed the worktree even when the command exits nonzero.
 
 ## Why it matters
 
@@ -62,6 +76,13 @@ cancellable, and the UI exposes the action only for modified files; added,
 deleted, renamed, untracked, binary, and historical diffs retain whole-file
 behavior.
 
+Stash selectors are mutable ordinal references, not stable identities. Parsing
+and rebuilding `stash@{n}` closes a ref-injection path, while the immediate
+entry preflight prevents a stale row from targeting a different stash after the
+list shifts. The message remains ordinary argv data and is never incorporated
+into a revision or shell command. Confirmations keep destructive removal under
+explicit user control, including pop's conditional drop-on-success behavior.
+
 ## Reproduction or evidence
 
 The focused Git tests create temporary repositories covering unborn staging,
@@ -78,6 +99,15 @@ the overlapping working-tree hunk, then reverses the staged hunk. The staged
 patch contains `+line 4 final` and never `line 20 working`; after reverse apply,
 the staged patch is empty and the working patch contains both final changes.
 
+The stash parser fixtures cover empty, single, and multiple records; generated
+`WIP on …` versus named `On …` subjects; fallback subjects; negative timestamps;
+and malformed or noncanonical selectors. The service round-trip modifies one
+tracked file and creates one untracked file, pushes with the include-untracked
+option, verifies a clean tree and one canonical entry, applies it to restore
+both files while retaining the entry, then drops it and verifies an empty list.
+Apple Git's actual formatted output was also checked byte-for-byte: `%gd`, `%ct`,
+and `%gs` were unit-separated and the record ended in NUL.
+
 ## Verification
 
 Run `swift test --filter Git`. Run the full suite afterward because process
@@ -87,10 +117,13 @@ isolation and shared workspace state are integration concerns.
 
 - `Sources/RafuApp/Git/` (including `GitCommandRunner.swift`, `GitNumstatParser.swift`, `GitChangeTree.swift`)
 - `Sources/RafuApp/Git/GitHunkPatchBuilder.swift`
+- `Sources/RafuApp/Git/GitStashParser.swift`
+- `Sources/RafuApp/Git/GitStashCoordinator.swift`
 - `Sources/RafuApp/Services/GitService.swift`
 - `Sources/RafuApp/Views/GitInspectorView.swift` (Source Control tree view)
 - `Tests/RafuAppTests/GitServiceTests.swift`
 - `Tests/RafuAppTests/GitChangeTreeTests.swift`
 - `Tests/RafuAppTests/GitHunkPatchBuilderTests.swift`
+- `Tests/RafuAppTests/GitStashParserTests.swift`
 - `docs/plans/phases/pre-initial-push-workbench.md`
 - `docs/plans/phases/git-depth-blame-stash-hunks.md`
