@@ -193,17 +193,20 @@ nonisolated enum ArchiveUnpacker {
 
 /// Validates an unpacked staging directory before any of its contents are
 /// moved into the real install location: rejects the entire install the
-/// moment it finds a path escaping `staging` or any symlink at all.
+/// moment it finds a path — or a symlink target — that escapes `staging`.
 ///
 /// Both `/usr/bin/tar` (bsdtar) and `/usr/bin/ditto` already refuse
 /// absolute paths and `..` path components in archive entries by default
 /// on macOS — this validator does not re-parse the archive itself, it
 /// defends the one path those tool-level protections don't fully close:
 /// a symlink entry whose target resolves outside `staging`, which would
-/// let a later entry in the same archive write through it. Since none of
-/// the servers this installer unpacks need a symlink, rejecting every
-/// symlink found anywhere under `staging` is a strictly safe policy, not
-/// an approximation.
+/// let a later entry in the same archive write through it. It does *not*
+/// reject every symlink: the managed Node runtime tarball legitimately
+/// ships internal `bin/npm`, `bin/npx`, and `bin/corepack` links that
+/// point back inside its own directory, so a symlink is allowed exactly
+/// when its declared target — resolved lexically against the link's real
+/// parent, so the check does not depend on the target existing yet —
+/// stays within `staging`.
 nonisolated enum StagingValidator {
     static func validate(staging: URL, binaryRelativePath: String) throws -> URL {
         let fileManager = FileManager.default
@@ -222,7 +225,9 @@ nonisolated enum StagingValidator {
         for case let url as URL in enumerator {
             let values = try url.resourceValues(forKeys: [.isSymbolicLinkKey])
             if values.isSymbolicLink == true {
-                throw ServerInstallError.pathTraversal
+                try requireSymlinkStaysInside(
+                    link: url, stagingRealPath: stagingRealPath, fileManager: fileManager)
+                continue
             }
             let realPath = url.resolvingSymlinksInPath().standardizedFileURL.path
             guard realPath == url.standardizedFileURL.path || realPath.hasPrefix(stagingRealPath)
@@ -243,6 +248,28 @@ nonisolated enum StagingValidator {
             throw ServerInstallError.pathTraversal
         }
         return binaryURL
+    }
+
+    /// Throws `.pathTraversal` unless `link`'s declared symlink target
+    /// resolves to a path inside `stagingRealPath`. The target is resolved
+    /// lexically (`standardizedFileURL` collapses `..` without touching the
+    /// filesystem) against the link's *real* parent directory, so an escape
+    /// is caught whether or not the target exists yet — the case
+    /// `resolvingSymlinksInPath()` alone would miss for a link to a
+    /// not-yet-extracted or absent path.
+    private static func requireSymlinkStaysInside(
+        link: URL, stagingRealPath: String, fileManager: FileManager
+    ) throws {
+        let destination = try fileManager.destinationOfSymbolicLink(atPath: link.path)
+        let parentReal = link.deletingLastPathComponent().resolvingSymlinksInPath()
+            .standardizedFileURL
+        let targetPath =
+            (destination as NSString).isAbsolutePath
+            ? URL(fileURLWithPath: destination).standardizedFileURL.path
+            : parentReal.appendingPathComponent(destination).standardizedFileURL.path
+        guard targetPath == stagingRealPath || targetPath.hasPrefix(stagingRealPath + "/") else {
+            throw ServerInstallError.pathTraversal
+        }
     }
 }
 

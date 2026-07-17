@@ -522,6 +522,12 @@ final class LanguageServersCatalogModel {
             return "The download failed."
         case ServerInstallError.binaryMissing:
             return "The expected binary wasn't found after installing."
+        case ServerInstallError.pathTraversal:
+            return "The downloaded archive contained an unsafe path and was rejected."
+        case ServerInstallError.unsupportedArchive:
+            return "The downloaded file wasn't in a supported archive format."
+        case ServerInstallError.unpackFailed:
+            return "The downloaded archive couldn't be unpacked and was discarded."
         default:
             return "The operation failed."
         }
