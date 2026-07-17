@@ -29,6 +29,16 @@ struct ServerInstallConsentView: View {
             )
             .font(.caption)
             .foregroundStyle(.secondary)
+            if requiresNpmInstall {
+                Text(
+                    "Installing this server also runs npm install, which downloads additional "
+                        + "packages from registry.npmjs.org. Those packages are not individually "
+                        + "pinned or checksum-verified by Rafu; package install scripts are "
+                        + "disabled."
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+            }
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { onCancel() }
@@ -47,6 +57,10 @@ struct ServerInstallConsentView: View {
         case .server(let descriptor): return [descriptor]
         case .pack(_, let descriptors): return descriptors
         }
+    }
+
+    private var requiresNpmInstall: Bool {
+        descriptors.contains { $0.archive?.npmPackageRoot != nil }
     }
 
     private var title: String {

@@ -10,6 +10,18 @@ struct CuratedCatalogTests {
         try CuratedCatalog.validate()
     }
 
+    @Test(
+        "typescript-language-server's archive names npmPackageRoot \"package\"; Pyright's does not"
+    )
+    func typeScriptLanguageServerNamesNpmPackageRootButPyrightDoesNot() throws {
+        let typeScriptLanguageServer = try #require(
+            CuratedCatalog.servers.first { $0.id == "typescript-language-server" })
+        #expect(typeScriptLanguageServer.archive?.npmPackageRoot == "package")
+
+        let pyright = try #require(CuratedCatalog.servers.first { $0.id == "pyright" })
+        #expect(pyright.archive?.npmPackageRoot == nil)
+    }
+
     @Test("Every real catalog entry names a unique, non-empty id and languageIDs")
     func realCatalogEntriesAreWellFormed() {
         let ids = CuratedCatalog.servers.map(\.id)

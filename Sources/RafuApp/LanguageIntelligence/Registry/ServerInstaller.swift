@@ -121,6 +121,13 @@ nonisolated enum ServerInstallError: Error, Equatable {
     case pathTraversal
     case binaryMissing
     case downloadFailed
+    /// An `ArchiveLayout` named an `npmPackageRoot` (so `install` needs to
+    /// run `npm install` in staging) but no `nodeExecutableURL` was
+    /// supplied — the caller must resolve the managed Node runtime first.
+    case nodeRuntimeUnavailable
+    /// `npm install --ignore-scripts …` exited non-zero while resolving a
+    /// node-hosted server's dependencies; the staged install is discarded.
+    case dependencyResolutionFailed(Int32)
 }
 
 /// Unpacks a downloaded asset into an isolated staging directory, by
@@ -131,11 +138,14 @@ nonisolated enum ArchiveUnpacker {
     /// code. Cancellable: a cancelled calling `Task` terminates the child
     /// process rather than leaving it to finish unsupervised.
     @concurrent
-    static func runArgv(executableURL: URL, arguments: [String]) async throws -> Int32 {
+    static func runArgv(
+        executableURL: URL, arguments: [String], currentDirectoryURL: URL? = nil
+    ) async throws -> Int32 {
         try Task.checkCancellation()
         let process = Process()
         process.executableURL = executableURL
         process.arguments = arguments
+        process.currentDirectoryURL = currentDirectoryURL
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
@@ -352,15 +362,18 @@ actor ServerInstaller {
     private let downloader: any AssetDownloading
     private let layout: InstallLayout
     private let fileManager: FileManager
+    private let resolver: any NodeDependencyResolving
 
     init(
         downloader: any AssetDownloading = URLSessionAssetDownloader(),
         layout: InstallLayout = InstallLayout(),
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        resolver: any NodeDependencyResolving = NpmDependencyResolver()
     ) {
         self.downloader = downloader
         self.layout = layout
         self.fileManager = fileManager
+        self.resolver = resolver
     }
 
     /// Installs `descriptor`. `consentToQuarantineRemoval` must reflect an
@@ -371,8 +384,15 @@ actor ServerInstaller {
     /// pointing at a binary the user already has) never downloads anything:
     /// it only validates the binary exists and is executable, and returns
     /// its own URL unchanged.
+    ///
+    /// `nodeExecutableURL` is required whenever `descriptor.archive?
+    /// .npmPackageRoot` is non-nil (a node-hosted server whose tarball
+    /// needs `npm install` to resolve its own dependencies); it is unused
+    /// otherwise. Callers pass the managed Node runtime's `bin/node` URL
+    /// from `NodeRuntimeManager.ensureInstalled()`.
     func install(
-        descriptor: ServerDescriptor, consentToQuarantineRemoval: Bool
+        descriptor: ServerDescriptor, consentToQuarantineRemoval: Bool,
+        nodeExecutableURL: URL? = nil
     ) async throws -> ServerInstallResult {
         guard let source = descriptor.source else {
             throw ServerInstallError.unsupportedArchive
@@ -406,6 +426,14 @@ actor ServerInstaller {
             binaryRelativePath: archive.binaryRelativePath, into: staging)
         _ = try StagingValidator.validate(
             staging: staging, binaryRelativePath: archive.binaryRelativePath)
+
+        if let npmPackageRoot = archive.npmPackageRoot {
+            guard let nodeExecutableURL else { throw ServerInstallError.nodeRuntimeUnavailable }
+            let packageDirectory = staging.appending(
+                path: npmPackageRoot, directoryHint: .isDirectory)
+            try await resolver.installDependencies(
+                packageDirectory: packageDirectory, nodeExecutableURL: nodeExecutableURL)
+        }
 
         let target = layout.serverDirectory(id: descriptor.id)
         try AtomicDirectoryReplacer.replace(target: target, with: staging)

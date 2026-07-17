@@ -360,6 +360,138 @@ struct ServerInstallerTests {
         }
     }
 
+    // MARK: - npm dependency resolution (nodeHosted, npmPackageRoot)
+
+    @Test(
+        "An npmPackageRoot install runs the resolver in staging, and its node_modules fixture survives the atomic move"
+    )
+    func npmDependenciesSurviveAtomicMove() async throws {
+        try await withTemporaryDirectory { fixtures in
+            try await withTemporaryDirectory { installBase in
+                let contents = Data("#!/usr/bin/env node\n".utf8)
+                let assetURL = try ArchiveFixtureBuilder.makeTarGzip(
+                    relativePath: "package/lib/cli.mjs", contents: contents, in: fixtures)
+
+                let descriptor = makeNodeHostedDescriptor(
+                    id: "typescript-language-server", npmPackageRoot: "package")
+
+                let layout = InstallLayout(baseDirectory: installBase)
+                let resolver = FakeNodeDependencyResolver()
+                let nodeExecutableURL = installBase.appending(path: "node-runtime/bin/node")
+                let installer = ServerInstaller(
+                    downloader: FixtureAssetDownloader(fixtureURL: assetURL), layout: layout,
+                    resolver: resolver)
+
+                let result = try await installer.install(
+                    descriptor: descriptor, consentToQuarantineRemoval: false,
+                    nodeExecutableURL: nodeExecutableURL)
+
+                #expect(await resolver.invocationCount == 1)
+                let recordedPackageDirectory = await resolver.recordedPackageDirectory
+                #expect(recordedPackageDirectory?.path.hasSuffix("/package") == true)
+                #expect(await resolver.recordedNodeExecutableURL == nodeExecutableURL)
+
+                let typescriptPackageJSON = layout.serverDirectory(
+                    id: "typescript-language-server"
+                ).appending(path: "package/node_modules/typescript/package.json")
+                #expect(FileManager.default.fileExists(atPath: typescriptPackageJSON.path))
+                #expect(try Data(contentsOf: result.binaryURL) == contents)
+            }
+        }
+    }
+
+    @Test(
+        "A descriptor with npmPackageRoot but no nodeExecutableURL throws nodeRuntimeUnavailable and installs nothing"
+    )
+    func missingNodeExecutableURLThrowsNodeRuntimeUnavailable() async throws {
+        try await withTemporaryDirectory { fixtures in
+            try await withTemporaryDirectory { installBase in
+                let assetURL = try ArchiveFixtureBuilder.makeTarGzip(
+                    relativePath: "package/lib/cli.mjs", contents: Data("x".utf8), in: fixtures)
+
+                let descriptor = makeNodeHostedDescriptor(
+                    id: "node-no-url-tool", npmPackageRoot: "package")
+
+                let layout = InstallLayout(baseDirectory: installBase)
+                let resolver = FakeNodeDependencyResolver()
+                let installer = ServerInstaller(
+                    downloader: FixtureAssetDownloader(fixtureURL: assetURL), layout: layout,
+                    resolver: resolver)
+
+                await #expect(throws: ServerInstallError.nodeRuntimeUnavailable) {
+                    try await installer.install(
+                        descriptor: descriptor, consentToQuarantineRemoval: false,
+                        nodeExecutableURL: nil)
+                }
+                #expect(await resolver.invocationCount == 0)
+                #expect(
+                    !FileManager.default.fileExists(
+                        atPath: layout.serverDirectory(id: "node-no-url-tool").path))
+            }
+        }
+    }
+
+    @Test(
+        "A Pyright-shaped fixture (npmPackageRoot nil) never invokes the npm dependency resolver"
+    )
+    func pyrightShapedFixtureNeverInvokesResolver() async throws {
+        try await withTemporaryDirectory { fixtures in
+            try await withTemporaryDirectory { installBase in
+                let contents = Data("console.log('pyright fixture')\n".utf8)
+                let assetURL = try ArchiveFixtureBuilder.makeTarGzip(
+                    relativePath: "package/dist/pyright-langserver.js", contents: contents,
+                    in: fixtures)
+
+                let descriptor = makeNodeHostedDescriptor(
+                    id: "pyright-fixture", binaryRelativePath: "package/dist/pyright-langserver.js",
+                    npmPackageRoot: nil)
+
+                let resolver = FakeNodeDependencyResolver()
+                let installer = ServerInstaller(
+                    downloader: FixtureAssetDownloader(fixtureURL: assetURL),
+                    layout: InstallLayout(baseDirectory: installBase), resolver: resolver)
+
+                let result = try await installer.install(
+                    descriptor: descriptor, consentToQuarantineRemoval: false,
+                    nodeExecutableURL: installBase.appending(path: "node-runtime/bin/node"))
+
+                #expect(await resolver.invocationCount == 0)
+                #expect(try Data(contentsOf: result.binaryURL) == contents)
+            }
+        }
+    }
+
+    @Test(
+        "A non-zero npm install exit status is propagated as dependencyResolutionFailed and installs nothing"
+    )
+    func npmInstallFailureAbortsInstall() async throws {
+        try await withTemporaryDirectory { fixtures in
+            try await withTemporaryDirectory { installBase in
+                let assetURL = try ArchiveFixtureBuilder.makeTarGzip(
+                    relativePath: "package/lib/cli.mjs", contents: Data("x".utf8), in: fixtures)
+
+                let descriptor = makeNodeHostedDescriptor(
+                    id: "npm-failure-tool", npmPackageRoot: "package")
+
+                let layout = InstallLayout(baseDirectory: installBase)
+                let resolver = FakeNodeDependencyResolver(failureStatus: 1)
+                let installer = ServerInstaller(
+                    downloader: FixtureAssetDownloader(fixtureURL: assetURL), layout: layout,
+                    resolver: resolver)
+
+                await #expect(throws: ServerInstallError.dependencyResolutionFailed(1)) {
+                    try await installer.install(
+                        descriptor: descriptor, consentToQuarantineRemoval: false,
+                        nodeExecutableURL: installBase.appending(path: "node-runtime/bin/node"))
+                }
+                #expect(await resolver.invocationCount == 1)
+                #expect(
+                    !FileManager.default.fileExists(
+                        atPath: layout.serverDirectory(id: "npm-failure-tool").path))
+            }
+        }
+    }
+
     private func makeDescriptor(
         id: String, format: ArchiveFormat, binaryRelativePath: String, urlSuffix: String,
         checksum: String?
@@ -376,6 +508,26 @@ struct ServerInstallerTests {
             archive: ArchiveLayout(format: format, binaryRelativePath: binaryRelativePath),
             initializationOptions: nil,
             prerequisites: []
+        )
+    }
+
+    private func makeNodeHostedDescriptor(
+        id: String, binaryRelativePath: String = "package/lib/cli.mjs", npmPackageRoot: String?
+    ) -> ServerDescriptor {
+        ServerDescriptor(
+            id: id,
+            languageIDs: ["typescript"],
+            displayName: id,
+            kind: .nodeHosted,
+            source: ServerSource(
+                url: URL(string: "https://registry.npmjs.org/\(id)/-/\(id)-1.0.0.tgz")!,
+                version: "1.0.0", checksum: nil, license: "MIT", estimatedBytes: nil),
+            launchArguments: ["--stdio"],
+            archive: ArchiveLayout(
+                format: .tarGzip, binaryRelativePath: binaryRelativePath,
+                npmPackageRoot: npmPackageRoot),
+            initializationOptions: nil,
+            prerequisites: [.managedNodeRuntime]
         )
     }
 }

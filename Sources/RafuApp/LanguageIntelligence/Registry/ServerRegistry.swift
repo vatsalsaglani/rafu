@@ -32,6 +32,13 @@ nonisolated enum ArchiveFormat: String, Codable, Sendable {
 nonisolated struct ArchiveLayout: Codable, Hashable, Sendable {
     let format: ArchiveFormat
     let binaryRelativePath: String
+    /// The directory, relative to the install root, that `npm install`
+    /// should run in — an npm release tarball's real package root (e.g.
+    /// `"package"`), or `nil` when the unpacked asset needs no npm
+    /// dependency resolution (a self-contained bundle, or a non-npm
+    /// archive). Optional so a legacy `ArchiveLayout` JSON payload that
+    /// predates this property still decodes.
+    var npmPackageRoot: String?
 }
 
 /// Where and how to fetch one server's asset, and what it costs to run

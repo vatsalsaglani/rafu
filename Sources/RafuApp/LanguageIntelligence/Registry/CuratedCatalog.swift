@@ -183,10 +183,12 @@ nonisolated enum CuratedCatalog {
         prerequisites: [.xcodeToolchain]
     )
 
-    // Coordinator decision: this descriptor documents that a bare `.tgz`
-    // unpack is NOT sufficient to run typescript-language-server — it also
-    // needs `typescript` and its other npm dependencies resolved, which is
-    // deferred. Do not treat a successful install as a runnable server.
+    // typescript-language-server's release tarball alone is not enough to
+    // run the server: it also depends on `typescript` and other npm
+    // packages. `archive.npmPackageRoot` names the tarball's own package
+    // root ("package") so `ServerInstaller` runs `npm install
+    // --ignore-scripts` there during install, resolving those dependencies
+    // before the install is moved into place.
     private static let typeScriptLanguageServer = ServerDescriptor(
         id: "typescript-language-server",
         languageIDs: ["typescript", "typescriptreact", "javascript", "javascriptreact"],
@@ -203,15 +205,15 @@ nonisolated enum CuratedCatalog {
             estimatedBytes: 2_000_000
         ),
         launchArguments: ["--stdio"],
-        archive: ArchiveLayout(format: .tarGzip, binaryRelativePath: "package/lib/cli.mjs"),
+        archive: ArchiveLayout(
+            format: .tarGzip, binaryRelativePath: "package/lib/cli.mjs",
+            npmPackageRoot: "package"),
         initializationOptions: nil,
         prerequisites: [
             .managedNodeRuntime,
             .note(
-                "Unpacking this release tarball alone is not enough to run the server: it "
-                    + "additionally depends on `typescript` and other npm packages that are not "
-                    + "resolved by a bare `.tgz` extraction. Full npm dependency installation is "
-                    + "deferred to a later increment."
+                "Installing this server also runs `npm install --ignore-scripts` to resolve "
+                    + "its own npm dependencies (see the install consent sheet)."
             ),
         ]
     )

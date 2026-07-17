@@ -73,20 +73,51 @@ unexplained install failure for Pyright and typescript-language-server.
 - `./script/build_and_run.sh --verify` (staged app relaunched for a live Pyright
   install retry)
 
+## npm dependency resolution within staging (added 2026-07-17)
+
+When a server descriptor declares `ArchiveLayout.npmPackageRoot` (e.g. `"package"` for typescript-language-server), the server's release tarball contains only source code; its dependencies are installed via `npm install` **while still in staging**, before the atomic move to the final install location.
+
+**npm-cli derivation:** The npm entry point is derived from the managed Node runtime's layout. Node's official distribution ships `npm` as a symlink: `bin/npm -> ../lib/node_modules/npm/bin/npm-cli.js`. This path is computed from `nodeExecutableURL` (`bin/node`) by two `deletingLastPathComponent()` calls to reach the runtime root, then appending `lib/node_modules/npm/bin/npm-cli.js`.
+
+**npm flags and rationale:** `node <npm-cli.js> install --omit=dev --no-audit --no-fund --ignore-scripts --no-package-lock --prefer-offline`
+
+- `--omit=dev`: install production dependencies only.
+- `--no-audit`: skip npm's advisory audit step (redundant with explicit consent).
+- `--no-fund`: suppress funding notices.
+- `--ignore-scripts`: **mandatory** — blocks arbitrary preinstall/postinstall lifecycle scripts. npm packages ship these hooks; without this flag, untrusted code runs with Rafu's privilege during every install. This is not optional hardening; it is the only defensible posture.
+- `--no-package-lock`: do not write `package-lock.json` (Rafu does not own or version it).
+- `--prefer-offline`: use npm's local cache when available, reducing network round-trips.
+
+All output (stdout/stderr) is discarded to /dev/null; package names and registry URLs never appear in logs.
+
+**Staging seam & rollback:** The npm step runs strictly AFTER `StagingValidator.validate` (line 427 in ServerInstaller) and BEFORE `AtomicDirectoryReplacer.replace` (line 439), so `node_modules/` is part of the atomic install move. If npm exits non-zero or `resolver.installDependencies()` throws, the function's `defer { try? fileManager.removeItem(at: isolationRoot) }` (line 421) discards staging entirely and the prior install remains untouched.
+
+**ArchiveLayout.npmPackageRoot optional-field nuance:** The field is declared as `var npmPackageRoot: String?` with **no initializer** (`= nil` not written) and **no explicit `init`**. This preserves the compiler-synthesized memberwise initializer with a defaulted `nil` parameter, which is critical for two reasons:
+1. Existing `language-servers.json` payloads (from an older version lacking this field) decode successfully because `Codable` synthesis omits missing optional keys.
+2. When encoding, if `npmPackageRoot` is `nil`, the key is omitted entirely from the JSON (not included as `"npmPackageRoot": null`).
+
+If the field were declared as `let npmPackageRoot: String? = nil`, the explicit initializer would **silently drop the parameter from the memberwise init** (Swift's compiler optimization), breaking existing call sites. If declared without `= nil`, the parameter remains required in the generated init, which would break existing code. The `var` without initializer is the unique pattern that keeps the init synthesized with an optional defaulted parameter.
+
 ## Related code, ADRs, and phases
 
 - **Code**: `Sources/RafuApp/LanguageIntelligence/Registry/ServerInstaller.swift`
-  (`StagingValidator.validate` + `requireSymlinkStaysInside`),
+  (`StagingValidator.validate` + `requireSymlinkStaysInside`, `install` method lines 430–436),
+  `Sources/RafuApp/LanguageIntelligence/Registry/NodeDependencyResolver.swift`
+  (`NodeDependencyResolving` protocol + `NpmDependencyResolver`),
   `Sources/RafuApp/LanguageIntelligence/Registry/NodeRuntimeManager.swift`
   (`ensureInstalled` → unpack → validate),
   `Sources/RafuApp/LanguageIntelligence/Catalog/LanguageServersCatalogModel.swift`
-  (`message(for:)`)
-- **Tests**: `Tests/RafuAppTests/ServerInstallerTests.swift`,
-  `Tests/RafuAppTests/FixtureAssetDownloader.swift`
-- **Phase**: Lane 2, Stage C3 — see
-  [`docs/plans/phases/lane-2-lsp-plan.md`](../plans/phases/lane-2-lsp-plan.md)
-  (Zip-slip bullet updated to reflect the refined policy)
+  (`message(for:)`, `performInstall`, `performInstallPack`),
+  `Sources/RafuApp/LanguageIntelligence/UI/ServerInstallConsentView.swift`
+  (npm install disclosure)
+- **Tests**: `Tests/RafuAppTests/ServerInstallerTests.swift` (npm integration, staging rollback),
+  `Tests/RafuAppTests/FixtureAssetDownloader.swift` (fake `NodeDependencyResolving`)
+- **Phases**: Lane 2, Stage C3 (symlink validation) — see
+  [`lane-2-lsp-plan.md`](../plans/phases/lane-2-lsp-plan.md);
+  lsp-production-readiness lane, P2 (npm dependency resolution) — see
+  [`lsp-production-readiness.md`](../plans/phases/lsp-production-readiness.md)
+- **ADRs**: [`0010-npm-supply-chain-and-checksum-policy.md`](../decisions/0010-npm-supply-chain-and-checksum-policy.md) (npm acceptance + transitive fetch mitigations), [`0005-language-intelligence-and-lsp.md`](../decisions/0005-language-intelligence-and-lsp.md)
 - **Related note**: [`workspace-trust-and-lsp-settings.md`](workspace-trust-and-lsp-settings.md)
 - **Deferred residual (unchanged)**: a during-extraction symlink escape is still
   only catchable post-hoc; the lane-2 plan's pre-extraction entry-scan hardening
-  follow-up remains open.
+  follow-up remains open. npm-installed native addons could be unsigned (AMFI SIGKILL on arm64) — typescript-language-server's deps are pure JS; residual recorded in ADR 0010.
