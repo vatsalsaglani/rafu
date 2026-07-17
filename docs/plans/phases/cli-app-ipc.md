@@ -228,3 +228,13 @@ unchanged.
   suites green; full suite green; no `Package.swift` diff; the three
   shared files untouched since I0; no paths or content logged; ADR 0009
   + references landed; `--wait` honestly deferred.
+
+## Lane completion record
+
+- **I1 — complete (2026-07-17):** Added the pure fixed-header frame encoder,
+  incremental bounded decoder, and content-redacting JSON codec in RafuCore.
+  Tests cover every request kind and response shape, all chunk boundaries,
+  multiple rebased frames, oversized/truncated/garbage headers, unknown-field
+  tolerance, unknown-kind sentinel decoding, and malformed JSON. Evidence:
+  `swift build`; full `swift test` (525 tests); `./script/format.sh --fix` and
+  `./script/format.sh --lint` all passed.
