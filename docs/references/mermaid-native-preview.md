@@ -329,6 +329,73 @@ topology and frame invariants only — activation ordering, block containment,
 note placement, arrow fidelity. **No pixel snapshots** — visual quality is asserted
 at render time via `./script/build_and_run.sh --verify`, not at layout time.
 
-**Section to be filled in M7:**
-- Fixture policy close-out.
-- Verified toolchain and closure.
+### Supported-subset contract (M1–M6 closed)
+
+The native Mermaid preview renders a **bounded supported subset**, making its
+bounds explicit and testable:
+
+- **Flowchart/Graph:** Both `flowchart` and `graph` syntaxes; all seven node
+  shapes; edge line styles (solid/dotted/thick) and heads (arrow/circle/cross,
+  bidirectional); inline and piped labels; chained-edge expansion; nested
+  subgraph nesting/containment; `TD`/`LR`/`BT`/`RL` direction; frontmatter/
+  comment skipping; real 2D rank-based layout; direction-aware coordinates;
+  edge routing with back-edge detection for cycles.
+- **Sequence Diagram:** Participants and actors; time-ordered messages with
+  styled arrows (solid/dotted) and activations; `+`/`-` activation semantics
+  on messages; `alt`/`opt`/`loop`/`par` control-flow blocks with `else`/`and`
+  dividers; notes (`over`/`leftOf`/`rightOf`); participant aliases; real 2D
+  lifeline geometry with activation bars, block frames, and time-ordered event
+  stream.
+
+Everything outside this subset — `classDiagram`, `pie`, `gantt`, `stateDiagram`,
+`erDiagram`, `gitGraph`, `mindmap`, `timeline`, and 21 others — renders as the
+**source code block plus a "diagram type not supported in native preview" notice**,
+never a web view, never a blank box, never a broken diagram. Malformed Mermaid
+(empty header, parse error) likewise falls back, with the parse reason appended
+to the notice.
+
+Every native flow or sequence render carries a **"Simplified native preview"
+badge**, communicating that layout is native and bounded, not mermaid.js parity.
+
+### Known limitations (M1–M6)
+
+1. **Per-subgraph direction:** Recognized in parse but not modeled per scope —
+   all edges within subgraphs use the root-level direction (M2 limitation).
+2. **Dotted/thick inline mid-labels:** `A-. label .--> B` and `A== label ==> B`
+   tokenized correctly but the label is not extracted; only solid `-- label --`
+   inline and `|piped|` labels captured (M2 limitation).
+3. **Non-`>` sequence arrows:** `-x`, `--x`, `-)`, and non-arrow endings still
+   ignored; only `>` arrows (`-->`, dotted/dashed) and identity modeled (M5
+   limitation).
+4. **Sibling subgraph overlap:** Sibling subgraph boxes not guaranteed disjoint;
+   only "member node frame ⊆ own subgraph frame" and "child frame ⊆ parent
+   frame" hold (M3 design choice, not a defect).
+5. **Unbounded canvas:** `canvasSize` intentionally unbounded to support dense/
+   wide diagrams; horizontal scroll for diagrams exceeding viewport (M3 design
+   choice).
+6. **Note over undeclared participant:** Renders at left margin without crash
+   (M6 known condition).
+7. **Layout parity:** Layout quality is "good for common diagrams," not
+   mermaid.js parity. Tests assert topology/frame invariants only, not pixels.
+   The badge and ADR 0008 say so explicitly.
+
+### Fixture policy (M1–M6)
+
+`MermaidLayoutTests.swift` and `MermaidParserTests.swift` assert **topology
+and frame invariants only**:
+
+- **Parser fixtures:** Classifier routes (supported/unsupported/malformed);
+  header detection with frontmatter/comments; node/edge/subgraph structure
+  (order-independent where determinism allows); durable `UUID` identity on
+  repeated rows; nested block balancing; participant aliasing; message
+  activation semantics.
+- **Layout fixtures:** Rank assignment and determinism; in-rank ordering
+  contiguity; subgraph containment/nesting; node no-overlap; cyclic-terminates-
+  with-feedback; self-loop routing; direction-axis correctness; empty graph;
+  disconnected components; sequence lifeline ordering; activation depth/nesting;
+  block frame containment; note placement; edge routing bounds.
+
+**No pixel snapshots.** Visual rendering quality is asserted at segment/render
+time via `./script/build_and_run.sh --verify` (process-level app launch + deep
+GUI inspection), not at layout-unit time. This preserves test determinism and
+decouples rendering quality from test brittleness.

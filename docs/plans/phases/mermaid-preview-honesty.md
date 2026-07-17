@@ -441,11 +441,35 @@ Gate: build/tests/lint green ✓; process-level `--verify` launch ✓; deep-visu
 
 ## M7 — Documentation close-out
 
-- Finalize `docs/references/mermaid-native-preview.md` (subset contract,
-  layout algorithm, fixture policy, verified toolchain), update the Mermaid
-  sentence in `local-editor-vertical-slice.md`, mark this plan's increments
-  complete, prepare the merge handoff (delivered behavior, changed paths,
-  evidence, risks). Index appends happen at merge per the fan-out plan.
+**Status: Complete (2026-07-17)**
+
+### Implementation
+
+- Finalized `docs/references/mermaid-native-preview.md` (M1–M6 closed):
+  - Added supported-subset contract (flowchart/graph + sequenceDiagram natively
+    supported; 29 known types + malformed → honest fallback).
+  - Gathered all known limitations in one place (per-subgraph direction,
+    dotted/thick mid-labels, non-`>` arrows, sibling subgraph overlap,
+    unbounded canvas, note over undeclared, layout parity).
+  - Stated fixture policy: topology/frame invariants only, no pixel snapshots.
+  - Confirmed verified toolchain (Swift 6.2.4, Xcode 26.3, macOS 26.1 on
+    2026-07-17).
+- Updated the Mermaid sentence in `docs/references/local-editor-vertical-slice.md`
+  (lines ~25–27 only): replaced binary "supports/degrades" language with precise
+  supported subset + fallback contract; added references to ADR 0008 and
+  `mermaid-native-preview.md`.
+- Marked this plan's increments M1–M6 complete; prepared the merge handoff
+  (delivered behavior per increment, changed paths, verification evidence,
+  remaining risks, next dependency). Index appends happen at merge per the
+  fan-out plan.
+
+### Verification
+
+Documentation notes are checked into the repository and human-reviewed; no
+verification build step. Internal consistency verified: no stale guidance,
+no inaccurate toolchain versions, no broken links.
+
+Gate: documentation complete and internally consistent ✓.
 
 ## Risks
 
@@ -457,13 +481,108 @@ Gate: build/tests/lint green ✓; process-level `--verify` launch ✓; deep-visu
 - Segmentation regex interaction: parser must tolerate leading/trailing
   whitespace and empty fence bodies.
 
+## Merge handoff
+
+### Delivered behavior (M1–M6, one line each)
+
+1. **M1:** First-token classifier (flowchart/graph/sequenceDiagram supported,
+   29 known types unsupported, unknown/malformed detected); honest code-block +
+   notice fallback; "Simplified native preview" badge on all native renders.
+2. **M2:** Rich flow model (Direction, NodeShape, 7 node types, EdgeLine/EdgeHead,
+   subgraph nesting); bracket/quote-aware parser (chained edges, `&` expansion,
+   nested scope); frontmatter/comment skip in body parse.
+3. **M3:** Pure CoreGraphics layout engine (longest-path DAG + back-edge detection,
+   deterministic in-rank barycenter, direction-aware coordinates, subgraph
+   containment, edge routing).
+4. **M4:** Canvas flow renderer (all 7 node shapes, edge styles/heads, subgraph
+   depth-based dashing, direction-aware arrows, horizontal scroll for unbounded
+   canvas).
+5. **M5:** Rich sequence model (Event stream: message/note/block/activate/
+   deactivate; participant identity semantics fix; activation `+`/`-` semantics;
+   block nesting/dividers; actor vs participant).
+6. **M6:** Canvas sequence renderer (lifelines, activation bars with nesting,
+   alt/opt/loop/par block frames, notes, actor stick-figure glyph, time-ordered
+   messages, shared layout cache).
+
+### Changed paths
+
+- `Sources/RafuApp/Markdown/MarkdownModels.swift` (MermaidParseResult enum,
+  MermaidFlow/MermaidSequence models, parser implementations)
+- `Sources/RafuApp/Markdown/MarkdownPreviewView.swift` (routing for result
+  cases, badge rendering)
+- `Sources/RafuApp/Markdown/MermaidDiagramView.swift` (new file: Canvas
+  renderers for flow and sequence)
+- `Sources/RafuApp/Markdown/MermaidLayout.swift` (new file: pure layout engine)
+- `Sources/RafuApp/Markdown/MarkdownPreviewSegmentParser.swift` (segmentation
+  routing)
+- `Tests/RafuAppTests/MarkdownParserTests.swift` (updated for new result shape)
+- `Tests/RafuAppTests/MermaidParserTests.swift` (new file: M1–M5 parser fixtures)
+- `Tests/RafuAppTests/MermaidLayoutTests.swift` (new file: M3–M6 layout
+  invariant fixtures)
+- `docs/decisions/0008-mermaid-native-preview.md` (new file: ADR Proposed)
+- `docs/references/mermaid-native-preview.md` (new file: finalized reference note)
+- `docs/references/local-editor-vertical-slice.md` (3-line Mermaid sentence update)
+- `docs/plans/phases/mermaid-preview-honesty.md` (this file: M1–M7 completed)
+
+### Verification evidence
+
+- `swift build` — clean (no new dependency).
+- `swift test` — 555 tests pass (12 M3 layout + 9 M6 geometry + parser fixtures).
+- `./script/format.sh --lint` — clean.
+- `./script/build_and_run.sh --verify` — process-level launch confirmed twice
+  (implementor + coordinator); Rafu.app staged and running, exit 0.
+- Deep visual GUI inspection (directional flowchart with subgraphs/edge labels;
+  sequence with alt/loop/activations/lifelines/frames; actor glyph; unsupported
+  type + notice; "Simplified native preview" badge; second window; Reduce
+  Motion; accessibility) — **OWED** to human/coordinator GUI pass (deferred
+  per coordination model). Scope documented in `scratchpad/mermaid-verify.md`.
+
+### Remaining risks
+
+- Deep visual inspection not yet observed (deferred to human GUI pass per
+  coordination model).
+- Layout quality is "good for common diagrams," not mermaid.js parity — the
+  badge and ADR 0008 make this explicit; topology/frame fixtures assert
+  correctness, not visual beauty.
+- Sibling subgraph overlap permitted; note over undeclared participant at
+  margin (design choices, not defects).
+- Cyclic flowcharts handled via back-edge marking; fixture verified; no known
+  regression.
+
+### Next integration dependency
+
+This lane integrates at merge with **L1 LSP (language-intelligence-honesty)** per
+the post-audit fan-out plan. The Mermaid lane closure does not block L1; they
+are independent. Shared index appends (docs/decisions/README.md + docs/references/README.md)
+happen at coordinator merge, not before.
+
+### Intended shared-index rows (coordinator must append at merge)
+
+The rows below match the existing index column schemas exactly (verified
+2026-07-17): `docs/decisions/README.md` uses `| ADR | Status | Decision |`
+and `docs/references/README.md` uses `| Reference | Read when |`. Paste as-is.
+
+**For `docs/decisions/README.md`** (append under the last ADR row):
+
+| [0008](0008-mermaid-native-preview.md) | Accepted | Bounded native Mermaid renderer with honest fallback; supported subset flowchart + sequenceDiagram, everything else falls back to code block + notice; shared-WKWebView option deferred |
+
+(ADR 0008's own file is currently **Proposed**; the user flips it to
+**Accepted** in-lane at merge, at which point this `Accepted` row is correct.
+If the flip has not happened when the row is appended, use `Proposed`.)
+
+**For `docs/references/README.md`** (append under the last reference row):
+
+| [`mermaid-native-preview.md`](mermaid-native-preview.md) | Changing Mermaid parsing, classification, layout, fallback rendering, or diagram-type detection |
+
 ## Exit
 
-- Classifier + typed models for flowchart/graph/sequenceDiagram; everything
+- ✓ Classifier + typed models for flowchart/graph/sequenceDiagram; everything
   else `.unsupported` with code-block + notice.
-- Real direction-aware flow layout (shapes, labels, subgraphs); sequence
+- ✓ Real direction-aware flow layout (shapes, labels, subgraphs); sequence
   lifelines/activations/blocks.
-- Badge on every native render; no new dependency; no WKWebView;
+- ✓ Badge on every native render; no new dependency; no WKWebView;
   segmentation and MarkdownUI boundaries unchanged.
-- ADR 0008 accepted + reference note indexed at merge; all verification
-  gates green.
+- → ADR 0008 status: Proposed (user flips to Accepted at merge); reference
+  note indexed at merge by coordinator; all build/test/lint verification gates
+  green ✓; process-level `--verify` launch confirmed ✓; deep-visual `--verify`
+  GUI inspection OWED (deferred to human pass).

@@ -22,9 +22,13 @@
   entire workspace tree. UTF-8 editing is capped at 4 MB for this checkpoint.
   The sidebar tree is lazy and expansion-driven, not eagerly recursive — see
   [`memory-and-file-indexing.md`](memory-and-file-indexing.md).
-- Markdown preview is a native block renderer. The Mermaid checkpoint supports
-  flowchart edges and sequence participants/messages; unsupported Mermaid syntax
-  degrades to the parsed subset instead of instantiating a web view.
+- Markdown preview is a native block renderer. The native Mermaid preview renders
+  a bounded supported subset — flowchart/graph (node shapes, subgraphs, direction,
+  styled/labeled edges) and sequenceDiagram (lifelines, activations, alt/opt/loop/par
+  blocks, notes) — as real 2D native diagrams with a "Simplified native preview" badge;
+  every other or malformed diagram type falls back to the source code block plus a
+  "not supported in native preview" notice, never a web view (see ADR 0008 and
+  [`mermaid-native-preview.md`](mermaid-native-preview.md)).
 - Parsed Markdown blocks and Mermaid edges/messages receive durable UUID identity
   before entering SwiftUI. Repeated prose or duplicate edges must not use content
   hashes or array offsets as `ForEach` identity; either choice can merge distinct
