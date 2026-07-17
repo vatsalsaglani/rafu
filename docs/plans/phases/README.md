@@ -37,6 +37,13 @@ Bootstrap itself did **not** claim TextKit editing, Tree-sitter, SSH, launcher I
 | [Phase 6](phase-6-controlled-expansion.md) | Deferred | Phase 5 plus explicit approval | Only approved bounded additions |
 | [Memory resilience](memory-resilience.md) | Lane 1 COMPLETE (2026-07-15); Stage C at lane-2 merge | Initial push; interleaves with feature phases | Budgets hold under abuse, with recorded Release evidence |
 | [Language intelligence](language-intelligence.md) | Lane 1 COMPLETE (2026-07-15); Stage C at lane-2 merge | Initial push; ADR 0005; Resources surface for Stage C | Ladder navigation (Tree-sitter → symbols → opt-in LSP) shipped in bounded stages |
+| [Post-audit fan-out](post-audit-worktree-fanout.md) | Planned (2026-07-17) | Clean working tree; contract commits G0 + I0 | Six lanes merged in three pairwise integration rounds |
+| ├ [LSP production readiness](lsp-production-readiness.md) | Planned | Fan-out prerequisites | npm-resolved TS server, verified catalog, live gopls/rust-analyzer round-trip, sourcekit-lsp references |
+| ├ [Symbol coverage + markdownInline](symbol-coverage-and-markdown-inline.md) | Planned | Fan-out prerequisites | tags.scm × 5 new grammars; inline Markdown highlighting |
+| ├ [Mermaid preview honesty](mermaid-preview-honesty.md) | Planned | Fan-out prerequisites; ADR 0008 | Honest fallback + real flow/sequence native rendering |
+| ├ [Multi-cursor editing](multi-cursor-editing.md) | Planned | Fan-out prerequisites | Bounded multi-caret v1 (⌥-click, ⌘D, ⌘⇧L, carets above/below) |
+| ├ [Git depth](git-depth-blame-stash-hunks.md) | Planned | G0 contract commit; stash needs user approval; ADR 0011 | Hunk staging, stash, blame — explicit and bounded |
+| └ [CLI ↔ app IPC v1](cli-app-ipc.md) | Planned | I0 contract commit; ADR 0009 | Socket protocol, routing, `--goto`, `--new-window`; `--wait` deferred |
 
 Memory resilience and language intelligence execute as the two-lane worktree
 split defined in `language-intelligence.md`: lane 1
@@ -45,7 +52,14 @@ checkout) and lane 2
 ([`lane-2-lsp-plan.md`](lane-2-lsp-plan.md), dedicated worktree created only
 after lane 1's contract commit lands).
 
-Phase 1C may develop late in parallel with Phase 1B after shared routing contracts stabilize, but the Phase 1 public gate requires 1A, 1B, and 1C together. Hardening and tests are continuous; Phase 5 is the dedicated release gate.
+The post-audit work (2026-07-17) executes as a six-lane worktree split
+coordinated by [`post-audit-worktree-fanout.md`](post-audit-worktree-fanout.md):
+that file owns fan-out prerequisites, the two contract-first commits (G0
+Git, I0 IPC), ADR number reservations 0008–0011, the shared-file
+protocol, and the pairwise merge rounds; each lane's plan document owns
+its scope and increments.
+
+Phase 1C may develop late in parallel with Phase 1B after shared routing contracts stabilize, but the Phase 1 public gate requires 1A, 1B, and 1C together. Hardening and tests are continuous; Phase 5 is the dedicated release gate. The CLI ↔ app IPC lane above delivers Phase 0's CLI spike and the core of Phase 1C.
 
 ## Goal mode contract
 
