@@ -204,6 +204,18 @@ IME, and GUI undo/redo remain on the consolidated MC6 checklist.
 
 Gate: full manual gesture checklist below, except menu paths.
 
+Execution record (2026-07-18): **MC4 complete, with its manual checklist
+deferred to the consolidated MC6 pass by explicit coordinator direction.**
+Option-click toggles carets ahead of the unchanged Command-click and plain-click
+branches; Escape collapses to the logical primary. View commands implement
+bounded occurrence selection and hybrid Foundation/pure-model line-column
+math across ragged and empty lines. Additive document/view closures expose the
+four menu-bound operations, and hibernation captures the authoritative primary
+selection rather than AppKit's earliest presentation range. Four AppKit tests
+cover occurrence commands, ragged-line placement, primary hibernation capture,
+and Escape. `swift build`, the full 529-test suite, formatter fix, and lint are
+green.
+
 ## MC5 — Menu commands (shared-file hunks, land LAST)
 
 - `WorkspaceSession`: `selectNextOccurrence()` etc. mirroring

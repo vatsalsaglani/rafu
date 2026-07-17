@@ -400,6 +400,107 @@ func multiCaretBackwardDelete() {
 }
 
 @MainActor
+@Test("View occurrence commands expand, add, select all, and collapse")
+func viewOccurrenceCommands() {
+    let textView = RafuTextView.makeTextKit1()
+    textView.string = "foo foobar foo"
+    textView.setSelectedRange(NSRange(location: 1, length: 0))
+
+    textView.selectNextOccurrence()
+    #expect(textView.currentCaretRanges == [NSRange(location: 0, length: 3)])
+
+    textView.selectNextOccurrence()
+    #expect(
+        textView.currentCaretRanges == [
+            NSRange(location: 0, length: 3),
+            NSRange(location: 4, length: 3),
+        ])
+
+    textView.selectAllOccurrences()
+    #expect(textView.currentCaretRanges.count == 3)
+
+    textView.collapseToPrimaryCaret()
+    #expect(textView.currentCaretRanges == [NSRange(location: 0, length: 3)])
+}
+
+@MainActor
+@Test("Add-caret commands preserve goal column across ragged and empty lines")
+func viewAddCaretColumnMath() {
+    let textView = RafuTextView.makeTextKit1()
+    textView.string = "1234\nx\n\nabcdef"
+    textView.setSelectedRange(NSRange(location: 3, length: 0))
+
+    textView.addCaret(direction: .below)
+    textView.addCaret(direction: .below)
+    textView.addCaret(direction: .below)
+
+    #expect(
+        textView.currentCaretRanges == [
+            NSRange(location: 3, length: 0),
+            NSRange(location: 6, length: 0),
+            NSRange(location: 7, length: 0),
+            NSRange(location: 11, length: 0),
+        ])
+}
+
+@MainActor
+@Test("Hibernation capture keeps the logical primary selection")
+func hibernationCapturesPrimaryCaret() {
+    let document = EditorDocument(url: URL(fileURLWithPath: "/tmp/multi-caret.swift"))
+    let coordinator = CodeEditorView.Coordinator(
+        document: document,
+        theme: RafuThemeCatalog.indigo,
+        findState: nil
+    )
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 100))
+    let textView = RafuTextView.makeTextKit1()
+    textView.string = "foo foo foo"
+    scrollView.documentView = textView
+    coordinator.textView = textView
+    textView.applyCaretRanges(
+        [
+            NSRange(location: 0, length: 3),
+            NSRange(location: 4, length: 3),
+            NSRange(location: 8, length: 3),
+        ],
+        primaryIndex: 1
+    )
+
+    #expect(textView.selectedRange() == NSRange(location: 0, length: 3))
+    coordinator.captureViewState(from: scrollView)
+    #expect(document.restoredSelection == NSRange(location: 4, length: 3))
+}
+
+@MainActor
+@Test("Escape collapses to the logical primary caret")
+func escapeCollapsesCarets() throws {
+    let textView = RafuTextView.makeTextKit1()
+    textView.string = "foo bar"
+    textView.applyCaretRanges(
+        [NSRange(location: 1, length: 0), NSRange(location: 5, length: 0)],
+        primaryIndex: 1
+    )
+    let event = try #require(
+        NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\u{1B}",
+            charactersIgnoringModifiers: "\u{1B}",
+            isARepeat: false,
+            keyCode: 53
+        )
+    )
+
+    textView.keyDown(with: event)
+
+    #expect(textView.currentCaretRanges == [NSRange(location: 5, length: 0)])
+}
+
+@MainActor
 private final class MultiCaretEditingProbe: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
     let manager: UndoManager = {
         let manager = UndoManager()

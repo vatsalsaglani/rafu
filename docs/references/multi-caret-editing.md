@@ -57,6 +57,29 @@ The newline delegate's single-caret auto-indent path is bypassed during a
 multi-caret batch. Newlines are inserted literally at every caret in v1; there
 is no per-caret auto-indent.
 
+## Gestures, commands, and restoration
+
+Option-click without Command toggles the caret at AppKit's insertion index;
+plain click and the existing Command-click navigation keep their original
+paths. Escape consumes the key only while multiple carets are active and
+collapses to the logical primary. Marked-text composition never enters either
+multi-caret branch.
+
+Occurrence commands operate on the primary selection. The first
+select-next invocation expands an empty primary through
+`IdentifierUnderCaret`; subsequent invocations add literal substring matches,
+and select-all replaces the caret set with the bounded result. Adding a caret
+above or below uses the primary caret's goal column but searches outward from
+the current topmost or bottommost caret. Foundation line ranges provide UTF-16
+line starts, while CR/LF terminators are removed before the pure model clamps
+the goal column on ragged and empty lines.
+
+`EditorDocument` stores only one restored selection by design. Before a live
+multi-caret text view hibernates, `CodeEditorView.Coordinator` captures the
+authoritative logical primary instead of AppKit's presentation selection.
+Restoration therefore resumes with one primary caret and never serializes the
+ephemeral secondary set.
+
 ## Runtime spike findings
 
 ### Spike A — multiple zero-length selections
@@ -109,7 +132,7 @@ swift test
 ./script/format.sh --lint
 ```
 
-MC3 completed with 525 tests green. Per the lane coordinator's explicit run
+MC4 completed with 529 tests green. Per the lane coordinator's explicit run
 direction, `./script/build_and_run.sh --verify` and the interactive blink,
 gesture, IME, accessibility, hibernation, and second-window checks are deferred
 to one consolidated MC6 pass.

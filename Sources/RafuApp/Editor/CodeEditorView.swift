@@ -89,6 +89,18 @@ struct CodeEditorView: NSViewRepresentable {
         document.toggleCommentAction = { [weak coordinator = context.coordinator] in
             coordinator?.toggleLineComment()
         }
+        document.selectNextOccurrenceAction = { [weak textView] in
+            textView?.selectNextOccurrence()
+        }
+        document.selectAllOccurrencesAction = { [weak textView] in
+            textView?.selectAllOccurrences()
+        }
+        document.addCaretAboveAction = { [weak textView] in
+            textView?.addCaret(direction: .above)
+        }
+        document.addCaretBelowAction = { [weak textView] in
+            textView?.addCaret(direction: .below)
+        }
         return scrollView
     }
 
@@ -140,6 +152,10 @@ struct CodeEditorView: NSViewRepresentable {
         coordinator.document.textSnapshotProvider = nil
         coordinator.document.selectionProvider = nil
         coordinator.document.toggleCommentAction = nil
+        coordinator.document.selectNextOccurrenceAction = nil
+        coordinator.document.selectAllOccurrencesAction = nil
+        coordinator.document.addCaretAboveAction = nil
+        coordinator.document.addCaretBelowAction = nil
     }
 
     @MainActor
@@ -253,6 +269,13 @@ struct CodeEditorView: NSViewRepresentable {
         /// `dismantleNSView` before teardown.
         func captureViewState(from scrollView: NSScrollView) {
             guard let textView else { return }
+            if textView.hasMultipleCarets {
+                document.captureViewState(
+                    selection: textView.primaryCaretRange,
+                    scrollFraction: Self.scrollFraction(of: scrollView)
+                )
+                return
+            }
             document.captureViewState(
                 selection: textView.selectedRange(),
                 scrollFraction: Self.scrollFraction(of: scrollView)

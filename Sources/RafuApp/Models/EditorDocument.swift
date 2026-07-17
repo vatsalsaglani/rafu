@@ -108,6 +108,18 @@ final class EditorDocument: Identifiable {
     @ObservationIgnored
     var toggleCommentAction: (() -> Void)?
 
+    @ObservationIgnored
+    var selectNextOccurrenceAction: (() -> Void)?
+
+    @ObservationIgnored
+    var selectAllOccurrencesAction: (() -> Void)?
+
+    @ObservationIgnored
+    var addCaretAboveAction: (() -> Void)?
+
+    @ObservationIgnored
+    var addCaretBelowAction: (() -> Void)?
+
     /// Returns a value copy of the live editor text. Set by the mounted
     /// `CodeEditorView`; `nil` when no text view backs this document
     /// (bitmap previews, Markdown preview-only mode). Live text itself
