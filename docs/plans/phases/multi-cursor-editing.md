@@ -118,6 +118,13 @@ column math on ragged lines, normalization/clamp.
 
 Gate: model API frozen; full test suite green; no UI change.
 
+Execution record (2026-07-17): **MC1 complete.** Added the pure model and 15
+focused tests; `swift build`, the full 520-test suite, formatter fix, and lint
+are green. The frozen model includes forward/backward delete plans earlier than
+the original anchor implied: empty carets expand with
+`rangeOfComposedCharacterSequence` before reverse-order editing, preventing a
+multi-caret delete from splitting a UTF-16 surrogate pair or grapheme cluster.
+
 ## MC2 — Caret set in the view + spikes + secondary-caret rendering
 
 - `RafuTextView`: `private var caretRanges: [NSRange]` (authoritative);
