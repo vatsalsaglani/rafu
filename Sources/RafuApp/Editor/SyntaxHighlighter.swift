@@ -319,6 +319,24 @@ final class NeonSyntaxHighlightingPipeline: NSObject {
     /// Monotonic parse-generation counter handed to the actor for staleness
     /// (a newer snapshot always wins). Independent of `EditorDocument.revision`.
     private var snapshotVersion = 0
+    /// Monotonic count of `.editedCharacters` passes. A tree-sitter token
+    /// request captures it at request time; if it moved by completion time,
+    /// the requested range refers to a document state that no longer exists.
+    /// Completing such a request with tokens (or `.noChange`, whose nil range
+    /// falls back to the requested range inside Neon) unions stale offsets
+    /// into Neon's valid-range set, which later trips
+    /// `RangeMutation.transform`'s bounds assertion — e.g. on undo of a
+    /// multi-caret edit. Stale requests must complete with `.failure`, the
+    /// only outcome Neon discards without touching its valid set.
+    private var contentGeneration = 0
+
+    /// Failure used to drop token results that raced a text edit; Neon
+    /// re-requests against the fresh document from `didChangeContent`.
+    private enum TokenProviderError: Error { case staleContent }
+
+    /// Test-only visibility into grammar-actor activation, so the stale-token
+    /// regression test can await the tree-sitter path deterministically.
+    var hasLiveGrammarActorForTesting: Bool { syntaxActor != nil }
 
     /// Set by `CodeEditorView.Coordinator.syncGuardSuppression()` for
     /// guarded, unoverridden documents. While `true`, `applyBaseStyleAndInvalidate()`
@@ -381,10 +399,16 @@ final class NeonSyntaxHighlightingPipeline: NSObject {
                 return
             }
             // Tree-sitter path: query the actor off-main, apply on main.
+            // The generation is read synchronously here, not inside the task,
+            // so an edit scheduled between this closure and the task body
+            // cannot make a stale request look current.
+            let requestGeneration = self.contentGeneration
             Task { [weak self] in
                 let spans = await actor.tokens(inUTF16: range)
-                guard self?.syntaxActor === actor else {
-                    completion(.success(.noChange))
+                guard let self, self.syntaxActor === actor,
+                    self.contentGeneration == requestGeneration
+                else {
+                    completion(.failure(TokenProviderError.staleContent))
                     return
                 }
                 let signposter = SyntaxSignpost.signposter
@@ -439,6 +463,7 @@ final class NeonSyntaxHighlightingPipeline: NSObject {
     ) {
         guard !isSuppressed else { return }
         guard editedMask.contains(.editedCharacters) else { return }
+        contentGeneration += 1
         let previousRange = NSRange(
             location: editedRange.location,
             length: max(0, editedRange.length - delta)

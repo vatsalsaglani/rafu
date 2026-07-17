@@ -775,7 +775,13 @@ final class RafuTextView: NSTextView {
         indentGuideColor.setFill()
         var location = charRange.location
         while location < NSMaxRange(charRange) {
-            let lineRange = content.lineRange(for: NSRange(location: location, length: 0))
+            // `NSString.lineRange(for:)` walks to the line's true start and
+            // end, which is O(document) per call on single-giant-line content
+            // (e.g. minified JSON) and produced a 30-second main-thread hang
+            // during drawing. Line discovery is therefore bounded: a line
+            // whose boundary sits farther than the scan cap from the visible
+            // range draws no guides, and drawing stops for this pass.
+            guard let lineRange = boundedLineRange(around: location, in: content) else { break }
             defer { location = NSMaxRange(lineRange) }
             guard let columns = leadingWhitespaceColumns(of: lineRange, in: content),
                 columns > 0
@@ -793,6 +799,47 @@ final class RafuTextView: NSTextView {
                 column += Self.indentColumns
             }
         }
+    }
+
+    /// Farthest distance, in UTF-16 units, that indent-guide drawing will
+    /// scan from the visible range to find a line boundary. Lines longer than
+    /// this are pathological (minified single-line files); their indentation
+    /// is not meaningful on screen and unbounded scans hang the main thread.
+    private static let maxIndentGuideLineScan = 4_096
+
+    /// Bounded replacement for `NSString.lineRange(for:)` used only by
+    /// indent-guide drawing. Returns the line range containing `location`
+    /// (trailing newline included, matching `lineRange(for:)`), or `nil`
+    /// when either boundary lies beyond `maxIndentGuideLineScan`.
+    private func boundedLineRange(around location: Int, in content: NSString) -> NSRange? {
+        let cap = Self.maxIndentGuideLineScan
+        let newlines = CharacterSet.newlines
+
+        let backStart = max(0, location - cap)
+        let backWindow = NSRange(location: backStart, length: location - backStart)
+        let backHit = content.rangeOfCharacter(
+            from: newlines, options: .backwards, range: backWindow)
+        let lineStart: Int
+        if backHit.location != NSNotFound {
+            lineStart = NSMaxRange(backHit)
+        } else if backStart == 0 {
+            lineStart = 0
+        } else {
+            return nil
+        }
+
+        let forwardLimit = min(content.length, location + cap)
+        let forwardWindow = NSRange(location: location, length: forwardLimit - location)
+        let forwardHit = content.rangeOfCharacter(from: newlines, range: forwardWindow)
+        let lineEnd: Int
+        if forwardHit.location != NSNotFound {
+            lineEnd = NSMaxRange(forwardHit)
+        } else if forwardLimit == content.length {
+            lineEnd = content.length
+        } else {
+            return nil
+        }
+        return NSRange(location: lineStart, length: lineEnd - lineStart)
     }
 
     /// Leading-whitespace column count of a line, or `nil` for blank lines

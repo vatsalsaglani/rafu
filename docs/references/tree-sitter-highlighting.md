@@ -153,3 +153,29 @@ No persistent inline tree is retained — each `tokens` call is a stateless, syn
 ### MarkdownInline code injections remain deferred
 
 Markdown fence syntax highlighting is fully implemented via `TreeSitterCodeSyntaxHighlighter`. Inline code spans (backtick-delimited text like `variable` within prose) do NOT receive tree-sitter highlighting in this phase. This is a deliberate feature deferral, not a defect: inline code often appears in comments, lists, and documentation where precise syntax coloring is less critical than rendering readability, and the scope of MarkdownUI's `CodeSyntaxHighlighter` protocol is fence-only. Adding inline-span discovery (regex or tree-sitter AST traversal) and per-span highlighting would require changes to MarkdownUI's rendering or custom prose paragraph reconstruction, both out of scope for this checkpoint. The deferral does not impair usability — users see plain-text inline code with theme markup, and fence code (the primary embedded-code surface) highlights correctly.
+
+## Neon token-provider staleness contract (post-fan-out fix, 2026-07-18)
+
+Neon's `Highlighter.handleTokens` unions the **requested** range into its
+`validSet` on every `.success` completion — including `.noChange`, whose
+`range: nil` falls back to the requested range — with no re-validation
+against the current document. Any token-provider completion that lands
+after subsequent edits therefore pollutes `validSet` with offsets beyond
+the (shrunken) document, and the next `didChangeContent` trips
+`RangeMutation.transform(location:)`'s bounds assertion
+(`Rearrange/RangeMutation.swift:84`) — a debug-build crash, silent range
+corruption in Release. The reliable trigger was undo of a multi-caret
+backspace: two rapid shrinking edits while a full-buffer request was in
+flight, then an immediate ⌘Z.
+
+Rule: an asynchronous token provider MUST complete with `.failure` when
+the document changed since the request was issued — failure is the only
+outcome Neon discards without touching `validSet`, and re-request comes
+free from `didChangeContent`. `NeonSyntaxHighlightingPipeline` implements
+this with a `contentGeneration` counter bumped per `.editedCharacters`
+pass and captured **synchronously in the provider closure** (not inside
+the async Task, where a scheduled edit could make a stale request look
+current). Regression: `multiCaretUndoSurvivesStaleTokenRequest`
+(`Tests/RafuAppTests/MultiCaretUndoDiagnosticTests.swift`), whose potency
+was verified by neutralizing the generation guard and observing the exact
+`RangeMutation.swift:84` fatal error.

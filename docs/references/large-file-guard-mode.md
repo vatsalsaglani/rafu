@@ -51,3 +51,23 @@ App-level verification: `./script/build_and_run.sh --verify` confirmed UI banner
 - **Symbol index reuse**: Increment 10 (`WorkspaceSymbolIndex`) reads the same `document.suppressesSyntax` flag to skip guarded files from the index.
 - **Deferred**: A dedicated menu/command-palette "Enable Highlighting for this file" override command; the banner Button is the sufficient keyboard-reachable path this increment (accessible via Full Keyboard Access, not hidden behind a gesture).
 - **Lane**: Lane 1, Increment 2 — memory resilience + Tree-sitter Stages A/B
+
+## Bounded indent-guide line scan (post-fan-out fix, 2026-07-18)
+
+A production stackshot (v0.1.1-beta, 31 s unresponsive, 13/13 samples in
+`RafuTextView.drawIndentGuides` → `NSString.lineRangeForRange`) showed
+that indent-guide drawing was visible-rect-bounded in glyph space but not
+in string space: `lineRange(for:)` walks to a line's TRUE start/end, which
+is O(document) per visible line fragment on single-giant-line content
+(e.g. minified JSON) — and `glyphRange(forCharacterRange:)` then forces
+layout of the whole mega-line, every draw. The guard mode's line-length
+check protects at open time but not against every path (e.g. thresholds
+tuned to bytes, or content arriving via paste).
+
+Rule: drawing-path code must never call `NSString.lineRange(for:)` (or
+similar whole-line walks) unbounded. `drawIndentGuides` now uses
+`boundedLineRange(around:in:)` — newline searches capped at
+`maxIndentGuideLineScan = 4096` UTF-16 units in each direction; a line
+whose boundary exceeds the cap draws no guides and ends the pass (its
+indentation is off-screen and meaningless anyway). Regression:
+`indentGuideLineScanBounded` (same test file as above).
