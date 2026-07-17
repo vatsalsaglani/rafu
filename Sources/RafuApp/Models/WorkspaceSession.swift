@@ -586,7 +586,10 @@ final class WorkspaceSession {
         }
         select(document)
 
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return }
+        guard
+            let text = document.textSnapshotProvider?()
+                ?? (try? String(contentsOf: url, encoding: .utf8))
+        else { return }
         let offset = LineColumnIndex.utf16Offset(
             line: location.line, column: location.column, in: text)
         findState(for: document).select(NSRange(location: offset, length: 0))

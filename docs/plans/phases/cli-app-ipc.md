@@ -258,3 +258,14 @@ unchanged.
   test` (543 tests); `./script/format.sh --fix` and
   `./script/format.sh --lint` all passed; window-management/AppKit review
   confirmed the narrow focus-only escape.
+- **I4 — complete (2026-07-18):** Filled only the frozen goto seam body. Goto
+  now computes UTF-16 selection from mounted live editor text when available,
+  otherwise from the clean disk file, and relies on `DocumentFindState` to
+  deliver the range after first mount or hibernation rematerialization. New
+  seam tests cover live-text precedence, CRLF disk fallback, pending
+  selection, hibernation, and clamping in concert with the exhaustive I0 line
+  index suite. Evidence: `swift build`; focused goto suite (3 tests); full
+  `swift test` (546 tests); `./script/format.sh --fix` and
+  `./script/format.sh --lint` all passed. One initial full run reported two
+  transient issues that did not reproduce in the focused suite or immediate
+  full rerun; no code change was needed.

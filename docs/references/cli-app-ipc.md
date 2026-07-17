@@ -41,6 +41,14 @@ prunes dead entries on every snapshot/effect, and uses SwiftUI to create the
 for `--new-window` carry a minimum registration order so an older same-root
 window cannot consume the new window's navigation request.
 
+Goto selection uses the mounted editor's `textSnapshotProvider` when present,
+so unsaved TextKit content determines the UTF-16 caret offset. When no editor
+is mounted, it reads the clean file from disk and places the resulting range in
+`DocumentFindState`; that state delivers the pending selection when the editor
+attaches. Selecting a hibernated tab rematerializes it through the ordinary
+session path. Its exact column is necessarily best-effort until mount because
+the clean disk snapshot is the only available text authority at that moment.
+
 In the RafuApp target's Swift 6.2 default-`MainActor` mode, declaring
 `LauncherIPCServer` as a custom `actor` gives it its own executor and is the
 explicit isolation boundary. Do not spell the type `nonisolated actor`: Swift
@@ -80,6 +88,11 @@ windows, unsupported targets, and injected focus/seed/goto effects. The
 window-management review verified that scene creation remains on SwiftUI's
 `openWindow` path and the AppKit escape is restricted to specific-window focus.
 
+`WorkspaceGotoLocationTests` proves that mounted live text wins over differing
+disk text, CRLF disk offsets queue before first mount, and a hibernated tab is
+rematerialized with its pending caret. `LineColumnIndexTests` supplies the
+exhaustive LF/CRLF, line-clamp, and column-clamp matrix beneath that seam.
+
 ## Verification
 
 ```bash
@@ -97,7 +110,9 @@ swift test
 - `Sources/RafuApp/Launcher/LauncherRequestRouter.swift`
 - `Sources/RafuApp/Launcher/WindowAccessor.swift`
 - `Sources/RafuApp/Launcher/WorkspaceWindowRegistry.swift`
+- `Sources/RafuApp/Models/WorkspaceSession.swift`
 - `Tests/RafuCoreTests/LauncherIPCFramingTests.swift`
 - `Tests/RafuAppTests/LauncherRequestRouterTests.swift`
+- `Tests/RafuAppTests/WorkspaceGotoLocationTests.swift`
 - `docs/plans/phases/cli-app-ipc.md`
 - ADR 0009 (authored by I6)
