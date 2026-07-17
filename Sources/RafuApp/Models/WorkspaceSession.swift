@@ -84,11 +84,14 @@ final class WorkspaceSession {
     var gitInspectorSection: GitInspectorSection = .changes
     var gitOpenDiff: GitOpenDiff?
     var gitMergeState: GitMergeState?
+    var gitStashes: [GitStashEntry] = []
+    var gitOpenBlame: GitBlame?
     var gitCommitMessage = ""
     var isGeneratingAICommitMessage = false
     var aiCommitGenerationError: String?
     var isLoadingTree = false
     var isGitBusy = false
+    var isGitHunkActionBusy = false
     var isOpenFolderImporterPresented = false
     var isCommandPalettePresented = false
     var commandPaletteSeed = ""
@@ -558,6 +561,35 @@ final class WorkspaceSession {
         }
         select(document)
         findState(for: document).select(range)
+    }
+
+    /// Opens a file at a workspace-relative path and selects the location
+    /// described by `location` — the CLI `--goto` entry point
+    /// (`Sources/RafuCore/Launcher/IPC/**`; contract signature landed by
+    /// I0, see `docs/plans/phases/cli-app-ipc.md`). Mirrors
+    /// `openWorkspaceSymbol`'s open/select shape, computing the UTF-16
+    /// selection range from the file's on-disk contents via
+    /// `LineColumnIndex`. Reusing `DocumentFindState.select(_:)` means a
+    /// buffer that isn't mounted yet still receives the pending selection
+    /// once it is (`DocumentFindState.attach(_:)`); a dirty in-memory
+    /// buffer's live text and exact-column precision on a hibernated tab
+    /// are completed by the IPC lane's I4 increment — this is an honest
+    /// best-effort selection, not the final behavior.
+    func openFile(atRelativePath relativePath: String, selecting location: SourceLocation) {
+        guard let rootURL else { return }
+        let url = rootURL.appending(path: relativePath)
+        let document: EditorDocument
+        if let existing = openDocuments.first(where: { $0.url == url }) {
+            document = existing
+        } else {
+            document = trackNewDocument(url: url)
+        }
+        select(document)
+
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return }
+        let offset = LineColumnIndex.utf16Offset(
+            line: location.line, column: location.column, in: text)
+        findState(for: document).select(NSRange(location: offset, length: 0))
     }
 
     /// Caret-driven navigation entry point for the "Go to Definition"/"Go to
@@ -1380,7 +1412,8 @@ final class WorkspaceSession {
                 title: "Diff • \((change.path as NSString).lastPathComponent)",
                 subtitle: "\(change.path) • \(scopeTitle)",
                 diff: diff,
-                identity: "\(scopeTitle):\(change.path)"
+                identity: "\(scopeTitle):\(change.path)",
+                scope: scope
             )
             selectedDocumentID = nil
             selectedTreePath = rootURL.appending(path: change.path).path
@@ -1425,7 +1458,8 @@ final class WorkspaceSession {
                 title: "Diff • \((change.path as NSString).lastPathComponent)",
                 subtitle: "\(change.path) • \(String(revision.prefix(8)))",
                 diff: diff,
-                identity: "\(revision):\(change.path)"
+                identity: "\(revision):\(change.path)",
+                scope: .commit(revision)
             )
             selectedDocumentID = nil
             selectedTreePath = rootURL.appending(path: change.path).path
@@ -1447,6 +1481,56 @@ final class WorkspaceSession {
         if wasSelected, let fallback = openDocuments.last {
             select(fallback)
         }
+    }
+
+    // MARK: - Hunk staging (stub — filled in by the git-depth lane's G1 increment)
+
+    /// Stages one hunk of the currently open working-tree diff via
+    /// `git apply --cached`. No-op until G1 lands `GitHunkPatchBuilder`.
+    func stageHunk(_ hunk: GitDiffHunk) async {
+        guard rootURL != nil, gitOpenDiff != nil else { return }
+    }
+
+    /// Unstages one hunk of the currently open staged diff via
+    /// `git apply --cached --reverse`. No-op until G1 lands
+    /// `GitHunkPatchBuilder`.
+    func unstageHunk(_ hunk: GitDiffHunk) async {
+        guard rootURL != nil, gitOpenDiff != nil else { return }
+    }
+
+    // MARK: - Stash (stub — requires explicit user approval before G2 starts)
+
+    /// Pushes a new stash entry. No-op until G2 is approved and implemented.
+    func stashChanges(message: String, includeUntracked: Bool) async {
+        guard rootURL != nil else { return }
+    }
+
+    /// Applies a stash entry without removing it. No-op until G2.
+    func applyStash(_ entry: GitStashEntry) async {
+        guard rootURL != nil else { return }
+    }
+
+    /// Applies a stash entry and removes it. No-op until G2.
+    func popStash(_ entry: GitStashEntry) async {
+        guard rootURL != nil else { return }
+    }
+
+    /// Discards a stash entry. No-op until G2.
+    func dropStash(_ entry: GitStashEntry) async {
+        guard rootURL != nil else { return }
+    }
+
+    // MARK: - Blame (stub — filled in by the git-depth lane's G3 increment)
+
+    /// Opens a read-only blame canvas for the selected file. No-op until G3
+    /// lands `GitBlameParser`.
+    func openBlameForSelectedFile() async {
+        guard rootURL != nil else { return }
+    }
+
+    /// Discards the retained blame data.
+    func closeBlame() {
+        gitOpenBlame = nil
     }
 
     func gitCreateBranch(named name: String) async {

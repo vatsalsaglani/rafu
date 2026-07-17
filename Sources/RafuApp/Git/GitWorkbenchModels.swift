@@ -18,11 +18,14 @@ struct GitOpenDiff: Identifiable, Sendable {
     let title: String
     let subtitle: String
     let diff: GitFileDiff
+    let scope: GitDiffScope
 
-    init(title: String, subtitle: String, diff: GitFileDiff, identity: String) {
+    init(title: String, subtitle: String, diff: GitFileDiff, identity: String, scope: GitDiffScope)
+    {
         id = identity
         self.title = title
         self.subtitle = subtitle
         self.diff = diff
+        self.scope = scope
     }
 }

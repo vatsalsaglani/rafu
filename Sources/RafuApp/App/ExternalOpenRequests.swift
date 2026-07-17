@@ -40,6 +40,11 @@ final class ExternalOpenRequests {
 final class RafuAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         MemoryPressureMonitor.shared.start()
+        LauncherIPCServer.shared.start()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        LauncherIPCServer.shared.stop()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {

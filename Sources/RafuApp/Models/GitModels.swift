@@ -327,6 +327,32 @@ nonisolated struct GitOperationResult: Hashable, Sendable {
     let standardError: String
 }
 
+nonisolated struct GitStashEntry: Identifiable, Hashable, Sendable {
+    let index: Int
+    let selector: String
+    let message: String
+    let createdAt: Date
+    let branch: String?
+
+    var id: String { selector }
+}
+
+nonisolated struct GitBlameLine: Identifiable, Hashable, Sendable {
+    let lineNumber: Int
+    let commitID: String
+    let shortID: String
+    let author: String
+    let time: Date
+    let summary: String
+    let isBoundary: Bool
+
+    var id: Int { lineNumber }
+}
+
+nonisolated struct GitBlame: Hashable, Sendable {
+    let lines: [GitBlameLine]
+}
+
 /// An in-progress merge (MERGE_HEAD exists). `headline` is the first content
 /// line of MERGE_MSG ("Merge branch 'x' into y"); `defaultMessage` is the
 /// full message with git's '#' comment lines stripped, suitable for

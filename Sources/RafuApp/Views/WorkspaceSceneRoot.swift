@@ -19,6 +19,12 @@ struct WorkspaceSceneRoot: View {
         WorkspaceWindowView(session: session)
             .environment(\.rafuTheme, theme)
             .preferredColorScheme(preferredColorScheme)
+            .background(
+                WindowAccessor { window in
+                    WorkspaceWindowRegistry.shared.register(
+                        session: session, window: window, rootURL: { session.rootURL })
+                }
+            )
             .task {
                 MemoryPressureMonitor.shared.register(session)
                 // An externally requested folder (rafu CLI / Finder) wins
@@ -38,6 +44,9 @@ struct WorkspaceSceneRoot: View {
                 if let url = ExternalOpenRequests.shared.take() {
                     session.openLocalWorkspace(at: url)
                 }
+            }
+            .onDisappear {
+                WorkspaceWindowRegistry.shared.deregister(session: session)
             }
     }
 
