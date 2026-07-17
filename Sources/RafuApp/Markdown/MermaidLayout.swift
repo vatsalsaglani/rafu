@@ -41,12 +41,14 @@ nonisolated struct MermaidFlowLayout: Sendable {
     let direction: MermaidFlow.Direction
 }
 
-/// A pure, deterministic, one-shot geometry for a `MermaidSequence` model. `activations`
-/// and `blocks` are structural placeholders (always empty from M3) so a later increment can
-/// populate activation bars and `alt`/`opt`/`loop` frames without a shape change.
+/// A pure, deterministic, one-shot geometry for a `MermaidSequence` model, produced by walking
+/// `sequence.events` in order: lifelines, time-ordered message rows, nested activation spans,
+/// `alt`/`opt`/`loop`/`par` block frames (with dividers), and placed note boxes.
 nonisolated struct MermaidSequenceLayout: Sendable {
     nonisolated struct Lifeline: Sendable {
         let participant: String
+        let displayName: String
+        let kind: MermaidSequence.ParticipantKind
         let x: CGFloat
         let headFrame: CGRect
         let bottomY: CGFloat
@@ -60,22 +62,36 @@ nonisolated struct MermaidSequenceLayout: Sendable {
         let startX: CGFloat
         let endX: CGFloat
         let isSelfMessage: Bool
+        let arrow: MermaidSequence.Arrow
     }
     nonisolated struct ActivationSpan: Sendable {
         let participant: String
         let x: CGFloat
         let startY: CGFloat
         let endY: CGFloat
+        let depth: Int
     }
     nonisolated struct BlockFrame: Sendable {
+        nonisolated struct Divider: Sendable {
+            let y: CGFloat
+            let label: String
+        }
         let kind: String
         let title: String
+        let frame: CGRect
+        let depth: Int
+        let dividers: [Divider]
+    }
+    nonisolated struct NoteBox: Sendable {
+        let id: UUID
+        let text: String
         let frame: CGRect
     }
     let lifelines: [Lifeline]
     let messages: [MessageRow]
     let activations: [ActivationSpan]
     let blocks: [BlockFrame]
+    let notes: [NoteBox]
     let canvasSize: CGSize
 }
 
@@ -97,6 +113,19 @@ nonisolated struct MermaidLayoutEngine: Sendable {
         var messageGap: CGFloat = 44
         var headerHeight: CGFloat = 40
         var topMargin: CGFloat = 20
+        var blockHeaderHeight: CGFloat = 26
+        var blockPadX: CGFloat = 14
+        var blockDepthInset: CGFloat = 6
+        var blockMinPadX: CGFloat = 4
+        var blockPadY: CGFloat = 10
+        var dividerGap: CGFloat = 14
+        var activationBarWidth: CGFloat = 10
+        var activationXOffset: CGFloat = 6
+        var noteHeight: CGFloat = 34
+        var noteMinWidth: CGFloat = 80
+        var noteSideGap: CGFloat = 12
+        var selfMessageLoopWidth: CGFloat = 44
+        var selfMessageLoopHeight: CGFloat = 30
     }
 
     var metrics = Metrics()
@@ -474,44 +503,235 @@ nonisolated struct MermaidLayoutEngine: Sendable {
 
     // MARK: - Sequence layout
 
+    /// A still-open `alt`/`opt`/`loop`/`par` block on the walk stack; its horizontal extent is
+    /// widened (`touch`) by every row/note nested inside it (including nested blocks), so the
+    /// emitted frame always encloses its content.
+    private struct OpenBlock {
+        let block: MermaidSequence.Block
+        let startY: CGFloat
+        let depth: Int
+        var minX: CGFloat = .infinity
+        var maxX: CGFloat = -.infinity
+        var dividers: [MermaidSequenceLayout.BlockFrame.Divider] = []
+    }
+
+    private func blockKindString(_ kind: MermaidSequence.BlockKind) -> String {
+        switch kind {
+        case .alt: return "alt"
+        case .opt: return "opt"
+        case .loop: return "loop"
+        case .par: return "par"
+        }
+    }
+
+    /// Resolves a `Note`'s frame and the x-coordinates it should widen enclosing blocks by.
+    /// Undeclared participants fall back to `metrics.margin` (documented limitation).
+    private func noteFrame(
+        _ note: MermaidSequence.Note, yTop: CGFloat, xByID: [String: CGFloat]
+    ) -> (frame: CGRect, touchXs: [CGFloat]) {
+        switch note.placement {
+        case .over(let participants) where participants.count <= 1:
+            let x = participants.first.flatMap { xByID[$0] } ?? metrics.margin
+            let width = max(metrics.noteMinWidth, nodeWidth(for: note.text))
+            let frame = CGRect(x: x - width / 2, y: yTop, width: width, height: metrics.noteHeight)
+            return (frame, [x])
+        case .over(let participants):
+            let xs = participants.map { xByID[$0] ?? metrics.margin }
+            let lo = xs.min() ?? metrics.margin
+            let hi = xs.max() ?? metrics.margin
+            let x = lo - metrics.noteSideGap
+            let width = max(metrics.noteMinWidth, (hi - lo) + 2 * metrics.noteSideGap)
+            let frame = CGRect(x: x, y: yTop, width: width, height: metrics.noteHeight)
+            return (frame, [lo, hi])
+        case .leftOf(let participant):
+            let px = xByID[participant] ?? metrics.margin
+            let width = max(metrics.noteMinWidth, nodeWidth(for: note.text))
+            let x = px - metrics.noteSideGap - width
+            let frame = CGRect(x: x, y: yTop, width: width, height: metrics.noteHeight)
+            return (frame, [x, px])
+        case .rightOf(let participant):
+            let px = xByID[participant] ?? metrics.margin
+            let width = max(metrics.noteMinWidth, nodeWidth(for: note.text))
+            let x = px + metrics.noteSideGap
+            let frame = CGRect(x: x, y: yTop, width: width, height: metrics.noteHeight)
+            return (frame, [px, x + width])
+        }
+    }
+
+    /// Builds a `Divider`-inclusive block frame from a closed/flushed `OpenBlock`, padding its
+    /// horizontal extent (narrower at deeper nesting) and falling back to the full lifeline span
+    /// when nothing was ever nested inside it (an empty branch).
+    private func finishedBlockFrame(
+        _ open: OpenBlock, endY: CGFloat, xByID: [String: CGFloat]
+    ) -> MermaidSequenceLayout.BlockFrame {
+        let pad = max(
+            metrics.blockMinPadX, metrics.blockPadX - CGFloat(open.depth) * metrics.blockDepthInset)
+        let lo: CGFloat
+        let hi: CGFloat
+        if open.minX.isFinite {
+            lo = open.minX
+            hi = open.maxX
+        } else {
+            lo = xByID.values.min() ?? metrics.margin
+            hi = xByID.values.max() ?? metrics.margin
+        }
+        let frame = CGRect(
+            x: lo - pad, y: open.startY, width: (hi - lo) + 2 * pad, height: endY - open.startY)
+        return .init(
+            kind: blockKindString(open.block.kind), title: open.block.title, frame: frame,
+            depth: open.depth, dividers: open.dividers)
+    }
+
     func layout(_ sequence: MermaidSequence) -> MermaidSequenceLayout {
-        var xByParticipant: [String: CGFloat] = [:]
-        var headFrameByParticipant: [String: CGRect] = [:]
-        for (index, name) in sequence.participants.enumerated() {
+        // Lifelines: cumulative, non-overlapping placement sized on the display name.
+        var xByID: [String: CGFloat] = [:]
+        var headFrameByID: [String: CGRect] = [:]
+        var lifelineOrder:
+            [(
+                id: String, name: String, kind: MermaidSequence.ParticipantKind, x: CGFloat,
+                head: CGRect
+            )] = []
+        var xCursor = metrics.margin
+        for id in sequence.participants {
+            let name = sequence.participantDisplay[id] ?? id
+            let kind = sequence.participantKinds[id] ?? .participant
             let width = nodeWidth(for: name)
-            let x = metrics.margin + width / 2 + CGFloat(index) * metrics.lifelineGap
-            xByParticipant[name] = x
-            headFrameByParticipant[name] = CGRect(
+            let x = xCursor + width / 2
+            let head = CGRect(
                 x: x - width / 2, y: metrics.margin, width: width, height: metrics.headerHeight)
+            xByID[id] = x
+            headFrameByID[id] = head
+            lifelineOrder.append((id, name, kind, x, head))
+            xCursor = x + width / 2 + metrics.lifelineGap
         }
 
         let headerBottom = metrics.margin + metrics.headerHeight
+        var yCursor = headerBottom + metrics.topMargin
+        var lastMessageY = yCursor
+
         var rows: [MermaidSequenceLayout.MessageRow] = []
-        for (index, message) in sequence.messages.enumerated() {
-            let y = headerBottom + metrics.topMargin + CGFloat(index) * metrics.messageGap
-            let startX = xByParticipant[message.from] ?? metrics.margin
-            let endX = xByParticipant[message.to] ?? metrics.margin
-            rows.append(
-                .init(
-                    id: message.id, from: message.from, to: message.to, label: message.label, y: y,
-                    startX: startX, endX: endX, isSelfMessage: message.from == message.to))
+        var notes: [MermaidSequenceLayout.NoteBox] = []
+        var spans: [MermaidSequenceLayout.ActivationSpan] = []
+        var blocks: [MermaidSequenceLayout.BlockFrame] = []
+
+        var activationStack: [String: [(startY: CGFloat, depth: Int)]] = [:]
+        var blockStack: [OpenBlock] = []
+
+        func touch(_ xs: [CGFloat]) {
+            guard !xs.isEmpty else { return }
+            for index in blockStack.indices {
+                for x in xs {
+                    blockStack[index].minX = min(blockStack[index].minX, x)
+                    blockStack[index].maxX = max(blockStack[index].maxX, x)
+                }
+            }
         }
 
-        let bottomY = (rows.last?.y ?? headerBottom) + metrics.messageGap
+        for event in sequence.events {
+            switch event {
+            case .message(let message):
+                let y = yCursor
+                lastMessageY = y
+                let startX = xByID[message.from] ?? metrics.margin
+                let endX = xByID[message.to] ?? metrics.margin
+                rows.append(
+                    .init(
+                        id: message.id, from: message.from, to: message.to, label: message.label,
+                        y: y, startX: startX, endX: endX, isSelfMessage: message.isSelfMessage,
+                        arrow: message.arrow))
+                touch([startX, endX])
+                yCursor +=
+                    message.isSelfMessage
+                    ? (metrics.selfMessageLoopHeight + metrics.messageGap * 0.5)
+                    : metrics.messageGap
 
-        let lifelines: [MermaidSequenceLayout.Lifeline] = sequence.participants.map { name in
+            case .note(let note):
+                let (frame, xs) = noteFrame(note, yTop: yCursor, xByID: xByID)
+                notes.append(.init(id: note.id, text: note.text, frame: frame))
+                touch(xs)
+                yCursor += metrics.noteHeight + 8
+
+            case .blockStart(let block):
+                let depth = blockStack.count
+                blockStack.append(OpenBlock(block: block, startY: yCursor, depth: depth))
+                yCursor += metrics.blockHeaderHeight
+
+            case .blockDivider(let blockID, let label):
+                if let index = blockStack.lastIndex(where: { $0.block.id == blockID }) {
+                    blockStack[index].dividers.append(.init(y: yCursor, label: label))
+                    yCursor += metrics.dividerGap
+                }
+
+            case .blockEnd(let blockID):
+                if let index = blockStack.lastIndex(where: { $0.block.id == blockID }) {
+                    let open = blockStack.remove(at: index)
+                    let endY = yCursor + metrics.blockPadY
+                    blocks.append(finishedBlockFrame(open, endY: endY, xByID: xByID))
+                    yCursor = endY + 4
+                }
+
+            case .activate(let participant):
+                let depth = activationStack[participant]?.count ?? 0
+                activationStack[participant, default: []].append(
+                    (startY: lastMessageY, depth: depth))
+
+            case .deactivate(let participant):
+                if var stack = activationStack[participant], let top = stack.popLast() {
+                    activationStack[participant] = stack
+                    spans.append(
+                        .init(
+                            participant: participant, x: xByID[participant] ?? metrics.margin,
+                            startY: top.startY, endY: lastMessageY, depth: top.depth))
+                }
+            }
+        }
+
+        let bottomY = yCursor + metrics.messageGap
+
+        // Defensive flush: still-open activations/blocks (unbalanced source, or M5's own
+        // end-of-parse block flush already closed every block — this only guards against a
+        // future parser change). Only ever-still-open entries are emitted; nothing is doubled.
+        for participant in activationStack.keys.sorted() {
+            for open in activationStack[participant] ?? [] {
+                spans.append(
+                    .init(
+                        participant: participant, x: xByID[participant] ?? metrics.margin,
+                        startY: open.startY, endY: bottomY, depth: open.depth))
+            }
+        }
+        for open in blockStack {
+            let endY = yCursor + metrics.blockPadY
+            blocks.append(finishedBlockFrame(open, endY: endY, xByID: xByID))
+        }
+
+        let lifelines: [MermaidSequenceLayout.Lifeline] = lifelineOrder.map {
             .init(
-                participant: name, x: xByParticipant[name] ?? metrics.margin,
-                headFrame: headFrameByParticipant[name] ?? .zero, bottomY: bottomY)
+                participant: $0.id, displayName: $0.name, kind: $0.kind, x: $0.x,
+                headFrame: $0.head,
+                bottomY: bottomY)
         }
 
-        let rightmostX = lifelines.map { $0.headFrame.maxX }.max() ?? metrics.margin
-        let canvasSize = CGSize(
-            width: max(rightmostX + metrics.margin, metrics.margin * 2),
-            height: max(bottomY + metrics.margin, metrics.margin * 2))
+        var allRects: [CGRect] = lifelineOrder.map(\.head)
+        allRects.append(contentsOf: blocks.map(\.frame))
+        allRects.append(contentsOf: notes.map(\.frame))
+        for span in spans {
+            allRects.append(
+                CGRect(
+                    x: span.x - metrics.activationBarWidth / 2
+                        + CGFloat(span.depth) * metrics.activationXOffset,
+                    y: span.startY, width: metrics.activationBarWidth,
+                    height: span.endY - span.startY))
+        }
+        for row in rows where row.isSelfMessage {
+            allRects.append(
+                CGRect(
+                    x: row.startX, y: row.y, width: metrics.selfMessageLoopWidth,
+                    height: metrics.selfMessageLoopHeight))
+        }
+        let canvasSize = canvasBounds(from: allRects)
 
         return MermaidSequenceLayout(
-            lifelines: lifelines, messages: rows, activations: [], blocks: [],
+            lifelines: lifelines, messages: rows, activations: spans, blocks: blocks, notes: notes,
             canvasSize: canvasSize)
     }
 }

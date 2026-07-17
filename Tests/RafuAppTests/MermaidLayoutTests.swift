@@ -257,3 +257,193 @@ func sequenceSelfMessageSharesStartAndEndX() {
     #expect(row.isSelfMessage)
     #expect(row.startX == row.endX)
 }
+
+// MARK: - 12. Sequence activations, blocks, notes, and arrow fidelity (M6)
+
+@Test("A closed activation produces one span aligned to its request/response rows")
+func sequenceActivationSpansRequestAndResponse() {
+    let seq = sequence("sequenceDiagram\nA->>+B: req\nB-->>-A: resp")
+    let layout = MermaidLayoutEngine().layout(seq)
+
+    #expect(layout.activations.count == 1)
+    guard let span = layout.activations.first, layout.messages.count == 2 else {
+        Issue.record("Expected one activation span and two message rows")
+        return
+    }
+    #expect(span.participant == "B")
+    #expect(span.depth == 0)
+    #expect(span.startY < span.endY)
+    #expect(span.startY == layout.messages[0].y)
+    #expect(span.endY == layout.messages[1].y)
+}
+
+@Test("Nested activations on the same participant produce distinct-depth spans at the same x")
+func sequenceNestedActivationsHaveDistinctDepths() {
+    let seq = sequence(
+        "sequenceDiagram\nA->>+B: a\nA->>+B: b\nB-->>-A: c\nB-->>-A: d")
+    let layout = MermaidLayoutEngine().layout(seq)
+
+    let bSpans = layout.activations.filter { $0.participant == "B" }
+    #expect(bSpans.count == 2)
+    let depths = Set(bSpans.map(\.depth))
+    #expect(depths == [0, 1])
+    let xs = Set(bSpans.map(\.x))
+    #expect(xs.count == 1)
+}
+
+@Test("An unclosed activation is flushed to the lifeline's bottom Y")
+func sequenceUnclosedActivationFlushesToLifelineBottom() {
+    let seq = sequence("sequenceDiagram\nA->>+B: req")
+    let layout = MermaidLayoutEngine().layout(seq)
+
+    #expect(layout.activations.count == 1)
+    guard let span = layout.activations.first,
+        let lifelineB = layout.lifelines.first(where: { $0.participant == "B" })
+    else {
+        Issue.record("Expected one activation span and a B lifeline")
+        return
+    }
+    #expect(span.endY == lifelineB.bottomY)
+}
+
+@Test("A block frame encloses the rows nested inside it")
+func sequenceBlockFrameEnclosesNestedRows() {
+    let seq = sequence(
+        """
+        sequenceDiagram
+        participant A
+        participant B
+        alt cond
+          A->>B: m
+        end
+        """)
+    let layout = MermaidLayoutEngine().layout(seq)
+
+    #expect(layout.blocks.count == 1)
+    guard let block = layout.blocks.first, let row = layout.messages.first else {
+        Issue.record("Expected one block frame and one message row")
+        return
+    }
+    #expect(block.frame.minY <= row.y)
+    #expect(row.y <= block.frame.maxY)
+    #expect(block.frame.minX <= row.startX)
+    #expect(row.startX <= block.frame.maxX)
+    #expect(block.frame.minX <= row.endX)
+    #expect(row.endX <= block.frame.maxX)
+}
+
+@Test("A nested block is enclosed by its outer block at a greater depth")
+func sequenceNestedBlockIsInsetWithinOuterBlock() {
+    let seq = sequence(
+        """
+        sequenceDiagram
+        participant A
+        participant B
+        alt cond
+          loop retry
+            A->>B: m
+          end
+        end
+        """)
+    let layout = MermaidLayoutEngine().layout(seq)
+
+    guard let outer = layout.blocks.first(where: { $0.kind == "alt" }),
+        let inner = layout.blocks.first(where: { $0.kind == "loop" })
+    else {
+        Issue.record("Expected an outer alt block and an inner loop block")
+        return
+    }
+    #expect(outer.depth < inner.depth)
+    #expect(outer.frame.contains(inner.frame))
+}
+
+@Test("A block's else divider sits between its top and bottom edges")
+func sequenceBlockDividerSitsWithinFrame() {
+    let seq = sequence(
+        """
+        sequenceDiagram
+        participant A
+        participant B
+        alt a
+          A->>B: m
+        else b
+          A->>B: n
+        end
+        """)
+    let layout = MermaidLayoutEngine().layout(seq)
+
+    #expect(layout.blocks.count == 1)
+    guard let block = layout.blocks.first, let divider = block.dividers.first else {
+        Issue.record("Expected one block with one divider")
+        return
+    }
+    #expect(block.dividers.count == 1)
+    #expect(block.frame.minY < divider.y)
+    #expect(divider.y < block.frame.maxY)
+    #expect(divider.label.contains("b"))
+}
+
+@Test("Note placement spans, sits left of, or sits right of its participants")
+func sequenceNotePlacementRespectsParticipantPositions() {
+    let over = sequence(
+        "sequenceDiagram\nparticipant A\nparticipant B\nnote over A,B: hi")
+    let overLayout = MermaidLayoutEngine().layout(over)
+    guard let overNote = overLayout.notes.first,
+        let xA = overLayout.lifelines.first(where: { $0.participant == "A" })?.x,
+        let xB = overLayout.lifelines.first(where: { $0.participant == "B" })?.x
+    else {
+        Issue.record("Expected a note and lifelines for A and B")
+        return
+    }
+    #expect(overNote.frame.minX <= min(xA, xB))
+    #expect(overNote.frame.maxX >= max(xA, xB))
+
+    let left = sequence(
+        "sequenceDiagram\nparticipant A\nparticipant B\nnote left of A: hi")
+    let leftLayout = MermaidLayoutEngine().layout(left)
+    guard let leftNote = leftLayout.notes.first,
+        let leftXA = leftLayout.lifelines.first(where: { $0.participant == "A" })?.x
+    else {
+        Issue.record("Expected a note and a lifeline for A")
+        return
+    }
+    #expect(leftNote.frame.maxX <= leftXA)
+
+    let right = sequence(
+        "sequenceDiagram\nparticipant A\nparticipant B\nnote right of A: hi")
+    let rightLayout = MermaidLayoutEngine().layout(right)
+    guard let rightNote = rightLayout.notes.first,
+        let rightXA = rightLayout.lifelines.first(where: { $0.participant == "A" })?.x
+    else {
+        Issue.record("Expected a note and a lifeline for A")
+        return
+    }
+    #expect(rightNote.frame.minX >= rightXA)
+}
+
+@Test("Message rows carry the parsed message's arrow style")
+func sequenceMessageRowsCarryArrowFidelity() {
+    let seq = sequence("sequenceDiagram\nA-->>B: d\nA->>B: s")
+    let layout = MermaidLayoutEngine().layout(seq)
+
+    #expect(layout.messages.count == seq.messages.count)
+    for (row, message) in zip(layout.messages, seq.messages) {
+        #expect(row.arrow == message.arrow)
+    }
+}
+
+@Test("The two M3 sequence fixtures still yield empty activations, blocks, and notes")
+func sequenceEmptyEventStreamsStayEmpty() {
+    let ordered = sequence(
+        "sequenceDiagram\nparticipant A\nparticipant B\nA->>B: hi\nB->>A: ok")
+    let orderedLayout = MermaidLayoutEngine().layout(ordered)
+    #expect(orderedLayout.activations.isEmpty)
+    #expect(orderedLayout.blocks.isEmpty)
+    #expect(orderedLayout.notes.isEmpty)
+
+    let selfMessage = sequence("sequenceDiagram\nparticipant A\nA->>A: note")
+    let selfLayout = MermaidLayoutEngine().layout(selfMessage)
+    #expect(selfLayout.activations.isEmpty)
+    #expect(selfLayout.blocks.isEmpty)
+    #expect(selfLayout.notes.isEmpty)
+}

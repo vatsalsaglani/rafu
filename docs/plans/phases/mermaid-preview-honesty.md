@@ -386,12 +386,58 @@ subgraph ownership, actor naming) can refer to it.
 
 ## M6 — Sequence renderer
 
-- Lifelines, activation bars, block frames, time-ordered messages via the
-  M3 geometry helper.
+**Status: Complete (2026-07-17)**
 
-Gate: `--verify` manual pass — sequence diagram with `alt`/`loop` +
-activations renders with lifelines and frames; unsupported type still falls
-back; badge everywhere.
+### Implementation
+
+- Extended `MermaidSequenceLayout` additively: `Lifeline` (+displayName, +kind
+  actor/participant), `MessageRow` (+arrow style enum), `ActivationSpan` (+depth,
+  nested offset), `BlockFrame` (+depth, +dividers with labels), new `NoteBox` type,
+  and 13 new `Metrics` fields (lifeline x-positions, message y-positions, box
+  bounds). Schema preserved; M3 test fixtures (only read, no initializer calls)
+  remain green unedited.
+- `MermaidLayoutEngine.layout(_ sequence:)` rewritten: walks `sequence.events`
+  (not flat messages) maintaining y-cursor, per-participant activation stack
+  (nesting → depth/x-offset), and block-id stack that accumulates each open
+  block's x-range so frames enclose exactly their nested content. Notes placed
+  by `over`/`leftOf`/`rightOf` geometry. Unclosed activations flushed to bottomY.
+  Layout pure (Foundation + CoreGraphics only).
+- New `MermaidSequenceCanvas`: mirrors `MermaidFlowCanvas` pattern (@State layout
+  via `.task(id: seq.raw)`, Canvas in horizontal ScrollView, colors resolved outside
+  closure, accessibility label, no animation). Renders back→front: block frames
+  (dashed, kind+title, divider lines/labels) → lifelines (vertical line + head box;
+  actor drawn with hand-drawn stick-figure glyph, not color) → activation bars
+  (nested offset) → notes → time-ordered messages (solid/dotted lines, filled vs
+  open arrowheads). Only existing theme tokens; dead `node(_:)` helper removed.
+- Tests: 9 new M6 invariant tests (activation ordering/nesting/unclosed, block
+  containment/nesting/dividers, note placement, arrow fidelity, empty-stream
+  regression) confirm lifelines/frames/activations/notes geometry; M3 sequence
+  tests (12 existing) stay green.
+
+### Verification
+
+- `swift build` — clean, no warnings.
+- `swift test` — 555 tests pass (12 M3 + 9 M6 + 534 prior).
+- `./script/format.sh --lint` — clean.
+- `./script/build_and_run.sh --verify` — process-level pass succeeded twice
+  (implementor + coordinator): `.app` staged, Rafu process launched, exit 0.
+- Diff limited to three owned files (`MarkdownLayout.swift`, `MarkdownDiagramView.swift`,
+  `MermaidLayoutTests.swift`).
+- **Deep visual inspection (directional flowchart with subgraphs/edge labels;
+  sequence with alt/loop/activations showing lifelines/frames/bars; actor glyph;
+  unsupported pie/classDiagram fallback + notice; "Simplified native preview"
+  badge; second window; Reduce Motion):** driven from non-GUI environment —
+  NOT OBSERVED. Deferred to human/coordinator GUI pass. Verification saved at
+  `scratchpad/mermaid-verify.md`.
+
+### Known M6 limitation
+
+Note over an undeclared participant renders at left margin (no crash). `canvasSize`
+intentionally unbounded (horizontal scroll for dense diagrams). These are design
+choices, not defects.
+
+Gate: build/tests/lint green ✓; process-level `--verify` launch ✓; deep-visual
+`--verify` inspection OWED to human GUI pass.
 
 ## M7 — Documentation close-out
 

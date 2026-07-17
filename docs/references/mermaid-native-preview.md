@@ -290,8 +290,44 @@ to `MermaidLayout.swift` or `MermaidLayoutTests.swift` are needed for M5.
 these parse as notes or edge cases and are ignored. Only solid (`-->`), dotted (`-.->`,
 `-..->`, `-.-`), and identity arrows are supported. Full arrow support deferred.
 
-**Section to be filled in M6:**
-- Sequence renderer: lifelines, activation bars, block frames.
+### Sequence renderer and geometry (M6)
+
+**Event stream geometry coupling:** `MermaidSequenceLayout.layout(_ sequence:)` walks
+`sequence.events` (the ordered `[Event]` stream from M5) rather than the flat
+`messages` list. Block frame y-range, activation nesting, and note placement are
+derived from the event stream's ordering. This couples geometry to the M5 parser's
+decisions about where `.activate`/`.deactivate` synthetic events sit relative to
+their triggering `.message`. A future change to M5's event ordering will change
+geometry directly — the layout engine has no independent ordering logic.
+
+**Actor glyph determinism:** Actors are rendered using a deterministic hand-drawn
+stick-figure `Path` (traced in `textSecondary` color), not `Image(systemName:)`.
+This choice avoids SF-Symbol-in-`Canvas` rendering uncertainty (alignment, scaling,
+antialiasing variance across runs). Actors are distinguished by glyph + label;
+color is never used alone to distinguish participant kind (no-color-alone invariant).
+
+**Shared layout engine instance:** `MermaidSequenceCanvas` holds a single `@State`
+cache of `MermaidLayoutEngine.layout(_ sequence:)` result, keyed by `sequence.raw`.
+Both the `.task` (which computes and caches the layout) and the render closure (which
+reads `metrics` for activation-bar x-offsets and self-loop geometry) share this
+instance. The drawn geometry can never drift from the metrics because there is
+exactly one engine instance and one layout compute per unique diagram source.
+
+**Additive extension rule:** `MermaidSequenceLayout` was extended additively
+(new fields added to existing types; old initializers not called). This preserved
+byte-compatibility with M3 test fixtures: they only read the model, never call
+initializers, and their empty-event fixtures yield empty activations/blocks/notes
+arrays without needing new initialization code.
+
+**Canvas layout pattern (M6 reaffirms M4 rule):** Layout is computed **outside
+`body` and outside the `Canvas` draw closure**, cached at the segment level via
+`.task(id: seq.raw)`, and never recomputed per-frame or on SwiftUI re-initialization.
+This satisfies the typing-path frame budget (AGENTS invariant).
+
+**Fixture policy (M6 reaffirms M3 rule):** `MermaidLayoutTests.swift` asserts
+topology and frame invariants only — activation ordering, block containment,
+note placement, arrow fidelity. **No pixel snapshots** — visual quality is asserted
+at render time via `./script/build_and_run.sh --verify`, not at layout time.
 
 **Section to be filled in M7:**
 - Fixture policy close-out.
