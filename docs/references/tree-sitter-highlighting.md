@@ -1,7 +1,7 @@
 # Tree-sitter full-parse syntax highlighting architecture
 
 - Applies to: Syntax highlighting via tree-sitter grammar parsing, SyntaxParsingActor, highlight query loading, and span application
-- Last verified: Swift 6.2, SwiftTreeSitter 0.8.0, Neon 0.6.0, macOS 15 deployment target, 2026-07-15
+- Last verified: Swift 6.2, SwiftTreeSitter 0.8.0, Neon 0.6.0, macOS 15 deployment target, 2026-07-18
 
 ## Rule or observed behavior
 
@@ -104,11 +104,15 @@ To verify queries load in the staged app:
 
 ## Grammar-backed @ symbols (increment 9)
 
-**Tags query and definitions-only extraction:** The vendored `tags.scm` file (MIT license, recorded in `Resources/Grammars/README.md`) provides semantic symbol extraction for the five code grammars (Swift, Python, JavaScript, TypeScript, TSX; TS and TSX each compile against their own Language with JS+TS or JS+JSX+TS query concatenation). `GrammarRegistry.tagsQuery(for:)` caches the compiled tags query per grammar (nil for grammars without one: JSON, YAML, TOML, Bash, Markdown, Dockerfile).
+**Tags query and definitions-only extraction:** The vendored `tags.scm` file (MIT license, recorded in `Resources/Grammars/README.md`) provides semantic symbol extraction for ten code grammars (Swift, Python, JavaScript, TypeScript, TSX, Bash, Dockerfile, TOML, YAML, Markdown; TS and TSX each compile against their own Language with JS+TS or JS+JSX+TS query concatenation). Bash and Dockerfile tags were hand-authored in the symbol-coverage lane's increment A, TOML and YAML tags in increment B, and Markdown tags in increment C, all verified against tree-sitter node-types.json. `GrammarRegistry.tagsQuery(for:)` caches the compiled tags query per grammar (nil for grammars without one: JSON, markdownInline).
 
 **Definition capture filtering and predicate honoring:** `BufferSymbolScanner.scanUsingGrammar` performs a one-shot parse and queries via `ResolvingQueryCursor` (unlike the highlights path, which uses plain `QueryCursor.highlights()` and ignores predicates). Predicates like `#not-eq?` and `#not-match?` are EVALUATED, so constructors and `require()` calls are correctly excluded. Only definitions are extracted: `@definition.function`, `@definition.method` → `BufferSymbol.Kind.function`; `@definition.class`, `@definition.interface` → `BufferSymbol.Kind.type`. References (`@reference.*`) and non-definition captures (`@definition.property`, `@definition.constant`, `@definition.module`) are SKIPPED. The outline gap is documented: properties and constants do not appear in the symbol list (BufferSymbol.Kind unchanged).
 
+**Markdown @-mode vs #-mode divergence (increment C):** For Markdown files, the `@` buffer-symbol palette deliberately KEEPS the regex `scanMarkdownHeadings` path (which preserves heading level information → `.heading(level:)` H1–H6 display), while the `#` workspace-symbol index uses the new grammar `tags.scm` path (which returns flat `section` kind with no level discrimination). This is enforced by a guard `grammarID != .markdown` in `CommandPaletteView.scanSymbols`: without it, the grammar path would return a non-nil EMPTY array for Markdown (since `section` suffix maps to nil in `BufferSymbolScanner.kind(forDefinitionSuffix:)`), which would blank the palette. The `section` suffix intentionally maps to nil so headings never pollute grammar-backed buffer symbols, keeping Markdown content-focused in the editor outline and level-preserving in level-aware regex scanning.
+
 **Duplicate method wart:** For Swift class-body methods, the vendored tags.scm includes a nested pattern that matches BOTH `@definition.method` (nested scope) and the generic top-level `@definition.function` pattern, yielding two symbol entries with the same range. This is documented and tested; deduplication by range is a trivial future polish deferred to increment 10's workspace symbol index.
+
+**TOML and YAML query-authoring nuances (increment B):** Hand-authored tags.scm files introduce two durable lessons: (1) **TOML config-key pairs:** Bare-key pairs are captured only when nested directly under `document`, `table`, or `table_array_element` contexts, excluding `inline_table` pairs (which are value data). The plan's "bare keys" scope refers only to unquoted/undotted keys at the config level. (2) **YAML top-level-only symbols:** The top-level-only restriction for mapping keys is achieved **structurally** via document-anchored ancestry (a direct `document` → block_mapping_pair → flow_node chain) rather than a depth predicate; nested mapping keys have an extra block_node ancestor that breaks this chain and excludes them automatically. Accepted limitations: YAML flow-style root maps (`{a: 1}` at document root) and complex (block_node) keys are not captured.
 
 **CommandPaletteView integration:** `CommandPaletteView.scanSymbols` tries the grammar path first (if `tagsQuery` is non-nil), falls back to the existing regex scanner for non-grammar languages, unsupported grammars, or parse failure. The 2000-symbol cap and off-main execution are preserved.
 
@@ -125,6 +129,24 @@ To verify queries load in the staged app:
 **GrammarLanguageID visibility:** Increment 9 widened `GrammarLanguageID.language` and `GrammarLanguageID.configurationName` from fileprivate to internal so the fence highlighter cache can build a Parser and compile highlights.scm without duplicating the Language switch logic.
 
 **Notes for increment 10:** The tags.scm extraction data seeded into workspace symbol queries (dedupe by range is a polish for the index phase).
+
+## Markdown inline emphasis/strong/code highlighting (symbol-coverage lane increment D)
+
+**Bounded lazy visible-range inline parse design:** `SyntaxParsingActor` now supports an optional `markdown_inline` injection bundle passed at init. When active (Markdown buffers only), `tokens(inUTF16:range)` runs a secondary pass after block-level tokens:
+1. Locates every `(inline)` node in the block tree intersecting the requested range via the locator query `"(inline) @injection.content"` (compiled from literal UTF-8 Data).
+2. Substring-parses each `(inline)` span using the `markdown_inline` grammar and highlights query.
+3. Remaps resulting spans to absolute UTF-16 offsets via `nodeRange.location + localSpan.location`.
+4. Caps total inline UTF-16 units per call at `maxInlineUTF16PerCall = 4096` as a secondary guard above Neon's visible-range bounding.
+
+No persistent inline tree is retained — each `tokens` call is a stateless, synchronous, actor-confined substring reparse of small inline regions. The deferred alternative (persistent `includedRanges` injection model for perf optimization) remains documented as a fallback design if profiling later demands it.
+
+**CaptureTokenMap text.* rows (increment D):** The `markdown_inline/highlights.scm` query uses the older nvim `text.*` capture convention (`text.emphasis`, `text.strong`, `text.literal`, `text.title`, `text.uri`, `text.reference`, `text.quote`) rather than the newer `markup.*` names. Increment D added these rows to `CaptureTokenMap`, mapping each to its corresponding `markup.*` theme key: `text.emphasis` → `markup.italic`, `text.strong` → `markup.bold`, `text.literal` → `markup.code`, `text.title` → `markup.heading`, `text.uri`/`text.reference` → `markup.link`, `text.quote` → `markup.quote`. This fixed a pre-existing coloring gap: both the vendored block-level `Markdown/highlights.scm` and the inline grammar use nvim conventions, but `CaptureTokenMap` previously had no `text.*` rows, leaving Markdown buffers nearly uncolored beyond punctuation.
+
+**GrammarRegistry and SyntaxHighlighter integration:** `GrammarRegistry.markdownInlineInjection()` builds and caches the injection bundle lazily; failures (missing resource, query compile error) are cached and do not crash or blank the editor. `SyntaxHighlighter.activateGrammarIfPossible` passes the bundle when `grammarID == .markdown`. The `Query` locator is built via `Query(language:data:)` from a literal UTF-8 Data constant, circumventing SwiftTreeSitter's lack of a string initializer.
+
+**UTF-16 span remapping:** Inline spans are remapped using pure addition: `NSRange(location: nodeRange.location + localSpan.location, length: localSpan.length)`. Both `nodeRange` (from `Node.range`) and `localSpan` (from `cursor.highlights()`) are already UTF-16 NSRanges. No byte-to-UTF-16 conversion (the naive `× 2` mistake) — tree-sitter's byte offsets and `SyntaxParsingActor` operate in UTF-16 units consistently.
+
+**Owed performance evidence:** p95 typing-latency proof under fast Markdown typing via Instruments/signpost (same measurement class as the 8b latency evidence) is deferred to measurement time and not yet gathered.
 
 ## Deliberate deferrals (post-merge validation, 2026-07-15)
 

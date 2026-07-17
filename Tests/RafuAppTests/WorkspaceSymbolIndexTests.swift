@@ -36,7 +36,33 @@ func symbolExtractorKeepsAllKindsAndDedups() async throws {
 
 @Test("Extractor returns nil for a grammar without a vendored tags.scm")
 func symbolExtractorNilForUnsupportedGrammar() async throws {
-    #expect(await WorkspaceSymbolExtractor.extract(text: "key: value\n", grammarID: .yaml) == nil)
+    #expect(await WorkspaceSymbolExtractor.extract(text: "{}\n", grammarID: .json) == nil)
+}
+
+@Test("Extractor finds TOML table names and bare-key pairs")
+func symbolExtractorTOMLGrammar() async throws {
+    let extracted = try #require(
+        await WorkspaceSymbolExtractor.extract(
+            text: "[server]\nport = 8080\n", grammarID: .toml))
+
+    #expect(extracted.contains { $0.name == "server" && $0.kind == "class" })
+    #expect(extracted.contains { $0.name == "port" && $0.kind == "property" })
+}
+
+@Test("Extractor finds Markdown ATX and Setext headings as sections")
+func symbolExtractorMarkdownGrammar() async throws {
+    let extracted = try #require(
+        await WorkspaceSymbolExtractor.extract(
+            text: "# Alpha\n\nBeta\n=====\n\n## Gamma\n", grammarID: .markdown))
+
+    #expect(extracted.allSatisfy { $0.kind == "section" })
+    // The `setext_heading` capture's `paragraph` field spans through the
+    // trailing newline before the underline, so names are trimmed of
+    // whitespace/newlines for the comparison — the extractor itself is left
+    // untouched.
+    let names = Set(
+        extracted.map { $0.name.trimmingCharacters(in: .whitespacesAndNewlines) })
+    #expect(names == ["Alpha", "Beta", "Gamma"])
 }
 
 @Test("Extractor maps only grammar-with-tags files by path")
@@ -44,10 +70,16 @@ func symbolExtractorGrammarWithTagsFilter() {
     #expect(WorkspaceSymbolExtractor.grammarWithTags(forRelativePath: "a/B.swift") == .swift)
     #expect(WorkspaceSymbolExtractor.grammarWithTags(forRelativePath: "a/b.py") == .python)
     #expect(WorkspaceSymbolExtractor.grammarWithTags(forRelativePath: "a/b.tsx") == .tsx)
-    // json/yaml/markdown/dockerfile map to a grammar but have no tags.scm.
+    // json maps to a grammar but has no tags.scm; Dockerfile and Bash gained
+    // a vendored tags.scm in the symbol-coverage lane's increment A; TOML
+    // and YAML gained one in increment B; Markdown gained one in
+    // increment C.
     #expect(WorkspaceSymbolExtractor.grammarWithTags(forRelativePath: "a/b.json") == nil)
-    #expect(WorkspaceSymbolExtractor.grammarWithTags(forRelativePath: "Dockerfile") == nil)
-    #expect(WorkspaceSymbolExtractor.grammarWithTags(forRelativePath: "notes.md") == nil)
+    #expect(WorkspaceSymbolExtractor.grammarWithTags(forRelativePath: "Dockerfile") == .dockerfile)
+    #expect(WorkspaceSymbolExtractor.grammarWithTags(forRelativePath: "build.sh") == .bash)
+    #expect(WorkspaceSymbolExtractor.grammarWithTags(forRelativePath: "notes.md") == .markdown)
+    #expect(WorkspaceSymbolExtractor.grammarWithTags(forRelativePath: "Cargo.toml") == .toml)
+    #expect(WorkspaceSymbolExtractor.grammarWithTags(forRelativePath: "config.yaml") == .yaml)
 }
 
 // MARK: - Build
@@ -75,8 +107,10 @@ func symbolIndexBuildsFromGitWorkspace() async throws {
             return
         }
         #expect(!isTruncated)
-        // Widget + render; config.yaml has no tags.scm; ignored.swift ignored.
-        #expect(count == 2)
+        // Widget + render; config.yaml's top-level `key: value` pair is now
+        // indexed by the YAML `tags.scm` added in increment B; ignored.swift
+        // is excluded by .gitignore.
+        #expect(count == 3)
 
         let matches = try await index.query(term: "render", limit: 10)
         #expect(matches.map(\.name) == ["render"])
@@ -87,6 +121,11 @@ func symbolIndexBuildsFromGitWorkspace() async throws {
         #expect(["method", "function"].contains(matches.first?.kind ?? ""))
         let widget = try await index.query(term: "Widget", limit: 10)
         #expect(widget.first?.kind == "class")
+
+        let key = try await index.query(term: "key", limit: 10)
+        #expect(key.map(\.name) == ["key"])
+        #expect(key.first?.relativePath == "config.yaml")
+        #expect(key.first?.kind == "property")
     }
 }
 

@@ -129,6 +129,32 @@ func syntacticProviderFreshIndexIsIndexing() async throws {
     #expect(answer.candidates.isEmpty)
 }
 
+@Test(
+    "Provider excludes Markdown sections from go-to-definition even when a same-named heading exists"
+)
+func syntacticProviderExcludesMarkdownSections() async throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try write("func Alpha() {}\n", to: root.appending(path: "Alpha.swift"))
+    try write("# Alpha\n", to: root.appending(path: "notes.md"))
+
+    let index = WorkspaceSymbolIndex()
+    await index.build(rootURL: root)
+
+    let provider = SyntacticNavigationProvider(index: index, rootURL: root)
+    let request = NavigationRequest(
+        documentURL: root.appending(path: "Alpha.swift"),
+        position: 0,
+        languageID: "swift",
+        kind: .definition,
+        symbolName: "Alpha"
+    )
+    let answer = try #require(try await provider.answer(request))
+    #expect(answer.state == .ready)
+    #expect(answer.candidates.map(\.relativePath) == ["Alpha.swift"])
+    #expect(answer.candidates.allSatisfy { $0.kindLabel != "section" })
+}
+
 @Test("Provider is authoritative for a ready index with no matching declaration")
 func syntacticProviderReadyWithNoMatchIsAuthoritative() async throws {
     let root = try makeTemporaryDirectory()

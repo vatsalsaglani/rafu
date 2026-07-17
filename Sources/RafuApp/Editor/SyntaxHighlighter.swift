@@ -482,9 +482,15 @@ final class NeonSyntaxHighlightingPipeline: NSObject {
             guard let registry = self?.grammarRegistry else { return }
             let configuration = try? await registry.configuration(for: grammarID)
             if Task.isCancelled { return }
+            // Markdown-only inline-injection bundle (symbol-coverage lane
+            // increment D): every other grammar gets `nil` and
+            // `SyntaxParsingActor` behaves exactly as before.
+            let injection =
+                grammarID == .markdown ? await registry.markdownInlineInjection() : nil
+            if Task.isCancelled { return }
             guard
                 let configuration,
-                let actor = SyntaxParsingActor(configuration: configuration)
+                let actor = SyntaxParsingActor(configuration: configuration, injection: injection)
             else {
                 // No highlights query / parser rejection → regex stays.
                 return

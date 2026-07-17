@@ -1,19 +1,25 @@
 # Workspace symbol index and syntactic navigation
 
 - **Applies to:** `WorkspaceSymbolIndex`, `WorkspaceSymbolExtractor`, `SyntacticNavigationProvider`, the command palette `#` workspace-symbol mode, `WorkspaceSession` index ownership and rebuild, and the `NavigationLadder` with LSP insertion point
-- **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-15
+- **Last verified:** Swift 6.2, SwiftTreeSitter 0.8.0, macOS 15 deployment target on 2026-07-18
 
 ## Rule or observed behavior
 
 ### Index design and capacity
 
-`WorkspaceSymbolIndex` is an actor mirroring `WorkspaceFileNameIndex`: it accepts a `git ls-files` feed or falls back to a cancellable `FileManager` enumeration, parses only files whose grammar has a vendored `tags.scm` (currently: swift, python, javascript, typescript, tsx), skips all other files via a cheap extension check, and builds a flat symbol array using `WorkspaceSymbolExtractor` (pure, nonisolated).
+`WorkspaceSymbolIndex` is an actor mirroring `WorkspaceFileNameIndex`: it accepts a `git ls-files` feed or falls back to a cancellable `FileManager` enumeration, parses only files whose grammar has a vendored `tags.scm` (currently: swift, python, javascript, typescript, tsx, bash, dockerfile, toml, yaml, markdown), skips all other files via a cheap extension check, and builds a flat symbol array using `WorkspaceSymbolExtractor` (pure, nonisolated).
 
 Key capacity rules:
 - **Per-file skip:** 512 KB (if a file exceeds this before reading, skip it without parsing).
 - **Per-file symbol cap:** 2,000 symbols per file (enforced during extraction, excess discarded).
 - **Global cap:** 500,000 symbols with truncation disclosure (`isTruncated` flag).
 - **Preview laziness:** `previewLine` (the matched line's text) is computed **only at candidate-build time** when the user selects a symbol, not stored for all symbols (would consume ~30–40 MB at the 500k cap).
+
+### Grammar coverage and JSON skip (symbol-coverage lane increments A–C)
+
+The index surfaces symbols from ten grammars with hand-authored `tags.scm` queries: Swift, Python, JavaScript, TypeScript, TSX (increment 9), Bash, Dockerfile (increment A), TOML, YAML (increment B), and Markdown (increment C). All five new queries were hand-verified against tree-sitter node-types.json in `.build/checkouts/`.
+
+**JSON deliberately excluded:** JSON keys are unbounded noise with no navigational payoff. A typical JSON file contains hundreds of keys (structural metadata), most meaningless for source-code navigation. The grammar has no vendored `tags.scm`, and no plan to add one — the cheap extension-based skip avoids index bloat on JavaScript/Node codebases where JSON is prevalent.
 
 ### Grammar-covered parsing and unified buffer symbol extraction (post-merge validation fix D3, 2026-07-15)
 
@@ -47,6 +53,7 @@ Non-Sendable tree-sitter types (Parser, Tree, QueryCursor) never cross an await 
 
 `SyntacticNavigationProvider` implements `NavigationTierProvider` over the symbol index and:
 - **.definition** / **.declaration** requests: exact-name lookup; candidates ranked same-file first, then same-directory (proximity), then lexicographic. An index that exists and returns no match is an authoritative empty answer (`NavigationAnswer(tier: .syntactic, candidates: [])`, not a decline).
+- **Kind filter — go-to-definition restriction (symbol-coverage lane increment C, durable decision):** `WorkspaceSymbolExtractor.navigableKinds = {function, method, class, interface, property, constant, module}` deliberately excludes the `section` kind (Markdown headings) from ⌃⌘J navigation, so headings surface only in `#` workspace-symbol search, never as go-to-definition answers. This prevents Markdown headings from incorrectly pre-empting the text-search tier when a same-named code identifier exists elsewhere. Configuration keys (TOML/YAML properties, TOML tables, YAML anchors) remain navigable by design — their `kind` values (class, property, constant) are indistinguishable from code declarations by `kind` alone, so filtering by kind would require out-of-band context (a durable commitment avoided).
 - **.references** / **.hover** requests: returns `nil` (decline), falling through to the text-search navigation tier. The index deliberately stores no `@reference.*` captures (to stay bounded); precise reference and hover are lane 2's LSP responsibility.
 - **.building** and **.idle** states: returns `NavigationAnswer(state: .indexing)` in both cases. An index that is `.idle` (cold start, or after memory pressure sheds it) has never been built and is not an authoritative "no match", so awaiting the build is correct. Previously only `.building` was treated as indexing, causing `.idle` to block the text tier.
 

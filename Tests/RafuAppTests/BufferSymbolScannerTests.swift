@@ -212,10 +212,86 @@ func bufferSymbolScannerTSXGrammar() async throws {
     #expect(symbols[1].kind == .function)
 }
 
+@Test("Grammar-backed scan finds Bash function definitions in both declaration styles")
+func bufferSymbolScannerBashGrammar() async throws {
+    let text = "foo() { :; }\nfunction bar { :; }"
+    let symbols = try #require(
+        await BufferSymbolScanner.scanUsingGrammar(text: text, grammarID: .bash))
+
+    #expect(symbols.contains { $0.name == "foo" && $0.kind == .function })
+    #expect(symbols.contains { $0.name == "bar" && $0.kind == .function })
+
+    let nsText = text as NSString
+    for symbol in symbols {
+        #expect(nsText.substring(with: symbol.range) == symbol.name)
+    }
+}
+
+@Test("Grammar-backed scan finds Dockerfile build-stage aliases")
+func bufferSymbolScannerDockerfileGrammar() async throws {
+    let text = "FROM node AS builder\n"
+    let symbols = try #require(
+        await BufferSymbolScanner.scanUsingGrammar(text: text, grammarID: .dockerfile))
+
+    #expect(symbols.contains { $0.name == "builder" && $0.kind == .type })
+
+    let nsText = text as NSString
+    for symbol in symbols {
+        #expect(nsText.substring(with: symbol.range) == symbol.name)
+    }
+}
+
+@Test(
+    "Grammar-backed scan finds TOML table names and property pairs, excluding inline-table values")
+func bufferSymbolScannerTOMLGrammar() async throws {
+    let text = "[server]\nport = 8080\nopts = { retries = 3 }\n"
+    let symbols = try #require(
+        await BufferSymbolScanner.scanUsingGrammar(text: text, grammarID: .toml))
+
+    #expect(symbols.contains { $0.name == "server" && $0.kind == .type })
+    #expect(symbols.contains { $0.name == "port" && $0.kind == .property })
+    #expect(symbols.contains { $0.name == "opts" && $0.kind == .property })
+    // `retries` is an inline-table value, not a config key — excluded.
+    #expect(!symbols.contains { $0.name == "retries" })
+
+    let nsText = text as NSString
+    for symbol in symbols {
+        #expect(nsText.substring(with: symbol.range) == symbol.name)
+    }
+}
+
+@Test("Grammar-backed scan finds YAML top-level keys and anchors, excluding nested mapping keys")
+func bufferSymbolScannerYAMLGrammar() async throws {
+    let text = "service: &base\n  host: localhost\n  port: 8080\n"
+    let symbols = try #require(
+        await BufferSymbolScanner.scanUsingGrammar(text: text, grammarID: .yaml))
+
+    #expect(symbols.contains { $0.name == "service" && $0.kind == .property })
+    #expect(symbols.contains { $0.name == "base" && $0.kind == .constant })
+    // `host`/`port` are nested mapping keys — excluded.
+    #expect(!symbols.contains { $0.name == "host" })
+    #expect(!symbols.contains { $0.name == "port" })
+
+    let nsText = text as NSString
+    for symbol in symbols {
+        #expect(nsText.substring(with: symbol.range) == symbol.name)
+    }
+}
+
+@Test(
+    "Grammar-backed scan returns non-nil empty for Markdown: its tags.scm's \"section\" kind has no @-mode icon"
+)
+func bufferSymbolScannerMarkdownGrammarReturnsEmpty() async throws {
+    let symbols = try #require(
+        await BufferSymbolScanner.scanUsingGrammar(
+            text: "# Title\n\nAlt\n===\n", grammarID: .markdown))
+    #expect(symbols.isEmpty)
+}
+
 @Test("Grammar-backed scan returns nil (not empty) for a grammar without a vendored tags.scm")
 func bufferSymbolScannerGrammarNilForUnsupported() async throws {
     let symbols = await BufferSymbolScanner.scanUsingGrammar(
-        text: "key: value\n", grammarID: .yaml)
+        text: "{}\n", grammarID: .json)
     #expect(symbols == nil)
 }
 

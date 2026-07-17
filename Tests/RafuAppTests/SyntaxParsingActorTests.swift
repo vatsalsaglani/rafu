@@ -59,9 +59,12 @@ func syntaxActorDiscardsStaleSnapshot() async throws {
 
 @Test("SyntaxParsingActor without a highlights query fails to initialize")
 func syntaxActorRequiresHighlightsQuery() async throws {
-    let registry = GrammarRegistry()
-    // markdownInline has no vendored highlights.scm in 8a → empty queries.
-    let configuration = try await registry.configuration(for: .markdownInline)
+    // `markdownInline` now vendors a real `highlights.scm` (symbol-coverage
+    // lane increment D), so an empty-queries `LanguageConfiguration` is built
+    // by hand here instead, to keep proving the "no highlights query → nil"
+    // contract independent of any one grammar's vendored resources.
+    let configuration = LanguageConfiguration(
+        GrammarLanguageID.markdownInline.language, name: "MarkdownInline", queries: [:])
     #expect(configuration.queries[.highlights] == nil)
     #expect(SyntaxParsingActor(configuration: configuration) == nil)
 }
@@ -204,6 +207,108 @@ func syntaxActorIncrementalHonorsCapBothWays() async throws {
         startUTF16: 2, oldEndUTF16: 11, newEndUTF16: 2, newText: underCap, version: 2)
     let spans = await shrinking.tokens(inUTF16: NSRange(location: 0, length: 7))
     #expect(spans.contains { $0.themeKey == "string" })
+}
+
+// MARK: - markdownInline injection (symbol-coverage lane increment D)
+
+/// Builds a Markdown `SyntaxParsingActor` with its `markdownInline` injection
+/// bundle attached, for the inline-span tests below.
+private func markdownActorWithInlineInjection() async throws -> SyntaxParsingActor {
+    let registry = GrammarRegistry()
+    let configuration = try await registry.configuration(for: .markdown)
+    let injection = try #require(await registry.markdownInlineInjection())
+    return try #require(
+        SyntaxParsingActor(configuration: configuration, injection: injection))
+}
+
+/// Data-level proof the inline pass runs and remaps spans correctly: parsing
+/// `*em*` with the block `markdown` grammar alone would emit no emphasis
+/// span at all (block-level Markdown has no notion of emphasis), so a
+/// `markup.italic` span at the exact UTF-16 range of the whole node
+/// (delimiters included — confirmed empirically against the vendored
+/// `markdown_inline` grammar; `emphasis` captures the full `*em*` node, not
+/// just its inner text) proves the locator found the `(inline)` node, the
+/// substring was reparsed with `markdown_inline`, and the result was mapped
+/// through the `text.emphasis` → `markup.italic` `CaptureTokenMap` row added
+/// in this increment.
+@Test("SyntaxParsingActor markdownInline injection highlights emphasis at its exact UTF-16 range")
+func syntaxActorHighlightsMarkdownInlineEmphasis() async throws {
+    let actor = try await markdownActorWithInlineInjection()
+
+    let text = "*em*"
+    await actor.updateSnapshot(text, version: 1)
+    let spans = await actor.tokens(
+        inUTF16: NSRange(location: 0, length: (text as NSString).length))
+
+    #expect(
+        spans.contains(
+            SyntaxSpan(themeKey: "markup.italic", range: NSRange(location: 0, length: 4))))
+}
+
+/// Same proof for inline code: `code_span` captures the whole `` `code` ``
+/// node (backticks included, confirmed empirically), mapped through
+/// `text.literal` → `markup.code`.
+@Test(
+    "SyntaxParsingActor markdownInline injection highlights inline code at its exact UTF-16 range")
+func syntaxActorHighlightsMarkdownInlineCode() async throws {
+    let actor = try await markdownActorWithInlineInjection()
+
+    let text = "`code`"
+    await actor.updateSnapshot(text, version: 1)
+    let spans = await actor.tokens(
+        inUTF16: NSRange(location: 0, length: (text as NSString).length))
+
+    #expect(
+        spans.contains(
+            SyntaxSpan(themeKey: "markup.code", range: NSRange(location: 0, length: 6))))
+}
+
+/// Same proof for a link: `link_text` ("t", offset 1) and `link_destination`
+/// ("u", offset 4) each capture only their inner token — not the surrounding
+/// `[`/`]`/`(`/`)` punctuation, confirmed empirically — mapped through
+/// `text.reference`/`text.uri` → `markup.link`.
+@Test(
+    "SyntaxParsingActor markdownInline injection highlights link text and destination at their exact UTF-16 ranges"
+)
+func syntaxActorHighlightsMarkdownInlineLink() async throws {
+    let actor = try await markdownActorWithInlineInjection()
+
+    let text = "[t](u)"
+    await actor.updateSnapshot(text, version: 1)
+    let spans = await actor.tokens(
+        inUTF16: NSRange(location: 0, length: (text as NSString).length))
+
+    #expect(
+        spans.contains(
+            SyntaxSpan(themeKey: "markup.link", range: NSRange(location: 1, length: 1))))
+    #expect(
+        spans.contains(
+            SyntaxSpan(themeKey: "markup.link", range: NSRange(location: 4, length: 1))))
+}
+
+/// Nonzero-offset fixture: proves both the block `text.title` →
+/// `markup.heading` mapping (this increment's block-coloring fix — "H" at
+/// UTF-16 offset 2) AND that the inline pass's offset remap is correct when
+/// the `(inline)` node does not start at document offset 0 — the emphasis
+/// span inside the paragraph after the heading lands at its true absolute
+/// offset (5), not at its offset within the reparsed substring (0).
+@Test(
+    "SyntaxParsingActor maps a heading and a non-zero-offset inline span in the same document"
+)
+func syntaxActorHighlightsHeadingAndOffsetInlineSpan() async throws {
+    let actor = try await markdownActorWithInlineInjection()
+
+    let text = "# H\n\n*em*"
+    await actor.updateSnapshot(text, version: 1)
+    let spans = await actor.tokens(
+        inUTF16: NSRange(location: 0, length: (text as NSString).length))
+
+    #expect(
+        spans.contains(
+            SyntaxSpan(themeKey: "markup.heading", range: NSRange(location: 2, length: 1))))
+    #expect(
+        spans.contains(
+            SyntaxSpan(themeKey: "markup.italic", range: NSRange(location: 5, length: 4))))
 }
 
 /// Stable ordering for comparing two span sets independent of query iteration

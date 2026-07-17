@@ -2,6 +2,21 @@
 
 ## Status
 
+**Implemented and verified (2026-07-18).** All increments A–E landed on
+`lane/symbol-coverage`: five hand-authored `tags.scm` (Bash, Dockerfile,
+TOML, YAML, Markdown), JSON deliberately skipped, the go-to-definition
+kind-filter decision resolved (`navigableKinds` excludes `section`), and
+markdownInline injection wired as a bounded lazy visible-range inline
+parse. `swift build` + `swift test` green (519 tests; one pre-existing
+`JSONRPCConnectionTests` ordering flake, out of lane scope). Docs closed
+out. `./script/build_and_run.sh --verify` passed (exit 0): the staged
+`.app` launches and stays up with the new grammar resources
+(`MarkdownInline/highlights.scm` + five `tags.scm`) packaged where
+`Bundle.module` resolves them. **Owed:** a human-eyeball confirmation of
+on-screen Markdown inline coloring (the `--verify` gate proves launch, not
+rendering) and p95 Markdown-typing latency evidence (measurement-time,
+same class as 8b). Not committed — awaiting the user.
+
 Planned (2026-07-17). One of six post-audit lanes defined in
 [`post-audit-worktree-fanout.md`](post-audit-worktree-fanout.md). Runs in a
 **dedicated git worktree**. Extends lane-1 increments 9–10: grammar-backed

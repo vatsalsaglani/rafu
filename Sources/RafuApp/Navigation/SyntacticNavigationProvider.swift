@@ -45,6 +45,7 @@ nonisolated struct SyntacticNavigationProvider: NavigationTierProvider {
         let requestRelativePath = NavigationCandidateRanking.relativePath(
             for: request.documentURL, rootURL: rootURL)
         let matches = try await index.lookup(name: symbolName)
+            .filter { WorkspaceSymbolExtractor.navigableKinds.contains($0.kind) }
         let ranked = Self.rank(matches, requestRelativePath: requestRelativePath)
         let candidates = ranked.map { match in
             SymbolCandidate(

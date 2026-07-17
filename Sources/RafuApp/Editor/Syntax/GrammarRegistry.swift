@@ -97,10 +97,17 @@ actor GrammarRegistry {
     private var cache: [GrammarLanguageID: LanguageConfiguration] = [:]
     /// Compiled `tags.scm` query cache for increment 9's grammar-backed `@`
     /// symbol extraction (`BufferSymbols.scanUsingGrammar`). Stored as
-    /// `Query?` so a grammar with no vendored `tags.scm` (json/yaml/toml/
-    /// bash/markdown/dockerfile — no meaningful symbols) or a compile
-    /// failure caches its `nil` result too, instead of retrying every call.
+    /// `Query?` so a grammar with no vendored `tags.scm` (json/markdownInline)
+    /// or a compile failure caches
+    /// its `nil` result too, instead of retrying every call.
     private var tagsCache: [GrammarLanguageID: Query?] = [:]
+    /// Cached `markdownInline` injection bundle for the symbol-coverage
+    /// lane's increment D (Markdown editor-buffer inline highlighting).
+    /// Double-optional: the outer optional distinguishes "not yet built"
+    /// from "built once and unavailable" (missing resource or compile
+    /// failure), so an unavailable bundle is cached too instead of retried
+    /// on every grammar activation.
+    private var markdownInlineInjectionCache: MarkdownInlineInjection??
 
     /// Returns the cached configuration for `id`, building it on first
     /// request. `config.language` is always a valid, ABI-checked parser
@@ -129,10 +136,13 @@ actor GrammarRegistry {
             configuration = LanguageConfiguration(
                 language, name: name, queries: [.highlights: query])
         } else {
-            // Missing resource (e.g. `markdownInline` in 8a) or a query
-            // read/compile failure → keep the valid, ABI-checked language with
-            // an EMPTY queries dictionary so the router degrades to the regex
-            // highlighter instead of crashing or blanking the editor.
+            // Missing resource or a query read/compile failure → keep the
+            // valid, ABI-checked language with an EMPTY queries dictionary so
+            // the router degrades to the regex highlighter instead of
+            // crashing or blanking the editor. `markdownInline`'s
+            // `highlights.scm` was vendored in the symbol-coverage lane's
+            // increment D (it now resolves here too), but this branch stays
+            // as the general failure path for every grammar.
             configuration = LanguageConfiguration(language, name: name, queries: [:])
         }
 
@@ -162,6 +172,59 @@ actor GrammarRegistry {
         tagsCache[id] = query
         return query
     }
+
+    /// Returns the cached `markdown_inline` injection bundle used by
+    /// `SyntaxParsingActor` to highlight inline Markdown spans (emphasis,
+    /// strong, inline code, links, …) in editor buffers — the
+    /// symbol-coverage lane's increment D. `nil` when the vendored
+    /// `MarkdownInline/highlights.scm` resource fails to resolve/compile or
+    /// either grammar's `Language` fails to build; callers then simply skip
+    /// the inline pass and keep block-level Markdown highlighting only,
+    /// never crash or blank the editor.
+    func markdownInlineInjection() async -> MarkdownInlineInjection? {
+        if let cached = markdownInlineInjectionCache {
+            return cached
+        }
+
+        let inlineLanguage = GrammarLanguageID.markdownInline.language
+        let markdownLanguage = GrammarLanguageID.markdown.language
+
+        // Same main-actor `Bundle.module` gateway pattern as `highlightsURL`/
+        // `tagsURL` above.
+        let inlineURL = await GrammarQueryResources.highlightsURL(
+            forName: GrammarLanguageID.markdownInline.configurationName)
+
+        guard
+            let inlineURL,
+            let inlineHighlights = try? Query(language: inlineLanguage, url: inlineURL),
+            // SwiftTreeSitter has no string-literal `Query` initializer —
+            // only `init(language:data:)` and `init(language:url:)` — so the
+            // locator query text is compiled from UTF-8 `Data`.
+            let locator = try? Query(
+                language: markdownLanguage, data: Data("(inline) @injection.content".utf8))
+        else {
+            markdownInlineInjectionCache = .some(nil)
+            return nil
+        }
+
+        let bundle = MarkdownInlineInjection(
+            inlineLanguage: inlineLanguage, inlineHighlights: inlineHighlights, locator: locator)
+        markdownInlineInjectionCache = .some(bundle)
+        return bundle
+    }
+}
+
+/// The `markdown_inline` grammar + compiled inline `highlights.scm` query +
+/// the block-tree locator query that finds `(inline)` node spans to
+/// substring-parse, bundled together so `SyntaxHighlighter` only has to pass
+/// one value into `SyntaxParsingActor.init?`. Honestly `Sendable`: `Language`
+/// and `Query` are both `Sendable` value/reference types already used this
+/// way elsewhere in `GrammarRegistry` (`LanguageConfiguration`), so no
+/// `@unchecked` escape hatch is needed.
+nonisolated struct MarkdownInlineInjection: Sendable {
+    let inlineLanguage: Language
+    let inlineHighlights: Query
+    let locator: Query
 }
 
 /// Main-actor gateway to the vendored grammar query bundle. `Bundle.module`
@@ -177,7 +240,8 @@ private enum GrammarQueryResources {
 
     /// `tags.scm` counterpart to `highlightsURL(forName:)`, `nil` when the
     /// grammar has none vendored (increment 9: Swift/Python/JavaScript/
-    /// TypeScript/TSX only).
+    /// TypeScript/TSX; Bash/Dockerfile added in the symbol-coverage lane's
+    /// increment A; TOML/YAML added in increment B).
     static func tagsURL(forName name: String) -> URL? {
         Bundle.module.url(
             forResource: "tags", withExtension: "scm",
