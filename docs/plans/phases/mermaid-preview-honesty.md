@@ -92,39 +92,56 @@ The increment order is deliberate: M1 alone already makes the feature honest
 - After each green increment the coordinator stops and asks the user to
   commit. No agent commits.
 
-## M1 — Contract, detection, honest fallback, badge (option (b), landed first)
+## M1 — Contract, detection, honest fallback, badge
 
-- `Sources/RafuApp/Markdown/MarkdownModels.swift`: add `MermaidParseResult`
+**Status: Complete (2026-07-17)**
+
+### Implementation
+
+- `Sources/RafuApp/Markdown/MarkdownModels.swift`: added `MermaidParseResult`
   (`.flow(…)`, `.sequence(…)`, `.unsupported(type:raw:)`,
-  `.malformed(type:raw:reason:)`; the implementor chooses between one result
-  enum vs extending `MermaidDiagram.Kind` — decide in this increment, record
-  the choice). Replace the binary detection in `parseMermaid`
-  (`MarkdownModels.swift:132`) with a first-token classifier:
-  `flowchart`/`graph` → flow, `sequenceDiagram` → sequence, a known-types
-  list (taken from current Mermaid docs at implementation time:
-  classDiagram, stateDiagram/v2, erDiagram, gantt, pie, journey, gitGraph,
-  mindmap, timeline, quadrantChart, requirement, C4*, sankey, xychart,
-  block, packet, kanban, architecture) → `.unsupported`; unknown/empty →
-  `.malformed`. Current flow/sequence parsing stays wired temporarily.
-- New `MermaidUnsupportedView` (styled like the existing `.code` block +
-  notice line via `theme.ui.warning ?? theme.ui.textSecondary`) and the
-  "Simplified native preview" badge on every native render.
-- Update `MarkdownPreviewSegmentParser.parse`
-  (`MarkdownPreviewView.swift:121`) and `MarkdownPreviewView` routing for
-  the new cases. Keep the segmentation regex (`:94`) intact.
-- Tests (new `MermaidParserTests.swift`): each unsupported type →
-  `.unsupported`; malformed → `.malformed`; legacy header spellings
-  (`graph LR`, `flowchart TD`, bare `flowchart`) still route to flow; a
-  `flowchart` with no parseable edges → fallback, not a blank box; existing
+  `.malformed(type:raw:reason:)`). Chose **option (a): one result enum** — this
+  keeps the enum and its call sites frozen for M2–M6 while the payload structs
+  grow new fields. Replaced the binary detection in `parseMermaid` with a
+  first-token classifier: `flowchart`/`graph` → flow, `sequenceDiagram` →
+  sequence, known-types list (29 types from Mermaid v10) → `.unsupported`;
+  unknown/empty → `.malformed`. Classifier skips leading blanks, YAML
+  frontmatter (`---`…`---`), and `%%` comment lines. Current flow/sequence
+  parsing bodies wired unchanged (M2/M5 rewrite them).
+- New `MermaidUnsupportedView` styled as a code block plus notice line
+  (`theme.ui.warning ?? theme.ui.textSecondary`). "Simplified native preview"
+  badge added to every native render.
+- Updated `MarkdownPreviewSegmentParser.parse` and `MarkdownPreviewView` routing
+  for the new result cases. Segmentation regex preserved.
+- Tests: new `MermaidParserTests.swift` with fixtures for each unsupported type,
+  malformed cases, legacy spellings, and fallback rendering. Existing
   `parsesMarkdownAndMermaid`, `parsesSequenceDiagram`,
-  `richPreviewSegmentation`, `repeatedBlocksHaveUniqueIdentity` pass
-  (updated only for model shape).
-- Documentor: write ADR 0008 from the skeleton in this plan's Decision
-  section (status Accepted once the user approves in-lane), start
-  `docs/references/mermaid-native-preview.md`.
+  `richPreviewSegmentation`, `repeatedBlocksHaveUniqueIdentity` tests updated
+  for result shape only.
+- Documented: ADR 0008 (status Proposed, recorded option (a) choice and deferred
+  WKWebView alternative), `docs/references/mermaid-native-preview.md` started
+  (M1 classifier, fallback, and known limitation sections; layout/fixture
+  sections stub for M3/M7).
+
+### Verification
+
+- `swift build` — clean, no new dependency.
+- `swift test` — 510 tests pass.
+- `./script/format.sh --lint` — clean.
+- `./script/build_and_run.sh --verify` — **deferred** to the consolidated GUI
+  pass at M6/M7 (other lanes share the staged app). The M1 badge/fallback
+  rendering is covered there.
+
+### Known M1 limitation
+
+The classifier correctly identifies diagram types even with frontmatter/comments,
+but the body parsers still assume line 0 is the header (unchanged from prior
+behavior). M2/M5 rewrite body parsers to skip frontmatter in context. Not a
+regression.
 
 Gate: unsupported/malformed input can no longer silently mis-render; badge
-visible; build/tests/lint green; `--verify` preview pass.
+visible; build/tests/lint green ✓; `--verify` preview pass deferred to the
+consolidated M6/M7 GUI pass.
 
 ## M2 — Flow model + parser upgrade
 

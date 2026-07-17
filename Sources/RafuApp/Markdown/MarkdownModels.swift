@@ -7,7 +7,7 @@ nonisolated struct MarkdownBlock: Identifiable, Sendable {
         case bullet(String)
         case quote(String)
         case code(language: String?, text: String)
-        case mermaid(MermaidDiagram)
+        case mermaid(MermaidParseResult)
         case divider
     }
 
@@ -28,29 +28,37 @@ nonisolated struct MarkdownBlock: Identifiable, Sendable {
     static func code(language: String?, text: String) -> Self {
         Self(.code(language: language, text: text))
     }
-    static func mermaid(_ diagram: MermaidDiagram) -> Self { Self(.mermaid(diagram)) }
+    static func mermaid(_ result: MermaidParseResult) -> Self { Self(.mermaid(result)) }
     static var divider: Self { Self(.divider) }
 }
 
-nonisolated struct MermaidDiagram: Sendable {
-    enum Kind: Equatable, Sendable { case flow, sequence }
-    struct Edge: Sendable {
-        let id: UUID = UUID()
-        let from: String
-        let to: String
-        let label: String
-    }
-    struct Message: Sendable {
-        let id: UUID = UUID()
-        let from: String
-        let to: String
-        let label: String
-    }
+nonisolated enum MermaidParseResult: Sendable {
+    case flow(MermaidFlow)
+    case sequence(MermaidSequence)
+    case unsupported(type: String, raw: String)
+    case malformed(type: String, raw: String, reason: String)
+}
 
+nonisolated struct MermaidFlow: Sendable {
+    nonisolated struct Edge: Sendable {
+        let id = UUID()
+        let from: String
+        let to: String
+        let label: String
+    }
     let raw: String
-    let kind: Kind
     let nodes: [String: String]
     let edges: [Edge]
+}
+
+nonisolated struct MermaidSequence: Sendable {
+    nonisolated struct Message: Sendable {
+        let id = UUID()
+        let from: String
+        let to: String
+        let label: String
+    }
+    let raw: String
     let participants: [String]
     let messages: [Message]
 }
@@ -129,43 +137,89 @@ nonisolated struct MarkdownParser: Sendable {
         return .heading(level: count, text: String(line.dropFirst(count + 1)))
     }
 
-    func parseMermaid(_ raw: String) -> MermaidDiagram {
+    private static let unsupportedTypes: Set<String> = [
+        "classdiagram", "statediagram", "statediagram-v2", "erdiagram", "gantt", "pie", "journey",
+        "gitgraph", "mindmap", "timeline", "quadrantchart", "requirement", "requirementdiagram",
+        "c4context", "c4container", "c4component", "c4dynamic", "c4deployment", "sankey",
+        "sankey-beta", "xychart", "xychart-beta", "block", "block-beta", "packet", "packet-beta",
+        "kanban", "architecture", "architecture-beta",
+    ]
+
+    func parseMermaid(_ raw: String) -> MermaidParseResult {
+        guard let header = firstHeaderLine(raw), !header.isEmpty else {
+            return .malformed(type: "", raw: raw, reason: "empty diagram")
+        }
+        let token = header.prefix { !$0.isWhitespace }
+        let key = String(token).lowercased()
+        switch key {
+        case "flowchart", "graph":
+            return .flow(parseFlow(raw))
+        case "sequencediagram":
+            return .sequence(parseSequence(raw))
+        case _ where Self.unsupportedTypes.contains(key):
+            return .unsupported(type: String(token), raw: raw)
+        default:
+            return .malformed(
+                type: String(token), raw: raw, reason: "unknown diagram type '\(token)'")
+        }
+    }
+
+    private func firstHeaderLine(_ raw: String) -> String? {
         let lines = raw.components(separatedBy: .newlines).map {
             $0.trimmingCharacters(in: .whitespaces)
         }
-        if lines.first?.lowercased().hasPrefix("sequenceDiagram".lowercased()) == true {
-            var participants: [String] = []
-            var messages: [MermaidDiagram.Message] = []
-            for line in lines.dropFirst() {
-                if line.hasPrefix("participant ") {
-                    let name =
-                        String(line.dropFirst("participant ".count)).components(separatedBy: " as ")
-                        .last ?? ""
-                    if !name.isEmpty { participants.append(name) }
-                } else if let arrow = ["->>", "-->>", "->", "-->"].first(where: line.contains),
-                    let colon = line.firstIndex(of: ":")
-                {
-                    let route = String(line[..<colon]).components(separatedBy: arrow)
-                    if route.count == 2 {
-                        let from = route[0].trimmingCharacters(in: .whitespaces)
-                        let to = route[1].trimmingCharacters(in: .whitespaces)
-                        if !participants.contains(from) { participants.append(from) }
-                        if !participants.contains(to) { participants.append(to) }
-                        messages.append(
-                            .init(
-                                from: from, to: to,
-                                label: String(line[line.index(after: colon)...]).trimmingCharacters(
-                                    in: .whitespaces)))
-                    }
+        var index = 0
+        while index < lines.count, lines[index].isEmpty { index += 1 }
+        if index < lines.count, lines[index] == "---" {
+            index += 1
+            while index < lines.count, lines[index] != "---" { index += 1 }
+            if index < lines.count { index += 1 }
+        }
+        while index < lines.count, lines[index].isEmpty || lines[index].hasPrefix("%%") {
+            index += 1
+        }
+        guard index < lines.count else { return nil }
+        return lines[index]
+    }
+
+    private func parseSequence(_ raw: String) -> MermaidSequence {
+        let lines = raw.components(separatedBy: .newlines).map {
+            $0.trimmingCharacters(in: .whitespaces)
+        }
+        var participants: [String] = []
+        var messages: [MermaidSequence.Message] = []
+        for line in lines.dropFirst() {
+            if line.hasPrefix("participant ") {
+                let name =
+                    String(line.dropFirst("participant ".count)).components(separatedBy: " as ")
+                    .last ?? ""
+                if !name.isEmpty { participants.append(name) }
+            } else if let arrow = ["->>", "-->>", "->", "-->"].first(where: line.contains),
+                let colon = line.firstIndex(of: ":")
+            {
+                let route = String(line[..<colon]).components(separatedBy: arrow)
+                if route.count == 2 {
+                    let from = route[0].trimmingCharacters(in: .whitespaces)
+                    let to = route[1].trimmingCharacters(in: .whitespaces)
+                    if !participants.contains(from) { participants.append(from) }
+                    if !participants.contains(to) { participants.append(to) }
+                    messages.append(
+                        .init(
+                            from: from, to: to,
+                            label: String(line[line.index(after: colon)...]).trimmingCharacters(
+                                in: .whitespaces)))
                 }
             }
-            return MermaidDiagram(
-                raw: raw, kind: .sequence, nodes: [:], edges: [], participants: participants,
-                messages: messages)
         }
+        return MermaidSequence(raw: raw, participants: participants, messages: messages)
+    }
 
+    private func parseFlow(_ raw: String) -> MermaidFlow {
+        let lines = raw.components(separatedBy: .newlines).map {
+            $0.trimmingCharacters(in: .whitespaces)
+        }
         var nodes: [String: String] = [:]
-        var edges: [MermaidDiagram.Edge] = []
+        var edges: [MermaidFlow.Edge] = []
         for line in lines.dropFirst() {
             guard let (arrowRange, arrow) = flowArrow(in: line) else { continue }
             var left = String(line[..<arrowRange.lowerBound]).trimmingCharacters(in: .whitespaces)
@@ -185,8 +239,7 @@ nonisolated struct MarkdownParser: Sendable {
             nodes[to.id] = to.label
             edges.append(.init(from: from.id, to: to.id, label: label))
         }
-        return MermaidDiagram(
-            raw: raw, kind: .flow, nodes: nodes, edges: edges, participants: [], messages: [])
+        return MermaidFlow(raw: raw, nodes: nodes, edges: edges)
     }
 
     private func flowArrow(in line: String) -> (Range<String.Index>, String)? {

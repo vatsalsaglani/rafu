@@ -19,15 +19,16 @@ func parsesMarkdownAndMermaid() {
     )
 
     #expect(blocks.count == 3)
-    guard case .mermaid(let diagram) = blocks.last?.content else {
-        Issue.record("Expected a Mermaid block")
+    guard case .mermaid(let result) = blocks.last?.content,
+        case .flow(let flow) = result
+    else {
+        Issue.record("Expected a Mermaid flow block")
         return
     }
-    #expect(diagram.kind == .flow)
-    #expect(diagram.edges.count == 2)
-    #expect(diagram.edges.first?.label == "opens")
-    #expect(diagram.nodes["Plan"] == "Plan")
-    #expect(diagram.nodes["Commit"] == "Commit")
+    #expect(flow.edges.count == 2)
+    #expect(flow.edges.first?.label == "opens")
+    #expect(flow.nodes["Plan"] == "Plan")
+    #expect(flow.nodes["Commit"] == "Commit")
 }
 
 @Test("Markdown blocks retain distinct stable identities for repeated content")
@@ -61,11 +62,13 @@ func richPreviewSegmentation() {
         return
     }
     #expect(table.contains("| Name | Value |"))
-    guard case .mermaid(let diagram) = segments[1].content else {
-        Issue.record("Expected native Mermaid segment")
+    guard case .mermaid(let result) = segments[1].content,
+        case .flow(let flow) = result
+    else {
+        Issue.record("Expected native Mermaid flow segment")
         return
     }
-    #expect(diagram.edges.count == 1)
+    #expect(flow.edges.count == 1)
 }
 
 @Test("Markdown parser recognizes Mermaid sequence diagrams")
@@ -80,11 +83,12 @@ func parsesSequenceDiagram() {
         ```
         """
     )
-    guard case .mermaid(let diagram) = blocks.first?.content else {
-        Issue.record("Expected a Mermaid block")
+    guard case .mermaid(let result) = blocks.first?.content,
+        case .sequence(let seq) = result
+    else {
+        Issue.record("Expected a Mermaid sequence block")
         return
     }
-    #expect(diagram.kind == .sequence)
-    #expect(diagram.participants == ["User", "Rafu"])
-    #expect(diagram.messages.first?.label == "Save file")
+    #expect(seq.participants == ["User", "Rafu"])
+    #expect(seq.messages.first?.label == "Save file")
 }

@@ -53,8 +53,8 @@ struct MarkdownPreviewView: View {
                             .markdownCodeSyntaxHighlighter(
                                 TreeSitterCodeSyntaxHighlighter(theme: theme))
 
-                    case .mermaid(let diagram):
-                        MermaidDiagramView(diagram: diagram)
+                    case .mermaid(let result):
+                        MermaidDiagramView(result: result)
                     }
                 }
             }
@@ -81,7 +81,7 @@ struct MarkdownPreviewView: View {
 nonisolated struct MarkdownPreviewSegment: Identifiable, Sendable {
     enum Content: Sendable {
         case markdown(String)
-        case mermaid(MermaidDiagram)
+        case mermaid(MermaidParseResult)
     }
 
     let id = UUID()
@@ -138,33 +138,32 @@ nonisolated struct MarkdownPreviewSegmentParser: Sendable {
 
 struct MermaidDiagramView: View {
     @Environment(\.rafuTheme) private var theme
-    let diagram: MermaidDiagram
+    let result: MermaidParseResult
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Mermaid", systemImage: "point.3.connected.trianglepath.dotted")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Color(rafuHex: theme.ui.accent))
-            switch diagram.kind {
-            case .flow:
-                ForEach(diagram.edges, id: \.id) { edge in
+        switch result {
+        case .flow(let flow):
+            diagramBody {
+                ForEach(flow.edges, id: \.id) { edge in
                     HStack(spacing: 10) {
-                        node(diagram.nodes[edge.from] ?? edge.from)
+                        node(flow.nodes[edge.from] ?? edge.from)
                         Image(systemName: "arrow.right")
                             .foregroundStyle(Color(rafuHex: theme.ui.accent))
                         if !edge.label.isEmpty {
                             Text(edge.label).font(.caption).foregroundStyle(.secondary)
                         }
-                        node(diagram.nodes[edge.to] ?? edge.to)
+                        node(flow.nodes[edge.to] ?? edge.to)
                     }
                 }
-            case .sequence:
+            }
+        case .sequence(let seq):
+            diagramBody {
                 HStack {
-                    ForEach(diagram.participants, id: \.self) {
+                    ForEach(seq.participants, id: \.self) {
                         node($0).frame(maxWidth: .infinity)
                     }
                 }
-                ForEach(diagram.messages, id: \.id) { message in
+                ForEach(seq.messages, id: \.id) { message in
                     HStack {
                         Text(message.from).font(.caption)
                         Image(systemName: "arrow.right")
@@ -173,6 +172,20 @@ struct MermaidDiagramView: View {
                     }
                 }
             }
+        case .unsupported(let type, let raw):
+            MermaidUnsupportedView(type: type, raw: raw, reason: nil)
+        case .malformed(let type, let raw, let reason):
+            MermaidUnsupportedView(type: type, raw: raw, reason: reason)
+        }
+    }
+
+    @ViewBuilder
+    private func diagramBody<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Simplified native preview", systemImage: "point.3.connected.trianglepath.dotted")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color(rafuHex: theme.ui.accent))
+            content()
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -192,5 +205,42 @@ struct MermaidDiagramView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(Color(rafuHex: theme.ui.selection), in: Capsule())
+    }
+}
+
+struct MermaidUnsupportedView: View {
+    @Environment(\.rafuTheme) private var theme
+    let type: String
+    let raw: String
+    let reason: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(noticeText)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color(rafuHex: theme.ui.warning ?? theme.ui.textSecondary))
+            Text(raw)
+                .font(.system(.callout, design: .monospaced))
+                .foregroundStyle(Color(rafuHex: theme.ui.textPrimary))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Color(rafuHex: theme.ui.elevatedBackground),
+            in: .rect(cornerRadius: 12)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color(rafuHex: theme.ui.borderSubtle))
+        }
+    }
+
+    private var noticeText: String {
+        if let reason {
+            return "diagram type not supported in native preview — \(reason)"
+        }
+        return "diagram type not supported in native preview"
     }
 }
