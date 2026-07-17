@@ -65,6 +65,55 @@ struct RafuAppCommands: Commands {
             }
             .keyboardShortcut("g", modifiers: [.command, .shift])
 
+            Divider()
+
+            Button("Stage Hunk") {
+                guard let session = workspaceSession,
+                    let hunk = soleHunk(in: session, scope: .workingTree)
+                else { return }
+                Task { await session.stageHunk(hunk) }
+            }
+            .disabled(
+                workspaceSession.map {
+                    soleHunk(in: $0, scope: .workingTree) == nil || $0.isGitBusy
+                        || $0.isGitHunkActionBusy
+                } ?? true
+            )
+
+            Button("Unstage Hunk") {
+                guard let session = workspaceSession,
+                    let hunk = soleHunk(in: session, scope: .staged)
+                else { return }
+                Task { await session.unstageHunk(hunk) }
+            }
+            .disabled(
+                workspaceSession.map {
+                    soleHunk(in: $0, scope: .staged) == nil || $0.isGitBusy
+                        || $0.isGitHunkActionBusy
+                } ?? true
+            )
+
+            Button("Stash Changes") {
+                guard let session = workspaceSession else { return }
+                Task { await session.stashChanges(message: "", includeUntracked: false) }
+            }
+            .disabled(
+                workspaceSession.map { !hasTrackedChanges(in: $0) || $0.isGitBusy } ?? true
+            )
+
+            Button("Blame File") {
+                guard let session = workspaceSession else { return }
+                Task { await session.openBlameForSelectedFile() }
+            }
+            .disabled(
+                workspaceSession.map {
+                    $0.selectedDocument == nil || $0.selectedDocument?.isDirty == true
+                        || $0.gitSnapshot == nil || $0.isGitBusy
+                } ?? true
+            )
+
+            Divider()
+
             Button("Toggle Terminal") {
                 workspaceSession?.toggleTerminal()
             }
@@ -110,5 +159,19 @@ struct RafuAppCommands: Commands {
             }
             .keyboardShortcut("w", modifiers: .command)
         }
+    }
+
+    private func soleHunk(in session: WorkspaceSession, scope: GitDiffScope) -> GitDiffHunk? {
+        guard let openDiff = session.gitOpenDiff,
+            openDiff.scope == scope,
+            openDiff.diff.hunks.count == 1,
+            session.gitSnapshot?.changes.first(where: { $0.path == openDiff.diff.path })?.kind
+                == .modified
+        else { return nil }
+        return openDiff.diff.hunks[0]
+    }
+
+    private func hasTrackedChanges(in session: WorkspaceSession) -> Bool {
+        session.gitSnapshot?.changes.contains { $0.kind != .untracked } == true
     }
 }
