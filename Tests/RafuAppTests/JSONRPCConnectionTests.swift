@@ -248,6 +248,47 @@ func connectionRepliesMethodNotFoundToIncomingRequests() async throws {
     #expect(reply.error?.code == JSONRPCErrorObject.methodNotFound)
 }
 
+@Test("window/workDoneProgress/create receives a null-result success reply, not -32601")
+func connectionRepliesSuccessToWorkDoneProgressCreate() async throws {
+    let (client, server) = InMemoryLanguageServerTransport.makePair()
+    let connection = JSONRPCConnection(transport: client)
+    await connection.start()
+    let reader = ServerFrameReader(stream: await server.receive())
+
+    struct IncomingRequest: Encodable {
+        let jsonrpc = "2.0"
+        let id: JSONRPCID
+        let method: String
+    }
+
+    // The allow-listed method gets a null-result success reply.
+    try await serverSend(
+        try JSONEncoder().encode(
+            IncomingRequest(id: .number(7), method: "window/workDoneProgress/create")),
+        via: server
+    )
+    let successReplyBody = try await reader.nextFrame()
+    let successReply = try JSONDecoder().decode(
+        JSONRPCResponseEnvelope<JSONValue>.self, from: successReplyBody)
+    #expect(successReply.id == .number(7))
+    #expect(successReply.error == nil)
+    #expect(successReply.hasResult == true)
+    #expect(successReply.result == .null)
+
+    // A different method still falls back to -32601 — locks the allow-list
+    // scope to exactly this one method.
+    try await serverSend(
+        try JSONEncoder().encode(
+            IncomingRequest(id: .number(8), method: "workspace/configuration")),
+        via: server
+    )
+    let errorReplyBody = try await reader.nextFrame()
+    let errorReply = try JSONDecoder().decode(
+        JSONRPCResponseEnvelope<JSONValue>.self, from: errorReplyBody)
+    #expect(errorReply.id == .number(8))
+    #expect(errorReply.error?.code == JSONRPCErrorObject.methodNotFound)
+}
+
 @Test("sendRequest after teardown throws connectionClosed immediately")
 func connectionSendRequestAfterTeardownThrows() async throws {
     let (client, _) = InMemoryLanguageServerTransport.makePair()

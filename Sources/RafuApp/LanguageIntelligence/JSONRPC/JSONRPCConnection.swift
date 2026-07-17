@@ -3,8 +3,10 @@ import Foundation
 /// Composes `JSONRPCFrameDecoder` (pure framing) and a `LanguageServerTransport`
 /// (bytes) into a JSON-RPC 2.0 client connection: request/response
 /// correlation, `$/cancelRequest` propagation, server-to-client
-/// notifications, and a minimal `-32601` auto-reply to server-to-client
-/// requests Rafu doesn't (yet) implement a handler for.
+/// notifications, and a scoped reply to server-to-client requests — a
+/// null-result success for `window/workDoneProgress/create` (the one
+/// request Rafu answers), and a `-32601` auto-reply for every other method
+/// Rafu doesn't (yet) implement a handler for.
 actor JSONRPCConnection {
     nonisolated enum ConnectionError: Error, Equatable {
         case connectionClosed
@@ -175,18 +177,28 @@ actor JSONRPCConnection {
     }
 
     /// Routes every incoming server-to-client request through this one
-    /// method. Lane 2 C1 will replace this default `-32601` reply with a
-    /// real dispatch as a localized change here, not in `route(_:)`.
+    /// method. Deliberately minimal — a server→client security surface: only
+    /// `window/workDoneProgress/create` gets a real (null-result success)
+    /// reply, since answering it is what lets a real server begin sending
+    /// `$/progress` (which drives `LanguageServerSession.isWarmingUp`).
+    /// Every other method still gets the default `-32601` reply.
     private func handleIncomingRequest(_ request: JSONRPCRequest) async {
-        let envelope = JSONRPCErrorResponseEnvelope(
-            id: request.id,
-            error: JSONRPCErrorObject(
-                code: JSONRPCErrorObject.methodNotFound,
-                message: "No handler registered for \(request.method)",
-                data: nil
+        guard request.method == "window/workDoneProgress/create" else {
+            let envelope = JSONRPCErrorResponseEnvelope(
+                id: request.id,
+                error: JSONRPCErrorObject(
+                    code: JSONRPCErrorObject.methodNotFound,
+                    message: "No handler registered for \(request.method)",
+                    data: nil
+                )
             )
-        )
-        guard let framed = try? encodeFrame(envelope) else { return }
+            guard let framed = try? encodeFrame(envelope) else { return }
+            try? await transport.send(framed)
+            return
+        }
+        guard let framed = try? encodeFrame(JSONRPCSuccessResponseEnvelope(id: request.id)) else {
+            return
+        }
         try? await transport.send(framed)
     }
 }

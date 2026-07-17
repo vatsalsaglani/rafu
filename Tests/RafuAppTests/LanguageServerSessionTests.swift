@@ -143,6 +143,64 @@ func initializeHandshakeReachesReady() async throws {
     #expect(await session.capabilities?.definitionProvider?.isEnabled == true)
 }
 
+@Test("initialize()'s params advertise window.workDoneProgress support")
+func initializeAdvertisesWorkDoneProgressCapability() async throws {
+    let (client, server) = InMemoryLanguageServerTransport.makePair()
+    let connection = JSONRPCConnection(transport: client)
+    let session = LanguageServerSession(
+        connection: connection, serverName: "fake-server", rootURI: "file:///workspace",
+        initializationOptions: nil)
+    let reader = ServerFrameReader(stream: await server.receive())
+
+    async let call: Void = session.initialize()
+
+    let requestBody = try await reader.nextFrame()
+    let request = try JSONDecoder().decode(
+        DecodedRequest<InitializeParams>.self, from: requestBody)
+    #expect(request.method == "initialize")
+    #expect(request.params.capabilities.window?.workDoneProgress == true)
+
+    try await serverSend(
+        initializeResponseBody(id: request.id, capabilitiesJSON: fullCapabilitiesJSON),
+        via: server)
+
+    let initializedBody = try await reader.nextFrame()
+    let initializedNotification = try JSONDecoder().decode(
+        JSONRPCNotification.self, from: initializedBody)
+    #expect(initializedNotification.method == "initialized")
+
+    try await call
+}
+
+@Test("initialize()'s params round-trip a non-nil initializationOptions value")
+func initializeRoundTripsInitializationOptions() async throws {
+    let (client, server) = InMemoryLanguageServerTransport.makePair()
+    let connection = JSONRPCConnection(transport: client)
+    let session = LanguageServerSession(
+        connection: connection, serverName: "fake-server", rootURI: "file:///workspace",
+        initializationOptions: .object(["backgroundIndexing": .bool(true)]))
+    let reader = ServerFrameReader(stream: await server.receive())
+
+    async let call: Void = session.initialize()
+
+    let requestBody = try await reader.nextFrame()
+    let request = try JSONDecoder().decode(
+        DecodedRequest<InitializeParams>.self, from: requestBody)
+    #expect(request.method == "initialize")
+    #expect(request.params.initializationOptions == .object(["backgroundIndexing": .bool(true)]))
+
+    try await serverSend(
+        initializeResponseBody(id: request.id, capabilitiesJSON: fullCapabilitiesJSON),
+        via: server)
+
+    let initializedBody = try await reader.nextFrame()
+    let initializedNotification = try JSONDecoder().decode(
+        JSONRPCNotification.self, from: initializedBody)
+    #expect(initializedNotification.method == "initialized")
+
+    try await call
+}
+
 @Test("A handshake the server never replies to times out, tearing down to .dead")
 func handshakeTimeoutTearsDownAndThrows() async throws {
     let (client, _) = InMemoryLanguageServerTransport.makePair()

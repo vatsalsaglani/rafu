@@ -21,10 +21,10 @@ nonisolated enum CuratedCatalogError: Error, Equatable {
 /// doesn't name.
 ///
 /// Versions and asset-name conventions below reflect each project's real
-/// release layout at the time this catalog was written, but this
-/// environment has no live network access to re-confirm them. Every
-/// version, checksum, and asset URL here must be re-verified against the
-/// upstream project's current release before this catalog ships.
+/// release layout, network-verified 2026-07-17. Every downloadable entry
+/// pins a locally-computed SHA-256 checksum (trust-on-first-download, per
+/// ADR 0010), cross-checked against upstream digests where the upstream
+/// project publishes one.
 nonisolated enum CuratedCatalog {
     static let servers: [ServerDescriptor] = [
         rustAnalyzer, clangd, marksman, gopls, sourceKitLSP, typeScriptLanguageServer, pyright,
@@ -96,9 +96,9 @@ nonisolated enum CuratedCatalog {
                     "https://github.com/rust-lang/rust-analyzer/releases/download/2024-01-01/rust-analyzer-aarch64-apple-darwin.gz"
             )!,
             version: "2024-01-01",
-            checksum: nil,
+            checksum: "fa1099920fc3f52bc36d80406fe66a96121ba87e321e5326269479339a1cce9d",
             license: "MIT OR Apache-2.0",
-            estimatedBytes: 50_000_000
+            estimatedBytes: 11_108_676
         ),
         launchArguments: [],
         archive: ArchiveLayout(format: .gzip, binaryRelativePath: "rust-analyzer"),
@@ -117,9 +117,9 @@ nonisolated enum CuratedCatalog {
                     "https://github.com/clangd/clangd/releases/download/18.1.3/clangd-mac-18.1.3.zip"
             )!,
             version: "18.1.3",
-            checksum: nil,
+            checksum: "442c18d98671d8b5d811b25002ad1f2fd0b9efb07e7905a41502f1f1311dc566",
             license: "Apache-2.0 WITH LLVM-exception",
-            estimatedBytes: 180_000_000
+            estimatedBytes: 41_548_931
         ),
         launchArguments: [],
         archive: ArchiveLayout(format: .zip, binaryRelativePath: "clangd_18.1.3/bin/clangd"),
@@ -127,9 +127,6 @@ nonisolated enum CuratedCatalog {
         prerequisites: []
     )
 
-    // marksman's license must be re-confirmed against the project's current
-    // `LICENSE` file before shipping (GPL-3.0-only at the time this catalog
-    // was written).
     private static let marksman = ServerDescriptor(
         id: "marksman",
         languageIDs: ["markdown"],
@@ -138,12 +135,12 @@ nonisolated enum CuratedCatalog {
         source: ServerSource(
             url: URL(
                 string:
-                    "https://github.com/artempyanykh/marksman/releases/download/2024-01-11/marksman-macos"
+                    "https://github.com/artempyanykh/marksman/releases/download/2026-02-08/marksman-macos"
             )!,
-            version: "2024-01-11",
-            checksum: nil,
-            license: "GPL-3.0-only",
-            estimatedBytes: 60_000_000
+            version: "2026-02-08",
+            checksum: "6a801c17b5ac0dba69787c5282b3b3bd416e66c96253fae098d311c6bbd1833b",
+            license: "MIT",
+            estimatedBytes: 43_856_208
         ),
         launchArguments: ["server"],
         archive: ArchiveLayout(format: .rawBinary, binaryRelativePath: "marksman"),
@@ -179,14 +176,20 @@ nonisolated enum CuratedCatalog {
         source: nil,
         launchArguments: [],
         archive: nil,
-        initializationOptions: nil,
+        // Requests background indexing so cross-file symbol data becomes
+        // available without an editor-driven build. Older sourcekit-lsp
+        // builds ignore unknown initializationOptions keys harmlessly; the
+        // exact key name is re-confirmed against the shipped toolchain in P5.
+        initializationOptions: .object(["backgroundIndexing": .bool(true)]),
         prerequisites: [.xcodeToolchain]
     )
 
-    // Coordinator decision: this descriptor documents that a bare `.tgz`
-    // unpack is NOT sufficient to run typescript-language-server — it also
-    // needs `typescript` and its other npm dependencies resolved, which is
-    // deferred. Do not treat a successful install as a runnable server.
+    // typescript-language-server's release tarball alone is not enough to
+    // run the server: it also depends on `typescript` and other npm
+    // packages. `archive.npmPackageRoot` names the tarball's own package
+    // root ("package") so `ServerInstaller` runs `npm install
+    // --ignore-scripts` there during install, resolving those dependencies
+    // before the install is moved into place.
     private static let typeScriptLanguageServer = ServerDescriptor(
         id: "typescript-language-server",
         languageIDs: ["typescript", "typescriptreact", "javascript", "javascriptreact"],
@@ -198,20 +201,20 @@ nonisolated enum CuratedCatalog {
                     "https://registry.npmjs.org/typescript-language-server/-/typescript-language-server-4.3.3.tgz"
             )!,
             version: "4.3.3",
-            checksum: nil,
+            checksum: "4a0e1c596fe598ff07db9221bf851a96a691718d99a12a9d4637dc64604914d0",
             license: "Apache-2.0",
             estimatedBytes: 2_000_000
         ),
         launchArguments: ["--stdio"],
-        archive: ArchiveLayout(format: .tarGzip, binaryRelativePath: "package/lib/cli.mjs"),
+        archive: ArchiveLayout(
+            format: .tarGzip, binaryRelativePath: "package/lib/cli.mjs",
+            npmPackageRoot: "package"),
         initializationOptions: nil,
         prerequisites: [
             .managedNodeRuntime,
             .note(
-                "Unpacking this release tarball alone is not enough to run the server: it "
-                    + "additionally depends on `typescript` and other npm packages that are not "
-                    + "resolved by a bare `.tgz` extraction. Full npm dependency installation is "
-                    + "deferred to a later increment."
+                "Installing this server also runs `npm install --ignore-scripts` to resolve "
+                    + "its own npm dependencies (see the install consent sheet)."
             ),
         ]
     )
@@ -227,7 +230,7 @@ nonisolated enum CuratedCatalog {
         source: ServerSource(
             url: URL(string: "https://registry.npmjs.org/pyright/-/pyright-1.1.377.tgz")!,
             version: "1.1.377",
-            checksum: nil,
+            checksum: "b11dc22e92560b38ebad99a892544d9ce81e2ce995db430b3683e86db57d7710",
             license: "MIT",
             estimatedBytes: 10_000_000
         ),

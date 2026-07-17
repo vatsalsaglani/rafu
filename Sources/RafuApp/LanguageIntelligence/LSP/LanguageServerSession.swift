@@ -90,7 +90,8 @@ actor LanguageServerSession {
             clientInfo: ClientInfo(name: "Rafu", version: nil),
             rootUri: rootURI,
             capabilities: ClientCapabilities(
-                general: GeneralClientCapabilities(positionEncodings: ["utf-16", "utf-8"])
+                general: GeneralClientCapabilities(positionEncodings: ["utf-16", "utf-8"]),
+                window: WindowClientCapabilities(workDoneProgress: true)
             ),
             initializationOptions: initializationOptions
         )

@@ -289,10 +289,16 @@ final class LanguageServersCatalogModel {
     }
 
     private func performInstall(descriptor: ServerDescriptor) async throws {
+        let nodeExecutableURL: URL?
         if descriptor.kind == .nodeHosted {
-            _ = try await nodeRuntime.ensureInstalled(consentToQuarantineRemoval: true)
+            nodeExecutableURL = try await nodeRuntime.ensureInstalled(
+                consentToQuarantineRemoval: true)
+        } else {
+            nodeExecutableURL = nil
         }
-        _ = try await installer.install(descriptor: descriptor, consentToQuarantineRemoval: true)
+        _ = try await installer.install(
+            descriptor: descriptor, consentToQuarantineRemoval: true,
+            nodeExecutableURL: nodeExecutableURL)
     }
 
     // MARK: - Packs
@@ -322,9 +328,11 @@ final class LanguageServersCatalogModel {
     /// failure is reported (never thrown out of this method) so the
     /// remaining members still install and stay installed.
     private func performInstallPack(descriptors: [ServerDescriptor]) async {
+        var nodeExecutableURL: URL?
         if descriptors.contains(where: { $0.kind == .nodeHosted }) {
             do {
-                _ = try await nodeRuntime.ensureInstalled(consentToQuarantineRemoval: true)
+                nodeExecutableURL = try await nodeRuntime.ensureInstalled(
+                    consentToQuarantineRemoval: true)
             } catch {
                 presentedError = Self.message(for: error)
                 return
@@ -334,7 +342,8 @@ final class LanguageServersCatalogModel {
             guard !Task.isCancelled else { return }
             do {
                 _ = try await installer.install(
-                    descriptor: descriptor, consentToQuarantineRemoval: true)
+                    descriptor: descriptor, consentToQuarantineRemoval: true,
+                    nodeExecutableURL: nodeExecutableURL)
             } catch {
                 presentedError = Self.message(for: error)
             }
@@ -528,6 +537,10 @@ final class LanguageServersCatalogModel {
             return "The downloaded file wasn't in a supported archive format."
         case ServerInstallError.unpackFailed:
             return "The downloaded archive couldn't be unpacked and was discarded."
+        case ServerInstallError.nodeRuntimeUnavailable:
+            return "Installing this server needs the managed Node runtime, which wasn't available."
+        case ServerInstallError.dependencyResolutionFailed:
+            return "Installing this server's npm dependencies failed and it was discarded."
         default:
             return "The operation failed."
         }

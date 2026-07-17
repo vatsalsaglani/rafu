@@ -173,3 +173,38 @@ enum ArchiveFixtureBuilder {
 enum ArchiveFixtureBuilderError: Error {
     case toolFailed(executable: String)
 }
+
+/// A fake `NodeDependencyResolving` that never spawns real `npm`/`node`
+/// processes: it records exactly what it was asked to resolve and, on
+/// success, fabricates a small `node_modules/typescript/package.json` fixture
+/// inside `packageDirectory` — enough to prove a real npm install's output
+/// would survive `ServerInstaller`'s later atomic move. `failureStatus`, when
+/// set, makes every call throw `ServerInstallError.dependencyResolutionFailed`
+/// instead, mirroring a real `npm install` exiting non-zero.
+actor FakeNodeDependencyResolver: NodeDependencyResolving {
+    private(set) var invocationCount = 0
+    private(set) var recordedPackageDirectory: URL?
+    private(set) var recordedNodeExecutableURL: URL?
+    private let failureStatus: Int32?
+
+    init(failureStatus: Int32? = nil) {
+        self.failureStatus = failureStatus
+    }
+
+    func installDependencies(packageDirectory: URL, nodeExecutableURL: URL) async throws {
+        invocationCount += 1
+        recordedPackageDirectory = packageDirectory
+        recordedNodeExecutableURL = nodeExecutableURL
+
+        if let failureStatus {
+            throw ServerInstallError.dependencyResolutionFailed(failureStatus)
+        }
+
+        let typescriptDirectory = packageDirectory.appending(
+            path: "node_modules/typescript", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(
+            at: typescriptDirectory, withIntermediateDirectories: true)
+        try Data("{\"name\":\"typescript\"}".utf8).write(
+            to: typescriptDirectory.appending(path: "package.json"))
+    }
+}

@@ -10,6 +10,36 @@ struct CuratedCatalogTests {
         try CuratedCatalog.validate()
     }
 
+    @Test(
+        "typescript-language-server's archive names npmPackageRoot \"package\"; Pyright's does not"
+    )
+    func typeScriptLanguageServerNamesNpmPackageRootButPyrightDoesNot() throws {
+        let typeScriptLanguageServer = try #require(
+            CuratedCatalog.servers.first { $0.id == "typescript-language-server" })
+        #expect(typeScriptLanguageServer.archive?.npmPackageRoot == "package")
+
+        let pyright = try #require(CuratedCatalog.servers.first { $0.id == "pyright" })
+        #expect(pyright.archive?.npmPackageRoot == nil)
+    }
+
+    @Test("sourcekit-lsp requests background indexing via initializationOptions")
+    func sourceKitLSPRequestsBackgroundIndexing() throws {
+        let sourceKit = try #require(CuratedCatalog.servers.first { $0.id == "sourcekit-lsp" })
+        #expect(sourceKit.initializationOptions == .object(["backgroundIndexing": .bool(true)]))
+    }
+
+    @Test("Every downloadable catalog entry pins a lowercase-hex SHA-256 checksum")
+    func downloadableEntriesPinChecksums() throws {
+        let hexPattern = /^[0-9a-f]{64}$/
+        for descriptor in CuratedCatalog.servers where descriptor.kind != .localDiscovery {
+            let source = try #require(descriptor.source, "\(descriptor.id) must have a source")
+            let checksum = try #require(source.checksum, "\(descriptor.id) must pin a checksum")
+            #expect(
+                checksum.wholeMatch(of: hexPattern) != nil,
+                "\(descriptor.id) checksum must be 64-char lowercase hex")
+        }
+    }
+
     @Test("Every real catalog entry names a unique, non-empty id and languageIDs")
     func realCatalogEntriesAreWellFormed() {
         let ids = CuratedCatalog.servers.map(\.id)

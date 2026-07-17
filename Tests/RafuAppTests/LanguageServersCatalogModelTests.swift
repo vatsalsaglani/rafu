@@ -61,8 +61,8 @@ struct LanguageServersCatalogModelTests {
     func confirmInstallTransitionsToInstalled() async throws {
         try await withTemporaryDirectory { fixtures in
             try await withTemporaryDirectory { directory in
-                let fixtureBinary = fixtures.appending(path: "marksman-macos")
-                try Data("#!/bin/sh\necho marksman\n".utf8).write(to: fixtureBinary)
+                let fixtureBinary = fixtures.appending(path: "gated-tool")
+                try Data("#!/bin/sh\necho gated-tool\n".utf8).write(to: fixtureBinary)
 
                 let gate = DownloadGate()
                 let model = await LanguageServersCatalogModel(
@@ -72,9 +72,28 @@ struct LanguageServersCatalogModelTests {
                 )
                 await model.load()
 
-                await model.beginInstall(id: "marksman")
+                // A custom (user-added) entry rather than a curated one: every
+                // curated download now pins a real, unforgeable upstream
+                // checksum (P4/G2), so a fixture binary can never satisfy it.
+                // Custom entries always carry `checksum: nil`
+                // (`LanguageServersCatalogModel.makeDescriptor`), which keeps
+                // this state-machine test focused on install/consent/progress
+                // transitions rather than checksum verification.
+                var draft = LanguageServersCatalogModel.UserEntryDraft()
+                draft.id = "gated-tool"
+                draft.displayName = "Gated Tool"
+                draft.languageIDsText = "toml"
+                draft.sourceKind = .httpsReleaseAsset
+                draft.assetURLText = "https://example.com/gated-tool"
+                draft.version = "1.0.0"
+                draft.license = "MIT"
+                draft.archiveFormat = .rawBinary
+                draft.binaryRelativePath = "gated-tool"
+                try await model.addUserEntry(draft)
+
+                await model.beginInstall(id: "gated-tool")
                 let consentID = await model.presentedConsent?.id
-                #expect(consentID == "marksman")
+                #expect(consentID == "gated-tool")
 
                 await model.confirmInstall()
                 let consentAfterConfirm = await model.presentedConsent
@@ -83,14 +102,15 @@ struct LanguageServersCatalogModelTests {
                 // row's in-progress flag is deterministically observable here
                 // (it can't flip to `false` until the install completes, which
                 // it cannot until `gate.release()` below).
-                let progressWhileInstalling = await model.rows.first { $0.id == "marksman" }?
-                    .progressActive
+                let progressWhileInstalling = await model.userRows.first {
+                    $0.id == "gated-tool"
+                }?.progressActive
                 #expect(progressWhileInstalling == true)
 
                 await gate.release()
 
                 let installed = await waitUntil {
-                    if case .installed = model.rows.first(where: { $0.id == "marksman" })?
+                    if case .installed = model.userRows.first(where: { $0.id == "gated-tool" })?
                         .installState
                     {
                         return true
@@ -98,8 +118,9 @@ struct LanguageServersCatalogModelTests {
                     return false
                 }
                 #expect(installed)
-                let progressAfterInstall = await model.rows.first { $0.id == "marksman" }?
-                    .progressActive
+                let progressAfterInstall = await model.userRows.first {
+                    $0.id == "gated-tool"
+                }?.progressActive
                 #expect(progressAfterInstall == false)
             }
         }

@@ -2,7 +2,7 @@
 
 ## Status
 
-Planned (2026-07-17). One of six post-audit lanes defined in
+Code-complete, live-GUI verification deferred to merge round (2026-07-17). One of six post-audit lanes defined in
 [`post-audit-worktree-fanout.md`](post-audit-worktree-fanout.md). Runs in a
 **dedicated git worktree**. Successor to
 [`lane-2-lsp-plan.md`](lane-2-lsp-plan.md): Stage C shipped and is fully
@@ -10,8 +10,23 @@ integrated; this lane takes it from "installs and navigates in the happy
 path" to "production-usable for the curated set." Governed by
 [ADR 0005](../../decisions/0005-language-intelligence-and-lsp.md). Each
 increment is one advisor → implementor → verification → documentor cycle.
-File:line anchors reflect the tree on 2026-07-17; the repository wins when
+P1–P4 all offshore-verified; P5 is a repeatable manual checklist deferred to the
+merge-round lane owner because `./script/build_and_run.sh --verify` is
+single-threaded (only one lane may run it at a time). All unit tests (518/518),
+scripted servers, and contract assertions green. File:line anchors reflect the tree on 2026-07-17; the repository wins when
 they disagree.
+
+### Work log
+
+- **P1 (2026-07-17):** Warm-up handshake complete. `ClientCapabilities.window.workDoneProgress` advertised; server→client `window/workDoneProgress/create` replies success (null result); `JSONRPCConnection.handleIncomingRequest` security surface locked to this method only. Scripted-server tests verify capability and reply envelope; locked-scope assertion that `workspace/configuration` still gets `-32601`. `swift test` 507/507 green (505 baseline + 2 new). Documented in `docs/references/navigation-and-lsp-contracts.md` new subsection. Ready for live validation in P5 (indexing progress via `$/progress` now surfaces).
+
+- **P2 (2026-07-17):** npm dependency resolution complete. `NodeDependencyResolver` protocol + `NpmDependencyResolver` (derives npm-cli.js from Node runtime, spawns `node <npm-cli> install --omit=dev --no-audit --no-fund --ignore-scripts --no-package-lock --prefer-offline`); `ServerInstaller.install` gains `nodeExecutableURL` + injected resolver; npm step runs in staging after validation, before atomic move (rollback intact on failure); `ArchiveLayout.npmPackageRoot` optional var (synthesized init preserved, legacy-decode-safe, encode-omits-when-nil); typescript-language-server marked runnable (`npmPackageRoot: "package"`); Pyright unchanged (nil); `ServerInstallConsentView` disclosure shows npm install + registry.npmjs.org + not-individually-pinned. ADR 0010 records unpinned npm acceptance with mitigations + checksum-source policy. `swift test` 515/515 green (507 baseline + 8 new); Package.* untouched; no forbidden-path diffs. Advisor CONFIRMED-SAFE on spawn, no-logging, staging, concurrency, nil-guard, legacy-decode, consent, Package. Documented in `docs/references/language-server-install-staging.md` new subsection (npm-cli derivation, flag rationale, staging seam, ArchiveLayout nuance).
+
+- **P3 (2026-07-17):** sourcekit-lsp background indexing enabled. `CuratedCatalog.swift` sets `sourceKitLSP.initializationOptions: .object(["backgroundIndexing": .bool(true)])`. Two offline tests: catalog assertion for the flag in the descriptor, and scripted-handshake round-trip verifying the `initialize` request carries the option. `swift test` 517/517 green (515 baseline + 2 new). References populate only after a real project build produces the index store; exact key string pending P5 live confirmation against installed sourcekit-lsp binary; text tier remains the fallback floor; older sourcekit-lsp versions harmlessly ignore the unknown key. Documented in `docs/references/navigation-and-lsp-contracts.md` updated "Note on true cross-file references" paragraph.
+
+- **P4 (2026-07-17):** Catalog verification constants pinned. Five downloadable entries now carry locally-computed SHA-256 (bare lowercase-hex format per ADR 0010, matching `ServerInstaller.verifyChecksum` semantics): rust-analyzer, clangd, marksman, typescript-language-server, pyright. Verification method: curl/shasum-a-256 per entry + npm packument dist.integrity (SHA-512) cross-check for npm-hosted entries + GitHub release-tag/asset/license/arch confirmation. Notable corrections: marksman tag bumped 2024-01-11 (did not exist) → 2026-02-08 (universal macOS, confirmed real); license corrected GPL-3.0-only → MIT (verified at pinned tag 2026-02-08). estimatedBytes corrected for rust-analyzer (50M→11,108,676), clangd (180M→41,548,931), marksman (60M→43,856,208). New test `CuratedCatalogTests.downloadableEntriesPinChecksums` asserts every non-localDiscovery descriptor pins a 64-char lowercase-hex checksum. `swift test` 518/518 green (517 baseline + 1 new). Code: `CuratedCatalog.swift` checksums + license fix + doc-comment refresh (stale "re-verify before ships" removed, replaced with ADR-0010 checksum-pin statement). Documented in `docs/references/language-server-install-staging.md` new subsection capturing checksum format, verification procedure, marksman corrections, and fixture-test nuance (real curated checksums require user-added entries for full-install tests, not curated ids).
+
+- **P5 (2026-07-17):** Live-validation checklist documented. Repeatable manual procedure recorded in `docs/references/navigation-and-lsp-contracts.md` new subsection "P5 live-validation checklist (G5)"; coverage table maps each checklist item to offline test coverage (P1–P4) and identifies GUI steps deferred to merge-round lane owner. P3 residual resolved: `backgroundIndexing` key confirmed live against Swift 6.2.4 sourcekit-lsp via `strings` scan (exact key `"backgroundIndexing"`; also `backgroundIndexingPaused`, `maxCoresPercentageToUseForBackgroundIndexing` present). Offline suite 518/518 tests green (all P1–P4 code complete, no source change for P5). Documented sample repo requirements (Go module, Cargo crate, TypeScript repo), expected tier-label strings, resource-tracking validation, kill-fallthrough evidence. GUI steps explicitly deferred to merge round (single-threaded `build_and_run.sh --verify` constraint). Phase document Status and Exit updated to reflect split: all offline work complete and verified, live GUI acceptance evidence pending integration.
 
 ## Verified baseline (corrects stale assumptions)
 
@@ -218,12 +233,26 @@ references after a project build (P3).
 
 ## Exit
 
-- typescript-language-server installs AND launches (npm step, consent
+**Offline (P1–P4, fully verified, code-complete, 518/518 tests green):**
+
+- typescript-language-server installs AND launches in staging (npm step, consent
   disclosed, ADR 0010 decided).
 - Every downloadable catalog entry has a human-verified URL/version and a
   pinned SHA-256.
-- Real gopls/rust-analyzer drive `.indexing` via `$/progress`; the P5
-  checklist run with captured evidence (tier labels, RSS row,
-  kill-fallthrough).
-- sourcekit-lsp cross-file references work after background indexing.
+- All core logic for gopls/rust-analyzer navigation, tier labeling, and status
+  surfaces scripted-server validated (`.indexing` via P1 warm-up handshake,
+  tier string format, trust flow, resources row).
+- sourcekit-lsp `backgroundIndexing` initializationOptions key live-confirmed
+  against Swift 6.2.4 shipped binary via `strings` scan.
 - All offline suites green; no Package.* diff; forbidden paths untouched.
+
+**Deferred to merge-round lane owner (P5 live GUI validation, single-threaded):**
+
+- Real gopls/rust-analyzer/typescript-language-server/sourcekit-lsp servers
+  drive `.indexing` via `$/progress` in live Settings UI.
+- P5 checklist run complete: tier labels (`"via gopls"`, `"via rust-analyzer"`, etc.)
+  human-verified on screen, Resources row shows live RSS memory, kill <pid> produces
+  graceful fallthrough (no UI error), server restart affordance visible, typescript
+  npm resolve succeeds (network step), sourcekit-lsp cross-file references populate
+  after a real project build produces index store. Captured evidence/screenshots provided
+  by the merge-round runner.

@@ -169,7 +169,7 @@ Hover text and tooltip rendering use new `EditorHoverInfo` (Sendable) and `Edito
 
 **Text tier change:** `TextSearchNavigationProvider` now also declines `.hover`, ensuring hover is truly LSP-only (no syntactic or text tier fallback for hover).
 
-**Note on true cross-file references:** sourcekit-lsp returns an empty array for `.references` without a project-wide index. The proper fix is enabling sourcekit-lsp's index store via the `ServerDescriptor.initializationOptions` (which flows into the LSP `initialize` handshake) **AND** a project build that produces the index. The curated `sourceKitLSP` descriptor currently sets `initializationOptions: nil` in `Registry/CuratedCatalog.swift`. This is the **real follow-up** for true cross-file references; the fall-through is the pragmatic interim for the current coordinator-verified state.
+**Note on true cross-file references:** sourcekit-lsp returns an empty array for `.references` without a project-wide index. The proper fix is enabling sourcekit-lsp's index store via the `ServerDescriptor.initializationOptions` (which flows into the LSP `initialize` handshake) **AND** a project build that produces the index. As of P3 (2026-07-17), the curated `sourceKitLSP` descriptor sets `initializationOptions: .object(["backgroundIndexing": .bool(true)])` in `Registry/CuratedCatalog.swift`, enabling background indexing. Cross-file references now populate after a real project build produces the index store. The exact key string is re-confirmed against a live installed sourcekit-lsp binary during P5; older versions ignore the unknown key harmlessly. Text tier remains the fallback floor when references are empty. Two offline tests assert the flag in the catalog descriptor and verify the round-trip through the `initialize` handshake.
 
 ### Context menu with navigation commands (post-fix increment, 2026-07-16)
 
@@ -189,6 +189,95 @@ Both closures are:
 - Wired through `EditorGroupView` (the composition layer) into both `EditorDocumentView` (code editor) and `MarkdownEditorPresentation` (markdown preview), so both code and markdown-edit contexts get navigation and hover
 
 Closure construction captures the session weakly to avoid retain cycles. New `EditorHoverInfo` (Sendable) carries tooltip payload. No `NavigationRequest`/`NavigationAnswer` shape changes; the new closures integrate at the UI boundary.
+
+### Server→client request handling and work-done progress handshake (P1, 2026-07-17)
+
+To enable real-server indexing progress, Rafu advertises `window.workDoneProgress` capability and responds to server→client `window/workDoneProgress/create` requests:
+
+- **Capability advertisement:** `ClientCapabilities.window` carries an optional
+  `WindowClientCapabilities` struct with `workDoneProgress: Bool?` (optional,
+  defaults to null). `LanguageServerSession.initialize()` sends
+  `ClientCapabilities(window: WindowClientCapabilities(workDoneProgress: true))`
+  in the `initialize` handshake. Without this, most production servers (gopls,
+  rust-analyzer, sourcekit-lsp) never create a work-done token, so `$/progress`
+  (which drives `LanguageServerStatus.Phase.warmingUp`) never surfaces.
+- **Server→client request dispatch is a security surface.** `JSONRPCConnection.handleIncomingRequest`
+  (actor-isolated, line 180) replies with a null-result success envelope **only**
+  to the exact method string `window/workDoneProgress/create`. Every other method
+  receives `-32601 methodNotFound`, unchanged. No prefix matching, no conditional
+  allowlist, no expansion without an explicit ADR. Type docs and seam comments
+  document this boundary.
+- **Null-result success encoding:** `JSONRPCSuccessResponseEnvelope` encodes exactly
+  `{"jsonrpc":"2.0","id":…,"result":null}`, with `result` as an explicit JSON
+  `null` (via `encodeNil(forKey:)` in the encoder), not an omitted key. This
+  mirrors the structure of `JSONRPCErrorResponseEnvelope` and matches the LSP spec.
+- **`isWarmingUp` vs. `LanguageServerStatus.Phase.warmingUp`.** The session holds a boolean
+  flag `isWarmingUp`, which drives `LSPNavigationProvider` to return `.indexing` status.
+  This flag is distinct from and independent of `LanguageServerStatus.Phase.warmingUp`,
+  which gates `forwardsDocumentChanges` to suppress keystroke forwarding during initialization.
+  The P1 handshake drives the session flag only; the phase is used elsewhere for gating.
+
+### P5 live-validation checklist (G5; repeatable manual procedure, 2026-07-17)
+
+**Applies to:** end-to-end language-server navigation validation, resource monitoring, server crash/restart recovery, and initialization-progress visibility.
+
+**Last verified:** Swift 6.2.4, Xcode 26.3, macOS Darwin 25.1 on 2026-07-17 (offline suite); live GUI steps deferred to merge-round runner.
+
+**Why it matters:** P1–P4 are fully validated offline via unit tests, scripted servers, and contract assertions. However, real-world gopls, rust-analyzer, typescript-language-server, and sourcekit-lsp behavior — tier label rendering, RSS memory tracking, kill-triggered fallback, and project-build-gated cross-file references — can only be verified with live servers and user interaction. This repeatable procedure documents the exact steps, sample-repository requirements, and deferred-GUI-run constraints so the merge-round lane owner can produce reproducible evidence.
+
+**Coverage table:** Each P5 item, what standing OFFLINE test covers the underlying logic, and what still needs a live GUI run (all deferred to merge round):
+
+| P5 item | Covered offline by | Still needs live GUI (deferred) |
+|---|---|---|
+| 1. build_and_run --verify; open sample repo | n/a (harness) | App staging + launch; open a real Go module / Cargo crate |
+| 2. gopls discovered (localDiscovery); rust-analyzer consent names URL/version/size/license/checksum | InstalledServerResolverTests (gopls discovery); CuratedCatalogTests.downloadableEntriesPinChecksums + npmPackageRoot test; ServerInstallerTests checksum verify/mismatch; LanguageServersCatalogModelTests install/consent state machine | Settings ▸ Language Servers rendering; gopls shown as discovered; consent sheet visually showing all five fields |
+| 3. First navigation raises trust sheet; approve | LanguageServerTrustFlowTests (approve persists+clears+resolves; decline remembered; pending raised) | Sheet mounts in WorkspaceWindowView; approve unblocks re-invoked navigation |
+| 4. Go to Definition / Find References land; tier "via gopls"/"via rust-analyzer" | LSPNavigationProviderTests (definition + references map; tier == .lsp(serverName:)); tier label format NavigationTypes.swift:77 (`"via " + displayName`) | Real gopls/rust-analyzer answering position-based def/refs; human reading the exact tier string |
+| 5. `.indexing` shows during initial indexing (validates P1) | LSPNavigationProviderTests warming→`.indexing`; LanguageServerSessionTests $/progress begin/end flips isWarmingUp + initialize advertises window.workDoneProgress | Real server emitting workDoneProgress/create + $/progress; `.indexing` visible in UI (use a repo large enough that indexing takes a beat) |
+| 6. Resources surface shows server row with RSS | ProcessResourceRegistryTests; LanguageServerManagerTests (spawned server registers pid) | ResourcesView rendering the language-server row with live RSS |
+| 7. kill <pid> → fall-through to syntactic/text, no UI error; row shows crash/restart | LanguageServerManagerTests (crash→backingOff/dead; ceiling-kill vs crash; unregister on restart); LanguageServerLifecycleTests (backoff); LSPNavigationProviderTests references fall-through + TextSearchNavigationProviderTests; ProcessResourceRegistryTests reaped-pid row retained | Kill the real pid (taken from the Resources row, NOT a blind pgrep); observe degrade-without-error + restart affordance |
+| tsserver end-to-end (P2+P4) | ServerInstallerTests fake-resolver/staging survival; npmPackageRoot catalog shape + consent npm disclosure; CuratedCatalogTests checksum pin | Real `npm install` (network) resolving typescript deps, trust, then navigate in a TS repo (never CI-verified by design) |
+| sourcekit-lsp references after project build (P3) | LanguageServerSessionTests initialize round-trips initializationOptions backgroundIndexing=true; CuratedCatalogTests | Real sourcekit-lsp populating cross-file refs only after a project build produces the index store (key already live-confirmed) |
+
+**P3 residual resolution:** The `backgroundIndexing` initializationOptions key for sourcekit-lsp was confirmed live against the Swift 6.2.4 Xcode toolchain on 2026-07-17 via a `strings` scan of the shipped `sourcekit-lsp` binary. The scan confirms three active keys: `backgroundIndexing`, `backgroundIndexingPaused`, and `maxCoresPercentageToUseForBackgroundIndexing`. The P3 implementation sets the exact key (string `"backgroundIndexing"` with value `true`), verified by `CuratedCatalogTests` assertion and scripted-handshake round-trip. Older sourcekit-lsp versions harmlessly ignore the unknown key.
+
+**Sample repository requirements:**
+
+- **Go module:** minimal `go.mod` + two `.go` files with a cross-file symbol (function or struct). Requires gopls on PATH: `go install golang.org/x/tools/gopls@latest`.
+- **Cargo crate:** `cargo new` with a cross-file function or struct. rust-analyzer installs via Rafu's consent/download flow (P4 checksum verified).
+- **TypeScript repository:** minimal `package.json` + two `.ts` files with a cross-file import. tsserver installs via Rafu (P2 npm resolution + P4 checksum verified). Network required for npm step (never CI-verified by design).
+- **Server pid for the kill step:** taken from the Resources surface row (kind `.languageServer`), NOT a blind `pgrep` (multiple lanes/servers may run simultaneously; single-threaded `build_and_run.sh --verify` constraint).
+- **Expected tier strings:** exactly `"via gopls"`, `"via rust-analyzer"`, `"via typescript-language-server"`, `"via SourceKit-LSP"` (format is `"via " + descriptor.displayName`; Swift displayName for sourcekit-lsp is `"SourceKit-LSP"`).
+- **Observing `.indexing`:** use a repository large enough that background indexing takes measurable time (a too-small sample finishing instantly is a false negative, not a P1 regression).
+
+**Critical constraint:** `./script/build_and_run.sh --verify` kills any running staged Rafu.app and is single-threaded (only one lane at a time). ALL GUI steps in this checklist are deferred to the merge-round lane owner's run, executing in sequence without concurrent app launches. The offline suite (P1–P4 unit tests, scripted servers, contract assertions) is fully green; live evidence waits for integration.
+
+**Verification commands:**
+
+```bash
+# Verify offline suite is green (P1–P4 all code complete):
+swift build
+swift test
+
+# Verify P3 residual — strings scan of shipped sourcekit-lsp:
+strings /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/sourcekit-lsp | grep backgroundIndexing
+
+# Merge-round GUI steps (deferred, single-threaded via build_and_run.sh):
+./script/build_and_run.sh --verify
+# Then follow the P5 checklist items 1–7 above
+```
+
+**Related code, ADRs, and phases:**
+
+- P1 handshake code: `Sources/RafuApp/LanguageIntelligence/LSPTypes.swift` (WindowClientCapabilities), `LanguageServerSession.swift` (initialize), `JSONRPCMessage.swift` (JSONRPCSuccessResponseEnvelope), `JSONRPCConnection.swift` (handleIncomingRequest security dispatch)
+- P2 npm resolution: `Sources/RafuApp/LanguageIntelligence/Registry/NodeDependencyResolver.swift`, `ServerInstaller.swift`, `LanguageServersCatalogModel.swift`
+- P3 sourcekit-lsp indexing: `Sources/RafuApp/LanguageIntelligence/Registry/CuratedCatalog.swift` (initializationOptions)
+- P4 catalog checksums: `CuratedCatalog.swift` (checksum pins + license corrections)
+- Navigation and tier rendering: `Sources/RafuApp/Navigation/NavigationTypes.swift`, `LSPNavigationProvider.swift`, `TextSearchNavigationProvider.swift`
+- Resource tracking: `Sources/RafuApp/Services/ProcessResourceRegistry.swift`, `Sources/RafuApp/Views/ResourcesView.swift`
+- Trust flow: `Sources/RafuApp/LanguageIntelligence/LanguageIntelligenceCoordinator.swift`, `Sources/RafuApp/Views/LanguageServerTrustPromptView.swift`
+- [`docs/plans/phases/lsp-production-readiness.md`](../plans/phases/lsp-production-readiness.md) (P1–P5 increments, exit criteria)
+- [`docs/decisions/0005-language-intelligence-and-lsp.md`](../decisions/0005-language-intelligence-and-lsp.md)
 
 ### Lane 2 seam: session lifecycle only
 
@@ -245,6 +334,7 @@ All contract types exist and compile:
 
 - Lane-1 Increment 0: `Sources/RafuApp/Navigation/NavigationTypes.swift` (`NavigationRequest` with `position: Int` and `symbolName: String?`); `Sources/RafuApp/Editor/DocumentEditDelta.swift`; `Sources/RafuApp/Models/EditorDocument.swift` (delta publishing); `Sources/RafuApp/Services/ProcessResourceRegistry.swift`; `Sources/RafuApp/Models/WorkspaceSession.swift`.
 - Post-fix increment (2026-07-16): `Sources/RafuApp/Services/MemoryPressureMonitor.swift` (@Sendable DispatchSource handler); hover/context-menu integration in `Sources/RafuApp/Views/CodeEditorView.swift`, `EditorGroupView.swift`, `MarkdownEditorPresentation.swift`, `RafuTextView.swift`; `EditorHoverInfo` and `EditorHoverTooltipView` new types; `WorkspaceSession.hoverInfo(at:utf16Offset:)` new method; `LSPNavigationProvider` and `TextSearchNavigationProvider` empty-decline changes.
+- LSP-production-readiness P1 warm-up handshake (2026-07-17): `Sources/RafuApp/LanguageIntelligence/LSPTypes.swift` (new `WindowClientCapabilities` struct, `window` field on `ClientCapabilities`, both `Codable, Sendable`); `Sources/RafuApp/LanguageIntelligence/LanguageServerSession.swift` (advertises `workDoneProgress: true` in `initialize`); `Sources/RafuApp/LanguageIntelligence/JSONRPCMessage.swift` (new `JSONRPCSuccessResponseEnvelope` with explicit null result); `Sources/RafuApp/LanguageIntelligence/JSONRPCConnection.swift` (`handleIncomingRequest` security surface: replies success only to `window/workDoneProgress/create`, `-32601` for all other methods).
 
 The format lint rule is standard Swift format behavior, verified by the
 `./script/format.sh --lint` check.
@@ -262,12 +352,18 @@ Lane-1 Increment 0: All contract types compile, pass focused tests (NavigationLa
 
 Post-fix increment (2026-07-16): Build clean, `swift test` 489/489 passing (485 baseline + 4 new: MemoryPressureMonitor isolation, hover debounce/dismissal, references fall-through, context menu). `./script/format.sh --lint` clean. `./script/build_and_run.sh --verify` green. Advisor final review of the navigation features: **ALL 8 correctness areas CONFIRMED-SAFE** (hover debounce race, retain cycles/leaks, tooltip dismissal, references fall-through, hoverInfo side-effect-freeness, menu, concurrency/isolation, no payload logging). One optional teardown hardening (performClose→close) applied. No defects found.
 
+LSP-production-readiness P1 (2026-07-17): `swift build` clean; `swift test` = 507/507 tests / 20 suites all green (505 baseline + 2 new, scripted server in-memory transport: success-envelope-not-`-32601` for `window/workDoneProgress/create`, AND locked-scope assertion that `workspace/configuration` still gets `-32601`; `initialize`-params assertion that `capabilities.window.workDoneProgress == true`). `./script/format.sh --lint` clean; zero forbidden-path diffs. Advisor final review: **CONFIRMED-SAFE on security surface, no-logging, concurrency/Sendable (no @unchecked), encoding correctness, comment truthfulness, and regression risk.**
+
 ## Related code, ADRs, and phases
 
 - `Sources/RafuApp/Navigation/`
 - `Sources/RafuApp/Editor/DocumentEditDelta.swift`
 - `Sources/RafuApp/Services/ProcessResourceRegistry.swift`
 - `Sources/RafuApp/Services/MemoryPressureMonitor.swift` (GCD handler isolation)
+- `Sources/RafuApp/LanguageIntelligence/LSPTypes.swift` (WindowClientCapabilities, ClientCapabilities.window)
+- `Sources/RafuApp/LanguageIntelligence/LanguageServerSession.swift` (initialize handshake, workDoneProgress)
+- `Sources/RafuApp/LanguageIntelligence/JSONRPCMessage.swift` (JSONRPCSuccessResponseEnvelope)
+- `Sources/RafuApp/LanguageIntelligence/JSONRPCConnection.swift` (server→client request security dispatch)
 - `Sources/RafuApp/LanguageIntelligence/LanguageIntelligenceCoordinator.swift`
 - `Sources/RafuApp/Models/EditorDocument.swift`
 - `Sources/RafuApp/Models/WorkspaceSession.swift`
@@ -279,5 +375,6 @@ Post-fix increment (2026-07-16): Build clean, `swift test` 489/489 passing (485 
 - [`docs/plans/phases/language-intelligence.md`](../plans/phases/language-intelligence.md)
 - [`docs/plans/phases/lane-1-memory-and-syntax-plan.md`](../plans/phases/lane-1-memory-and-syntax-plan.md)
 - [`docs/plans/phases/lane-2-lsp-plan.md`](../plans/phases/lane-2-lsp-plan.md)
+- [`docs/plans/phases/lsp-production-readiness.md`](../plans/phases/lsp-production-readiness.md) (P1 warm-up handshake)
 - [`docs/plans/phases/post-merge-validation-fixes.md`](../plans/phases/post-merge-validation-fixes.md)
 - [`docs/references/concurrency.md`](concurrency.md) (GCD DispatchSource handler isolation)

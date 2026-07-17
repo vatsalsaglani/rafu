@@ -22,16 +22,25 @@ nonisolated struct ServerInfo: Codable, Sendable {
 }
 
 /// `general` capabilities this client advertises. Only `positionEncodings`
-/// is sent — no `window.workDoneProgress` (Lane 2 C1 parses `$/progress`
-/// notifications defensively but never advertises support for them).
+/// is sent here — `window.workDoneProgress` is advertised via the sibling
+/// ``WindowClientCapabilities``, not this type.
 nonisolated struct GeneralClientCapabilities: Codable, Sendable {
     let positionEncodings: [String]?
 }
 
+/// `window` capabilities this client advertises. `workDoneProgress: true`
+/// tells the server it may create work-done-progress tokens via
+/// `window/workDoneProgress/create`, which is how servers stream indexing
+/// progress ($/progress begin/report/end) that Rafu surfaces as `.indexing`.
+nonisolated struct WindowClientCapabilities: Codable, Sendable {
+    let workDoneProgress: Bool?
+}
+
 /// The full set of client capabilities this session advertises. Deliberately
-/// minimal: only the fields C1 actually uses.
+/// minimal: only the fields the client actually uses.
 nonisolated struct ClientCapabilities: Codable, Sendable {
     let general: GeneralClientCapabilities?
+    let window: WindowClientCapabilities?
 }
 
 /// `initialize`'s request params.
