@@ -1,6 +1,6 @@
 # Phase 1C — CLI and desktop integration
 
-- **Status:** Planned
+- **Status:** In progress — deterministic local IPC/goto/window routing complete (2026-07-18); SSH, wait v2, signing, and remaining desktop exits remain
 - **Depends on:** Product Phase 0 CLI proof and stable Phase 1A/1B workspace routing contracts
 - **Canonical scope:** v0.4 §9, §15 Phase 1C, and §16 CLI backlog
 

@@ -584,12 +584,20 @@ final class WorkspaceSession {
         } else {
             document = trackNewDocument(url: url)
         }
+        let liveText = document.textSnapshotProvider?()
+        let text = liveText ?? (try? String(contentsOf: url, encoding: .utf8))
+        let range = text.map {
+            NSRange(
+                location: LineColumnIndex.utf16Offset(
+                    line: location.line, column: location.column, in: $0),
+                length: 0
+            )
+        }
+        if liveText == nil, let range {
+            document.captureViewState(selection: range, scrollFraction: nil)
+        }
         select(document)
-
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return }
-        let offset = LineColumnIndex.utf16Offset(
-            line: location.line, column: location.column, in: text)
-        findState(for: document).select(NSRange(location: offset, length: 0))
+        if let range { findState(for: document).select(range) }
     }
 
     /// Caret-driven navigation entry point for the "Go to Definition"/"Go to

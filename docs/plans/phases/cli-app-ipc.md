@@ -2,7 +2,7 @@
 
 ## Status
 
-Planned (2026-07-17). One of six post-audit lanes defined in
+Complete on `lane/cli-ipc` (2026-07-18). One of six post-audit lanes defined in
 [`post-audit-worktree-fanout.md`](post-audit-worktree-fanout.md). Runs in a
 **dedicated git worktree** after its contract commit (I0) lands on main.
 Delivers the Phase 0 CLI spike and the foundation of Phase 1C: a
@@ -224,7 +224,78 @@ unchanged.
 
 ## Exit
 
-- All nine manual checklist items pass; framing/codec/router/goto/uid
-  suites green; full suite green; no `Package.swift` diff; the three
-  shared files untouched since I0; no paths or content logged; ADR 0009
-  + references landed; `--wait` honestly deferred.
+- **Passed (2026-07-18).** All nine checklist items passed in the staged app;
+  framing/codec/router/goto/uid suites and the 551-test full suite are green;
+  no `Package.swift`/`Package.resolved` diff exists; the frozen
+  `WorkspaceSceneRoot` and `ExternalOpenRequests` are byte-identical to I0 and
+  `WorkspaceSession` differs only inside the allowed goto seam body; live logs
+  contain no paths or content; ADR 0009 (Proposed) and owned references landed;
+  `--wait` is honestly deferred. CoreGraphics and Accessibility supplied the
+  window/caret evidence, so no checklist item remains for a human.
+
+## Lane completion record
+
+- **I1 — complete (2026-07-17):** Added the pure fixed-header frame encoder,
+  incremental bounded decoder, and content-redacting JSON codec in RafuCore.
+  Tests cover every request kind and response shape, all chunk boundaries,
+  multiple rebased frames, oversized/truncated/garbage headers, unknown-field
+  tolerance, unknown-kind sentinel decoding, and malformed JSON. Evidence:
+  `swift build`; full `swift test` (525 tests); `./script/format.sh --fix` and
+  `./script/format.sh --lint` all passed.
+- **I2 — complete (2026-07-17):** Replaced the server stub with a custom actor
+  that owns listener/connection fd lifecycle, safely distinguishes a live from
+  stale socket, authenticates peers before body reads, dispatches through a
+  MainActor handler seam, and logs only kind/outcome. Socketpair tests cover
+  UID ordering, malformed/oversized rejection, typed version/kind rejection,
+  and concurrent clients; a temporary real listener test covers `0700`/`0600`
+  permissions and live-socket ownership. Evidence: `swift build`; full `swift
+  test` (531 tests); `./script/format.sh --fix` and
+  `./script/format.sh --lint` all passed.
+- **I3 — complete (2026-07-18):** Added the pure component-aware routing
+  matrix and its MainActor effects bridge; deterministic registry snapshots
+  prefer the key window and then registration order. SwiftUI's `openWindow`
+  creates workspace scenes, while weak `NSWindow`/session references support
+  specific-window focus and stale-entry pruning. Pending goto requests cover
+  reused roots, containing-folder replacement, and a registration-order fence
+  for forced new windows. Headless router/effect tests cover the full reuse,
+  match, goto, and new-window matrix. Evidence: `swift build`; full `swift
+  test` (543 tests); `./script/format.sh --fix` and
+  `./script/format.sh --lint` all passed; window-management/AppKit review
+  confirmed the narrow focus-only escape.
+- **I4 — complete (2026-07-18):** Filled only the frozen goto seam body. Goto
+  now computes UTF-16 selection from mounted live editor text when available,
+  otherwise from the clean disk file, and relies on `DocumentFindState` to
+  deliver the range after first mount or hibernation rematerialization. New
+  seam tests cover live-text precedence, CRLF disk fallback, pending
+  selection, hibernation, and clamping in concert with the exhaustive I0 line
+  index suite. Evidence: `swift build`; focused goto suite (3 tests); full
+  `swift test` (546 tests); `./script/format.sh --fix` and
+  `./script/format.sh --lint` all passed. One initial full run reported two
+  transient issues that did not reproduce in the focused suite or immediate
+  full rerun; no code change was needed.
+- **I5 — complete (2026-07-18):** Added the synchronous single-owner RafuCore
+  socket client with handshake-before-request, typed content-free failures,
+  `SO_NOSIGPIPE`, bounded I/O, and an under-ten-second reconnect schedule.
+  CLI main now normalizes and validates folder/goto targets, tries IPC first,
+  uses `/usr/bin/open -a <bundle>` without a document only for absent/refused
+  listeners, promotes cold automatic requests to `newWindow`, and retains
+  `/usr/bin/open -a <bundle> <folder>` as the last-resort fallback. Five
+  socketpair/pure client tests cover ordering, kind/payload, rejection,
+  availability classification, and backoff. Evidence: `swift build`; full
+  `swift test` (551 tests); `./script/format.sh --fix` and
+  `./script/format.sh --lint` all passed. Per the user's run-level override,
+  app launch and manual end-to-end verification remain consolidated at I6.
+- **I6 — complete (2026-07-18):** Added the post-acknowledgement one-line
+  `--wait` deferral, refreshed launcher help and Phase 0/1C status lines, and
+  authored ADR 0009 as Proposed. The consolidated staged-bundle pass covered
+  all nine checklist items: cold/warm opens, exact reuse, forced new window,
+  exact multi-root focus, goto caret offsets (including containing-folder
+  goto), SIGKILL stale recovery, unchanged help/version/SSH/status behavior,
+  and wait notice/exit. The first Accessibility goto probe exposed an async
+  mount-order bug (pending find selection was overwritten by disk load); the
+  fix remained entirely inside the frozen goto seam body and seeds the existing
+  `restoredSelection` before mount. Final evidence: `swift build`; focused goto
+  suite (3 tests); full `swift test` (551 tests); `./script/format.sh --fix` and
+  `./script/format.sh --lint`; `./script/build_and_run.sh --verify`; socket
+  directory `0700`, socket `0600`; live logs contained kind/outcome only. No
+  checklist item remains for a human.
