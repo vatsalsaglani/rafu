@@ -146,6 +146,16 @@ multi-caret delete from splitting a UTF-16 surrogate pair or grapheme cluster.
 Gate: two carets render and blink; single-caret rendering untouched;
 `--verify` pass.
 
+Execution record (2026-07-17): **MC2 complete, with interactive evidence
+deferred to MC6 by explicit coordinator direction.** Spike A proved AppKit
+retains multiple non-empty selections but coalesces multiple empty selections
+to the earliest range; Spike B's insertion-point override received no calls in
+an offscreen keyed-window harness and remains visually unconfirmed. The
+outcome-independent overlay design is implemented and covered by three AppKit
+tests, including Reduce Motion. `swift build`, the full 523-test suite,
+formatter fix, and lint are green. Primary/secondary blink, `--verify`, and the
+manual gesture checks remain on the consolidated MC6 checklist.
+
 ## MC3 — Typing/delete/paste fan-out with one undo step
 
 - Override `insertText(_:replacementRange:)`, `deleteBackward(_:)`,

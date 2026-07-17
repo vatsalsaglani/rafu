@@ -106,6 +106,7 @@ struct CodeEditorView: NSViewRepresentable {
         textView.backgroundColor = NSColor(rafuHex: theme.editor.background)
         textView.textColor = NSColor(rafuHex: theme.editor.foreground)
         textView.insertionPointColor = NSColor(rafuHex: theme.editor.cursor)
+        textView.refreshMultiCaretOverlay()
         textView.navigateAction = navigate
         textView.hoverAction = hover
         textView.hoverTheme = theme
@@ -497,6 +498,7 @@ struct CodeEditorView: NSViewRepresentable {
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard !isLoading else { return }
+            (notification.object as? RafuTextView)?.collapseCaretSetToNativeSelectionIfNeeded()
             refreshSelectionDecorations()
         }
 

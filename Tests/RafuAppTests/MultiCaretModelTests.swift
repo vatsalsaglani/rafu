@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 
@@ -281,4 +282,59 @@ struct MultiCaretModelTests {
         #expect(
             toggled.collapsedToPrimary(textLength: 10).ranges == [NSRange(location: 4, length: 0)])
     }
+}
+
+@MainActor
+@Test("RafuTextView keeps zero-length carets authoritative when AppKit drops them")
+func textViewOwnsZeroLengthCarets() {
+    let textView = RafuTextView.makeTextKit1()
+    textView.frame = NSRect(x: 0, y: 0, width: 400, height: 160)
+    textView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+    textView.string = "alpha beta gamma"
+    textView.applyCaretRanges(
+        [
+            NSRange(location: 1, length: 0),
+            NSRange(location: 7, length: 0),
+            NSRange(location: 12, length: 0),
+        ],
+        primaryIndex: 1
+    )
+
+    #expect(textView.currentCaretRanges.count == 3)
+    #expect(textView.primaryCaretRange == NSRange(location: 7, length: 0))
+    #expect(textView.selectedRanges.map(\.rangeValue) == [NSRange(location: 7, length: 0)])
+    let overlay = textView.subviews.compactMap { $0 as? MultiCaretOverlayView }.first
+    #expect(overlay?.caretRects.count == 2)
+    #expect(!textView.dataWithPDF(inside: textView.bounds).isEmpty)
+}
+
+@MainActor
+@Test("A plain native selection collapses the multi-caret set")
+func nativeSelectionCollapsesCarets() {
+    let textView = RafuTextView.makeTextKit1()
+    textView.string = "alpha beta"
+    textView.applyCaretRanges(
+        [NSRange(location: 1, length: 0), NSRange(location: 7, length: 0)]
+    )
+
+    textView.setSelectedRange(NSRange(location: 4, length: 0))
+    textView.collapseCaretSetToNativeSelectionIfNeeded()
+
+    #expect(!textView.hasMultipleCarets)
+    #expect(textView.currentCaretRanges == [NSRange(location: 4, length: 0)])
+    #expect(textView.subviews.allSatisfy { !($0 is MultiCaretOverlayView) })
+}
+
+@MainActor
+@Test("Reduce Motion keeps overlay carets steady")
+func overlayHonorsReduceMotion() {
+    let overlay = MultiCaretOverlayView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
+    overlay.update(
+        caretRects: [NSRect(x: 10, y: 10, width: 1, height: 14)],
+        color: .textColor,
+        reduceMotion: true
+    )
+
+    #expect(!overlay.isBlinking)
+    #expect(overlay.caretsVisible)
 }
