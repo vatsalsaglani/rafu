@@ -2,7 +2,10 @@
 
 ## Status
 
-In progress (2026-07-18; G1-G3 complete). One of six post-audit lanes defined in
+Implementation complete (2026-07-18; G1-G4 complete). Automated gates are green;
+the keyboard-only, VoiceOver, and second-window manual acceptance passes remain
+deferred after the user prohibited computer-control tooling. One of six
+post-audit lanes defined in
 [`post-audit-worktree-fanout.md`](post-audit-worktree-fanout.md). Runs in a
 **dedicated git worktree** after its contract commit (G0) lands on main.
 Hunk staging and read-only blame are explicitly enumerated Phase 6
@@ -238,3 +241,16 @@ they disagree.
   Test delta: +4 (three pure porcelain fixtures and one two-author repository
   round-trip). `build_and_run.sh --verify` and manual UI checks remain
   consolidated at G4.
+- **G4 — complete (2026-07-18):** minimal additive menu and command-palette
+  entries expose Stage/Unstage Hunk, conservative tracked-only Stash Changes,
+  and Blame File without claiming shared keyboard shortcuts. ADR 0011 records
+  the user-approved stash expansion, exact index-write contract, bounded blame
+  canvas, rejected-for-MVP gutter alternative, and removability; the Git
+  process reference records the verified parsing and security contracts. Test
+  delta: +0. Final automated evidence: 42 Git-focused tests, 530 full tests,
+  `swift build`, format fix/lint, and `build_and_run.sh --verify` green. The G1
+  repository round-trip supplies the external `git diff --cached`/working-tree
+  evidence for exact stage/unstage behavior. Keyboard-only, VoiceOver, and
+  second-window checks are not claimed: they remain manual acceptance work
+  because the user explicitly disallowed computer-control tooling during the
+  consolidated pass.

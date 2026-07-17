@@ -1,7 +1,7 @@
 # Git process and parsing
 
 - Applies to: local Git status, diffs, history, branch operations, staging, stash, and process capture
-- Last verified: Swift 6.2, `/usr/bin/git` (Apple Git-155, 2.50.1) on macOS, 2026-07-17
+- Last verified: Swift 6.2, `/usr/bin/git` (Apple Git-155, 2.50.1) on macOS, 2026-07-18
 
 ## Rule or observed behavior
 
@@ -148,3 +148,4 @@ isolation and shared workspace state are integration concerns.
 - `Tests/RafuAppTests/GitBlameParserTests.swift`
 - `docs/plans/phases/pre-initial-push-workbench.md`
 - `docs/plans/phases/git-depth-blame-stash-hunks.md`
+- `docs/decisions/0011-advanced-git-hunks-stash-blame.md`
