@@ -120,8 +120,13 @@ do {
 
             if let response {
                 switch response {
-                case .accepted:
+                case .accepted(_, _, let waitSupported):
                     print("Opening \(path) in \(RafuBuildInformation.appName).")
+                    if normalized.request.wait, !waitSupported {
+                        writeError(
+                            "rafu: --wait is not yet available; the request was opened without waiting."
+                        )
+                    }
                 case .rejected(let reason):
                     writeError("rafu: Rafu.app rejected the request: \(reason)")
                     exit(EX_UNAVAILABLE)

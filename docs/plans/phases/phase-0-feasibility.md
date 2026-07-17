@@ -1,6 +1,6 @@
 # Phase 0 — Technical feasibility and architecture locks
 
-- **Status:** Planned
+- **Status:** In progress — local CLI IPC spike complete (2026-07-18); combined editor, SSH, and performance exits remain
 - **Depends on:** Bootstrap checkpoint in [README](README.md)
 - **Canonical scope:** v0.4 §15 Phase 0 and §21
 

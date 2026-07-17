@@ -2,7 +2,7 @@
 
 - **Applies to:** Rafu's local launcher Unix-domain socket, framing, peer
   authentication, listener/client fd ownership, request routing, and fallback
-- **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-17
+- **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-18
 
 ## Rule or observed behavior
 
@@ -44,10 +44,13 @@ window cannot consume the new window's navigation request.
 Goto selection uses the mounted editor's `textSnapshotProvider` when present,
 so unsaved TextKit content determines the UTF-16 caret offset. When no editor
 is mounted, it reads the clean file from disk and places the resulting range in
-`DocumentFindState`; that state delivers the pending selection when the editor
-attaches. Selecting a hibernated tab rematerializes it through the ordinary
-session path. Its exact column is necessarily best-effort until mount because
-the clean disk snapshot is the only available text authority at that moment.
+both `DocumentFindState` and the document's existing `restoredSelection` before
+the session selects it. Both are required: the find controller attaches before
+the editor's asynchronous disk load, so its early selection can be overwritten;
+`restoreViewState()` reapplies the seeded range after the text arrives.
+Selecting a hibernated tab rematerializes it through the same path. Its exact
+column is necessarily best-effort until mount because the clean disk snapshot
+is the only available text authority at that moment.
 
 The CLI client performs handshake and open/goto as two sequential socket
 connections. This follows the I2 listener's one-frame-per-connection contract
@@ -114,6 +117,16 @@ exhaustive LF/CRLF, line-clamp, and column-clamp matrix beneath that seam.
 handshake ordering, request kind/payload, typed rejection short-circuiting,
 listener-unavailable classification, and the bounded retry schedule without
 launching the app or sleeping.
+
+The staged-bundle pass (`./script/build_and_run.sh --verify`) exercised all
+nine lane checklist items without UI automation guesses. CoreGraphics window
+titles/counts proved cold open, nonmatching reuse, exact-root focus, no
+duplicate exact match, and forced new-window behavior. Accessibility reported
+`/etc/hosts:1:1` at UTF-16 selection `0,0` and `main.swift:70:3` at the
+independently calculated `2155,0`. A SIGKILL left the socket inode and the next
+CLI invocation recovered it. Help/version/SSH/status and the one-line wait
+notice returned their expected exit behavior. A live unified-log stream showed
+only handshake/openFolder request kinds and accepted outcomes.
 
 ## Verification
 

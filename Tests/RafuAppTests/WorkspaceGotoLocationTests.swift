@@ -40,6 +40,7 @@ struct WorkspaceGotoLocationTests {
 
         let document = try #require(session.selectedDocument)
         #expect(document.textSnapshotProvider == nil)
+        #expect(document.restoredSelection == NSRange(location: 9, length: 0))
         let controller = SelectionRecorder()
         session.findState(for: document).attach(controller)
         #expect(controller.selectedRange == NSRange(location: 9, length: 0))
@@ -60,6 +61,7 @@ struct WorkspaceGotoLocationTests {
         )
 
         #expect(document.loadState == .loaded)
+        #expect(document.restoredSelection == NSRange(location: 13, length: 0))
         let controller = SelectionRecorder()
         session.findState(for: document).attach(controller)
         #expect(controller.selectedRange == NSRange(location: 13, length: 0))
