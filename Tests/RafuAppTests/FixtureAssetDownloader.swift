@@ -127,6 +127,35 @@ enum ArchiveFixtureBuilder {
         return tarURL
     }
 
+    /// Builds a `.tar.gz` fixture that mirrors the managed Node runtime's
+    /// shape — a real binary at `package/bin/tool` plus an internal,
+    /// cross-directory relative symlink `package/bin/alias -> ../lib/impl.js`
+    /// resolving back inside the archive (as Node's `bin/npm`,`bin/npx`,
+    /// `bin/corepack` do). `StagingValidator` must accept this while still
+    /// rejecting the escaping `makeZipSlipTarGzip` fixture.
+    static func makeInternalSymlinkTarGzip(binaryContents: Data, in directory: URL) throws -> URL {
+        let sourceRoot = directory.appending(
+            path: "internal-symlink-source", directoryHint: .isDirectory)
+        let binURL = sourceRoot.appending(path: "package/bin/tool")
+        let implURL = sourceRoot.appending(path: "package/lib/impl.js")
+        try FileManager.default.createDirectory(
+            at: binURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: implURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try binaryContents.write(to: binURL)
+        try Data("module.exports = {}\n".utf8).write(to: implURL)
+        // Path-based API so the destination stays a literal *relative* link
+        // (`URL(fileURLWithPath:)` would resolve it against the CWD into an
+        // absolute, escaping target — defeating the point of the fixture).
+        try FileManager.default.createSymbolicLink(
+            atPath: sourceRoot.appending(path: "package/bin/alias").path,
+            withDestinationPath: "../lib/impl.js")
+
+        let tarURL = directory.appending(path: "internal-symlink.tar.gz")
+        try run("/usr/bin/tar", ["-czf", tarURL.path, "-C", sourceRoot.path, "."])
+        return tarURL
+    }
+
     private static func run(_ executable: String, _ arguments: [String]) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)

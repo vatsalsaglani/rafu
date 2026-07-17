@@ -206,6 +206,35 @@ struct ServerInstallerTests {
         }
     }
 
+    @Test("An internal (within-staging) symlink is accepted, mirroring Node's bin/npm links")
+    func internalSymlinkIsAccepted() async throws {
+        try await withTemporaryDirectory { fixtures in
+            try await withTemporaryDirectory { installBase in
+                let contents = Data("#!/bin/sh\necho tool\n".utf8)
+                let assetURL = try ArchiveFixtureBuilder.makeInternalSymlinkTarGzip(
+                    binaryContents: contents, in: fixtures)
+
+                let descriptor = makeDescriptor(
+                    id: "internal-symlink-tool", format: .tarGzip,
+                    binaryRelativePath: "package/bin/tool", urlSuffix: "internal-symlink.tar.gz",
+                    checksum: nil)
+
+                let layout = InstallLayout(baseDirectory: installBase)
+                let installer = ServerInstaller(
+                    downloader: FixtureAssetDownloader(fixtureURL: assetURL), layout: layout)
+
+                let result = try await installer.install(
+                    descriptor: descriptor, consentToQuarantineRemoval: false)
+
+                #expect(try Data(contentsOf: result.binaryURL) == contents)
+                // The internal symlink survives the move and still resolves.
+                let alias = layout.serverDirectory(id: "internal-symlink-tool").appending(
+                    path: "package/bin/alias")
+                #expect(FileManager.default.fileExists(atPath: alias.path))
+            }
+        }
+    }
+
     @Test("A missing declared binary after unpack is rejected as binaryMissing")
     func missingDeclaredBinaryIsRejected() async throws {
         try await withTemporaryDirectory { fixtures in

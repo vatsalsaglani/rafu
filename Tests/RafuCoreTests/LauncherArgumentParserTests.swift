@@ -77,3 +77,39 @@ func appLocatorResolvesBundle() {
     let stray = URL(fileURLWithPath: "/usr/local/bin/rafu")
     #expect(LauncherAppLocator.appBundle(forCLIExecutable: stray, requireOnDisk: false) == nil)
 }
+
+@Test("enclosingAppBundle follows a ~/.local/bin symlink back into the bundle")
+func enclosingAppBundleFollowsInstalledSymlink() throws {
+    let fileManager = FileManager.default
+    let root = fileManager.temporaryDirectory.appending(
+        path: "rafu-locator-test-\(UUID().uuidString)", directoryHint: .isDirectory)
+    defer { try? fileManager.removeItem(at: root) }
+
+    // A real Rafu.app tree with the bundled CLI, and a marker under
+    // Contents/MacOS so the on-disk check passes.
+    let bundledCLI = root.appending(path: "Rafu.app/Contents/SharedSupport/bin/rafu")
+    try fileManager.createDirectory(
+        at: bundledCLI.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data("#!/bin/sh\n".utf8).write(to: bundledCLI)
+    try fileManager.createDirectory(
+        at: root.appending(path: "Rafu.app/Contents/MacOS"), withIntermediateDirectories: true)
+
+    // The installer-style symlink at a location with no bundle above it.
+    let binDirectory = root.appending(path: ".local/bin")
+    try fileManager.createDirectory(at: binDirectory, withIntermediateDirectories: true)
+    let symlink = binDirectory.appending(path: "rafu")
+    try fileManager.createSymbolicLink(at: symlink, withDestinationURL: bundledCLI)
+
+    // Resolving the symlink lands back inside Rafu.app; the raw symlink path
+    // (no bundle above ~/.local/bin) would not — this is what the real-exec-
+    // path locator relies on for a PATH-installed CLI.
+    let resolved = LauncherAppLocator.enclosingAppBundle(executablePath: symlink.path)
+    // Normalize both sides: the temp dir lives under /var/folders which
+    // `resolvingSymlinksInPath()` rewrites to /private/var.
+    let expectedBundle = root.appending(path: "Rafu.app").resolvingSymlinksInPath()
+        .standardizedFileURL.path
+    #expect(resolved?.standardizedFileURL.path == expectedBundle)
+
+    let unresolved = LauncherAppLocator.appBundle(forCLIExecutable: symlink)
+    #expect(unresolved == nil)
+}
