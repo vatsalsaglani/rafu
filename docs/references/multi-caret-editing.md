@@ -1,8 +1,9 @@
 # Multi-caret editing
 
 - **Applies to:** `RafuTextView` caret ownership, TextKit selection bridging,
-  secondary-caret rendering, and multi-caret edit batches
-- **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-17
+  secondary-caret rendering, multi-caret edit batches, commands, and
+  single-selection restoration
+- **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-18
 
 ## Caret ownership and rendering rule
 
@@ -80,6 +81,13 @@ authoritative logical primary instead of AppKit's presentation selection.
 Restoration therefore resumes with one primary caret and never serializes the
 ephemeral secondary set.
 
+The Edit menu exposes Select Next Occurrence (Command-D), Select All
+Occurrences (Command-Shift-L), Add Caret Above (Option-Command-Up), and Add
+Caret Below (Option-Command-Down). The shortcuts were checked against every
+`keyboardShortcut` in `Sources/RafuApp` before landing; no collision required
+an alternative. `WorkspaceSession` only forwards each command to the selected
+document's additive action closure, keeping caret state inside the text view.
+
 ## Runtime spike findings
 
 ### Spike A — multiple zero-length selections
@@ -132,10 +140,12 @@ swift test
 ./script/format.sh --lint
 ```
 
-MC4 completed with 529 tests green. Per the lane coordinator's explicit run
-direction, `./script/build_and_run.sh --verify` and the interactive blink,
-gesture, IME, accessibility, hibernation, and second-window checks are deferred
-to one consolidated MC6 pass.
+MC6 completed with the 24 focused multi-caret tests and all 529 repository
+tests green. `./script/build_and_run.sh --verify` also built, staged, launched,
+and found the real app bundle successfully. The coordinator then prohibited
+Computer Use, so visual primary/secondary blinking and the interactive
+gesture, IME, accessibility, live-syntax, and second-window checks remain
+explicit integration-owner checklist items rather than claimed evidence.
 
 ## Related code and plans
 
@@ -143,6 +153,9 @@ to one consolidated MC6 pass.
 - `Sources/RafuApp/Editor/MultiCaretOverlayView.swift`
 - `Sources/RafuApp/Editor/RafuTextView.swift`
 - `Sources/RafuApp/Editor/CodeEditorView.swift`
+- `Sources/RafuApp/App/RafuAppCommands.swift`
+- `Sources/RafuApp/Models/EditorDocument.swift`
+- `Sources/RafuApp/Models/WorkspaceSession.swift`
 - `Tests/RafuAppTests/MultiCaretModelTests.swift`
 - `docs/plans/phases/multi-cursor-editing.md`
 - `docs/references/swiftui-appkit-boundary.md`

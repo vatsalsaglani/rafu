@@ -2,7 +2,9 @@
 
 ## Status
 
-Planned (2026-07-17). One of six post-audit lanes defined in
+Implementation complete; automated gates green, with the interactive GUI
+checklist deferred to the integration owner (2026-07-18). One of six
+post-audit lanes defined in
 [`post-audit-worktree-fanout.md`](post-audit-worktree-fanout.md). Runs in a
 **dedicated git worktree**. Delivers the named Phase 2 deliverable
 "multi-cursor editing" (see
@@ -232,12 +234,29 @@ green.
 Gate: every command has a menu path (AGENTS.md visible-path rule);
 keyboard reachability pass.
 
+Execution record (2026-07-18): **MC5 complete.** A repository-wide shortcut
+grep found no collisions, so Command-D, Command-Shift-L, Option-Command-Up, and
+Option-Command-Down retain the pre-resolved bindings. Four Edit-menu buttons
+and four selected-document forwarding methods landed as +28/-0 across exactly
+the two shared files in isolated commit `e34d067`. `swift build`, the full
+529-test suite, formatter fix, and lint are green. Interactive keyboard
+reachability is included in the deferred checklist below.
+
 ## MC6 — Documentation close-out
 
 `docs/references/multi-caret-editing.md`: Spike A/B findings, the
 reverse-order edit rule, undo-group naming rule, the N-delta batch
 semantics, v1 limitations (IME bail, auto-indent, current-line highlight
 suppression, hibernation collapse). Handoff summary for merge.
+
+Execution record (2026-07-18): **MC6 complete.** The owned reference now records
+caret ownership/rendering, batch undo and N-delta semantics, gesture/command
+routing, restoration, spikes, shortcuts, and every v1 limitation. The
+canonical `./script/build_and_run.sh --verify` pass is green, as are the 24
+focused multi-caret tests, `swift build`, all 529 tests, formatter fix, and
+lint. At the coordinator's direction no Computer Use was used for the
+remaining interactive pass; those visual/manual items stay explicit for the
+integration owner and are not represented as verified below.
 
 ## Manual GUI checklist (MC4/MC5 gates)
 
@@ -269,3 +288,9 @@ suppression, hibernation collapse). Handoff summary for merge.
   path unchanged; gestures + menu paths live; deltas/reparse in-order;
   hibernation collapses safely; spikes + nuances documented; all gates
   green.
+
+Implementation exit status (2026-07-18): **satisfied by automated evidence.**
+The consolidated app-bundle verify gate is green. Visual/manual confirmation
+of the checklist above remains deferred and must be completed by the
+integration owner before treating the corresponding interaction claims as
+observed GUI evidence.

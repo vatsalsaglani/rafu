@@ -146,16 +146,19 @@ final class RafuTextView: NSTextView {
 
     private static let hoverDelay = Duration.milliseconds(450)
 
-    /// ⌘-click "go to definition". Only intercepts when `.command` is held
-    /// and an action is wired; every other click (plain, drag, other
-    /// modifiers) falls through to `super` unchanged, so command-drag
+    /// ⌥-click toggles a caret and ⌘-click invokes "go to definition" when an
+    /// action is wired. Marked-text composition and every other click (plain,
+    /// drag, other modifiers) fall through to `super`, so command-drag
     /// selection and ordinary editing are unaffected. Any click also dismisses
     /// a shown hover tooltip.
     override func mouseDown(with event: NSEvent) {
         dismissHover()
+        guard !hasMarkedText() else {
+            super.mouseDown(with: event)
+            return
+        }
         if event.modifierFlags.contains(.option),
-            !event.modifierFlags.contains(.command),
-            !hasMarkedText()
+            !event.modifierFlags.contains(.command)
         {
             let point = convert(event.locationInWindow, from: nil)
             let index = characterIndexForInsertion(at: point)
