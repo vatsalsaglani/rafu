@@ -49,6 +49,23 @@ attaches. Selecting a hibernated tab rematerializes it through the ordinary
 session path. Its exact column is necessarily best-effort until mount because
 the clean disk snapshot is the only available text authority at that moment.
 
+The CLI client performs handshake and open/goto as two sequential socket
+connections. This follows the I2 listener's one-frame-per-connection contract
+while still ensuring compatibility is acknowledged before a request is sent.
+Each synchronous exchange has one fd owner, closes exactly once, suppresses
+`SIGPIPE`, and uses bounded send/receive timeouts. Errors contain only syscall
+names/codes or the app's typed rejection; raw frame bytes are never retained in
+diagnostics.
+
+Only `ENOENT` and `ECONNREFUSED` at connect trigger `/usr/bin/open -a
+<bundle>` as a starter, with no document argument. Reconnect uses a bounded
+exponential schedule totaling under ten seconds. An automatic request sent
+after that cold start is promoted to `newWindow`, preventing a restored window
+for another workspace from consuming it; explicit `reuseWindow` and
+`newWindow` remain unchanged. If IPC still cannot complete, the final fallback
+is `/usr/bin/open -a <bundle> <folder>` (the containing folder for goto), so
+basic document-open behavior remains available.
+
 In the RafuApp target's Swift 6.2 default-`MainActor` mode, declaring
 `LauncherIPCServer` as a custom `actor` gives it its own executor and is the
 explicit isolation boundary. Do not spell the type `nonisolated actor`: Swift
@@ -93,6 +110,11 @@ disk text, CRLF disk offsets queue before first mount, and a hibernated tab is
 rematerialized with its pending caret. `LineColumnIndexTests` supplies the
 exhaustive LF/CRLF, line-clamp, and column-clamp matrix beneath that seam.
 
+`LauncherIPCClientTests` scripts both halves with socketpairs. It verifies
+handshake ordering, request kind/payload, typed rejection short-circuiting,
+listener-unavailable classification, and the bounded retry schedule without
+launching the app or sleeping.
+
 ## Verification
 
 ```bash
@@ -106,12 +128,15 @@ swift test
 ## Related code, ADRs, and phases
 
 - `Sources/RafuCore/Launcher/IPC/LauncherIPCCodec.swift`
+- `Sources/RafuCore/Launcher/IPC/LauncherIPCClient.swift`
+- `Sources/RafuCLI/main.swift`
 - `Sources/RafuApp/Launcher/LauncherIPCServer.swift`
 - `Sources/RafuApp/Launcher/LauncherRequestRouter.swift`
 - `Sources/RafuApp/Launcher/WindowAccessor.swift`
 - `Sources/RafuApp/Launcher/WorkspaceWindowRegistry.swift`
 - `Sources/RafuApp/Models/WorkspaceSession.swift`
 - `Tests/RafuCoreTests/LauncherIPCFramingTests.swift`
+- `Tests/RafuCoreTests/LauncherIPCClientTests.swift`
 - `Tests/RafuAppTests/LauncherRequestRouterTests.swift`
 - `Tests/RafuAppTests/WorkspaceGotoLocationTests.swift`
 - `docs/plans/phases/cli-app-ipc.md`

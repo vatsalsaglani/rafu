@@ -269,3 +269,15 @@ unchanged.
   `./script/format.sh --lint` all passed. One initial full run reported two
   transient issues that did not reproduce in the focused suite or immediate
   full rerun; no code change was needed.
+- **I5 — complete (2026-07-18):** Added the synchronous single-owner RafuCore
+  socket client with handshake-before-request, typed content-free failures,
+  `SO_NOSIGPIPE`, bounded I/O, and an under-ten-second reconnect schedule.
+  CLI main now normalizes and validates folder/goto targets, tries IPC first,
+  uses `/usr/bin/open -a <bundle>` without a document only for absent/refused
+  listeners, promotes cold automatic requests to `newWindow`, and retains
+  `/usr/bin/open -a <bundle> <folder>` as the last-resort fallback. Five
+  socketpair/pure client tests cover ordering, kind/payload, rejection,
+  availability classification, and backoff. Evidence: `swift build`; full
+  `swift test` (551 tests); `./script/format.sh --fix` and
+  `./script/format.sh --lint` all passed. Per the user's run-level override,
+  app launch and manual end-to-end verification remain consolidated at I6.
