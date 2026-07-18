@@ -40,7 +40,7 @@ struct WorkspaceSidebarView: View {
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
         }
-        .background(theme.palette.sidebarBackground.opacity(0.85))
+        .background(theme.palette.sidebarBackground)
         .navigationSplitViewColumnWidth(min: 190, ideal: 250, max: 380)
         .alert("Rename File", isPresented: renameBinding) {
             TextField("Name", text: $renameText)

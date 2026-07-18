@@ -617,7 +617,7 @@ private struct EditorGroupTabBar: View {
             }
         }
         .frame(height: 34)
-        .background(theme.palette.tabBarBackground.opacity(0.92))
+        .background(theme.palette.tabBarBackground)
         .overlay(alignment: .bottom) { Divider().overlay(theme.palette.borderSubtle) }
     }
 
@@ -664,7 +664,7 @@ private struct GitStandaloneDiffCanvas: View {
                 Spacer()
             }
             .frame(height: 34)
-            .background(theme.palette.tabBarBackground.opacity(0.92))
+            .background(theme.palette.tabBarBackground)
             Divider().overlay(theme.palette.borderSubtle)
             GitSideBySideDiffView(openDiff: openDiff, session: session)
         }
@@ -707,7 +707,7 @@ private struct GitStandaloneBlameCanvas: View {
                 Spacer()
             }
             .frame(height: 34)
-            .background(theme.palette.tabBarBackground.opacity(0.92))
+            .background(theme.palette.tabBarBackground)
             Divider().overlay(theme.palette.borderSubtle)
             blameHeader
             Divider().overlay(theme.palette.borderSubtle)
@@ -779,7 +779,7 @@ private struct GitBlameTableHeader: View {
             column("Summary", width: nil)
         }
         .frame(height: 28)
-        .background(theme.palette.tabBarBackground.opacity(0.97))
+        .background(theme.palette.tabBarBackground)
         .overlay(alignment: .bottom) { Divider().overlay(theme.palette.borderSubtle) }
     }
 
@@ -1002,7 +1002,7 @@ private struct GitSideBySideDiffView: View {
                             diffColumnTitle("After", symbol: "plus")
                         }
                         .frame(height: 28)
-                        .background(theme.palette.tabBarBackground.opacity(0.97))
+                        .background(theme.palette.tabBarBackground)
                     }
                 }
                 .frame(

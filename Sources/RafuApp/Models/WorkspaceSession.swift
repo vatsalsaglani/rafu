@@ -91,6 +91,8 @@ final class WorkspaceSession {
     var gitOpenDiff: GitOpenDiff?
     var gitMergeState: GitMergeState?
     var gitStashes: [GitStashEntry] = []
+    var gitWorktrees: [GitWorktree] = []
+    var isGitWorktreesLoading = false
     var gitOpenBlame: GitBlame?
     var gitCommitMessage = ""
     var isGeneratingAICommitMessage = false
@@ -1596,6 +1598,88 @@ final class WorkspaceSession {
         }
     }
 
+    // MARK: - Worktrees
+
+    /// The absolute standardized path of the worktree Rafu currently has open,
+    /// used to mark the "current" row. Prefers the git repository root (the
+    /// worktree's own top), falling back to the opened folder.
+    var currentWorktreePath: String? {
+        (gitSnapshot?.repositoryRoot ?? rootURL)?.standardizedFileURL.path
+    }
+
+    /// Loads `git worktree list` for the Source Control worktrees section.
+    /// Called on explicit section expand and after worktree mutations — never
+    /// polled, and never watches sibling worktrees.
+    func loadWorktrees() async {
+        guard let rootURL, !isGitWorktreesLoading else { return }
+        isGitWorktreesLoading = true
+        defer { isGitWorktreesLoading = false }
+        do {
+            let worktrees = try await gitService.worktrees(at: rootURL)
+            guard self.rootURL == rootURL else { return }
+            gitWorktrees = worktrees
+        } catch is CancellationError {
+            return
+        } catch {
+            guard self.rootURL == rootURL else { return }
+            reportGitError(error)
+        }
+    }
+
+    /// Opens a worktree as a new workspace window, reusing the same in-app
+    /// folder-open path the CLI uses (enqueue → open a fresh window that
+    /// consumes the request and skips last-workspace restoration).
+    func openWorktreeInNewWindow(_ worktree: GitWorktree) {
+        let url = URL(filePath: worktree.path)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+            isDirectory.boolValue
+        else {
+            reportGitError(GitServiceError.invalidGitPath)
+            return
+        }
+        ExternalOpenRequests.shared.enqueue([url])
+        _ = WorkspaceWindowRegistry.shared.openWorkspaceWindow()
+    }
+
+    /// Adds a worktree, then refreshes the list. `createBranch` chooses
+    /// `git worktree add -b <branch> <path>` vs checking out an existing
+    /// branch at `<path>`.
+    func addWorktree(at path: URL, branch: String?, createBranch: Bool) async {
+        guard let rootURL, !isGitBusy else { return }
+        isGitBusy = true
+        defer { isGitBusy = false }
+        do {
+            try await gitService.addWorktree(
+                path: path, branch: branch, createBranch: createBranch, at: rootURL)
+            guard self.rootURL == rootURL else { return }
+            await loadWorktrees()
+        } catch is CancellationError {
+            return
+        } catch {
+            guard self.rootURL == rootURL else { return }
+            reportGitError(error)
+        }
+    }
+
+    /// Removes a worktree (never `--force`; git refuses dirty/locked and the
+    /// real error surfaces), then refreshes the list.
+    func removeWorktree(_ worktree: GitWorktree) async {
+        guard let rootURL, !isGitBusy, !worktree.isMain else { return }
+        isGitBusy = true
+        defer { isGitBusy = false }
+        do {
+            try await gitService.removeWorktree(path: worktree.path, at: rootURL)
+            guard self.rootURL == rootURL else { return }
+            await loadWorktrees()
+        } catch is CancellationError {
+            return
+        } catch {
+            guard self.rootURL == rootURL else { return }
+            reportGitError(error)
+        }
+    }
+
     // MARK: - Stash
 
     /// Pushes a new stash entry via `git stash push`.
@@ -2174,6 +2258,7 @@ final class WorkspaceSession {
 
     private func resetGitWorkbenchState() {
         gitSnapshot = nil
+        gitWorktrees = []
         gitSelectedChangeIDs = []
         gitBranchSnapshot = nil
         gitHistoryPage = nil

@@ -232,6 +232,46 @@ nonisolated struct GitService: Sendable {
     }
 
     @concurrent
+    func worktrees(at rootURL: URL) async throws -> [GitWorktree] {
+        let repositoryRoot = try await requireRepositoryRoot(at: rootURL)
+        let output = try await checkedRun(
+            ["worktree", "list", "--porcelain"],
+            at: repositoryRoot,
+            maximumOutputBytes: 4 * 1_024 * 1_024
+        )
+        return GitWorktreeParser.parse(output.stdout)
+    }
+
+    /// Adds a worktree at `path`. When `createBranch` is set, git creates that
+    /// branch at HEAD (`-b`); otherwise `branch` must name an existing branch
+    /// to check out. All values are passed as separate argv entries — never
+    /// interpolated into a shell string.
+    @concurrent
+    func addWorktree(
+        path: URL, branch: String?, createBranch: Bool, at rootURL: URL
+    ) async throws {
+        let repositoryRoot = try await requireRepositoryRoot(at: rootURL)
+        var arguments = ["worktree", "add"]
+        let trimmed = branch?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if createBranch, let trimmed, !trimmed.isEmpty {
+            arguments += ["-b", trimmed, path.path]
+        } else if let trimmed, !trimmed.isEmpty {
+            arguments += [path.path, trimmed]
+        } else {
+            arguments.append(path.path)
+        }
+        _ = try await checkedRun(arguments, at: repositoryRoot)
+    }
+
+    /// Removes a worktree. Never uses `--force`: git refuses to remove a dirty
+    /// or locked worktree and the real error is surfaced to the user.
+    @concurrent
+    func removeWorktree(path: String, at rootURL: URL) async throws {
+        let repositoryRoot = try await requireRepositoryRoot(at: rootURL)
+        _ = try await checkedRun(["worktree", "remove", path], at: repositoryRoot)
+    }
+
+    @concurrent
     func stashList(at rootURL: URL) async throws -> [GitStashEntry] {
         let repositoryRoot = try await requireRepositoryRoot(at: rootURL)
         let output = try await checkedRun(

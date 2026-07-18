@@ -75,7 +75,7 @@ struct WorkspaceUtilityRail: View {
         .frame(width: 40)
         .frame(maxHeight: .infinity)
         .fixedSize(horizontal: true, vertical: false)
-        .background(theme.palette.sidebarBackground.opacity(0.92))
+        .background(theme.palette.sidebarBackground)
     }
 
     private func railButton(_ mode: WorkspaceNavigatorMode) -> some View {

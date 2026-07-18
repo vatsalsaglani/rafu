@@ -103,6 +103,10 @@ struct WorkspaceWindowView: View {
                 .help("Open a local workspace folder")
             }
         }
+        // Flat chrome (UI plan U1 / ADR 0012): drop the system toolbar band so
+        // the themed panels meet the titlebar edge-to-edge behind the traffic
+        // lights. Native toolbar items and window controls are retained.
+        .toolbarBackground(.hidden, for: .windowToolbar)
     }
 
     private var editorCanvas: some View {

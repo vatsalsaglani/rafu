@@ -32,12 +32,22 @@ struct RafuIconButtonStyle: ButtonStyle {
                 .foregroundStyle(foreground)
                 .frame(width: size, height: size)
                 .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
                         .fill(background)
                 )
-                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
+                        .strokeBorder(
+                            theme.palette.accent.opacity(isActive ? 0.5 : 0),
+                            lineWidth: RafuMetrics.hairline
+                        )
+                )
+                .contentShape(
+                    RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
+                )
                 .onHover { isHovering = $0 }
                 .animation(.easeOut(duration: 0.12), value: isHovering)
+                .animation(.easeOut(duration: 0.12), value: isActive)
                 .opacity(isEnabled ? 1 : 0.35)
         }
 
@@ -48,8 +58,10 @@ struct RafuIconButtonStyle: ButtonStyle {
         }
 
         private var background: Color {
+            // Selected nav items read as a scarce accent wash + hairline
+            // outline (references); pressed and hover stay neutral washes.
+            if isActive { return theme.palette.accentSoft }
             if configuration.isPressed { return theme.palette.selection }
-            if isActive { return theme.palette.selection }
             if isHovering { return theme.palette.hover }
             return .clear
         }

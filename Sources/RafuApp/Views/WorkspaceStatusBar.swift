@@ -46,8 +46,8 @@ struct WorkspaceStatusBar: View {
         .font(.caption)
         .foregroundStyle(theme.palette.textSecondary)
         .padding(.horizontal, 12)
-        .frame(height: 26)
-        .background(theme.palette.statusBarBackground.opacity(0.92))
+        .frame(height: RafuMetrics.statusBarHeight)
+        .background(theme.palette.statusBarBackground)
         .overlay(alignment: .top) { Divider().overlay(theme.palette.borderSubtle) }
         .task(id: showsProcessMemory) {
             guard showsProcessMemory else {

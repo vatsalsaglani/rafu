@@ -2,6 +2,7 @@ import Foundation
 
 enum GitInspectorSection: String, CaseIterable, Sendable {
     case changes
+    case worktrees
     case history
 
     var title: String { rawValue.capitalized }

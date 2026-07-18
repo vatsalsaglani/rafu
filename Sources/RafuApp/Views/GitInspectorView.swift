@@ -6,9 +6,11 @@ struct GitInspectorView: View {
     @State private var isCreatingBranch = false
     @State private var isStashSheetPresented = false
     @State private var isStashesExpanded = true
+    @State private var isAddWorktreeSheetPresented = false
     @State private var newBranchName = ""
     @State private var pendingMergeBranch: String?
     @State private var pendingStashAction: PendingStashAction?
+    @State private var pendingWorktreeRemoval: GitWorktree?
     @AppStorage("gitChangesViewMode") private var gitChangesViewModeRaw =
         GitChangesViewMode.flat.rawValue
 
@@ -33,6 +35,8 @@ struct GitInspectorView: View {
             switch session.gitInspectorSection {
             case .changes:
                 changesView
+            case .worktrees:
+                worktreesView
             case .history:
                 historyView
             }
@@ -359,6 +363,86 @@ struct GitInspectorView: View {
         }
     }
 
+    private var worktreesView: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Label(
+                    "Worktrees (\(session.gitWorktrees.count))",
+                    systemImage: "point.3.filled.connected.trianglepath.dotted"
+                )
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(theme.palette.textMuted)
+                .textCase(.uppercase)
+                Spacer()
+                Button("Add Worktree", systemImage: "plus") {
+                    isAddWorktreeSheetPresented = true
+                }
+                .buttonStyle(RafuIconButtonStyle(size: 24))
+                .help("Add a worktree")
+                Button("Refresh", systemImage: "arrow.clockwise") {
+                    Task { await session.loadWorktrees() }
+                }
+                .buttonStyle(RafuIconButtonStyle(size: 24))
+                .help("Refresh worktrees")
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 6)
+
+            if session.gitWorktrees.isEmpty {
+                ContentUnavailableView(
+                    "No Worktrees",
+                    systemImage: "point.3.connected.trianglepath.dotted",
+                    description: Text(
+                        "Add a worktree to run a branch — or an agent lane — in parallel.")
+                )
+                .frame(maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(session.gitWorktrees) { worktree in
+                        GitWorktreeRow(
+                            worktree: worktree,
+                            isCurrent: worktree.path == session.currentWorktreePath,
+                            openInNewWindow: { session.openWorktreeInNewWindow(worktree) },
+                            remove: worktree.isMain ? nil : { pendingWorktreeRemoval = worktree }
+                        )
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+            }
+        }
+        .padding(.top, 4)
+        .task(id: session.rootURL) { await session.loadWorktrees() }
+        .sheet(isPresented: $isAddWorktreeSheetPresented) {
+            GitAddWorktreeSheet(session: session)
+        }
+        .confirmationDialog(
+            "Remove worktree “\(pendingWorktreeRemoval?.name ?? "")”?",
+            isPresented: worktreeRemovalBinding
+        ) {
+            if let worktree = pendingWorktreeRemoval {
+                Button("Remove Worktree", role: .destructive) {
+                    pendingWorktreeRemoval = nil
+                    Task { await session.removeWorktree(worktree) }
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingWorktreeRemoval = nil }
+        } message: {
+            Text(
+                "The worktree's files are removed from disk. Git refuses if it has uncommitted changes or is locked; its branch is not deleted."
+            )
+        }
+    }
+
+    private var worktreeRemovalBinding: Binding<Bool> {
+        Binding(
+            get: { pendingWorktreeRemoval != nil },
+            set: { if !$0 { pendingWorktreeRemoval = nil } }
+        )
+    }
+
     private func changeRow(_ change: GitChange, scope: GitDiffScope) -> some View {
         GitChangeRow(
             change: change,
@@ -627,6 +711,158 @@ private struct GitStashRow: View {
     private var accessibilityText: String {
         let branch = entry.branch.map { ", branch \($0)" } ?? ""
         return "Stash \(entry.index), \(entry.message)\(branch)"
+    }
+}
+
+private struct GitWorktreeRow: View {
+    let worktree: GitWorktree
+    let isCurrent: Bool
+    let openInNewWindow: () -> Void
+    let remove: (() -> Void)?
+
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: isCurrent ? "checkmark.circle.fill" : "folder")
+                .foregroundStyle(isCurrent ? theme.palette.accent : theme.palette.textSecondary)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(worktree.name)
+                        .lineLimit(1)
+                        .foregroundStyle(theme.palette.textPrimary)
+                    if let branch = worktree.branch {
+                        chip(branch, color: theme.palette.accent)
+                    } else if worktree.isDetached {
+                        chip("detached", color: theme.palette.textMuted)
+                    }
+                    if worktree.isMain { chip("main worktree", color: theme.palette.textMuted) }
+                    if worktree.isLocked { chip("locked", color: theme.palette.warning) }
+                    if worktree.isPrunable { chip("prunable", color: theme.palette.error) }
+                }
+                Text(worktree.path)
+                    .font(.caption2)
+                    .foregroundStyle(theme.palette.textMuted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 4)
+            Menu("Worktree Actions", systemImage: "ellipsis.circle") {
+                actions
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+        }
+        .padding(.vertical, 3)
+        .contentShape(.rect)
+        .contextMenu { actions }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        Button("Open in New Window", systemImage: "macwindow.badge.plus") { openInNewWindow() }
+        Button("Copy Path", systemImage: "doc.on.doc") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(worktree.path, forType: .string)
+        }
+        if let remove {
+            Divider()
+            Button("Remove Worktree…", systemImage: "trash", role: .destructive) { remove() }
+        }
+    }
+
+    private func chip(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(
+                Capsule().fill(theme.palette.chipBackground)
+            )
+    }
+
+    private var accessibilityText: String {
+        var parts = ["Worktree \(worktree.name)"]
+        if isCurrent { parts.append("current") }
+        if let branch = worktree.branch { parts.append("branch \(branch)") }
+        if worktree.isLocked { parts.append("locked") }
+        if worktree.isPrunable { parts.append("prunable") }
+        return parts.joined(separator: ", ")
+    }
+}
+
+private struct GitAddWorktreeSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var session: WorkspaceSession
+    @State private var path = ""
+    @State private var branch = ""
+    @State private var createBranch = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Add Worktree")
+                    .font(.title2.weight(.semibold))
+                Text(
+                    "Check out a branch into a separate folder — ideal for running a branch or a CLI coding agent in parallel."
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
+
+            Form {
+                TextField("Folder path", text: $path, prompt: Text(defaultPathPrompt))
+                Toggle("Create a new branch", isOn: $createBranch)
+                TextField(
+                    createBranch ? "New branch name" : "Existing branch to check out",
+                    text: $branch)
+            }
+            .formStyle(.grouped)
+
+            HStack {
+                Button("Cancel", role: .cancel) { dismiss() }
+                Spacer()
+                Button("Add Worktree") {
+                    let resolvedPath = resolvedPath
+                    let submittedBranch = branch
+                    let submittedCreate = createBranch
+                    Task {
+                        await session.addWorktree(
+                            at: resolvedPath, branch: submittedBranch,
+                            createBranch: submittedCreate)
+                        dismiss()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!isValid)
+            }
+        }
+        .padding(20)
+        .frame(width: 460)
+    }
+
+    /// Sibling of the current workspace folder, matching the common
+    /// `../repo-branch` worktree convention.
+    private var defaultPathPrompt: String {
+        guard let root = session.rootURL else { return "/path/to/worktree" }
+        return root.deletingLastPathComponent().appending(path: "worktree").path
+    }
+
+    private var resolvedPath: URL {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return URL(filePath: defaultPathPrompt)
+        }
+        return URL(filePath: (trimmed as NSString).expandingTildeInPath)
+    }
+
+    private var isValid: Bool {
+        let trimmedBranch = branch.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmedBranch.isEmpty && !trimmedPath.isEmpty && !session.isGitBusy
     }
 }
 

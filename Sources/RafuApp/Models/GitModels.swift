@@ -353,6 +353,28 @@ nonisolated struct GitBlame: Hashable, Sendable {
     let lines: [GitBlameLine]
 }
 
+/// One entry from `git worktree list --porcelain`. `isMain` marks the
+/// primary worktree (first record). "Current" (the worktree Rafu has open) is
+/// not part of git's output — the session derives it by path match.
+nonisolated struct GitWorktree: Identifiable, Hashable, Sendable {
+    let path: String
+    let headOID: String?
+    let branch: String?
+    let isDetached: Bool
+    let isBare: Bool
+    let isMain: Bool
+    let isLocked: Bool
+    let lockReason: String?
+    let isPrunable: Bool
+
+    var id: String { path }
+
+    /// Last path component, used as the display name.
+    var name: String { (path as NSString).lastPathComponent }
+
+    var shortHead: String { String((headOID ?? "").prefix(8)) }
+}
+
 /// An in-progress merge (MERGE_HEAD exists). `headline` is the first content
 /// line of MERGE_MSG ("Merge branch 'x' into y"); `defaultMessage` is the
 /// full message with git's '#' comment lines stripped, suitable for
