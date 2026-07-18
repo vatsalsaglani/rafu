@@ -149,3 +149,31 @@ isolation and shared workspace state are integration concerns.
 - `docs/plans/phases/pre-initial-push-workbench.md`
 - `docs/plans/phases/git-depth-blame-stash-hunks.md`
 - `docs/decisions/0011-advanced-git-hunks-stash-blame.md`
+
+## File-tree Git status badges (2026-07-18)
+
+The sidebar decorates each file/folder row with a `git status --short`-style
+marker (`M`, `A`, `??`, `D`, `R`, `U`, …) via `GitSnapshot.treeBadges(workspaceRoot:)`
+(`Sources/RafuApp/Models/GitTreeBadge.swift`). Two nuances:
+
+- **Path frame.** `GitChange.path` is relative to the **repository root**
+  (`GitSnapshot.repositoryRoot`), which can sit *above* the opened workspace
+  folder. Each change is reduced to a standardized absolute path
+  (`repositoryRoot.appending(path:)`) and re-expressed relative to
+  `workspaceRoot`; changes outside the open subtree are dropped. The map is
+  keyed by **workspace-relative path** — the same identity
+  `WorkspaceFileNode.relativePath` uses — so row lookups need no per-row
+  symlink normalization (avoids the `/var` vs `/private/var` ambiguity that
+  bites absolute-path matching).
+- **Ancestor rollup.** Every ancestor directory of a change (up to, but
+  excluding, the workspace root) gets the most severe descendant status by a
+  fixed precedence (conflict > modified > renamed > typeChanged > added >
+  copied > deleted > untracked), so a change shows at every level without
+  expanding the tree.
+
+The badge map is cached on `WorkspaceSession.gitTreeBadges`, rebuilt from
+`gitSnapshot.didSet` — so it recomputes exactly once per snapshot refresh
+(open, FSEvents `gitChanged`, save, stage/unstage, stash) and never per row.
+Colors come from the existing `gitAdded`/`gitModified`/`gitDeleted`/
+`gitUntracked`/`gitConflict` palette tokens; the letter is never the sole
+channel (VoiceOver label + name tint for added/untracked/deleted).

@@ -177,7 +177,8 @@ private struct WorkspaceFileTreeItem: View {
         let base =
             FileTreeRow(
                 node: node,
-                isSelected: node.url.path == session.selectedTreePath
+                isSelected: node.url.path == session.selectedTreePath,
+                gitBadge: session.gitTreeBadges[node.relativePath]
             )
             .contentShape(.rect)
             .onTapGesture(count: 2) { session.open(node) }
@@ -272,16 +273,27 @@ private struct FileCreationSheet: View {
 private struct FileTreeRow: View {
     let node: WorkspaceFileNode
     var isSelected: Bool = false
+    var gitBadge: GitTreeBadge?
     @Environment(\.rafuTheme) private var theme
 
     var body: some View {
         let icon = FileIconProvider.icon(for: node.url, isDirectory: node.isDirectory)
-        Label {
-            Text(node.name)
-                .lineLimit(1)
-                .foregroundStyle(theme.palette.textPrimary)
-        } icon: {
-            FileIconView(icon: icon, size: 12)
+        HStack(spacing: 6) {
+            Label {
+                Text(node.name)
+                    .lineLimit(1)
+                    .foregroundStyle(nameColor)
+            } icon: {
+                FileIconView(icon: icon, size: 12)
+            }
+            .layoutPriority(1)
+            Spacer(minLength: 4)
+            if let gitBadge {
+                Text(gitBadge.shortCode)
+                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(gitBadge.color(in: theme.palette))
+                    .accessibilityLabel(gitBadge.accessibilityLabel)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 2)
@@ -293,5 +305,18 @@ private struct FileTreeRow: View {
         .help(node.relativePath)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityHint(node.isDirectory ? "Folder" : "Double-click to open")
+    }
+
+    /// Tints the file name for statuses whose meaning is otherwise carried only
+    /// by a color-coded letter, keeping the row legible while echoing the
+    /// familiar editor convention. Untracked/added files read greenish, deleted
+    /// files dimmed; everything else keeps the primary text color.
+    private var nameColor: Color {
+        guard let gitBadge, !node.isDirectory else { return theme.palette.textPrimary }
+        switch gitBadge.kind {
+        case .untracked, .added, .copied: return gitBadge.color(in: theme.palette)
+        case .deleted: return theme.palette.textMuted
+        default: return theme.palette.textPrimary
+        }
     }
 }

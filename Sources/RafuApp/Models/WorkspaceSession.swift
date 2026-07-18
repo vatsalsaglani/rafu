@@ -74,7 +74,13 @@ final class WorkspaceSession {
     var pendingCloseDocument: EditorDocument?
     var pendingFileCreation: FileCreationRequest?
     var pendingFileName = ""
-    var gitSnapshot: GitSnapshot?
+    var gitSnapshot: GitSnapshot? {
+        didSet { rebuildGitTreeBadges() }
+    }
+    /// File-tree Git decorations keyed by workspace-relative path, rebuilt from
+    /// `gitSnapshot` whenever it changes so tree rows never recompute the map
+    /// per render. Empty when there is no repository or no changes.
+    private(set) var gitTreeBadges: [String: GitTreeBadge] = [:]
     var gitSelectedChangeIDs: Set<String> = []
     var gitBranchSnapshot: GitBranchSnapshot?
     var gitHistoryPage: GitHistoryPage?
@@ -2153,6 +2159,17 @@ final class WorkspaceSession {
     private func reconcileGitSelection() {
         let liveIDs = Set(gitSnapshot?.changes.map(\.id) ?? [])
         gitSelectedChangeIDs.formIntersection(liveIDs)
+    }
+
+    /// Recomputes `gitTreeBadges` from the current snapshot. Called from
+    /// `gitSnapshot.didSet`, so every snapshot refresh (and clear) keeps the
+    /// file-tree decorations in sync without any per-row work.
+    private func rebuildGitTreeBadges() {
+        guard let snapshot = gitSnapshot, let rootURL else {
+            if !gitTreeBadges.isEmpty { gitTreeBadges = [:] }
+            return
+        }
+        gitTreeBadges = snapshot.treeBadges(workspaceRoot: rootURL)
     }
 
     private func resetGitWorkbenchState() {
