@@ -9,6 +9,14 @@ struct MarkdownPreviewView: View {
     let document: EditorDocument
     private let fileService = WorkspaceFileService()
 
+    /// Directory the current document lives in, used to resolve relative
+    /// and absolute local image/link references in the rendered Markdown
+    /// (`Markdown(_:baseURL:imageBaseURL:)`). Cheap `URL` manipulation, safe
+    /// to recompute per render.
+    private var documentDirectory: URL {
+        document.url.deletingLastPathComponent()
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 18) {
@@ -23,38 +31,41 @@ struct MarkdownPreviewView: View {
                 ForEach(segments) { segment in
                     switch segment.content {
                     case .markdown(let source):
-                        Markdown(source)
-                            .markdownTheme(.basic)
-                            .markdownTextStyle {
-                                ForegroundColor(Color(rafuHex: theme.ui.textPrimary))
-                                FontSize(15)
-                            }
-                            .markdownTextStyle(\.link) {
-                                ForegroundColor(Color(rafuHex: theme.ui.accent))
-                            }
-                            .markdownBlockStyle(\.table) { configuration in
-                                configuration.label
-                                    .markdownTableBorderStyle(
-                                        .init(
-                                            color: Color(rafuHex: theme.ui.borderSubtle),
-                                            width: 1
-                                        )
+                        Markdown(
+                            source, baseURL: documentDirectory, imageBaseURL: documentDirectory
+                        )
+                        .markdownImageProvider(LocalFileImageProvider())
+                        .markdownTheme(.basic)
+                        .markdownTextStyle {
+                            ForegroundColor(Color(rafuHex: theme.ui.textPrimary))
+                            FontSize(15)
+                        }
+                        .markdownTextStyle(\.link) {
+                            ForegroundColor(Color(rafuHex: theme.ui.accent))
+                        }
+                        .markdownBlockStyle(\.table) { configuration in
+                            configuration.label
+                                .markdownTableBorderStyle(
+                                    .init(
+                                        color: Color(rafuHex: theme.ui.borderSubtle),
+                                        width: 1
                                     )
-                                    .markdownTableBackgroundStyle(
-                                        .alternatingRows(
-                                            Color(rafuHex: theme.ui.elevatedBackground),
-                                            Color.clear,
-                                            header: Color(rafuHex: theme.ui.selection)
-                                        )
+                                )
+                                .markdownTableBackgroundStyle(
+                                    .alternatingRows(
+                                        Color(rafuHex: theme.ui.elevatedBackground),
+                                        Color.clear,
+                                        header: Color(rafuHex: theme.ui.selection)
                                     )
-                            }
-                            .markdownBlockStyle(\.codeBlock) { configuration in
-                                codeBlockCard(configuration)
-                            }
-                            .tint(Color(rafuHex: theme.ui.accent))
-                            .textSelection(.enabled)
-                            .markdownCodeSyntaxHighlighter(
-                                TreeSitterCodeSyntaxHighlighter(theme: theme))
+                                )
+                        }
+                        .markdownBlockStyle(\.codeBlock) { configuration in
+                            codeBlockCard(configuration)
+                        }
+                        .tint(Color(rafuHex: theme.ui.accent))
+                        .textSelection(.enabled)
+                        .markdownCodeSyntaxHighlighter(
+                            TreeSitterCodeSyntaxHighlighter(theme: theme))
 
                     case .mermaid(let result):
                         MermaidDiagramView(result: result)
@@ -70,14 +81,55 @@ struct MarkdownPreviewView: View {
         .task(id: "\(document.url.path)#\(document.revision)") {
             do {
                 let source = try await fileService.readText(at: document.url)
-                segments = MarkdownPreviewSegmentParser().parse(source)
-                errorMessage = nil
+                await applySegments(from: source)
             } catch is CancellationError {
                 return
             } catch {
                 errorMessage = error.localizedDescription
             }
         }
+        // Live-buffer preview for `.split` mode: re-parses from the mounted
+        // editor's in-memory text (never disk) on a trailing debounce after
+        // each edit delta. View-lifetime (no `.task(id:)`), so it starts
+        // once per mount and stops when this view is torn down —
+        // `MarkdownEditorPresentation.renderedPreview` already mounts this
+        // view with `.id(document.id)`, so a document switch remounts fresh.
+        // In pure `.preview` mode no `CodeEditorView` is mounted, so
+        // `textSnapshotProvider` stays `nil` and no edit deltas are ever
+        // recorded — this task is inert there, and the disk-read `.task`
+        // above remains the only source of truth for pure preview and for
+        // external reloads.
+        .task {
+            // Trailing debounce: each new delta cancels the previous
+            // pending refresh `Task` before its sleep completes, so only
+            // the last delta in a burst actually reparses. The `Task`
+            // reference itself is the cancellation token; `Task.sleep`'s
+            // `CancellationError` is swallowed by returning early.
+            var pendingRefresh: Task<Void, Never>?
+            for await _ in document.editDeltas() {
+                pendingRefresh?.cancel()
+                pendingRefresh = Task {
+                    do {
+                        try await Task.sleep(for: .milliseconds(200))
+                    } catch {
+                        return
+                    }
+                    guard let snapshot = document.textSnapshotProvider else { return }
+                    let text = snapshot()
+                    await applySegments(from: text)
+                }
+            }
+        }
+    }
+
+    /// Parses `source` into preview segments off the main actor and applies
+    /// the result. `source` is always a local value — a disk read or a
+    /// one-shot editor text snapshot — never retained; only the parsed
+    /// `segments` persist in view state.
+    private func applySegments(from source: String) async {
+        let parsed = await Task.detached { MarkdownPreviewSegmentParser().parse(source) }.value
+        segments = parsed
+        errorMessage = nil
     }
 
     /// Renders a fenced code block as a flat card: a header row (language
