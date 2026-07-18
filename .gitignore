@@ -17,3 +17,5 @@ remote-agent/target/
 .claude/worktrees
 
 error-report.txt
+
+docs/issues/images/
