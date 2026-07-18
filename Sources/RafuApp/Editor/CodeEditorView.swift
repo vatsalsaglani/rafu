@@ -6,6 +6,10 @@ struct CodeEditorView: NSViewRepresentable {
     let theme: RafuTheme
     let findState: DocumentFindState?
     let gitLineChangesProvider: (@MainActor () async -> GitGutterLineChanges?)?
+    /// Invoked after a successful save so the workspace can refresh Git state
+    /// (sidebar badges, Source Control panel). Rafu's FSEvents watcher ignores
+    /// its own writes, so a self-save is otherwise invisible to Git refresh.
+    let requestGitRefresh: (@MainActor () -> Void)?
     let dropForwarding: EditorDropForwarding?
     let navigate: (@MainActor (NavigationTargetKind) -> Void)?
     let hover: (@MainActor (Int) async -> EditorHoverInfo?)?
@@ -15,6 +19,7 @@ struct CodeEditorView: NSViewRepresentable {
         theme: RafuTheme,
         findState: DocumentFindState? = nil,
         gitLineChangesProvider: (@MainActor () async -> GitGutterLineChanges?)? = nil,
+        requestGitRefresh: (@MainActor () -> Void)? = nil,
         dropForwarding: EditorDropForwarding? = nil,
         navigate: (@MainActor (NavigationTargetKind) -> Void)? = nil,
         hover: (@MainActor (Int) async -> EditorHoverInfo?)? = nil
@@ -23,6 +28,7 @@ struct CodeEditorView: NSViewRepresentable {
         self.theme = theme
         self.findState = findState
         self.gitLineChangesProvider = gitLineChangesProvider
+        self.requestGitRefresh = requestGitRefresh
         self.dropForwarding = dropForwarding
         self.navigate = navigate
         self.hover = hover
@@ -76,6 +82,7 @@ struct CodeEditorView: NSViewRepresentable {
         context.coordinator.textView = textView
         context.coordinator.gutterRuler = gutter
         context.coordinator.gitLineChangesProvider = gitLineChangesProvider
+        context.coordinator.requestGitRefresh = requestGitRefresh
         context.coordinator.installSyntaxPipeline(for: textView)
         textView.textStorage?.delegate = context.coordinator
         context.coordinator.installFindController(for: textView)
@@ -108,6 +115,7 @@ struct CodeEditorView: NSViewRepresentable {
         (scrollView as? EditorDropForwardingScrollView)?.dropForwarding = dropForwarding
         context.coordinator.theme = theme
         context.coordinator.gitLineChangesProvider = gitLineChangesProvider
+        context.coordinator.requestGitRefresh = requestGitRefresh
         context.coordinator.updateSyntaxPipeline()
         context.coordinator.updateFindState(findState)
         context.coordinator.applyThemeDecorations()
@@ -172,6 +180,7 @@ struct CodeEditorView: NSViewRepresentable {
         var loadTask: Task<Void, Never>?
         var gitMarkersTask: Task<Void, Never>?
         var gitLineChangesProvider: (@MainActor () async -> GitGutterLineChanges?)?
+        var requestGitRefresh: (@MainActor () -> Void)?
         private(set) var findState: DocumentFindState?
         private var findController: NSTextViewFindController?
         private var syntaxPipeline: NeonSyntaxHighlightingPipeline?
@@ -364,6 +373,7 @@ struct CodeEditorView: NSViewRepresentable {
                     loadedRevision = document.revision
                     recordDiskModificationDate()
                     refreshGitMarkers()
+                    requestGitRefresh?()
                 } catch {
                     document.errorMessage = error.localizedDescription
                 }
