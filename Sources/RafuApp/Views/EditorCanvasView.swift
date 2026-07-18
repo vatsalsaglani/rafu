@@ -153,7 +153,13 @@ private struct EditorGroupView: View {
                                     guard let session, let document else { return nil }
                                     return await session.hoverInfo(
                                         at: document.url, utf16Offset: offset)
-                                }
+                                },
+                                inlineBlameEnabled: session.isInlineBlameEnabled,
+                                inlineBlameProvider: { [weak session, weak document] in
+                                    guard let session, let document else { return nil }
+                                    return await session.inlineBlame(for: document)
+                                },
+                                gitPeekActions: gitPeekActions(for: document)
                             )
                             .id(document.id)
                             .opacity(isActive ? 1 : 0)
@@ -200,6 +206,45 @@ private struct EditorGroupView: View {
 
     private var isFindPresented: Bool {
         session.isDocumentFindPresented && session.isFocusedGroup(group.id)
+    }
+
+    /// GX2 hunk-peek/blame-hover wiring for `document`, threaded into
+    /// `CodeEditorView`. Stage Hunk and the working-tree diff provider go
+    /// through `WorkspaceSession`'s peek-scoped methods; Open Full Diff maps
+    /// to the standalone diff canvas; Show in History jumps the History
+    /// selection (and reveals Source Control if it isn't already open);
+    /// Open Blame Canvas reuses the existing read-only blame path.
+    private func gitPeekActions(for document: EditorDocument) -> GitPeekActions {
+        GitPeekActions(
+            workingTreeDiffProvider: { [weak session, weak document] in
+                guard let session, let document else { return nil }
+                return await session.workingTreeDiff(for: document)
+            },
+            stageHunk: { [weak session] hunk, diff in
+                await session?.stagePeekHunk(hunk, in: diff)
+            },
+            openFullDiff: { [weak session, weak document] in
+                guard let session, let document else { return }
+                session.openWorkingTreeDiff(for: document)
+            },
+            showCommitInHistory: { [weak session] line in
+                guard let session else { return }
+                session.navigatorMode = .sourceControl
+                session.gitInspectorSection = .history
+                session.gitSelectedHistoryCommitID = line.commitID
+                if let commit = session.gitHistoryPage?.commits.first(where: {
+                    $0.id == line.commitID
+                }) {
+                    Task { await session.gitSelectHistoryCommit(commit) }
+                }
+            },
+            openBlameCanvas: { [weak session] in
+                Task { await session?.openBlameForSelectedFile() }
+            },
+            isBusy: { [weak session] in
+                session?.isGitBusy == true || session?.isGitHunkActionBusy == true
+            }
+        )
     }
 
     /// Forwards drag events from the AppKit editor scroll view into the same
@@ -1295,6 +1340,9 @@ private struct EditorDocumentView: View {
     var dropForwarding: EditorDropForwarding? = nil
     var navigate: (@MainActor (NavigationTargetKind) -> Void)? = nil
     var hover: (@MainActor (Int) async -> EditorHoverInfo?)? = nil
+    var inlineBlameEnabled: Bool = false
+    var inlineBlameProvider: (@MainActor () async -> GitBlame?)? = nil
+    var gitPeekActions: GitPeekActions? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1313,7 +1361,10 @@ private struct EditorDocumentView: View {
                         requestGitRefresh: requestGitRefresh,
                         dropForwarding: dropForwarding,
                         navigate: navigate,
-                        hover: hover
+                        hover: hover,
+                        inlineBlameEnabled: inlineBlameEnabled,
+                        inlineBlameProvider: inlineBlameProvider,
+                        gitPeekActions: gitPeekActions
                     )
                 } else {
                     CodeEditorView(
@@ -1324,7 +1375,10 @@ private struct EditorDocumentView: View {
                         requestGitRefresh: requestGitRefresh,
                         dropForwarding: dropForwarding,
                         navigate: navigate,
-                        hover: hover
+                        hover: hover,
+                        inlineBlameEnabled: inlineBlameEnabled,
+                        inlineBlameProvider: inlineBlameProvider,
+                        gitPeekActions: gitPeekActions
                     )
                 }
             }
@@ -1401,6 +1455,9 @@ private struct MarkdownEditorPresentation: View {
     var dropForwarding: EditorDropForwarding? = nil
     var navigate: (@MainActor (NavigationTargetKind) -> Void)? = nil
     var hover: (@MainActor (Int) async -> EditorHoverInfo?)? = nil
+    var inlineBlameEnabled: Bool = false
+    var inlineBlameProvider: (@MainActor () async -> GitBlame?)? = nil
+    var gitPeekActions: GitPeekActions? = nil
 
     var body: some View {
         switch document.markdownMode {
@@ -1426,7 +1483,10 @@ private struct MarkdownEditorPresentation: View {
             requestGitRefresh: requestGitRefresh,
             dropForwarding: dropForwarding,
             navigate: navigate,
-            hover: hover
+            hover: hover,
+            inlineBlameEnabled: inlineBlameEnabled,
+            inlineBlameProvider: inlineBlameProvider,
+            gitPeekActions: gitPeekActions
         )
     }
 

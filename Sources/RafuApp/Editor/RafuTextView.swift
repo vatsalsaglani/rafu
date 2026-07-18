@@ -106,6 +106,46 @@ final class RafuTextView: NSTextView {
         didSet { if oldValue != matchedBracketRanges { setNeedsDisplay(visibleRect) } }
     }
 
+    // MARK: - GX1 inline blame
+
+    /// The GX1 ghost-text annotation to draw after the caret line, or `nil`
+    /// to draw nothing. Set by `CodeEditorView.Coordinator`'s debounced
+    /// scheduler; drawing never touches `NSTextStorage`.
+    var inlineBlameAnnotation: InlineBlameAnnotation? {
+        didSet { if oldValue != inlineBlameAnnotation { setNeedsDisplay(visibleRect) } }
+    }
+
+    var inlineBlameColor: NSColor? {
+        didSet { if oldValue != inlineBlameColor { setNeedsDisplay(visibleRect) } }
+    }
+
+    /// Bounding rect of the currently drawn inline-blame ghost text, in this
+    /// view's coordinate space — `.zero` when nothing is drawn. Read by
+    /// `mouseMoved`'s GX2 blame-hover hit test; written only by
+    /// `drawInlineBlameAnnotation(in:)`.
+    private(set) var inlineBlameRect: NSRect = .zero
+
+    private static let inlineBlameLeadingPadding: CGFloat = 24
+
+    // MARK: - GX2 hunk peek / blame hover
+
+    /// Peek-popover action for a gutter change-strip click, wired by
+    /// `CodeEditorView.Coordinator` (`EditorGutterRulerView.peekAction`
+    /// ultimately calls into this same path). Builds the hunk-peek card and
+    /// presents it via `presentPeekPopover(_:atLine:)`. `nil` disables
+    /// gutter-click peeking.
+    var peekAction: (@MainActor (Int) -> Void)?
+
+    /// Blame-hover action for the inline-blame ghost annotation, wired by
+    /// `CodeEditorView.Coordinator`: builds the blame-hover card from its
+    /// already-fetched blame line and presents it via
+    /// `presentPeekPopover(_:atLine:)`. `nil` disables blame hover.
+    var blameHoverAction: (@MainActor () -> Void)?
+
+    private var peekPopover: NSPopover?
+    private var peekClipObserver: NSObjectProtocol?
+    private var blameHoverDebounceTask: Task<Void, Never>?
+
     /// Caret-driven navigation entry point, shared by ⌘-click and the editor
     /// context menu. Called after the caret has been moved to the clicked
     /// character, with the requested `NavigationTargetKind`. `nil` (the
@@ -153,6 +193,7 @@ final class RafuTextView: NSTextView {
     /// a shown hover tooltip.
     override func mouseDown(with event: NSEvent) {
         dismissHover()
+        closePeekPopover()
         guard !hasMarkedText() else {
             super.mouseDown(with: event)
             return
@@ -200,9 +241,29 @@ final class RafuTextView: NSTextView {
 
     override func mouseMoved(with event: NSEvent) {
         super.mouseMoved(with: event)
-        guard hoverAction != nil else { return }
+        guard hoverAction != nil || blameHoverAction != nil else { return }
         let point = convert(event.locationInWindow, from: nil)
-        scheduleHover(at: point)
+        // LSP hover keeps priority: only when the pointer is NOT over a
+        // navigable identifier does a blame-hover target (the ghost
+        // annotation) get a chance.
+        if hoverAction != nil {
+            let index = characterIndexForInsertion(at: point)
+            let length = (string as NSString).length
+            if index >= 0, index <= length, IdentifierUnderCaret.word(in: string, at: index) != nil
+            {
+                scheduleHover(at: point)
+                return
+            }
+        }
+        if blameHoverAction != nil, inlineBlameRect != .zero, inlineBlameRect.contains(point) {
+            scheduleBlameHover()
+            return
+        }
+        hoverDebounceTask?.cancel()
+        hoverDebounceTask = nil
+        hoverTargetOffset = nil
+        blameHoverDebounceTask?.cancel()
+        blameHoverDebounceTask = nil
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -213,12 +274,32 @@ final class RafuTextView: NSTextView {
         hoverDebounceTask?.cancel()
         hoverDebounceTask = nil
         hoverTargetOffset = nil
+        blameHoverDebounceTask?.cancel()
+        blameHoverDebounceTask = nil
+    }
+
+    /// Debounced blame-hover resolve: after `hoverDelay`, invokes
+    /// `blameHoverAction`, which builds and presents the blame-hover card
+    /// itself (see the property doc comment). A no-op when a peek popover is
+    /// already shown, so an in-flight card is never replaced by a stale
+    /// re-trigger from the same hover.
+    private func scheduleBlameHover() {
+        guard peekPopover == nil, blameHoverDebounceTask == nil, let blameHoverAction else {
+            return
+        }
+        blameHoverDebounceTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.hoverDelay)
+            if Task.isCancelled { return }
+            guard self != nil else { return }
+            blameHoverAction()
+        }
     }
 
     override func keyDown(with event: NSEvent) {
-        // Any keystroke (including Escape) dismisses a shown tooltip before the
-        // edit/command is processed.
+        // Any keystroke (including Escape) dismisses a shown tooltip/peek
+        // before the edit/command is processed.
         dismissHover()
+        closePeekPopover()
         if event.keyCode == 53, hasMultipleCarets, !hasMarkedText() {
             collapseToPrimaryCaret()
             return
@@ -660,6 +741,104 @@ final class RafuTextView: NSTextView {
         }
     }
 
+    // MARK: - GX2 peek popover (hunk peek / blame hover)
+
+    /// Presents a peek-style popover (GX2 hunk peek or blame hover) anchored
+    /// to `line`'s fragment rect, reusing `showHoverTooltip`'s anchor-rect
+    /// math. Closes any previously shown peek popover first (only one peek
+    /// popover is ever shown at a time). A no-op when `line` has no fragment
+    /// rect (out of range).
+    func presentPeekPopover<Content: View>(
+        _ hostingController: NSHostingController<Content>, atLine line: Int
+    ) {
+        guard let anchorRect = fragmentRect(forLine: line) else { return }
+        closePeekPopover()
+
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        hostingController.sizingOptions = [.preferredContentSize]
+        popover.contentViewController = hostingController
+        popover.show(relativeTo: anchorRect, of: self, preferredEdge: .maxY)
+        peekPopover = popover
+        observeClipViewForPeekDismissal()
+    }
+
+    /// Closes the peek popover (if shown) and cancels any pending blame-hover
+    /// resolve. Called on edit, keystroke, scroll, click, and teardown —
+    /// the same discipline `dismissHover()` follows for the identifier
+    /// tooltip.
+    func closePeekPopover() {
+        blameHoverDebounceTask?.cancel()
+        blameHoverDebounceTask = nil
+        peekPopover?.close()
+        peekPopover = nil
+        if let peekClipObserver {
+            NotificationCenter.default.removeObserver(peekClipObserver)
+            self.peekClipObserver = nil
+        }
+    }
+
+    private func observeClipViewForPeekDismissal() {
+        guard let clipView = enclosingScrollView?.contentView else { return }
+        clipView.postsBoundsChangedNotifications = true
+        peekClipObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification, object: clipView, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.closePeekPopover() }
+        }
+    }
+
+    /// Character range of 1-based `line` in the current buffer, or `nil` if
+    /// the buffer has fewer lines. A bounded forward scan — acceptable only
+    /// because this runs exclusively on an explicit peek/hover interaction,
+    /// never per keystroke or per frame.
+    private func lineRange(forLine line: Int, in content: NSString) -> NSRange? {
+        guard line >= 1 else { return nil }
+        var currentLine = 1
+        var location = 0
+        while true {
+            var lineEnd = 0
+            var contentsEnd = 0
+            content.getLineStart(
+                nil, end: &lineEnd, contentsEnd: &contentsEnd,
+                for: NSRange(location: location, length: 0)
+            )
+            if currentLine == line {
+                return NSRange(location: location, length: lineEnd - location)
+            }
+            if lineEnd >= content.length {
+                // A trailing newline yields one final empty line.
+                if contentsEnd < lineEnd, currentLine + 1 == line {
+                    return NSRange(location: lineEnd, length: 0)
+                }
+                return nil
+            }
+            location = lineEnd
+            currentLine += 1
+        }
+    }
+
+    /// Fragment rect (view coordinates) of 1-based `line`, or `nil` when the
+    /// line cannot be located or the layout manager/container are missing.
+    private func fragmentRect(forLine line: Int) -> NSRect? {
+        guard let layoutManager, let textContainer else { return nil }
+        let content = string as NSString
+        guard let range = lineRange(forLine: line, in: content) else { return nil }
+        let origin = textContainerOrigin
+        var rect: NSRect
+        if range.length == 0, range.location >= content.length {
+            rect = layoutManager.extraLineFragmentRect
+        } else {
+            let glyphRange = layoutManager.glyphRange(
+                forCharacterRange: range, actualCharacterRange: nil)
+            rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+        }
+        rect.origin.x += origin.x
+        rect.origin.y += origin.y
+        return rect
+    }
+
     // MARK: - Context menu
 
     /// Augments the default editor context menu (copy/paste/lookup, from
@@ -718,6 +897,60 @@ final class RafuTextView: NSTextView {
         drawCurrentLineHighlight(in: rect)
         drawIndentGuides(in: rect)
         drawBracketBorders()
+        drawInlineBlameAnnotation(in: rect)
+    }
+
+    /// Draws the GX1 ghost-text annotation after the caret line's content,
+    /// in `inlineBlameColor` at ~85% of the editor font size. Purely
+    /// additive drawing — never touches `NSTextStorage` attributes, so the
+    /// syntax pipeline can re-apply storage attributes freely regardless of
+    /// blame state. `CodeEditorView.Coordinator` clears
+    /// `inlineBlameAnnotation` synchronously the moment the caret moves to a
+    /// different line, so this always trusts the caret's CURRENT line.
+    private func drawInlineBlameAnnotation(in rect: NSRect) {
+        guard let annotation = inlineBlameAnnotation,
+            let inlineBlameColor,
+            let layoutManager, let textContainer,
+            !hasMultipleCarets,
+            selectedRange().length == 0
+        else {
+            if inlineBlameRect != .zero { inlineBlameRect = .zero }
+            return
+        }
+        let content = string as NSString
+        let caret = min(selectedRange().location, content.length)
+        let lineRange = content.lineRange(for: NSRange(location: caret, length: 0))
+        let origin = textContainerOrigin
+
+        let fragmentRect: NSRect
+        if lineRange.length == 0 {
+            fragmentRect = layoutManager.extraLineFragmentRect
+        } else {
+            let glyphRange = layoutManager.glyphRange(
+                forCharacterRange: lineRange, actualCharacterRange: nil)
+            fragmentRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+        }
+        guard fragmentRect.height > 0 else {
+            inlineBlameRect = .zero
+            return
+        }
+
+        let baseFont =
+            font ?? .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        let annotationFont =
+            NSFont(descriptor: baseFont.fontDescriptor, size: baseFont.pointSize * 0.85)
+            ?? .monospacedSystemFont(ofSize: baseFont.pointSize * 0.85, weight: .regular)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: annotationFont, .foregroundColor: inlineBlameColor,
+        ]
+        let label = annotation.text as NSString
+        let size = label.size(withAttributes: attributes)
+        let x = fragmentRect.maxX + origin.x + Self.inlineBlameLeadingPadding
+        let y = fragmentRect.minY + origin.y + (fragmentRect.height - size.height) / 2
+        let drawRect = NSRect(x: x, y: y, width: size.width, height: size.height)
+        inlineBlameRect = drawRect
+        guard drawRect.intersects(rect) else { return }
+        label.draw(at: drawRect.origin, withAttributes: attributes)
     }
 
     private func drawCurrentLineHighlight(in rect: NSRect) {

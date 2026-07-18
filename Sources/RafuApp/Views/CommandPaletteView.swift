@@ -660,6 +660,34 @@ struct CommandPaletteView: View {
             )
         }
 
+        commands.append(
+            .init(
+                id: "git.toggle-inline-blame",
+                title: "Toggle Inline Blame",
+                detail: session.isInlineBlameEnabled ? "On" : "Off",
+                symbolName: "text.append",
+                keywords: ["git", "blame", "annotation", "ghost", "author"]
+            ) {
+                dismiss()
+                session.toggleInlineBlame()
+            }
+        )
+
+        if session.selectedDocument != nil, session.gitSnapshot != nil {
+            commands.append(
+                .init(
+                    id: "git.peek-change-at-line",
+                    title: "Peek Change at Line",
+                    detail: "Stage or view the hunk at the caret",
+                    symbolName: "text.line.first.and.arrowtriangle.forward",
+                    keywords: ["git", "hunk", "diff", "peek", "stage"]
+                ) {
+                    dismiss()
+                    session.peekChangeAtCaret()
+                }
+            )
+        }
+
         for choice in RafuThemeChoice.allCases {
             commands.append(
                 .init(

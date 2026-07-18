@@ -33,6 +33,12 @@ final class WorkspaceSession {
         let isDirectory: Bool
     }
 
+    /// Cache key for `workingTreeDiffCache` — see its doc comment.
+    private struct WorkingTreeDiffCacheKey: Hashable {
+        let path: String
+        let revision: Int
+    }
+
     var descriptor: WorkspaceDescriptor?
     var navigatorMode: WorkspaceNavigatorMode = .files {
         didSet { persistWorkspaceState() }
@@ -94,6 +100,15 @@ final class WorkspaceSession {
     var gitWorktrees: [GitWorktree] = []
     var isGitWorktreesLoading = false
     var gitOpenBlame: GitBlame?
+    /// Per-window GX1 inline-blame ghost-annotation toggle (View menu /
+    /// command palette "Toggle Inline Blame"). Off by default (ADR 0013,
+    /// GD2 — a calm default) and deliberately NOT persisted across
+    /// launches: every new window starts with it off.
+    var isInlineBlameEnabled = false
+    /// Set at the end of a successful explicit `gitFetch(remote:)` — the
+    /// GX3 commit-graph header's "last fetched" label. Never advances on
+    /// its own; Rafu never fetches automatically.
+    var gitLastFetchedAt: Date?
     var gitCommitMessage = ""
     var isGeneratingAICommitMessage = false
     var aiCommitGenerationError: String?
@@ -164,6 +179,17 @@ final class WorkspaceSession {
 
     @ObservationIgnored
     private let gitService = GitService()
+
+    /// GX1 single-entry cache backing `inlineBlame(for:)` — retains only the
+    /// active file's blame (see `InlineBlameStore`).
+    @ObservationIgnored
+    private var inlineBlameStore = InlineBlameStore()
+
+    /// GX2 single-entry cache backing `workingTreeDiff(for:)`, mirroring
+    /// `InlineBlameStore`'s "active file only" retention: keyed by
+    /// (repo-relative path, buffer revision), evicted wholesale by a new key.
+    @ObservationIgnored
+    private var workingTreeDiffCache: (key: WorkingTreeDiffCacheKey, diff: GitFileDiff)?
 
     @ObservationIgnored
     private let aiConfigurationStore = UserDefaultsAIProviderConfigurationStore()
@@ -1000,6 +1026,41 @@ final class WorkspaceSession {
             }
             reconcileGitSelection()
         } catch {
+            reportGitError(error)
+        }
+    }
+
+    /// Appends the next page of commit history to `gitHistoryPage`,
+    /// preserving `hasMore`'s existing `commits.count == requestedCount`
+    /// formula by carrying `requestedCount` forward across the merge —
+    /// `hasMore` is true after this exactly when the freshly fetched page
+    /// was itself full (100 commits), which is the honest signal that more
+    /// history may exist. `refreshGit()`'s initial single-page load is
+    /// unchanged; this is the explicit "Load More" continuation only —
+    /// never automatic, never a background poll (GX3, ADR 0013).
+    func loadMoreHistory() async {
+        guard let rootURL, let currentPage = gitHistoryPage, currentPage.hasMore, !isGitBusy else {
+            return
+        }
+        isGitBusy = true
+        defer { isGitBusy = false }
+        do {
+            let nextPage = try await gitService.history(
+                at: rootURL, limit: 100, offset: currentPage.commits.count)
+            guard self.rootURL == rootURL,
+                let existing = gitHistoryPage,
+                existing.commits.count == currentPage.commits.count,
+                existing.offset == currentPage.offset
+            else { return }
+            gitHistoryPage = GitHistoryPage(
+                commits: existing.commits + nextPage.commits,
+                offset: existing.offset,
+                requestedCount: existing.commits.count + nextPage.requestedCount
+            )
+        } catch is CancellationError {
+            return
+        } catch {
+            guard self.rootURL == rootURL else { return }
             reportGitError(error)
         }
     }
@@ -1844,6 +1905,123 @@ final class WorkspaceSession {
         gitOpenBlame = nil
     }
 
+    /// Resolves `document`'s workspace URL to a Git-repository-relative
+    /// path, exactly like the resolution `gutterLineChanges(for:)` and
+    /// `openBlameForSelectedFile()` perform inline. `nil` when there is no
+    /// repository or the file lives outside it — callers skip without
+    /// spawning any process. Shared by the GX1 inline-blame and GX2
+    /// hunk-peek/blame-hover lookups so both stay consistent with the
+    /// existing gutter/blame resolution.
+    private func gitRepositoryRelativePath(for document: EditorDocument) -> String? {
+        guard let gitSnapshot, let repositoryRoot = gitSnapshot.repositoryRoot ?? rootURL else {
+            return nil
+        }
+        let rootPath = repositoryRoot.standardizedFileURL.path
+        let filePath = document.url.standardizedFileURL.path
+        guard filePath.hasPrefix(rootPath + "/") else { return nil }
+        let relativePath = String(filePath.dropFirst(rootPath.count + 1))
+        return relativePath.isEmpty ? nil : relativePath
+    }
+
+    // MARK: - GX1 inline blame
+
+    /// Toggles the per-window inline-blame ghost annotation (View menu /
+    /// command palette "Toggle Inline Blame"). Not persisted (ADR 0013, GD2).
+    func toggleInlineBlame() {
+        isInlineBlameEnabled.toggle()
+        if !isInlineBlameEnabled { inlineBlameStore.invalidate() }
+    }
+
+    /// Computes (or returns the cached) `GitBlame` for `document`'s GX1
+    /// inline-blame annotation. Returns `nil` — no process spawned, no cache
+    /// touched — when inline blame is off, there is no repository, the file
+    /// lives outside it, the buffer is dirty (blame would be stale against
+    /// unsaved edits — the data-safety reason inline blame never runs
+    /// between keystrokes), or the document is guard-suppressed (the same
+    /// large/pathological-file guard that suppresses syntax and symbols).
+    func inlineBlame(for document: EditorDocument) async -> GitBlame? {
+        guard isInlineBlameEnabled, !document.isDirty, !document.suppressesSyntax,
+            let gitSnapshot, let repositoryRoot = gitSnapshot.repositoryRoot ?? rootURL,
+            let relativePath = gitRepositoryRelativePath(for: document)
+        else { return nil }
+
+        let key = InlineBlameCacheKey(
+            path: relativePath, headOID: gitSnapshot.headOID, revision: document.revision)
+        if let cached = inlineBlameStore.blame(for: key) { return cached }
+        do {
+            let blame = try await gitService.blame(
+                forRelativePath: relativePath, at: repositoryRoot)
+            inlineBlameStore.store(blame, for: key)
+            return blame
+        } catch {
+            return nil
+        }
+    }
+
+    // MARK: - GX2 hunk peek / blame hover
+
+    /// The working-tree diff for `document`, used by the GX2 hunk-peek
+    /// popover. Cached by (repo-relative path, buffer revision) — a single
+    /// entry, mirroring `InlineBlameStore`'s "active file only" retention —
+    /// so opening the peek repeatedly at the same buffer state never
+    /// re-diffs.
+    func workingTreeDiff(for document: EditorDocument) async -> GitFileDiff? {
+        guard let rootURL, let relativePath = gitRepositoryRelativePath(for: document) else {
+            return nil
+        }
+        let key = WorkingTreeDiffCacheKey(path: relativePath, revision: document.revision)
+        if let cached = workingTreeDiffCache, cached.key == key { return cached.diff }
+        do {
+            let diff = try await gitService.diff(
+                GitDiffRequest(path: relativePath, scope: .workingTree), at: rootURL)
+            workingTreeDiffCache = (key, diff)
+            return diff
+        } catch {
+            return nil
+        }
+    }
+
+    /// Stages one hunk sliced from the peek popover's working-tree diff —
+    /// the same `GitHunkPatchBuilder` + `applyHunk(staging:true)` path
+    /// `stageHunk(_:)` uses for the standalone diff canvas, but keyed to
+    /// `diff` directly rather than `gitOpenDiff`: the peek can stage without
+    /// the diff canvas ever being open. A context drift since the diff was
+    /// captured throws `GitServiceError.hunkContextChanged`, which surfaces
+    /// through the normal Git error alert rather than silently retrying
+    /// against a stale hunk.
+    func stagePeekHunk(_ hunk: GitDiffHunk, in diff: GitFileDiff) async {
+        guard let rootURL, !isGitBusy, !isGitHunkActionBusy else { return }
+        isGitHunkActionBusy = true
+        defer { isGitHunkActionBusy = false }
+        do {
+            let patch = try GitHunkPatchBuilder.patch(for: hunk, in: diff)
+            try await gitService.applyHunk(patch: patch, staging: true, at: rootURL)
+            workingTreeDiffCache = nil
+            await refreshGit()
+        } catch is CancellationError {
+            return
+        } catch {
+            reportGitError(error)
+        }
+    }
+
+    /// Opens the standalone diff canvas for `document`'s working-tree
+    /// change — the peek popover's "Open Full Diff" action. A no-op when
+    /// the file has no working-tree change to show.
+    func openWorkingTreeDiff(for document: EditorDocument) {
+        guard let relativePath = gitRepositoryRelativePath(for: document),
+            let change = gitSnapshot?.changes.first(where: { $0.path == relativePath })
+        else { return }
+        Task { await gitOpenChangeDiff(change, scope: .workingTree) }
+    }
+
+    /// Opens the GX2 hunk-peek popover at the selected document's caret
+    /// line — the "Peek Change at Line" command's session-level entry point.
+    /// A no-op when there is no mounted editor to peek in.
+    func peekChangeAtCaret() {
+        selectedDocument?.peekChangeAtCaretAction?()
+    }
+
     func gitCreateBranch(named name: String) async {
         guard let rootURL else { return }
         isGitBusy = true
@@ -1885,6 +2063,7 @@ final class WorkspaceSession {
         defer { isGitBusy = false }
         do {
             _ = try await gitService.fetch(GitFetchRequest(remote: remote), at: rootURL)
+            gitLastFetchedAt = Date()
             await refreshGit()
         } catch { reportGitError(error) }
     }
@@ -2267,6 +2446,9 @@ final class WorkspaceSession {
         isGitHistoryDetailLoading = false
         gitOpenDiff = nil
         gitMergeState = nil
+        gitLastFetchedAt = nil
+        inlineBlameStore.invalidate()
+        workingTreeDiffCache = nil
     }
 
     private static func boundedAIErrorMessage(_ error: any Error) -> String {

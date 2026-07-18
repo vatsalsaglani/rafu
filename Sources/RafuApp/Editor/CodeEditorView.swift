@@ -1,6 +1,36 @@
 import AppKit
 import SwiftUI
 
+/// Bundled GX2 hunk-peek and blame-hover wiring for `CodeEditorView`,
+/// threaded from `EditorCanvasView` down to `CodeEditorView.Coordinator`.
+/// Bundled into one value (rather than several separate init parameters) so
+/// `CodeEditorView`'s initializer stays readable. Copy SHA needs no session
+/// access (plain `NSPasteboard`) and is built directly by the Coordinator.
+struct GitPeekActions {
+    let workingTreeDiffProvider: @MainActor () async -> GitFileDiff?
+    let stageHunk: @MainActor (GitDiffHunk, GitFileDiff) async -> Void
+    let openFullDiff: @MainActor () -> Void
+    let showCommitInHistory: @MainActor (GitBlameLine) -> Void
+    let openBlameCanvas: @MainActor () -> Void
+    let isBusy: @MainActor () -> Bool
+
+    init(
+        workingTreeDiffProvider: @escaping @MainActor () async -> GitFileDiff?,
+        stageHunk: @escaping @MainActor (GitDiffHunk, GitFileDiff) async -> Void,
+        openFullDiff: @escaping @MainActor () -> Void,
+        showCommitInHistory: @escaping @MainActor (GitBlameLine) -> Void,
+        openBlameCanvas: @escaping @MainActor () -> Void,
+        isBusy: @escaping @MainActor () -> Bool
+    ) {
+        self.workingTreeDiffProvider = workingTreeDiffProvider
+        self.stageHunk = stageHunk
+        self.openFullDiff = openFullDiff
+        self.showCommitInHistory = showCommitInHistory
+        self.openBlameCanvas = openBlameCanvas
+        self.isBusy = isBusy
+    }
+}
+
 struct CodeEditorView: NSViewRepresentable {
     let document: EditorDocument
     let theme: RafuTheme
@@ -13,6 +43,12 @@ struct CodeEditorView: NSViewRepresentable {
     let dropForwarding: EditorDropForwarding?
     let navigate: (@MainActor (NavigationTargetKind) -> Void)?
     let hover: (@MainActor (Int) async -> EditorHoverInfo?)?
+    /// GX1: whether the inline-blame ghost annotation is on for this window.
+    let inlineBlameEnabled: Bool
+    /// GX1: resolves (or returns cached) blame for the active document.
+    let inlineBlameProvider: (@MainActor () async -> GitBlame?)?
+    /// GX2: hunk-peek and blame-hover wiring. `nil` disables both.
+    let gitPeekActions: GitPeekActions?
 
     init(
         document: EditorDocument,
@@ -22,7 +58,10 @@ struct CodeEditorView: NSViewRepresentable {
         requestGitRefresh: (@MainActor () -> Void)? = nil,
         dropForwarding: EditorDropForwarding? = nil,
         navigate: (@MainActor (NavigationTargetKind) -> Void)? = nil,
-        hover: (@MainActor (Int) async -> EditorHoverInfo?)? = nil
+        hover: (@MainActor (Int) async -> EditorHoverInfo?)? = nil,
+        inlineBlameEnabled: Bool = false,
+        inlineBlameProvider: (@MainActor () async -> GitBlame?)? = nil,
+        gitPeekActions: GitPeekActions? = nil
     ) {
         self.document = document
         self.theme = theme
@@ -32,6 +71,9 @@ struct CodeEditorView: NSViewRepresentable {
         self.dropForwarding = dropForwarding
         self.navigate = navigate
         self.hover = hover
+        self.inlineBlameEnabled = inlineBlameEnabled
+        self.inlineBlameProvider = inlineBlameProvider
+        self.gitPeekActions = gitPeekActions
     }
 
     func makeCoordinator() -> Coordinator {
@@ -83,6 +125,15 @@ struct CodeEditorView: NSViewRepresentable {
         context.coordinator.gutterRuler = gutter
         context.coordinator.gitLineChangesProvider = gitLineChangesProvider
         context.coordinator.requestGitRefresh = requestGitRefresh
+        context.coordinator.inlineBlameEnabled = inlineBlameEnabled
+        context.coordinator.inlineBlameProvider = inlineBlameProvider
+        context.coordinator.gitPeekActions = gitPeekActions
+        gutter.peekAction = { [weak coordinator = context.coordinator] line in
+            coordinator?.presentHunkPeek(atLine: line)
+        }
+        textView.blameHoverAction = { [weak coordinator = context.coordinator] in
+            coordinator?.presentBlameHover()
+        }
         context.coordinator.installSyntaxPipeline(for: textView)
         textView.textStorage?.delegate = context.coordinator
         context.coordinator.installFindController(for: textView)
@@ -92,6 +143,9 @@ struct CodeEditorView: NSViewRepresentable {
         document.textSnapshotProvider = { [weak textView] in textView?.string ?? "" }
         document.selectionProvider = { [weak textView] in
             textView?.selectedRange() ?? NSRange(location: 0, length: 0)
+        }
+        document.peekChangeAtCaretAction = { [weak coordinator = context.coordinator] in
+            coordinator?.presentHunkPeekAtCaretLine()
         }
         document.toggleCommentAction = { [weak coordinator = context.coordinator] in
             coordinator?.toggleLineComment()
@@ -116,11 +170,14 @@ struct CodeEditorView: NSViewRepresentable {
         context.coordinator.theme = theme
         context.coordinator.gitLineChangesProvider = gitLineChangesProvider
         context.coordinator.requestGitRefresh = requestGitRefresh
+        context.coordinator.gitPeekActions = gitPeekActions
         context.coordinator.updateSyntaxPipeline()
         context.coordinator.updateFindState(findState)
         context.coordinator.applyThemeDecorations()
         context.coordinator.reloadIfNeeded()
         context.coordinator.syncGuardSuppression()
+        context.coordinator.updateInlineBlame(
+            enabled: inlineBlameEnabled, provider: inlineBlameProvider)
         scrollView.backgroundColor = NSColor(rafuHex: theme.editor.background)
         guard let textView = scrollView.documentView as? RafuTextView else { return }
         textView.backgroundColor = NSColor(rafuHex: theme.editor.background)
@@ -149,16 +206,21 @@ struct CodeEditorView: NSViewRepresentable {
         }
         coordinator.loadTask?.cancel()
         coordinator.gitMarkersTask?.cancel()
+        coordinator.clearInlineBlame()
         coordinator.tearDownSyntaxPipeline()
         coordinator.textView?.textStorage?.delegate = nil
         coordinator.uninstallFindController()
         coordinator.textView?.dismissHover()
+        coordinator.textView?.closePeekPopover()
         coordinator.textView?.navigateAction = nil
         coordinator.textView?.hoverAction = nil
         coordinator.textView?.hoverTheme = nil
+        coordinator.textView?.blameHoverAction = nil
+        coordinator.gutterRuler?.peekAction = nil
         coordinator.document.saveAction = nil
         coordinator.document.textSnapshotProvider = nil
         coordinator.document.selectionProvider = nil
+        coordinator.document.peekChangeAtCaretAction = nil
         coordinator.document.toggleCommentAction = nil
         coordinator.document.selectNextOccurrenceAction = nil
         coordinator.document.selectAllOccurrencesAction = nil
@@ -181,6 +243,25 @@ struct CodeEditorView: NSViewRepresentable {
         var gitMarkersTask: Task<Void, Never>?
         var gitLineChangesProvider: (@MainActor () async -> GitGutterLineChanges?)?
         var requestGitRefresh: (@MainActor () -> Void)?
+        var inlineBlameEnabled = false
+        var inlineBlameProvider: (@MainActor () async -> GitBlame?)?
+        var gitPeekActions: GitPeekActions?
+        /// The in-flight (or debouncing) GX1 blame lookup for the caret's
+        /// current line. Cancelled and replaced whenever the caret line
+        /// changes; NEVER started while `document.isDirty` — see
+        /// `scheduleInlineBlame()`'s doc comment for the typing-path proof.
+        private var inlineBlameTask: Task<Void, Never>?
+        /// The 1-based line number the currently shown/pending inline-blame
+        /// annotation targets, or `nil` when none is scheduled/shown.
+        /// Compared on every selection change so an unchanged caret line
+        /// never restarts the debounce, and a changed line clears the stale
+        /// annotation immediately (synchronously, before any async work).
+        private var inlineBlameLine: Int?
+        /// The most recently fetched `GitBlameLine` for `inlineBlameLine`,
+        /// read synchronously by `presentBlameHover()` — hovering the ghost
+        /// annotation never re-fetches blame.
+        private var cachedInlineBlameLine: GitBlameLine?
+        private static let inlineBlameDebounce = Duration.milliseconds(300)
         private(set) var findState: DocumentFindState?
         private var findController: NSTextViewFindController?
         private var syntaxPipeline: NeonSyntaxHighlightingPipeline?
@@ -262,6 +343,7 @@ struct CodeEditorView: NSViewRepresentable {
                     findState?.refresh()
                     refreshSelectionDecorations()
                     refreshGitMarkers()
+                    scheduleInlineBlame()
                 } catch is CancellationError {
                     return
                 } catch {
@@ -373,6 +455,7 @@ struct CodeEditorView: NSViewRepresentable {
                     loadedRevision = document.revision
                     recordDiskModificationDate()
                     refreshGitMarkers()
+                    scheduleInlineBlame()
                     requestGitRefresh?()
                 } catch {
                     document.errorMessage = error.localizedDescription
@@ -455,6 +538,7 @@ struct CodeEditorView: NSViewRepresentable {
                 textView.currentLineHighlightColor = theme.editorLineHighlightColor
                 textView.indentGuideColor = theme.editorIndentGuideColor
                 textView.bracketBorderColor = theme.editorMatchingBracketBorderColor
+                textView.inlineBlameColor = theme.editorInlineBlameColor
             }
             gutterRuler?.style = EditorGutterStyle(theme: theme)
             if let findController {
@@ -515,6 +599,162 @@ struct CodeEditorView: NSViewRepresentable {
             }
         }
 
+        // MARK: - GX1 inline blame
+
+        /// Flips inline blame on/off and re-wires the provider from
+        /// `updateNSView`. A no-op when neither changed; toggling ON
+        /// schedules a fresh lookup for the caret's current line, toggling
+        /// OFF clears immediately.
+        func updateInlineBlame(
+            enabled: Bool, provider: (@MainActor () async -> GitBlame?)?
+        ) {
+            let wasEnabled = inlineBlameEnabled
+            inlineBlameEnabled = enabled
+            inlineBlameProvider = provider
+            guard enabled != wasEnabled else { return }
+            if enabled {
+                scheduleInlineBlame()
+            } else {
+                clearInlineBlame()
+            }
+        }
+
+        /// Schedules (or cancels) the GX1 ghost-text annotation for the
+        /// caret's current line. Called from `textViewDidChangeSelection`
+        /// and after load/save.
+        ///
+        /// TYPING-PATH PROOF: while the user is typing, `document.isDirty`
+        /// is `true` (set by `textDidChange`, which fires before AppKit's
+        /// following selection-change notification for the same keystroke),
+        /// so the very first guard below always short-circuits BEFORE the
+        /// 300ms debounce is even scheduled — no `git blame` process is ever
+        /// spawned between keystrokes. Only a caret move on a SAVED
+        /// (non-dirty) buffer reaches the debounce.
+        func scheduleInlineBlame() {
+            guard inlineBlameEnabled, !document.isDirty, let textView, let inlineBlameProvider
+            else {
+                clearInlineBlame()
+                return
+            }
+            let caret = textView.selectedRange().location
+            let caretLine = gutterRuler?.lineNumber(forOffset: caret) ?? 1
+            guard caretLine != inlineBlameLine else { return }
+            inlineBlameLine = caretLine
+            cachedInlineBlameLine = nil
+            textView.inlineBlameAnnotation = nil
+            inlineBlameTask?.cancel()
+            let requestedRevision = document.revision
+            inlineBlameTask = Task(name: "Inline blame \(document.displayName)") { [weak self] in
+                try? await Task.sleep(for: Self.inlineBlameDebounce)
+                if Task.isCancelled { return }
+                // Re-check BEFORE calling the provider (not only after): a
+                // keystroke resuming mid-debounce already flipped
+                // `document.isDirty` synchronously (see `textDidChange`), so
+                // this is the guard that keeps a typing burst from ever
+                // reaching `WorkspaceSession.inlineBlame(for:)` — and the
+                // process it would spawn — at all.
+                guard let self, self.document.revision == requestedRevision,
+                    self.inlineBlameLine == caretLine,
+                    !self.document.isDirty
+                else { return }
+                guard let blame = await inlineBlameProvider() else { return }
+                if Task.isCancelled { return }
+                guard self.document.revision == requestedRevision,
+                    self.inlineBlameLine == caretLine,
+                    !self.document.isDirty
+                else { return }
+                guard let line = blame.lines.first(where: { $0.lineNumber == caretLine }) else {
+                    self.textView?.inlineBlameAnnotation = nil
+                    return
+                }
+                self.cachedInlineBlameLine = line
+                let formatted = InlineBlameFormatter.format(line, referenceDate: Date())
+                self.textView?.inlineBlameAnnotation = InlineBlameAnnotation(
+                    lineNumber: caretLine, text: formatted)
+            }
+        }
+
+        /// Cancels any pending/in-flight inline-blame lookup and clears the
+        /// shown annotation. Called when inline blame is toggled off and
+        /// from `dismantleNSView`.
+        func clearInlineBlame() {
+            inlineBlameTask?.cancel()
+            inlineBlameTask = nil
+            inlineBlameLine = nil
+            cachedInlineBlameLine = nil
+            textView?.inlineBlameAnnotation = nil
+        }
+
+        // MARK: - GX2 hunk peek / blame hover
+
+        /// Builds and presents the hunk-peek card for `line`, sliced from
+        /// the working-tree diff via `HunkPeekSlice`. A no-op when there is
+        /// no wiring, no matching hunk at `line`, or the underlying diff
+        /// fetch declines (no repository / not a tracked change).
+        func presentHunkPeek(atLine line: Int) {
+            guard let gitPeekActions else { return }
+            let capturedTheme = theme
+            Task { [weak self] in
+                guard let self else { return }
+                guard let diff = await gitPeekActions.workingTreeDiffProvider() else { return }
+                guard let slice = HunkPeekSlice.slice(diff, atLine: line) else { return }
+                let card = GitHunkPeekCard(
+                    hunk: slice.hunk,
+                    rows: slice.rows,
+                    isTruncated: slice.isTruncated,
+                    theme: capturedTheme,
+                    isBusy: gitPeekActions.isBusy(),
+                    stageHunk: { [weak self] in
+                        Task {
+                            await gitPeekActions.stageHunk(slice.hunk, diff)
+                            self?.textView?.closePeekPopover()
+                        }
+                    },
+                    openFullDiff: { [weak self] in
+                        gitPeekActions.openFullDiff()
+                        self?.textView?.closePeekPopover()
+                    }
+                )
+                let hostingController = NSHostingController(rootView: card)
+                hostingController.sizingOptions = [.preferredContentSize]
+                self.textView?.presentPeekPopover(hostingController, atLine: line)
+            }
+        }
+
+        /// The "Peek Change at Line" command's editor-side entry point:
+        /// resolves the caret's current line and delegates to
+        /// `presentHunkPeek(atLine:)`.
+        func presentHunkPeekAtCaretLine() {
+            guard let textView else { return }
+            let caret = textView.selectedRange().location
+            let line = gutterRuler?.lineNumber(forOffset: caret) ?? 1
+            presentHunkPeek(atLine: line)
+        }
+
+        /// Builds and presents the blame-hover card from the cached blame
+        /// line for the currently shown inline-blame annotation — hovering
+        /// never re-fetches blame. A no-op when there is no cached line, no
+        /// wiring, or no annotation currently shown.
+        func presentBlameHover() {
+            guard let gitPeekActions, let line = cachedInlineBlameLine, let textView,
+                let annotationLine = textView.inlineBlameAnnotation?.lineNumber
+            else { return }
+            let capturedTheme = theme
+            let card = GitBlameHoverCard(
+                line: line,
+                theme: capturedTheme,
+                copySHA: {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(line.commitID, forType: .string)
+                },
+                showInHistory: { gitPeekActions.showCommitInHistory(line) },
+                openBlameCanvas: { gitPeekActions.openBlameCanvas() }
+            )
+            let hostingController = NSHostingController(rootView: card)
+            hostingController.sizingOptions = [.preferredContentSize]
+            textView.presentPeekPopover(hostingController, atLine: annotationLine)
+        }
+
         private func refreshSelectionDecorations() {
             guard let textView else { return }
             let selection = textView.selectedRange()
@@ -533,6 +773,7 @@ struct CodeEditorView: NSViewRepresentable {
             guard !isLoading else { return }
             (notification.object as? RafuTextView)?.collapseCaretSetToNativeSelectionIfNeeded()
             refreshSelectionDecorations()
+            scheduleInlineBlame()
         }
 
         func textView(
@@ -577,8 +818,11 @@ struct CodeEditorView: NSViewRepresentable {
                 if editedMask.contains(.editedCharacters) {
                     gutterRuler?.invalidateLineIndex()
                     // A text edit invalidates any shown hover tooltip (its
-                    // anchored range and payload may no longer be valid).
+                    // anchored range and payload may no longer be valid) and
+                    // any shown GX2 peek popover (its anchored line/hunk may
+                    // have shifted).
                     textView?.dismissHover()
+                    textView?.closePeekPopover()
                 }
                 if editedMask.contains(.editedCharacters), !isLoading {
                     document.recordEditDelta(editedRange: editedRange, changeInLength: delta)

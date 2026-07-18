@@ -120,6 +120,13 @@ final class EditorDocument: Identifiable {
     @ObservationIgnored
     var addCaretBelowAction: (() -> Void)?
 
+    /// Opens the GX2 hunk-peek popover at the caret's current line — the
+    /// "Peek Change at Line" command's editor-side entry point. Set by the
+    /// mounted `CodeEditorView`; `nil` when no text view backs this
+    /// document.
+    @ObservationIgnored
+    var peekChangeAtCaretAction: (() -> Void)?
+
     /// Returns a value copy of the live editor text. Set by the mounted
     /// `CodeEditorView`; `nil` when no text view backs this document
     /// (bitmap previews, Markdown preview-only mode). Live text itself

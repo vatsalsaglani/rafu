@@ -54,4 +54,11 @@ extension RafuTheme {
     var gitGutterDeletedColor: NSColor {
         NSColor(rafuHex: git?.deleted ?? ui.error ?? "#E06C75")
     }
+
+    /// GX1 inline-blame ghost-text color — the same `textMuted` token the
+    /// SwiftUI chrome uses, so the annotation reads as quiet metadata rather
+    /// than a competing accent.
+    var editorInlineBlameColor: NSColor {
+        NSColor(rafuHex: ui.textMuted ?? ui.textSecondary)
+    }
 }

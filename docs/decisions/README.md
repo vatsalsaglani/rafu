@@ -21,6 +21,8 @@ Accepted ADRs take precedence over older plan suggestions when they explicitly s
 | [0009](0009-local-cli-app-ipc.md) | Proposed | Versioned same-user Unix-domain socket for local `rafu` CLI ↔ app IPC (bounded JSON framing, peer-UID auth, `open -a` as app starter only, `--wait` deferred to v2) |
 | [0010](0010-npm-supply-chain-and-checksum-policy.md) | Proposed | Accept unpinned transitive npm fetch for nodeHosted servers with mandatory `--ignore-scripts`/`--omit=dev` and explicit consent disclosure; pin locally-verified SHA-256 (trust-on-first-download) per catalog entry |
 | [0011](0011-advanced-git-hunks-stash-blame.md) | Proposed | Add explicit whole-hunk staging (verbatim rawPatch slicing via `git apply --cached`), explicit stash with drift guards, and read-only bounded blame |
+| [0012](0012-flat-workbench-chrome.md) | Proposed | Flat, layered workbench chrome (tonal surfaces + hairlines, single continuous-corner scale, card language for overlays) supersedes system-material sidebars/toolbar band; native toolbar/controls/accessibility retained; no Liquid Glass |
+| [0013](0013-git-experience-scope.md) | Proposed | Scope inline editor blame annotations (off by default), blame-hover/hunk-peek cards, and a theme-colored bounded commit graph; excludes background fetch/poll, repo-wide search scans, avatars, and discard-from-peek |
 
 Unresolved choices are tracked in [`open-decisions.md`](open-decisions.md).
 

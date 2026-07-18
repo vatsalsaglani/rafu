@@ -126,6 +126,20 @@ struct RafuAppCommands: Commands {
                 } ?? true
             )
 
+            Button("Toggle Inline Blame") {
+                workspaceSession?.toggleInlineBlame()
+            }
+            .disabled(workspaceSession == nil)
+
+            Button("Peek Change at Line") {
+                workspaceSession?.peekChangeAtCaret()
+            }
+            .disabled(
+                workspaceSession.map {
+                    $0.selectedDocument == nil || $0.gitSnapshot == nil
+                } ?? true
+            )
+
             Divider()
 
             Button("Toggle Terminal") {

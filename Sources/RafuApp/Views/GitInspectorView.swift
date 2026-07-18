@@ -535,20 +535,23 @@ struct GitInspectorView: View {
     private var historyView: some View {
         VStack(spacing: 0) {
             if let commits = session.gitHistoryPage?.commits, !commits.isEmpty {
-                List(selection: $session.gitSelectedHistoryCommitID) {
-                    Section("Commits") {
-                        ForEach(commits) { commit in
-                            GitHistoryRow(commit: commit)
-                                .tag(commit.id)
-                                .contentShape(.rect)
-                                .onTapGesture {
-                                    Task { await session.gitSelectHistoryCommit(commit) }
-                                }
-                        }
-                    }
-                }
-                .listStyle(.inset)
-                .scrollContentBackground(.hidden)
+                // GX3: the commit-graph lane/chip row replaces the plain
+                // commit-row list, but keeps the SAME
+                // `gitSelectedHistoryCommitID` selection binding and the
+                // same `gitSelectHistoryCommit` tap handler every other
+                // History entry point already uses.
+                GitCommitGraphView(
+                    commits: commits,
+                    currentBranch: session.gitBranchSnapshot?.currentBranch,
+                    upstream: session.gitBranchSnapshot?.upstream,
+                    lastFetchedAt: session.gitLastFetchedAt,
+                    hasMore: session.gitHistoryPage?.hasMore ?? false,
+                    isBusy: session.isGitBusy,
+                    selection: $session.gitSelectedHistoryCommitID,
+                    onSelect: { commit in Task { await session.gitSelectHistoryCommit(commit) } },
+                    onFetch: { Task { await session.gitFetch() } },
+                    onLoadMore: { Task { await session.loadMoreHistory() } }
+                )
                 if let commit = selectedHistoryCommit {
                     Divider()
                     GitHistoryDetail(
@@ -1090,32 +1093,6 @@ private struct GitChangeTreeRows: View {
         case .some: .partial
         case .none: .unstaged
         }
-    }
-}
-
-private struct GitHistoryRow: View {
-    @Environment(\.rafuTheme) private var theme
-    let commit: GitCommitSummary
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(commit.subject).font(.callout.weight(.medium)).lineLimit(2)
-            HStack(spacing: 6) {
-                Text(commit.shortID).font(.caption2.monospaced())
-                Text(commit.authorName).lineLimit(1)
-                Spacer()
-                Text(commit.authoredAt, style: .relative)
-            }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            if !commit.decorations.isEmpty {
-                Text(commit.decorations.joined(separator: " · "))
-                    .font(.caption2)
-                    .foregroundStyle(theme.palette.info)
-                    .lineLimit(1)
-            }
-        }
-        .padding(.vertical, 3)
     }
 }
 

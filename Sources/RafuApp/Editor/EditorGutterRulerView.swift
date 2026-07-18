@@ -43,6 +43,13 @@ final class EditorGutterRulerView: NSRulerView {
         }
     }
 
+    /// GX2 hunk-peek action, wired by `CodeEditorView.Coordinator`. Invoked
+    /// from `mouseDown` with the clicked line's 1-based number, but only
+    /// when that line actually carries a git-marker strip — a click
+    /// elsewhere in the gutter falls through to `super` unchanged. `nil`
+    /// disables gutter-click peeking entirely.
+    var peekAction: (@MainActor (Int) -> Void)?
+
     private weak var textView: NSTextView?
     private var lineStartOffsets: [Int] = [0]
     private var lineIndexIsValid = false
@@ -223,6 +230,52 @@ final class EditorGutterRulerView: NSRulerView {
             style.deletedColor.setFill()
             NSRect(x: 0, y: max(0, y - 1), width: Self.stripWidth + 3, height: 2).fill()
         }
+    }
+
+    /// GX2: a click anywhere in the git-marker strip column opens the
+    /// hunk-peek popover for that line via `peekAction`; every other click
+    /// (line-number column, no marker at that line, no `peekAction` wired)
+    /// falls through to the default ruler behavior.
+    override func mouseDown(with event: NSEvent) {
+        guard let peekAction, let textView else {
+            super.mouseDown(with: event)
+            return
+        }
+        let rulerPoint = convert(event.locationInWindow, from: nil)
+        guard rulerPoint.x <= Self.stripWidth + 2 else {
+            super.mouseDown(with: event)
+            return
+        }
+        let textPoint = textView.convert(event.locationInWindow, from: nil)
+        let index = textView.characterIndexForInsertion(at: textPoint)
+        let content = textView.string as NSString
+        rebuildLineIndexIfNeeded(content: content)
+        let line = lineNumber(forCharacterAt: index)
+        guard hasGitMarkerStrip(atLine: line) else {
+            super.mouseDown(with: event)
+            return
+        }
+        peekAction(line)
+    }
+
+    private func hasGitMarkerStrip(atLine line: Int) -> Bool {
+        guard let markers = gitMarkers else { return false }
+        return markers.added.contains(where: { $0.contains(line) })
+            || markers.modified.contains(where: { $0.contains(line) })
+    }
+
+    /// 1-based line number of the line containing an arbitrary character
+    /// offset in the client text view's CURRENT content, rebuilding the
+    /// cached line-start index first if it was invalidated (e.g. by a
+    /// recent edit). Used outside `draw()` — by GX1's caret-line detection
+    /// (`CodeEditorView.Coordinator.scheduleInlineBlame()`) — so callers
+    /// never read a stale index the way a raw `lineNumber(forCharacterAt:)`
+    /// call could.
+    func lineNumber(forOffset offset: Int) -> Int {
+        if let content = textView?.string as NSString? {
+            rebuildLineIndexIfNeeded(content: content)
+        }
+        return lineNumber(forCharacterAt: offset)
     }
 
     /// 1-based line number of the line containing `offset`.
