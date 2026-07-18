@@ -205,8 +205,14 @@ struct CommandPaletteView: View {
             ScrollView {
                 LazyVStack(spacing: 1) {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                        // Scroll target keyed to the row's STABLE id — the same
+                        // identity `ForEach` diffs by. Using `.id(index)` here
+                        // gave each view a second, positional identity that
+                        // conflicted with the element id, so when the result
+                        // set changed but kept a count, SwiftUI reused the old
+                        // row views (stale/wrong titles). One identity only.
                         paletteRowView(row, isSelected: index == selectedIndex)
-                            .id(index)
+                            .id(row.id)
                             .onHover { hovering in
                                 if hovering { selectedIndex = index }
                             }
@@ -215,7 +221,8 @@ struct CommandPaletteView: View {
                 .padding(6)
             }
             .onChange(of: selectedIndex) { _, newValue in
-                proxy.scrollTo(newValue, anchor: nil)
+                guard rows.indices.contains(newValue) else { return }
+                proxy.scrollTo(rows[newValue].id, anchor: nil)
             }
         }
     }
