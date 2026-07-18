@@ -75,7 +75,7 @@ struct EditorHoverTooltipView: View {
             }
         }
         .frame(width: Self.contentWidth)
-        .background(theme.palette.elevatedBackground)
+        .background(theme.palette.cardBackground)
         .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { newHeight in
             guard !hasMeasuredNaturalHeight else { return }
             naturalHeight = newHeight
@@ -124,11 +124,11 @@ struct EditorHoverTooltipView: View {
             .fixedSize(horizontal: false, vertical: true)
             .padding(8)
             .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(theme.palette.editorBackground)
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusField, style: .continuous)
+                    .fill(theme.palette.fieldBackground)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusField, style: .continuous)
                     .strokeBorder(theme.palette.borderSubtle)
             )
     }

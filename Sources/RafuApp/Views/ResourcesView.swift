@@ -133,13 +133,13 @@ struct ResourcesView: View {
 
     private var appRow: some View {
         let label = ResourceMemoryFormat.label(appSample?.residentBytes)
-        return HStack {
-            Label("Rafu (this app)", systemImage: "app.badge")
-            Spacer()
-            Text(label)
-                .foregroundStyle(theme.palette.textMuted)
+        return resourceRow {
+            HStack {
+                Label("Rafu (this app)", systemImage: "app.badge")
+                Spacer()
+                RafuChip(text: label, monospacedDigit: true)
+            }
         }
-        .font(.caption)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Rafu, this app, \(label)")
     }
@@ -147,15 +147,26 @@ struct ResourcesView: View {
     private func processRow(_ row: ProcessResourceRegistry.ProcessResourceSample) -> some View {
         let label = ResourceMemoryFormat.label(row.residentBytes)
         let kind = kindLabel(row.kind)
-        return HStack {
-            Label(row.name, systemImage: symbol(for: row.kind))
-            Spacer()
-            Text(label)
-                .foregroundStyle(theme.palette.textMuted)
+        return resourceRow {
+            HStack {
+                Label(row.name, systemImage: symbol(for: row.kind))
+                Spacer()
+                RafuChip(text: label, monospacedDigit: true)
+            }
         }
-        .font(.caption)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(row.name), \(kind), \(label)")
+    }
+
+    private func resourceRow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .font(.caption)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
+                    .fill(theme.palette.cardBackground)
+            )
     }
 
     private func kindLabel(_ kind: ProcessResourceRegistry.ProcessKind) -> String {
@@ -179,23 +190,23 @@ struct ResourcesView: View {
     private func languageServerRow(_ status: LanguageServerStatus) -> some View {
         let stateLabel = LanguageServerStatusPresentation.stateLabel(status.phase)
         let showsRestart = LanguageServerStatusPresentation.showsRestart(status.phase)
-        return HStack {
-            Label(
-                status.serverName,
-                systemImage: LanguageServerStatusPresentation.symbol(status.phase))
-            Spacer()
-            Text(stateLabel)
-                .foregroundStyle(theme.palette.textMuted)
-            if showsRestart {
-                Button("Restart") {
-                    coordinator.restartServer(languageID: status.languageID)
+        return resourceRow {
+            HStack {
+                Label(
+                    status.serverName,
+                    systemImage: LanguageServerStatusPresentation.symbol(status.phase))
+                Spacer()
+                RafuChip(text: stateLabel)
+                if showsRestart {
+                    Button("Restart") {
+                        coordinator.restartServer(languageID: status.languageID)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(theme.palette.accent)
+                    .accessibilityLabel("Restart \(status.serverName)")
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(theme.palette.accent)
-                .accessibilityLabel("Restart \(status.serverName)")
             }
         }
-        .font(.caption)
         .accessibilityElement(children: showsRestart ? .contain : .combine)
         .accessibilityLabel("\(status.serverName), \(stateLabel)")
     }

@@ -48,6 +48,9 @@ struct MarkdownPreviewView: View {
                                         )
                                     )
                             }
+                            .markdownBlockStyle(\.codeBlock) { configuration in
+                                codeBlockCard(configuration)
+                            }
                             .tint(Color(rafuHex: theme.ui.accent))
                             .textSelection(.enabled)
                             .markdownCodeSyntaxHighlighter(
@@ -75,6 +78,52 @@ struct MarkdownPreviewView: View {
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    /// Renders a fenced code block as a flat card: a header row (language
+    /// chip + copy action) over `cardBackground`, then the syntax-highlighted
+    /// body (`TreeSitterCodeSyntaxHighlighter`, wired above via
+    /// `.markdownCodeSyntaxHighlighter`) on a horizontally scrollable strip so
+    /// long lines never force the preview column wide.
+    private func codeBlockCard(_ configuration: CodeBlockConfiguration) -> some View {
+        let language = configuration.language.flatMap { $0.isEmpty ? nil : $0 } ?? "text"
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                RafuChip(text: language.uppercased())
+                Spacer()
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(configuration.content, forType: .string)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .buttonStyle(RafuIconButtonStyle(size: 22, iconSize: 10))
+                .help("Copy code")
+            }
+            .padding(.horizontal, RafuMetrics.space3)
+            .frame(height: RafuMetrics.sectionHeaderHeight)
+            .background(theme.palette.cardBackground)
+            .overlay(alignment: .bottom) {
+                Divider().overlay(theme.palette.borderSubtle)
+            }
+            ScrollView(.horizontal) {
+                configuration.label
+                    .fixedSize(horizontal: false, vertical: true)
+                    .relativeLineSpacing(.em(0.15))
+                    .markdownTextStyle {
+                        FontFamilyVariant(.monospaced)
+                        FontSize(.em(0.94))
+                    }
+                    .padding(RafuMetrics.space3)
+            }
+        }
+        .background(theme.palette.cardBackground)
+        .overlay(
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
+                .strokeBorder(theme.palette.borderSubtle)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous))
+        .markdownMargin(top: .zero, bottom: .em(1))
     }
 }
 

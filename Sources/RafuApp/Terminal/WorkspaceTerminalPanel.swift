@@ -74,7 +74,7 @@ struct WorkspaceTerminalPanel: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
-        .background(theme.palette.tabBarBackground.opacity(0.92))
+        .background(theme.palette.tabBarBackground)
     }
 
     private var emptyState: some View {
@@ -144,15 +144,19 @@ private struct TerminalTabChip: View {
                 .opacity(isHovering || isSelected ? 1 : 0)
                 .help("Close \(controller.title)")
         }
-        .padding(.horizontal, 7)
+        .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
+            Capsule()
                 .fill(
                     isSelected
-                        ? theme.palette.selection
+                        ? theme.palette.accentSoft
                         : isHovering ? theme.palette.hover : .clear
                 )
+        )
+        .overlay(
+            Capsule()
+                .strokeBorder(theme.palette.accent.opacity(isSelected ? 0.5 : 0))
         )
         .onHover { isHovering = $0 }
         .animation(.easeOut(duration: 0.12), value: isHovering)

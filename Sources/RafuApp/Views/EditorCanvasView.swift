@@ -398,11 +398,13 @@ private struct WorkspaceWelcomeView: View {
     let openFolder: () -> Void
 
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 24) {
             RafuBrandMarkView().frame(width: 96, height: 96)
             VStack(spacing: 7) {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text("Rafu").font(.system(size: 38, weight: .semibold, design: .serif))
+                    Text("Rafu")
+                        .font(.system(size: 40, weight: .semibold, design: .serif))
+                        .kerning(-0.4)
                         .foregroundStyle(theme.palette.textPrimary)
                     Text("રફૂ").font(.system(size: 27, weight: .medium, design: .serif))
                         .foregroundStyle(theme.palette.textSecondary)
@@ -414,32 +416,50 @@ private struct WorkspaceWelcomeView: View {
             Button("Open Folder…", systemImage: "folder.badge.plus", action: openFolder)
                 .buttonStyle(RafuProminentButtonStyle())
                 .controlSize(.large)
-            if !recents.isEmpty {
-                recentList
+            HStack(alignment: .top, spacing: 16) {
+                if !recents.isEmpty {
+                    welcomeCard(title: "Recent Workspaces") { recentList }
+                }
+                welcomeCard(title: "Shortcuts") { WelcomeShortcutHints() }
             }
-            WelcomeShortcutHints()
         }
         .padding(40)
-        .modifier(WelcomeGlassSurface())
         .task { recents = recentsStore.load() }
     }
 
     @State private var recents: [RecentWorkspaceEntry] = []
     private let recentsStore = RecentWorkspacesStore()
 
-    private var recentList: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Recent")
+    private func welcomeCard<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(theme.palette.textMuted)
                 .textCase(.uppercase)
                 .kerning(0.6)
-                .padding(.bottom, 4)
+            content()
+        }
+        .padding(14)
+        .frame(width: 260, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
+                .fill(theme.palette.cardBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
+                .strokeBorder(theme.palette.borderSubtle)
+        )
+    }
+
+    private var recentList: some View {
+        VStack(alignment: .leading, spacing: 2) {
             ForEach(recents.prefix(4)) { entry in
                 recentRow(entry)
             }
         }
-        .frame(maxWidth: 340)
     }
 
     private func recentRow(_ entry: RecentWorkspaceEntry) -> some View {
@@ -456,22 +476,24 @@ private struct WorkspaceWelcomeView: View {
                 Image(systemName: "folder")
                     .font(.system(size: 11))
                     .foregroundStyle(theme.palette.accent)
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(entry.displayName)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(theme.palette.textPrimary)
-                    Text((entry.rootPath as NSString).abbreviatingWithTildeInPath)
-                        .font(.system(size: 10))
-                        .foregroundStyle(theme.palette.textMuted)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    RafuChip(
+                        text: (entry.rootPath as NSString).abbreviatingWithTildeInPath,
+                        foreground: theme.palette.textMuted
+                    )
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                 }
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .contentShape(
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous))
         }
         .buttonStyle(WelcomeRecentButtonStyle())
     }
@@ -490,7 +512,7 @@ private struct WelcomeRecentButtonStyle: ButtonStyle {
         var body: some View {
             configuration.label
                 .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
                         .fill(
                             configuration.isPressed
                                 ? theme.palette.selection
@@ -507,31 +529,18 @@ private struct WelcomeShortcutHints: View {
     @Environment(\.rafuTheme) private var theme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             hint("Go to File", keys: "⌘P")
             hint("Command Palette", keys: "⌘⇧P")
             hint("Search Workspace", keys: "⌘⇧F")
             hint("Source Control", keys: "⌘⇧G")
         }
-        .padding(.top, 6)
     }
 
     private func hint(_ title: String, keys: String) -> some View {
         HStack(spacing: 10) {
-            Text(keys)
-                .font(.caption.monospaced())
-                .foregroundStyle(theme.palette.textSecondary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(theme.palette.elevatedBackground)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .strokeBorder(theme.palette.borderSubtle)
-                )
-                .frame(width: 64, alignment: .center)
+            RafuChip(text: keys)
+                .frame(width: 60, alignment: .center)
             Text(title)
                 .font(.caption)
                 .foregroundStyle(theme.palette.textMuted)
@@ -616,7 +625,7 @@ private struct EditorGroupTabBar: View {
                 .padding(.horizontal, 6)
             }
         }
-        .frame(height: 34)
+        .frame(height: RafuMetrics.tabBarHeight)
         .background(theme.palette.tabBarBackground)
         .overlay(alignment: .bottom) { Divider().overlay(theme.palette.borderSubtle) }
     }
@@ -663,7 +672,7 @@ private struct GitStandaloneDiffCanvas: View {
                 )
                 Spacer()
             }
-            .frame(height: 34)
+            .frame(height: RafuMetrics.tabBarHeight)
             .background(theme.palette.tabBarBackground)
             Divider().overlay(theme.palette.borderSubtle)
             GitSideBySideDiffView(openDiff: openDiff, session: session)
@@ -695,8 +704,7 @@ private struct GitStandaloneBlameCanvas: View {
                 }
                 .font(.callout)
                 .padding(.horizontal, 10)
-                .frame(height: 33)
-                .background(theme.palette.tabActiveBackground)
+                .frame(height: RafuMetrics.tabBarHeight)
                 .overlay(alignment: .bottom) {
                     StitchedUnderline(color: theme.palette.accent)
                 }
@@ -706,7 +714,7 @@ private struct GitStandaloneBlameCanvas: View {
                 .onHover { isHoveringTab = $0 }
                 Spacer()
             }
-            .frame(height: 34)
+            .frame(height: RafuMetrics.tabBarHeight)
             .background(theme.palette.tabBarBackground)
             Divider().overlay(theme.palette.borderSubtle)
             blameHeader
@@ -725,23 +733,20 @@ private struct GitStandaloneBlameCanvas: View {
     }
 
     private var blameHeader: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "person.text.rectangle")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(theme.palette.info)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(fileName)
-                    .font(.headline)
-                    .foregroundStyle(theme.palette.textPrimary)
-                Text("Read-only line attribution • \(blame.lines.count) lines")
+        RafuCardHeaderRow {
+            HStack(spacing: 8) {
+                Image(systemName: "person.text.rectangle")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(theme.palette.info)
+                RafuChip(text: fileName, foreground: theme.palette.textPrimary)
+                Text("Read-only line attribution")
                     .font(.caption)
                     .foregroundStyle(theme.palette.textSecondary)
+                    .lineLimit(1)
             }
-            Spacer()
+        } trailing: {
+            RafuChip(text: "\(blame.lines.count) lines", monospacedDigit: true)
         }
-        .padding(.horizontal, 14)
-        .frame(height: 46)
-        .background(theme.palette.elevatedBackground.opacity(0.6))
     }
 
     private var blameTable: some View {
@@ -896,12 +901,7 @@ private struct GitDiffTabItem: View {
         }
         .font(.callout)
         .padding(.horizontal, 10)
-        .frame(height: 33)
-        .background {
-            if isSelected {
-                theme.palette.tabActiveBackground
-            }
-        }
+        .frame(height: RafuMetrics.tabBarHeight)
         .overlay(alignment: .bottom) {
             if isSelected { StitchedUnderline(color: theme.palette.accent) }
         }
@@ -944,26 +944,20 @@ private struct GitSideBySideDiffView: View {
     }
 
     private var diffHeader: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "arrow.left.arrow.right")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(theme.palette.info)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(openDiff.title)
-                    .font(.headline)
-                    .foregroundStyle(theme.palette.textPrimary)
-                    .lineLimit(1)
+        RafuCardHeaderRow {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(theme.palette.info)
+                RafuChip(text: openDiff.title, foreground: theme.palette.textPrimary)
                 Text(openDiff.subtitle)
                     .font(.caption)
                     .foregroundStyle(theme.palette.textSecondary)
                     .lineLimit(1)
             }
-            Spacer()
+        } trailing: {
             diffStats
         }
-        .padding(.horizontal, 14)
-        .frame(height: 46)
-        .background(theme.palette.elevatedBackground.opacity(0.6))
     }
 
     private var diffStats: some View {
@@ -973,13 +967,12 @@ private struct GitSideBySideDiffView: View {
         let deletions = openDiff.diff.hunks
             .flatMap(\.rows)
             .count { $0.oldLine != nil && ($0.kind == .deletion || $0.kind == .modification) }
-        return HStack(spacing: 8) {
-            Text("+\(additions)")
-                .foregroundStyle(theme.palette.gitAdded)
-            Text("−\(deletions)")
-                .foregroundStyle(theme.palette.gitDeleted)
+        return HStack(spacing: 6) {
+            RafuChip(
+                text: "+\(additions)", foreground: theme.palette.gitAdded, monospacedDigit: true)
+            RafuChip(
+                text: "−\(deletions)", foreground: theme.palette.gitDeleted, monospacedDigit: true)
         }
-        .font(.caption.monospacedDigit().weight(.semibold))
     }
 
     private var diffTable: some View {
@@ -1257,11 +1250,9 @@ private struct EditorTabItem: View {
         }
         .font(.callout)
         .padding(.horizontal, 10)
-        .frame(height: 33)
+        .frame(height: RafuMetrics.tabBarHeight)
         .background {
-            if isSelected {
-                theme.palette.tabActiveBackground
-            } else if isHovering {
+            if isHovering {
                 theme.palette.hover.opacity(0.6)
             } else {
                 Color.clear
@@ -1366,7 +1357,10 @@ private struct GuardBannerView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(theme.palette.warning)
+                .padding(5)
+                .background(Circle().fill(theme.palette.chipBackground))
             Text(message)
                 .font(.system(size: 12))
                 .foregroundStyle(theme.palette.textPrimary)
@@ -1609,15 +1603,5 @@ private struct DarnedUnderline: View {
                 style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [7, 4]))
         }
         .frame(height: 8).accessibilityHidden(true)
-    }
-}
-
-private struct WelcomeGlassSurface: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
-            content.glassEffect(.regular, in: .rect(cornerRadius: 28)).padding(24)
-        } else {
-            content.background(.ultraThinMaterial, in: .rect(cornerRadius: 28)).padding(24)
-        }
     }
 }

@@ -207,6 +207,79 @@ struct RafuSegmentedPicker<Item: Hashable>: View {
     }
 }
 
+/// Capsule chip for inline metadata: counts, languages, statuses, and
+/// keyboard-shortcut hints (diff +N/-N, blame line counts, palette shortcut
+/// hints, code-block languages). Matches the anatomy already hand-rolled by
+/// `GitInspectorView`'s worktree chips.
+struct RafuChip: View {
+    let text: String
+    var foreground: Color? = nil
+    var monospacedDigit: Bool = false
+
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 10.5, weight: .medium))
+            .modifier(MonospacedDigitIfNeeded(enabled: monospacedDigit))
+            .foregroundStyle(foreground ?? theme.palette.textSecondary)
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(theme.palette.chipBackground))
+    }
+
+    private struct MonospacedDigitIfNeeded: ViewModifier {
+        let enabled: Bool
+        func body(content: Content) -> some View {
+            if enabled {
+                content.monospacedDigit()
+            } else {
+                content
+            }
+        }
+    }
+}
+
+/// Card header row anatomy shared by diff/blame headers, code-block cards,
+/// and other embedded-content chrome: a leading label/chip slot, a trailing
+/// actions slot, `cardBackground` fill, and a bottom hairline.
+struct RafuCardHeaderRow<Leading: View, Trailing: View>: View {
+    @ViewBuilder let leading: Leading
+    @ViewBuilder let trailing: Trailing
+
+    @Environment(\.rafuTheme) private var theme
+
+    init(
+        @ViewBuilder leading: () -> Leading,
+        @ViewBuilder trailing: () -> Trailing
+    ) {
+        self.leading = leading()
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        HStack(spacing: RafuMetrics.space2) {
+            leading
+            Spacer(minLength: RafuMetrics.space2)
+            trailing
+        }
+        .padding(.horizontal, RafuMetrics.space3)
+        .frame(height: RafuMetrics.sectionHeaderHeight)
+        .background(theme.palette.cardBackground)
+        .overlay(alignment: .bottom) {
+            Divider().overlay(theme.palette.borderSubtle)
+        }
+    }
+}
+
+extension RafuCardHeaderRow where Trailing == EmptyView {
+    init(@ViewBuilder leading: () -> Leading) {
+        self.leading = leading()
+        self.trailing = EmptyView()
+    }
+}
+
 /// Hover-highlighting row container for custom list-like stacks.
 struct RafuHoverRow<Content: View>: View {
     var isSelected: Bool = false

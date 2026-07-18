@@ -24,9 +24,9 @@ struct NavigationPeekView: View {
         }
         .frame(width: 560, height: 360)
         .background(peekBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
                 .strokeBorder(theme.palette.borderStrong.opacity(0.5))
         )
         .onKeyPress(.downArrow) {
@@ -47,15 +47,16 @@ struct NavigationPeekView: View {
     private var header: some View {
         HStack(spacing: 10) {
             Image(systemName: "arrow.triangle.turn.up.right.diamond")
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(theme.palette.accent)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(theme.palette.chipBackground))
             Text(title)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(theme.palette.textPrimary)
             Spacer()
             if let tierLabel {
-                Text(tierLabel)
-                    .font(.caption)
-                    .foregroundStyle(theme.palette.textMuted)
+                RafuChip(text: tierLabel)
             }
         }
         .padding(.horizontal, 16)
@@ -188,9 +189,11 @@ struct NavigationPeekView: View {
             }
             .padding(.horizontal, 12)
             .frame(minHeight: 44)
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
+            )
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
                     .fill(isSelected ? theme.palette.selection : .clear)
             )
         }
@@ -222,10 +225,7 @@ struct NavigationPeekView: View {
     }
 
     private var peekBackground: some View {
-        ZStack {
-            Rectangle().fill(.ultraThinMaterial)
-            theme.palette.elevatedBackground.opacity(0.72)
-        }
+        theme.palette.cardBackground
     }
 
     private func moveSelection(_ delta: Int) {

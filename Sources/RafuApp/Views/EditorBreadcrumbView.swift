@@ -94,7 +94,7 @@ struct EditorBreadcrumbView: View {
         .padding(.horizontal, 10)
         .frame(height: 24)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(theme.palette.tabBarBackground.opacity(0.92))
+        .background(theme.palette.tabBarBackground)
         .overlay(alignment: .bottom) { Divider().overlay(theme.palette.borderSubtle) }
         .task(id: document.url) { rebuildSegments() }
         .accessibilityElement(children: .contain)
@@ -163,14 +163,14 @@ private struct BreadcrumbSegmentButtonStyle: ButtonStyle {
                 .foregroundStyle(
                     isHovering ? theme.palette.textPrimary : theme.palette.textMuted
                 )
-                .padding(.horizontal, 3)
+                .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    Capsule()
                         .fill(
                             configuration.isPressed
                                 ? theme.palette.selection
-                                : isHovering ? theme.palette.hover : .clear
+                                : isHovering ? theme.palette.chipBackground : .clear
                         )
                 )
                 .onHover { isHovering = $0 }

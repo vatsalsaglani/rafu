@@ -60,12 +60,13 @@ struct CommandPaletteView: View {
             } else {
                 resultsList(rows: rows)
             }
+            paletteFooterHints
         }
         .frame(width: 580, height: 400)
         .background(paletteBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
                 .strokeBorder(theme.palette.borderStrong.opacity(0.5))
         )
         .onKeyPress(.downArrow) {
@@ -111,18 +112,25 @@ struct CommandPaletteView: View {
         rows: [PaletteRow]
     ) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: headerSymbolName(for: parsed.mode))
-                .frame(width: 18)
-                .foregroundStyle(theme.palette.accent)
-            TextField(
-                "Go to file… > commands, @ file symbols, # workspace symbols", text: $query
+            HStack(spacing: 8) {
+                Image(systemName: headerSymbolName(for: parsed.mode))
+                    .frame(width: 18)
+                    .foregroundStyle(theme.palette.accent)
+                TextField(
+                    "Go to file… > commands, @ file symbols, # workspace symbols", text: $query
+                )
+                .textFieldStyle(.plain)
+                .font(.system(size: 15))
+                .focused($searchFocused)
+                .onSubmit { run(rows, at: selectedIndex) }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusField, style: .continuous)
+                    .fill(theme.palette.fieldBackground)
             )
-            .textFieldStyle(.plain)
-            .font(.system(size: 15))
-            .focused($searchFocused)
-            .onSubmit { run(rows, at: selectedIndex) }
-            Text("⌘P").font(.caption.monospaced())
-                .foregroundStyle(theme.palette.textMuted)
+            RafuChip(text: "⌘P")
         }
         .padding(.horizontal, 16)
         .frame(height: 46)
@@ -203,10 +211,14 @@ struct CommandPaletteView: View {
     }
 
     private var paletteBackground: some View {
-        ZStack {
-            Rectangle().fill(.ultraThinMaterial)
-            theme.palette.elevatedBackground.opacity(0.72)
-        }
+        theme.palette.cardBackground
+    }
+
+    /// A trailing capsule chip for a genuine keyboard-shortcut hint (e.g.
+    /// "⌃`"); longer descriptive detail (paths, hunk headers, summaries)
+    /// keeps reading as a plain secondary line under the title.
+    private func isShortcutHint(_ detail: String) -> Bool {
+        !detail.isEmpty && detail.allSatisfy { "⌘⌃⇧⌥⌫⏎`".contains($0) }
     }
 
     private func paletteRowView(_ row: PaletteRow, isSelected: Bool) -> some View {
@@ -227,7 +239,7 @@ struct CommandPaletteView: View {
                     Text(row.title)
                         .foregroundStyle(theme.palette.textPrimary)
                         .lineLimit(1)
-                    if let detail = row.detail {
+                    if let detail = row.detail, !isShortcutHint(detail) {
                         Text(detail).font(.caption)
                             .foregroundStyle(theme.palette.textSecondary)
                             .lineLimit(1)
@@ -235,6 +247,9 @@ struct CommandPaletteView: View {
                     }
                 }
                 Spacer()
+                if let detail = row.detail, isShortcutHint(detail) {
+                    RafuChip(text: detail)
+                }
                 if isSelected {
                     Image(systemName: "return")
                         .font(.caption)
@@ -243,13 +258,37 @@ struct CommandPaletteView: View {
             }
             .padding(.horizontal, 12)
             .frame(minHeight: 38)
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
+            )
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
                     .fill(isSelected ? theme.palette.selection : .clear)
             )
         }
         .buttonStyle(.plain)
+    }
+
+    private var paletteFooterHints: some View {
+        HStack(spacing: 14) {
+            footerHint(symbol: "arrow.up.arrow.down", label: "Navigate")
+            footerHint(symbol: "return", label: "Open")
+            footerHint(symbol: "escape", label: "Close")
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .frame(height: RafuMetrics.statusBarHeight)
+        .background(theme.palette.cardBackground)
+        .overlay(alignment: .top) { Divider().overlay(theme.palette.borderSubtle) }
+        .accessibilityHidden(true)
+    }
+
+    private func footerHint(symbol: String, label: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: symbol).font(.system(size: 9))
+            Text(label).font(.system(size: 10))
+        }
+        .foregroundStyle(theme.palette.textMuted)
     }
 
     private func iconColor(for row: PaletteRow, isSelected: Bool) -> Color {
