@@ -122,4 +122,19 @@ nonisolated enum CommitGraphLayout {
         }
         return rows
     }
+
+    /// The narrowest lane count the rendered rows actually need: one past
+    /// the highest lane index any row or edge references, clamped to
+    /// `visibleLaneCap` since `layout` already clamps every lane it emits.
+    /// Lets the canvas column shrink to a single lane for linear history
+    /// instead of always reserving the full cap's width.
+    static func laneCount(_ rows: [GraphRow]) -> Int {
+        var maxLane = 0
+        for row in rows {
+            maxLane = max(maxLane, row.laneIndex)
+            for edge in row.incomingEdges { maxLane = max(maxLane, edge.fromLane, edge.toLane) }
+            for edge in row.outgoingEdges { maxLane = max(maxLane, edge.fromLane, edge.toLane) }
+        }
+        return max(1, maxLane + 1)
+    }
 }

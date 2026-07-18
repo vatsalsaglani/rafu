@@ -162,49 +162,61 @@ struct GitInspectorView: View {
         .padding(10)
     }
 
+    /// A searchable branch switcher (GD/GI 10) replacing the previous flat
+    /// `Menu` branch list, which had no way to filter a long branch set. The
+    /// switcher itself only switches branches; merge and create-branch stay
+    /// in the adjacent compact ellipsis menu so the trigger's accessible
+    /// name/help stays "switch branches" and the destructive/creation
+    /// actions stay one deliberate tap away rather than mixed into search
+    /// results.
     private var branchMenu: some View {
-        Menu {
+        HStack(spacing: 2) {
             if let branches = session.gitBranchSnapshot {
-                Section("Local Branches") {
-                    ForEach(branches.localBranches) { branch in
-                        Button {
-                            guard !branch.isCurrent else { return }
-                            Task { await session.gitCheckoutBranch(named: branch.name) }
-                        } label: {
-                            Label(
-                                branch.name,
-                                systemImage: branch.isCurrent ? "checkmark" : "arrow.right"
-                            )
+                RafuSearchableDropdown(
+                    items: branches.localBranches + branches.remoteBranches,
+                    text: \.name,
+                    keywords: { [$0.name] },
+                    isCurrent: \.isCurrent,
+                    onSelect: { branch in
+                        guard !branch.isCurrent else { return }
+                        Task { await session.gitCheckoutBranch(named: branch.name) }
+                    },
+                    searchPrompt: "Search branches"
+                ) {
+                    Label(snapshot.branch, systemImage: "arrow.triangle.branch")
+                        .font(.headline)
+                        .lineLimit(1)
+                }
+                .help("Switch branches")
+
+                Menu {
+                    Menu("Merge into Current", systemImage: "arrow.triangle.merge") {
+                        ForEach(branches.localBranches.filter { !$0.isCurrent }) { branch in
+                            Button(branch.name) { pendingMergeBranch = branch.name }
                         }
-                        .disabled(branch.isCurrent)
                     }
+                    .disabled(branches.localBranches.allSatisfy(\.isCurrent))
+                    Divider()
+                    Button("Create Branch…", systemImage: "plus") { isCreatingBranch = true }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(theme.palette.textSecondary)
+                        .frame(width: 22, height: 22)
+                        .contentShape(.rect)
                 }
-                if !branches.remoteBranches.isEmpty {
-                    Section("Remote Branches") {
-                        ForEach(branches.remoteBranches) { branch in
-                            Button(branch.name) {
-                                Task { await session.gitCheckoutBranch(named: branch.name) }
-                            }
-                        }
-                    }
-                }
-                Menu("Merge into Current", systemImage: "arrow.triangle.merge") {
-                    ForEach(branches.localBranches.filter { !$0.isCurrent }) { branch in
-                        Button(branch.name) { pendingMergeBranch = branch.name }
-                    }
-                }
-                .disabled(branches.localBranches.allSatisfy(\.isCurrent))
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Merge or create a branch")
+                .accessibilityLabel("Branch actions")
+            } else {
+                Label(snapshot.branch, systemImage: "arrow.triangle.branch")
+                    .font(.headline)
+                    .lineLimit(1)
+                    .foregroundStyle(theme.palette.textMuted)
             }
-            Divider()
-            Button("Create Branch…", systemImage: "plus") { isCreatingBranch = true }
-        } label: {
-            Label(snapshot.branch, systemImage: "arrow.triangle.branch")
-                .font(.headline)
-                .lineLimit(1)
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .help("Switch, create, or merge branches")
     }
 
     private var syncMenu: some View {
@@ -746,12 +758,17 @@ private struct GitWorktreeRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: isCurrent ? "checkmark.circle.fill" : "folder")
-                .foregroundStyle(isCurrent ? theme.palette.accent : theme.palette.textSecondary)
+            Image(
+                systemName: isCurrent
+                    ? "checkmark.circle.fill" : "point.3.connected.trianglepath.dotted"
+            )
+            .foregroundStyle(isCurrent ? theme.palette.accent : theme.palette.textSecondary)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(worktree.name)
+                        .fontWeight(.medium)
                         .lineLimit(1)
+                        .truncationMode(.tail)
                         .foregroundStyle(theme.palette.textPrimary)
                     if let branch = worktree.branch {
                         chip(branch, color: theme.palette.accent)
@@ -761,6 +778,7 @@ private struct GitWorktreeRow: View {
                     if worktree.isMain { chip("main worktree", color: theme.palette.textMuted) }
                     if worktree.isLocked { chip("locked", color: theme.palette.warning) }
                     if worktree.isPrunable { chip("prunable", color: theme.palette.error) }
+                    Spacer(minLength: 0)
                 }
                 Text(worktree.path)
                     .font(.caption2)
@@ -769,11 +787,20 @@ private struct GitWorktreeRow: View {
                     .truncationMode(.middle)
             }
             Spacer(minLength: 4)
-            Menu("Worktree Actions", systemImage: "ellipsis.circle") {
+            Menu {
                 actions
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(.rect)
             }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .fixedSize()
+            .help("Worktree actions")
+            .accessibilityLabel("Worktree actions")
         }
         .padding(.vertical, 3)
         .contentShape(.rect)

@@ -44,6 +44,13 @@ struct GitCommitGraphView: View {
         // work in `body` — hoist it here so it is built exactly once.
         let rowsByID = Dictionary(
             uniqueKeysWithValues: CommitGraphLayout.layout(commits).map { ($0.commitID, $0) })
+        // The lane column only needs to be as wide as the widest lane the
+        // LOADED window actually uses, not a fixed `visibleLaneCap` column —
+        // linear history collapses to a single narrow lane.
+        let laneCanvasWidth =
+            CGFloat(CommitGraphLayout.laneCount(Array(rowsByID.values)))
+            * GitCommitGraphRow.laneWidth
+            + 10
         return VStack(spacing: 0) {
             header
             Divider().overlay(theme.palette.borderSubtle)
@@ -61,7 +68,8 @@ struct GitCommitGraphView: View {
                                 commit: commit,
                                 row: rowsByID[commit.id],
                                 palette: colorPalette,
-                                currentBranch: currentBranch
+                                currentBranch: currentBranch,
+                                laneCanvasWidth: laneCanvasWidth
                             )
                             .tag(commit.id)
                             .contentShape(.rect)
@@ -134,6 +142,11 @@ private struct GitCommitGraphRow: View {
     let row: GraphRow?
     let palette: [Color]
     let currentBranch: String?
+    /// Computed once per render by the parent from `CommitGraphLayout.laneCount`
+    /// over ALL loaded rows (not just this row) so every row in the list
+    /// shares one canvas width — a per-row width would make edges between
+    /// rows misalign.
+    let laneCanvasWidth: CGFloat
 
     var body: some View {
         HStack(alignment: .top, spacing: RafuMetrics.space2) {
@@ -174,9 +187,7 @@ private struct GitCommitGraphRow: View {
         return "\(commit.subject), \(commit.shortID), \(commit.authorName)\(decorationText)"
     }
 
-    private static let laneWidth: CGFloat = 14
-    private static let laneCanvasWidth =
-        CGFloat(CommitGraphLayout.visibleLaneCap) * laneWidth + 10
+    fileprivate static let laneWidth: CGFloat = 14
 
     private var laneCanvas: some View {
         Canvas { context, size in
@@ -204,7 +215,7 @@ private struct GitCommitGraphRow: View {
                 )
             }
         }
-        .frame(width: Self.laneCanvasWidth, height: 30)
+        .frame(width: laneCanvasWidth, height: 30)
         .accessibilityHidden(true)
     }
 

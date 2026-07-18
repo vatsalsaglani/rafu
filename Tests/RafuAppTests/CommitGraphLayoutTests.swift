@@ -141,4 +141,41 @@ struct CommitGraphLayoutTests {
         #expect(rows[0].outgoingEdges.isEmpty)
         #expect(rows[0].openStubParentIDs.isEmpty)
     }
+
+    @Test("laneCount is 1 for an empty layout")
+    func laneCountEmpty() {
+        #expect(CommitGraphLayout.laneCount([]) == 1)
+    }
+
+    @Test("laneCount is 1 for a linear chain")
+    func laneCountLinearChain() {
+        let commits = [
+            commit("c3", parents: ["c2"]),
+            commit("c2", parents: ["c1"]),
+            commit("c1", parents: []),
+        ]
+        let rows = CommitGraphLayout.layout(commits)
+        #expect(CommitGraphLayout.laneCount(rows) == 1)
+    }
+
+    @Test("laneCount is 2 for a branch and merge")
+    func laneCountBranchAndMerge() {
+        let commits = [
+            commit("C", parents: ["B2", "B1"]),
+            commit("B2", parents: ["A"]),
+            commit("B1", parents: ["A"]),
+            commit("A", parents: []),
+        ]
+        let rows = CommitGraphLayout.layout(commits)
+        #expect(CommitGraphLayout.laneCount(rows) == 2)
+    }
+
+    @Test("laneCount clamps to the visible lane cap for a wide merge")
+    func laneCountClampsToVisibleCap() {
+        let parentIDs = (0..<12).map { "P\($0)" }
+        var commits = [commit("M", parents: parentIDs)]
+        commits += parentIDs.map { commit($0, parents: []) }
+        let rows = CommitGraphLayout.layout(commits)
+        #expect(CommitGraphLayout.laneCount(rows) == CommitGraphLayout.visibleLaneCap)
+    }
 }
