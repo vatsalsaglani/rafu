@@ -41,6 +41,13 @@ nonisolated struct RafuThemePalette: Sendable {
     let hover: Color
     let borderSubtle: Color
     let borderStrong: Color
+    // Flat-refresh surfaces (UI plan U0). Optional in JSON with derived
+    // fallbacks, so every existing theme renders identically until a theme
+    // opts in.
+    let cardBackground: Color
+    let fieldBackground: Color
+    let chipBackground: Color
+    let accentSoft: Color
     let textPrimary: Color
     let textSecondary: Color
     let textMuted: Color
@@ -96,6 +103,10 @@ nonisolated struct RafuTheme: Decodable, Sendable {
         let tabActiveBackground: String?
         let hover: String?
         let borderStrong: String?
+        let cardBackground: String?
+        let fieldBackground: String?
+        let chipBackground: String?
+        let accentSoft: String?
         let textMuted: String?
         let accentHover: String?
         let onAccent: String?
@@ -243,6 +254,13 @@ nonisolated struct RafuTheme: Decodable, Sendable {
             hover: color(ui.hover, fallback: ui.selection),
             borderSubtle: color(ui.borderSubtle),
             borderStrong: color(ui.borderStrong, fallback: ui.borderSubtle),
+            // Cards are the elevated surface; fields recess to the canvas so a
+            // field on a card reads as a well; chips reuse the hover wash;
+            // accentSoft is the scarce ~14% tint for selected nav/segments.
+            cardBackground: color(ui.cardBackground, fallback: ui.elevatedBackground),
+            fieldBackground: color(ui.fieldBackground, fallback: ui.appBackground),
+            chipBackground: color(ui.chipBackground, fallback: ui.hover ?? ui.selection),
+            accentSoft: color(ui.accentSoft, fallback: accentHex + "24"),
             textPrimary: color(ui.textPrimary),
             textSecondary: color(ui.textSecondary),
             textMuted: color(ui.textMuted, fallback: ui.textSecondary),
