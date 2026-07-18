@@ -15,6 +15,9 @@ struct CommandPaletteView: View {
     @FocusState private var searchFocused: Bool
 
     private static let maximumFileRows = 100
+    /// Coalesces a fast typing burst into one index rank pass (file and
+    /// workspace-symbol modes); the `.task(id:)` cancellation does the rest.
+    private static let queryDebounce = Duration.milliseconds(110)
 
     private enum SymbolScanState: Equatable {
         case idle
@@ -344,6 +347,14 @@ struct CommandPaletteView: View {
     /// memory-pressure shed emptied — a no-op the rest of the time.
     private func runFileQuery(term: String) async {
         session.ensureFileIndexReady()
+        // Debounce keystrokes: each keypress cancels the prior `.task(id:)`,
+        // so a short sleep here coalesces a fast typing burst into one rank
+        // pass over the (possibly large) path list instead of one per key.
+        // An empty term (initial open) skips the wait for instant results.
+        if !term.isEmpty {
+            try? await Task.sleep(for: Self.queryDebounce)
+            if Task.isCancelled { return }
+        }
         do {
             let results = try await session.queryFileIndex(term: term, limit: Self.maximumFileRows)
             fileMatches = results
@@ -396,6 +407,10 @@ struct CommandPaletteView: View {
     private func runWorkspaceSymbolQuery(parsed: PaletteQueryParser.ParsedQuery) async {
         guard parsed.mode == .workspaceSymbols else { return }
         session.ensureSymbolIndexReady()
+        if !parsed.term.isEmpty {
+            try? await Task.sleep(for: Self.queryDebounce)
+            if Task.isCancelled { return }
+        }
         do {
             workspaceSymbolMatches = try await session.queryWorkspaceSymbols(
                 term: parsed.term, limit: Self.maximumFileRows)

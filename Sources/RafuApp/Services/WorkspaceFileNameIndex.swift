@@ -53,8 +53,13 @@ actor WorkspaceFileNameIndex {
         } catch is CancellationError {
             return
         } catch {
+            // A failed build (git/enumerator hiccup on open) must NOT latch as
+            // `.ready(count: 0)` — `ensureFileIndexReady()` only rebuilds an
+            // `.idle` index, so latching empty would pin file search at "no
+            // matching files" until the folder is reopened. Reset to `.idle`
+            // so the next palette query transparently retries the build.
             paths = []
-            state = .ready(count: 0, isTruncated: false)
+            state = .idle
         }
     }
 

@@ -150,6 +150,30 @@ func fileNameIndexShedReturnsToIdle() async throws {
     #expect(results.isEmpty)
 }
 
+@Test("A failed build resets to idle so the next query retries, not latches empty")
+func fileNameIndexFailedBuildResetsToIdle() async throws {
+    // Point the index at a path that does not exist: git ls-files declines
+    // (not a repo) and the filesystem enumerator throws — the failure path.
+    let missing = FileManager.default.temporaryDirectory.appending(
+        path: "rafu-missing-\(UUID().uuidString)", directoryHint: .isDirectory)
+
+    let index = WorkspaceFileNameIndex()
+    await index.build(rootURL: missing)
+    // Must NOT latch as .ready(count: 0) — that would pin file search at "no
+    // matching files" because ensureFileIndexReady only rebuilds .idle.
+    #expect(await index.currentState == .idle)
+
+    // After the directory appears, a rebuild succeeds — proving the earlier
+    // failure did not permanently break file search.
+    try FileManager.default.createDirectory(at: missing, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: missing) }
+    try write("hello", to: missing.appending(path: "Main.swift"))
+    await index.build(rootURL: missing)
+    #expect(await index.currentState != .idle)
+    let results = try await index.query(term: "Main", limit: 10)
+    #expect(results.contains("Main.swift"))
+}
+
 private func makeTemporaryDirectory() throws -> URL {
     let url = FileManager.default.temporaryDirectory.appending(
         path: "rafu-file-index-tests-\(UUID().uuidString)",
