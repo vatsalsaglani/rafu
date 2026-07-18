@@ -22,6 +22,9 @@ enum RafuMetrics {
     static let space3: CGFloat = 12
     static let space4: CGFloat = 16
     static let space5: CGFloat = 20
+    /// Custom-sheet outer padding (Stash/Worktree/File-creation/Quit/Trust/
+    /// Install-consent sheets).
+    static let sheetPadding: CGFloat = 22
 
     // Vertical rhythm.
     /// Standard list/tree/command row height.

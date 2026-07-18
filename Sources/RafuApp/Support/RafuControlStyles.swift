@@ -212,14 +212,29 @@ struct RafuSegmentedPicker<Item: Hashable>: View {
 /// hints, code-block languages). Matches the anatomy already hand-rolled by
 /// `GitInspectorView`'s worktree chips.
 struct RafuChip: View {
-    let text: String
+    private let label: Text
     var foreground: Color? = nil
     var monospacedDigit: Bool = false
 
     @Environment(\.rafuTheme) private var theme
 
+    init(text: String, foreground: Color? = nil, monospacedDigit: Bool = false) {
+        self.label = Text(text)
+        self.foreground = foreground
+        self.monospacedDigit = monospacedDigit
+    }
+
+    /// Wraps a pre-built `Text`, e.g. `Text(date, style: .relative)`, so a
+    /// chip can host SwiftUI's self-updating relative-date rendering
+    /// instead of a one-shot formatted string.
+    init(_ label: Text, foreground: Color? = nil, monospacedDigit: Bool = false) {
+        self.label = label
+        self.foreground = foreground
+        self.monospacedDigit = monospacedDigit
+    }
+
     var body: some View {
-        Text(text)
+        label
             .font(.system(size: 10.5, weight: .medium))
             .modifier(MonospacedDigitIfNeeded(enabled: monospacedDigit))
             .foregroundStyle(foreground ?? theme.palette.textSecondary)
@@ -277,6 +292,74 @@ extension RafuCardHeaderRow where Trailing == EmptyView {
     init(@ViewBuilder leading: () -> Leading) {
         self.leading = leading()
         self.trailing = EmptyView()
+    }
+}
+
+/// Filled-field chrome for single/multi-line text inputs: `fieldBackground`
+/// fill at `RafuMetrics.radiusField`, a `borderSubtle` hairline at rest, and
+/// a `focusRing` hairline when focused. `.roundedBorder`'s system chrome
+/// draws its own focus ring for free; a plain field loses that, so callers
+/// MUST thread their `@FocusState` through `isFocused` to keep Full Keyboard
+/// Access legible.
+struct RafuFieldModifier: ViewModifier {
+    var isFocused: Bool = false
+
+    @Environment(\.rafuTheme) private var theme
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, RafuMetrics.space2)
+            .padding(.vertical, RafuMetrics.space1)
+            .background(
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusField, style: .continuous)
+                    .fill(theme.palette.fieldBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusField, style: .continuous)
+                    .strokeBorder(
+                        isFocused ? theme.palette.focusRing : theme.palette.borderSubtle,
+                        lineWidth: RafuMetrics.hairline
+                    )
+            )
+    }
+}
+
+extension View {
+    /// Applies the flat filled-field chrome (see `RafuFieldModifier`).
+    /// Pass the field's `@FocusState` binding value to preserve the
+    /// system's focus-ring affordance that `.roundedBorder` provided.
+    func rafuField(isFocused: Bool = false) -> some View {
+        modifier(RafuFieldModifier(isFocused: isFocused))
+    }
+}
+
+/// Shared sheet header anatomy: a leading glyph plus a title/subtitle
+/// stack. Used by every custom sheet restyled under ADR 0012 so their
+/// headers read consistently.
+struct RafuSheetHeader: View {
+    let icon: String
+    let title: String
+    var subtitle: String? = nil
+
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        HStack(alignment: .top, spacing: RafuMetrics.space2) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(theme.palette.accent)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(theme.palette.textPrimary)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.callout)
+                        .foregroundStyle(theme.palette.textSecondary)
+                }
+            }
+        }
     }
 }
 

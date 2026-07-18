@@ -27,8 +27,10 @@ struct LanguageServerTrustPromptView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Run \(request.displayName) for this workspace?")
-                .font(.headline)
+            RafuSheetHeader(
+                icon: "server.rack",
+                title: "Run \(request.displayName) for this workspace?"
+            )
             Text(
                 "\(request.displayName) will start automatically to provide code intelligence "
                     + "for \(request.languageID) files in this workspace, until you change this "
@@ -37,15 +39,16 @@ struct LanguageServerTrustPromptView: View {
             .foregroundStyle(.secondary)
             .accessibilityElement(children: .combine)
             HStack {
-                Spacer()
                 Button("Decline") { onDecline(request) }
+                    .buttonStyle(RafuSecondaryButtonStyle())
                     .keyboardShortcut(.cancelAction)
+                Spacer()
                 Button("Trust") { onApprove(request) }
+                    .buttonStyle(RafuProminentButtonStyle())
                     .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
             }
         }
-        .padding()
+        .padding(RafuMetrics.sheetPadding)
         .frame(minWidth: 360)
     }
 }

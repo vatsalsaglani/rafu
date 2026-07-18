@@ -149,15 +149,17 @@ private struct EmptyWindowQuitConfirmationView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label("Quit Rafu?", systemImage: "questionmark.circle")
-                .font(.title3.weight(.semibold))
-            Text("No editor tabs are open in this window.")
-                .foregroundStyle(.secondary)
+            RafuSheetHeader(
+                icon: "questionmark.circle",
+                title: "Quit Rafu?",
+                subtitle: "No editor tabs are open in this window."
+            )
             Toggle("Don’t ask again when the last editor is closed", isOn: $neverAskAgain)
             HStack {
-                Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
+                    .buttonStyle(RafuSecondaryButtonStyle())
                     .keyboardShortcut(.cancelAction)
+                Spacer()
                 Button("Quit") {
                     if neverAskAgain {
                         UserDefaults.standard.set(
@@ -167,10 +169,11 @@ private struct EmptyWindowQuitConfirmationView: View {
                     }
                     NSApp.terminate(nil)
                 }
+                .buttonStyle(RafuProminentButtonStyle())
                 .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(22)
+        .padding(RafuMetrics.sheetPadding)
         .frame(width: 430)
     }
 }

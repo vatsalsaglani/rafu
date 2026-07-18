@@ -106,6 +106,9 @@ private struct WorkspaceSearchContent: View {
     @Bindable var search: WorkspaceSearchModel
     @Environment(\.rafuTheme) private var theme
     @FocusState private var isQueryFocused: Bool
+    @FocusState private var isIncludeFocused: Bool
+    @FocusState private var isExcludeFocused: Bool
+    @FocusState private var isReplaceFocused: Bool
     @State private var isApplyConfirmationPresented = false
 
     var body: some View {
@@ -135,7 +138,8 @@ private struct WorkspaceSearchContent: View {
         VStack(spacing: 7) {
             HStack(spacing: 6) {
                 TextField("Search workspace", text: $search.query)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
+                    .rafuField(isFocused: isQueryFocused)
                     .focused($isQueryFocused)
                     .onSubmit(performSearch)
                 Menu {
@@ -167,12 +171,16 @@ private struct WorkspaceSearchContent: View {
             }
             HStack(spacing: 6) {
                 TextField("files to include", text: $search.includePattern)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
+                    .rafuField(isFocused: isIncludeFocused)
+                    .focused($isIncludeFocused)
                     .controlSize(.small)
                     .onSubmit(performSearch)
                     .help("Include only matching files, e.g. *.swift, Sources/**")
                 TextField("files to exclude", text: $search.excludePattern)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
+                    .rafuField(isFocused: isExcludeFocused)
+                    .focused($isExcludeFocused)
                     .controlSize(.small)
                     .onSubmit(performSearch)
                     .help("Skip matching files and folders, e.g. *.md, Tests/**")
@@ -194,7 +202,9 @@ private struct WorkspaceSearchContent: View {
             if search.isReplacePresented {
                 HStack(spacing: 6) {
                     TextField("Replace", text: $search.replacement)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(.plain)
+                        .rafuField(isFocused: isReplaceFocused)
+                        .focused($isReplaceFocused)
                         .onSubmit(previewReplacements)
                     Button("Preview", action: previewReplacements)
                         .buttonStyle(RafuSecondaryButtonStyle(compact: true))

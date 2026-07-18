@@ -299,6 +299,9 @@ struct GitInspectorView: View {
 
     private var changesHeader: some View {
         HStack(spacing: 6) {
+            Image(systemName: "pencil")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(theme.palette.textMuted)
             Text(
                 "\(snapshot.changes.count) changed \(snapshot.changes.count == 1 ? "file" : "files")"
             )
@@ -468,51 +471,65 @@ struct GitInspectorView: View {
     }
 
     private var commitComposer: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Commit").font(.caption.weight(.semibold))
-                    .foregroundStyle(theme.palette.textMuted)
-                    .textCase(.uppercase)
-                    .kerning(0.5)
-                Spacer()
-                if session.isGeneratingAICommitMessage {
-                    ProgressView().controlSize(.mini)
+        VStack(alignment: .leading, spacing: 0) {
+            RafuCardHeaderRow {
+                HStack(spacing: 6) {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(theme.palette.textSecondary)
+                    Text("Commit")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(theme.palette.textPrimary)
                 }
-                Button("Generate Commit Message", systemImage: "sparkles") {
-                    Task { await session.generateAICommitMessage() }
-                }
-                .buttonStyle(RafuIconButtonStyle(size: 24))
-                .disabled(!session.canGenerateAICommitMessage)
-                .help(
-                    "Generate from \(session.aiCommitGenerationScopeDescription). No commit is created automatically."
-                )
-            }
-            Text("Generate scope: \(session.aiCommitGenerationScopeDescription)")
-                .font(.caption2)
-                .foregroundStyle(theme.palette.textMuted)
-            TextField("Commit message", text: $session.gitCommitMessage, axis: .vertical)
-                .lineLimit(2...5)
-            if let error = session.aiCommitGenerationError {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .font(.caption2)
-                    .foregroundStyle(theme.palette.error)
-            }
-            HStack {
-                Button("Stage All") { Task { await session.stageAll() } }
-                    .buttonStyle(RafuSecondaryButtonStyle(compact: true))
-                Spacer()
-                Button("Commit") { Task { await session.commit() } }
-                    .buttonStyle(RafuProminentButtonStyle(compact: true))
-                    .disabled(
-                        session.gitCommitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-                            .isEmpty || snapshot.stagedChanges.isEmpty
-                            || session.isGeneratingAICommitMessage
+            } trailing: {
+                HStack(spacing: 6) {
+                    if session.isGeneratingAICommitMessage {
+                        ProgressView().controlSize(.mini)
+                    }
+                    Button("Generate Commit Message", systemImage: "sparkles") {
+                        Task { await session.generateAICommitMessage() }
+                    }
+                    .buttonStyle(RafuIconButtonStyle(size: 24))
+                    .disabled(!session.canGenerateAICommitMessage)
+                    .help(
+                        "Generate from \(session.aiCommitGenerationScopeDescription). No commit is created automatically."
                     )
+                }
             }
+            VStack(alignment: .leading, spacing: 8) {
+                RafuChip(text: session.aiCommitGenerationScopeDescription)
+                TextField("Commit message", text: $session.gitCommitMessage, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(2...5)
+                    .rafuField()
+                if let error = session.aiCommitGenerationError {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.caption2)
+                        .foregroundStyle(theme.palette.error)
+                }
+                HStack {
+                    Button("Stage All") { Task { await session.stageAll() } }
+                        .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+                    Spacer()
+                    Button("Commit") { Task { await session.commit() } }
+                        .buttonStyle(RafuProminentButtonStyle(compact: true))
+                        .disabled(
+                            session.gitCommitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+                                .isEmpty || snapshot.stagedChanges.isEmpty
+                                || session.isGeneratingAICommitMessage
+                        )
+                }
+            }
+            .padding(10)
         }
-        .padding(10)
-        .background(theme.palette.elevatedBackground.opacity(0.65))
-        .overlay(alignment: .top) { Divider().overlay(theme.palette.borderSubtle) }
+        .background(theme.palette.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
+                .strokeBorder(theme.palette.borderSubtle, lineWidth: RafuMetrics.hairline)
+        )
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
     }
 
     private var historyView: some View {
@@ -626,13 +643,12 @@ private struct GitStashChangesSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Stash Changes")
-                    .font(.title2.weight(.semibold))
-                Text("Save the current working tree explicitly. Rafu never stashes automatically.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
+            RafuSheetHeader(
+                icon: "archivebox",
+                title: "Stash Changes",
+                subtitle:
+                    "Save the current working tree explicitly. Rafu never stashes automatically."
+            )
 
             Form {
                 TextField("Message (Optional)", text: $message, axis: .vertical)
@@ -643,6 +659,8 @@ private struct GitStashChangesSheet: View {
 
             HStack {
                 Button("Cancel", role: .cancel) { dismiss() }
+                    .buttonStyle(RafuSecondaryButtonStyle())
+                    .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Stash Changes") {
                     let submittedMessage = message
@@ -655,11 +673,12 @@ private struct GitStashChangesSheet: View {
                         dismiss()
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(RafuProminentButtonStyle())
+                .keyboardShortcut(.defaultAction)
                 .disabled(session.gitSnapshot?.changes.isEmpty != false || session.isGitBusy)
             }
         }
-        .padding(20)
+        .padding(RafuMetrics.sheetPadding)
         .frame(width: 440)
     }
 }
@@ -670,22 +689,22 @@ private struct GitStashRow: View {
     let requestPop: () -> Void
     let requestDrop: () -> Void
 
+    @Environment(\.rafuTheme) private var theme
+
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "archivebox")
                 .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(entry.message)
                     .lineLimit(2)
                 HStack(spacing: 5) {
                     if let branch = entry.branch {
-                        Text(branch)
+                        RafuChip(text: branch, foreground: theme.palette.accent)
                     }
-                    Text(entry.selector)
-                    Text(entry.createdAt, style: .relative)
+                    RafuChip(text: entry.selector)
+                    RafuChip(Text(entry.createdAt, style: .relative))
                 }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel(accessibilityText)
@@ -803,15 +822,12 @@ private struct GitAddWorktreeSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Add Worktree")
-                    .font(.title2.weight(.semibold))
-                Text(
+            RafuSheetHeader(
+                icon: "point.3.filled.connected.trianglepath.dotted",
+                title: "Add Worktree",
+                subtitle:
                     "Check out a branch into a separate folder — ideal for running a branch or a CLI coding agent in parallel."
-                )
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            }
+            )
 
             Form {
                 TextField("Folder path", text: $path, prompt: Text(defaultPathPrompt))
@@ -824,6 +840,8 @@ private struct GitAddWorktreeSheet: View {
 
             HStack {
                 Button("Cancel", role: .cancel) { dismiss() }
+                    .buttonStyle(RafuSecondaryButtonStyle())
+                    .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Add Worktree") {
                     let resolvedPath = resolvedPath
@@ -836,11 +854,12 @@ private struct GitAddWorktreeSheet: View {
                         dismiss()
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(RafuProminentButtonStyle())
+                .keyboardShortcut(.defaultAction)
                 .disabled(!isValid)
             }
         }
-        .padding(20)
+        .padding(RafuMetrics.sheetPadding)
         .frame(width: 460)
     }
 

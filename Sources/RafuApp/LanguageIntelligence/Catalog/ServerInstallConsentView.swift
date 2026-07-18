@@ -13,8 +13,7 @@ struct ServerInstallConsentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(title)
-                .font(.headline)
+            RafuSheetHeader(icon: "arrow.down.circle", title: title)
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     ForEach(descriptors, id: \.id) { descriptor in
@@ -40,15 +39,16 @@ struct ServerInstallConsentView: View {
                 .foregroundStyle(.orange)
             }
             HStack {
-                Spacer()
                 Button("Cancel", role: .cancel) { onCancel() }
+                    .buttonStyle(RafuSecondaryButtonStyle())
                     .keyboardShortcut(.cancelAction)
+                Spacer()
                 Button("Install") { onInstall() }
+                    .buttonStyle(RafuProminentButtonStyle())
                     .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
             }
         }
-        .padding()
+        .padding(RafuMetrics.sheetPadding)
         .frame(minWidth: 420)
     }
 

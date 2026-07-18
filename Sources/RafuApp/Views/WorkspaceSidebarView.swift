@@ -230,33 +230,38 @@ private struct WorkspaceFileTreeItem: View {
 private struct FileCreationSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var session: WorkspaceSession
+    @FocusState private var isNameFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label(
-                request?.isDirectory == true ? "New Folder" : "New File",
-                systemImage: request?.isDirectory == true ? "folder.badge.plus" : "doc.badge.plus"
+            RafuSheetHeader(
+                icon: request?.isDirectory == true ? "folder.badge.plus" : "doc.badge.plus",
+                title: request?.isDirectory == true ? "New Folder" : "New File"
             )
-            .font(.headline)
             Text(request?.parentURL.path ?? "")
                 .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(2)
             TextField("Name", text: $session.pendingFileName)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .rafuField(isFocused: isNameFocused)
+                .focused($isNameFocused)
                 .onSubmit { create() }
             HStack {
-                Spacer()
                 Button("Cancel", role: .cancel) {
                     session.pendingFileCreation = nil
                     dismiss()
                 }
+                .buttonStyle(RafuSecondaryButtonStyle())
+                .keyboardShortcut(.cancelAction)
+                Spacer()
                 Button("Create") { create() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(RafuProminentButtonStyle())
+                    .keyboardShortcut(.defaultAction)
                     .disabled(
                         session.pendingFileName.trimmingCharacters(in: .whitespacesAndNewlines)
                             .isEmpty)
             }
         }
-        .padding(22)
+        .padding(RafuMetrics.sheetPadding)
         .frame(width: 420)
     }
 
