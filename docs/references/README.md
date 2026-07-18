@@ -37,6 +37,9 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`workspace-trust-and-lsp-settings.md`](workspace-trust-and-lsp-settings.md) | Workspace trust approval/revocation in Settings, trust store persistence, end-to-end trust flow with UI prompt mounting, and deferred live-teardown design choice |
 | [`language-server-install-staging.md`](language-server-install-staging.md) | StagingValidator's zip-slip symlink policy (allow within-staging targets, reject escapes via lexical resolution), npm dependency resolution within staging (npm-cli derivation, mandatory `--ignore-scripts`, atomic-move seam, optional `ArchiveLayout.npmPackageRoot`), curated-catalog SHA-256 checksum pinning, and the fixture relative-symlink caveat |
 | [`skill-routing.md`](skill-routing.md) | Selecting a local skill or Build macOS Apps capability |
+| [`command-palette-and-search-pitfalls.md`](command-palette-and-search-pitfalls.md) | Debugging command-palette result rendering, file-index build/retry behavior, or "a fix doesn't seem to work" during manual GUI verification |
+| [`searchable-dropdown-component.md`](searchable-dropdown-component.md) | Reusing or extending `RafuSearchableDropdown`/`RafuDropdownFilter` for a new trigger-plus-filterable-list picker |
+| [`markdown-local-image-preview.md`](markdown-local-image-preview.md) | Changing Markdown image resolution, the local/remote `ImageProvider` split, or local image decode bounds |
 
 ## Reference-note template
 

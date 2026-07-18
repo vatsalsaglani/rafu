@@ -79,3 +79,33 @@ and explicit AI-assisted commit drafting.
 - User hands-on pass for all 21 acceptance items without Computer Use automation:
   pending; deliberately left to the user.
 - First repository commit created by the user from Rafu only.
+
+### 2026-07-19: UI issue-fix batch
+
+All 15 items in `docs/issues/issues_ui.md` (found during the pending
+hands-on acceptance pass) were implemented and landed on `main` across 7
+commits: flat sidebar chrome (ADR 0012), removal of the clipped
+top-right "Open Folder" toolbar button, commit-graph lane-column sizing
+(`CommitGraphLayout.laneCount`), terminal sessions presented as
+first-class editor tabs (ADR 0014, narrowing ADR 0004), selection
+bracket/quote wrap (`BracketWrap`) and `⌘/` per-language comment toggle
+(`CommentSyntaxTable`), `⌘N` blank untitled document + `⌘S` save-panel
+flow, `⌘⇧N` new window, an animated/cancellable AI commit-composer border
+with a Stop Generating action, a redesigned worktree row with a compact
+icon-only menu, the reusable `RafuSearchableDropdown`/`RafuDropdownFilter`
+component (first used for the branch dropdown and the new status-bar
+branch switcher), native local-image rendering and live split/preview
+editing in Markdown preview, additional VS Code-style shortcuts (`⌘N`,
+`⌘⇧N`, `⌘B`, `⌃G` seeded with `:` for go-to-line), and an opt-in,
+off-by-default full-file per-line git blame mode (amendment to ADR 0013).
+Verified: 789 tests passing, 0 build warnings, lint clean. See
+[`ui-flat-modern-refresh.md`](ui-flat-modern-refresh.md),
+[`git-experience-and-worktrees.md`](git-experience-and-worktrees.md), and
+[`editor-terminal-tabs.md`](editor-terminal-tabs.md) for the sibling phase
+docs each cluster of fixes touches, and
+[`command-palette-and-search-pitfalls.md`](../../references/command-palette-and-search-pitfalls.md),
+[`searchable-dropdown-component.md`](../../references/searchable-dropdown-component.md), and
+[`markdown-local-image-preview.md`](../../references/markdown-local-image-preview.md)
+for the new engineering references this batch produced. The user's
+hands-on acceptance pass for the 21 acceptance items above remains
+pending.

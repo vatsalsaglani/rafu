@@ -3,6 +3,16 @@
 ## Status
 
 Planned (2026-07-18). Direction brief only — no implementation started.
+
+**2026-07-19 update:** increment T1's core placement change (terminal
+sessions presented as first-class editor tabs) landed narrower than this
+brief as part of the 15-item `docs/issues/issues_ui.md` fix batch (issue
+#4; 789 tests, 0 warnings, lint clean) — see
+[ADR 0014](../../decisions/0014-terminal-as-editor-tab.md). Terminal tabs
+are ephemeral (not restored across relaunch), which is narrower than T2's
+placeholder-restoration design below; T2 (full lifecycle policy), T3
+(agent-workflow polish), and T4 (docs/measurement close-out) remain
+planned. TD1–TD4 below are still open.
 Sibling to [`ui-flat-modern-refresh.md`](ui-flat-modern-refresh.md) (adopts
 its design language) and to
 [`git-experience-and-worktrees.md`](git-experience-and-worktrees.md)

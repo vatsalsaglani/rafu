@@ -23,6 +23,7 @@ Accepted ADRs take precedence over older plan suggestions when they explicitly s
 | [0011](0011-advanced-git-hunks-stash-blame.md) | Proposed | Add explicit whole-hunk staging (verbatim rawPatch slicing via `git apply --cached`), explicit stash with drift guards, and read-only bounded blame |
 | [0012](0012-flat-workbench-chrome.md) | Proposed | Flat, layered workbench chrome (tonal surfaces + hairlines, single continuous-corner scale, card language for overlays) supersedes system-material sidebars/toolbar band; native toolbar/controls/accessibility retained; no Liquid Glass |
 | [0013](0013-git-experience-scope.md) | Proposed | Scope inline editor blame annotations (off by default), blame-hover/hunk-peek cards, and a theme-colored bounded commit graph; excludes background fetch/poll, repo-wide search scans, avatars, and discard-from-peek |
+| [0014](0014-terminal-as-editor-tab.md) | Proposed | Present terminal sessions as first-class, ephemeral (non-restored) editor tabs alongside file tabs, narrowing ADR 0004's bottom-panel-only placement; full lifecycle policy (restoration, cap, agent-workflow polish) remains future scope in `editor-terminal-tabs.md` |
 
 Unresolved choices are tracked in [`open-decisions.md`](open-decisions.md).
 

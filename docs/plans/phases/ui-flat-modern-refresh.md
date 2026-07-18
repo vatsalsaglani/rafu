@@ -4,6 +4,14 @@
 
 IMPLEMENTED (2026-07-18). Increments U0–U5 shipped across five commits with 714 tests (684→714, +30 pure-core); manual GUI verification + ADR acceptance (0012/0013 Proposed) remain owed by the user.
 
+**2026-07-19 follow-up:** the manual pass surfaced 15 issues
+(`docs/issues/issues_ui.md`), fixed in one batch (789 tests, 0 warnings,
+lint clean). Of those, this phase's surfaces got: the flat sidebar no
+longer uses material elevation (issue #1), and the clipped top-right
+"Open Folder" toolbar button was removed (issue #2). See
+[`pre-initial-push-workbench.md`](pre-initial-push-workbench.md)'s
+2026-07-19 work-log entry for the full 15-item list.
+
 Prior art: [`workbench-visual-polish.md`](workbench-visual-polish.md) built
 the token/palette engine, shared control styles, and the Files-left /
 utility-right structure this plan composes on top of. Nothing here replaces

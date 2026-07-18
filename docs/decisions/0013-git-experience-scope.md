@@ -138,6 +138,19 @@ bounded indexing — a new ADR); demand for worktree-aware graph lanes (a
 worktree glyph per lane) once GX4's dirty-indicator question (GD4) is
 revisited; or GX6 being picked back up with measured memory/CPU evidence.
 
+**Amendment (2026-07-19, issue #15 of `docs/issues/issues_ui.md`):** GX1
+above scopes inline blame to a single ghost-text annotation on the active
+caret line. A separate, opt-in **full-file blame mode** was added in the
+same UI-issue-fix batch:
+`WorkspaceSession.isFileBlameAnnotationsEnabled`/`toggleFileBlameAnnotations()`
+gates a per-line annotation (`RafuTextView.fileBlameAnnotations: [Int:
+String]?`) drawn for every committed line of the active, saved file, using
+the same `drawBackground`-only discipline (never `NSTextStorage`) and the
+same off-by-default posture (GD2) as GX1. This is an additive presentation
+mode, not a change to GX1's caret-line ghost text, the blame-hover/hunk-peek
+cards (GX2), or the commit-graph (GX3); both blame modes remain read-only
+and never fetch or poll.
+
 **Merge note:** the integration owner should change this ADR from Proposed
 to Accepted only when merging the lane and append its row to the shared
 decision index.

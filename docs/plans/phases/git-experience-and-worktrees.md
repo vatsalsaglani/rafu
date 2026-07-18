@@ -4,6 +4,19 @@
 
 IMPLEMENTED (2026-07-18). Increments GX1, GX2, GX3, GX5 shipped across three commits (477372b covers GX1/GX2/GX3 + ADR 0013; 9971888 covered GX4 worktrees; 6b46423 covers GX5); 714 tests pass (684→714, +30 pure-core); manual GUI verification remains owed.
 
+**2026-07-19 follow-up:** the manual pass surfaced 15 issues
+(`docs/issues/issues_ui.md`), fixed in one batch (789 tests, 0 warnings,
+lint clean). This phase's surfaces got: commit-graph lane-column sizing
+narrowed to `CommitGraphLayout.laneCount` (issue #3), an animated/
+cancellable AI commit-composer border with a Stop Generating action
+(issue #8), a redesigned worktree row with a compact icon-only menu
+(issue #9), the branch dropdown rebuilt on the new
+`RafuSearchableDropdown` component plus a new status-bar branch switcher
+(issues #10/#11), and an opt-in, off-by-default full-file per-line blame
+mode extending GX1 (issue #15, amendment recorded in ADR 0013). See
+[`pre-initial-push-workbench.md`](pre-initial-push-workbench.md)'s
+2026-07-19 work-log entry for the full 15-item list.
+
 ## Why this fits Rafu specifically
 
 The user's own workflow *is* worktree fan-out with CLI coding agents (six
