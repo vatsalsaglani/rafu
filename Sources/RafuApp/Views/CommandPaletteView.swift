@@ -101,8 +101,15 @@ struct CommandPaletteView: View {
         ) {
             await runWorkspaceSymbolQuery(parsed: PaletteQueryParser.parse(query))
         }
-        .task {
+        // Reset on EVERY appearance, not once per view identity: the palette
+        // sheet's content view is reused across open/close, so a `.task`
+        // (which runs once per identity) left the previous session's typed
+        // text in place — reopening showed stale results, and typing appended
+        // to it. `.onAppear` fires on each presentation, so the field always
+        // starts at its seed ("" for ⌘P file mode, ">" for ⌘⇧P, etc.).
+        .onAppear {
             query = session.commandPaletteSeed
+            selectedIndex = 0
             if PaletteQueryParser.parse(session.commandPaletteSeed).mode == .symbols {
                 prepareSymbolsIfNeeded()
             }
