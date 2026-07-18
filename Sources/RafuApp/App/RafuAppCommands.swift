@@ -161,6 +161,14 @@ struct RafuAppCommands: Commands {
             }
             .disabled(workspaceSession == nil)
 
+            // Issue #15: every committed AND uncommitted line, not just the
+            // caret's — a separate, independently toggled decoration from
+            // "Toggle Inline Blame" above.
+            Button("Toggle File Blame") {
+                workspaceSession?.toggleFileBlameAnnotations()
+            }
+            .disabled(workspaceSession == nil)
+
             Button("Toggle AI Completion") {
                 workspaceSession?.toggleAICompletion()
             }

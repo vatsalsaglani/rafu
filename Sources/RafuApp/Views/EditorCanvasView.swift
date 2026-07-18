@@ -11,7 +11,7 @@ struct EditorCanvasView: View {
         ZStack {
             if session.descriptor == nil {
                 WorkspaceWelcomeView(session: session, openFolder: openFolder)
-            } else if session.openDocuments.isEmpty && session.gitOpenDiff == nil
+            } else if !session.hasAnyEditorTabs && session.gitOpenDiff == nil
                 && session.gitOpenBlame == nil
             {
                 EmptyEditorView(
@@ -115,7 +115,16 @@ private struct EditorGroupView: View {
                     )
                     Divider()
                 }
-                if loadedDocuments.isEmpty {
+                if let terminalController = selectedTerminalController {
+                    // Issue #4: a terminal tab's content replaces the
+                    // document ZStack entirely while selected — only one
+                    // terminal is ever mounted at a time per group, since
+                    // `WorkspaceTerminalController.makeOrReuseView` reuses
+                    // the same live `LocalProcessTerminalView` (and its
+                    // scrollback) across remounts, unlike a document's
+                    // bounded-working-set hibernation.
+                    EditorTerminalTabContent(controller: terminalController)
+                } else if loadedDocuments.isEmpty {
                     ContentUnavailableView(
                         "Empty Editor Group",
                         systemImage: "rectangle.split.2x1",
@@ -159,6 +168,11 @@ private struct EditorGroupView: View {
                                     guard let session, let document else { return nil }
                                     return await session.inlineBlame(for: document)
                                 },
+                                fileBlameAnnotationsEnabled: session.isFileBlameAnnotationsEnabled,
+                                fileBlameAnnotationsProvider: { [weak session, weak document] in
+                                    guard let session, let document else { return nil }
+                                    return await session.fileBlameAnnotations(for: document)
+                                },
                                 aiCompletionEnabled: session.isAICompletionEnabled,
                                 aiCompletionProvider: {
                                     [weak session, weak document] prefix, suffix in
@@ -195,11 +209,22 @@ private struct EditorGroupView: View {
         }
     }
 
+    private var selectedTab: EditorTabState? {
+        guard let selectedTabID = group.selectedTabID else { return nil }
+        return group.tabs.first(where: { $0.id == selectedTabID })
+    }
+
     private var selectedDocument: EditorDocument? {
-        guard let selectedTabID = group.selectedTabID,
-            let tab = group.tabs.first(where: { $0.id == selectedTabID })
-        else { return nil }
-        return session.document(for: tab)
+        guard let selectedTab else { return nil }
+        return session.document(for: selectedTab)
+    }
+
+    /// The live terminal session behind the selected `.terminal` tab, or
+    /// `nil` when the selection is a file tab (or the referenced session no
+    /// longer exists — e.g. it was closed by another path).
+    private var selectedTerminalController: WorkspaceTerminalController? {
+        guard case .terminal(let sessionID) = selectedTab?.resource else { return nil }
+        return session.terminal.sessions.first { $0.id == sessionID }
     }
 
     /// This group's documents whose editor should stay mounted. The selected
@@ -650,14 +675,35 @@ private struct EditorGroupTabBar: View {
             ScrollView(.horizontal) {
                 HStack(spacing: 0) {
                     ForEach(group.tabs) { tab in
-                        if let document = session.document(for: tab) {
-                            EditorTabItem(
-                                tabID: tab.id,
-                                groupID: group.id,
-                                document: document,
-                                isSelected: tab.id == group.selectedTabID,
-                                session: session
-                            )
+                        switch tab.resource {
+                        case .file:
+                            if let document = session.document(for: tab) {
+                                EditorTabItem(
+                                    tabID: tab.id,
+                                    groupID: group.id,
+                                    document: document,
+                                    isSelected: tab.id == group.selectedTabID,
+                                    session: session
+                                )
+                            }
+                        case .terminal(let sessionID):
+                            // Issue #4: same tab chrome as a file tab (icon,
+                            // label, close button, selected underline) —
+                            // just backed by a live terminal session instead
+                            // of an `EditorDocument`.
+                            if let controller = session.terminal.sessions.first(where: {
+                                $0.id == sessionID
+                            }) {
+                                EditorTerminalTabItem(
+                                    tabID: tab.id,
+                                    groupID: group.id,
+                                    controller: controller,
+                                    isSelected: tab.id == group.selectedTabID,
+                                    session: session
+                                )
+                            }
+                        case .restorable:
+                            EmptyView()
                         }
                     }
                 }
@@ -1339,6 +1385,95 @@ private struct EditorTabItem: View {
     }
 }
 
+/// Issue #4: a terminal tab, presented with the EXACT SAME chrome as
+/// `EditorTabItem` (icon, label, close button, hover, selected underline,
+/// trailing divider, drag/split context menu) — just backed by a live
+/// `WorkspaceTerminalController` instead of an `EditorDocument`. Closing
+/// always terminates the shell (`session.closeTerminalTab`); there is no
+/// dirty-state confirmation, since a terminal has no unsaved buffer.
+private struct EditorTerminalTabItem: View {
+    @Environment(\.rafuTheme) private var theme
+    @State private var isHovering = false
+
+    let tabID: EditorTabID
+    let groupID: EditorGroupID
+    @Bindable var controller: WorkspaceTerminalController
+    let isSelected: Bool
+    @Bindable var session: WorkspaceSession
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Button {
+                session.selectEditorTab(tabID, in: groupID)
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "terminal")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(theme.palette.accent)
+                    Text(controller.title)
+                        .lineLimit(1)
+                        .foregroundStyle(
+                            isSelected
+                                ? theme.palette.textPrimary
+                                : theme.palette.textSecondary
+                        )
+                    // Never communicated by color alone: the running/stopped
+                    // dot pairs with the "Shell exited" content overlay text.
+                    if !controller.isRunning {
+                        Circle().fill(theme.palette.textMuted).frame(width: 6, height: 6)
+                            .accessibilityLabel("Shell exited")
+                    }
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+
+            Button("Close", systemImage: "xmark") { session.closeTerminalTab(tabID) }
+                .buttonStyle(RafuIconButtonStyle(size: 18, iconSize: 9))
+                .opacity(isHovering || isSelected ? 1 : 0)
+                .help("Close \(controller.title)")
+        }
+        .font(.callout)
+        .padding(.horizontal, 10)
+        .frame(height: RafuMetrics.tabBarHeight)
+        .background {
+            if isHovering {
+                theme.palette.hover.opacity(0.6)
+            } else {
+                Color.clear
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if isSelected { StitchedUnderline(color: theme.palette.accent) }
+        }
+        .overlay(alignment: .trailing) {
+            Divider().frame(height: 18).overlay(theme.palette.borderSubtle)
+        }
+        .onHover { isHovering = $0 }
+        .onDrag { session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString)) }
+        .contextMenu {
+            Button("Split Left", systemImage: "rectangle.split.2x1") {
+                session.splitEditorTab(tabID, at: .leading)
+            }
+            Button("Split Right", systemImage: "rectangle.split.2x1") {
+                session.splitEditorTab(tabID, at: .trailing)
+            }
+            Button("Split Up", systemImage: "rectangle.split.1x2") {
+                session.splitEditorTab(tabID, at: .top)
+            }
+            Button("Split Down", systemImage: "rectangle.split.1x2") {
+                session.splitEditorTab(tabID, at: .bottom)
+            }
+            Divider()
+            Button("Restart Shell", systemImage: "arrow.clockwise") { controller.restart() }
+            Divider()
+            Button("Close") { session.closeTerminalTab(tabID) }
+        }
+        .accessibilityElement(children: .contain)
+        .help(controller.currentDirectoryPath ?? controller.startingDirectory)
+    }
+}
+
 private struct EditorDocumentView: View {
     @Environment(\.rafuTheme) private var theme
     @Bindable var document: EditorDocument
@@ -1350,6 +1485,8 @@ private struct EditorDocumentView: View {
     var hover: (@MainActor (Int) async -> EditorHoverInfo?)? = nil
     var inlineBlameEnabled: Bool = false
     var inlineBlameProvider: (@MainActor () async -> GitBlame?)? = nil
+    var fileBlameAnnotationsEnabled: Bool = false
+    var fileBlameAnnotationsProvider: (@MainActor () async -> GitBlame?)? = nil
     var aiCompletionEnabled: Bool = false
     var aiCompletionProvider: (@MainActor (String, String) async -> String?)? = nil
     var gitPeekActions: GitPeekActions? = nil
@@ -1374,6 +1511,8 @@ private struct EditorDocumentView: View {
                         hover: hover,
                         inlineBlameEnabled: inlineBlameEnabled,
                         inlineBlameProvider: inlineBlameProvider,
+                        fileBlameAnnotationsEnabled: fileBlameAnnotationsEnabled,
+                        fileBlameAnnotationsProvider: fileBlameAnnotationsProvider,
                         aiCompletionEnabled: aiCompletionEnabled,
                         aiCompletionProvider: aiCompletionProvider,
                         gitPeekActions: gitPeekActions
@@ -1390,6 +1529,8 @@ private struct EditorDocumentView: View {
                         hover: hover,
                         inlineBlameEnabled: inlineBlameEnabled,
                         inlineBlameProvider: inlineBlameProvider,
+                        fileBlameAnnotationsEnabled: fileBlameAnnotationsEnabled,
+                        fileBlameAnnotationsProvider: fileBlameAnnotationsProvider,
                         aiCompletionEnabled: aiCompletionEnabled,
                         aiCompletionProvider: aiCompletionProvider,
                         gitPeekActions: gitPeekActions
@@ -1471,6 +1612,8 @@ private struct MarkdownEditorPresentation: View {
     var hover: (@MainActor (Int) async -> EditorHoverInfo?)? = nil
     var inlineBlameEnabled: Bool = false
     var inlineBlameProvider: (@MainActor () async -> GitBlame?)? = nil
+    var fileBlameAnnotationsEnabled: Bool = false
+    var fileBlameAnnotationsProvider: (@MainActor () async -> GitBlame?)? = nil
     var aiCompletionEnabled: Bool = false
     var aiCompletionProvider: (@MainActor (String, String) async -> String?)? = nil
     var gitPeekActions: GitPeekActions? = nil
@@ -1502,6 +1645,8 @@ private struct MarkdownEditorPresentation: View {
             hover: hover,
             inlineBlameEnabled: inlineBlameEnabled,
             inlineBlameProvider: inlineBlameProvider,
+            fileBlameAnnotationsEnabled: fileBlameAnnotationsEnabled,
+            fileBlameAnnotationsProvider: fileBlameAnnotationsProvider,
             aiCompletionEnabled: aiCompletionEnabled,
             aiCompletionProvider: aiCompletionProvider,
             gitPeekActions: gitPeekActions

@@ -105,6 +105,11 @@ final class WorkspaceSession {
     /// GD2 — a calm default) and deliberately NOT persisted across
     /// launches: every new window starts with it off.
     var isInlineBlameEnabled = false
+    /// Issue #15: per-window full-file blame toggle — annotates EVERY line
+    /// (committed and uncommitted alike) with its author and relative date,
+    /// unlike GX1's single caret-line ghost. Off by default (same calm-UI
+    /// default as inline blame, ADR 0013 GD2) and never persisted.
+    var isFileBlameAnnotationsEnabled = false
     /// AI tab-completion mode; per-window, off by default, never persisted.
     var isAICompletionEnabled = false
     /// Set at the end of a successful explicit `gitFetch(remote:)` — the
@@ -241,20 +246,63 @@ final class WorkspaceSession {
         isSidebarCollapsed.toggle()
     }
 
-    var isTerminalPresented = false
-
     @ObservationIgnored
     let terminal = WorkspaceTerminalManager()
 
+    /// Issue #4: the terminal presents as an ordinary editor tab (same
+    /// chrome as a file tab) rather than a separate docked panel, so "toggle
+    /// terminal" and "close tab" both act on the editor layout instead of a
+    /// boolean visibility flag. Closing always terminates the shell — the
+    /// simplest, leak-free contract (ADR 0004's "bounded" panel): there is
+    /// no hidden-but-still-running state to resurrect, only "open a fresh
+    /// one" via `newTerminalTab()`.
     func toggleTerminal() {
-        isTerminalPresented.toggle()
+        if let selectedTerminalTabID {
+            closeTerminalTab(selectedTerminalTabID)
+        } else {
+            newTerminalTab()
+        }
+    }
+
+    /// The focused group's selected tab, when it is a `.terminal` tab.
+    private var selectedTerminalTabID: EditorTabID? {
+        guard let group = editorLayout.group(id: editorLayout.focusedGroupID),
+            let selectedTabID = group.selectedTabID,
+            let tab = group.tabs.first(where: { $0.id == selectedTabID }),
+            case .terminal = tab.resource
+        else { return nil }
+        return tab.id
     }
 
     /// Opens a new terminal tab starting in the active file's directory,
-    /// falling back to the workspace root, then the user's home.
+    /// falling back to the workspace root, then the user's home. Spawns a
+    /// fresh `WorkspaceTerminalController` (lazy, per ADR 0004) and inserts
+    /// it into the focused editor group as a `.terminal` tab, presented with
+    /// the same chrome as a file tab.
     func newTerminalTab() {
-        isTerminalPresented = true
-        terminal.newSession(startingDirectory: preferredTerminalDirectory())
+        let controller = terminal.newSession(startingDirectory: preferredTerminalDirectory())
+        let groupID = editorLayout.focusedGroupID
+        let tab = EditorTabState(resource: .terminal(sessionID: controller.id))
+        editorLayout.insert(tab, in: groupID)
+        editorLayout.select(tab.id, in: groupID)
+        selectedDocumentID = nil
+        selectedTreePath = nil
+        persistWorkspaceState()
+    }
+
+    /// Closes one terminal tab: removes it from the editor layout AND
+    /// terminates its shell (`terminal.close(_:)`), so a closed terminal tab
+    /// never leaves an orphaned process running. A no-op if `tabID` does not
+    /// resolve to a live `.terminal` tab.
+    func closeTerminalTab(_ tabID: EditorTabID) {
+        guard let groupID = editorLayout.group(containing: tabID)?.id,
+            let tab = editorLayout.group(id: groupID)?.tabs.first(where: { $0.id == tabID }),
+            case .terminal(let sessionID) = tab.resource
+        else { return }
+        _ = editorLayout.closeTab(tabID)
+        terminal.close(sessionID)
+        synchronizeSelectionFromLayout()
+        persistWorkspaceState()
     }
 
     private func preferredTerminalDirectory() -> String {
@@ -276,6 +324,15 @@ final class WorkspaceSession {
 
     var selectedDocument: EditorDocument? {
         openDocuments.first { $0.id == selectedDocumentID }
+    }
+
+    /// Whether the editor layout has any tab at all — file or terminal.
+    /// `EditorCanvasView` uses this (rather than `openDocuments.isEmpty`) to
+    /// decide between the "workspace is open, nothing to show yet" welcome
+    /// view and the real editor tree, since a terminal-only layout has no
+    /// open documents but still has a tab to render (issue #4).
+    var hasAnyEditorTabs: Bool {
+        editorLayout.groupIDs.contains { editorLayout.group(id: $0)?.tabs.isEmpty == false }
     }
 
     /// Ids of documents whose editor is currently visible: the selected tab
@@ -470,7 +527,6 @@ final class WorkspaceSession {
         selectedTreePath = nil
         resetGitWorkbenchState()
         resetFileTreeState()
-        isTerminalPresented = false
         terminal.shutdownAll()
         languageIntelligence.workspaceDidClose()
         RecentWorkspacesStore().record(url: url, displayName: name)
@@ -1342,14 +1398,24 @@ final class WorkspaceSession {
     }
 
     func selectEditorTab(_ tabID: EditorTabID, in groupID: EditorGroupID) {
-        guard let tab = editorLayout.group(id: groupID)?.tabs.first(where: { $0.id == tabID }),
-            let document = document(for: tab)
+        guard let tab = editorLayout.group(id: groupID)?.tabs.first(where: { $0.id == tabID })
         else { return }
         editorLayout.select(tabID, in: groupID)
-        selectedDocumentID = document.id
-        selectedTreePath = document.url.path
-        recordAccess(document)
-        updateHibernationStates()
+        switch tab.resource {
+        case .file:
+            guard let document = document(for: tab) else { return }
+            selectedDocumentID = document.id
+            selectedTreePath = document.url.path
+            recordAccess(document)
+            updateHibernationStates()
+        case .terminal(let sessionID):
+            selectedDocumentID = nil
+            selectedTreePath = nil
+            terminal.selectedID = sessionID
+        case .restorable:
+            selectedDocumentID = nil
+            selectedTreePath = nil
+        }
         persistWorkspaceState()
     }
 
@@ -2161,7 +2227,45 @@ final class WorkspaceSession {
     /// between keystrokes), or the document is guard-suppressed (the same
     /// large/pathological-file guard that suppresses syntax and symbols).
     func inlineBlame(for document: EditorDocument) async -> GitBlame? {
-        guard isInlineBlameEnabled, !document.isDirty, !document.suppressesSyntax,
+        guard isInlineBlameEnabled else { return nil }
+        return await blame(for: document)
+    }
+
+    // MARK: - Issue #15: full-file blame
+
+    /// Toggles the full-file blame decoration (issue #15): every committed
+    /// AND uncommitted line gets its own "Author, relative-date" annotation,
+    /// not just the caret's current line. A separate per-window toggle from
+    /// GX1 inline blame — either can be on independently — but both share
+    /// `blame(for:)`'s cache and git plumbing, so enabling this never spawns
+    /// a second, redundant `git blame` process for the same buffer state.
+    /// Off by default; not persisted (same calm-default precedent as
+    /// `toggleInlineBlame()`).
+    func toggleFileBlameAnnotations() {
+        isFileBlameAnnotationsEnabled.toggle()
+        if !isFileBlameAnnotationsEnabled { inlineBlameStore.invalidate() }
+    }
+
+    /// Computes (or returns the cached) `GitBlame` for `document`'s full-file
+    /// blame decoration. Same guards, cache, and git plumbing as
+    /// `inlineBlame(for:)` — gated on `isFileBlameAnnotationsEnabled`
+    /// instead of `isInlineBlameEnabled` so the two decorations toggle
+    /// independently.
+    func fileBlameAnnotations(for document: EditorDocument) async -> GitBlame? {
+        guard isFileBlameAnnotationsEnabled else { return nil }
+        return await blame(for: document)
+    }
+
+    /// Shared blame lookup behind both GX1 inline blame and issue #15's
+    /// full-file blame: `nil` — no process spawned, no cache touched — when
+    /// there is no repository, the file lives outside it, the buffer is
+    /// dirty (blame would be stale against unsaved edits — the data-safety
+    /// reason neither decoration ever runs between keystrokes), or the
+    /// document is guard-suppressed (the same large/pathological-file guard
+    /// that suppresses syntax and symbols). Cached by (repo-relative path,
+    /// HEAD OID, buffer revision) so both callers reuse one fetch.
+    private func blame(for document: EditorDocument) async -> GitBlame? {
+        guard !document.isDirty, !document.suppressesSyntax,
             let gitSnapshot, let repositoryRoot = gitSnapshot.repositoryRoot ?? rootURL,
             let relativePath = gitRepositoryRelativePath(for: document)
         else { return nil }
@@ -2754,10 +2858,16 @@ final class WorkspaceSession {
 
     private func synchronizeSelectionFromLayout(fallback: EditorDocument? = nil) {
         let group = editorLayout.group(id: editorLayout.focusedGroupID)
-        let document =
-            group?.selectedTabID.flatMap { tabID in
-                group?.tabs.first(where: { $0.id == tabID }).flatMap(document(for:))
-            } ?? fallback
+        let selectedTab = group?.selectedTabID.flatMap { tabID in
+            group?.tabs.first(where: { $0.id == tabID })
+        }
+        if case .terminal(let sessionID) = selectedTab?.resource {
+            selectedDocumentID = nil
+            selectedTreePath = nil
+            terminal.selectedID = sessionID
+            return
+        }
+        let document = selectedTab.flatMap(document(for:)) ?? fallback
         selectedDocumentID = document?.id
         selectedTreePath = document?.url.path
     }
@@ -2787,7 +2897,11 @@ final class WorkspaceSession {
         for groupID in layout.groupIDs {
             let tabs = layout.group(id: groupID)?.tabs ?? []
             for tab in tabs {
-                guard case .file(let savedURL) = tab.resource,
+                // `isRestorable` drops every non-file resource up front — in
+                // particular a persisted `.terminal` tab (its shell no
+                // longer exists after relaunch; issue #4/ADR 0004).
+                guard tab.resource.isRestorable,
+                    case .file(let savedURL) = tab.resource,
                     let rebasedURL = rebase(savedURL, from: oldRootURL, to: newRootURL),
                     openURLs.contains(rebasedURL.resolvingSymlinksInPath().standardizedFileURL)
                 else {

@@ -12,23 +12,16 @@ struct WorkspaceWindowView: View {
                 WorkspaceSidebarView(session: session)
             } detail: {
                 HStack(spacing: 0) {
-                    // H/VSplitView are AppKit-backed and collapse to their
+                    // HSplitView is AppKit-backed and collapses to its
                     // children's ideal size unless every level is forced to
                     // fill; keep the explicit max frames and layout priority.
+                    // Issue #4: the terminal presents as an editor tab inside
+                    // `editorCanvas` now, not a separate docked panel here.
                     HSplitView {
-                        VSplitView {
-                            editorCanvas
-                                .frame(minWidth: 480, minHeight: 220)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            if session.isTerminalPresented {
-                                WorkspaceTerminalPanel(session: session)
-                                    .frame(minHeight: 130, idealHeight: 240, maxHeight: 520)
-                                    .frame(maxWidth: .infinity)
-                            }
-                        }
-                        .frame(minWidth: 480)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .layoutPriority(1)
+                        editorCanvas
+                            .frame(minWidth: 480, minHeight: 220)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .layoutPriority(1)
                         if session.descriptor != nil, session.navigatorMode != .files {
                             WorkspaceUtilityPanelView(session: session)
                                 .frame(minWidth: 250, idealWidth: 310, maxWidth: 460)

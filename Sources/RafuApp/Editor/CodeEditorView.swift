@@ -47,6 +47,13 @@ struct CodeEditorView: NSViewRepresentable {
     let inlineBlameEnabled: Bool
     /// GX1: resolves (or returns cached) blame for the active document.
     let inlineBlameProvider: (@MainActor () async -> GitBlame?)?
+    /// Issue #15: whether the full-file blame decoration is on for this
+    /// window — every line, not just the caret's.
+    let fileBlameAnnotationsEnabled: Bool
+    /// Issue #15: resolves (or returns cached) blame for the active
+    /// document. Same signature as `inlineBlameProvider` — both providers
+    /// typically forward to `WorkspaceSession`'s shared blame plumbing.
+    let fileBlameAnnotationsProvider: (@MainActor () async -> GitBlame?)?
     /// AI tab-completion mode for this window (explicit opt-in toggle).
     let aiCompletionEnabled: Bool
     /// Resolves a completion for (prefix, suffix) around the caret.
@@ -65,6 +72,8 @@ struct CodeEditorView: NSViewRepresentable {
         hover: (@MainActor (Int) async -> EditorHoverInfo?)? = nil,
         inlineBlameEnabled: Bool = false,
         inlineBlameProvider: (@MainActor () async -> GitBlame?)? = nil,
+        fileBlameAnnotationsEnabled: Bool = false,
+        fileBlameAnnotationsProvider: (@MainActor () async -> GitBlame?)? = nil,
         aiCompletionEnabled: Bool = false,
         aiCompletionProvider: (@MainActor (String, String) async -> String?)? = nil,
         gitPeekActions: GitPeekActions? = nil
@@ -79,6 +88,8 @@ struct CodeEditorView: NSViewRepresentable {
         self.hover = hover
         self.inlineBlameEnabled = inlineBlameEnabled
         self.inlineBlameProvider = inlineBlameProvider
+        self.fileBlameAnnotationsEnabled = fileBlameAnnotationsEnabled
+        self.fileBlameAnnotationsProvider = fileBlameAnnotationsProvider
         self.aiCompletionEnabled = aiCompletionEnabled
         self.aiCompletionProvider = aiCompletionProvider
         self.gitPeekActions = gitPeekActions
@@ -135,6 +146,8 @@ struct CodeEditorView: NSViewRepresentable {
         context.coordinator.requestGitRefresh = requestGitRefresh
         context.coordinator.inlineBlameEnabled = inlineBlameEnabled
         context.coordinator.inlineBlameProvider = inlineBlameProvider
+        context.coordinator.fileBlameAnnotationsEnabled = fileBlameAnnotationsEnabled
+        context.coordinator.fileBlameProvider = fileBlameAnnotationsProvider
         context.coordinator.aiCompletionEnabled = aiCompletionEnabled
         context.coordinator.aiCompletionProvider = aiCompletionProvider
         context.coordinator.gitPeekActions = gitPeekActions
@@ -188,6 +201,8 @@ struct CodeEditorView: NSViewRepresentable {
         context.coordinator.syncGuardSuppression()
         context.coordinator.updateInlineBlame(
             enabled: inlineBlameEnabled, provider: inlineBlameProvider)
+        context.coordinator.updateFileBlameAnnotations(
+            enabled: fileBlameAnnotationsEnabled, provider: fileBlameAnnotationsProvider)
         context.coordinator.updateAICompletion(
             enabled: aiCompletionEnabled, provider: aiCompletionProvider)
         scrollView.backgroundColor = NSColor(rafuHex: theme.editor.background)
@@ -219,6 +234,7 @@ struct CodeEditorView: NSViewRepresentable {
         coordinator.loadTask?.cancel()
         coordinator.gitMarkersTask?.cancel()
         coordinator.clearInlineBlame()
+        coordinator.clearFileBlameAnnotations()
         coordinator.clearAICompletion()
         coordinator.tearDownSyntaxPipeline()
         coordinator.textView?.textStorage?.delegate = nil
@@ -286,6 +302,16 @@ struct CodeEditorView: NSViewRepresentable {
         /// annotation never re-fetches blame.
         private var cachedInlineBlameLine: GitBlameLine?
         private static let inlineBlameDebounce = Duration.milliseconds(300)
+        /// Issue #15: whether the full-file blame decoration is on for this
+        /// window, and its provider — set from `makeNSView`/`updateNSView`
+        /// exactly like `inlineBlameEnabled`/`inlineBlameProvider`.
+        var fileBlameAnnotationsEnabled = false
+        var fileBlameProvider: (@MainActor () async -> GitBlame?)?
+        /// The in-flight (or debouncing) full-file blame lookup. Cancelled
+        /// and replaced by every `scheduleFileBlameAnnotations()` call;
+        /// NEVER started while `document.isDirty`.
+        private var fileBlameTask: Task<Void, Never>?
+        private static let fileBlameDebounce = Duration.milliseconds(300)
         private(set) var findState: DocumentFindState?
         private var findController: NSTextViewFindController?
         private var syntaxPipeline: NeonSyntaxHighlightingPipeline?
@@ -373,6 +399,7 @@ struct CodeEditorView: NSViewRepresentable {
                     refreshSelectionDecorations()
                     refreshGitMarkers()
                     scheduleInlineBlame()
+                    scheduleFileBlameAnnotations()
                 } catch is CancellationError {
                     return
                 } catch {
@@ -444,6 +471,12 @@ struct CodeEditorView: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard !isLoading else { return }
             document.isDirty = true
+            // The full-file blame decoration goes stale the instant the
+            // buffer diverges from what was blamed — unlike GX1's
+            // caret-line ghost, nothing else re-checks `document.isDirty`
+            // for this decoration until the caret moves, so it clears
+            // synchronously here rather than through a selection-change path.
+            clearFileBlameAnnotations()
             findState?.refresh()
             editGeneration += 1
             scheduleAICompletion()
@@ -487,6 +520,7 @@ struct CodeEditorView: NSViewRepresentable {
                     recordDiskModificationDate()
                     refreshGitMarkers()
                     scheduleInlineBlame()
+                    scheduleFileBlameAnnotations()
                     requestGitRefresh?()
                 } catch {
                     document.errorMessage = error.localizedDescription
@@ -570,6 +604,7 @@ struct CodeEditorView: NSViewRepresentable {
                 textView.indentGuideColor = theme.editorIndentGuideColor
                 textView.bracketBorderColor = theme.editorMatchingBracketBorderColor
                 textView.inlineBlameColor = theme.editorInlineBlameColor
+                textView.fileBlameColor = theme.editorInlineBlameColor
                 textView.inlineCompletionGhostColor = theme.editorInlineBlameColor
             }
             gutterRuler?.style = EditorGutterStyle(theme: theme)
@@ -762,6 +797,77 @@ struct CodeEditorView: NSViewRepresentable {
             inlineBlameLine = nil
             cachedInlineBlameLine = nil
             textView?.inlineBlameAnnotation = nil
+        }
+
+        // MARK: - Issue #15: full-file blame
+
+        /// Flips the full-file blame decoration on/off and re-wires the
+        /// provider from `updateNSView`. A no-op when neither changed;
+        /// toggling ON schedules a fresh whole-file lookup, toggling OFF
+        /// clears immediately — mirrors `updateInlineBlame(enabled:provider:)`.
+        func updateFileBlameAnnotations(
+            enabled: Bool, provider: (@MainActor () async -> GitBlame?)?
+        ) {
+            let wasEnabled = fileBlameAnnotationsEnabled
+            fileBlameAnnotationsEnabled = enabled
+            fileBlameProvider = provider
+            guard enabled != wasEnabled else { return }
+            if enabled {
+                scheduleFileBlameAnnotations()
+            } else {
+                clearFileBlameAnnotations()
+            }
+        }
+
+        /// Schedules (or cancels) the full-file blame decoration covering
+        /// EVERY line — committed and uncommitted alike (issue #15), unlike
+        /// GX1's single caret-line ghost. Called after load/save and
+        /// whenever the mode toggles on. Not re-triggered by caret movement
+        /// (the annotation set does not depend on the caret), only by a
+        /// buffer state change, so this never redoes work on a plain cursor
+        /// move.
+        ///
+        /// TYPING-PATH PROOF: identical to `scheduleInlineBlame()`'s —
+        /// `document.isDirty` guards both the immediate call here (edits
+        /// clear the decoration synchronously via `textDidChange`, so this
+        /// function's own dirty-buffer path is only reachable right after a
+        /// load/save, never mid-typing) and the debounced continuation, so
+        /// no `git blame` process is ever spawned between keystrokes.
+        func scheduleFileBlameAnnotations() {
+            guard fileBlameAnnotationsEnabled, !document.isDirty, textView != nil,
+                let fileBlameProvider
+            else {
+                clearFileBlameAnnotations()
+                return
+            }
+            fileBlameTask?.cancel()
+            let requestedRevision = document.revision
+            fileBlameTask = Task(name: "File blame \(document.displayName)") { [weak self] in
+                try? await Task.sleep(for: Self.fileBlameDebounce)
+                if Task.isCancelled { return }
+                guard let self, self.document.revision == requestedRevision, !self.document.isDirty
+                else { return }
+                guard let blame = await fileBlameProvider() else {
+                    self.textView?.fileBlameAnnotations = nil
+                    return
+                }
+                if Task.isCancelled { return }
+                guard self.document.revision == requestedRevision, !self.document.isDirty,
+                    let currentText = self.textView?.string
+                else { return }
+                let annotations = InlineBlameFormatter.fileAnnotations(
+                    for: blame.lines, in: currentText, referenceDate: Date())
+                self.textView?.fileBlameAnnotations = annotations
+            }
+        }
+
+        /// Cancels any pending/in-flight full-file blame lookup and clears
+        /// the shown decoration. Called when the mode is toggled off, on
+        /// every keystroke (via `textDidChange`), and from `dismantleNSView`.
+        func clearFileBlameAnnotations() {
+            fileBlameTask?.cancel()
+            fileBlameTask = nil
+            textView?.fileBlameAnnotations = nil
         }
 
         // MARK: - AI inline completion

@@ -127,6 +127,25 @@ final class RafuTextView: NSTextView {
 
     private static let inlineBlameLeadingPadding: CGFloat = 24
 
+    // MARK: - Issue #15 full-file blame
+
+    /// Every committed AND uncommitted line's "Author, relative-date" ghost
+    /// text, keyed by the line's starting UTF-16 character offset (not a
+    /// 1-based line number — an offset key lets `drawFileBlameAnnotations`
+    /// reuse the exact same bounded per-line walk `drawIndentGuides` already
+    /// uses, with no separate global line-number cache). `nil` disables the
+    /// decoration. Set by `CodeEditorView.Coordinator`'s debounced
+    /// scheduler; `CodeEditorView.Coordinator.textDidChange` clears it the
+    /// instant the buffer goes dirty, mirroring `inlineBlameAnnotation`.
+    /// Drawing never touches `NSTextStorage`.
+    var fileBlameAnnotations: [Int: String]? {
+        didSet { if oldValue != fileBlameAnnotations { setNeedsDisplay(visibleRect) } }
+    }
+
+    var fileBlameColor: NSColor? {
+        didSet { if oldValue != fileBlameColor { setNeedsDisplay(visibleRect) } }
+    }
+
     /// AI tab-completion ghost text drawn at the caret (never stored in
     /// `NSTextStorage`); Tab accepts it, Escape or any edit clears it.
     var inlineCompletionGhost: String? {
@@ -990,11 +1009,16 @@ final class RafuTextView: NSTextView {
         drawCurrentLineHighlight(in: rect)
         drawIndentGuides(in: rect)
         drawBracketBorders()
-        // A visible completion ghost owns the caret line; blame would overlap.
-        if inlineCompletionGhost == nil {
-            drawInlineBlameAnnotation(in: rect)
-        } else {
+        // A visible completion ghost owns the caret line; blame would
+        // overlap it. Full-file blame (issue #15) already annotates every
+        // line, including the caret's, so it takes over from the single
+        // caret-line GX1 annotation whenever it is populated.
+        if inlineCompletionGhost != nil {
             drawInlineCompletionGhost(in: rect)
+        } else if fileBlameAnnotations != nil {
+            drawFileBlameAnnotations(in: rect)
+        } else {
+            drawInlineBlameAnnotation(in: rect)
         }
     }
 
@@ -1094,6 +1118,63 @@ final class RafuTextView: NSTextView {
         label.draw(at: drawRect.origin, withAttributes: attributes)
     }
 
+    /// Draws issue #15's full-file blame ghost text after EVERY visible
+    /// line's content, not just the caret's — the whole reason for this
+    /// decoration existing alongside GX1's single-line one. Walks the
+    /// visible lines with the same bounded, pathological-file-safe scan
+    /// `drawIndentGuides` uses (`boundedLineRange`), and looks each line up
+    /// in `fileBlameAnnotations` by its starting character offset — no
+    /// separate global line-number cache needed. Purely additive drawing,
+    /// never touches `NSTextStorage`.
+    private func drawFileBlameAnnotations(in rect: NSRect) {
+        guard let fileBlameAnnotations, !fileBlameAnnotations.isEmpty,
+            let fileBlameColor,
+            let layoutManager, let textContainer
+        else { return }
+        let content = string as NSString
+        guard content.length > 0 else { return }
+
+        let origin = textContainerOrigin
+        var containerRect = rect
+        containerRect.origin.x -= origin.x
+        containerRect.origin.y -= origin.y
+        let glyphRange = layoutManager.glyphRange(forBoundingRect: containerRect, in: textContainer)
+        let charRange = layoutManager.characterRange(
+            forGlyphRange: glyphRange, actualGlyphRange: nil)
+
+        let baseFont =
+            font ?? .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        let annotationFont =
+            NSFont(descriptor: baseFont.fontDescriptor, size: baseFont.pointSize * 0.85)
+            ?? .monospacedSystemFont(ofSize: baseFont.pointSize * 0.85, weight: .regular)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: annotationFont, .foregroundColor: fileBlameColor,
+        ]
+
+        var location = charRange.location
+        while location < NSMaxRange(charRange) {
+            guard let lineRange = boundedLineRange(around: location, in: content) else { break }
+            defer { location = NSMaxRange(lineRange) }
+            guard let text = fileBlameAnnotations[lineRange.location], !text.isEmpty else {
+                continue
+            }
+
+            let lineGlyphRange = layoutManager.glyphRange(
+                forCharacterRange: lineRange, actualCharacterRange: nil)
+            let fragmentRect = layoutManager.boundingRect(
+                forGlyphRange: lineGlyphRange, in: textContainer)
+            guard fragmentRect.height > 0 else { continue }
+
+            let label = text as NSString
+            let size = label.size(withAttributes: attributes)
+            let x = fragmentRect.maxX + origin.x + Self.inlineBlameLeadingPadding
+            let y = fragmentRect.minY + origin.y + (fragmentRect.height - size.height) / 2
+            let drawRect = NSRect(x: x, y: y, width: size.width, height: size.height)
+            guard drawRect.intersects(rect) else { continue }
+            label.draw(at: drawRect.origin, withAttributes: attributes)
+        }
+    }
+
     private func drawCurrentLineHighlight(in rect: NSRect) {
         guard let currentLineHighlightColor,
             let layoutManager, let textContainer,
@@ -1175,16 +1256,18 @@ final class RafuTextView: NSTextView {
         }
     }
 
-    /// Farthest distance, in UTF-16 units, that indent-guide drawing will
-    /// scan from the visible range to find a line boundary. Lines longer than
-    /// this are pathological (minified single-line files); their indentation
-    /// is not meaningful on screen and unbounded scans hang the main thread.
+    /// Farthest distance, in UTF-16 units, that a bounded per-line scan will
+    /// look from the visible range to find a line boundary. Lines longer
+    /// than this are pathological (minified single-line files); indentation
+    /// and full-file blame text are not meaningful on screen at that width,
+    /// and unbounded scans would hang the main thread.
     private static let maxIndentGuideLineScan = 4_096
 
-    /// Bounded replacement for `NSString.lineRange(for:)` used only by
-    /// indent-guide drawing. Returns the line range containing `location`
-    /// (trailing newline included, matching `lineRange(for:)`), or `nil`
-    /// when either boundary lies beyond `maxIndentGuideLineScan`.
+    /// Bounded replacement for `NSString.lineRange(for:)` used by both
+    /// indent-guide drawing and `drawFileBlameAnnotations`. Returns the line
+    /// range containing `location` (trailing newline included, matching
+    /// `lineRange(for:)`), or `nil` when either boundary lies beyond
+    /// `maxIndentGuideLineScan`.
     private func boundedLineRange(around location: Int, in content: NSString) -> NSRange? {
         let cap = Self.maxIndentGuideLineScan
         let newlines = CharacterSet.newlines

@@ -27,6 +27,23 @@ nonisolated struct EditorTabID: RawRepresentable, Codable, Hashable, Sendable {
 nonisolated enum EditorTabResource: Codable, Equatable, Sendable {
     case file(URL)
     case restorable(kind: String, key: String, title: String)
+    /// A terminal tab (issue #4): presented with the same tab chrome as a
+    /// file, but backed by a live `WorkspaceTerminalController` looked up by
+    /// `sessionID` rather than an `EditorDocument`. Never restorable — see
+    /// `isRestorable`.
+    case terminal(sessionID: UUID)
+
+    /// Whether this resource is meaningful across a relaunch. Only an
+    /// on-disk file tab is: a terminal tab's `sessionID` references a shell
+    /// process that no longer exists once the app restarts (ADR 0004 —
+    /// sessions are lazy and per-window, never persisted), and the
+    /// speculative `.restorable` kind has no restoration path implemented
+    /// yet either. `WorkspaceSession.restoreEditorLayout` drops any tab
+    /// whose resource answers `false` here.
+    var isRestorable: Bool {
+        if case .file = self { return true }
+        return false
+    }
 }
 
 nonisolated struct EditorTabState: Codable, Equatable, Identifiable, Sendable {

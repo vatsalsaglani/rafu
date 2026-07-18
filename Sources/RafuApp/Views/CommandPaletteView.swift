@@ -731,6 +731,20 @@ struct CommandPaletteView: View {
 
         commands.append(
             .init(
+                id: "git.toggle-file-blame",
+                title: "Toggle File Blame",
+                detail: session.isFileBlameAnnotationsEnabled
+                    ? "On — every line" : "Off",
+                symbolName: "person.text.rectangle",
+                keywords: ["git", "blame", "annotation", "author", "every line", "committed"]
+            ) {
+                dismiss()
+                session.toggleFileBlameAnnotations()
+            }
+        )
+
+        commands.append(
+            .init(
                 id: "ai.toggle-completion",
                 title: "Toggle AI Completion",
                 detail: session.isAICompletionEnabled

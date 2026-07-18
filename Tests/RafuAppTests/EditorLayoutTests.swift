@@ -67,6 +67,27 @@ func closingSelectedTabChoosesAdjacentTab() throws {
     #expect(layout.group(id: group.id)?.selectedTabID == tabs[2].id)
 }
 
+@Test("Only a file resource is restorable; a terminal tab is not")
+func terminalTabResourceIsNotRestorable() {
+    #expect(EditorTabResource.file(URL(fileURLWithPath: "/tmp/a.swift")).isRestorable)
+    #expect(!EditorTabResource.terminal(sessionID: UUID()).isRestorable)
+    #expect(!EditorTabResource.restorable(kind: "diff", key: "x", title: "x").isRestorable)
+}
+
+@Test("A terminal tab resource round-trips through Codable")
+func terminalTabResourceCodableRoundTrip() throws {
+    let sessionID = UUID()
+    let resource = EditorTabResource.terminal(sessionID: sessionID)
+    let encoded = try JSONEncoder().encode(resource)
+    let decoded = try JSONDecoder().decode(EditorTabResource.self, from: encoded)
+    #expect(decoded == resource)
+    guard case .terminal(let decodedID) = decoded else {
+        Issue.record("Expected a decoded .terminal case")
+        return
+    }
+    #expect(decodedID == sessionID)
+}
+
 @Test("Editor layout restoration rejects unknown schema versions")
 func editorLayoutRejectsUnknownSchema() {
     let layout = EditorLayoutState()
