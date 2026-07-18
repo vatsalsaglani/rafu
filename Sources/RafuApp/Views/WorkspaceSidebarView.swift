@@ -37,7 +37,7 @@ struct WorkspaceSidebarView: View {
                     }
                 }
             }
-            .listStyle(.sidebar)
+            .listStyle(.plain)
             .scrollContentBackground(.hidden)
             // Finder (or cross-workspace) drops on the tree background land in
             // the workspace root; folder rows below claim their own drops.

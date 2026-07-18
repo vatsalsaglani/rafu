@@ -5,9 +5,9 @@ struct WorkspaceStatusBar: View {
     @AppStorage("showsProcessMemory") private var showsProcessMemory = false
     @Environment(\.rafuTheme) private var theme
     @State private var memorySample: ProcessMemorySample?
-    let descriptor: WorkspaceDescriptor?
-    @Binding var isResourcesPresented: Bool
-    let languageIntelligence: LanguageIntelligenceCoordinator
+    @Bindable var session: WorkspaceSession
+
+    private var descriptor: WorkspaceDescriptor? { session.descriptor }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -19,6 +19,10 @@ struct WorkspaceStatusBar: View {
                     .lineLimit(1)
             }
 
+            if let branchSnapshot = session.gitBranchSnapshot {
+                branchControl(branchSnapshot)
+            }
+
             Spacer()
 
             if showsProcessMemory, let memorySample {
@@ -28,7 +32,7 @@ struct WorkspaceStatusBar: View {
             }
 
             Button {
-                isResourcesPresented.toggle()
+                session.isResourcesPresented.toggle()
             } label: {
                 Image(systemName: "memorychip")
             }
@@ -36,8 +40,8 @@ struct WorkspaceStatusBar: View {
             .foregroundStyle(theme.palette.textMuted)
             .accessibilityLabel("Show Resources")
             .help("Show Resources")
-            .popover(isPresented: $isResourcesPresented) {
-                ResourcesView(coordinator: languageIntelligence)
+            .popover(isPresented: $session.isResourcesPresented) {
+                ResourcesView(coordinator: session.languageIntelligence)
             }
 
             Text(descriptor == nil ? "Ready" : "Local editor")
@@ -90,5 +94,70 @@ struct WorkspaceStatusBar: View {
         case .ssh:
             return "network"
         }
+    }
+
+    /// Bottom-bar branch chip (GD/GI 11): shows the current git branch when
+    /// the workspace is a repo and switches branches without opening Source
+    /// Control, via the same reusable `RafuSearchableDropdown` used by the
+    /// Source Control branch switcher.
+    private func branchControl(_ snapshot: GitBranchSnapshot) -> some View {
+        let presentation = StatusBarBranchFormatter.present(snapshot)
+        return RafuSearchableDropdown(
+            items: snapshot.localBranches + snapshot.remoteBranches,
+            text: \.name,
+            keywords: { [$0.name] },
+            isCurrent: \.isCurrent,
+            onSelect: { branch in
+                guard !branch.isCurrent else { return }
+                Task { await session.gitCheckoutBranch(named: branch.name) }
+            },
+            searchPrompt: "Search branches"
+        ) {
+            HStack(spacing: RafuMetrics.space1) {
+                Image(systemName: "arrow.triangle.branch")
+                Text(presentation.label).lineLimit(1)
+                if presentation.isDetached {
+                    Text("detached")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .foregroundStyle(theme.palette.textMuted)
+                }
+                if let aheadText = presentation.aheadText {
+                    Label(aheadText, systemImage: "arrow.up")
+                }
+                if let behindText = presentation.behindText {
+                    Label(behindText, systemImage: "arrow.down")
+                }
+            }
+            .lineLimit(1)
+        }
+        .help(
+            presentation.isDetached
+                ? "Detached HEAD — select a branch to check out"
+                : "Switch branches"
+        )
+        .accessibilityLabel(
+            presentation.isDetached
+                ? "Detached HEAD, switch branches"
+                : "Current branch \(presentation.label), switch branches")
+    }
+}
+
+/// Pure, UI-free formatting for the status bar branch chip, kept separate
+/// from the view so it is unit testable without instantiating SwiftUI.
+nonisolated enum StatusBarBranchFormatter {
+    struct Presentation: Equatable {
+        let label: String
+        let isDetached: Bool
+        let aheadText: String?
+        let behindText: String?
+    }
+
+    static func present(_ snapshot: GitBranchSnapshot) -> Presentation {
+        Presentation(
+            label: snapshot.currentBranch ?? "HEAD",
+            isDetached: snapshot.isDetached,
+            aheadText: snapshot.aheadCount > 0 ? "\(snapshot.aheadCount)" : nil,
+            behindText: snapshot.behindCount > 0 ? "\(snapshot.behindCount)" : nil
+        )
     }
 }

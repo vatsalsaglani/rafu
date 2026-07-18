@@ -45,11 +45,7 @@ struct WorkspaceWindowView: View {
             .navigationSplitViewStyle(.balanced)
 
             Divider()
-            WorkspaceStatusBar(
-                descriptor: session.descriptor,
-                isResourcesPresented: $session.isResourcesPresented,
-                languageIntelligence: session.languageIntelligence
-            )
+            WorkspaceStatusBar(session: session)
         }
         .frame(minWidth: 720, minHeight: 480)
         .navigationTitle(session.windowTitle)
@@ -94,14 +90,6 @@ struct WorkspaceWindowView: View {
             Button("OK", role: .cancel) { session.cliInstallMessage = nil }
         } message: {
             Text(session.cliInstallMessage ?? "")
-        }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Open Folder", systemImage: "folder.badge.plus") {
-                    session.requestOpenFolder()
-                }
-                .help("Open a local workspace folder")
-            }
         }
         // Flat chrome (UI plan U1 / ADR 0012): drop the system toolbar band so
         // the themed panels meet the titlebar edge-to-edge behind the traffic
