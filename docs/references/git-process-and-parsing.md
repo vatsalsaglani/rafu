@@ -139,16 +139,27 @@ isolation and shared workspace state are integration concerns.
 - `Sources/RafuApp/Git/GitStashParser.swift`
 - `Sources/RafuApp/Git/GitStashCoordinator.swift`
 - `Sources/RafuApp/Git/GitBlameParser.swift`
-- `Sources/RafuApp/Services/GitService.swift`
-- `Sources/RafuApp/Views/GitInspectorView.swift` (Source Control tree view)
+- `Sources/RafuApp/Git/GitInlineBlameStore.swift` (GX1 cache key: path/headOID/revision)
+- `Sources/RafuApp/Git/HunkPeekSlice.swift` (GX2 200-line cap slicing rawPatch)
+- `Sources/RafuApp/Git/CommitGraphLayout.swift` (GX3 pure lane/edge model, ~8-lane visible cap)
+- `Sources/RafuApp/Git/GitWorktreeParser.swift` (GX4 `git worktree list --porcelain`)
+- `Sources/RafuApp/Services/GitService.swift` (including `loadMoreHistory()` for GX3 pagination)
+- `Sources/RafuApp/Views/GitInspectorView.swift` (Source Control tree view; GX1/GX2/GX3/GX4/GX5 presentations)
+- `Sources/RafuApp/Views/EditorInlineBlameView.swift` (GX1 drawBackground decoration)
+- `Sources/RafuApp/Views/EditorHunkPeekPopover.swift` (GX2 NSPopover card)
+- `Sources/RafuApp/Views/EditorBlameHoverPopover.swift` (GX2 NSPopover tooltip)
 - `Tests/RafuAppTests/GitServiceTests.swift`
 - `Tests/RafuAppTests/GitChangeTreeTests.swift`
 - `Tests/RafuAppTests/GitHunkPatchBuilderTests.swift`
 - `Tests/RafuAppTests/GitStashParserTests.swift`
 - `Tests/RafuAppTests/GitBlameParserTests.swift`
+- `Tests/RafuAppTests/CommitGraphLayoutTests.swift` (GX3 lane/edge layout)
+- `Tests/RafuAppTests/GitWorktreeParserTests.swift` (GX4 porcelain parsing)
 - `docs/plans/phases/pre-initial-push-workbench.md`
 - `docs/plans/phases/git-depth-blame-stash-hunks.md`
+- `docs/plans/phases/git-experience-and-worktrees.md` (GX1–GX5 scope and deferrals)
 - `docs/decisions/0011-advanced-git-hunks-stash-blame.md`
+- `docs/decisions/0013-git-experience-expansion.md` (ADR 0013 — Proposed)
 
 ## File-tree Git status badges (2026-07-18)
 
@@ -177,3 +188,43 @@ The badge map is cached on `WorkspaceSession.gitTreeBadges`, rebuilt from
 Colors come from the existing `gitAdded`/`gitModified`/`gitDeleted`/
 `gitUntracked`/`gitConflict` palette tokens; the letter is never the sole
 channel (VoiceOver label + name tint for added/untracked/deleted).
+
+## Inline blame, hunk peek, and commit graph (GX1–GX3, 2026-07-18)
+
+**Inline blame** (GX1):
+- Data source: `git blame --porcelain -- <relative-path>` for the active saved file only; cached per key `(path, headOID, document.revision)`.
+- Debounce: ~300ms on caret-line change (via `RafuTextView.selectedRangeDidChange`). Never runs during typing; skipped entirely for dirty (unsaved) or guarded documents. Cache invalidated on save (`didSet` on `document.isDirty` and `document.revision`), workspace refresh, or `GitService.refreshGit()`.
+- Presentation: **drawBackground decoration** (never `NSTextStorage` attributes). Ghost text after line end, author • relative time • summary, middle-truncated, rendered in `textMuted` color at ~85% size. Dirty document → annotation hidden (honest: blame is stale while editing).
+- State: per-window toggle (`WorkspaceSession.isInlineBlameLikelyEnabled`), View menu + Command Palette action "Toggle Inline Blame". Off by default (calm default, discoverable).
+
+**Hunk peek card** (GX2):
+- Trigger: click a gutter change strip (`GitGutterHunkMarker` in the editor).
+- Content: −/+ rows for that hunk **sliced verbatim from the existing `GitFileDiff.rawPatch`** (no re-diffing), prefixed with the exact file prologue. **Bounds:** 200-line cap on the slice (`HunkPeekSlice(rawPatch, at: hunk, maxLines: 200)`); if the hunk exceeds the cap, display "Open Full Diff" action only, no truncated preview.
+- Footer: "Working Tree ↔ HEAD" label + Stage Hunk action set (no discard in v1 — destructive ops require full diff). Esc or click-outside dismisses; keyboard path via Command Palette "Peek Change at Line".
+- Presentation: card anchored at the hunk using `NSPopover` (rounded-12 card header row + hairline + body on `cardBackground`; see ui-design-language reference for card anatomy).
+
+**Blame hover card** (GX2):
+- Trigger: hover over the inline blame ghost text OR gutter blame canvas.
+- Content: header = author + relative time + absolute date; body = commit summary + sha chip; footer = Copy SHA, Show in History (jumps History detail selection), Open Blame Canvas.
+- Presentation: `NSPopover` tooltip card, same anatomy as hunk peek. LSP hover keeps priority inside code (hover over identifiers still shows LSP type hints); blame hover anchors to the annotation/gutter, not text identifiers.
+
+**Commit graph layout** (GX3):
+- Input: paginated commit list from History (`GitHistoryPage`); commit parents captured via `%P` (space-separated, already in `GitHistoryCommit` by 2026-07-18).
+- Model: pure `CommitGraphLayout` (deterministic, unit-tested, no Git I/O). Input → output: per-row lane index, incoming/outgoing edges, per-lane color (stable hash of the lane → small palette derived from theme git tokens `gitBranch`/`gitTag`/`gitRemote`).
+- **Lane cap:** visible lanes capped at ~8; overflow handled with "+n more" indicator. Open stubs for edges pointing to unloaded parents (pagination boundary).
+- Row anatomy: lane column (Canvas, ~14pt per lane, multiline lane crossings rendered vertically) | branch/tag chips (current branch ✓ check, upstream ↔, worktree ⚒ glyph when a worktree has this commit checked out) | commit subject | author • relative time.
+- Header: search field for loaded commits (subject/author/sha substring match, explicitly labeled "in loaded commits" to set expectation — no repo-wide scan). Branch breadcrumb (current branch display). Fetch button with last-fetch relative time (explicit user action only — never automatic fetch).
+- **Pagination note:** History pagination did NOT exist as a separate loading concept before GX3. `loadMoreHistory()` was added during this increment to progressively load commit pages, allowing graph layout to compute incrementally per loaded window without blocking the UI.
+
+**Worktree porcelain parsing** (GX4):
+- Source: `git worktree list --porcelain` (one worktree per line, fields space-separated).
+- Model: pure `GitWorktree { path, headOID, branch, isCurrent, isLocked, isPrunable }` (fixture-tested). Paths are absolute (`/path/to/worktree`); `isCurrent` is true for the active worktree only.
+- Row display: folder name (last path component) + branch chip + ahead/behind counts vs. upstream (one `rev-list --left-right --count HEAD...upstream/branch` per worktree on expand only; cached) + "current" indicator.
+- Open-in-new-window action reuses the existing `LauncherRequestRouter`/`WorkspaceWindowRegistry` path: enqueue a `LauncherRequest { openWorkspaceWindow(at: worktree.path) }` to the CLI socket, which the app processes by creating a new window and routing to that workspace. No duplicate Git parsing or window management logic.
+- Dirty indicators deferred (GX4 shipped 2026-07-18 without them): would require one `git status` per sibling worktree on expand, revisit later.
+
+**History pagination model** (introduced GX3):
+- `loadMoreHistory()` method on `GitService` fetches the next page of commits (page size TBD, ~100–200). Returns `GitHistoryPage { commits, isComplete }`.
+- Graph layout computed per loaded page; edges to unloaded parents drawn as open stubs (no projection or prediction).
+- Explicit pagination boundaries: search field clearly states "in loaded commits"; fetch button visible in header so user can load more explicitly.
+- Memory bounded: lazy loading prevents a 10k-commit repo from parsing all commits upfront.

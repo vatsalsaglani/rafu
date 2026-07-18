@@ -1003,6 +1003,12 @@ final class WorkspaceSession {
 
     func refreshGit() async {
         guard let rootURL else { return }
+        // The working-tree peek diff is cached by (path, revision), which does
+        // not change when the index changes (stage/unstage/commit here, in the
+        // Source Control panel, or in a terminal). refreshGit runs after every
+        // such mutation, so invalidate the cache here to keep a reopened hunk
+        // peek coherent with the actual index.
+        workingTreeDiffCache = nil
         do {
             guard let snapshot = try await gitService.snapshot(at: rootURL) else {
                 resetGitWorkbenchState()

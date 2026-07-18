@@ -24,11 +24,6 @@ struct GitCommitGraphView: View {
 
     @State private var searchTerm = ""
 
-    private var rowsByID: [String: GraphRow] {
-        Dictionary(
-            uniqueKeysWithValues: CommitGraphLayout.layout(commits).map { ($0.commitID, $0) })
-    }
-
     /// Filters the LOADED commits only — never a repository-wide scan (ADR
     /// 0013). The header label makes this explicit.
     private var filteredCommits: [GitCommitSummary] {
@@ -43,7 +38,13 @@ struct GitCommitGraphView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        // Compute the lane layout once per render (not once per row): reading a
+        // computed `rowsByID` inside the ForEach would run the O(n) layout n
+        // times, and re-run on every search keystroke. AGENTS: no expensive
+        // work in `body` — hoist it here so it is built exactly once.
+        let rowsByID = Dictionary(
+            uniqueKeysWithValues: CommitGraphLayout.layout(commits).map { ($0.commitID, $0) })
+        return VStack(spacing: 0) {
             header
             Divider().overlay(theme.palette.borderSubtle)
             if filteredCommits.isEmpty {

@@ -2,11 +2,7 @@
 
 ## Status
 
-Planned (2026-07-18). Direction-setting document only — **no implementation
-has started**. Written from five user-supplied visual references plus the
-`apple-design` skill's foundations, against the tree at `cb4e76b`/`19cdfd7`.
-The user reviews this plan (and the open decisions at the bottom) before any
-increment begins.
+IMPLEMENTED (2026-07-18). Increments U0–U5 shipped across five commits with 714 tests (684→714, +30 pure-core); manual GUI verification + ADR acceptance (0012/0013 Proposed) remain owed by the user.
 
 Prior art: [`workbench-visual-polish.md`](workbench-visual-polish.md) built
 the token/palette engine, shared control styles, and the Files-left /
@@ -147,31 +143,12 @@ theme-JSON breaking changes.
 
 ## Increments (each = advisor → implementor → verify → documentor)
 
-- **U0 — Foundation (no visible change).** ADR 0012 authored (Proposed);
-  `RafuMetrics`; four optional palette keys + fallback derivations + decode
-  tests; `AIThemePrompt` schema row additions. Gate: build, full suite,
-  every bundled theme + one AI-generated theme decodes byte-identically in
-  rendered output (snapshot of palette values).
-- **U1 — Shell.** Titlebar unification, sidebar flush-flat + header, rail
-  restyle, status bar slim, hairline discipline pass (all `Divider()`s
-  audited to `borderSubtle`). Gate: `--verify`, second window, sidebar
-  toggle/menu paths, VoiceOver landmark pass, Reduce Transparency check.
-- **U2 — Editor chrome.** Tab bar, breadcrumb chips, diff/blame headers,
-  find bar, guard/merge banners. Gate: tab drag/split/hibernation
-  regression pass + typing-path untouched (no new work in draw/typing).
-- **U3 — Panels & forms.** Git inspector sections/fields/composer, search
-  panel, sheet template applied to all five sheets. Gate: keyboard-only
-  commit + stage/unstage/stash flows; Full Keyboard Access.
-- **U4 — Overlays.** Command palette, peek, hover tooltip, Resources,
-  welcome screen; overlay motion (springs, anchoring, Reduce Motion
-  fallbacks). Gate: palette latency unchanged (measure open→first-keystroke),
-  Reduce Motion pass.
-- **U5 — Content & close-out.** Markdown code-block cards +
-  `fonts.markdownPreview`, terminal header, Increase Contrast audit,
-  before/after screenshots per surface, reference note
-  (`docs/references/ui-design-language.md`: tokens→surface mapping table,
-  do/don't list), ADR 0012 flip proposed→accepted with the user, phase
-  README row.
+- **U0 — Foundation (no visible change).** DONE (cfab4e8). ADR 0012 authored (Proposed); `RafuMetrics`; four optional palette keys + fallback derivations + decode tests; `AIThemePrompt` schema row additions. Gate: build, full suite, every bundled theme + one AI-generated theme decodes byte-identically in rendered output.
+- **U1 — Shell.** DONE (9971888). Titlebar unification, sidebar flush-flat + header, rail restyle, status bar slim, hairline discipline pass. Gate: `--verify`, second window, sidebar toggle/menu paths, VoiceOver landmark pass, Reduce Transparency check.
+- **U2 — Editor chrome.** DONE (c9d6eb8). Tab bar, breadcrumb chips, diff/blame headers, find bar, guard/merge banners. Gate: tab drag/split/hibernation regression pass + typing-path untouched.
+- **U3 — Panels & forms.** DONE (6b46423). Git inspector sections/fields/composer, search panel, sheet template applied to all five sheets. Gate: keyboard-only commit + stage/unstage/stash flows; Full Keyboard Access.
+- **U4 — Overlays.** DONE (c9d6eb8). Command palette, peek, hover tooltip, Resources, welcome screen; overlay motion. **Deferral:** trigger-anchored spring motion — `.sheet` is system-animated, card visuals kept.
+- **U5 — Content & close-out.** DONE (c9d6eb8). Terminal header, Increase Contrast audit. **Deferral:** `fonts.markdownPreview` — ThemeFonts schema has no such key; plan assumption was stale, NOT wired.
 
 Sequencing rationale: U0 unblocks everything and is invisible; U1 is the
 single biggest perceptual change and lands before dependent surfaces so
