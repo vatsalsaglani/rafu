@@ -105,6 +105,8 @@ final class WorkspaceSession {
     /// GD2 — a calm default) and deliberately NOT persisted across
     /// launches: every new window starts with it off.
     var isInlineBlameEnabled = false
+    /// AI tab-completion mode; per-window, off by default, never persisted.
+    var isAICompletionEnabled = false
     /// Set at the end of a successful explicit `gitFetch(remote:)` — the
     /// GX3 commit-graph header's "last fetched" label. Never advances on
     /// its own; Rafu never fetches automatically.
@@ -1416,10 +1418,112 @@ final class WorkspaceSession {
         } catch { reportOpenFolderError(error) }
     }
 
+    /// The folder new items and pastes target: the selected tree folder, the
+    /// selected file's parent, or the workspace root.
+    var selectedFolderURL: URL? {
+        guard let rootURL else { return nil }
+        guard let selectedTreePath else { return rootURL }
+        let rootPath = rootURL.standardizedFileURL.path
+        let selected = URL(filePath: selectedTreePath).standardizedFileURL
+        guard selected.path == rootPath || selected.path.hasPrefix(rootPath + "/") else {
+            return rootURL
+        }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: selected.path, isDirectory: &isDirectory)
+        else { return rootURL }
+        return isDirectory.boolValue ? selected : selected.deletingLastPathComponent()
+    }
+
     func requestFileCreation(in parentURL: URL? = nil, isDirectory: Bool) {
-        guard let directory = parentURL ?? rootURL else { return }
+        // No explicit parent (the sidebar-header buttons) → create inside the
+        // selected folder / the selected file's folder, not always the root.
+        guard let directory = parentURL ?? selectedFolderURL ?? rootURL else { return }
         pendingFileName = ""
         pendingFileCreation = FileCreationRequest(parentURL: directory, isDirectory: isDirectory)
+    }
+
+    /// Tree drop handler shared by the root list and per-folder rows: items
+    /// already inside the workspace MOVE; items from outside (Finder) COPY in.
+    func handleTreeDrop(_ urls: [URL], into directory: URL) async {
+        guard let rootURL else { return }
+        let rootPath = rootURL.standardizedFileURL.path
+        var changed = false
+        for url in urls {
+            let sourcePath = url.standardizedFileURL.path
+            do {
+                if sourcePath == rootPath { continue }
+                if sourcePath.hasPrefix(rootPath + "/") {
+                    let destination = try await fileService.move(url, into: directory)
+                    rebindOpenDocuments(from: url, to: destination)
+                } else {
+                    _ = try await fileService.importItem(at: url, into: directory)
+                }
+                changed = true
+            } catch {
+                reportOpenFolderError(error)
+            }
+        }
+        if changed { await refreshWorkspace() }
+    }
+
+    /// ⌘V / context-menu Paste into the selected folder. Handles copied files
+    /// (Finder or Rafu's own Copy File) and clipboard images (screenshots
+    /// captured with ⌃⇧⌘4), written as a timestamped PNG.
+    func pasteIntoSelectedFolder(target: URL? = nil) {
+        guard let directory = target ?? selectedFolderURL else { return }
+        let pasteboard = NSPasteboard.general
+        Task {
+            do {
+                if let urls = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL],
+                    !urls.isEmpty
+                {
+                    for url in urls where url.isFileURL {
+                        _ = try await fileService.importItem(at: url, into: directory)
+                    }
+                } else if let imageData = Self.pasteboardPNGData(from: pasteboard) {
+                    let formatter = DateFormatter()
+                    formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
+                    let name = "Screenshot \(formatter.string(from: Date())).png"
+                    _ = try await fileService.writeData(imageData, named: name, into: directory)
+                } else {
+                    return
+                }
+                await refreshWorkspace()
+            } catch {
+                reportOpenFolderError(error)
+            }
+        }
+    }
+
+    /// PNG bytes from the general pasteboard, converting TIFF screenshots.
+    private static func pasteboardPNGData(from pasteboard: NSPasteboard) -> Data? {
+        if let png = pasteboard.data(forType: .png) { return png }
+        guard let tiff = pasteboard.data(forType: .tiff),
+            let bitmap = NSBitmapImageRep(data: tiff)
+        else { return nil }
+        return bitmap.representation(using: .png, properties: [:])
+    }
+
+    /// Points open documents (and their tabs) at a moved file or folder so a
+    /// tree drag never orphans an open editor.
+    private func rebindOpenDocuments(from oldURL: URL, to newURL: URL) {
+        let oldPath = oldURL.standardizedFileURL.path
+        for document in openDocuments {
+            let documentPath = document.url.standardizedFileURL.path
+            if documentPath == oldPath {
+                if let tab = editorLayout.tab(matching: .file(document.url)) {
+                    editorLayout.updateResource(for: tab.id, to: .file(newURL))
+                }
+                document.url = newURL
+            } else if documentPath.hasPrefix(oldPath + "/") {
+                let suffix = documentPath.dropFirst(oldPath.count)
+                let movedURL = URL(fileURLWithPath: newURL.path + suffix)
+                if let tab = editorLayout.tab(matching: .file(document.url)) {
+                    editorLayout.updateResource(for: tab.id, to: .file(movedURL))
+                }
+                document.url = movedURL
+            }
+        }
     }
 
     func createPendingFileItem() async {
@@ -1959,6 +2063,55 @@ final class WorkspaceSession {
                 forRelativePath: relativePath, at: repositoryRoot)
             inlineBlameStore.store(blame, for: key)
             return blame
+        } catch {
+            return nil
+        }
+    }
+
+    // MARK: - AI inline completion
+
+    /// Toggles the per-window AI tab-completion mode (Edit menu / palette).
+    /// Off by default and not persisted: enabling it is the explicit consent
+    /// to send a bounded window of buffer text around the caret to the
+    /// configured AI provider (AGENTS: AI stays explicit).
+    func toggleAICompletion() {
+        isAICompletionEnabled.toggle()
+    }
+
+    /// Resolves one inline-completion suggestion for the bounded context
+    /// around the caret. Silent by design: any failure (no provider
+    /// configured, no key, network, over-budget reply) returns nil — a
+    /// completion must never interrupt typing with an alert.
+    func inlineCompletion(prefix: String, suffix: String, fileName: String) async -> String? {
+        guard isAICompletionEnabled else { return nil }
+        do {
+            let configurations = try await aiConfigurationStore.load()
+            let preferredID = await aiConfigurationStore.selectedConfigurationID()
+            guard
+                let configuration = preferredID.flatMap({ id in
+                    configurations.first(where: { $0.id == id })
+                }) ?? configurations.first,
+                let apiKey = try await aiSecretStore.secret(for: configuration.id)
+            else { return nil }
+
+            let stream = try aiProviderClient.makeTextStream(
+                configuration: configuration,
+                apiKey: apiKey,
+                instructions: AICompletionPromptBuilder.instructions,
+                prompt: AICompletionPromptBuilder.prompt(
+                    prefix: prefix, suffix: suffix, fileName: fileName)
+            )
+            var output = ""
+            for try await delta in stream {
+                try Task.checkCancellation()
+                output += delta
+                // Completions are short by contract; stop consuming once the
+                // reply clearly exceeds any usable suggestion.
+                if output.count > AICompletionPromptBuilder.maximumSuggestionCharacters * 2 {
+                    break
+                }
+            }
+            return AICompletionPromptBuilder.sanitize(output)
         } catch {
             return nil
         }

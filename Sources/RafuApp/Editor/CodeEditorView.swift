@@ -47,6 +47,10 @@ struct CodeEditorView: NSViewRepresentable {
     let inlineBlameEnabled: Bool
     /// GX1: resolves (or returns cached) blame for the active document.
     let inlineBlameProvider: (@MainActor () async -> GitBlame?)?
+    /// AI tab-completion mode for this window (explicit opt-in toggle).
+    let aiCompletionEnabled: Bool
+    /// Resolves a completion for (prefix, suffix) around the caret.
+    let aiCompletionProvider: (@MainActor (String, String) async -> String?)?
     /// GX2: hunk-peek and blame-hover wiring. `nil` disables both.
     let gitPeekActions: GitPeekActions?
 
@@ -61,6 +65,8 @@ struct CodeEditorView: NSViewRepresentable {
         hover: (@MainActor (Int) async -> EditorHoverInfo?)? = nil,
         inlineBlameEnabled: Bool = false,
         inlineBlameProvider: (@MainActor () async -> GitBlame?)? = nil,
+        aiCompletionEnabled: Bool = false,
+        aiCompletionProvider: (@MainActor (String, String) async -> String?)? = nil,
         gitPeekActions: GitPeekActions? = nil
     ) {
         self.document = document
@@ -73,6 +79,8 @@ struct CodeEditorView: NSViewRepresentable {
         self.hover = hover
         self.inlineBlameEnabled = inlineBlameEnabled
         self.inlineBlameProvider = inlineBlameProvider
+        self.aiCompletionEnabled = aiCompletionEnabled
+        self.aiCompletionProvider = aiCompletionProvider
         self.gitPeekActions = gitPeekActions
     }
 
@@ -127,6 +135,8 @@ struct CodeEditorView: NSViewRepresentable {
         context.coordinator.requestGitRefresh = requestGitRefresh
         context.coordinator.inlineBlameEnabled = inlineBlameEnabled
         context.coordinator.inlineBlameProvider = inlineBlameProvider
+        context.coordinator.aiCompletionEnabled = aiCompletionEnabled
+        context.coordinator.aiCompletionProvider = aiCompletionProvider
         context.coordinator.gitPeekActions = gitPeekActions
         gutter.peekAction = { [weak coordinator = context.coordinator] line in
             coordinator?.presentHunkPeek(atLine: line)
@@ -178,6 +188,8 @@ struct CodeEditorView: NSViewRepresentable {
         context.coordinator.syncGuardSuppression()
         context.coordinator.updateInlineBlame(
             enabled: inlineBlameEnabled, provider: inlineBlameProvider)
+        context.coordinator.updateAICompletion(
+            enabled: aiCompletionEnabled, provider: aiCompletionProvider)
         scrollView.backgroundColor = NSColor(rafuHex: theme.editor.background)
         guard let textView = scrollView.documentView as? RafuTextView else { return }
         textView.backgroundColor = NSColor(rafuHex: theme.editor.background)
@@ -207,6 +219,7 @@ struct CodeEditorView: NSViewRepresentable {
         coordinator.loadTask?.cancel()
         coordinator.gitMarkersTask?.cancel()
         coordinator.clearInlineBlame()
+        coordinator.clearAICompletion()
         coordinator.tearDownSyntaxPipeline()
         coordinator.textView?.textStorage?.delegate = nil
         coordinator.uninstallFindController()
@@ -245,6 +258,17 @@ struct CodeEditorView: NSViewRepresentable {
         var requestGitRefresh: (@MainActor () -> Void)?
         var inlineBlameEnabled = false
         var inlineBlameProvider: (@MainActor () async -> GitBlame?)?
+        var aiCompletionEnabled = false
+        var aiCompletionProvider: (@MainActor (String, String) async -> String?)?
+        private var aiCompletionTask: Task<Void, Never>?
+        /// Caret captured when the pending/shown completion was scheduled;
+        /// any selection change away from it clears the ghost.
+        private var aiCompletionCaret: Int?
+        /// Bumped on every text change so a stale completion reply can never
+        /// install a ghost over newer text (document.revision only changes
+        /// on save/reload, so it cannot serve this purpose).
+        private var editGeneration = 0
+        private static let aiCompletionDebounce = Duration.milliseconds(500)
         var gitPeekActions: GitPeekActions?
         /// The in-flight (or debouncing) GX1 blame lookup for the caret's
         /// current line. Cancelled and replaced whenever the caret line
@@ -416,6 +440,8 @@ struct CodeEditorView: NSViewRepresentable {
             guard !isLoading else { return }
             document.isDirty = true
             findState?.refresh()
+            editGeneration += 1
+            scheduleAICompletion()
         }
 
         func highlight() {
@@ -539,6 +565,7 @@ struct CodeEditorView: NSViewRepresentable {
                 textView.indentGuideColor = theme.editorIndentGuideColor
                 textView.bracketBorderColor = theme.editorMatchingBracketBorderColor
                 textView.inlineBlameColor = theme.editorInlineBlameColor
+                textView.inlineCompletionGhostColor = theme.editorInlineBlameColor
             }
             gutterRuler?.style = EditorGutterStyle(theme: theme)
             if let findController {
@@ -685,6 +712,66 @@ struct CodeEditorView: NSViewRepresentable {
             textView?.inlineBlameAnnotation = nil
         }
 
+        // MARK: - AI inline completion
+
+        func updateAICompletion(
+            enabled: Bool, provider: (@MainActor (String, String) async -> String?)?
+        ) {
+            let wasEnabled = aiCompletionEnabled
+            aiCompletionEnabled = enabled
+            aiCompletionProvider = provider
+            if wasEnabled, !enabled { clearAICompletion() }
+        }
+
+        /// Schedules an AI tab-completion for the caret position after a
+        /// typing pause. Unlike inline blame this deliberately RUNS on dirty
+        /// buffers — completing unsaved text is the feature — but everything
+        /// stays off the typing path: each keystroke only cancels the prior
+        /// debounce task and clears the ghost; the provider is reached only
+        /// after 500ms of quiet, and its reply is dropped unless the buffer
+        /// revision and caret are still exactly where they were.
+        func scheduleAICompletion() {
+            guard aiCompletionEnabled, let textView, let aiCompletionProvider,
+                !isLoading, !document.suppressesSyntax,
+                !textView.hasMarkedText(), !textView.hasMultipleCarets,
+                textView.selectedRange().length == 0
+            else {
+                clearAICompletion()
+                return
+            }
+            aiCompletionTask?.cancel()
+            textView.inlineCompletionGhost = nil
+            let caret = textView.selectedRange().location
+            aiCompletionCaret = caret
+            let generation = editGeneration
+            aiCompletionTask = Task(name: "AI completion \(document.displayName)") { [weak self] in
+                try? await Task.sleep(for: Self.aiCompletionDebounce)
+                if Task.isCancelled { return }
+                guard let self, let textView = self.textView,
+                    self.editGeneration == generation,
+                    self.aiCompletionCaret == caret,
+                    !textView.hasMarkedText(), !textView.hasMultipleCarets
+                else { return }
+                let content = textView.string as NSString
+                let boundedCaret = min(caret, content.length)
+                let prefix = content.substring(to: boundedCaret)
+                let suffix = content.substring(from: boundedCaret)
+                guard let suggestion = await aiCompletionProvider(prefix, suffix) else { return }
+                if Task.isCancelled { return }
+                guard self.editGeneration == generation, self.aiCompletionCaret == caret,
+                    textView.selectedRange().location == caret
+                else { return }
+                textView.inlineCompletionGhost = suggestion
+            }
+        }
+
+        func clearAICompletion() {
+            aiCompletionTask?.cancel()
+            aiCompletionTask = nil
+            aiCompletionCaret = nil
+            textView?.inlineCompletionGhost = nil
+        }
+
         // MARK: - GX2 hunk peek / blame hover
 
         /// Builds and presents the hunk-peek card for `line`, sliced from
@@ -774,6 +861,14 @@ struct CodeEditorView: NSViewRepresentable {
             (notification.object as? RafuTextView)?.collapseCaretSetToNativeSelectionIfNeeded()
             refreshSelectionDecorations()
             scheduleInlineBlame()
+            // A caret move away from the scheduled/shown completion position
+            // invalidates the ghost (typing re-schedules via textDidChange,
+            // which runs before this notification and updates the caret).
+            if let pendingCaret = aiCompletionCaret,
+                textView?.selectedRange().location != pendingCaret
+            {
+                clearAICompletion()
+            }
         }
 
         func textView(

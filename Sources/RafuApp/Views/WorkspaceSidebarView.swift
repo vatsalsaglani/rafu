@@ -39,6 +39,23 @@ struct WorkspaceSidebarView: View {
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
+            // Finder (or cross-workspace) drops on the tree background land in
+            // the workspace root; folder rows below claim their own drops.
+            .dropDestination(for: URL.self) { urls, _ in
+                guard let root = session.rootURL else { return false }
+                Task { await session.handleTreeDrop(urls, into: root) }
+                return true
+            }
+            // ⌘C copies the selected tree item as a real file reference;
+            // ⌘V pastes copied files or a clipboard image (screenshot) into
+            // the selected folder. Both also exist as menu/context paths.
+            .onCopyCommand {
+                guard let path = session.selectedTreePath else { return [] }
+                return [NSItemProvider(object: URL(filePath: path) as NSURL)]
+            }
+            .onPasteCommand(of: [.fileURL, .png, .tiff, .image]) { _ in
+                session.pasteIntoSelectedFolder()
+            }
         }
         .background(theme.palette.sidebarBackground)
         .navigationSplitViewColumnWidth(min: 190, ideal: 250, max: 380)
@@ -169,15 +186,17 @@ private struct WorkspaceFileTreeItem: View {
         )
     }
 
-    /// A file row gets `.onDrag` so it can be dropped into the editor area
-    /// (same private drag type and live preview as tab drags); directories
-    /// never drag. The single- and double-click gestures are unaffected.
+    /// A file row's drag carries BOTH the private editor-drag type (so it can
+    /// split/open in the editor area) and a real file URL (so folder rows,
+    /// other apps, and Finder can accept it). Directory rows drag as plain
+    /// file URLs and accept drops: workspace items move, outside items copy.
     @ViewBuilder
     private var row: some View {
         let base =
             FileTreeRow(
                 node: node,
                 isSelected: node.url.path == session.selectedTreePath,
+                isDropTarget: isDropTargeted,
                 gitBadge: session.gitTreeBadges[node.relativePath]
             )
             .contentShape(.rect)
@@ -191,10 +210,23 @@ private struct WorkspaceFileTreeItem: View {
             .listRowBackground(Color.clear)
         if node.isDirectory {
             base
+                .onDrag { NSItemProvider(object: node.url as NSURL) }
+                .dropDestination(for: URL.self) { urls, _ in
+                    Task { await session.handleTreeDrop(urls, into: node.url) }
+                    return true
+                } isTargeted: {
+                    isDropTargeted = $0
+                }
         } else {
-            base.onDrag { session.beginEditorDrag(.file(path: node.url.path)) }
+            base.onDrag {
+                let provider = session.beginEditorDrag(.file(path: node.url.path))
+                provider.registerObject(node.url as NSURL, visibility: .all)
+                return provider
+            }
         }
     }
+
+    @State private var isDropTargeted = false
 
     @ViewBuilder
     private var contextMenu: some View {
@@ -214,6 +246,12 @@ private struct WorkspaceFileTreeItem: View {
         Button("Copy Relative Path") { copyString(node.relativePath) }
         Button("Copy Absolute Path") { copyString(node.url.path) }
         Button("Copy File") { copyFile(node.url) }
+        Divider()
+        Button("Paste") {
+            session.pasteIntoSelectedFolder(
+                target: node.isDirectory ? node.url : node.url.deletingLastPathComponent()
+            )
+        }
     }
 
     private func copyString(_ value: String) {
@@ -278,6 +316,7 @@ private struct FileCreationSheet: View {
 private struct FileTreeRow: View {
     let node: WorkspaceFileNode
     var isSelected: Bool = false
+    var isDropTarget: Bool = false
     var gitBadge: GitTreeBadge?
     @Environment(\.rafuTheme) private var theme
 
@@ -305,7 +344,18 @@ private struct FileTreeRow: View {
         .padding(.horizontal, 6)
         .background(
             RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(isSelected ? theme.palette.selection : Color.clear)
+                .fill(
+                    isDropTarget
+                        ? theme.palette.accentSoft
+                        : isSelected ? theme.palette.selection : Color.clear
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .strokeBorder(
+                    theme.palette.accent.opacity(isDropTarget ? 0.6 : 0),
+                    lineWidth: 1
+                )
         )
         .help(node.relativePath)
         .accessibilityAddTraits(isSelected ? .isSelected : [])

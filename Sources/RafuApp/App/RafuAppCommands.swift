@@ -131,6 +131,11 @@ struct RafuAppCommands: Commands {
             }
             .disabled(workspaceSession == nil)
 
+            Button("Toggle AI Completion") {
+                workspaceSession?.toggleAICompletion()
+            }
+            .disabled(workspaceSession == nil)
+
             Button("Peek Change at Line") {
                 workspaceSession?.peekChangeAtCaret()
             }

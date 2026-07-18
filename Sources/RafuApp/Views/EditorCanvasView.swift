@@ -159,6 +159,14 @@ private struct EditorGroupView: View {
                                     guard let session, let document else { return nil }
                                     return await session.inlineBlame(for: document)
                                 },
+                                aiCompletionEnabled: session.isAICompletionEnabled,
+                                aiCompletionProvider: {
+                                    [weak session, weak document] prefix, suffix in
+                                    guard let session, let document else { return nil }
+                                    return await session.inlineCompletion(
+                                        prefix: prefix, suffix: suffix,
+                                        fileName: document.displayName)
+                                },
                                 gitPeekActions: gitPeekActions(for: document)
                             )
                             .id(document.id)
@@ -1342,6 +1350,8 @@ private struct EditorDocumentView: View {
     var hover: (@MainActor (Int) async -> EditorHoverInfo?)? = nil
     var inlineBlameEnabled: Bool = false
     var inlineBlameProvider: (@MainActor () async -> GitBlame?)? = nil
+    var aiCompletionEnabled: Bool = false
+    var aiCompletionProvider: (@MainActor (String, String) async -> String?)? = nil
     var gitPeekActions: GitPeekActions? = nil
 
     var body: some View {
@@ -1364,6 +1374,8 @@ private struct EditorDocumentView: View {
                         hover: hover,
                         inlineBlameEnabled: inlineBlameEnabled,
                         inlineBlameProvider: inlineBlameProvider,
+                        aiCompletionEnabled: aiCompletionEnabled,
+                        aiCompletionProvider: aiCompletionProvider,
                         gitPeekActions: gitPeekActions
                     )
                 } else {
@@ -1378,6 +1390,8 @@ private struct EditorDocumentView: View {
                         hover: hover,
                         inlineBlameEnabled: inlineBlameEnabled,
                         inlineBlameProvider: inlineBlameProvider,
+                        aiCompletionEnabled: aiCompletionEnabled,
+                        aiCompletionProvider: aiCompletionProvider,
                         gitPeekActions: gitPeekActions
                     )
                 }
@@ -1457,6 +1471,8 @@ private struct MarkdownEditorPresentation: View {
     var hover: (@MainActor (Int) async -> EditorHoverInfo?)? = nil
     var inlineBlameEnabled: Bool = false
     var inlineBlameProvider: (@MainActor () async -> GitBlame?)? = nil
+    var aiCompletionEnabled: Bool = false
+    var aiCompletionProvider: (@MainActor (String, String) async -> String?)? = nil
     var gitPeekActions: GitPeekActions? = nil
 
     var body: some View {
@@ -1486,6 +1502,8 @@ private struct MarkdownEditorPresentation: View {
             hover: hover,
             inlineBlameEnabled: inlineBlameEnabled,
             inlineBlameProvider: inlineBlameProvider,
+            aiCompletionEnabled: aiCompletionEnabled,
+            aiCompletionProvider: aiCompletionProvider,
             gitPeekActions: gitPeekActions
         )
     }

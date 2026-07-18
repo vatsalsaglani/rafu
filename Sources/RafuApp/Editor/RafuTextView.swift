@@ -127,6 +127,15 @@ final class RafuTextView: NSTextView {
 
     private static let inlineBlameLeadingPadding: CGFloat = 24
 
+    /// AI tab-completion ghost text drawn at the caret (never stored in
+    /// `NSTextStorage`); Tab accepts it, Escape or any edit clears it.
+    var inlineCompletionGhost: String? {
+        didSet { if oldValue != inlineCompletionGhost { setNeedsDisplay(visibleRect) } }
+    }
+    var inlineCompletionGhostColor: NSColor? {
+        didSet { if oldValue != inlineCompletionGhostColor { setNeedsDisplay(visibleRect) } }
+    }
+
     // MARK: - GX2 hunk peek / blame hover
 
     /// Peek-popover action for a gutter change-strip click, wired by
@@ -300,6 +309,22 @@ final class RafuTextView: NSTextView {
         // before the edit/command is processed.
         dismissHover()
         closePeekPopover()
+        // AI completion ghost: Tab accepts the full suggestion through the
+        // normal insertText path (undo, delegates, syntax all see it);
+        // Escape dismisses the ghost without touching multi-caret state.
+        if let ghost = inlineCompletionGhost, !hasMarkedText(), !hasMultipleCarets {
+            if event.keyCode == 48,
+                event.modifierFlags.intersection([.command, .option, .control]).isEmpty
+            {
+                inlineCompletionGhost = nil
+                insertText(ghost, replacementRange: selectedRange())
+                return
+            }
+            if event.keyCode == 53 {
+                inlineCompletionGhost = nil
+                return
+            }
+        }
         if event.keyCode == 53, hasMultipleCarets, !hasMarkedText() {
             collapseToPrimaryCaret()
             return
@@ -897,7 +922,55 @@ final class RafuTextView: NSTextView {
         drawCurrentLineHighlight(in: rect)
         drawIndentGuides(in: rect)
         drawBracketBorders()
-        drawInlineBlameAnnotation(in: rect)
+        // A visible completion ghost owns the caret line; blame would overlap.
+        if inlineCompletionGhost == nil {
+            drawInlineBlameAnnotation(in: rect)
+        } else {
+            drawInlineCompletionGhost(in: rect)
+        }
+    }
+
+    /// Draws the first line of the AI completion suggestion at the caret in
+    /// the ghost color at the editor font size — additive drawing only, no
+    /// `NSTextStorage` attributes. A multi-line suggestion shows its first
+    /// line with a trailing ⋯; Tab still inserts the whole suggestion.
+    private func drawInlineCompletionGhost(in rect: NSRect) {
+        guard let ghost = inlineCompletionGhost, !ghost.isEmpty,
+            let color = inlineCompletionGhostColor,
+            let layoutManager, let textContainer,
+            !hasMultipleCarets, !hasMarkedText(),
+            selectedRange().length == 0
+        else { return }
+
+        let content = string as NSString
+        let caret = min(selectedRange().location, content.length)
+        let origin = textContainerOrigin
+        let glyphIndex = layoutManager.glyphIndexForCharacter(at: caret)
+        var caretRect = layoutManager.boundingRect(
+            forGlyphRange: NSRange(location: glyphIndex, length: 0), in: textContainer)
+        if caretRect.height <= 0 {
+            caretRect = layoutManager.extraLineFragmentRect
+        }
+        guard caretRect.height > 0 else { return }
+
+        let firstLine =
+            ghost.split(separator: "\n", omittingEmptySubsequences: false)
+            .first.map(String.init) ?? ghost
+        let hasMore = ghost.contains("\n")
+        let label = (firstLine + (hasMore ? " ⋯" : "")) as NSString
+        let ghostFont =
+            font ?? .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: ghostFont, .foregroundColor: color,
+        ]
+        let size = label.size(withAttributes: attributes)
+        let drawOrigin = NSPoint(
+            x: caretRect.minX + origin.x,
+            y: caretRect.minY + origin.y + (caretRect.height - size.height) / 2
+        )
+        let drawRect = NSRect(origin: drawOrigin, size: size)
+        guard drawRect.intersects(rect) else { return }
+        label.draw(at: drawOrigin, withAttributes: attributes)
     }
 
     /// Draws the GX1 ghost-text annotation after the caret line's content,

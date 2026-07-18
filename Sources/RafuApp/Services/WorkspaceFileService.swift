@@ -79,6 +79,62 @@ nonisolated struct WorkspaceFileService: Sendable {
         return destination
     }
 
+    /// Copies an outside item (Finder drag/paste) into `directory`, choosing a
+    /// unique "name", "name 2", … destination instead of overwriting.
+    @concurrent
+    func importItem(at sourceURL: URL, into directory: URL) async throws -> URL {
+        try Task.checkCancellation()
+        let destination = Self.uniqueDestination(
+            forName: sourceURL.lastPathComponent, in: directory)
+        try FileManager.default.copyItem(at: sourceURL, to: destination)
+        return destination
+    }
+
+    /// Writes raw data (e.g. a pasted screenshot) to a unique file in
+    /// `directory`, never overwriting an existing item.
+    @concurrent
+    func writeData(_ data: Data, named name: String, into directory: URL) async throws -> URL {
+        try Task.checkCancellation()
+        let destination = Self.uniqueDestination(forName: name, in: directory)
+        try data.write(to: destination, options: .atomic)
+        return destination
+    }
+
+    /// Moves a workspace item into another workspace directory (tree
+    /// drag-and-drop). Refuses no-op moves, name collisions, and moving a
+    /// directory into itself or a descendant.
+    @concurrent
+    func move(_ sourceURL: URL, into directory: URL) async throws -> URL {
+        try Task.checkCancellation()
+        let sourcePath = sourceURL.standardizedFileURL.path
+        let directoryPath = directory.standardizedFileURL.path
+        guard directoryPath != sourcePath,
+            !directoryPath.hasPrefix(sourcePath + "/")
+        else { throw WorkspaceFileError.moveIntoSelf }
+        guard sourceURL.deletingLastPathComponent().standardizedFileURL.path != directoryPath
+        else { return sourceURL }
+        let destination = directory.appending(path: sourceURL.lastPathComponent)
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            throw WorkspaceFileError.itemAlreadyExists(sourceURL.lastPathComponent)
+        }
+        try FileManager.default.moveItem(at: sourceURL, to: destination)
+        return destination
+    }
+
+    /// "name.ext" → "name 2.ext" → "name 3.ext"… until unused.
+    nonisolated static func uniqueDestination(forName name: String, in directory: URL) -> URL {
+        let base = (name as NSString).deletingPathExtension
+        let ext = (name as NSString).pathExtension
+        var candidate = directory.appending(path: name)
+        var counter = 2
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            let next = ext.isEmpty ? "\(base) \(counter)" : "\(base) \(counter).\(ext)"
+            candidate = directory.appending(path: next)
+            counter += 1
+        }
+        return candidate
+    }
+
     private func children(of directory: URL, rootURL: URL) throws -> [WorkspaceFileNode] {
         let keys: Set<URLResourceKey> = [.isDirectoryKey, .isSymbolicLinkKey]
         let urls = try FileManager.default.contentsOfDirectory(
@@ -114,6 +170,7 @@ enum WorkspaceFileError: LocalizedError {
     case invalidName
     case itemAlreadyExists(String)
     case couldNotCreate(String)
+    case moveIntoSelf
     case notRegularFile
     case notUTF8
 
@@ -124,6 +181,7 @@ enum WorkspaceFileError: LocalizedError {
         case .invalidName: "Enter a non-empty file name without a slash."
         case .itemAlreadyExists(let name): "An item named \(name) already exists."
         case .couldNotCreate(let name): "Could not create \(name)."
+        case .moveIntoSelf: "A folder cannot be moved into itself."
         case .notRegularFile: "This item is not a regular file."
         case .notUTF8: "Rafu's initial editor supports UTF-8 text files."
         }
