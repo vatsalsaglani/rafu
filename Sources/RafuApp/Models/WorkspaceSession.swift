@@ -202,6 +202,12 @@ final class WorkspaceSession {
     @ObservationIgnored
     private let aiProviderClient = AIProviderClient()
 
+    /// The in-flight AI commit-message generation, owned so the composer's
+    /// Stop button (`cancelAICommitGeneration()`) can interrupt it — see
+    /// `startAICommitGeneration()`.
+    @ObservationIgnored
+    private var aiCommitGenerationTask: Task<Void, Never>?
+
     @ObservationIgnored
     private let restorationStore = WorkspaceRestorationStore()
 
@@ -2301,6 +2307,30 @@ final class WorkspaceSession {
                 branch.name.split(separator: "/", maxSplits: 1).first.map(String.init)
             } ?? []
         return Array(Set(names)).sorted()
+    }
+
+    /// Starts AI commit-message generation as an owned, cancellable task — the
+    /// composer's "Generate Commit Message" action. A no-op while a
+    /// generation is already in flight, mirroring `generateAICommitMessage`'s
+    /// own re-entrancy guard. Pair with `cancelAICommitGeneration()` (the
+    /// composer's Stop button).
+    func startAICommitGeneration() {
+        guard aiCommitGenerationTask == nil else { return }
+        aiCommitGenerationTask = Task(name: "Generate AI commit message") { [weak self] in
+            await self?.generateAICommitMessage()
+            self?.aiCommitGenerationTask = nil
+        }
+    }
+
+    /// Stops an in-flight AI commit-message generation — the composer's Stop
+    /// button. Cancelling the task lets `generateAICommitMessage()`'s
+    /// `Task.checkCancellation()` calls unwind the streaming loop; clearing
+    /// `isGeneratingAICommitMessage` here too means the UI drops the
+    /// generating state immediately rather than waiting on that unwind.
+    func cancelAICommitGeneration() {
+        aiCommitGenerationTask?.cancel()
+        aiCommitGenerationTask = nil
+        isGeneratingAICommitMessage = false
     }
 
     func generateAICommitMessage() async {

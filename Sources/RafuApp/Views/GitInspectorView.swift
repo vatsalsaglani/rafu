@@ -497,15 +497,21 @@ struct GitInspectorView: View {
                 HStack(spacing: 6) {
                     if session.isGeneratingAICommitMessage {
                         ProgressView().controlSize(.mini)
+                        Button("Stop Generating", systemImage: "stop.fill") {
+                            session.cancelAICommitGeneration()
+                        }
+                        .buttonStyle(RafuIconButtonStyle(size: 24))
+                        .help("Stop generating the commit message.")
+                    } else {
+                        Button("Generate Commit Message", systemImage: "sparkles") {
+                            session.startAICommitGeneration()
+                        }
+                        .buttonStyle(RafuIconButtonStyle(size: 24))
+                        .disabled(!session.canGenerateAICommitMessage)
+                        .help(
+                            "Generate from \(session.aiCommitGenerationScopeDescription). No commit is created automatically."
+                        )
                     }
-                    Button("Generate Commit Message", systemImage: "sparkles") {
-                        Task { await session.generateAICommitMessage() }
-                    }
-                    .buttonStyle(RafuIconButtonStyle(size: 24))
-                    .disabled(!session.canGenerateAICommitMessage)
-                    .help(
-                        "Generate from \(session.aiCommitGenerationScopeDescription). No commit is created automatically."
-                    )
                 }
             }
             VStack(alignment: .leading, spacing: 8) {
@@ -540,6 +546,7 @@ struct GitInspectorView: View {
             RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
                 .strokeBorder(theme.palette.borderSubtle, lineWidth: RafuMetrics.hairline)
         )
+        .aiCommitGeneratingBorder(isActive: session.isGeneratingAICommitMessage)
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
     }
