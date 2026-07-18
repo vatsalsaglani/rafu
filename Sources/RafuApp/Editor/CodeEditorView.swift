@@ -338,6 +338,11 @@ struct CodeEditorView: NSViewRepresentable {
                     let text: String
                     if let seededDirtyText {
                         text = seededDirtyText
+                    } else if document.isUntitled {
+                        // No backing file to read yet (issue #6) — starts
+                        // blank until `WorkspaceSession.saveUntitledDocument`
+                        // gives it a real location.
+                        text = ""
                     } else {
                         text = try await fileService.readText(at: document.url)
                     }
@@ -582,13 +587,25 @@ struct CodeEditorView: NSViewRepresentable {
             }
         }
 
+        /// Issue #5b: line-comment toggling (⌘/) for languages with a line
+        /// token, falling back to block-comment toggling for a block-only
+        /// language (e.g. CSS, HTML) instead of the prior no-op. Language is
+        /// resolved from the same file-extension/file-name pair the syntax
+        /// pipeline and `LineCommenter` already key off.
         func toggleLineComment() {
-            guard let textView, textView.isEditable,
-                let prefix = LineCommenter.prefix(
-                    forExtension: document.url.pathExtension.lowercased(),
-                    fileName: document.url.lastPathComponent
-                )
-            else { return }
+            guard let textView, textView.isEditable else { return }
+            let syntax = CommentSyntaxTable.syntax(
+                forExtension: document.url.pathExtension.lowercased(),
+                fileName: document.url.lastPathComponent
+            )
+            if let prefix = syntax.line {
+                toggleLineComment(prefix: prefix, in: textView)
+            } else if let block = syntax.block {
+                toggleBlockComment(delimiters: block, in: textView)
+            }
+        }
+
+        private func toggleLineComment(prefix: String, in textView: RafuTextView) {
             let content = textView.string as NSString
             let selection = textView.selectedRange()
             let lineRange = content.lineRange(for: selection)
@@ -609,6 +626,41 @@ struct CodeEditorView: NSViewRepresentable {
             } else {
                 textView.setSelectedRange(NSRange(location: lineRange.location, length: newLength))
             }
+        }
+
+        /// Toggles block-comment delimiters around the selection, or (for an
+        /// empty selection) around the current line's content, excluding its
+        /// trailing newline so the delimiters never swallow the line break.
+        private func toggleBlockComment(
+            delimiters: BlockCommentDelimiters, in textView: RafuTextView
+        ) {
+            let content = textView.string as NSString
+            let selection = textView.selectedRange()
+            let targetRange: NSRange
+            if selection.length == 0 {
+                var lineRange = content.lineRange(for: selection)
+                while lineRange.length > 0 {
+                    let last = content.character(at: NSMaxRange(lineRange) - 1)
+                    guard last == unichar(UInt8(ascii: "\n")) || last == unichar(UInt8(ascii: "\r"))
+                    else { break }
+                    lineRange.length -= 1
+                }
+                targetRange = lineRange
+            } else {
+                targetRange = selection
+            }
+            let original = content.substring(with: targetRange)
+            let result = BlockCommenter.toggle(
+                selection: original, open: delimiters.open, close: delimiters.close)
+            guard result.replacement != original,
+                textView.shouldChangeText(in: targetRange, replacementString: result.replacement)
+            else { return }
+            textView.textStorage?.replaceCharacters(in: targetRange, with: result.replacement)
+            textView.didChangeText()
+            textView.undoManager?.setActionName(
+                result.didComment ? "Comment Selection" : "Uncomment Selection")
+            let newLength = (result.replacement as NSString).length
+            textView.setSelectedRange(NSRange(location: targetRange.location, length: newLength))
         }
 
         func refreshGitMarkers() {

@@ -6,10 +6,21 @@ struct RafuAppCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
+            // Issue #6: ⌘N opens a blank untitled document (⌘S saves it
+            // anywhere via a save panel), matching VS Code's File > New File
+            // instead of opening a second window.
+            Button("New File") {
+                workspaceSession?.newUntitledDocument()
+            }
+            .keyboardShortcut("n", modifiers: .command)
+            .disabled(workspaceSession == nil)
+
+            // Issue #7: what ⌘N used to do (open a new window) moves to
+            // ⌘⇧N.
             Button("New Workspace Window") {
                 openWindow(id: "workspace")
             }
-            .keyboardShortcut("n", modifiers: .command)
+            .keyboardShortcut("n", modifiers: [.command, .shift])
 
             Button("Open Folder…") {
                 workspaceSession?.requestOpenFolder()
@@ -67,11 +78,30 @@ struct RafuAppCommands: Commands {
             }
             .keyboardShortcut("p", modifiers: [.command, .shift])
 
+            // Issue #14: ⌘B toggles the Files/Search/Source Control
+            // sidebar, mirroring `NavigationSplitView`'s own built-in
+            // toolbar toggle (ADR 0002's "one system sidebar toggle" — this
+            // is a keyboard path to that same control, not a second one).
+            Button("Toggle Sidebar") {
+                workspaceSession?.toggleSidebar()
+            }
+            .keyboardShortcut("b", modifiers: .command)
+            .disabled(workspaceSession == nil)
+
+            // Issue #14: ⌃G opens the command palette seeded with ":" for
+            // go-to-line ("Go to Line…" mirrors VS Code's Ctrl+G).
+            Button("Go to Line…") {
+                workspaceSession?.showCommandPalette(seed: ":")
+            }
+            .keyboardShortcut("g", modifiers: [.control])
+            .disabled(workspaceSession?.selectedDocument == nil)
+
             Button("Search Workspace") {
                 workspaceSession?.navigatorMode = .search
             }
             .keyboardShortcut("f", modifiers: [.command, .shift])
 
+            // Issue #14: ⌘⇧G stays Show Source Control — do NOT rebind ⌘G.
             Button("Show Source Control") {
                 workspaceSession?.toggleUtilityPane(.sourceControl)
             }

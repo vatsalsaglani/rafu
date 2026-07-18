@@ -230,6 +230,17 @@ final class WorkspaceSession {
         navigatorMode = navigatorMode == mode ? .files : mode
     }
 
+    /// Drives `WorkspaceWindowView`'s `NavigationSplitView` column
+    /// visibility — the ⌘B Files/Search/Source Control sidebar toggle
+    /// (issue #14). ADR 0002's "one system sidebar toggle" stays true: this
+    /// is a keyboard path to the SAME visibility the split view's own
+    /// built-in toolbar toggle controls, not a second affordance.
+    var isSidebarCollapsed = false
+
+    func toggleSidebar() {
+        isSidebarCollapsed.toggle()
+    }
+
     var isTerminalPresented = false
 
     @ObservationIgnored
@@ -603,6 +614,19 @@ final class WorkspaceSession {
         }
         select(document)
         findState(for: document).select(range)
+    }
+
+    /// Moves the caret to the start of `line` (1-based) in the active editor
+    /// and scrolls it into view — the ⌃G command palette's go-to-line entry
+    /// point (issue #14). Reuses `DocumentFindState.select(_:)`'s
+    /// scroll+select+focus contract, the same path `openWorkspaceSymbol`
+    /// uses. A no-op when there is no selected document or its editor isn't
+    /// mounted (no live text snapshot).
+    func goToLine(_ line: Int) {
+        guard let document = selectedDocument, let snapshotProvider = document.textSnapshotProvider
+        else { return }
+        let offset = LineColumnIndex.utf16Offset(line: line, column: 1, in: snapshotProvider())
+        findState(for: document).select(NSRange(location: offset, length: 0))
     }
 
     /// Opens a file at a workspace-relative path and selects the location
@@ -1095,11 +1119,80 @@ final class WorkspaceSession {
     /// routes through here so lane 2 always learns about a new document,
     /// regardless of which UI path opened it.
     private func trackNewDocument(url: URL) -> EditorDocument {
-        let document = EditorDocument(url: url)
+        registerDocument(EditorDocument(url: url))
+    }
+
+    private func registerDocument(_ document: EditorDocument) -> EditorDocument {
         openDocuments.append(document)
         documentFindStates[document.id] = DocumentFindState()
         languageIntelligence.documentDidOpen(document)
         return document
+    }
+
+    /// Monotonic counter for untitled tabs' display names ("Untitled",
+    /// "Untitled 2", …); never reused, so closing one and opening another
+    /// never collides with a still-open tab.
+    @ObservationIgnored
+    private var untitledDocumentCounter = 0
+
+    /// Opens a new blank, unsaved editor tab with no backing file — the ⌘N
+    /// entry point (issue #6). Selects the new tab immediately, exactly like
+    /// `open(_:)` does for a file. `⌘S` on it routes through
+    /// `saveUntitledDocument(_:)` to a save panel; see `EditorDocument.isUntitled`.
+    func newUntitledDocument() {
+        untitledDocumentCounter += 1
+        let document = registerDocument(EditorDocument(untitledNumber: untitledDocumentCounter))
+        select(document)
+    }
+
+    /// ⌘S on an untitled tab (issue #6): prompts for a destination with
+    /// `NSSavePanel`, then gives the document that URL and performs the
+    /// first real write through its existing `saveAction` (so the write
+    /// path, dirty-flag clearing, and Git refresh stay identical to a normal
+    /// save).
+    func saveUntitledDocument(_ document: EditorDocument) {
+        presentSavePanel(for: document) { [weak self] in
+            self?.persistWorkspaceState()
+        }
+    }
+
+    /// "Save and Close" (`EditorCanvasView`'s unsaved-changes sheet) on a
+    /// dirty untitled tab: the same save-panel flow as
+    /// `saveUntitledDocument(_:)`, but the tab only closes once the panel
+    /// actually returns a destination — a cancelled panel leaves the tab
+    /// open and still dirty instead of silently discarding it.
+    private func saveUntitledDocumentThenClose(_ document: EditorDocument) {
+        presentSavePanel(for: document) { [weak self] in
+            self?.close(document)
+        }
+    }
+
+    /// Shared `NSSavePanel` flow backing both untitled-save paths above:
+    /// retargets the tab/document's resource to the chosen URL, then
+    /// performs the first real write through `saveAction`. A no-op (no
+    /// panel shown) for a document that isn't untitled or has no mounted
+    /// editor; `onSaved` never runs when the panel is cancelled.
+    private func presentSavePanel(for document: EditorDocument, onSaved: @escaping () -> Void) {
+        guard document.isUntitled, document.saveAction != nil else { return }
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = document.displayName
+        if let rootURL {
+            panel.directoryURL = rootURL
+        }
+        panel.begin { [weak self] response in
+            guard let self, response == .OK, let url = panel.url else { return }
+            let previousURL = document.url
+            document.assignSavedURL(url)
+            if let tab = editorLayout.tab(matching: .file(previousURL)) {
+                editorLayout.updateResource(for: tab.id, to: .file(url))
+            }
+            if selectedDocumentID == document.id {
+                selectedTreePath = url.path
+            }
+            document.saveAction?()
+            onSaved()
+        }
     }
 
     func select(_ document: EditorDocument) {
@@ -1134,8 +1227,12 @@ final class WorkspaceSession {
 
     func saveAndClosePendingDocument() {
         guard let document = pendingCloseDocument else { return }
-        document.saveAction?()
         pendingCloseDocument = nil
+        if document.isUntitled {
+            saveUntitledDocumentThenClose(document)
+            return
+        }
+        document.saveAction?()
         close(document)
     }
 
@@ -1161,8 +1258,16 @@ final class WorkspaceSession {
         persistWorkspaceState()
     }
 
+    /// ⌘S. An untitled document (issue #6) routes to `saveUntitledDocument(_:)`'s
+    /// save panel; a normal file-backed document keeps writing straight to
+    /// its existing URL.
     func saveSelectedDocument() {
-        selectedDocument?.saveAction?()
+        guard let selectedDocument else { return }
+        if selectedDocument.isUntitled {
+            saveUntitledDocument(selectedDocument)
+            return
+        }
+        selectedDocument.saveAction?()
     }
 
     func requestCloseActiveTab() {

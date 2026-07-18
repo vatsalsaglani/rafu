@@ -39,6 +39,15 @@ final class EditorDocument: Identifiable {
     var markdownMode: MarkdownPresentationMode
     var errorMessage: String?
 
+    /// `true` for a blank document opened via ⌘N with no backing file yet —
+    /// `url` holds a synthetic, never-read-or-written identity until
+    /// `WorkspaceSession.saveUntitledDocument(_:)` gives it a real location
+    /// through a save panel. `CodeEditorView.Coordinator.load()` skips the
+    /// disk read for an untitled document (there is nothing on disk to
+    /// read); `WorkspaceSession.saveSelectedDocument()` routes ⌘S through
+    /// the save panel instead of `saveAction` while this is `true`.
+    private(set) var isUntitled: Bool
+
     /// Drives whether the editor is mounted for this document. Starts loaded;
     /// `WorkspaceSession.updateHibernationStates()` flips it as the working
     /// set changes.
@@ -158,6 +167,7 @@ final class EditorDocument: Identifiable {
     init(url: URL) {
         id = UUID()
         self.url = url
+        isUntitled = false
         let ext = url.pathExtension.lowercased()
         if ["md", "markdown"].contains(ext) {
             // Markdown opens in the mode the user last picked; Edit by default.
@@ -169,6 +179,34 @@ final class EditorDocument: Identifiable {
         } else {
             markdownMode = .edit
         }
+    }
+
+    /// Creates a blank, unsaved document with no backing file (issue #6's
+    /// ⌘N). `number` distinguishes concurrently open untitled tabs in the
+    /// display name ("Untitled", "Untitled 2", …), mirroring Xcode/VS Code.
+    convenience init(untitledNumber number: Int) {
+        self.init(url: Self.untitledURL(number: number))
+        isUntitled = true
+    }
+
+    /// A synthetic identity URL rooted under the temporary directory so it
+    /// can never collide with a real workspace file (and so this document is
+    /// naturally skipped by workspace restoration, which only reopens paths
+    /// that exist on disk). Never read or written — see `isUntitled`'s doc
+    /// comment.
+    private static func untitledURL(number: Int) -> URL {
+        let name = number <= 1 ? "Untitled" : "Untitled \(number)"
+        return URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+            .appending(path: name, directoryHint: .notDirectory)
+    }
+
+    /// Gives an untitled document its real, saved location — called once by
+    /// `WorkspaceSession.saveUntitledDocument(_:)` after the save panel
+    /// returns a destination URL and the initial write succeeds.
+    func assignSavedURL(_ url: URL) {
+        self.url = url
+        isUntitled = false
     }
 
     static let bitmapImageExtensions: Set<String> = [

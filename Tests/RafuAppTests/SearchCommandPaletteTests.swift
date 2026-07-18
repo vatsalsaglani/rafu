@@ -35,6 +35,24 @@ func paletteQueryParserPrefixPosition() {
     #expect(PaletteQueryParser.parse("user@host") == .init(mode: .files, term: "user@host"))
 }
 
+@Test("Palette query parser maps the colon prefix to go-to-line mode")
+func paletteQueryParserGotoLineMode() {
+    #expect(PaletteQueryParser.parse(":20") == .init(mode: .gotoLine, term: "20"))
+    #expect(PaletteQueryParser.parse(":") == .init(mode: .gotoLine, term: ""))
+    #expect(PaletteQueryParser.parse(": 20 ") == .init(mode: .gotoLine, term: "20"))
+}
+
+@Test("Go-to-line query parses a positive integer and rejects everything else")
+func gotoLineQueryParsing() {
+    #expect(GotoLineQuery.parse("20") == 20)
+    #expect(GotoLineQuery.parse("1") == 1)
+    #expect(GotoLineQuery.parse("") == nil)
+    #expect(GotoLineQuery.parse("0") == nil)
+    #expect(GotoLineQuery.parse("-5") == nil)
+    #expect(GotoLineQuery.parse("12abc") == nil)
+    #expect(GotoLineQuery.parse("abc") == nil)
+}
+
 @Test("File ranking prefers a filename match over a deeper path-only match")
 func rankFilesPrefersFilenameMatches() async throws {
     let paths = [

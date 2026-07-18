@@ -64,6 +64,79 @@ func noTrailingNewline() {
     #expect(back.replacement == "last line")
 }
 
+// MARK: - BracketWrap
+
+@Test("Wrapping a selection produces the paired text with the original inside")
+func bracketWrapWrapsSelectionAndKeepsInnerRange() {
+    let result = BracketWrap.wrapping(selection: "hello", opening: "(")
+    #expect(result?.text == "(hello)")
+    #expect(result?.innerRange == NSRange(location: 1, length: 5))
+}
+
+@Test("Every configured opener maps to its closer")
+func bracketWrapCoversAllConfiguredPairs() {
+    #expect(BracketWrap.wrapping(selection: "x", opening: "[")?.text == "[x]")
+    #expect(BracketWrap.wrapping(selection: "x", opening: "{")?.text == "{x}")
+    #expect(BracketWrap.wrapping(selection: "x", opening: "<")?.text == "<x>")
+    #expect(BracketWrap.wrapping(selection: "x", opening: "\"")?.text == "\"x\"")
+    #expect(BracketWrap.wrapping(selection: "x", opening: "'")?.text == "'x'")
+    #expect(BracketWrap.wrapping(selection: "x", opening: "`")?.text == "`x`")
+}
+
+@Test("An empty selection still wraps to an empty pair")
+func bracketWrapEmptySelection() {
+    let result = BracketWrap.wrapping(selection: "", opening: "(")
+    #expect(result?.text == "()")
+    #expect(result?.innerRange == NSRange(location: 1, length: 0))
+}
+
+@Test("A character with no configured pair returns nil")
+func bracketWrapUnknownOpener() {
+    #expect(BracketWrap.wrapping(selection: "x", opening: "a") == nil)
+}
+
+// MARK: - CommentSyntaxTable / BlockCommenter
+
+@Test("Comment syntax pairs a line token with a block form where both exist")
+func commentSyntaxLineAndBlockLanguages() {
+    let swift = CommentSyntaxTable.syntax(forExtension: "swift")
+    #expect(swift.line == "//")
+    #expect(swift.block == BlockCommentDelimiters(open: "/*", close: "*/"))
+
+    let css = CommentSyntaxTable.syntax(forExtension: "css")
+    #expect(css.line == nil)
+    #expect(css.block == BlockCommentDelimiters(open: "/*", close: "*/"))
+
+    let html = CommentSyntaxTable.syntax(forExtension: "html")
+    #expect(html.line == nil)
+    #expect(html.block == BlockCommentDelimiters(open: "<!--", close: "-->"))
+
+    let json = CommentSyntaxTable.syntax(forExtension: "json")
+    #expect(json.line == nil)
+    #expect(json.block == nil)
+}
+
+@Test("Block-comment toggling wraps a selection with padding")
+func blockCommentWrapsSelection() {
+    let result = BlockCommenter.toggle(selection: "color: red;", open: "/*", close: "*/")
+    #expect(result.didComment)
+    #expect(result.replacement == "/* color: red; */")
+}
+
+@Test("Block-comment toggling unwraps an already-commented selection")
+func blockCommentUnwrapsSelection() {
+    let result = BlockCommenter.toggle(selection: "/* color: red; */", open: "/*", close: "*/")
+    #expect(!result.didComment)
+    #expect(result.replacement == "color: red;")
+}
+
+@Test("Block-comment unwrapping tolerates missing padding spaces")
+func blockCommentUnwrapsWithoutPadding() {
+    let result = BlockCommenter.toggle(selection: "<!--note-->", open: "<!--", close: "-->")
+    #expect(!result.didComment)
+    #expect(result.replacement == "note")
+}
+
 // MARK: - AutoIndenter
 
 @Test("Newline copies the current line's leading whitespace")

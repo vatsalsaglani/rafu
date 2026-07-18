@@ -91,6 +91,34 @@ nonisolated enum BracketMatcher {
     }
 }
 
+/// Pure "wrap selection in matching bracket pair" logic (issue #5a): typing
+/// an opening bracket/quote while text is selected wraps the selection
+/// instead of replacing it, leaving the original text selected — matching
+/// VS Code's `editor.autoSurround`. `RafuTextView.insertText(_:replacementRange:)`
+/// is the only caller.
+nonisolated enum BracketWrap {
+    static let pairs: [Character: Character] = [
+        "(": ")", "[": "]", "{": "}", "<": ">",
+        "\"": "\"", "'": "'", "`": "`",
+    ]
+
+    struct Result: Equatable, Sendable {
+        /// The full replacement text: `opening` + `selection` + `closing`.
+        let text: String
+        /// The UTF-16 range the ORIGINAL selection occupies inside `text`,
+        /// so the caller can reselect exactly the wrapped content.
+        let innerRange: NSRange
+    }
+
+    /// `nil` when `opening` has no configured closing pair.
+    static func wrapping(selection: String, opening: Character) -> Result? {
+        guard let closing = pairs[opening] else { return nil }
+        let text = String(opening) + selection + String(closing)
+        let innerLength = (selection as NSString).length
+        return Result(text: text, innerRange: NSRange(location: 1, length: innerLength))
+    }
+}
+
 nonisolated struct LineCommentToggle: Equatable, Sendable {
     let replacement: String
     let didComment: Bool
@@ -184,6 +212,77 @@ nonisolated enum LineCommenter {
 
     private static func joined(_ components: [String], endsWithNewline: Bool) -> String {
         components.joined(separator: "\n") + (endsWithNewline ? "\n" : "")
+    }
+}
+
+/// A language's block-comment open/close delimiters (e.g. `/*`/`*/`,
+/// `<!--`/`-->`). `nil` in `CommentSyntax.block` means the language has no
+/// block-comment syntax Rafu knows about.
+nonisolated struct BlockCommentDelimiters: Equatable, Sendable {
+    let open: String
+    let close: String
+}
+
+/// A file's comment syntax: an optional line-comment token
+/// (`LineCommenter.prefix`) and an optional block-comment delimiter pair.
+/// Both can be present (most C-family languages); a markup language may
+/// have only a block form; a data format with no comment syntax (plain
+/// JSON) has neither, and ⌘/ stays a no-op.
+nonisolated struct CommentSyntax: Equatable, Sendable {
+    let line: String?
+    let block: BlockCommentDelimiters?
+}
+
+/// Static, per-language comment-syntax lookup (issue #5b). Tree-sitter has
+/// no cheap "comment token" query across grammars, so this table is the
+/// source of truth `CodeEditorView.Coordinator.toggleLineComment()` reads to
+/// choose between `LineCommenter` and `BlockCommenter`.
+nonisolated enum CommentSyntaxTable {
+    static func syntax(forExtension fileExtension: String, fileName: String = "") -> CommentSyntax {
+        CommentSyntax(
+            line: LineCommenter.prefix(forExtension: fileExtension, fileName: fileName),
+            block: blockDelimiters(forExtension: fileExtension)
+        )
+    }
+
+    private static func blockDelimiters(forExtension fileExtension: String)
+        -> BlockCommentDelimiters?
+    {
+        switch fileExtension.lowercased() {
+        case "html", "htm", "xml", "svg", "vue", "md", "markdown":
+            return BlockCommentDelimiters(open: "<!--", close: "-->")
+        case "css", "scss", "less", "swift", "js", "jsx", "mjs", "cjs", "ts", "tsx", "c", "h",
+            "cc", "cpp", "cxx", "hpp", "m", "mm", "go", "rs", "java", "kt", "kts", "scala", "cs",
+            "php", "dart", "proto", "groovy":
+            return BlockCommentDelimiters(open: "/*", close: "*/")
+        default:
+            return nil
+        }
+    }
+}
+
+nonisolated struct BlockCommentToggle: Equatable, Sendable {
+    let replacement: String
+    let didComment: Bool
+}
+
+/// Pure block-comment toggling for a single selection or the current line
+/// (the caller supplies the exact substring to toggle). Complements
+/// `LineCommenter` for languages whose only ⌘/ comment form is a block
+/// delimiter pair (e.g. CSS, HTML).
+nonisolated enum BlockCommenter {
+    /// Wraps `selection` in `open`/`close` (with one padding space each), or
+    /// unwraps it when it already starts with `open` and ends with `close`.
+    static func toggle(selection: String, open: String, close: String) -> BlockCommentToggle {
+        if selection.hasPrefix(open), selection.hasSuffix(close),
+            selection.count >= open.count + close.count
+        {
+            var inner = String(selection.dropFirst(open.count).dropLast(close.count))
+            if inner.hasPrefix(" ") { inner.removeFirst() }
+            if inner.hasSuffix(" ") { inner.removeLast() }
+            return BlockCommentToggle(replacement: inner, didComment: false)
+        }
+        return BlockCommentToggle(replacement: "\(open) \(selection) \(close)", didComment: true)
     }
 }
 

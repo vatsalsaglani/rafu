@@ -127,7 +127,8 @@ struct CommandPaletteView: View {
                     .frame(width: 18)
                     .foregroundStyle(theme.palette.accent)
                 TextField(
-                    "Go to file… > commands, @ file symbols, # workspace symbols", text: $query
+                    "Go to file… > commands, @ file symbols, # workspace symbols, : go to line",
+                    text: $query
                 )
                 .textFieldStyle(.plain)
                 .font(.system(size: 15))
@@ -152,6 +153,7 @@ struct CommandPaletteView: View {
         case .commands: "command"
         case .symbols: "at"
         case .workspaceSymbols: "number.square"
+        case .gotoLine: "arrow.turn.down.right"
         }
     }
 
@@ -197,6 +199,9 @@ struct CommandPaletteView: View {
             case .building, .ready:
                 return "No matching symbols"
             }
+        case .gotoLine:
+            guard session.selectedDocument != nil else { return "Open a file to go to a line" }
+            return "Type a line number, e.g. :20"
         }
     }
 
@@ -331,7 +336,29 @@ struct CommandPaletteView: View {
         case .commands: commandRows(matching: parsed.term)
         case .symbols: symbolRows(matching: parsed.term)
         case .workspaceSymbols: workspaceSymbolRows(matching: parsed.term)
+        case .gotoLine: gotoRows(matching: parsed.term)
         }
+    }
+
+    /// The go-to-line row for a valid ":<line>" query (issue #14's ⌃G),
+    /// while a document is open to jump within. Empty otherwise, matching
+    /// every other mode's "no query yet" empty state.
+    private func gotoRows(matching term: String) -> [PaletteRow] {
+        guard let document = session.selectedDocument, let line = GotoLineQuery.parse(term) else {
+            return []
+        }
+        return [
+            PaletteRow(
+                id: "goto:\(line)",
+                symbolName: "arrow.turn.down.right",
+                iconTint: .accent,
+                title: "Go to Line \(line)",
+                detail: document.displayName
+            ) {
+                dismiss()
+                session.goToLine(line)
+            }
+        ]
     }
 
     /// `fileMatches` is already ranked and top-N limited by the background
@@ -390,7 +417,7 @@ struct CommandPaletteView: View {
             return
                 "Showing top \(Self.maximumFileRows) matches — symbol index truncated at "
                 + "\(WorkspaceSymbolIndex.maximumSymbols) symbols"
-        case .commands, .symbols:
+        case .commands, .symbols, .gotoLine:
             return nil
         }
     }
@@ -783,6 +810,7 @@ nonisolated enum PaletteQueryParser {
         case commands
         case symbols
         case workspaceSymbols
+        case gotoLine
     }
 
     struct ParsedQuery: Equatable, Sendable {
@@ -801,8 +829,19 @@ nonisolated enum PaletteQueryParser {
     }
 
     private static let prefixModes: [Character: Mode] = [
-        ">": .commands, "@": .symbols, "#": .workspaceSymbols,
+        ">": .commands, "@": .symbols, "#": .workspaceSymbols, ":": .gotoLine,
     ]
+}
+
+/// Pure parser for the ⌃G go-to-line palette term (issue #14): ":20" → line
+/// 20. `PaletteQueryParser.parse` already strips the leading ":" and
+/// surrounding whitespace, so `term` here is just the digits.
+nonisolated enum GotoLineQuery {
+    /// `nil` for an empty, non-numeric, or non-positive term.
+    static func parse(_ term: String) -> Int? {
+        guard let value = Int(term), value > 0 else { return nil }
+        return value
+    }
 }
 
 nonisolated enum CommandPaletteMatcher {

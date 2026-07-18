@@ -264,6 +264,71 @@ struct MultiCaretModelTests {
             ) == 30)
     }
 
+    @Test("Wrapping shifts each wrapped selection's start by the growing pair overhead")
+    func wrappingSelections() {
+        let text = "a bb ccc"
+        let model = MultiCaretModel(
+            ranges: [
+                NSRange(location: 0, length: 1),
+                NSRange(location: 2, length: 2),
+                NSRange(location: 5, length: 3),
+            ],
+            primaryIndex: 1,
+            textLength: (text as NSString).length
+        )
+        let result = model.applyingWrap(opening: "(", closing: ")", in: text)
+
+        #expect(
+            result.edits == [
+                MultiCaretSubedit(range: NSRange(location: 5, length: 3), replacement: "(ccc)"),
+                MultiCaretSubedit(range: NSRange(location: 2, length: 2), replacement: "(bb)"),
+                MultiCaretSubedit(range: NSRange(location: 0, length: 1), replacement: "(a)"),
+            ])
+        #expect(
+            result.model.ranges == [
+                NSRange(location: 1, length: 1),
+                NSRange(location: 5, length: 2),
+                NSRange(location: 10, length: 3),
+            ])
+        #expect(result.model.primaryIndex == 1)
+    }
+
+    @Test("Wrapping leaves empty (caret-only) ranges untouched — no auto-pairing")
+    func wrappingSkipsEmptyRanges() {
+        let text = "ab"
+        let model = MultiCaretModel(
+            ranges: [
+                NSRange(location: 0, length: 0),
+                NSRange(location: 1, length: 1),
+            ],
+            textLength: (text as NSString).length
+        )
+        let result = model.applyingWrap(opening: "[", closing: "]", in: text)
+
+        #expect(
+            result.edits == [
+                MultiCaretSubedit(range: NSRange(location: 1, length: 1), replacement: "[b]")
+            ])
+        #expect(
+            result.model.ranges == [
+                NSRange(location: 0, length: 0),
+                NSRange(location: 2, length: 1),
+            ])
+    }
+
+    @Test("Wrapping with no selections at all is a pass-through no-op")
+    func wrappingWithNoSelections() {
+        let text = "ab"
+        let model = MultiCaretModel(
+            ranges: [NSRange(location: 0, length: 0), NSRange(location: 2, length: 0)],
+            textLength: (text as NSString).length
+        )
+        let result = model.applyingWrap(opening: "(", closing: ")", in: text)
+
+        #expect(result.edits.isEmpty)
+        #expect(result.model == model)
+    }
+
     @Test("Caret toggling removes an existing secondary and collapse keeps primary")
     func toggleAndCollapse() {
         let model = MultiCaretModel(
@@ -397,6 +462,55 @@ func multiCaretBackwardDelete() {
     #expect(probe.processedCharacterEdits == 2)
     probe.manager.undo()
     #expect(textView.string == "a😀 bc")
+}
+
+@MainActor
+@Test("Typing an opening bracket over a single-caret selection wraps it")
+func singleCaretBracketWrap() {
+    let textView = RafuTextView.makeTextKit1()
+    textView.string = "let x = hello"
+    textView.setSelectedRange(NSRange(location: 8, length: 5))
+
+    textView.insertText("(", replacementRange: NSRange(location: NSNotFound, length: 0))
+
+    #expect(textView.string == "let x = (hello)")
+    #expect(textView.selectedRange() == NSRange(location: 9, length: 5))
+}
+
+@MainActor
+@Test("Typing an opening bracket at a bare caret still inserts it normally")
+func singleCaretBracketNoSelectionInsertsLiterally() {
+    let textView = RafuTextView.makeTextKit1()
+    textView.string = "let x = "
+    textView.setSelectedRange(NSRange(location: 8, length: 0))
+
+    textView.insertText("(", replacementRange: NSRange(location: NSNotFound, length: 0))
+
+    #expect(textView.string == "let x = (")
+    #expect(textView.selectedRange() == NSRange(location: 9, length: 0))
+}
+
+@MainActor
+@Test("Typing an opening bracket over multi-caret selections wraps only the non-empty ones")
+func multiCaretBracketWrap() {
+    let textView = RafuTextView.makeTextKit1()
+    let probe = MultiCaretEditingProbe()
+    textView.delegate = probe
+    textView.textStorage?.delegate = probe
+    textView.allowsUndo = true
+    textView.string = "aa bb"
+    textView.applyCaretRanges(
+        [NSRange(location: 0, length: 2), NSRange(location: 3, length: 2)]
+    )
+
+    textView.insertText("[", replacementRange: NSRange(location: NSNotFound, length: 0))
+
+    #expect(textView.string == "[aa] [bb]")
+    #expect(
+        textView.currentCaretRanges == [
+            NSRange(location: 1, length: 2),
+            NSRange(location: 6, length: 2),
+        ])
 }
 
 @MainActor

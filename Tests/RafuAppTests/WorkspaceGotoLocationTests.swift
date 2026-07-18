@@ -69,6 +69,56 @@ struct WorkspaceGotoLocationTests {
 }
 
 @MainActor
+@Suite("Workspace go-to-line (⌃G palette)")
+struct WorkspaceGoToLineTests {
+    @Test("Go to line selects the start of the requested line in the live buffer")
+    func goToLineSelectsWithinLiveText() throws {
+        let fixture = try Fixture(diskText: "one\ntwo\n")
+        defer { fixture.remove() }
+        let session = fixture.session()
+        let document = EditorDocument(url: fixture.fileURL)
+        document.textSnapshotProvider = { "alpha\nbravo\ncharlie\n" }
+        session.openDocuments = [document]
+        session.selectedDocumentID = document.id
+
+        let controller = SelectionRecorder()
+        session.findState(for: document).attach(controller)
+
+        session.goToLine(2)
+        #expect(controller.selectedRange == NSRange(location: 6, length: 0))
+
+        session.goToLine(3)
+        #expect(controller.selectedRange == NSRange(location: 12, length: 0))
+    }
+
+    @Test("Go to line is a no-op with no selected document")
+    func goToLineNoSelectedDocument() throws {
+        let fixture = try Fixture(diskText: "one\n")
+        defer { fixture.remove() }
+        let session = fixture.session()
+
+        session.goToLine(1)
+        #expect(session.selectedDocument == nil)
+    }
+
+    @Test("Go to line is a no-op without a live text snapshot")
+    func goToLineWithoutMountedEditor() throws {
+        let fixture = try Fixture(diskText: "one\n")
+        defer { fixture.remove() }
+        let session = fixture.session()
+        let document = EditorDocument(url: fixture.fileURL)
+        session.openDocuments = [document]
+        session.selectedDocumentID = document.id
+
+        let controller = SelectionRecorder()
+        session.findState(for: document).attach(controller)
+
+        session.goToLine(1)
+        #expect(controller.selectedRange == nil)
+    }
+}
+
+@MainActor
 private final class SelectionRecorder: DocumentFindControlling {
     private(set) var selectedRange: NSRange?
 

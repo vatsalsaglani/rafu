@@ -443,8 +443,35 @@ final class RafuTextView: NSTextView {
         scrollRangeToVisible(collapsed.primaryRange)
     }
 
+    /// Issue #5a: a single-character opening bracket/quote typed over a
+    /// non-empty selection wraps the selection instead of replacing it
+    /// (checked first, before the multi-caret/marked-text dispatch below, so
+    /// it applies in both the single- and multi-caret cases). Every other
+    /// insertion — including a bare caret typing the same character, IME
+    /// composition, snippet/ghost-completion inserts, and paste-as-typing —
+    /// falls through to the existing behavior untouched.
     override func insertText(_ insertString: Any, replacementRange: NSRange) {
-        guard hasMultipleCarets, !hasMarkedText() else {
+        guard !hasMarkedText() else {
+            super.insertText(insertString, replacementRange: replacementRange)
+            return
+        }
+
+        if let opening = Self.wrappingCharacter(from: insertString) {
+            if hasMultipleCarets {
+                let model = currentCaretModel
+                if let closing = BracketWrap.pairs[opening],
+                    model.ranges.contains(where: { $0.length > 0 })
+                {
+                    performMultiCaretEdit(
+                        model.applyingWrap(opening: opening, closing: closing, in: string))
+                    return
+                }
+            } else if applyBracketWrap(opening: opening, in: super.selectedRange()) {
+                return
+            }
+        }
+
+        guard hasMultipleCarets else {
             super.insertText(insertString, replacementRange: replacementRange)
             return
         }
@@ -463,6 +490,47 @@ final class RafuTextView: NSTextView {
                 at: (string as NSString).length
             )
         )
+    }
+
+    /// The single wrapping character `insertString` represents, or `nil` for
+    /// anything else (a multi-character string, an IME commit represented
+    /// some other way, or an unsupported payload type) — those always fall
+    /// through to normal insertion.
+    private static func wrappingCharacter(from insertString: Any) -> Character? {
+        let text: String
+        if let string = insertString as? String {
+            text = string
+        } else if let attributedString = insertString as? NSAttributedString {
+            text = attributedString.string
+        } else {
+            return nil
+        }
+        guard text.count == 1, let character = text.first, BracketWrap.pairs[character] != nil
+        else { return nil }
+        return character
+    }
+
+    /// Wraps `selection` (single-caret path) with `opening`'s matching
+    /// closer, leaving the original text selected. Returns `false` — nothing
+    /// applied — for an empty selection, a delegate rejection, or an
+    /// unconfigured `opening`, so the caller falls through to normal
+    /// insertion.
+    @discardableResult
+    private func applyBracketWrap(opening: Character, in selection: NSRange) -> Bool {
+        guard selection.length > 0, let textStorage,
+            let wrap = BracketWrap.wrapping(
+                selection: (string as NSString).substring(with: selection), opening: opening)
+        else { return false }
+        guard shouldChangeText(in: selection, replacementString: wrap.text) else { return false }
+        textStorage.replaceCharacters(in: selection, with: wrap.text)
+        didChangeText()
+        setSelectedRange(
+            NSRange(
+                location: selection.location + wrap.innerRange.location,
+                length: wrap.innerRange.length
+            )
+        )
+        return true
     }
 
     override func deleteBackward(_ sender: Any?) {

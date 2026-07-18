@@ -4,12 +4,11 @@ import UniformTypeIdentifiers
 
 struct WorkspaceWindowView: View {
     @Bindable var session: WorkspaceSession
-    @State private var navigationSplitVisibility = NavigationSplitViewVisibility.all
     @Environment(\.rafuTheme) private var theme
 
     var body: some View {
         VStack(spacing: 0) {
-            NavigationSplitView(columnVisibility: $navigationSplitVisibility) {
+            NavigationSplitView(columnVisibility: navigationSplitVisibility) {
                 WorkspaceSidebarView(session: session)
             } detail: {
                 HStack(spacing: 0) {
@@ -95,6 +94,18 @@ struct WorkspaceWindowView: View {
         // the themed panels meet the titlebar edge-to-edge behind the traffic
         // lights. Native toolbar items and window controls are retained.
         .toolbarBackground(.hidden, for: .windowToolbar)
+    }
+
+    /// Backs `NavigationSplitView`'s column visibility with
+    /// `session.isSidebarCollapsed` (issue #14's ⌘B) instead of local
+    /// `@State`, so the session is the single source of truth: dragging the
+    /// divider, clicking the split view's own toolbar toggle, and ⌘B all
+    /// converge on the same flag.
+    private var navigationSplitVisibility: Binding<NavigationSplitViewVisibility> {
+        Binding(
+            get: { session.isSidebarCollapsed ? .detailOnly : .all },
+            set: { session.isSidebarCollapsed = $0 == .detailOnly }
+        )
     }
 
     private var editorCanvas: some View {

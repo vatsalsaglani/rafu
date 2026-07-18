@@ -60,6 +60,47 @@ nonisolated struct MultiCaretModel: Equatable, Sendable {
         )
     }
 
+    /// Wraps every non-empty range with `opening`/`closing` (issue #5a's
+    /// multi-caret path), leaving each wrapped selection covering its
+    /// original content — the same edit-from-the-end-then-remap shape as
+    /// `applyingReplacement`. Empty (caret-only) ranges are left untouched:
+    /// Rafu does not auto-close brackets at a bare caret, only wrap an
+    /// existing selection.
+    func applyingWrap(opening: Character, closing: Character, in text: String)
+        -> MultiCaretEditResult
+    {
+        let content = text as NSString
+        let source = normalized(textLength: content.length)
+        let edits: [MultiCaretSubedit] = source.ranges.reversed().compactMap { range in
+            guard range.length > 0 else { return nil }
+            let inner = content.substring(with: range)
+            return MultiCaretSubedit(
+                range: range, replacement: String(opening) + inner + String(closing))
+        }
+        guard !edits.isEmpty else {
+            return MultiCaretEditResult(edits: [], model: source)
+        }
+
+        var cumulativeShift = 0
+        var newRanges: [NSRange] = []
+        newRanges.reserveCapacity(source.ranges.count)
+        for range in source.ranges {
+            if range.length > 0 {
+                newRanges.append(
+                    NSRange(location: range.location + cumulativeShift + 1, length: range.length))
+                cumulativeShift += 2
+            } else {
+                newRanges.append(NSRange(location: range.location + cumulativeShift, length: 0))
+            }
+        }
+        let newTextLength = max(0, content.length + cumulativeShift)
+        return MultiCaretEditResult(
+            edits: edits,
+            model: MultiCaretModel(
+                ranges: newRanges, primaryIndex: source.primaryIndex, textLength: newTextLength)
+        )
+    }
+
     /// Expands empty carets to composed-character deletion targets before
     /// applying an empty replacement. This keeps UTF-16 surrogate pairs and
     /// other extended grapheme clusters intact.
