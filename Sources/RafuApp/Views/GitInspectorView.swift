@@ -45,7 +45,13 @@ struct GitInspectorView: View {
             }
         }
         .frame(minWidth: 250, idealWidth: 310)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // `alignment: .top` is load-bearing: `.frame(maxHeight: .infinity)`
+        // defaults to CENTER alignment, so any tab whose content under-fills
+        // (History with no commits) floated the whole header/picker stack to
+        // the vertical middle of the panel. Header and tabs must stay pinned
+        // to the top regardless of how empty the selected tab is (AGENTS:
+        // panel/tab containers pin to the top).
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .overlay {
             if session.isGitBusy {
                 ProgressView().controlSize(.small).padding(10)
@@ -654,11 +660,15 @@ struct GitInspectorView: View {
                     .frame(maxHeight: 260)
                 }
             } else {
+                // Expands to claim the tab's remaining space so the empty
+                // state centers WITHIN it — without this the under-filled
+                // panel used to center the header and tab picker themselves.
                 ContentUnavailableView(
                     "No commits yet",
                     systemImage: "clock.arrow.circlepath",
                     description: Text("Commit history will appear here.")
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }

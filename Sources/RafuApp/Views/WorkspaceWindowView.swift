@@ -64,7 +64,24 @@ struct WorkspaceWindowView: View {
                 .help("Toggle Sidebar (⌘B)")
                 .accessibilityLabel("Toggle Sidebar")
             }
+            // The window title, CENTERED. The system inline title renders at
+            // the leading edge next to the traffic lights, which sits on top
+            // of the sidebar and reads as a broken leftover header — so the
+            // default title is removed below and re-added here as a quiet
+            // principal item in the middle of the titlebar.
+            ToolbarItem(placement: .principal) {
+                Text(session.windowTitle)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .accessibilityAddTraits(.isHeader)
+            }
         }
+        // Hide the system's leading inline title; `navigationTitle` stays set
+        // so Mission Control, the Window menu, and the proxy icon keep the
+        // real title.
+        .toolbar(removing: .title)
         .frame(minWidth: 720, minHeight: 480)
         .navigationTitle(session.windowTitle)
         .focusedSceneValue(\.workspaceSession, session)

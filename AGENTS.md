@@ -81,6 +81,7 @@ See [`docs/references/build-and-run.md`](docs/references/build-and-run.md) for t
 - Important actions need a visible UI path and a menu/keyboard path. Do not hide core actions behind gestures or icon-only context menus.
 - Respect VoiceOver, Full Keyboard Access, Reduce Motion, Reduce Transparency, Increase Contrast, and user text settings.
 - Frequent keyboard actions and tab/cursor changes are immediate; do not add decorative motion to them.
+- Panel and tab containers pin to the top. SwiftUI's `.frame(maxHeight: .infinity)` centers its content by default, so a header + tab picker + content stack filled that way MUST pass `alignment: .top`, and each tab's empty state must itself expand (`.frame(maxWidth: .infinity, maxHeight: .infinity)`) so it centers within the remaining space. Otherwise an under-filled tab (e.g. History with no commits) floats the whole panel — header, tabs, and all — to the vertical middle. Recurred across several tabs before being fixed categorically; check every new tab/panel against this rule.
 
 ## Performance and security evidence
 
