@@ -110,6 +110,11 @@ final class WorkspaceSession {
     /// unlike GX1's single caret-line ghost. Off by default (same calm-UI
     /// default as inline blame, ADR 0013 GD2) and never persisted.
     var isFileBlameAnnotationsEnabled = false
+    /// Build-level feature flag: AI tab-completion is not ready to ship yet.
+    /// While false, the Edit-menu item and palette entry are hidden and
+    /// `toggleAICompletion()` is a no-op, so the mode can never turn on.
+    /// Flip to true when the feature is finished.
+    nonisolated static let isAICompletionFeatureAvailable = false
     /// AI tab-completion mode; per-window, off by default, never persisted.
     var isAICompletionEnabled = false
     /// Set at the end of a successful explicit `gitFetch(remote:)` — the
@@ -2290,6 +2295,7 @@ final class WorkspaceSession {
     /// to send a bounded window of buffer text around the caret to the
     /// configured AI provider (AGENTS: AI stays explicit).
     func toggleAICompletion() {
+        guard Self.isAICompletionFeatureAvailable else { return }
         isAICompletionEnabled.toggle()
     }
 

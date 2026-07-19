@@ -181,7 +181,8 @@ struct GitInspectorView: View {
                         guard !branch.isCurrent else { return }
                         Task { await session.gitCheckoutBranch(named: branch.name) }
                     },
-                    searchPrompt: "Search branches"
+                    searchPrompt: "Search branches",
+                    sectionTitle: { $0.kind == .local ? "Local" : "Remote" }
                 ) {
                     Label(snapshot.branch, systemImage: "arrow.triangle.branch")
                         .font(.headline)

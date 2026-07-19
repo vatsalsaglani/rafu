@@ -111,7 +111,8 @@ struct WorkspaceStatusBar: View {
                 guard !branch.isCurrent else { return }
                 Task { await session.gitCheckoutBranch(named: branch.name) }
             },
-            searchPrompt: "Search branches"
+            searchPrompt: "Search branches",
+            sectionTitle: { $0.kind == .local ? "Local" : "Remote" }
         ) {
             HStack(spacing: RafuMetrics.space1) {
                 Image(systemName: "arrow.triangle.branch")

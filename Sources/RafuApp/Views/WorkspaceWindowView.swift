@@ -8,9 +8,19 @@ struct WorkspaceWindowView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            NavigationSplitView(columnVisibility: navigationSplitVisibility) {
-                WorkspaceSidebarView(session: session)
-            } detail: {
+            // Issue: flat sidebar. `NavigationSplitView` on macOS 26 floats
+            // the sidebar as an inset, rounded Liquid Glass card whenever the
+            // window is key — visible elevation, shadow, and margins that
+            // contradict the flat chrome the user asked for (ADR 0012). An
+            // AppKit-backed `HSplitView` keeps the sidebar an ordinary flush
+            // pane while preserving drag-to-resize; ⌘B and the toolbar toggle
+            // both drive `session.isSidebarCollapsed`.
+            HSplitView {
+                if !session.isSidebarCollapsed {
+                    WorkspaceSidebarView(session: session)
+                        .frame(minWidth: 200, idealWidth: 260, maxWidth: 420)
+                        .frame(maxHeight: .infinity)
+                }
                 HStack(spacing: 0) {
                     // HSplitView is AppKit-backed and collapses to its
                     // children's ideal size unless every level is forced to
@@ -33,11 +43,27 @@ struct WorkspaceWindowView: View {
                     Divider().overlay(theme.palette.borderSubtle)
                     WorkspaceUtilityRail(session: session)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .layoutPriority(1)
             }
-            .navigationSplitViewStyle(.balanced)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Divider()
             WorkspaceStatusBar(session: session)
+        }
+        // `NavigationSplitView` used to contribute the system sidebar toggle;
+        // with the flat `HSplitView` we provide the one toggle ourselves
+        // (ADR 0002: exactly one sidebar toggle, plus the ⌘B keyboard path).
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    session.toggleSidebar()
+                } label: {
+                    Image(systemName: "sidebar.left")
+                }
+                .help("Toggle Sidebar (⌘B)")
+                .accessibilityLabel("Toggle Sidebar")
+            }
         }
         .frame(minWidth: 720, minHeight: 480)
         .navigationTitle(session.windowTitle)
@@ -87,18 +113,6 @@ struct WorkspaceWindowView: View {
         // the themed panels meet the titlebar edge-to-edge behind the traffic
         // lights. Native toolbar items and window controls are retained.
         .toolbarBackground(.hidden, for: .windowToolbar)
-    }
-
-    /// Backs `NavigationSplitView`'s column visibility with
-    /// `session.isSidebarCollapsed` (issue #14's ⌘B) instead of local
-    /// `@State`, so the session is the single source of truth: dragging the
-    /// divider, clicking the split view's own toolbar toggle, and ⌘B all
-    /// converge on the same flag.
-    private var navigationSplitVisibility: Binding<NavigationSplitViewVisibility> {
-        Binding(
-            get: { session.isSidebarCollapsed ? .detailOnly : .all },
-            set: { session.isSidebarCollapsed = $0 == .detailOnly }
-        )
     }
 
     private var editorCanvas: some View {

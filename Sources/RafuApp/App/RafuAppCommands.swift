@@ -169,10 +169,14 @@ struct RafuAppCommands: Commands {
             }
             .disabled(workspaceSession == nil)
 
-            Button("Toggle AI Completion") {
-                workspaceSession?.toggleAICompletion()
+            // AI tab-completion is feature-flagged off until it is ready;
+            // the menu item disappears entirely rather than sitting disabled.
+            if WorkspaceSession.isAICompletionFeatureAvailable {
+                Button("Toggle AI Completion") {
+                    workspaceSession?.toggleAICompletion()
+                }
+                .disabled(workspaceSession == nil)
             }
-            .disabled(workspaceSession == nil)
 
             Button("Peek Change at Line") {
                 workspaceSession?.peekChangeAtCaret()

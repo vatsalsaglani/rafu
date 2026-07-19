@@ -743,19 +743,23 @@ struct CommandPaletteView: View {
             }
         )
 
-        commands.append(
-            .init(
-                id: "ai.toggle-completion",
-                title: "Toggle AI Completion",
-                detail: session.isAICompletionEnabled
-                    ? "On — Tab accepts suggestions" : "Off",
-                symbolName: "sparkles",
-                keywords: ["ai", "complete", "autocomplete", "suggest", "tab", "copilot"]
-            ) {
-                dismiss()
-                session.toggleAICompletion()
-            }
-        )
+        // AI tab-completion is feature-flagged off until it is ready; hide
+        // its palette entry so it cannot be toggled from anywhere.
+        if WorkspaceSession.isAICompletionFeatureAvailable {
+            commands.append(
+                .init(
+                    id: "ai.toggle-completion",
+                    title: "Toggle AI Completion",
+                    detail: session.isAICompletionEnabled
+                        ? "On — Tab accepts suggestions" : "Off",
+                    symbolName: "sparkles",
+                    keywords: ["ai", "complete", "autocomplete", "suggest", "tab", "copilot"]
+                ) {
+                    dismiss()
+                    session.toggleAICompletion()
+                }
+            )
+        }
 
         if session.selectedDocument != nil, session.gitSnapshot != nil {
             commands.append(

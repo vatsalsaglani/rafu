@@ -50,4 +50,46 @@ struct RafuSearchableDropdownTests {
         let result = RafuDropdownFilter.filter(items, query: "main") { [$0.name] }
         #expect(result.map(\.name) == ["main", "origin/main"])
     }
+
+    @Test("sectioned groups by title preserving item and first-appearance order")
+    func sectionedPreservesOrder() {
+        struct Fixture {
+            let name: String
+            let isLocal: Bool
+        }
+        let items = [
+            Fixture(name: "develop", isLocal: true),
+            Fixture(name: "main", isLocal: true),
+            Fixture(name: "origin/develop", isLocal: false),
+            Fixture(name: "origin/main", isLocal: false),
+        ]
+        let sections = RafuDropdownFilter.sectioned(items) { $0.isLocal ? "Local" : "Remote" }
+        #expect(sections.map(\.title) == ["Local", "Remote"])
+        #expect(sections[0].items.map(\.name) == ["develop", "main"])
+        #expect(sections[1].items.map(\.name) == ["origin/develop", "origin/main"])
+    }
+
+    @Test("sectioned keeps first-appearance section order even when interleaved")
+    func sectionedInterleavedKeepsFirstAppearanceOrder() {
+        struct Fixture {
+            let name: String
+            let kind: String
+        }
+        let items = [
+            Fixture(name: "origin/main", kind: "Remote"),
+            Fixture(name: "main", kind: "Local"),
+            Fixture(name: "origin/develop", kind: "Remote"),
+        ]
+        let sections = RafuDropdownFilter.sectioned(items) { $0.kind }
+        #expect(sections.map(\.title) == ["Remote", "Local"])
+        #expect(sections[0].items.map(\.name) == ["origin/main", "origin/develop"])
+        #expect(sections[1].items.map(\.name) == ["main"])
+    }
+
+    @Test("sectioned on an empty list yields no sections")
+    func sectionedEmpty() {
+        struct Fixture { let name: String }
+        let sections = RafuDropdownFilter.sectioned([Fixture]()) { _ in "Local" }
+        #expect(sections.isEmpty)
+    }
 }

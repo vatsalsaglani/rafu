@@ -20,6 +20,23 @@ nonisolated enum RafuDropdownFilter {
     static func filter<Item>(_ items: [Item], query: String, fields: (Item) -> [String]) -> [Item] {
         items.filter { matches(query: query, fields: fields($0)) }
     }
+
+    /// Groups `items` into ordered sections keyed by `title`, preserving the
+    /// items' relative order and the sections' first-appearance order.
+    /// Sections whose items were all filtered out simply never appear —
+    /// callers pass the ALREADY-filtered item list.
+    static func sectioned<Item>(
+        _ items: [Item], title: (Item) -> String
+    ) -> [(title: String, items: [Item])] {
+        var order: [String] = []
+        var groups: [String: [Item]] = [:]
+        for item in items {
+            let key = title(item)
+            if groups[key] == nil { order.append(key) }
+            groups[key, default: []].append(item)
+        }
+        return order.map { (title: $0, items: groups[$0] ?? []) }
+    }
 }
 
 /// Reusable, keyboard-navigable searchable dropdown: a trigger button that
@@ -34,6 +51,10 @@ struct RafuSearchableDropdown<Item: Identifiable, Label: View, Trailing: View>: 
     let keywords: (Item) -> [String]
     let isCurrent: (Item) -> Bool
     let onSelect: (Item) -> Void
+    /// Optional grouping: when set, rows render under small uppercase
+    /// section headers (e.g. Local / Remote branches) while keyboard
+    /// navigation still moves through the flat filtered order.
+    let sectionTitle: ((Item) -> String)?
     @ViewBuilder let trailing: (Item) -> Trailing
     @ViewBuilder let label: () -> Label
     var searchPrompt: String = "Search"
@@ -51,6 +72,7 @@ struct RafuSearchableDropdown<Item: Identifiable, Label: View, Trailing: View>: 
         isCurrent: @escaping (Item) -> Bool,
         onSelect: @escaping (Item) -> Void,
         searchPrompt: String = "Search",
+        sectionTitle: ((Item) -> String)? = nil,
         @ViewBuilder trailing: @escaping (Item) -> Trailing,
         @ViewBuilder label: @escaping () -> Label
     ) {
@@ -60,6 +82,7 @@ struct RafuSearchableDropdown<Item: Identifiable, Label: View, Trailing: View>: 
         self.isCurrent = isCurrent
         self.onSelect = onSelect
         self.searchPrompt = searchPrompt
+        self.sectionTitle = sectionTitle
         self.trailing = trailing
         self.label = label
     }
@@ -105,8 +128,20 @@ struct RafuSearchableDropdown<Item: Identifiable, Label: View, Trailing: View>: 
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 1) {
-                            ForEach(filtered) { item in
-                                row(item).id(item.id)
+                            if let sectionTitle {
+                                ForEach(
+                                    RafuDropdownFilter.sectioned(filtered, title: sectionTitle),
+                                    id: \.title
+                                ) { section in
+                                    sectionHeader(section.title)
+                                    ForEach(section.items) { item in
+                                        row(item).id(item.id)
+                                    }
+                                }
+                            } else {
+                                ForEach(filtered) { item in
+                                    row(item).id(item.id)
+                                }
                             }
                         }
                         .padding(RafuMetrics.space1)
@@ -139,6 +174,18 @@ struct RafuSearchableDropdown<Item: Identifiable, Label: View, Trailing: View>: 
             highlighted = filtered.first?.id
             searchFocused = true
         }
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(theme.palette.textMuted)
+            .textCase(.uppercase)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, RafuMetrics.space2)
+            .padding(.top, RafuMetrics.space2)
+            .padding(.bottom, 2)
+            .accessibilityAddTraits(.isHeader)
     }
 
     private func row(_ item: Item) -> some View {
@@ -199,6 +246,7 @@ extension RafuSearchableDropdown where Trailing == EmptyView {
         isCurrent: @escaping (Item) -> Bool,
         onSelect: @escaping (Item) -> Void,
         searchPrompt: String = "Search",
+        sectionTitle: ((Item) -> String)? = nil,
         @ViewBuilder label: @escaping () -> Label
     ) {
         self.init(
@@ -208,6 +256,7 @@ extension RafuSearchableDropdown where Trailing == EmptyView {
             isCurrent: isCurrent,
             onSelect: onSelect,
             searchPrompt: searchPrompt,
+            sectionTitle: sectionTitle,
             trailing: { _ in EmptyView() },
             label: label
         )
