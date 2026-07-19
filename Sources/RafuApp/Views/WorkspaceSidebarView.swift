@@ -137,13 +137,21 @@ private struct WorkspaceFileTreeItem: View {
             } label: {
                 row
             }
+            .listRowInsets(Self.rowInsets)
             .onChange(of: expandedBinding.wrappedValue, initial: true) { _, isExpanded in
                 if isExpanded { session.loadChildrenIfNeeded(node.relativePath) }
             }
         } else {
             row
+                .listRowInsets(Self.rowInsets)
         }
     }
+
+    /// Keeps every row clear of the sidebar's trailing edge: without an
+    /// explicit inset, `.plain` list rows run flush against the split
+    /// divider and long names visually cross it instead of truncating
+    /// inside the pane.
+    private static let rowInsets = EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 12)
 
     @ViewBuilder
     private var directoryContent: some View {
@@ -324,8 +332,12 @@ private struct FileTreeRow: View {
         let icon = FileIconProvider.icon(for: node.url, isDirectory: node.isDirectory)
         HStack(spacing: 6) {
             Label {
+                // Middle truncation keeps the extension visible when a long
+                // name has to shrink; tail truncation used to hide ".md"/".sh"
+                // right where the row met the divider.
                 Text(node.name)
                     .lineLimit(1)
+                    .truncationMode(.middle)
                     .foregroundStyle(nameColor)
             } icon: {
                 FileIconView(icon: icon, size: 12)

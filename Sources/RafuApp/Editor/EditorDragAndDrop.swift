@@ -150,4 +150,38 @@ final class EditorDropForwardingScrollView: NSScrollView {
             .flatMap { try? EditorDragPayload(data: $0) }
         return dropForwarding.perform(topLeftLocation(sender), bounds.size, payload)
     }
+
+    /// macOS 26 tiles vertical rulers as OVERLAYS: `super.tile()` keeps the
+    /// clip view at the scroll view's full width and hides the gutter's span
+    /// behind `contentInsets.left`, making the resting scroll position
+    /// x = -ruleThickness. The wrapping text view then autoresizes to the
+    /// FULL clip width, so the document is `ruleThickness` wider than the
+    /// visible area — any code that scrolls to x = 0 (view-state restore,
+    /// scrollRangeToVisible, NSClipView constraining) legally parks the
+    /// first characters of every line UNDERNEATH the gutter. Re-tile
+    /// classically instead: shrink the clip frame so it starts at the
+    /// ruler's trailing edge and drop the overlay inset, which makes x = 0
+    /// the true home, sizes the wrapped text to the visible width, and
+    /// removes the phantom horizontal overflow entirely.
+    override func tile() {
+        super.tile()
+        guard rulersVisible, let ruler = verticalRulerView, ruler.superview === self else {
+            return
+        }
+        let thickness = ruler.requiredThickness
+        contentView.automaticallyAdjustsContentInsets = false
+        var insets = contentView.contentInsets
+        if insets.left >= thickness - 0.5 {
+            insets.left -= thickness
+            contentView.contentInsets = insets
+        }
+        var clipFrame = contentView.frame
+        let expectedMinX = ruler.frame.maxX
+        if abs(clipFrame.minX - expectedMinX) > 0.5 {
+            let delta = expectedMinX - clipFrame.minX
+            clipFrame.origin.x += delta
+            clipFrame.size.width -= delta
+            contentView.frame = clipFrame
+        }
+    }
 }

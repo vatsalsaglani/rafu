@@ -2412,6 +2412,21 @@ final class WorkspaceSession {
         } catch { reportGitError(error) }
     }
 
+    /// Explicit `git init` from the Source Control empty state — the only
+    /// way Rafu ever creates a repository (never automatic, AGENTS: Git
+    /// stays explicit). On success the refreshed snapshot flips the panel
+    /// from the empty state to the full inspector.
+    func gitInitializeRepository() async {
+        guard let rootURL else { return }
+        isGitBusy = true
+        defer { isGitBusy = false }
+        do {
+            try await gitService.initializeRepository(at: rootURL)
+            await refreshWorkspace()
+            await refreshGit()
+        } catch { reportGitError(error) }
+    }
+
     func gitCheckoutBranch(named name: String) async {
         guard let rootURL else { return }
         isGitBusy = true

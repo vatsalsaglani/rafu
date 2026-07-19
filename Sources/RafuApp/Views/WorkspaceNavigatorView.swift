@@ -50,11 +50,19 @@ struct WorkspaceUtilityPanelView: View {
             if session.gitSnapshot != nil {
                 GitInspectorView(session: session)
             } else {
-                ContentUnavailableView(
-                    "No Git Repository",
-                    systemImage: "arrow.triangle.branch",
-                    description: Text("Initialize Git in this workspace to use Source Control.")
-                )
+                ContentUnavailableView {
+                    Label("No Git Repository", systemImage: "arrow.triangle.branch")
+                } description: {
+                    Text("Initialize Git in this workspace to use Source Control.")
+                } actions: {
+                    // Explicit user action — Rafu never initializes a
+                    // repository on its own (AGENTS: Git stays explicit).
+                    Button("Initialize Repository") {
+                        Task { await session.gitInitializeRepository() }
+                    }
+                    .buttonStyle(RafuProminentButtonStyle())
+                    .disabled(session.descriptor == nil || session.isGitBusy)
+                }
             }
         }
     }

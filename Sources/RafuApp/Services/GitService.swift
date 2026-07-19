@@ -353,6 +353,19 @@ nonisolated struct GitService: Sendable {
         _ = try await checkedRun(["checkout", name], at: repositoryRoot)
     }
 
+    /// Initializes a new repository at the workspace root — an explicit user
+    /// action from the Source Control empty state, never automatic. `-b main`
+    /// names the initial branch deterministically instead of depending on the
+    /// user's global `init.defaultBranch`. Guarded against re-initializing a
+    /// directory that is already inside a repository.
+    @concurrent
+    func initializeRepository(at rootURL: URL) async throws {
+        if try await repositoryRoot(at: rootURL) != nil {
+            throw GitServiceError.alreadyARepository
+        }
+        _ = try await checkedRun(["init", "-b", "main"], at: rootURL)
+    }
+
     @concurrent
     func merge(
         branch name: String,
@@ -613,6 +626,7 @@ nonisolated struct GitService: Sendable {
 }
 
 nonisolated enum GitServiceError: LocalizedError, Equatable {
+    case alreadyARepository
     case blameRequiresSavedFile
     case branchRequiresRemote
     case captureCreationFailed
@@ -633,6 +647,8 @@ nonisolated enum GitServiceError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
+        case .alreadyARepository:
+            "This workspace is already inside a Git repository."
         case .blameRequiresSavedFile:
             "Save the file before opening blame so its line numbers match Git."
         case .branchRequiresRemote:

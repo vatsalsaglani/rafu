@@ -127,28 +127,12 @@ final class EditorGutterRulerView: NSRulerView {
         )
         guard abs(needed - ruleThickness) > 0.5 else { return }
         ruleThickness = needed
+        // `EditorDropForwardingScrollView.tile()` converts macOS 26's
+        // overlay-inset ruler tiling back to classic frame tiling, so after
+        // this the clip view starts at the gutter's trailing edge and x = 0
+        // is the true horizontal home — see that override for the details.
         enclosingScrollView?.tile()
-        clampHorizontalScrollIfNeeded()
         enclosingScrollView?.documentView?.needsDisplay = true
-    }
-
-    /// The editor wraps to its width (`widthTracksTextView`), so the document
-    /// is never wider than the clip view and the horizontal scroll offset must
-    /// stay 0. AppKit's ruler re-tiling can leave the clip view scrolled by
-    /// the gutter's width delta after a thickness change (opening a file, the
-    /// line count gaining a digit), which renders the start of every line
-    /// underneath the gutter until the user manually scrolls it back — clamp
-    /// the offset instead.
-    private func clampHorizontalScrollIfNeeded() {
-        guard let scrollView = enclosingScrollView,
-            let documentView = scrollView.documentView
-        else { return }
-        let clip = scrollView.contentView
-        guard clip.bounds.origin.x != 0,
-            documentView.frame.width <= clip.bounds.width + 0.5
-        else { return }
-        clip.setBoundsOrigin(NSPoint(x: 0, y: clip.bounds.origin.y))
-        scrollView.reflectScrolledClipView(clip)
     }
 
     /// Fast newline count (no offsets array); used only for thickness sizing.
@@ -168,7 +152,6 @@ final class EditorGutterRulerView: NSRulerView {
     }
 
     @objc private func clientLayoutChanged() {
-        clampHorizontalScrollIfNeeded()
         needsDisplay = true
     }
 
