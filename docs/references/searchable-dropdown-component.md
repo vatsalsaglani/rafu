@@ -29,6 +29,10 @@ popover/filter/keyboard-navigation plumbing:
   case-insensitive). An empty or all-whitespace query always matches every
   item. `RafuDropdownFilter.filter(_:query:fields:)` applies that predicate
   while preserving the input's original order (no re-sorting/ranking).
+  `RafuDropdownFilter.sectioned(_:title:)` groups already-filtered items into
+  ordered sections keyed by a title closure, preserving items' relative order
+  and sections' first-appearance order — used by the branch dropdown and
+  status-bar branch switcher to group Local/Remote branches.
 - First shipped consumers: the Source Control branch switcher
   (`GitInspectorView.branchMenu`) and the status-bar branch switcher
   (`WorkspaceStatusBar`, issue #11), both passing `GitBranch` items — the

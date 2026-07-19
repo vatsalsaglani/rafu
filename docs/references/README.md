@@ -40,6 +40,9 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`command-palette-and-search-pitfalls.md`](command-palette-and-search-pitfalls.md) | Debugging command-palette result rendering, file-index build/retry behavior, or "a fix doesn't seem to work" during manual GUI verification |
 | [`searchable-dropdown-component.md`](searchable-dropdown-component.md) | Reusing or extending `RafuSearchableDropdown`/`RafuDropdownFilter` for a new trigger-plus-filterable-list picker |
 | [`markdown-local-image-preview.md`](markdown-local-image-preview.md) | Changing Markdown image resolution, the local/remote `ImageProvider` split, or local image decode bounds |
+| [`editor-gutter-ruler-tiling.md`](editor-gutter-ruler-tiling.md) | Understanding macOS 26 NSRulerView overlay tiling, the clip-view-width bug, text-under-gutter symptom, and the `EditorDropForwardingScrollView.tile()` classic-tiling fix |
+| [`github-cli-integration.md`](github-cli-integration.md) | Implementing or changing GitHub account lookup, repository publishing, or the locator/subprocess/error-taxonomy for system `gh` CLI invocations |
+| [`ai-ignore-suggestion-privacy.md`](ai-ignore-suggestion-privacy.md) | Changing ignore-file suggestion prompts, tree serialization, response parsing, bounds, or the explicit accept-before-write policy |
 
 ## Reference-note template
 

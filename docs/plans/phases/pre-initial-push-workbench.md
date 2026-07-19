@@ -109,3 +109,52 @@ docs each cluster of fixes touches, and
 for the new engineering references this batch produced. The user's
 hands-on acceptance pass for the 21 acceptance items above remains
 pending.
+
+### 2026-07-19 (continued): Flat HSplitView, gutter tiling fix, GitHub/AI features
+
+Three additional commits landed on `main` after the UI issue-fix batch:
+
+1. **Flat HSplitView sidebar (macOS 26 Liquid Glass fix):** `NavigationSplitView`
+   was replaced with an AppKit-backed `HSplitView` in `WorkspaceWindowView` because
+   macOS 26 floats the `NavigationSplitView` sidebar as an inset rounded Liquid
+   Glass card whenever the window is key, contradicting ADR 0012's flat-chrome
+   decision. `HSplitView` preserves drag-to-resize while keeping the sidebar
+   flush. One custom toolbar toggle (`sidebar.left`, driving
+   `session.isSidebarCollapsed`; ⌘B unchanged) replaced the automatic system
+   toggle `NavigationSplitView` contributed, satisfying ADR 0002's "exactly one
+   toggle" requirement.
+
+2. **Editor gutter: macOS 26 ruler overlay-tiling fix:** On macOS 26, NSScrollView
+   tiles vertical NSRulerViews as OVERLAYS after `tile()` — the clip view keeps
+   the scroll view's full width and the ruler covers its left edge via
+   `contentInsets.left == ruleThickness`, parking the resting scroll at
+   `x = -ruleThickness` instead of `0`. This caused text to appear underneath
+   the line-number gutter. `EditorDropForwardingScrollView.tile()` now re-tiles
+   classically: removes the overlay inset and moves the clip view's frame to
+   start at the ruler's trailing edge, making `x = 0` the true home.
+   Regression tests: `EditorGutterTilingTests` (3 tests).
+
+3. **GitHub publish, AI ignore suggestions, commit hygiene:**
+   - `GitHubCLIService` + `GitHubCLILocator`: system `gh` CLI subprocess runner
+     (argv-only, full environment to preserve `gh`'s auth state, deliberate
+     deviation from the hardened `/usr/bin/git` runner). `gh api user` and
+     `gh repo create … --push` with explicit error mapping
+     (notAuthenticated/remoteAlreadyExists/commandFailed).
+   - `GitHubAccountModel` + status-bar account chip + `GitHubPublishSheet`:
+     account display, "Create & Push" action (gated by repo + ≥1 commit +
+     no origin).
+   - `IgnoreFileTreeSerializer`, `IgnoreSuggestionPrompt`, `IgnoreSuggestionSheet`:
+     bounded, paths-only tree serialization (never file contents); explicit
+     accept-before-write; inert untrusted-data directive.
+   - `CommitHygieneChecker`: pure heuristic scan of staged paths (secrets,
+     dependencies, build artifacts, OS cruft) with advisory-only composer warning.
+   - 53 new tests across 4 suites: `GitHubCLIParsingTests`,
+     `IgnoreFileTreeSerializerTests`, `IgnoreSuggestionPromptTests`,
+     `CommitHygieneCheckerTests`.
+
+Verified: 848 tests passing, 0 build warnings, lint clean. New reference
+notes: [`editor-gutter-ruler-tiling.md`](../../references/editor-gutter-ruler-tiling.md),
+[`github-cli-integration.md`](../../references/github-cli-integration.md),
+[`ai-ignore-suggestion-privacy.md`](../../references/ai-ignore-suggestion-privacy.md).
+New ADR: [`0015-github-publishing-via-system-gh.md`](../../decisions/0015-github-publishing-via-system-gh.md).
+Amendment to ADR 0012 documenting the HSplitView/Liquid Glass fix.

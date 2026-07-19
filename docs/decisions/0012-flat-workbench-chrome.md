@@ -87,6 +87,22 @@ and accessibility-safe, or if user testing shows the flush-panel base reads as
 too plain versus a measured card alternative, revisit the base-composition
 choice (D1 in the phase plan).
 
+**Amendment (2026-07-19):** `NavigationSplitView` was replaced with an
+AppKit-backed `HSplitView` in `WorkspaceWindowView`. On macOS 26,
+`NavigationSplitView` floats its sidebar as an inset, rounded, elevated
+Liquid Glass card whenever the window is key — visible elevation, shadow,
+and margins that directly contradict this ADR's flat-chrome decision and
+its "no Liquid Glass" consequence, regardless of the sidebar's own
+background token. `HSplitView` keeps the sidebar an ordinary flush pane
+while preserving drag-to-resize behavior. Because `NavigationSplitView`
+used to contribute the system sidebar toggle automatically, the toolbar now
+adds exactly **one** custom toggle button (`sidebar.left`, driving
+`session.toggleSidebar()` / `session.isSidebarCollapsed`), satisfying ADR
+0002's "never duplicates the system sidebar toggle" rule with a
+single explicit replacement rather than a second, competing toggle. ⌘B
+continues to drive the same state. No other consequence of this ADR
+changes.
+
 ## Related plan, reference, and implementation paths
 
 - Plan: [`ui-flat-modern-refresh.md`](../plans/phases/ui-flat-modern-refresh.md)

@@ -42,6 +42,13 @@ OpenAI-compatible endpoints. Do not infer one provider's wire format from anothe
   model; the Source Control caption discloses it to the user only past the
   64-file full-patch cap (a count-based heuristic — byte-driven summarization
   under that count is disclosed in the prompt only, not recomputed per keystroke).
+- **AI tab-completion feature flag (off by default).** A separate AI completion
+  mode (ghost-text suggestions as-you-type) exists but is not ready to ship yet.
+  `WorkspaceSession.isAICompletionFeatureAvailable` is a build-level static flag
+  (default `false`). While false, the Edit menu item and command-palette entry
+  are hidden and `toggleAICompletion()` is a no-op, preventing the feature from
+  being enabled. Set the flag to `true` when the feature is finished and
+  verified.
 
 ## Why it matters
 
