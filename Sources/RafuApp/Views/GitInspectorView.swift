@@ -11,6 +11,9 @@ struct GitInspectorView: View {
     @State private var pendingMergeBranch: String?
     @State private var pendingStashAction: PendingStashAction?
     @State private var pendingWorktreeRemoval: GitWorktree?
+    /// Whether the commit composer's hygiene-warning row is expanded to
+    /// list the flagged paths. Local, ephemeral UI state — never persisted.
+    @State private var isHygieneWarningExpanded = false
     @AppStorage("gitChangesViewMode") private var gitChangesViewModeRaw =
         GitChangesViewMode.flat.rawValue
 
@@ -526,6 +529,9 @@ struct GitInspectorView: View {
                         .font(.caption2)
                         .foregroundStyle(theme.palette.error)
                 }
+                if !session.commitHygieneFindings.isEmpty {
+                    commitHygieneWarning(session.commitHygieneFindings)
+                }
                 HStack {
                     Button("Stage All") { Task { await session.stageAll() } }
                         .buttonStyle(RafuSecondaryButtonStyle(compact: true))
@@ -550,6 +556,69 @@ struct GitInspectorView: View {
         .aiCommitGeneratingBorder(isActive: session.isGeneratingAICommitMessage)
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
+    }
+
+    /// Calm, advisory-only warning for `CommitHygieneChecker.findings` on the
+    /// staged changeset. Never disables Commit — only informs, with an
+    /// optional expansion listing each flagged path, its reason, and a
+    /// per-row Unstage shortcut. No decorative animation.
+    private func commitHygieneWarning(_ findings: [CommitHygieneFinding]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                isHygieneWarningExpanded.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Label(
+                        "\(findings.count) staged \(findings.count == 1 ? "file" : "files") may not belong in a commit",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(theme.palette.warning)
+                    Spacer()
+                    Image(systemName: isHygieneWarningExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(theme.palette.textSecondary)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(
+                "\(findings.count) staged files may not belong in a commit. Toggle details.")
+
+            if isHygieneWarningExpanded {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(findings) { finding in
+                        HStack(alignment: .top, spacing: 6) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(finding.path)
+                                    .font(.caption2)
+                                    .foregroundStyle(theme.palette.textPrimary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Text(finding.reason)
+                                    .font(.caption2)
+                                    .foregroundStyle(theme.palette.textSecondary)
+                            }
+                            Spacer(minLength: 4)
+                            Button("Unstage") {
+                                guard
+                                    let change = snapshot.stagedChanges.first(where: {
+                                        $0.path == finding.path
+                                    })
+                                else { return }
+                                Task { await session.setStaged(false, change: change) }
+                            }
+                            .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+                        }
+                    }
+                }
+            }
+        }
+        .padding(8)
+        .background(
+            theme.palette.warning.opacity(0.08),
+            in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+        )
     }
 
     private var historyView: some View {

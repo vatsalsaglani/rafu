@@ -97,6 +97,12 @@ struct WorkspaceWindowView: View {
         .sheet(isPresented: $session.isQuitConfirmationPresented) {
             EmptyWindowQuitConfirmationView()
         }
+        .sheet(isPresented: $session.isGitHubPublishPresented) {
+            GitHubPublishSheet(session: session)
+        }
+        .sheet(isPresented: ignoreSuggestionPresentedBinding) {
+            IgnoreSuggestionSheet(session: session)
+        }
         .sheet(item: trustPromptBinding) { request in
             LanguageServerTrustPromptView(
                 request: request,
@@ -126,6 +132,20 @@ struct WorkspaceWindowView: View {
         Binding(
             get: { session.cliInstallMessage != nil },
             set: { if !$0 { session.cliInstallMessage = nil } }
+        )
+    }
+
+    /// Presents `IgnoreSuggestionSheet`. An interactive dismissal (Escape,
+    /// click-outside) routes through the setter to `cancelIgnoreSuggestion()`
+    /// so a dismissed suggestion never leaves its background task running,
+    /// mirroring `trustPromptBinding`.
+    private var ignoreSuggestionPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { session.isIgnoreSuggestionPresented },
+            set: { newValue in
+                guard !newValue else { return }
+                session.cancelIgnoreSuggestion()
+            }
         )
     }
 

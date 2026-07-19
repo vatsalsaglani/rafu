@@ -39,6 +39,15 @@ final class WorkspaceSession {
         let revision: Int
     }
 
+    /// The proposed content and per-pattern reasons for the currently open
+    /// `IgnoreSuggestionSheet`, plus a locally editable copy of the content
+    /// the user can tweak before accepting (see `acceptIgnoreSuggestion(content:)`).
+    struct IgnoreSuggestionState {
+        var kind: IgnoreFileKind
+        var proposed: ProposedIgnore
+        var editableContent: String
+    }
+
     var descriptor: WorkspaceDescriptor?
     var navigatorMode: WorkspaceNavigatorMode = .files {
         didSet { persistWorkspaceState() }
@@ -124,6 +133,21 @@ final class WorkspaceSession {
     var gitCommitMessage = ""
     var isGeneratingAICommitMessage = false
     var aiCommitGenerationError: String?
+    /// Explicit "Publish to GitHub" flow (a repository with no `origin`
+    /// remote) — see `publishToGitHub(name:visibility:)`.
+    var isGitHubPublishPresented = false
+    var isPublishingToGitHub = false
+    /// Drives `IgnoreSuggestionSheet`'s presentation. Set the moment
+    /// `startIgnoreSuggestion(kind:)` runs — before the AI reply arrives —
+    /// so the sheet can show a loading state while `isSuggestingIgnore` is
+    /// still true, rather than only appearing once `ignoreSuggestion` has
+    /// content.
+    var isIgnoreSuggestionPresented = false
+    /// The completed AI ignore-file suggestion once the reply has been
+    /// parsed; `nil` while loading or when no suggestion has been requested.
+    var ignoreSuggestion: IgnoreSuggestionState?
+    var isSuggestingIgnore = false
+    var ignoreSuggestionError: String?
     var isLoadingTree = false
     var isGitBusy = false
     var isGitHunkActionBusy = false
@@ -217,6 +241,12 @@ final class WorkspaceSession {
     /// `startAICommitGeneration()`.
     @ObservationIgnored
     private var aiCommitGenerationTask: Task<Void, Never>?
+
+    /// The in-flight ignore-file suggestion request, owned so
+    /// `IgnoreSuggestionSheet`'s Cancel can interrupt it — see
+    /// `startIgnoreSuggestion(kind:)`.
+    @ObservationIgnored
+    private var ignoreSuggestionTask: Task<Void, Never>?
 
     @ObservationIgnored
     private let restorationStore = WorkspaceRestorationStore()
@@ -2503,6 +2533,143 @@ final class WorkspaceSession {
         } catch { reportGitError(error) }
     }
 
+    /// Whether "Publish to GitHub…" can run right now: a Git repository is
+    /// open, it has at least one commit (`gh repo create … --push` has
+    /// nothing to push from an unborn HEAD), and no `origin` remote already
+    /// exists.
+    var canPublishToGitHub: Bool {
+        guard let gitSnapshot else { return false }
+        return !gitSnapshot.isUnborn && !gitRemoteNames.contains("origin")
+    }
+
+    /// Publishes the open workspace as a new GitHub repository: creates it,
+    /// adds it as `origin`, and pushes the current branch — the
+    /// `GitHubPublishSheet`'s explicit "Create & Push" confirmation. A no-op
+    /// unless `canPublishToGitHub` holds and no publish is already running.
+    func publishToGitHub(name: String, visibility: GitHubRepositoryVisibility) async {
+        guard let rootURL, canPublishToGitHub, !isPublishingToGitHub else { return }
+        isPublishingToGitHub = true
+        defer { isPublishingToGitHub = false }
+        do {
+            try await GitHubCLIService().publish(name: name, visibility: visibility, at: rootURL)
+            isGitHubPublishPresented = false
+            await refreshGit()
+            await GitHubAccountModel.shared.refresh()
+        } catch {
+            reportGitError(error)
+        }
+    }
+
+    /// Starts an AI ignore-file suggestion as an owned, cancellable task —
+    /// mirrors `startAICommitGeneration()`. Presents `IgnoreSuggestionSheet`
+    /// immediately (before the AI reply arrives) so it can show its loading
+    /// state; a no-op while a suggestion is already in flight.
+    func startIgnoreSuggestion(kind: IgnoreFileKind) {
+        guard ignoreSuggestionTask == nil else { return }
+        ignoreSuggestion = nil
+        ignoreSuggestionError = nil
+        isIgnoreSuggestionPresented = true
+        ignoreSuggestionTask = Task(name: "Suggest \(kind.fileName)") { [weak self] in
+            await self?.suggestIgnoreFile(kind: kind)
+            self?.ignoreSuggestionTask = nil
+        }
+    }
+
+    /// Cancels an in-flight suggestion request and dismisses
+    /// `IgnoreSuggestionSheet` — its Cancel action and interactive dismissal
+    /// alike, mirroring `cancelAICommitGeneration()`.
+    func cancelIgnoreSuggestion() {
+        ignoreSuggestionTask?.cancel()
+        ignoreSuggestionTask = nil
+        isSuggestingIgnore = false
+        isIgnoreSuggestionPresented = false
+        ignoreSuggestion = nil
+        ignoreSuggestionError = nil
+    }
+
+    /// Sends only the bounded workspace file tree (relative paths, never
+    /// file contents — see `IgnoreFileTreeSerializer`) plus the existing
+    /// ignore file's own content to the configured AI provider, and parses
+    /// its reply into `ignoreSuggestion` for the sheet to present. Errors
+    /// are bounded exactly like `generateAICommitMessage()`.
+    func suggestIgnoreFile(kind: IgnoreFileKind) async {
+        guard !isSuggestingIgnore else { return }
+        isSuggestingIgnore = true
+        ignoreSuggestionError = nil
+        defer { isSuggestingIgnore = false }
+
+        do {
+            try Task.checkCancellation()
+            guard let rootURL else {
+                throw AIProviderError.invalidConfiguration("Open a folder first.")
+            }
+
+            ensureFileIndexReady()
+            let paths = try await queryFileIndex(term: "", limit: 5_000)
+            let existingURL = rootURL.appending(path: kind.fileName)
+            let existingContent = (try? await fileService.readText(at: existingURL)) ?? ""
+            let tree = IgnoreFileTreeSerializer.serialize(paths: paths)
+
+            let configurations = try await aiConfigurationStore.load()
+            let preferredID = await aiConfigurationStore.selectedConfigurationID()
+            guard
+                let configuration = preferredID.flatMap({ preferredID in
+                    configurations.first(where: { $0.id == preferredID })
+                }) ?? configurations.first
+            else {
+                throw AIProviderError.invalidConfiguration(
+                    "Configure and save a commit-message provider in Settings first."
+                )
+            }
+            guard let apiKey = try await aiSecretStore.secret(for: configuration.id) else {
+                throw AIProviderError.missingAPIKey
+            }
+
+            let promptBuilder = IgnoreSuggestionPromptBuilder()
+            let stream = try aiProviderClient.makeTextStream(
+                configuration: configuration,
+                apiKey: apiKey,
+                instructions: promptBuilder.instructions(for: kind),
+                prompt: promptBuilder.makePrompt(
+                    kind: kind, tree: tree, existingContent: existingContent)
+            )
+            var accumulated = ""
+            for try await delta in stream {
+                try Task.checkCancellation()
+                accumulated += delta
+            }
+            guard !accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw AIProviderError.malformedResponse
+            }
+
+            let proposed = IgnoreSuggestionResponseParser.parse(accumulated, kind: kind)
+            ignoreSuggestion = IgnoreSuggestionState(
+                kind: kind, proposed: proposed, editableContent: proposed.content
+            )
+        } catch is CancellationError {
+            return
+        } catch {
+            ignoreSuggestionError = Self.boundedAIErrorMessage(error)
+        }
+    }
+
+    /// Writes the (possibly user-edited) accepted ignore-file content
+    /// atomically and re-syncs workspace/Git state — `IgnoreSuggestionSheet`'s
+    /// Accept action.
+    func acceptIgnoreSuggestion(content: String) async {
+        guard let rootURL, let kind = ignoreSuggestion?.kind else { return }
+        do {
+            try await fileService.writeText(content, to: rootURL.appending(path: kind.fileName))
+            ignoreSuggestion = nil
+            ignoreSuggestionError = nil
+            isIgnoreSuggestionPresented = false
+            await refreshWorkspace()
+            await refreshGit()
+        } catch {
+            reportOpenFolderError(error)
+        }
+    }
+
     /// Per-line Git gutter markers for one open buffer. Returns `nil` when
     /// the workspace is not a repository or the file lives outside it, so
     /// callers can skip drawing without spawning any process. Untracked
@@ -2537,6 +2704,13 @@ final class WorkspaceSession {
                 branch.name.split(separator: "/", maxSplits: 1).first.map(String.init)
             } ?? []
         return Array(Set(names)).sorted()
+    }
+
+    /// Pure, per-render heuristic scan of the staged changeset — the commit
+    /// composer's advisory-only warning (`GitInspectorView.commitComposer`).
+    /// Never blocks a commit; see `CommitHygieneChecker`.
+    var commitHygieneFindings: [CommitHygieneFinding] {
+        CommitHygieneChecker.findings(for: gitSnapshot?.stagedChanges.map(\.path) ?? [])
     }
 
     /// Starts AI commit-message generation as an owned, cancellable task — the

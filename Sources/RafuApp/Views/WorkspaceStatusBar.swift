@@ -25,6 +25,8 @@ struct WorkspaceStatusBar: View {
 
             Spacer()
 
+            GitHubAccountStatusView(session: session)
+
             if showsProcessMemory, let memorySample {
                 Label(memorySample.formatted, systemImage: "memorychip")
                     .foregroundStyle(theme.palette.textMuted)

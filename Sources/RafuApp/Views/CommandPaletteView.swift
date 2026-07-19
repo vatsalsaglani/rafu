@@ -776,6 +776,48 @@ struct CommandPaletteView: View {
             )
         }
 
+        if session.canPublishToGitHub {
+            commands.append(
+                .init(
+                    id: "github.publish",
+                    title: "Publish to GitHub…",
+                    detail: "Creates an origin remote and pushes",
+                    symbolName: "arrow.up.doc.on.clipboard",
+                    keywords: ["github", "gh", "remote", "publish", "push"]
+                ) {
+                    dismiss()
+                    session.isGitHubPublishPresented = true
+                }
+            )
+        }
+
+        if session.rootURL != nil {
+            commands.append(
+                .init(
+                    id: "ignore.suggest-gitignore",
+                    title: "Suggest .gitignore…",
+                    detail: "AI-proposed ignore patterns from the file tree",
+                    symbolName: "eye.slash",
+                    keywords: ["gitignore", "ignore", "ai"]
+                ) {
+                    dismiss()
+                    session.startIgnoreSuggestion(kind: .gitignore)
+                }
+            )
+            commands.append(
+                .init(
+                    id: "ignore.suggest-dockerignore",
+                    title: "Suggest .dockerignore…",
+                    detail: "AI-proposed ignore patterns from the file tree",
+                    symbolName: "eye.slash",
+                    keywords: ["dockerignore", "docker", "ignore", "ai"]
+                ) {
+                    dismiss()
+                    session.startIgnoreSuggestion(kind: .dockerignore)
+                }
+            )
+        }
+
         for choice in RafuThemeChoice.allCases {
             commands.append(
                 .init(

@@ -189,6 +189,23 @@ struct RafuAppCommands: Commands {
 
             Divider()
 
+            Button("Publish to GitHub…") {
+                workspaceSession?.isGitHubPublishPresented = true
+            }
+            .disabled(workspaceSession?.canPublishToGitHub != true)
+
+            Button("Suggest .gitignore…") {
+                workspaceSession?.startIgnoreSuggestion(kind: .gitignore)
+            }
+            .disabled(workspaceSession?.rootURL == nil)
+
+            Button("Suggest .dockerignore…") {
+                workspaceSession?.startIgnoreSuggestion(kind: .dockerignore)
+            }
+            .disabled(workspaceSession?.rootURL == nil)
+
+            Divider()
+
             Button("Toggle Terminal") {
                 workspaceSession?.toggleTerminal()
             }
