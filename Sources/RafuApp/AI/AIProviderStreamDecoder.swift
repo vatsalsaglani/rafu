@@ -12,10 +12,18 @@ nonisolated struct AIProviderStreamDecoder: Sendable {
         configuration: AIProviderConfiguration
     ) throws -> AIProviderDecodedEvent {
         if event.data == "[DONE]" { return .done }
-        guard let data = event.data.data(using: .utf8),
-            let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        // Tolerate empty and non-JSON data lines instead of failing the whole
+        // stream: providers interleave keep-alives, bare "ping"/"OK" lines,
+        // and empty `data:` fields with real deltas, and one junk line used
+        // to surface as "the provider returned an unreadable response" even
+        // though the rest of the reply was fine. An entirely junk stream
+        // still fails downstream via the caller's empty-accumulation check.
+        let trimmed = event.data.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .ignored }
+        guard let data = trimmed.data(using: .utf8),
+            let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         else {
-            throw AIProviderError.malformedResponse
+            return .ignored
         }
 
         if let error = object["error"] as? [String: Any] {

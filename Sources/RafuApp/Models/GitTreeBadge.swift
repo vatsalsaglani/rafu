@@ -9,19 +9,21 @@ nonisolated struct GitTreeBadge: Hashable, Sendable {
     let kind: GitChangeKind
     let isDirectory: Bool
 
-    /// Short code shown at the trailing edge of the row. Directory badges use
-    /// a single-character form of the aggregated kind to stay quiet; file
-    /// badges match `git status --short` exactly.
+    /// Short code shown at the trailing edge of the row. Always a single
+    /// character (the familiar editor convention): the earlier file badge
+    /// used git's raw porcelain "??" for untracked, which read as broken and
+    /// even wrapped onto two lines in a narrow sidebar. "U" = untracked,
+    /// "!" = conflicted, matching VS Code's explorer decorations.
     var shortCode: String {
         switch kind {
         case .added: "A"
         case .copied: "C"
-        case .conflicted: "U"
+        case .conflicted: "!"
         case .deleted: "D"
         case .modified: "M"
         case .renamed: "R"
         case .typeChanged: "T"
-        case .untracked: isDirectory ? "?" : "??"
+        case .untracked: "U"
         case .unknown: "•"
         }
     }

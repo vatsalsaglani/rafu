@@ -38,6 +38,7 @@ struct WorkspaceSidebarView: View {
                 }
             }
             .listStyle(.plain)
+            .environment(\.defaultMinListRowHeight, 22)
             .scrollContentBackground(.hidden)
             // Finder (or cross-workspace) drops on the tree background land in
             // the workspace root; folder rows below claim their own drops.
@@ -74,14 +75,11 @@ struct WorkspaceSidebarView: View {
         }
     }
 
+    /// Just the action strip — no workspace name. The folder name already
+    /// lives in the window title (and truncated badly in a narrow sidebar),
+    /// so the header stays a quiet right-aligned row of icon actions.
     private var sidebarHeader: some View {
         HStack(spacing: 4) {
-            Text(session.descriptor?.displayName ?? "Files")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(theme.palette.textMuted)
-                .textCase(.uppercase)
-                .kerning(0.6)
-                .lineLimit(1)
             Spacer(minLength: 8)
             Button("Search Workspace", systemImage: "magnifyingglass") {
                 session.navigatorMode = .search
@@ -138,12 +136,14 @@ private struct WorkspaceFileTreeItem: View {
                 row
             }
             .listRowInsets(Self.rowInsets)
+            .listRowSeparator(.hidden)
             .onChange(of: expandedBinding.wrappedValue, initial: true) { _, isExpanded in
                 if isExpanded { session.loadChildrenIfNeeded(node.relativePath) }
             }
         } else {
             row
                 .listRowInsets(Self.rowInsets)
+                .listRowSeparator(.hidden)
         }
     }
 
@@ -161,6 +161,7 @@ private struct WorkspaceFileTreeItem: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             } else {
                 ForEach(children, id: \.id) { child in
                     WorkspaceFileTreeItem(
@@ -178,6 +179,7 @@ private struct WorkspaceFileTreeItem: View {
             }
             .foregroundStyle(.secondary)
             .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
         }
     }
 
@@ -348,6 +350,8 @@ private struct FileTreeRow: View {
                 Text(gitBadge.shortCode)
                     .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
                     .foregroundStyle(gitBadge.color(in: theme.palette))
+                    .lineLimit(1)
+                    .fixedSize()
                     .accessibilityLabel(gitBadge.accessibilityLabel)
             }
         }

@@ -20,12 +20,25 @@ struct IgnoreSuggestionSheet: View {
             )
 
             if session.isSuggestingIgnore {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
+                // Same "generating" affordance as the commit composer: the
+                // animated theme-gradient border (static under Reduce
+                // Motion), not a bare spinner.
+                VStack(spacing: 8) {
                     Text("Asking the configured AI provider…")
+                        .font(.callout)
                         .foregroundStyle(theme.palette.textSecondary)
+                    Button("Stop", systemImage: "stop.fill") {
+                        session.cancelIgnoreSuggestion()
+                        dismiss()
+                    }
+                    .buttonStyle(RafuSecondaryButtonStyle())
                 }
-                .frame(maxWidth: .infinity, minHeight: 140, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 140)
+                .background(
+                    RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
+                        .fill(theme.palette.fieldBackground)
+                )
+                .aiCommitGeneratingBorder(isActive: true)
             } else if let suggestion = session.ignoreSuggestion {
                 proposalContent(suggestion)
             }

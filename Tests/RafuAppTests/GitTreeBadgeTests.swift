@@ -29,7 +29,7 @@ struct GitTreeBadgeTests {
 
         #expect(badges[".env"]?.shortCode == "M")
         #expect(badges[".env"]?.isDirectory == false)
-        #expect(badges["compose.yaml"]?.shortCode == "??")
+        #expect(badges["compose.yaml"]?.shortCode == "U")
         #expect(badges["compose.yaml"]?.kind == .untracked)
         #expect(badges["Dockerfile"]?.shortCode == "M")
         #expect(badges["README.md"] == nil)
@@ -64,7 +64,7 @@ struct GitTreeBadgeTests {
         #expect(badges["Sources"]?.kind == .modified)
         #expect(badges["Sources"]?.shortCode == "M")
         // Files keep their own exact status.
-        #expect(badges["Sources/new.swift"]?.shortCode == "??")
+        #expect(badges["Sources/new.swift"]?.shortCode == "U")
         #expect(badges["Sources/edited.swift"]?.shortCode == "M")
     }
 
@@ -79,7 +79,7 @@ struct GitTreeBadgeTests {
         let badges = snap.treeBadges(workspaceRoot: root)
 
         #expect(badges["pkg"]?.kind == .conflicted)
-        #expect(badges["pkg"]?.shortCode == "U")
+        #expect(badges["pkg"]?.shortCode == "!")
     }
 
     @Test("Changes outside the open workspace subtree are ignored")

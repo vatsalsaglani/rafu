@@ -2639,7 +2639,8 @@ final class WorkspaceSession {
                 accumulated += delta
             }
             guard !accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw AIProviderError.malformedResponse
+                ignoreSuggestionError = "The provider returned an empty reply — try again."
+                return
             }
 
             let proposed = IgnoreSuggestionResponseParser.parse(accumulated, kind: kind)
