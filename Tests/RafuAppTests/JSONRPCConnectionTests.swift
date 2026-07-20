@@ -63,20 +63,31 @@ func connectionHandlesOutOfOrderResponses() async throws {
     async let secondResult: String = connection.sendRequest(
         method: "echo", params: EchoParams(value: "second"))
 
-    let firstRequestBody = try await reader.nextFrame()
-    let firstRequest = try JSONDecoder().decode(JSONRPCRequest.self, from: firstRequestBody)
-    let secondRequestBody = try await reader.nextFrame()
-    let secondRequest = try JSONDecoder().decode(JSONRPCRequest.self, from: secondRequestBody)
-    #expect(firstRequest.method == "echo")
-    #expect(secondRequest.method == "echo")
+    // The two `async let` child tasks race to the transport, so the frame
+    // ARRIVAL order is not the request order — match each request to its
+    // caller by params, never by position (this assumption held under
+    // parallel test scheduling and broke under --no-parallel).
+    struct EchoRequestBody: Decodable {
+        let params: EchoParams
+    }
+    var requestIDByValue: [String: JSONRPCID] = [:]
+    for _ in 0..<2 {
+        let body = try await reader.nextFrame()
+        let request = try JSONDecoder().decode(JSONRPCRequest.self, from: body)
+        #expect(request.method == "echo")
+        let echo = try JSONDecoder().decode(EchoRequestBody.self, from: body)
+        requestIDByValue[echo.params.value] = request.id
+    }
+    let firstID = try #require(requestIDByValue["first"])
+    let secondID = try #require(requestIDByValue["second"])
 
     // Reply out of order: answer the second request before the first.
     try await serverSend(
-        try JSONEncoder().encode(ResultResponse(id: secondRequest.id, result: "second-reply")),
+        try JSONEncoder().encode(ResultResponse(id: secondID, result: "second-reply")),
         via: server
     )
     try await serverSend(
-        try JSONEncoder().encode(ResultResponse(id: firstRequest.id, result: "first-reply")),
+        try JSONEncoder().encode(ResultResponse(id: firstID, result: "first-reply")),
         via: server
     )
 

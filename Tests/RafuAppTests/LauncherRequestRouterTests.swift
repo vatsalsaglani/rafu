@@ -506,6 +506,28 @@ private func fileURL(_ path: String) -> URL {
     URL(fileURLWithPath: path).standardizedFileURL
 }
 
+/// These tests drive raw, hand-rolled fds against the IPC server, and a
+/// test-side `write` racing the server closing its end raises SIGPIPE, whose
+/// default disposition KILLS the whole test process (surfaced on CI as every
+/// in-flight test stuck at "started", and locally as `swift test
+/// --no-parallel` dying with signal 13). Production code guards its own fds
+/// with `SO_NOSIGPIPE` (`LauncherIPCClient`/`LauncherIPCServer`); the test
+/// helpers below now do the same, and this process-wide SIG_IGN is the
+/// belt-and-braces so a missed fd can never take down the test run — a
+/// suppressed SIGPIPE just turns the write into a handled EPIPE.
+private let sigpipeIgnoredForSocketTests: Void = {
+    signal(SIGPIPE, SIG_IGN)
+}()
+
+private func setNoSigPipe(_ fileDescriptor: Int32) {
+    _ = sigpipeIgnoredForSocketTests
+    var one: Int32 = 1
+    _ = setsockopt(
+        fileDescriptor, SOL_SOCKET, SO_NOSIGPIPE, &one,
+        socklen_t(MemoryLayout.size(ofValue: one))
+    )
+}
+
 private final class SocketPair {
     let client: Int32
     private var server: Int32
@@ -517,6 +539,8 @@ private final class SocketPair {
         }
         client = descriptors[0]
         server = descriptors[1]
+        setNoSigPipe(client)
+        setNoSigPipe(server)
     }
 
     func releaseServer() -> Int32 {
@@ -573,6 +597,7 @@ private func connectSocket(at url: URL) throws -> Int32 {
     guard fileDescriptor >= 0 else {
         throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
     }
+    setNoSigPipe(fileDescriptor)
     var address = try LauncherSocketAddress.make(path: url.path)
     let result = withUnsafePointer(to: &address) { pointer in
         pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in

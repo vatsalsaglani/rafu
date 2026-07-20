@@ -48,4 +48,12 @@ jobs:
             swiftpm-${{ runner.os }}-
 
       - name: Verify package and CLI
+        # --no-parallel: Swift Testing's parallel executor stalled on hosted
+        # runners (every in-flight test stuck at "started" — one blocked
+        # thread starves the pool and freezes innocent tests too). Serial
+        # execution avoids the starvation and, if a single test genuinely
+        # hangs, makes it identifiable: it is the LAST "started" line in the
+        # log before the stall.
+        env:
+          RAFU_TEST_FLAGS: --no-parallel
         run: ./script/verify.sh

@@ -137,10 +137,26 @@ private struct SocketPair {
     let server: Int32
 }
 
+/// SIGPIPE from a test-side write racing the peer's close would kill the
+/// whole test process (default disposition). Ignore it process-wide and
+/// guard each fd, mirroring the production `SO_NOSIGPIPE` handling — see the
+/// matching note in RafuAppTests/LauncherRequestRouterTests.swift.
+private let sigpipeIgnoredForSocketTests: Void = {
+    signal(SIGPIPE, SIG_IGN)
+}()
+
 private func socketPair() throws -> SocketPair {
+    _ = sigpipeIgnoredForSocketTests
     var descriptors = [Int32](repeating: -1, count: 2)
     guard Darwin.socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors) == 0 else {
         throw LauncherIPCClientError.systemCall(name: "socketpair", code: errno)
+    }
+    for descriptor in descriptors {
+        var one: Int32 = 1
+        _ = setsockopt(
+            descriptor, SOL_SOCKET, SO_NOSIGPIPE, &one,
+            socklen_t(MemoryLayout.size(ofValue: one))
+        )
     }
     return SocketPair(client: descriptors[0], server: descriptors[1])
 }
