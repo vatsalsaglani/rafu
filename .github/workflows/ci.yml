@@ -19,7 +19,10 @@ jobs:
   verify:
     name: Format, build, and test
     runs-on: macos-26
-    timeout-minutes: 15
+    # A cold SwiftPM build of the full package plus the test suite runs well
+    # past 15 minutes on a hosted macOS runner; the cache below makes warm
+    # runs much faster, but the timeout must still cover a cache miss.
+    timeout-minutes: 45
 
     steps:
       - name: Check out repository
@@ -29,6 +32,20 @@ jobs:
 
       - name: Show Swift toolchain
         run: swift --version
+
+      # Restore compiled dependencies and incremental build state so warm
+      # runs skip the cold SwiftPM compile that blew the old 15m timeout.
+      # Keyed on Package.resolved (dependency graph) with the Swift version
+      # in the key so a toolchain bump never reuses stale objects.
+      - name: Cache SwiftPM build
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            .build
+            ~/Library/Caches/org.swift.swiftpm
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          restore-keys: |
+            swiftpm-${{ runner.os }}-
 
       - name: Verify package and CLI
         run: ./script/verify.sh
