@@ -68,6 +68,15 @@ final class RafuTextView: NSTextView {
         )
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
+        // Rafu edits code, not prose: Writing Tools has no place on code
+        // buffers, and disabling it also removes macOS 26's
+        // `updateWritingToolsSelection` hook — which forces a synchronous
+        // FULL-document `boundingRectForGlyphRange` layout pass on TextKit 1
+        // — from firing on every selection change (a real 75s main-thread
+        // hang on large files). `writingToolsBehavior` requires macOS 15.0+,
+        // matching this package's deployment target, so no availability
+        // guard is needed.
+        textView.writingToolsBehavior = .none
         // `acceptableDragTypes` is overridden below to refuse file/URL
         // drags; `updateDragTypeRegistration()` refreshes the view's
         // registered pasteboard types from that override immediately
@@ -1084,7 +1093,17 @@ final class RafuTextView: NSTextView {
         }
         let content = string as NSString
         let caret = min(selectedRange().location, content.length)
-        let lineRange = content.lineRange(for: NSRange(location: caret, length: 0))
+        // `NSString.lineRange(for:)` walks to the line's true start and end,
+        // which is O(document) per call on single-giant-line content (e.g.
+        // minified JSON) and produced a 32-second main-thread hang during
+        // drawing. Line discovery is bounded like `drawIndentGuides`; when
+        // the caret's line boundary sits beyond the scan cap, nothing is
+        // drawn and the hover hit-test rect is cleared rather than left
+        // pointing at stale geometry.
+        guard let lineRange = boundedLineRange(around: caret, in: content) else {
+            inlineBlameRect = .zero
+            return
+        }
         let origin = textContainerOrigin
 
         let fragmentRect: NSRect
@@ -1183,7 +1202,13 @@ final class RafuTextView: NSTextView {
         else { return }
         let content = string as NSString
         let caret = min(selectedRange().location, content.length)
-        let lineRange = content.lineRange(for: NSRange(location: caret, length: 0))
+        // `NSString.lineRange(for:)` walks to the line's true start and end,
+        // which is O(document) per call on single-giant-line content (e.g.
+        // minified JSON) and, combined with `setSelectedRange` firing this
+        // draw on every caret move, produced multi-second main-thread hangs.
+        // Line discovery is bounded like `drawIndentGuides`; when the
+        // caret's line boundary sits beyond the scan cap, nothing is drawn.
+        guard let lineRange = boundedLineRange(around: caret, in: content) else { return }
         let origin = textContainerOrigin
 
         let lineRect: NSRect

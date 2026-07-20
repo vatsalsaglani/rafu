@@ -9,6 +9,23 @@ import Testing
 /// tripping `RangeMutation.transform`'s bounds assertion on the next edit
 /// (reliably: undo of a multi-caret backspace).
 
+/// Forces `view` to actually run its `draw(_:)`/`drawRect(_:)` path for
+/// `rect` via an offscreen bitmap, the way `-cacheDisplay(in:to:)` does.
+/// `NSView.display()` is a no-op for drawing when the view has no live
+/// WindowServer connection (true of this test process), so a test that
+/// calls `.display()` and asserts on timing or drawn side effects is
+/// silently vacuous — the decoration code never runs at all. Rendering into
+/// an explicit bitmap sidesteps the WindowServer entirely and reliably
+/// invokes drawing regardless of the test host's session.
+@MainActor
+private func forceOffscreenDraw(_ view: NSView, in rect: NSRect) {
+    guard let rep = view.bitmapImageRepForCachingDisplay(in: rect) else {
+        Issue.record("could not allocate offscreen bitmap for \(rect)")
+        return
+    }
+    view.cacheDisplay(in: rect, to: rep)
+}
+
 /// Forwards storage edits to the pipeline the way
 /// `CodeEditorView.Coordinator` does, and records each event so the Neon
 /// delta contract (`previousRange.max <= preEditLength`) can be asserted.
@@ -122,22 +139,105 @@ func multiCaretUndoSurvivesStaleTokenRequest() async throws {
 @MainActor
 @Test("Indent-guide line scan is bounded on single-giant-line documents")
 func indentGuideLineScanBounded() {
-    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 480, height: 320))
+    let viewportRect = NSRect(x: 0, y: 0, width: 480, height: 320)
+    let scrollView = NSScrollView(frame: viewportRect)
     let textView = RafuTextView.makeTextKit1()
     textView.frame = scrollView.bounds
     scrollView.documentView = textView
+
+    // Every bounded decoration path (indent guides, current-line highlight)
+    // only runs when its color/font are set — leaving these unset makes the
+    // test vacuous (every decoration early-returns before the scan even
+    // runs). Set them, and a caret, so the bounded scan is actually
+    // exercised by the measured draw.
+    textView.font = RafuThemeCatalog.indigo.resolvedEditorFont()
+    textView.indentGuideColor = .gray
+    textView.currentLineHighlightColor = .gray
 
     // One ~2 MB line with no newline: the previous implementation walked the
     // whole string per draw via NSString.lineRange(for:). The bounded scan
     // must finish promptly and draw nothing rather than hang.
     textView.string = "    " + String(repeating: "x", count: 2_000_000)
+    textView.setSelectedRange(NSRange(location: 5, length: 0))
     textView.layoutManager?.ensureLayout(for: textView.textContainer!)
 
     let clock = ContinuousClock()
     let elapsed = clock.measure {
-        textView.display()
+        forceOffscreenDraw(textView, in: viewportRect)
     }
     // Generous bound: a debug-build draw of the visible slice should be far
     // under this; the unbounded version took tens of seconds.
     #expect(elapsed < .seconds(5))
+}
+
+@MainActor
+@Test("Current-line and indent-guide draws are bounded on huge line-count documents")
+func manyLineDocumentDrawIsBounded() {
+    let viewportRect = NSRect(x: 0, y: 0, width: 480, height: 320)
+    let scrollView = NSScrollView(frame: viewportRect)
+    let textView = RafuTextView.makeTextKit1()
+    textView.frame = scrollView.bounds
+    scrollView.documentView = textView
+
+    textView.font = RafuThemeCatalog.indigo.resolvedEditorFont()
+    textView.indentGuideColor = .gray
+    textView.currentLineHighlightColor = .gray
+
+    // 200k short lines: a document shape unrelated to the giant-single-line
+    // case above, but one where per-draw decoration walks that aren't
+    // scoped to the visible glyph range would also regress badly.
+    let line = "    let x = 1\n"
+    textView.string = String(repeating: line, count: 200_000)
+    textView.setSelectedRange(NSRange(location: 20, length: 0))
+
+    // Ensure the visible region is laid out before measuring so the ceiling
+    // targets per-draw decoration cost, not one-time first layout.
+    guard let layoutManager = textView.layoutManager, let container = textView.textContainer
+    else {
+        Issue.record("missing TextKit 1 stack")
+        return
+    }
+    let visibleGlyphRange = layoutManager.glyphRange(
+        forBoundingRect: viewportRect, in: container)
+    layoutManager.ensureLayout(forGlyphRange: visibleGlyphRange)
+
+    let clock = ContinuousClock()
+    let elapsed = clock.measure {
+        forceOffscreenDraw(textView, in: viewportRect)
+    }
+    #expect(elapsed < .seconds(5))
+}
+
+@MainActor
+@Test("Editor disables Writing Tools on the code buffer")
+func editorDisablesWritingTools() {
+    let textView = RafuTextView.makeTextKit1()
+    #expect(textView.writingToolsBehavior == .none)
+}
+
+@MainActor
+@Test("Inline blame draw clears its hover rect when the caret's line boundary is unbounded")
+func inlineBlameDrawClearsRectBeyondScanCap() {
+    let viewportRect = NSRect(x: 0, y: 0, width: 480, height: 320)
+    let scrollView = NSScrollView(frame: viewportRect)
+    let textView = RafuTextView.makeTextKit1()
+    textView.frame = scrollView.bounds
+    scrollView.documentView = textView
+
+    textView.font = RafuThemeCatalog.indigo.resolvedEditorFont()
+    textView.inlineBlameColor = .gray
+    textView.inlineBlameAnnotation = InlineBlameAnnotation(lineNumber: 1, text: "author • 1d ago")
+
+    // One 20k-char line, no newlines. A caret 10k in has no newline within
+    // the 4096-unit scan cap in either direction, so a bounded line-range
+    // lookup must return nil (deterministic, not timing-dependent): this is
+    // the direct proof that `drawInlineBlameAnnotation`'s substitution is
+    // actually exercised rather than skipped. Before the fix this location
+    // still resolved a valid (if expensive) line range and left
+    // `inlineBlameRect` non-zero.
+    textView.string = String(repeating: "x", count: 20_000)
+    textView.setSelectedRange(NSRange(location: 10_000, length: 0))
+    forceOffscreenDraw(textView, in: viewportRect)
+
+    #expect(textView.inlineBlameRect == .zero)
 }
