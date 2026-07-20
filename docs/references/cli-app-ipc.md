@@ -88,6 +88,26 @@ child of `/work/app`. Weak registry references avoid extending a window or
 workspace session lifetime, while the registration-order fence preserves
 `--new-window` semantics across asynchronous SwiftUI scene creation.
 
+### SIGPIPE in socket tests kills the whole test process (verified 2026-07-20)
+
+Every fd that raw socket TESTS write to needs `SO_NOSIGPIPE` just like the
+production fds (`LauncherIPCClient`/`LauncherIPCServer` already guard theirs):
+a test-side `write` racing the peer's close raises SIGPIPE, whose default
+disposition terminates the entire test process. The failure signature is
+misleading — on CI every in-flight test appears "stuck at started" (the run
+then hits the job timeout); locally `swift test --no-parallel` exits with
+"Exited with unexpected signal code 13" at whichever test happened to be
+running. It is timing-dependent: parallel scheduling usually dodges it.
+Both test targets' socket helpers now set `SO_NOSIGPIPE` per fd AND install a
+process-wide `signal(SIGPIPE, SIG_IGN)` (belt-and-braces; a suppressed
+SIGPIPE just turns the write into a handled `EPIPE`). CI additionally runs
+`swift test --no-parallel` (via `RAFU_TEST_FLAGS` in `script/test.sh`) so a
+genuine hang is identifiable as the last "started" line in the log. Serial
+runs also expose order-dependent tests that parallel scheduling masks — e.g.
+the JSONRPC out-of-order-responses test assumed frame ARRIVAL order matched
+request order across two racing `async let` child tasks; match by request
+payload, never by position.
+
 ## Reproduction or evidence
 
 `LauncherRequestRouterTests` uses `socketpair` transports to prove same-user,
