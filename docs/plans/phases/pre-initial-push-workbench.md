@@ -158,3 +158,34 @@ notes: [`editor-gutter-ruler-tiling.md`](../../references/editor-gutter-ruler-ti
 [`ai-ignore-suggestion-privacy.md`](../../references/ai-ignore-suggestion-privacy.md).
 New ADR: [`0015-github-publishing-via-system-gh.md`](../../decisions/0015-github-publishing-via-system-gh.md).
 Amendment to ADR 0012 documenting the HSplitView/Liquid Glass fix.
+
+### 2026-07-20: Two main-thread hang fixes (macOS 26 Writing Tools; bounded blame/highlight draws)
+
+One commit fixed two main-thread hangs reported via macOS stackshots:
+
+1. **75 s hang on macOS 26**: every `NSTextView` selection change runs
+   Apple's Writing Tools selection-rect computation, which forces
+   synchronous full-document layout on a contiguous-layout TextKit 1
+   document. Repro was ⌘F find-next; it also explains "place caret, then
+   scrolling stalls." Fix: `textView.writingToolsBehavior = .none` in
+   `RafuTextView.makeTextKit1()`. `allowsNonContiguousLayout` was
+   evaluated and explicitly deferred pending Instruments evidence (it
+   interacts with scroll-fraction restore, gutter fragment math, and the
+   Neon TextKit 1 integration).
+2. **Bounded draw follow-up**: `drawCurrentLineHighlight` and
+   `drawInlineBlameAnnotation` still used unbounded
+   `NSString.lineRange(for:)` per draw; both now use the existing
+   `boundedLineRange(around:in:)` (4096-unit cap), matching
+   `drawIndentGuides`/`drawFileBlameAnnotations`. `inlineBlameRect` resets
+   to `.zero` when the bound declines, so blame-hover hit-testing never
+   uses stale geometry.
+
+Verified: 856 tests passing (parallel and `--no-parallel`), 0 build
+warnings, lint clean. New reference note:
+[`macos26-writing-tools-textkit-layout.md`](../../references/macos26-writing-tools-textkit-layout.md).
+Extended: [`large-file-guard-mode.md`](../../references/large-file-guard-mode.md)
+with the two new bounded call sites, the measured linear (not quadratic)
+cost of `NSString.lineRange(for:)`, deterministic-vs-timing test guidance,
+and the headless `NSView.display()` no-op / `cacheDisplay` testing
+pattern. No ADR: no architectural fork, only a bug fix and a testing
+correction.

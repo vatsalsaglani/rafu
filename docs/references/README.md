@@ -23,7 +23,7 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`memory-and-file-indexing.md`](memory-and-file-indexing.md) | Changing the lazy sidebar tree, the background ⌘P file-name index, `WorkspaceChangeSet` directory tracking, or file-ranking behavior |
 | [`navigation-and-lsp-contracts.md`](navigation-and-lsp-contracts.md) | Changing the navigation ladder, document edit deltas, language intelligence seams, or process resource tracking |
 | [`editor-dependencies.md`](editor-dependencies.md) | Changing Markdown rendering, syntax highlighting, package pins, or editor memory behavior |
-| [`large-file-guard-mode.md`](large-file-guard-mode.md) | Understanding large-file thresholds, guard-mode design, suppression chokepoint, known limitations, or deferred override commands |
+| [`large-file-guard-mode.md`](large-file-guard-mode.md) | Understanding large-file thresholds, guard-mode design, suppression chokepoint, known limitations, deferred override commands, bounded draw-path line scans, or headless `NSView` draw-test patterns |
 | [`editor-working-set-and-hibernation.md`](editor-working-set-and-hibernation.md) | Understanding document hibernation, bounded working set (visible ∪ dirty ∪ newest-8), tab/split data-loss fixes, `pendingDirtyText` exception, undo cap, and known limitations |
 | [`memory-caps-and-pressure.md`](memory-caps-and-pressure.md) | App-level memory-pressure monitoring, document hibernation + filename-index shedding on warnings, resource caps (Git/AI/search buffers), polling-audit findings, and cap values table |
 | [`ai-provider-rest-contracts.md`](ai-provider-rest-contracts.md) | Changing provider endpoints, streaming, Keychain secrets, connection tests, or commit generation |
@@ -43,6 +43,7 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`editor-gutter-ruler-tiling.md`](editor-gutter-ruler-tiling.md) | Understanding macOS 26 NSRulerView overlay tiling, the clip-view-width bug, text-under-gutter symptom, and the `EditorDropForwardingScrollView.tile()` classic-tiling fix |
 | [`github-cli-integration.md`](github-cli-integration.md) | Implementing or changing GitHub account lookup, repository publishing, or the locator/subprocess/error-taxonomy for system `gh` CLI invocations |
 | [`ai-ignore-suggestion-privacy.md`](ai-ignore-suggestion-privacy.md) | Changing ignore-file suggestion prompts, tree serialization, response parsing, bounds, or the explicit accept-before-write policy |
+| [`macos26-writing-tools-textkit-layout.md`](macos26-writing-tools-textkit-layout.md) | Understanding the macOS 26 Writing Tools full-TextKit-1-layout hang on selection change, why `RafuTextView` disables `writingToolsBehavior`, and the deferred `allowsNonContiguousLayout` evaluation |
 
 ## Reference-note template
 

@@ -71,3 +71,65 @@ similar whole-line walks) unbounded. `drawIndentGuides` now uses
 whose boundary exceeds the cap draws no guides and ends the pass (its
 indentation is off-screen and meaningless anyway). Regression:
 `indentGuideLineScanBounded` (same test file as above).
+
+## Two more draw sites bounded; the scan is linear, not quadratic (2026-07-20)
+
+Two remaining unbounded `NSString.lineRange(for:)` draw-path call sites
+were found and fixed alongside the macOS 26 Writing Tools hang (see
+[`macos26-writing-tools-textkit-layout.md`](macos26-writing-tools-textkit-layout.md)
+for that unrelated but co-discovered issue): `RafuTextView.drawCurrentLineHighlight`
+and `RafuTextView.drawInlineBlameAnnotation` both now call the existing
+`boundedLineRange(around:in:)` (same 4096-unit cap), matching
+`drawIndentGuides`/`drawFileBlameAnnotations`. In
+`drawInlineBlameAnnotation`, `inlineBlameRect` is reset to `.zero` when the
+bounded lookup declines (returns `nil`), so a stale rect from a previous
+draw can never leave the GX2 inline-blame hover hit-test (`hitTest`/mouse
+handling reads `inlineBlameRect`) pointing at geometry that was never
+actually drawn this pass.
+
+**Measured, not assumed: `NSString.lineRange(for:)` is linear, not
+quadratic.** Implementor measurement put it at roughly 500–570M UTF-16
+units/second on `NSTextStorage`-backed content — a single unbounded call
+on a 2 MB line costs about 3.5 ms. The original 31–32 s hang recorded in
+`error-report.txt` (v0.1.1-beta) was `drawIndentGuides` calling this
+**repeatedly, once per visible line fragment, every draw** (already fixed
+in commit `2495241`), not an inherent quadratic cost in the API itself.
+
+This has a direct consequence for regression tests: a timing-ceiling test
+(`elapsed < .seconds(N)`) cannot reliably catch a *reintroduced* single
+unbounded `lineRange(for:)` call at practical document sizes, because that
+single call is cheap. The reliable regression guard is a **deterministic
+behavior assertion** that only holds if the bounded substitution actually
+ran — e.g. `inlineBlameDrawClearsRectBeyondScanCap` asserts
+`inlineBlameRect == .zero` after drawing a caret with no newline within
+4096 units in either direction, which is only true if
+`boundedLineRange(around:in:)` (not `lineRange(for:)`) was used. Prefer
+this pattern over a timing bound when guarding a single bounded call site;
+timing bounds remain appropriate for guarding *repeated-per-visible-line*
+scans (as in `indentGuideLineScanBounded`/`manyLineDocumentDrawIsBounded`).
+
+## `NSView.display()` is a silent no-op in headless `swift test` runs
+
+There is no WindowServer session under `swift test`, so `NSView.display()`
+returns without ever invoking `draw(_:)` — any draw-path test written
+against `.display()` passes vacuously, exercising nothing. The reliable
+headless alternative, used throughout `MultiCaretUndoDiagnosticTests.swift`
+(`forceOffscreenDraw`) and `EditorGutterRenderTests.swift`, is:
+
+```swift
+guard let rep = view.bitmapImageRepForCachingDisplay(in: rect) else { return }
+view.cacheDisplay(in: rect, to: rep)
+```
+
+This forces a real `draw(_:)` call into an offscreen bitmap and works
+without a window or WindowServer session.
+
+The pre-existing `indentGuideLineScanBounded` test was vacuous for **two**
+independent reasons before this pass fixed it: (1) it used `.display()`
+instead of the `cacheDisplay` pattern, and (2) even after switching to
+`cacheDisplay`, it never set `indentGuideColor`/`currentLineHighlightColor`/
+`font` on the text view — every bounded decoration path early-returns when
+its color/font is unset, so the scan it claimed to guard never ran. Any
+new draw-path test on `RafuTextView` must set every decoration
+property the code path under test depends on, and must use
+`bitmapImageRepForCachingDisplay`/`cacheDisplay`, never `.display()`.
