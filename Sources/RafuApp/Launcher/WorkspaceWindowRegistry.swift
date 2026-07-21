@@ -107,6 +107,18 @@ final class WorkspaceWindowRegistry {
         return true
     }
 
+    /// Session-keyed counterpart to `focus(windowID:)` — used by the notch
+    /// HUD's reveal routes, which resolve a terminal session to its owning
+    /// `WorkspaceSession` and need that workspace's window forward.
+    @discardableResult
+    func focus(session: WorkspaceSession) -> Bool {
+        pruneDeadEntries()
+        guard let window = entries[ObjectIdentifier(session)]?.window else { return false }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        return true
+    }
+
     @discardableResult
     func goto(windowID: UUID, relativePath: String, location: SourceLocation) -> Bool {
         pruneDeadEntries()

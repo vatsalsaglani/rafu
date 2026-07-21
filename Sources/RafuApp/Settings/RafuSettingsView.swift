@@ -5,8 +5,8 @@ struct RafuSettingsView: View {
     @AppStorage("themeChoice") private var themeChoice = RafuThemeChoice.system.rawValue
     @AppStorage("themeRevision") private var themeRevision = 0
     @AppStorage("showsProcessMemory") private var showsProcessMemory = false
-    @AppStorage("terminalBellNotificationsEnabled") private var terminalBellNotificationsEnabled =
-        true
+    @AppStorage("terminalAttentionSurface") private var terminalAttentionSurface =
+        TerminalAttentionSurface.both.rawValue
     @Environment(\.colorScheme) private var systemScheme
 
     var body: some View {
@@ -28,12 +28,13 @@ struct RafuSettingsView: View {
                         LabeledContent("Version", value: RafuBuildInformation.version)
                         LabeledContent("Command Line Tool", value: "Bundled as rafu")
                         Toggle("Show process memory in status bar", isOn: $showsProcessMemory)
-                        Toggle(
-                            "Notify when a terminal needs attention",
-                            isOn: $terminalBellNotificationsEnabled
-                        )
+                        Picker("Terminal attention", selection: $terminalAttentionSurface) {
+                            ForEach(TerminalAttentionSurface.allCases, id: \.rawValue) { surface in
+                                Text(surface.displayName).tag(surface.rawValue)
+                            }
+                        }
                         .help(
-                            "Posts a system notification when a background terminal session bells (e.g. an agent CLI finishing or needing input). macOS will ask to allow notifications the first time this happens."
+                            "Where to surface a background terminal session that bells (e.g. an agent CLI finishing or needing input): a system notification, a HUD below the notch, both, or neither. Replies you type are sent to that terminal. macOS will ask to allow notifications the first time a notification would post."
                         )
                     }
                 }

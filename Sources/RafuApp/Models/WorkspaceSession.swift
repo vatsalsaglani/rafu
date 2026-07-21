@@ -333,7 +333,23 @@ final class WorkspaceSession {
     /// `notifyIfNeeded(for:)` without polluting the developer's actual
     /// setting under `swift test --no-parallel`.
     @ObservationIgnored
-    var terminalNotificationPreferenceStore = TerminalNotificationPreferenceStore()
+    var terminalAttentionSurfaceStore = TerminalAttentionSurfaceStore()
+
+    /// Injectable seam for the notch HUD (terminal-notch-hud.md N-3) —
+    /// `nil` by default and resolved to `NotchHUDController.shared` lazily,
+    /// mirroring `attentionNotifier`, so tests substitute a spy and no
+    /// headless test ever constructs the real panel.
+    @ObservationIgnored
+    var attentionHUD: (any NotchHUDPresenting)?
+
+    /// The HUD belongs to no window/scene, so its theme is resolved HERE —
+    /// at show time, from the same inputs `WorkspaceSceneRoot` uses — and
+    /// passed into `show` by value (terminal-notch-hud.md N-4). Injectable
+    /// so tests never read the real `themeChoice` default.
+    @ObservationIgnored
+    var hudThemeProvider: () -> RafuTheme = {
+        RafuThemeCatalog.resolvedForCurrentAppearance()
+    }
 
     /// Shells discovered on this machine (terminal-manager.md T-C), default
     /// first. See `cachedTerminalShells`'s doc comment for the caching rule.
@@ -364,7 +380,17 @@ final class WorkspaceSession {
         terminal.sessionDidBell = { [weak self] sessionID in
             self?.terminalSessionDidBell(sessionID)
         }
+        terminal.sessionDidClearAttention = { [weak self] sessionID in
+            self?.terminalSessionDidClearAttention(sessionID)
+        }
         TerminalAttentionCenter.shared.register(self)
+    }
+
+    /// `.bell` cleared for any reason (tab selected, session revealed,
+    /// reply sent): the notch HUD dismisses — it re-presents attention
+    /// state, it does not own it (terminal-notch-hud.md).
+    private func terminalSessionDidClearAttention(_ sessionID: UUID) {
+        resolvedAttentionHUD().attentionCleared(for: sessionID)
     }
 
     /// A shell that exits naturally leaves its session `.exited` and its tab
@@ -410,14 +436,16 @@ final class WorkspaceSession {
         notifyIfNeeded(for: controller)
     }
 
-    /// Posts a system notification for a belling session when the user has
-    /// opted in AND the OS has granted permission — the permission PROMPT
-    /// itself is requested here, lazily, the first time a bell would
-    /// actually notify (never at launch — AGENTS calm defaults). The
-    /// concrete notifier (`SystemTerminalAttentionNotifier`, the only file
-    /// importing `UserNotifications`) is constructed lazily too, via
-    /// `resolvedAttentionNotifier()`, so a test that never reaches this
-    /// path never touches `UNUserNotificationCenter` — mandatory, not
+    /// Surfaces a belling session per the `TerminalAttentionSurface`
+    /// arbitration preference (terminal-notch-hud.md): the notch HUD shows
+    /// synchronously (our own window — no OS gate), and/or a system
+    /// notification posts when the OS has granted permission — the
+    /// permission PROMPT itself is requested here, lazily, the first time
+    /// a bell would actually notify (never at launch — AGENTS calm
+    /// defaults). The concrete notifier (`SystemTerminalAttentionNotifier`,
+    /// the only file importing `UserNotifications`) is constructed lazily
+    /// too, via `resolvedAttentionNotifier()`, so a test that never reaches
+    /// this path never touches `UNUserNotificationCenter` — mandatory, not
     /// stylistic, since an unsigned/test binary has no bundle identity to
     /// post through. Internal (not `private`, mirroring
     /// `processDidTerminate(exitCode:)`/`updateTitle(_:)`) so tests can
@@ -428,18 +456,40 @@ final class WorkspaceSession {
     /// its own via `TerminalAttentionPolicy`, and this covers the
     /// preference/authorization/posting behavior downstream of it.
     func notifyIfNeeded(for controller: WorkspaceTerminalController) {
-        guard terminalNotificationPreferenceStore.isEnabled() else { return }
-        let notifier = resolvedAttentionNotifier()
+        let preference = terminalAttentionSurfaceStore.surface()
         let sessionID = controller.id
+
+        // The HUD surface (terminal-notch-hud.md): needs NO authorization —
+        // it is our own window — so it shows synchronously, gated on the
+        // same attention state the notification checks. The snippet is read
+        // ONLY here, now that the HUD will actually show — the same single
+        // sanctioned read the notification makes, passed by value and
+        // dropped on HUD dismissal (ADR 0016's privacy rules, verbatim).
+        if NotchHUDPolicy.surfaces(for: preference, authorized: false).hud,
+            controller.status == .bell
+        {
+            resolvedAttentionHUD().show(
+                NotchHUDEvent(
+                    sessionID: controller.id,
+                    title: controller.displayName,
+                    snippet: controller.recentOutputSnippet(),
+                    color: controller.sessionColor),
+                theme: hudThemeProvider()
+            )
+        }
+
+        // The notification surface keeps its lazy, first-bell authorization
+        // (ADR 0016) — and the prompt is only ever requested when the
+        // preference can actually post one.
+        guard NotchHUDPolicy.surfaces(for: preference, authorized: true).notification
+        else { return }
+        let notifier = resolvedAttentionNotifier()
         Task { @MainActor [weak self, weak controller] in
             guard let self, let controller, controller.id == sessionID else { return }
             let authorized = await notifier.requestAuthorizationIfNeeded()
-            guard
-                TerminalAttentionPolicy.shouldNotify(
-                    raisedAttention: controller.status == .bell,
-                    preferenceEnabled: self.terminalNotificationPreferenceStore.isEnabled(),
-                    isAuthorized: authorized)
-            else { return }
+            let surfaces = NotchHUDPolicy.surfaces(
+                for: self.terminalAttentionSurfaceStore.surface(), authorized: authorized)
+            guard surfaces.notification, controller.status == .bell else { return }
             // Read ONLY here, now that the notification will actually post
             // — never from a view body. Passed by value into one
             // notification post, then dropped: never logged, persisted, or
@@ -450,6 +500,13 @@ final class WorkspaceSession {
                 TerminalAttentionNotification(
                     sessionID: controller.id, title: controller.displayName, body: snippet))
         }
+    }
+
+    private func resolvedAttentionHUD() -> any NotchHUDPresenting {
+        if let attentionHUD { return attentionHUD }
+        let hud = NotchHUDController.shared
+        attentionHUD = hud
+        return hud
     }
 
     private func resolvedAttentionNotifier() -> any TerminalAttentionNotifying {

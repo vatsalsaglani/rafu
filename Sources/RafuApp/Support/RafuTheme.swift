@@ -334,6 +334,23 @@ enum RafuThemeCatalog {
         return resolved(choice: .system, systemScheme: systemScheme)
     }
 
+    /// The theme a non-scene surface (the notch HUD, terminal-notch-hud.md
+    /// N-4) uses right now: resolved from the same inputs
+    /// `WorkspaceSceneRoot` binds through the SwiftUI environment — the
+    /// `themeChoice` default and the app's effective appearance. Captured
+    /// by the HUD at show time; it does not live-update while the HUD is
+    /// up (documented, accepted).
+    @MainActor
+    static func resolvedForCurrentAppearance() -> RafuTheme {
+        let identifier =
+            UserDefaults.standard.string(forKey: "themeChoice")
+            ?? RafuThemeChoice.system.rawValue
+        let scheme: ColorScheme =
+            NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? .dark : .light
+        return resolved(identifier: identifier, systemScheme: scheme)
+    }
+
     static func resourceURL(for choice: RafuThemeChoice) -> URL? {
         guard choice != .system else { return nil }
         let resourceName: String =
