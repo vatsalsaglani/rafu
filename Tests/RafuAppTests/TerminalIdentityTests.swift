@@ -204,3 +204,24 @@ func tabLabelNeverSplitsMultibyteCharacters() {
         #expect(character == "🧑‍💻")
     }
 }
+
+@Test("Path-like OSC titles are skipped so prompts can't name a session its cwd")
+@MainActor
+func pathLikeTitlesFallBackToShellName() {
+    let controller = WorkspaceTerminalController(
+        index: 3,
+        startingDirectory: "/tmp",
+        shell: TerminalShell(path: "/opt/homebrew/bin/fish", name: "fish", isDefault: false)
+    )
+    // bobthefish/starship set the title to the abbreviated cwd.
+    controller.updateTitle("~/D/n/p/p/rafu")
+    #expect(controller.displayName == "fish 3")
+    controller.updateTitle("/usr/local/project")
+    #expect(controller.displayName == "fish 3")
+    // A real agent title still wins.
+    controller.updateTitle("✳ claude")
+    #expect(controller.displayName == "✳ claude")
+    // And a user name outranks everything.
+    controller.userName = "backend agent"
+    #expect(controller.displayName == "backend agent")
+}

@@ -121,6 +121,21 @@ final class SystemTerminalAttentionNotifier: TerminalAttentionNotifying {
 /// `DelegateProxy`) this hops to the main actor explicitly rather than
 /// claiming an isolation the framework does not guarantee.
 private final class ReplyRoutingDelegate: NSObject, UNUserNotificationCenterDelegate {
+    /// Without this, macOS SUPPRESSES banners for notifications posted by
+    /// the frontmost app — and "I'm working in Rafu while an agent bells in
+    /// a hidden terminal" is this feature's primary scenario, so the
+    /// notification must present even when Rafu is active. This was the
+    /// "bell never rang" bug: the post succeeded and the banner was
+    /// silently swallowed.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler:
+            @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
+    }
+
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,

@@ -149,8 +149,23 @@ final class WorkspaceTerminalController: Identifiable {
     /// `userName`, then the shell's own OSC 0/2 title report, then a
     /// generated fallback — the single source of truth for every place
     /// this session's name is shown (panel row, tab label, `.help` text).
+    ///
+    /// A PATH-LIKE title is skipped: prompt themes (bobthefish, starship)
+    /// set the terminal title to the abbreviated cwd, which duplicated the
+    /// panel row's own directory line and made sessions read as
+    /// "~/D/n/p/p/rafu". Agent CLIs set real names ("✳ claude"), which is
+    /// the case auto-naming exists for.
     var displayName: String {
-        userName ?? reportedTitle ?? "\(shell.basename) \(index)"
+        if let userName { return userName }
+        if let reportedTitle, !Self.isPathLikeTitle(reportedTitle) { return reportedTitle }
+        return "\(shell.basename) \(index)"
+    }
+
+    /// True for titles that are just a filesystem path ("~/x/y", "/usr/…"),
+    /// which carry no identity beyond the directory line already shown.
+    nonisolated static func isPathLikeTitle(_ title: String) -> Bool {
+        let trimmed = title.trimmingCharacters(in: .whitespaces)
+        return trimmed.hasPrefix("~") || trimmed.hasPrefix("/")
     }
 
     init(index: Int, startingDirectory: String, shell: TerminalShell) {

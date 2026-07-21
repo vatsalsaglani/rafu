@@ -174,20 +174,20 @@ private struct TerminalSessionRowView: View {
     @State private var customColor = Color.accentColor
 
     var body: some View {
-        HStack(spacing: 8) {
-            // Color TAG dot (terminal-manager.md T-D) — never the only
-            // signal: always paired with the status glyph beside it.
-            if let sessionColor = row.sessionColor {
-                Circle()
-                    .fill(theme.palette.color(for: sessionColor))
-                    .frame(width: 7, height: 7)
-                    .accessibilityHidden(true)
-            }
+        HStack(spacing: RafuMetrics.space3) {
+            // Status glyph in a quiet icon well. The session's chosen color
+            // lives on the CARD BORDER (below), not a dot — never the only
+            // signal: the glyph + name/status text always carry meaning.
             Image(systemName: TerminalSessionPresentation.symbol(row.status))
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(statusTint)
+                .frame(width: 26, height: 26)
+                .background(
+                    RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
+                        .fill(theme.palette.chipBackground)
+                )
                 .accessibilityLabel(TerminalSessionPresentation.label(row.status))
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     if isRenaming {
                         TextField("Name", text: $renameText)
@@ -255,7 +255,7 @@ private struct TerminalSessionRowView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
-                .strokeBorder(rowBorder)
+                .strokeBorder(rowBorder, lineWidth: rowBorderWidth)
         )
         // Double-click edits the name in place. Registered BEFORE the
         // single-click reveal so SwiftUI can disambiguate; a single click
@@ -359,12 +359,23 @@ private struct TerminalSessionRowView: View {
         return theme.palette.cardBackground
     }
 
-    /// Only the selected and attention rows carry a visible edge; resting
-    /// cards stay borderless so the list reads calm rather than striped.
+    /// The user's chosen session color IS the card border (their explicit
+    /// request) — it outranks the selection/attention edges, which still
+    /// show through the row BACKGROUND. Uncolored cards keep a whisper of
+    /// an edge so the card shape reads at all.
     private var rowBorder: Color {
+        if let sessionColor = row.sessionColor {
+            return theme.palette.color(for: sessionColor)
+        }
         if isSelected { return theme.palette.borderStrong.opacity(0.6) }
         if row.needsAttention { return theme.palette.accent.opacity(0.5) }
         return theme.palette.borderSubtle.opacity(0.5)
+    }
+
+    /// A colored border is the identity signal, so it gets real weight;
+    /// structural edges stay hairline.
+    private var rowBorderWidth: CGFloat {
+        row.sessionColor != nil ? 2 : RafuMetrics.hairline
     }
 
     private var accessibilityText: String {
