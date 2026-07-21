@@ -72,7 +72,7 @@ func rowsMatchSessionsInCreationOrder() {
     #expect(rows.count == session.terminal.sessions.count)
     #expect(rows.map(\.id) == session.terminal.sessions.map(\.id))
     for (row, controller) in zip(rows, session.terminal.sessions) {
-        #expect(row.displayName == controller.title)
+        #expect(row.displayName == controller.displayName)
         #expect(row.shellName == controller.shellDisplayName)
     }
 }
@@ -124,15 +124,17 @@ func directoryLabelDerivation() {
 func labelAndSymbolPerStatus() {
     #expect(TerminalSessionPresentation.label(.idle) == "Idle")
     #expect(TerminalSessionPresentation.label(.running) == "Running")
+    #expect(TerminalSessionPresentation.label(.bell) == "Needs attention")
     #expect(TerminalSessionPresentation.label(.exited(code: nil)) == "Exited")
     #expect(TerminalSessionPresentation.label(.exited(code: 1)) == "Exited (1)")
 
     let symbols = Set([
         TerminalSessionPresentation.symbol(.idle),
         TerminalSessionPresentation.symbol(.running),
+        TerminalSessionPresentation.symbol(.bell),
         TerminalSessionPresentation.symbol(.exited(code: nil)),
     ])
-    #expect(symbols.count == 3)
+    #expect(symbols.count == 4)
 }
 
 @MainActor
@@ -244,13 +246,16 @@ func attentionCountCountsHandBuiltRows() {
     let rows = [
         TerminalSessionRow(
             id: UUID(), displayName: "A", shellName: "zsh", directoryLabel: ".",
-            status: .running, isParked: false, needsAttention: false),
+            status: .running, isParked: false, needsAttention: false, hasUserName: false,
+            sessionColor: nil),
         TerminalSessionRow(
             id: UUID(), displayName: "B", shellName: "zsh", directoryLabel: ".",
-            status: .running, isParked: false, needsAttention: true),
+            status: .bell, isParked: false, needsAttention: true, hasUserName: false,
+            sessionColor: nil),
         TerminalSessionRow(
             id: UUID(), displayName: "C", shellName: "zsh", directoryLabel: ".",
-            status: .exited(code: nil), isParked: true, needsAttention: true),
+            status: .exited(code: nil), isParked: true, needsAttention: true, hasUserName: true,
+            sessionColor: .accent),
     ]
     #expect(TerminalsPanelModel.attentionCount(rows) == 2)
 }

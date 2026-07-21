@@ -3,14 +3,18 @@ import Observation
 import SwiftTerm
 
 /// A terminal session's lifecycle: `.idle` until its view is first mounted
-/// (spawn is lazy, ADR 0004), `.running` while the shell is alive, and
-/// `.exited(code:)` once it has quit — either naturally (SwiftTerm's
-/// `processTerminated` delegate callback, `code` carries the real exit
-/// status) or via explicit `shutdown()` (`code == nil`, since no process
-/// delivered one there).
+/// (spawn is lazy, ADR 0004), `.running` while the shell is alive, `.bell`
+/// while it is alive but has requested attention (BEL received while
+/// unfocused — terminal-manager.md T-E; cleared back to `.running` the
+/// moment its tab is focused again, `WorkspaceTerminalController
+/// .clearAttention()`), and `.exited(code:)` once it has quit — either
+/// naturally (SwiftTerm's `processTerminated` delegate callback, `code`
+/// carries the real exit status) or via explicit `shutdown()` (`code ==
+/// nil`, since no process delivered one there).
 nonisolated enum TerminalSessionStatus: Equatable, Sendable {
     case idle
     case running
+    case bell
     case exited(code: Int32?)
 }
 
@@ -33,9 +37,17 @@ final class WorkspaceTerminalManager {
 
     /// Invoked whenever any session's shell exits naturally (never on an
     /// explicit `close`/`shutdown`). `WorkspaceSession` wires this lazily —
-    /// see `installTerminalExitHandlerIfNeeded()`.
+    /// see `installTerminalHandlersIfNeeded()`.
     @ObservationIgnored
     var sessionDidExit: (@MainActor (UUID, Int32?) -> Void)?
+
+    /// Invoked whenever any session receives BEL (terminal-manager.md T-E).
+    /// `WorkspaceSession.terminalSessionDidBell(_:)` decides whether that
+    /// actually raises attention (the session's tab may already be
+    /// focused) — wired lazily alongside `sessionDidExit`, see
+    /// `installTerminalHandlersIfNeeded()`.
+    @ObservationIgnored
+    var sessionDidBell: (@MainActor (UUID) -> Void)?
 
     var selected: WorkspaceTerminalController? {
         sessions.first { $0.id == selectedID } ?? sessions.first
@@ -54,6 +66,9 @@ final class WorkspaceTerminalManager {
         )
         session.onExit = { [weak self] id, exitCode in
             self?.sessionDidExit?(id, exitCode)
+        }
+        session.onBell = { [weak self] id in
+            self?.sessionDidBell?(id)
         }
         sessions.append(session)
         selectedID = session.id
@@ -107,7 +122,21 @@ final class WorkspaceTerminalController: Identifiable {
     /// The shell binary this session spawns (terminal-manager.md T-C).
     let shell: TerminalShell
     private(set) var status: TerminalSessionStatus = .idle
-    private(set) var title: String
+    /// User-set name (terminal-manager.md T-D) — always wins in
+    /// `displayName`. `nil` returns display to the auto name
+    /// (`reportedTitle`, then the shell/index fallback). Trimming and the
+    /// empty-clears-to-auto rule live in
+    /// `WorkspaceSession.renameTerminalSession(_:to:)`, the one caller.
+    var userName: String?
+    /// Auto title from the shell's own OSC 0/2 report (agent CLIs set this
+    /// — "✳ claude", "codex", …). `nil` until the shell reports one, or
+    /// after an empty/whitespace-only report clears it. Never wins over
+    /// `userName`.
+    private(set) var reportedTitle: String?
+    /// Color TAG (terminal-manager.md T-D) — a theme palette token, never a
+    /// raw color, so themes restyle it. `nil` shows no dot/stripe. Not
+    /// persisted (sessions don't restore across relaunch).
+    var sessionColor: TerminalSessionColor?
     /// Live working directory reported by the shell via OSC 7, when the
     /// prompt emits it (starship/powerlevel10k do; stock zsh may not).
     private(set) var currentDirectoryPath: String?
@@ -117,17 +146,23 @@ final class WorkspaceTerminalController: Identifiable {
     /// parked at least once.
     private(set) var parkSequence: Int = 0
 
+    /// `userName`, then the shell's own OSC 0/2 title report, then a
+    /// generated fallback — the single source of truth for every place
+    /// this session's name is shown (panel row, tab label, `.help` text).
+    var displayName: String {
+        userName ?? reportedTitle ?? "\(shell.basename) \(index)"
+    }
+
     init(index: Int, startingDirectory: String, shell: TerminalShell) {
         self.index = index
         self.startingDirectory = startingDirectory
         self.shell = shell
-        title = "Terminal \(index)"
     }
     /// Bumped whenever a fresh terminal view must replace the old one.
     private(set) var generation = 0
 
     @ObservationIgnored
-    private var terminalView: LocalProcessTerminalView?
+    private var terminalView: RafuTerminalView?
     @ObservationIgnored
     private var delegateProxy: DelegateProxy?
     @ObservationIgnored
@@ -137,13 +172,84 @@ final class WorkspaceTerminalController: Identifiable {
     /// `newSession`; `nil` otherwise.
     @ObservationIgnored
     var onExit: (@MainActor (UUID, Int32?) -> Void)?
+    /// Invoked once per BEL, forwarded up to
+    /// `WorkspaceTerminalManager.sessionDidBell`. Wired by
+    /// `RafuTerminalView.onBell` in `makeOrReuseView`; `nil` before a view
+    /// mounts.
+    @ObservationIgnored
+    var onBell: (@MainActor (UUID) -> Void)?
 
     var isRunning: Bool { status == .running }
 
     var shellDisplayName: String { shell.basename }
 
+    /// Whether this session's live view currently sits in the KEY window —
+    /// part of the "not focused" test for bell attention (terminal-manager
+    /// .md T-E): not the focused tab, OR the app inactive, OR the window
+    /// not key. `false` when parked (no mounted view) or never spawned.
+    var isHostWindowKey: Bool { terminalView?.window?.isKeyWindow ?? false }
+
     func markParked(sequence: Int) {
         parkSequence = sequence
+    }
+
+    /// Forces `.running` without spawning a real process. `makeOrReuseView`
+    /// is the one PRODUCTION path to `.running`, and it genuinely spawns a
+    /// shell inside a mounted AppKit view — something headless tests never
+    /// do (ADR 0004's lazy spawn). Test-only, mirroring
+    /// `processDidTerminate(exitCode:)`'s "internal so tests can drive it
+    /// directly" precedent: exercises `noteBell()`/`clearAttention()` and
+    /// the attention pipeline above them without a live pty.
+    func markRunningForTesting() {
+        status = .running
+    }
+
+    /// BEL received while the session is NOT the focused tab
+    /// (terminal-manager.md T-E) — the guard also gives free coalescing: a
+    /// second bell while already `.bell` is a no-op. Only a `.running`
+    /// session can be asked to raise attention; the FOCUS decision itself
+    /// lives one level up in `WorkspaceSession.terminalSessionDidBell(_:)`
+    /// (`TerminalAttentionPolicy.shouldRaiseAttention`), which only calls
+    /// this when it decided to raise.
+    func noteBell() {
+        guard status == .running else { return }
+        status = .bell
+    }
+
+    /// Clears the attention state once the tab is focused again — both
+    /// `WorkspaceSession.selectEditorTab` and `synchronizeSelectionFromLayout`
+    /// call this on their `.terminal` branch, and `revealTerminalSession`
+    /// calls it directly since it mutates `editorLayout`/`terminal
+    /// .selectedID` without going through either. A no-op outside `.bell`.
+    func clearAttention() {
+        if status == .bell { status = .running }
+    }
+
+    /// Sends a notification reply's already-sanitized, single-line text
+    /// into this session's live pty, followed by a trailing newline — the
+    /// agent is blocked on a prompt, so exactly one line can ever be
+    /// submitted this way (`TerminalAttentionPolicy.sanitizedReply` is the
+    /// one caller that produces `text`). Returns `false` — never respawns,
+    /// never queues — when there is no live view (parked with nothing
+    /// mounted) or the shell has already exited.
+    @discardableResult
+    func sendReply(_ text: String) -> Bool {
+        guard let terminalView else { return false }
+        if case .exited = status { return false }
+        terminalView.send(txt: text + "\n")
+        clearAttention()
+        return true
+    }
+
+    /// Bounded read of recent on-screen output for an attention
+    /// notification's body (terminal-manager.md T-E) — `""` when there is
+    /// no live view (e.g. a race where the shell exited between the bell
+    /// and the notification actually posting). See
+    /// `RafuTerminalView.recentOutputSnippet` for the bounds and privacy
+    /// rules; never call this outside the one notification-posting path
+    /// that needs it.
+    func recentOutputSnippet() -> String {
+        terminalView?.recentOutputSnippet() ?? ""
     }
 
     /// Returns the live terminal view, creating it and spawning the login
@@ -153,10 +259,14 @@ final class WorkspaceTerminalController: Identifiable {
             applyTheme(theme, to: terminalView)
             return terminalView
         }
-        let view = LocalProcessTerminalView(frame: .zero)
+        let view = RafuTerminalView(frame: .zero)
         let proxy = DelegateProxy(controller: self)
         delegateProxy = proxy
         view.processDelegate = proxy
+        view.onBell = { [weak self] in
+            guard let self else { return }
+            self.onBell?(self.id)
+        }
         applyTheme(theme, to: view)
 
         view.startProcess(
@@ -266,8 +376,16 @@ final class WorkspaceTerminalController: Identifiable {
         onExit?(id, exitCode)
     }
 
-    fileprivate func updateTitle(_ newTitle: String) {
-        title = newTitle.isEmpty ? "Terminal \(index)" : newTitle
+    /// OSC 0/2 title report from the shell (terminal-manager.md T-D — agent
+    /// CLIs set this, e.g. "✳ claude"). An empty/whitespace-only report
+    /// clears the auto title back to the shell/index fallback rather than
+    /// storing blank text; `userName`, when set, always wins regardless
+    /// (`displayName`). Internal (not `fileprivate`, mirroring
+    /// `processDidTerminate(exitCode:)`) so tests can drive it directly
+    /// without a live SwiftTerm delegate callback.
+    func updateTitle(_ newTitle: String) {
+        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        reportedTitle = trimmed.isEmpty ? nil : trimmed
     }
 
     /// OSC 7 delivers the shell's cwd as a `file://host/path` URI; some

@@ -316,7 +316,24 @@ final class WorkspaceSession {
     private lazy var cachedTerminalShells: [TerminalShell] = shellCatalog.shells()
 
     @ObservationIgnored
-    private var didInstallTerminalExitHandler = false
+    private var didInstallTerminalHandlers = false
+    /// Injectable seam for a system attention notification (terminal-manager
+    /// .md T-E) — `nil` by default, and never assigned the real
+    /// `UNUserNotifications`-backed `SystemTerminalAttentionNotifier` except
+    /// lazily, in `resolvedAttentionNotifier()`, the FIRST time a bell would
+    /// actually notify. Tests substitute a spy here so no headless test
+    /// path ever constructs the concrete notifier (it needs a signed
+    /// bundle identity `swift test` does not have).
+    @ObservationIgnored
+    var attentionNotifier: (any TerminalAttentionNotifying)?
+    @ObservationIgnored
+    /// Not `private` (mirroring `attentionNotifier`) so tests can inject a
+    /// store backed by an isolated `UserDefaults` suite instead of the
+    /// real standard defaults — needed to test the preference-off gate in
+    /// `notifyIfNeeded(for:)` without polluting the developer's actual
+    /// setting under `swift test --no-parallel`.
+    @ObservationIgnored
+    var terminalNotificationPreferenceStore = TerminalNotificationPreferenceStore()
 
     /// Shells discovered on this machine (terminal-manager.md T-C), default
     /// first. See `cachedTerminalShells`'s doc comment for the caching rule.
@@ -331,17 +348,23 @@ final class WorkspaceSession {
                 path: TerminalShellCatalog.environmentShellPath(), name: "Default", isDefault: true)
     }
 
-    /// Wires `terminal.sessionDidExit` on first use — lazy so a workspace
-    /// that never opens a terminal never installs the hook. `[weak self]` is
-    /// mandatory: `terminal` is a stored, non-observed strong property, and a
-    /// strong `self` here would retain-cycle session → terminal → closure →
-    /// session.
-    private func installTerminalExitHandlerIfNeeded() {
-        guard !didInstallTerminalExitHandler else { return }
-        didInstallTerminalExitHandler = true
+    /// Wires `terminal.sessionDidExit`/`sessionDidBell` on first use — lazy
+    /// so a workspace that never opens a terminal never installs the hooks,
+    /// and registers this workspace with `TerminalAttentionCenter` so a
+    /// notification reply (which arrives with no window context) can find
+    /// it. `[weak self]` is mandatory: `terminal` is a stored, non-observed
+    /// strong property, and a strong `self` here would retain-cycle
+    /// session → terminal → closure → session.
+    private func installTerminalHandlersIfNeeded() {
+        guard !didInstallTerminalHandlers else { return }
+        didInstallTerminalHandlers = true
         terminal.sessionDidExit = { [weak self] sessionID, exitCode in
             self?.terminalSessionDidExit(sessionID, exitCode: exitCode)
         }
+        terminal.sessionDidBell = { [weak self] sessionID in
+            self?.terminalSessionDidBell(sessionID)
+        }
+        TerminalAttentionCenter.shared.register(self)
     }
 
     /// A shell that exits naturally leaves its session `.exited` and its tab
@@ -351,6 +374,131 @@ final class WorkspaceSession {
     /// this hook exists so later stages (T-B panel refresh, T-E attention
     /// state) have one place to react to a natural exit.
     private func terminalSessionDidExit(_ sessionID: UUID, exitCode: Int32?) {}
+
+    /// The terminal session id backing the FOCUSED group's selected tab,
+    /// when that tab is a `.terminal` — distinct from `selectedTerminalTabID`
+    /// (which returns the tab id, used by `toggleTerminal()`). Used to
+    /// decide "is this session's tab focused right now" for bell/attention
+    /// routing (terminal-manager.md T-E).
+    private var focusedTerminalSessionID: UUID? {
+        guard let group = editorLayout.group(id: editorLayout.focusedGroupID),
+            let selectedTabID = group.selectedTabID,
+            let tab = group.tabs.first(where: { $0.id == selectedTabID }),
+            case .terminal(let sessionID) = tab.resource
+        else { return nil }
+        return sessionID
+    }
+
+    /// Routes a BEL (terminal-manager.md T-E) to attention state and,
+    /// opt-in, a system notification. "Not focused" = the session's tab is
+    /// not the focused group's selected tab, OR the app is not active, OR
+    /// its window is not key — any one of those means the user is not
+    /// looking at this shell right now (`TerminalAttentionPolicy
+    /// .shouldRaiseAttention`).
+    private func terminalSessionDidBell(_ sessionID: UUID) {
+        guard let controller = terminal.sessions.first(where: { $0.id == sessionID }) else {
+            return
+        }
+        let shouldRaise = TerminalAttentionPolicy.shouldRaiseAttention(
+            isSelectedTab: focusedTerminalSessionID == sessionID,
+            isAppActive: NSApp.isActive,
+            isWindowKey: controller.isHostWindowKey,
+            status: controller.status
+        )
+        guard shouldRaise else { return }
+        controller.noteBell()
+        notifyIfNeeded(for: controller)
+    }
+
+    /// Posts a system notification for a belling session when the user has
+    /// opted in AND the OS has granted permission — the permission PROMPT
+    /// itself is requested here, lazily, the first time a bell would
+    /// actually notify (never at launch — AGENTS calm defaults). The
+    /// concrete notifier (`SystemTerminalAttentionNotifier`, the only file
+    /// importing `UserNotifications`) is constructed lazily too, via
+    /// `resolvedAttentionNotifier()`, so a test that never reaches this
+    /// path never touches `UNUserNotificationCenter` — mandatory, not
+    /// stylistic, since an unsigned/test binary has no bundle identity to
+    /// post through. Internal (not `private`, mirroring
+    /// `processDidTerminate(exitCode:)`/`updateTitle(_:)`) so tests can
+    /// drive it directly: `terminalSessionDidBell(_:)`'s own focus
+    /// decision (`TerminalAttentionPolicy.shouldRaiseAttention`) depends on
+    /// `NSApp.isActive`/a real key `NSWindow`, neither of which exists in
+    /// `swift test`'s headless process — that pure decision is tested on
+    /// its own via `TerminalAttentionPolicy`, and this covers the
+    /// preference/authorization/posting behavior downstream of it.
+    func notifyIfNeeded(for controller: WorkspaceTerminalController) {
+        guard terminalNotificationPreferenceStore.isEnabled() else { return }
+        let notifier = resolvedAttentionNotifier()
+        let sessionID = controller.id
+        Task { @MainActor [weak self, weak controller] in
+            guard let self, let controller, controller.id == sessionID else { return }
+            let authorized = await notifier.requestAuthorizationIfNeeded()
+            guard
+                TerminalAttentionPolicy.shouldNotify(
+                    raisedAttention: controller.status == .bell,
+                    preferenceEnabled: self.terminalNotificationPreferenceStore.isEnabled(),
+                    isAuthorized: authorized)
+            else { return }
+            // Read ONLY here, now that the notification will actually post
+            // — never from a view body. Passed by value into one
+            // notification post, then dropped: never logged, persisted, or
+            // transmitted anywhere else (AGENTS: the Git/AI
+            // diff-transmission privacy rule extends to terminal content).
+            let snippet = controller.recentOutputSnippet()
+            notifier.post(
+                TerminalAttentionNotification(
+                    sessionID: controller.id, title: controller.displayName, body: snippet))
+        }
+    }
+
+    private func resolvedAttentionNotifier() -> any TerminalAttentionNotifying {
+        if let attentionNotifier { return attentionNotifier }
+        let notifier = SystemTerminalAttentionNotifier()
+        attentionNotifier = notifier
+        return notifier
+    }
+
+    /// Delivers a sanitized notification reply to one of THIS workspace's
+    /// terminal sessions, routed here by `TerminalAttentionCenter` since a
+    /// notification response arrives with no window context. Returns
+    /// `true` once the session is found in this workspace — the caller
+    /// stops searching other windows then, whether or not the shell was
+    /// still alive to receive it (`WorkspaceTerminalController.sendReply(_:)`
+    /// silently drops rather than respawning/queueing). The caller has
+    /// already sanitized `text` to one control-free line under 1024 bytes
+    /// (AGENTS: no shell-string interpolation — this only relays the
+    /// user's own typed reply into a live pty by session UUID).
+    @discardableResult
+    func deliverTerminalReply(_ text: String, to sessionID: UUID) -> Bool {
+        guard let controller = terminal.sessions.first(where: { $0.id == sessionID }) else {
+            return false
+        }
+        controller.sendReply(text)
+        return true
+    }
+
+    /// Renames a terminal session (terminal-manager.md T-D panel inline
+    /// rename). Trims; an empty/whitespace-only or `nil` name clears back
+    /// to the auto name (`reportedTitle` or the shell/index fallback). A
+    /// no-op for an unknown session id.
+    func renameTerminalSession(_ sessionID: UUID, to name: String?) {
+        guard let controller = terminal.sessions.first(where: { $0.id == sessionID }) else {
+            return
+        }
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        controller.userName = (trimmed?.isEmpty ?? true) ? nil : trimmed
+    }
+
+    /// Sets or clears a terminal session's color TAG (terminal-manager.md
+    /// T-D). Not persisted — sessions never restore across relaunch, so
+    /// neither does their color. A no-op for an unknown session id.
+    func setTerminalSessionColor(_ sessionID: UUID, _ color: TerminalSessionColor?) {
+        guard let controller = terminal.sessions.first(where: { $0.id == sessionID }) else {
+            return
+        }
+        controller.sessionColor = color
+    }
 
     /// Issue #4: the terminal presents as an ordinary editor tab (same
     /// chrome as a file tab). Hiding and closing are different verbs
@@ -386,7 +534,7 @@ final class WorkspaceSession {
     /// (terminal-manager.md T-C, recorded as the new preferred shell) — and
     /// reveals it in the focused editor group.
     func newTerminalTab(shell: TerminalShell? = nil) {
-        installTerminalExitHandlerIfNeeded()
+        installTerminalHandlersIfNeeded()
         let resolvedShell = shell ?? preferredTerminalShell()
         if let shell {
             preferredShellStore.record(shell)
@@ -480,6 +628,11 @@ final class WorkspaceSession {
         selectedDocumentID = nil
         selectedTreePath = nil
         terminal.selectedID = sessionID
+        // Revealing (unlike a plain layout selection change) doesn't route
+        // through `selectEditorTab`/`synchronizeSelectionFromLayout`, so
+        // this is the third bell-clear hook (terminal-manager.md T-E):
+        // revealing a parked, belling session must clear its attention too.
+        terminal.sessions.first(where: { $0.id == sessionID })?.clearAttention()
         persistWorkspaceState()
     }
 
@@ -1693,6 +1846,10 @@ final class WorkspaceSession {
             selectedDocumentID = nil
             selectedTreePath = nil
             terminal.selectedID = sessionID
+            // Bell-clear hook 1/3 (terminal-manager.md T-E) — see
+            // `synchronizeSelectionFromLayout` and `revealTerminalSession`
+            // for the other two.
+            terminal.sessions.first(where: { $0.id == sessionID })?.clearAttention()
         case .restorable:
             selectedDocumentID = nil
             selectedTreePath = nil
@@ -3176,6 +3333,7 @@ final class WorkspaceSession {
         symbolIndexRebuildTask?.cancel()
         languageIntelligence.workspaceDidClose()
         stopAccessingSecurityScopedURL()
+        TerminalAttentionCenter.shared.unregister(self)
     }
 
     private func stopAccessingSecurityScopedURL() {
@@ -3307,6 +3465,10 @@ final class WorkspaceSession {
             selectedDocumentID = nil
             selectedTreePath = nil
             terminal.selectedID = sessionID
+            // Bell-clear hook 2/3 (terminal-manager.md T-E) — this is the
+            // path reveal/split/drag/close-neighbour funnel through, not
+            // just direct tab clicks (`selectEditorTab`).
+            terminal.sessions.first(where: { $0.id == sessionID })?.clearAttention()
             return
         }
         let document = selectedTab.flatMap(document(for:)) ?? fallback

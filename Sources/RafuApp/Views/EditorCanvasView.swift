@@ -1577,8 +1577,9 @@ private struct EditorTerminalTabItem: View {
                     Image(systemName: "terminal")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(theme.palette.accent)
-                    Text(controller.title)
+                    Text(TerminalSessionPresentation.tabLabel(controller.displayName))
                         .lineLimit(1)
+                        .truncationMode(.middle)
                         .foregroundStyle(
                             isSelected
                                 ? theme.palette.textPrimary
@@ -1586,7 +1587,11 @@ private struct EditorTerminalTabItem: View {
                         )
                     // Never communicated by color alone: the running/stopped
                     // dot pairs with the "Shell exited" content overlay text.
-                    if !controller.isRunning {
+                    // `.bell` is not exited (terminal-manager.md T-E
+                    // regression guard — see `EditorTerminalTabContent`'s
+                    // identical note), so this uses the same separately
+                    // tested `isExited` predicate rather than `!isRunning`.
+                    if TerminalSessionPresentation.isExited(controller.status) {
                         Circle().fill(theme.palette.textMuted).frame(width: 6, height: 6)
                             .accessibilityLabel("Shell exited")
                     }
@@ -1598,7 +1603,7 @@ private struct EditorTerminalTabItem: View {
             Button("Close", systemImage: "xmark") { session.closeTerminalTab(tabID) }
                 .buttonStyle(RafuIconButtonStyle(size: 18, iconSize: 9))
                 .opacity(isHovering || isSelected ? 1 : 0)
-                .help("Close \(controller.title)")
+                .help("Close \(controller.displayName)")
         }
         .font(.callout)
         .padding(.horizontal, 10)
@@ -1615,6 +1620,17 @@ private struct EditorTerminalTabItem: View {
         }
         .overlay(alignment: .trailing) {
             Divider().frame(height: 18).overlay(theme.palette.borderSubtle)
+        }
+        .overlay(alignment: .leading) {
+            // Color TAG (terminal-manager.md T-D) — correlates this tab
+            // with its panel row's dot. Never the only signal: paired with
+            // the label/icon/dot text as always.
+            if let sessionColor = controller.sessionColor {
+                Rectangle()
+                    .fill(theme.palette.color(for: sessionColor))
+                    .frame(width: 2)
+                    .accessibilityHidden(true)
+            }
         }
         .onHover { isHovering = $0 }
         .onDrag { session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString)) }

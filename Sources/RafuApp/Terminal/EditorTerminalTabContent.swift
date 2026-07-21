@@ -16,7 +16,12 @@ struct EditorTerminalTabContent: View {
         ZStack {
             TerminalHostView(controller: controller, theme: theme)
                 .id("\(controller.id)#\(controller.generation)")
-            if !controller.isRunning {
+            // Regression guard (terminal-manager.md T-E): `.bell` is NOT
+            // `.running` (`controller.isRunning`), but it is very much NOT
+            // exited either — testing `isRunning` here would wrongly show
+            // "Shell exited" for a belling session. `isExited` is the
+            // pure, separately-tested predicate for the actual exit state.
+            if TerminalSessionPresentation.isExited(controller.status) {
                 shellExitedOverlay
             }
         }

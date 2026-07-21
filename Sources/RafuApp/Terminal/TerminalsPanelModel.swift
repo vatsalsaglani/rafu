@@ -3,8 +3,8 @@ import Foundation
 /// One row in the terminals panel (terminal-manager.md T-B), derived from a
 /// `WorkspaceTerminalController` plus whether it currently has a presented
 /// tab. Pure data — no SwiftUI import — so it stays headless-testable.
-/// `displayName` is `controller.title` for now; T-D changes only the SOURCE
-/// (auto-name from OSC 0/2 title vs. a user-set name), not this shape.
+/// `displayName` is `controller.displayName` (terminal-manager.md T-D:
+/// user name, then auto title, then a generated fallback).
 nonisolated struct TerminalSessionRow: Identifiable, Equatable, Sendable {
     let id: UUID
     let displayName: String
@@ -13,18 +13,26 @@ nonisolated struct TerminalSessionRow: Identifiable, Equatable, Sendable {
     let status: TerminalSessionStatus
     let isParked: Bool
     let needsAttention: Bool
+    /// Whether `displayName` came from a user-set name rather than the auto
+    /// title/fallback — drives the panel's "Reset to Automatic Name" menu
+    /// item (terminal-manager.md T-D), shown only when this is `true`.
+    let hasUserName: Bool
+    /// Color TAG (terminal-manager.md T-D), or `nil` for no tag. Never the
+    /// only signal for anything — always paired with `status`'s glyph/label.
+    let sessionColor: TerminalSessionColor?
 }
 
 /// Pure presentation helpers for `TerminalSessionRow` — symbol/label/string
 /// derivations only, no FileManager or process work, so they are safe to
 /// call from a view body.
 nonisolated enum TerminalSessionPresentation {
-    /// Three SHAPE-distinct symbols (never color alone, AGENTS) so status is
+    /// Four SHAPE-distinct symbols (never color alone, AGENTS) so status is
     /// legible under Increase Contrast / Reduce Transparency / grayscale.
     static func symbol(_ status: TerminalSessionStatus) -> String {
         switch status {
         case .idle: "circle"
         case .running: "circle.fill"
+        case .bell: "bell.fill"
         case .exited: "xmark.circle.fill"
         }
     }
@@ -33,18 +41,32 @@ nonisolated enum TerminalSessionPresentation {
         switch status {
         case .idle: "Idle"
         case .running: "Running"
+        case .bell: "Needs attention"
         case .exited(let code?): "Exited (\(code))"
         case .exited(nil): "Exited"
         }
     }
 
-    /// `false` for every status this build knows about — T-E's `.bell` case
-    /// is the first one that returns `true`; nothing else in this function
-    /// changes when that lands.
+    /// `true` only for `.bell` (terminal-manager.md T-E) — this single
+    /// change is what lights the rail badge and the panel row highlight;
+    /// no view code changes when this landed.
     static func needsAttention(_ status: TerminalSessionStatus) -> Bool {
         switch status {
+        case .bell: true
         case .idle, .running, .exited: false
         }
+    }
+
+    /// `true` only for `.exited` — the one state where "shell exited"
+    /// chrome (the tab item's stopped dot, `EditorTerminalTabContent`'s
+    /// overlay) should show. Deliberately its OWN predicate rather than
+    /// `!isRunning`: `.bell` is neither running NOR exited, and testing
+    /// `!isRunning` for "exited" was exactly the terminal-manager.md T-E
+    /// regression this guards against — a belling session must not show
+    /// "Shell exited".
+    static func isExited(_ status: TerminalSessionStatus) -> Bool {
+        if case .exited = status { return true }
+        return false
     }
 
     /// `path` relative to `workspaceRoot` when it is nested underneath it
@@ -75,6 +97,19 @@ nonisolated enum TerminalSessionPresentation {
         }
         return path
     }
+
+    /// Middle-truncates a terminal tab label at `limit` CHARACTERS
+    /// (grapheme clusters, not UTF-8 bytes — so a multibyte/emoji name never
+    /// splits a scalar mid-truncation). Identity under/at `limit`.
+    static func tabLabel(_ name: String, limit: Int = 20) -> String {
+        guard name.count > limit, limit > 1 else { return name }
+        let keep = limit - 1
+        let headCount = (keep + 1) / 2
+        let tailCount = keep - headCount
+        let head = name.prefix(headCount)
+        let tail = name.suffix(tailCount)
+        return "\(head)…\(tail)"
+    }
 }
 
 /// Derives the terminals panel's rows and rail-badge count from live model
@@ -96,13 +131,15 @@ nonisolated enum TerminalsPanelModel {
             let directory = controller.currentDirectoryPath ?? controller.startingDirectory
             return TerminalSessionRow(
                 id: controller.id,
-                displayName: controller.title,
+                displayName: controller.displayName,
                 shellName: controller.shellDisplayName,
                 directoryLabel: TerminalSessionPresentation.directoryLabel(
                     path: directory, workspaceRoot: workspaceRoot),
                 status: controller.status,
                 isParked: !presentedIDs.contains(controller.id),
-                needsAttention: TerminalSessionPresentation.needsAttention(controller.status)
+                needsAttention: TerminalSessionPresentation.needsAttention(controller.status),
+                hasUserName: controller.userName != nil,
+                sessionColor: controller.sessionColor
             )
         }
     }

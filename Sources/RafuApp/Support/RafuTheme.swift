@@ -374,6 +374,22 @@ enum RafuThemeCatalog {
     }
 }
 
+extension RafuThemePalette {
+    /// Resolves a terminal session's color TAG to this theme's token
+    /// (terminal-manager.md T-D) — never a raw hex value, so every theme
+    /// restyles tagged sessions automatically.
+    func color(for sessionColor: TerminalSessionColor) -> Color {
+        switch sessionColor {
+        case .accent: accent
+        case .info: info
+        case .success: success
+        case .warning: warning
+        case .error: error
+        case .muted: textMuted
+        }
+    }
+}
+
 extension Color {
     nonisolated init(rafuHex: String) {
         self.init(nsColor: NSColor(rafuHex: rafuHex))

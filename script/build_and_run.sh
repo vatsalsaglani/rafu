@@ -141,6 +141,24 @@ cat >"$INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
+# Best-effort ad-hoc sign the staged bundle. Without a bundle identity,
+# macOS's `UNUserNotificationCenter.current()` (terminal-manager.md T-E's
+# attention notifications) is known to fail or trap
+# ("bundleProxyForCurrentProcess is nil") against an unsigned app. `--sign -`
+# needs no Developer ID/keychain entry, so this stays CI/local-safe.
+#
+# NOT fatal on failure: the vendored tree-sitter resource bundle
+# ("$RESOURCE_BUNDLE_NAME") deliberately sits at the .app TOP LEVEL, beside
+# Contents (see Sources/RafuApp/Resources/Grammars/README.md) — SwiftPM's
+# flat resource-bundle layout requires this for `Bundle.module` to resolve
+# it, both under `swift test`/`swift run` and here. `codesign` treats a
+# loose top-level directory as "unsealed contents present in the bundle
+# root" and exits non-zero even under `--force`/`--deep`; this is a known,
+# accepted limitation, not a build failure — every other verification step
+# below (build, resources, launch) must still pass regardless of whether
+# this signing step fully seals the resource bundle.
+codesign --force --sign - --timestamp=none "$APP_BUNDLE" || true
+
 plutil -lint "$INFO_PLIST" >/dev/null
 test -x "$APP_BINARY"
 test -x "$CLI_BINARY"

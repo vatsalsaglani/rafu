@@ -41,6 +41,14 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         MemoryPressureMonitor.shared.start()
         LauncherIPCServer.shared.start()
+        // Registering the reply-capable notification category and
+        // delegate never prompts for permission — safe unconditionally, at
+        // launch, before the user has ever enabled or triggered a terminal
+        // bell notification (terminal-manager.md T-E). This is the only
+        // call into `SystemTerminalAttentionNotifier` from outside
+        // `WorkspaceSession`, and it stays free of `import
+        // UserNotifications` itself — the static method is the seam.
+        SystemTerminalAttentionNotifier.registerCategoryAndDelegate()
     }
 
     func applicationWillTerminate(_ notification: Notification) {

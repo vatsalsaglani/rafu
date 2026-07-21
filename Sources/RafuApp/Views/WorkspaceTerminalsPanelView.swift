@@ -13,6 +13,13 @@ import SwiftUI
 struct WorkspaceTerminalsPanelView: View {
     @Bindable var session: WorkspaceSession
     @Environment(\.rafuTheme) private var theme
+    /// Inline rename state (terminal-manager.md T-D) lives on the PANEL, not
+    /// the row: rows are recreated every render from `TerminalsPanelModel
+    /// .rows`, so holding the in-progress text on a row would lose it (or
+    /// the field's focus) across any unrelated re-render. Only one row can
+    /// be renaming at a time.
+    @State private var renamingID: UUID?
+    @State private var renameText = ""
 
     var body: some View {
         // Derived ONCE per body evaluation, never per-row inside a `ForEach`
@@ -106,9 +113,16 @@ struct WorkspaceTerminalsPanelView: View {
                 TerminalSessionRowView(
                     row: row,
                     isSelected: session.terminal.selectedID == row.id,
+                    isRenaming: renamingID == row.id,
+                    renameText: $renameText,
                     reveal: { session.revealTerminalSession(row.id) },
                     hide: row.isParked ? nil : { session.hideTerminalSession(row.id) },
-                    close: { session.closeTerminalSession(row.id) }
+                    close: { session.closeTerminalSession(row.id) },
+                    beginRename: { beginRename(row) },
+                    commitRename: { commitRename(row.id) },
+                    cancelRename: cancelRename,
+                    resetName: { session.renameTerminalSession(row.id, to: nil) },
+                    setColor: { color in session.setTerminalSessionColor(row.id, color) }
                 )
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
@@ -116,6 +130,22 @@ struct WorkspaceTerminalsPanelView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+    }
+
+    private func beginRename(_ row: TerminalSessionRow) {
+        renameText = row.displayName
+        renamingID = row.id
+    }
+
+    private func commitRename(_ id: UUID) {
+        session.renameTerminalSession(id, to: renameText)
+        renamingID = nil
+        renameText = ""
+    }
+
+    private func cancelRename() {
+        renamingID = nil
+        renameText = ""
     }
 }
 
@@ -126,26 +156,56 @@ struct WorkspaceTerminalsPanelView: View {
 private struct TerminalSessionRowView: View {
     let row: TerminalSessionRow
     let isSelected: Bool
+    let isRenaming: Bool
+    @Binding var renameText: String
     let reveal: () -> Void
     /// `nil` when the row is already parked — there is no tab left to hide.
     let hide: (() -> Void)?
     let close: () -> Void
+    let beginRename: () -> Void
+    let commitRename: () -> Void
+    let cancelRename: () -> Void
+    let resetName: () -> Void
+    let setColor: (TerminalSessionColor?) -> Void
 
     @Environment(\.rafuTheme) private var theme
+    @FocusState private var isRenameFieldFocused: Bool
 
     var body: some View {
         HStack(spacing: 8) {
+            // Color TAG dot (terminal-manager.md T-D) — never the only
+            // signal: always paired with the status glyph beside it.
+            if let sessionColor = row.sessionColor {
+                Circle()
+                    .fill(theme.palette.color(for: sessionColor))
+                    .frame(width: 7, height: 7)
+                    .accessibilityHidden(true)
+            }
             Image(systemName: TerminalSessionPresentation.symbol(row.status))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(statusTint)
                 .accessibilityLabel(TerminalSessionPresentation.label(row.status))
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
-                    Text(row.displayName)
-                        .fontWeight(.medium)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .foregroundStyle(theme.palette.textPrimary)
+                    if isRenaming {
+                        TextField("Name", text: $renameText)
+                            .textFieldStyle(.plain)
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(theme.palette.textPrimary)
+                            .focused($isRenameFieldFocused)
+                            .onSubmit(commitRename)
+                            .onExitCommand(perform: cancelRename)
+                            .onAppear { isRenameFieldFocused = true }
+                            .onChange(of: isRenameFieldFocused) { _, focused in
+                                if !focused { commitRename() }
+                            }
+                    } else {
+                        Text(row.displayName)
+                            .fontWeight(.medium)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .foregroundStyle(theme.palette.textPrimary)
+                    }
                     if row.isParked {
                         Image(systemName: "eye.slash")
                             .font(.system(size: 9))
@@ -186,24 +246,31 @@ private struct TerminalSessionRowView: View {
         }
         .padding(.vertical, 3)
         .contentShape(.rect)
-        .background(isSelected ? theme.palette.selection : Color.clear)
+        .background(rowBackground)
         .onTapGesture { reveal() }
         .contextMenu { actions }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
     }
 
-    /// Rename is present but disabled — it advertises where the action will
-    /// live once T-D adds `userName`; a permanently enabled no-op would be
-    /// worse than a disabled placeholder. Restart Shell is deliberately NOT
-    /// offered here: `WorkspaceTerminalController.restart()` only respawns
-    /// when a `TerminalHostView` mounts, and a parked row has no view, so a
-    /// panel-only restart would strand the session `.exited` forever. Reveal
-    /// (which mounts the exited overlay's own Restart Shell) covers that.
+    /// Restart Shell is deliberately NOT offered here:
+    /// `WorkspaceTerminalController.restart()` only respawns when a
+    /// `TerminalHostView` mounts, and a parked row has no view, so a
+    /// panel-only restart would strand the session `.exited` forever.
+    /// Reveal (which mounts the exited overlay's own Restart Shell) covers
+    /// that.
     @ViewBuilder
     private var actions: some View {
-        Button("Rename…", systemImage: "pencil") {}
-            .disabled(true)
+        Button("Rename…", systemImage: "pencil") { beginRename() }
+        if row.hasUserName {
+            Button("Reset to Automatic Name", systemImage: "arrow.uturn.backward") { resetName() }
+        }
+        Menu("Color", systemImage: "paintpalette") {
+            Button("None") { setColor(nil) }
+            ForEach(TerminalSessionColor.allCases, id: \.self) { color in
+                Button(color.displayName) { setColor(color) }
+            }
+        }
         Divider()
         Button("Reveal", systemImage: "eye") { reveal() }
         if let hide {
@@ -217,8 +284,18 @@ private struct TerminalSessionRowView: View {
         switch row.status {
         case .running: theme.palette.accent
         case .idle: theme.palette.textSecondary
+        case .bell: theme.palette.accent
         case .exited: theme.palette.textMuted
         }
+    }
+
+    /// A subtle attention wash (never the only signal — the glyph/label
+    /// already say "Needs attention") for an unselected belling row;
+    /// selection tint always wins when both apply.
+    private var rowBackground: Color {
+        if isSelected { return theme.palette.selection }
+        if row.needsAttention { return theme.palette.accentSoft }
+        return .clear
     }
 
     private var accessibilityText: String {
