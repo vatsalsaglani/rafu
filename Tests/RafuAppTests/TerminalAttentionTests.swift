@@ -566,3 +566,25 @@ func selectingTabDismissesHUD() throws {
     #expect(first.status == .running)
     #expect(hud.clearedIDs == [first.id])
 }
+
+@Test("NUL buffer cells between words become spaces, never glue words together")
+func snippetPreservesWordGapsFromNulCells() {
+    // TUIs position words with cursor movement, leaving NUL cells between
+    // them — the regression that rendered "Hey!We'reontherafurepo".
+    let line = "Hey!\u{0}We're\u{0}on\u{0}the\u{0}rafu\u{0}repo"
+    let snippet = TerminalAttentionPolicy.snippet(from: [line])
+    #expect(snippet == "Hey! We're on the rafu repo")
+}
+
+@Test("Decorative rule lines are dropped from the snippet")
+func snippetDropsDecorativeRules() {
+    let lines = [
+        "❯ hey",
+        String(repeating: "─", count: 60),
+        "---------------",
+        "Sautéed for 4s",
+    ]
+    #expect(TerminalAttentionPolicy.snippet(from: lines) == "❯ hey\nSautéed for 4s")
+    // Real content with repeated characters is NOT a rule.
+    #expect(TerminalAttentionPolicy.snippet(from: ["wheeeeeeeeeeee!"]) == "wheeeeeeeeeeee!")
+}

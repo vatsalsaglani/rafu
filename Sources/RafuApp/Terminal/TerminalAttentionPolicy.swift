@@ -47,7 +47,8 @@ nonisolated enum TerminalAttentionPolicy {
         maxLineBytes: Int = 200,
         maxBytes: Int = 512
     ) -> String {
-        let sanitizedLines = lines.map(sanitizedControlFreeLine).filter { !$0.isEmpty }
+        let sanitizedLines = lines.map(sanitizedControlFreeLine)
+            .filter { !$0.isEmpty && !isDecorativeRule($0) }
         let kept = sanitizedLines.suffix(maxLines)
         guard !kept.isEmpty else { return "" }
         let bounded = kept.map { boundedUTF8($0, maxBytes: maxLineBytes) }
@@ -87,13 +88,33 @@ nonisolated enum TerminalAttentionPolicy {
         var scalars = String.UnicodeScalarView()
         for scalar in line.unicodeScalars {
             switch scalar.value {
-            case 0, 0x01...0x1F, 0x7F...0x9F:
+            case 0:
+                // NUL is a never-written buffer cell, NOT junk: TUIs (claude,
+                // codex) position words with cursor movement instead of
+                // literal spaces, so the cells BETWEEN words are NUL.
+                // Dropping them glued every word together
+                // ("Hey!We'reontherafurepo"); they must become spaces, which
+                // `collapsedWhitespace` then de-duplicates.
+                scalars.append(" ")
+            case 0x01...0x1F, 0x7F...0x9F:
                 continue
             default:
                 scalars.append(scalar)
             }
         }
         return collapsedWhitespace(String(scalars))
+    }
+
+    /// Drops purely decorative lines — a TUI's horizontal rules
+    /// ("──────…", "-----") — which waste one of the snippet's six lines
+    /// saying nothing. Structural check only (repetition of one
+    /// non-alphanumeric character), never content interpretation.
+    private static func isDecorativeRule(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count >= 8, let first = trimmed.first, !first.isLetter, !first.isNumber
+        else { return false }
+        let dominant = trimmed.filter { $0 == first }.count
+        return Double(dominant) / Double(trimmed.count) >= 0.9
     }
 
     private static func collapsedWhitespace(_ text: String) -> String {
