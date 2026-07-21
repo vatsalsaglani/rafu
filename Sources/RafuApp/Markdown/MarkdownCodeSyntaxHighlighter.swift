@@ -75,17 +75,20 @@ nonisolated struct TreeSitterCodeSyntaxHighlighter: CodeSyntaxHighlighter {
     /// One-shot parse (deliberately not reusing the live editor's
     /// incremental `SyntaxParsingActor` tree — out of scope here, and this
     /// path has no open `EditorDocument` to attach to anyway) + a highlights
-    /// query pass, building an `NSMutableAttributedString` the same way
-    /// `SyntaxHighlighter.attributes(for:)` styles editor tokens so a fence
-    /// and the live editor render a language identically. `nil` on any
+    /// query pass — the parse+query core now lives in the shared
+    /// `PlainTextSyntaxHighlighter.spans(text:language:highlightsQuery:)`
+    /// (also used by the diff canvas's `DiffSyntaxHighlighter`); this method
+    /// only adds theming, building an `NSMutableAttributedString` the same
+    /// way `SyntaxHighlighter.attributes(for:)` styles editor tokens so a
+    /// fence and the live editor render a language identically. `nil` on any
     /// parser/query failure.
     @MainActor
     private static func highlightedAttributedString(
         code: String, grammarID: GrammarLanguageID, query: Query, theme: RafuTheme
     ) -> NSAttributedString? {
-        let parser = Parser()
-        guard (try? parser.setLanguage(grammarID.language)) != nil,
-            let tree = parser.parse(code)
+        guard
+            let spans = PlainTextSyntaxHighlighter.spans(
+                text: code, language: grammarID.language, highlightsQuery: query)
         else { return nil }
 
         let highlighter = SyntaxHighlighter(theme: theme, fileExtension: "", fileName: "")
@@ -96,17 +99,10 @@ nonisolated struct TreeSitterCodeSyntaxHighlighter: CodeSyntaxHighlighter {
                 .foregroundColor: NSColor(rafuHex: theme.editor.foreground),
             ]
         )
-        let fullRange = NSRange(location: 0, length: mutable.length)
-
-        let cursor = query.execute(in: tree)
-        for namedRange in cursor.highlights() {
-            guard let themeKey = CaptureTokenMap.themeKey(forCapture: namedRange.name) else {
-                continue
-            }
-            let range = NSIntersectionRange(fullRange, namedRange.range)
-            guard range.length > 0 else { continue }
+        for span in spans {
             mutable.addAttributes(
-                highlighter.attributes(for: Token(name: themeKey, range: range)), range: range)
+                highlighter.attributes(for: Token(name: span.themeKey, range: span.range)),
+                range: span.range)
         }
         return mutable
     }

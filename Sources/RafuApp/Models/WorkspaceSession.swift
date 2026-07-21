@@ -872,6 +872,83 @@ final class WorkspaceSession {
         )
     }
 
+    /// Hover for the NEW side of an open, WORKING-TREE-scoped diff — the
+    /// diff canvas's only supported hover surface
+    /// (`docs/plans/phases/diff-syntax-highlighting-and-hover.md`). The old
+    /// side and any history/commit-scoped diff NEVER get hover: that text
+    /// may not exist on disk or may not match what the language server has
+    /// synced, so any answer about it would be a guess — a deliberate
+    /// product decision, not a deferral. Sibling to `hoverInfo(at:
+    /// utf16Offset:)` rather than a loosened guard on it: the diff canvas is
+    /// never `selectedDocument`, so that function's document-identity guard
+    /// can stay exactly as strict as it is today.
+    ///
+    /// Reads the CURRENT text: the matching open document's live snapshot
+    /// when it is open and not dirty (an unsaved edit shifts line numbers,
+    /// so hover suppresses rather than lying — same rule inline blame
+    /// follows), otherwise the on-disk file via `fileService.readText`.
+    /// `nil` when: there is no workspace root, the open diff doesn't match
+    /// `path`, the diff's scope isn't `.workingTree`, the matching open
+    /// document is dirty, the text can't be read, `DiffHoverPositionMapper`
+    /// can't place `(line, utf16Column)` in that text (the file changed
+    /// since the diff was captured), or every navigation tier declines —
+    /// the same LSP-only contract as `hoverInfo(at:utf16Offset:)`, reused
+    /// unmodified via the same `navigationLadder`.
+    ///
+    /// LSP document-sync caveat: if `path` isn't open in the editor, the
+    /// language server may have no synced document for it
+    /// (`documentDidOpen` only fires on open, see `registerDocument`). This
+    /// deliberately does NOT open a hidden/transient document to force a
+    /// sync — a closed file's hover simply doesn't appear until the file is
+    /// opened once; that limitation is documented, not worked around, in
+    /// this phase.
+    func diffHoverInfo(path: String, line: Int, utf16Column: Int) async -> EditorHoverInfo? {
+        guard let rootURL,
+            let gitOpenDiff, gitOpenDiff.diff.path == path,
+            gitOpenDiff.scope == .workingTree,
+            let ladder = navigationLadder
+        else { return nil }
+
+        let documentURL = rootURL.appending(path: path)
+        let openDocument = openDocuments.first { $0.url == documentURL }
+        if let openDocument, openDocument.isDirty { return nil }
+
+        let text: String
+        if let snapshot = openDocument?.textSnapshotProvider?() {
+            text = snapshot
+        } else if let onDisk = try? await fileService.readText(at: documentURL) {
+            text = onDisk
+        } else {
+            return nil
+        }
+
+        guard
+            let offset = DiffHoverPositionMapper.utf16Offset(
+                line: line, utf16Column: utf16Column, in: text)
+        else { return nil }
+
+        let symbolName = IdentifierUnderCaret.word(in: text, at: offset)?.word
+        let request = NavigationRequest(
+            documentURL: documentURL,
+            position: offset,
+            languageID: resolveLanguageID(for: documentURL),
+            kind: .hover,
+            symbolName: symbolName
+        )
+        let answer = try? await ladder.resolve(request)
+        guard let hoverText = answer?.candidates.first?.previewLine, !hoverText.isEmpty else {
+            return nil
+        }
+        let parsed = HoverMarkdownParser.parse(hoverText, isMarkdown: true)
+        return EditorHoverInfo(
+            text: hoverText,
+            symbolName: symbolName,
+            signature: parsed.signature,
+            documentation: parsed.documentation,
+            isMarkdown: true
+        )
+    }
+
     /// Jumps straight to a resolved navigation candidate — used both for a
     /// single-candidate `navigate(kind:)` outcome and for a row selected from
     /// `NavigationPeekView`. Dismisses the peek (a no-op if it was never

@@ -189,3 +189,23 @@ cost of `NSString.lineRange(for:)`, deterministic-vs-timing test guidance,
 and the headless `NSView.display()` no-op / `cacheDisplay` testing
 pattern. No ADR: no architectural fork, only a bug fix and a testing
 correction.
+
+### 2026-07-20 (continued): Diff canvas syntax highlighting + new-side-only hover
+
+Advisor→implementor→documentor pass for
+[`diff-syntax-highlighting-and-hover.md`](diff-syntax-highlighting-and-hover.md):
+the editor-hosted diff canvas now syntax-highlights both columns (per-side
+join-then-slice tree-sitter parsing via a new shared
+`PlainTextSyntaxHighlighter` core plus `DiffSyntaxHighlighter`, theme-
+independent spans cached per opened diff and resolved to colors at render)
+and offers hover on the new side only of working-tree-scoped diffs
+(LSP-only, gated by scope/dirty-state/file-open checks, via a new
+`DiffHoverPositionMapper` and `WorkspaceSession.diffHoverInfo`). Advisor
+read-only review approved the implementation; the review's one hardening
+suggestion (a `Task.isCancelled` guard around the `.task(id:)` diff-highlight
+cache assignment) landed before handoff. New baseline: 876 tests, both
+`swift test` and `swift test --no-parallel` green, 0 build warnings, lint
+clean. Uncommitted, pending the user's hands-on review. New reference note:
+[`diff-syntax-highlighting-and-hover.md`](../../references/diff-syntax-highlighting-and-hover.md).
+No ADR (stays inside ADR 0005's opt-in LSP client and the approved
+tree-sitter boundary).

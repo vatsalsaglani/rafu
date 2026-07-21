@@ -44,6 +44,7 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`github-cli-integration.md`](github-cli-integration.md) | Implementing or changing GitHub account lookup, repository publishing, or the locator/subprocess/error-taxonomy for system `gh` CLI invocations |
 | [`ai-ignore-suggestion-privacy.md`](ai-ignore-suggestion-privacy.md) | Changing ignore-file suggestion prompts, tree serialization, response parsing, bounds, or the explicit accept-before-write policy |
 | [`macos26-writing-tools-textkit-layout.md`](macos26-writing-tools-textkit-layout.md) | Understanding the macOS 26 Writing Tools full-TextKit-1-layout hang on selection change, why `RafuTextView` disables `writingToolsBehavior`, and the deferred `allowsNonContiguousLayout` evaluation |
+| [`diff-syntax-highlighting-and-hover.md`](diff-syntax-highlighting-and-hover.md) | Diff-canvas syntax highlighting (per-side join-then-slice parsing, the pre-resolved-Language+Query seam, UTF-16 span → `AttributedString` conversion), and new-side-only hover (LSP-only navigation ladder, monospace column hit-test, `.task(id:)` stale-assignment guard) |
 
 ## Reference-note template
 

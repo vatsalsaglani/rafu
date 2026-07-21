@@ -1,7 +1,26 @@
 # Diff syntax highlighting + new-side hover
 
-Status: planned, not started. Owner: one agent in a dedicated worktree.
-Prepared 2026-07-20 against `main` (853 tests, 0 warnings baseline).
+Status: Implemented (2026-07-20). Diff canvas syntax highlighting (both
+columns, parsed per side, cached per opened diff, theme-independent spans
+resolved to colors at render time) and new-side-only hover (working-tree-
+scoped diffs, non-dirty file, LSP-only via the existing `NavigationLadder` —
+no tree-sitter hover fallback exists) shipped with 20 new tests (876 total,
+`swift test` and `swift test --no-parallel` both green, 0 build warnings,
+`./script/format.sh --lint` clean). LSP document-sync caveat carried
+forward from `hoverInfo(at:utf16Offset:)`: a closed file has no synced
+mirror, so its hover doesn't appear until opened once — documented, not
+worked around. Interactive GUI checklist (hover card appearance/dismissal,
+old-side and history-scope hover suppression, 1,000+ line diff scroll
+smoothness, theme-switch recolor without reparse) still owed a manual pass;
+`./script/build_and_run.sh --verify` confirmed a clean stage + launch.
+Prepared 2026-07-20 against `main` (853 tests, 0 warnings baseline; the
+runtime-measured baseline immediately before this work was 856 tests).
+Advisor read-only review approved the implementation; one hardening item
+from that review landed before handoff: the `.task(id:)` diff-highlight
+cache assignment in `GitSideBySideDiffView` is now guarded by
+`Task.isCancelled` so a superseded parse can't briefly overwrite a newer
+diff's spans (see the `diff-syntax-highlighting-and-hover.md` reference
+note).
 
 ## Goal
 

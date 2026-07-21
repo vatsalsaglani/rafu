@@ -1017,6 +1017,17 @@ private struct GitSideBySideDiffView: View {
     let openDiff: GitOpenDiff
     @Bindable var session: WorkspaceSession
 
+    /// Cached per-side token spans for `openDiff`, computed off-main by
+    /// `DiffSyntaxHighlighter` and re-run only when `openDiff.id` changes
+    /// (`.task(id:)` below) — NOT on theme change, since spans carry only a
+    /// `themeKey` and `GitDiffCell` resolves the actual color at render
+    /// time. `nil` before the first computation and for a diff with no
+    /// eligible grammar; `GitDiffCell` renders plainly in both cases.
+    @State private var highlights: DiffSyntaxHighlighter.DiffHighlights?
+    /// Row → per-side line-index lookup for `highlights`, precomputed
+    /// alongside it so no row-position scanning happens in `body`.
+    @State private var lineIndexMap = DiffLineIndexMap(rows: [])
+
     var body: some View {
         VStack(spacing: 0) {
             diffHeader
@@ -1040,6 +1051,48 @@ private struct GitSideBySideDiffView: View {
             }
         }
         .background(theme.palette.editorBackground)
+        .task(id: openDiff.id) {
+            // Guard the assignment against a superseded task: `.task(id:)`
+            // cancels but does not await the prior task, and a parse that
+            // finished before cancellation would otherwise briefly overwrite
+            // the NEW diff's spans with the previous diff's. The check also
+            // keeps `lineIndexMap`/`highlights` mutually consistent for the
+            // same diff.
+            let map = DiffLineIndexMap(rows: openDiff.diff.rows)
+            let result = await DiffSyntaxHighlighter.highlights(for: openDiff.diff)
+            if Task.isCancelled { return }
+            lineIndexMap = map
+            highlights = result
+        }
+    }
+
+    /// New-side-only hover entry point (Part B, product decision: the old
+    /// side and non-working-tree diffs never hover). Passed to
+    /// `GitSideBySideDiffRow` only when `openDiff.scope == .workingTree`
+    /// (view-level gating), and `session.diffHoverInfo` re-checks the same
+    /// conditions independently, so a future call site can't accidentally
+    /// bypass either gate.
+    private func requestHover(line: Int, utf16Column: Int) async -> EditorHoverInfo? {
+        await session.diffHoverInfo(path: openDiff.diff.path, line: line, utf16Column: utf16Column)
+    }
+
+    /// Builds one diff row, indexing `highlights`/`lineIndexMap` for its
+    /// spans. Extracted out of `diffTable`'s `ForEach` closure (rather than
+    /// inlined) purely to keep the surrounding `ScrollView`/`LazyVStack`
+    /// result-builder chain within the type checker's inference budget —
+    /// no behavior difference, still a pure index into the precomputed
+    /// cache, no parse work.
+    private func diffRowView(for row: GitDiffRow) -> some View {
+        var hoverHandler: ((Int, Int) async -> EditorHoverInfo?)?
+        if openDiff.scope == .workingTree {
+            hoverHandler = requestHover
+        }
+        return GitSideBySideDiffRow(
+            row: row,
+            oldSpans: highlights.flatMap { lineIndexMap.oldSpans(for: row, in: $0) },
+            newSpans: highlights.flatMap { lineIndexMap.newSpans(for: row, in: $0) },
+            hover: hoverHandler
+        )
     }
 
     private var diffHeader: some View {
@@ -1084,7 +1137,7 @@ private struct GitSideBySideDiffView: View {
                         ForEach(openDiff.diff.hunks) { hunk in
                             hunkHeader(hunk)
                             ForEach(hunk.rows) { row in
-                                GitSideBySideDiffRow(row: row)
+                                diffRowView(for: row)
                             }
                         }
                     } header: {
@@ -1187,6 +1240,13 @@ private struct GitSideBySideDiffView: View {
 private struct GitSideBySideDiffRow: View {
     @Environment(\.rafuTheme) private var theme
     let row: GitDiffRow
+    var oldSpans: [SyntaxSpan]?
+    var newSpans: [SyntaxSpan]?
+    /// New-side-only hover request, `nil` for a history/commit-scoped diff
+    /// (`GitSideBySideDiffView` never passes one). Threaded straight through
+    /// to the new-side `GitDiffCell`; the old-side cell never receives it,
+    /// so it structurally cannot hover.
+    var hover: ((Int, Int) async -> EditorHoverInfo?)?
 
     var body: some View {
         let spans =
@@ -1199,12 +1259,12 @@ private struct GitSideBySideDiffRow: View {
         HStack(spacing: 0) {
             GitDiffCell(
                 line: row.oldLine, side: .old, rowKind: row.kind,
-                changedSpan: spans?.old
+                changedSpan: spans?.old, syntaxSpans: oldSpans
             )
             Divider().overlay(theme.palette.borderSubtle.opacity(0.6))
             GitDiffCell(
                 line: row.newLine, side: .new, rowKind: row.kind,
-                changedSpan: spans?.new
+                changedSpan: spans?.new, syntaxSpans: newSpans, hover: hover
             )
         }
         .frame(minHeight: 21)
@@ -1219,6 +1279,37 @@ private struct GitDiffCell: View {
     let side: Side
     let rowKind: GitDiffRowKind
     var changedSpan: Range<Int>?
+    /// Precomputed token spans for this line (UTF-16, line-relative), or
+    /// `nil` for plain rendering — no grammar, an unopened diff cache, or a
+    /// side over `DiffSyntaxHighlighter`'s highlighted-length cap. No parse
+    /// work happens here; this view only indexes into the cache.
+    var syntaxSpans: [SyntaxSpan]?
+    /// New-side-only hover request (`(line, utf16Column) async ->
+    /// EditorHoverInfo?`). `nil` for the old-side cell always, and for the
+    /// new-side cell of a history/commit-scoped diff — the product decision
+    /// that only the new side of a working-tree diff ever hovers.
+    var hover: ((Int, Int) async -> EditorHoverInfo?)?
+
+    @State private var hoverDebounceTask: Task<Void, Never>?
+    @State private var hoverInfo: EditorHoverInfo?
+    @State private var isHoverPresented = false
+
+    /// UTF-16-column advance for `.system(size: 12, design: .monospaced)` —
+    /// the diff cell's fixed content font — computed once via `NSFont`
+    /// metrics rather than per hover event. Pragmatic v1 column estimation
+    /// (phase brief B3): `column ≈ pointerX / monospaceAdvance`, clamped to
+    /// the line's UTF-16 length. Emoji/wide-glyph drift is accepted —
+    /// `IdentifierUnderCaret` snaps to the nearest word, and a miss shows no
+    /// card rather than a wrong one.
+    private static let monospaceAdvance: CGFloat = {
+        let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        return ("0" as NSString).size(withAttributes: [.font: font]).width
+    }()
+
+    /// Debounce before a stable hover resolves — matches the editor's own
+    /// hover delay (`RafuTextView.hoverDelay`) so both surfaces feel
+    /// consistent.
+    private static let hoverDelay: Duration = .milliseconds(350)
 
     var body: some View {
         HStack(spacing: 0) {
@@ -1238,17 +1329,90 @@ private struct GitDiffCell: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.trailing, 8)
+                .onContinuousHover(coordinateSpace: .local) { phase in
+                    switch phase {
+                    case .active(let point):
+                        scheduleHover(at: point.x)
+                    case .ended:
+                        cancelHover()
+                    }
+                }
+                .popover(isPresented: $isHoverPresented, arrowEdge: .bottom) {
+                    if let hoverInfo {
+                        EditorHoverTooltipView(info: hoverInfo, theme: theme)
+                    }
+                }
         }
         .frame(maxWidth: .infinity, minHeight: 21, alignment: .leading)
         .background(backgroundColor)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
+        .onDisappear(perform: cancelHover)
+    }
+
+    /// Schedules a debounced hover resolve at pointer x-offset `x` within
+    /// the content `Text`'s local coordinate space. A no-op for the old
+    /// side, a row without a `newLine`, a diff with no `hover` handler
+    /// (history/commit scope), or a column with no identifier under it —
+    /// every one of those cases must never show a card (AGENTS: state is
+    /// never color-only, and old-side/history hover is an explicit
+    /// non-goal). Cancels any in-flight resolve first so a fast pointer
+    /// sweep never stacks requests or shows a stale card.
+    private func scheduleHover(at x: CGFloat) {
+        hoverDebounceTask?.cancel()
+        guard side == .new, let line, let hover else {
+            cancelHover()
+            return
+        }
+        let column = Self.column(forX: x, in: line.content)
+        guard IdentifierUnderCaret.word(in: line.content, at: column) != nil else {
+            cancelHover()
+            return
+        }
+        let requestedLine = line.number
+        hoverDebounceTask = Task {
+            try? await Task.sleep(for: Self.hoverDelay)
+            if Task.isCancelled { return }
+            let info = await hover(requestedLine, column)
+            if Task.isCancelled { return }
+            hoverInfo = info
+            isHoverPresented = info != nil
+        }
+    }
+
+    /// Cancels any in-flight/scheduled resolve and dismisses the card —
+    /// pointer exit, row teardown, and a declined hover attempt all funnel
+    /// through here so hover never lingers or blocks scrolling (AGENTS).
+    private func cancelHover() {
+        hoverDebounceTask?.cancel()
+        hoverDebounceTask = nil
+        isHoverPresented = false
+    }
+
+    private static func column(forX x: CGFloat, in content: String) -> Int {
+        let length = (content as NSString).length
+        guard monospaceAdvance > 0 else { return 0 }
+        let raw = Int((x / monospaceAdvance).rounded())
+        return max(0, min(raw, length))
     }
 
     private var attributedContent: AttributedString {
         guard let line else { return AttributedString("") }
         var text = AttributedString(line.content)
         text.foregroundColor = theme.palette.textPrimary
+
+        if let syntaxSpans {
+            let contentLength = (line.content as NSString).length
+            for span in syntaxSpans {
+                guard span.range.location >= 0, span.range.length > 0,
+                    span.range.location + span.range.length <= contentLength,
+                    let hex = theme.syntax[span.themeKey]?.color,
+                    let range = Range<AttributedString.Index>(span.range, in: text)
+                else { continue }
+                text[range].foregroundColor = Color(rafuHex: hex)
+            }
+        }
+
         if let changedSpan, isChanged, !changedSpan.isEmpty,
             changedSpan.upperBound <= line.content.count
         {

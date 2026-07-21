@@ -43,7 +43,19 @@ nonisolated struct EditorHoverInfo: Sendable, Equatable {
 struct EditorHoverTooltipView: View {
     let info: EditorHoverInfo
     let theme: RafuTheme
-    let onGoToDeclaration: () -> Void
+    /// `nil` when the tooltip has no navigation target — the diff canvas's
+    /// new-side hover card (Part B of the diff-syntax-highlighting-and-hover
+    /// phase) presents this same view but has no caret/document to jump to,
+    /// so it renders no footer at all rather than a dead-end button. The
+    /// editor's own hover tooltip (`RafuTextView.showHoverTooltip`) always
+    /// supplies a closure, so its footer is unaffected.
+    let onGoToDeclaration: (() -> Void)?
+
+    init(info: EditorHoverInfo, theme: RafuTheme, onGoToDeclaration: (() -> Void)? = nil) {
+        self.info = info
+        self.theme = theme
+        self.onGoToDeclaration = onGoToDeclaration
+    }
 
     /// Fixed so the popover's measured height is deterministic: a variable
     /// width would make identical content report a different natural height
@@ -164,12 +176,16 @@ struct EditorHoverTooltipView: View {
 
     /// De-emphasized, borderless "Go to Declaration" affordance — a link,
     /// not a full-width primary button, so it doesn't dominate a short
-    /// signature-only hover.
+    /// signature-only hover. Renders nothing when `onGoToDeclaration` is
+    /// `nil` (no navigation target).
+    @ViewBuilder
     private var footer: some View {
-        Button("Go to Declaration", action: onGoToDeclaration)
-            .buttonStyle(.link)
-            .controlSize(.small)
-            .tint(theme.palette.accent)
+        if let onGoToDeclaration {
+            Button("Go to Declaration", action: onGoToDeclaration)
+                .buttonStyle(.link)
+                .controlSize(.small)
+                .tint(theme.palette.accent)
+        }
     }
 
     private var accessibilityLabel: String {
