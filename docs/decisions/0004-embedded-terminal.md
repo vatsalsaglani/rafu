@@ -53,4 +53,23 @@ Alternatives considered:
 - Memory claims must be re-measured with the panel open before distribution
   (shell + emulator expected in the tens of MB, only after first open).
 - Terminal support does not extend to an extension host, task runners, or
-  automatic command execution — the shell only runs what the user types.
+  automatic command execution — the shell only runs what the user types or
+  what the user themselves relays via a notification reply (see the
+  2026-07-21 amendment below).
+
+## 2026-07-21 amendment (`terminal-manager.md`)
+
+- **"Closing a tab terminates its shell" is superseded.** A session now
+  outlives its tab: ⌃` hides (parks) a terminal tab without killing the
+  shell; only explicit close (tab ✕, panel Close, `exit` in the shell)
+  terminates the process. The lazy-spawn, bounded-scrollback, per-window
+  ownership, and workspace-switch-terminates-all bounds are unchanged — see
+  ADR 0014's parallel amendment for the parked-session lifecycle detail.
+- **Two new, narrow exceptions to "the shell only runs what the user
+  types."** `terminal-manager.md` T-E adds: (a) a bounded, ephemeral,
+  viewport-only read of recent terminal output (6 lines / 512 bytes,
+  control-character-stripped, never logged/persisted/transmitted) used
+  solely to compose an attention-notification snippet, and (b) relaying the
+  user's own typed notification reply into the session's pty. Neither
+  capability lets Rafu compose, infer, or auto-execute a command; both are
+  scoped and justified in the new ADR 0016.

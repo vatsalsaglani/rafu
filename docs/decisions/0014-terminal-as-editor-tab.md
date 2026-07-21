@@ -64,6 +64,31 @@ When `editor-terminal-tabs.md`'s T2 (lifecycle policy, including placeholder
 restoration) lands, update this ADR's restoration statement or supersede it
 rather than silently changing behavior against this record.
 
+## 2026-07-21 amendment (`terminal-manager.md` stages T-A/T-C)
+
+- **Sessions outlive tabs.** A terminal SESSION (the running shell, owned by
+  `WorkspaceTerminalManager`) is now distinct from the editor TAB that
+  displays it. ⌃` no longer closes the focused terminal tab; it PARKS it —
+  the tab is removed from the layout but the session and its shell process
+  stay alive — and a second ⌃` (with no terminal tab focused) reveals the
+  most-recently-parked session as a tab again, ordered by a monotonic
+  `parkSequence` stamp. Parked-ness is DERIVED (sessions minus sessions
+  referenced by any `.terminal` tab in the layout), not a separately
+  bookkept flag, so drag/split/close paths cannot desync it.
+- **Hide vs. close is now an explicit verb split.** Only explicit close —
+  the tab ✕, the Terminals panel's Close action, or `exit` inside the
+  shell — terminates the process. Generic layout closes (tab-drag,
+  close-others, etc.) still default to CLOSE, preserving the "no orphaned
+  process" guarantee from a different angle than before.
+- **Bounded-lifetime guarantee, restated, unchanged in substance:** parking
+  a session never exempts it from teardown — workspace switch and app quit
+  still terminate every session, parked or not. What changed is only that
+  hiding a tab is no longer equivalent to closing it.
+- Full detail: [`terminal-manager.md`](../plans/phases/terminal-manager.md)
+  stages T-A (hide/close) and T-B (Terminals panel, the surface for parked
+  sessions). ADR 0004 carries the parallel amendment for the terminal
+  engine's non-goal boundary.
+
 ## Related plan, reference, and implementation paths
 
 - Plan: [`editor-terminal-tabs.md`](../plans/phases/editor-terminal-tabs.md)

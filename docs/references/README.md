@@ -45,6 +45,7 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`ai-ignore-suggestion-privacy.md`](ai-ignore-suggestion-privacy.md) | Changing ignore-file suggestion prompts, tree serialization, response parsing, bounds, or the explicit accept-before-write policy |
 | [`macos26-writing-tools-textkit-layout.md`](macos26-writing-tools-textkit-layout.md) | Understanding the macOS 26 Writing Tools full-TextKit-1-layout hang on selection change, why `RafuTextView` disables `writingToolsBehavior`, and the deferred `allowsNonContiguousLayout` evaluation |
 | [`diff-syntax-highlighting-and-hover.md`](diff-syntax-highlighting-and-hover.md) | Diff-canvas syntax highlighting (per-side join-then-slice parsing, the pre-resolved-Language+Query seam, UTF-16 span → `AttributedString` conversion), and new-side-only hover (LSP-only navigation ladder, monospace column hit-test, `.task(id:)` stale-assignment guard) |
+| [`terminal-signals-and-shell-catalog.md`](terminal-signals-and-shell-catalog.md) | Changing terminal session lifecycle, SwiftTerm delegate signals (title/cwd/exit and the bell-forwarding gap), bounded terminal-content reads, `/etc/shells` shell discovery, `UserDefaults`-not-`Sendable` stores, or `UNUserNotificationCenter` usage |
 
 ## Reference-note template
 

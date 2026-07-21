@@ -209,3 +209,31 @@ clean. Uncommitted, pending the user's hands-on review. New reference note:
 [`diff-syntax-highlighting-and-hover.md`](../../references/diff-syntax-highlighting-and-hover.md).
 No ADR (stays inside ADR 0005's opt-in LSP client and the approved
 tree-sitter boundary).
+
+### 2026-07-21: Terminal manager — sessions panel, hide/close, shells, attention
+
+Advisor→implementor→documentor pass for
+[`terminal-manager.md`](terminal-manager.md), landed across 4 commits (all
+five stages T-A through T-E): ⌃` now parks the focused terminal (tab
+removed, shell alive) instead of killing it, with reveal via a derived,
+MRU-ordered parked-session set; a third "Terminals" utility-rail panel
+lists sessions with status glyph, live cwd, and parked indicator; shell
+choice (`TerminalShellCatalog`, `/etc/shells` + Homebrew probing,
+existence/executability only) with a remembered preferred shell; auto-
+naming from OSC 0/2 titles plus inline rename and theme-token session
+colors; and per-session `.bell` attention state driving a rail badge and,
+reversing two positions the phase document had locked, an on-by-default
+(lazily authorized) system notification carrying a bounded output snippet
+and an inline reply routed back into the session's pty. A latent
+`WorkspaceNavigatorMode` decode bug (an unknown persisted mode threw and
+wiped the ENTIRE restoration store, not just the mode) was found and fixed
+during T-B. Verified: 956 tests passing in both `swift test` and `swift
+test --no-parallel`, 0 build warnings, lint clean. New reference note:
+[`terminal-signals-and-shell-catalog.md`](../../references/terminal-signals-and-shell-catalog.md).
+Amended [ADR 0004](../../decisions/0004-embedded-terminal.md) and
+[ADR 0014](../../decisions/0014-terminal-as-editor-tab.md) for the
+sessions-outlive-tabs lifecycle; new
+[ADR 0016](../../decisions/0016-terminal-attention-notifications.md)
+(Proposed) records the attention-notification reversals and their
+security argument. See `terminal-manager.md` for the corrected T-A/T-D
+claims and the accepted unbounded-exited-session-row trade-off.

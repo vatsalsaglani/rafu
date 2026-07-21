@@ -25,6 +25,7 @@ Accepted ADRs take precedence over older plan suggestions when they explicitly s
 | [0013](0013-git-experience-scope.md) | Proposed | Scope inline editor blame annotations (off by default), blame-hover/hunk-peek cards, and a theme-colored bounded commit graph; excludes background fetch/poll, repo-wide search scans, avatars, and discard-from-peek |
 | [0014](0014-terminal-as-editor-tab.md) | Proposed | Present terminal sessions as first-class, ephemeral (non-restored) editor tabs alongside file tabs, narrowing ADR 0004's bottom-panel-only placement; full lifecycle policy (restoration, cap, agent-workflow polish) remains future scope in `editor-terminal-tabs.md` |
 | [0015](0015-github-publishing-via-system-gh.md) | Accepted | Publish to GitHub via the user's own `gh` CLI (account lookup + `repo create --push`), never a bundled OAuth flow or GitHub REST client |
+| [0016](0016-terminal-attention-notifications.md) | Proposed | Terminal bell attention notifications carry a bounded (6-line/512-byte, control-stripped, viewport-only) output snippet and accept a user-typed reply routed back into the session's pty by a minted UUID; on by default with authorization requested lazily on first actual notify, not at launch |
 
 Unresolved choices are tracked in [`open-decisions.md`](open-decisions.md).
 

@@ -1,9 +1,36 @@
 # Terminal manager — sessions panel, hide-vs-close, shell flavors, attention states
 
-Status: planned, not started. Prepared 2026-07-21 against `main` plus the
-uncommitted diff-highlighting and window-chrome work (baseline 888 tests,
-0 warnings). Owner: one agent per stage; stages T-A/T-C can land together,
-T-B is the big one, T-D/T-E follow.
+Status: **Implemented** (2026-07-21), all five stages T-A through T-E, across
+4 commits (`afecf27` T-A+T-C, `cbc9cb8` T-B, `475faf1` T-D+T-E, plus this
+documentation pass). Verified: 956 tests passing in both `swift test` and
+`swift test --no-parallel`, 0 build warnings, lint clean. Prepared
+2026-07-21 against `main` plus the uncommitted diff-highlighting and
+window-chrome work (baseline 888 tests, 0 warnings).
+
+## Per-stage outcome
+
+- **T-A (hide vs. close):** shipped as planned. ⌃` parks the focused
+  terminal (tab removed, session/shell alive); a second ⌃` reveals the
+  most-recently-parked session (MRU via a monotonic `parkSequence` stamp).
+  Parked-ness is DERIVED (sessions minus sessions referenced by any
+  `.terminal` tab in the layout), not dual-bookkept. Explicit close (tab ✕,
+  panel Close, context menu) still terminates the shell. See the correction
+  below re: what natural exit already did.
+- **T-C (shell flavors):** shipped as planned. `TerminalShellCatalog`
+  discovers shells via `/etc/shells` + `$SHELL` + Homebrew probe paths,
+  existence/executability only, never by spawning; `PreferredShellStore`
+  remembers the last-used shell and self-clears when stale.
+- **T-B (Terminals panel):** shipped as planned. Third utility-rail button;
+  rows show status glyph, name, live OSC-7 cwd, and a parked indicator;
+  every action is reachable from both a context menu and a trailing
+  ellipsis menu. Fixed a latent bug found during this stage (see
+  correction below) in unrelated `WorkspaceNavigatorMode` decode
+  tolerance.
+- **T-D (identity: names and colors):** shipped, with one correction to
+  this document's rename description (see below).
+- **T-E (attention states):** shipped, with two locked positions in this
+  document explicitly reversed by the user during implementation — see
+  [ADR 0016](../../decisions/0016-terminal-attention-notifications.md).
 
 ## Why this phase exists
 
@@ -103,6 +130,18 @@ Implementation notes:
 - Shell exit (process termination callback in `WorkspaceTerminalController`)
   must remove the session from the manager AND close any tab showing it
   (today's behavior — verify it survives the split).
+
+  **Correction (implementation finding, 2026-07-21):** this line's premise
+  was wrong — today's behavior before this phase did NOT remove the
+  session or close the tab on natural exit; it only flipped `isRunning` to
+  `false` and left the session/tab in place (so "Restart Shell" stayed
+  reachable), while leaking a stale `ProcessResourceRegistry` row on every
+  natural exit. The shipped behavior instead LINGERS an exited session
+  with its tab and exit code (status `.exited(code:)`), releases its
+  terminal view, and unregisters it from `ProcessResourceRegistry` — fixing
+  the leak while preserving "Restart Shell" reachability. See the T-E
+  section's exited-session-lingering note below, which this correction
+  supersedes.
 - ADR 0014 (terminal-as-editor-tab) gets an amendment: sessions may be
   parked without a tab; the "no orphaned process" guarantee moves from
   "closing the tab kills the shell" to "closing the SESSION kills the shell;
@@ -224,9 +263,13 @@ fallback when the stored path vanished, per-basename login-arg table.
   display name = `userName ?? reportedTitle ?? "\(shellName) \(index)"`.
   This is what makes the panel self-labeling for agent sessions with zero
   user effort — the single highest-leverage detail in this phase.
-- **Rename:** panel context menu → inline TextField row edit (matches the
-  file-tree rename pattern). `userName` sticks; clearing it returns to
-  auto.
+- **Rename:** panel context menu → inline TextField row edit.
+
+  **Correction (implementation finding, 2026-07-21):** this line's claim
+  that the file-tree rename pattern is inline is wrong — the file-tree
+  rename is an `.alert`, not inline. T-D's panel rename IS true inline
+  (a TextField row edit), which is new to this feature, not a match to an
+  existing pattern. `userName` sticks; clearing it returns to auto.
 - **Color:** `sessionColor: TerminalSessionColor?` — an enum of ~6 theme
   palette tokens (accent, info, success, warning, error, textMuted), NOT
   raw colors, so themes restyle them. Shown as the row dot and as a thin
@@ -250,16 +293,24 @@ Per-session `status`:
   does this out of the box (`terminal-config` docs) and users bolt entire
   notification systems on top of exactly this signal.
 - `.exited(code)` — process terminated; row stays listed until closed so
-  the exit code is visible (today the session vanishes instantly; keep
-  auto-close for tab-visible sessions but let PARKED sessions linger as
-  `.exited` rows — decide in implementation; simplest honest v1: keep
-  today's auto-remove and show `.exited` only transiently, deferring
-  lingering rows).
-- Rail dot + panel highlight from `.bell` (T-B). Optional (off by default,
-  Settings toggle): post a user notification when a parked/unfocused
-  session bells — "Terminal 'claude' needs attention". Uses
-  `UNUserNotificationCenter`, needs the permission prompt on first enable;
-  keep strictly opt-in (AGENTS calm defaults).
+  the exit code is visible.
+
+  **Resolved (implementation finding, 2026-07-21):** the shipped design is
+  the fuller option this line left undecided — a naturally exited session
+  LINGERS with its tab and exit code (both tab-visible and parked
+  sessions), rather than auto-closing tab-visible ones. This also fixed the
+  pre-phase `ProcessResourceRegistry` leak described in T-A's correction
+  above. **Accepted trade-off, no cap:** exited sessions accumulate in the
+  panel with no automatic pruning or maximum count; the panel's Close
+  action is the sole dismiss affordance. Revisit if real usage shows
+  exited-row buildup becomes a problem.
+- Rail dot + panel highlight from `.bell` (T-B). A user notification when a
+  parked/unfocused session bells ships ON by default with lazily requested
+  authorization, and carries a bounded output snippet plus an inline reply
+  action — both locked positions in this line (opt-in/off-by-default,
+  never-parses-output-content) were explicitly reversed by the user during
+  implementation. See [ADR 0016](../../decisions/0016-terminal-attention-notifications.md)
+  for the full decision record and security argument.
 
 Tests: bell sets state only when unfocused; selecting the tab clears it;
 badge derivation; notification gate (enabled flag false → no post; use a
@@ -297,15 +348,24 @@ non-default shell, panel reveal/rename/color/close, bell → rail badge
 VoiceOver labels on rows and rail, Reduce Motion (no decorative row
 animation).
 
-## Documentation on completion
+## Documentation on completion (done, 2026-07-21)
 
-- Amend ADR 0004/0014: sessions-outlive-tabs lifecycle, the hide/close
-  verb split, and the bounded-lifetime guarantee (workspace switch / quit
-  kills all).
-- Reference note: SwiftTerm delegate signals used (title, OSC 7 cwd, bell,
-  process exit) and the no-content-parsing rule; `/etc/shells` catalog
-  behavior.
-- Update this doc's status + phases README row.
+- Amended [ADR 0004](../../decisions/0004-embedded-terminal.md) and
+  [ADR 0014](../../decisions/0014-terminal-as-editor-tab.md):
+  sessions-outlive-tabs lifecycle, the hide/close verb split, and the
+  bounded-lifetime guarantee (workspace switch / quit kills all).
+- New [ADR 0016](../../decisions/0016-terminal-attention-notifications.md)
+  (Proposed): the T-E attention-notification reversals (bounded snippet,
+  on-by-default with lazy authorization, sanitized reply routing) and their
+  security argument.
+- New reference note:
+  [`terminal-signals-and-shell-catalog.md`](../../references/terminal-signals-and-shell-catalog.md)
+  — SwiftTerm delegate signals used (title, OSC 7 cwd, process exit), the
+  bell-forwarding gap and its `open`-override fix, the bounded viewport
+  read recipe and `getBufferAsData` prohibition, `/etc/shells` catalog
+  rules, the `UserDefaults`-not-`Sendable` store pattern, and
+  `UNUserNotificationCenter`'s bundle-identity/signing requirement.
+- This doc's status and the phases README row updated to Implemented.
 
 ## Sources (research trail, July 2026)
 
