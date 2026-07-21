@@ -170,6 +170,8 @@ private struct TerminalSessionRowView: View {
 
     @Environment(\.rafuTheme) private var theme
     @FocusState private var isRenameFieldFocused: Bool
+    @State private var isColorPickerPresented = false
+    @State private var customColor = Color.accentColor
 
     var body: some View {
         HStack(spacing: 8) {
@@ -244,10 +246,25 @@ private struct TerminalSessionRowView: View {
             .help("Terminal actions")
             .accessibilityLabel("Terminal actions")
         }
-        .padding(.vertical, 3)
+        .padding(.horizontal, RafuMetrics.space3)
+        .padding(.vertical, RafuMetrics.space2)
         .contentShape(.rect)
-        .background(rowBackground)
+        .background(
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
+                .fill(rowBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
+                .strokeBorder(rowBorder)
+        )
+        // Double-click edits the name in place. Registered BEFORE the
+        // single-click reveal so SwiftUI can disambiguate; a single click
+        // still reveals.
+        .onTapGesture(count: 2) { beginRename() }
         .onTapGesture { reveal() }
+        .popover(isPresented: $isColorPickerPresented, arrowEdge: .trailing) {
+            colorPalette
+        }
         .contextMenu { actions }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
@@ -265,12 +282,9 @@ private struct TerminalSessionRowView: View {
         if row.hasUserName {
             Button("Reset to Automatic Name", systemImage: "arrow.uturn.backward") { resetName() }
         }
-        Menu("Color", systemImage: "paintpalette") {
-            Button("None") { setColor(nil) }
-            ForEach(TerminalSessionColor.allCases, id: \.self) { color in
-                Button(color.displayName) { setColor(color) }
-            }
-        }
+        // A popover rather than a submenu: `ColorPicker` cannot live inside
+        // a `Menu`, and the arbitrary-color picker is the point.
+        Button("Color…", systemImage: "paintpalette") { isColorPickerPresented = true }
         Divider()
         Button("Reveal", systemImage: "eye") { reveal() }
         if let hide {
@@ -278,6 +292,53 @@ private struct TerminalSessionRowView: View {
         }
         Divider()
         Button("Close", systemImage: "xmark.circle", role: .destructive) { close() }
+    }
+
+    /// Preset swatches plus the system color picker. Presets follow the
+    /// theme; a picked color is stored as literal sRGB hex and does not.
+    private var colorPalette: some View {
+        VStack(alignment: .leading, spacing: RafuMetrics.space3) {
+            Text("Session Color")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(theme.palette.textSecondary)
+            HStack(spacing: RafuMetrics.space2) {
+                ForEach(TerminalSessionColor.presets, id: \.self) { preset in
+                    Button {
+                        setColor(preset)
+                        isColorPickerPresented = false
+                    } label: {
+                        Circle()
+                            .fill(theme.palette.color(for: preset))
+                            .frame(width: 18, height: 18)
+                            .overlay(
+                                Circle().strokeBorder(
+                                    theme.palette.textPrimary,
+                                    lineWidth: row.sessionColor == preset ? 2 : 0
+                                )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .help(preset.displayName)
+                    .accessibilityLabel(preset.displayName)
+                }
+            }
+            ColorPicker("Custom", selection: $customColor, supportsOpacity: false)
+                .font(.caption)
+                .onChange(of: customColor) { _, picked in
+                    guard let hex = picked.rafuHexString,
+                        let custom = TerminalSessionColor.custom(fromHex: hex)
+                    else { return }
+                    setColor(custom)
+                }
+            Divider().overlay(theme.palette.borderSubtle)
+            Button("No Color") {
+                setColor(nil)
+                isColorPickerPresented = false
+            }
+            .buttonStyle(RafuSecondaryButtonStyle())
+        }
+        .padding(RafuMetrics.space4)
+        .frame(width: 220)
     }
 
     private var statusTint: Color {
@@ -295,7 +356,15 @@ private struct TerminalSessionRowView: View {
     private var rowBackground: Color {
         if isSelected { return theme.palette.selection }
         if row.needsAttention { return theme.palette.accentSoft }
-        return .clear
+        return theme.palette.cardBackground
+    }
+
+    /// Only the selected and attention rows carry a visible edge; resting
+    /// cards stay borderless so the list reads calm rather than striped.
+    private var rowBorder: Color {
+        if isSelected { return theme.palette.borderStrong.opacity(0.6) }
+        if row.needsAttention { return theme.palette.accent.opacity(0.5) }
+        return theme.palette.borderSubtle.opacity(0.5)
     }
 
     private var accessibilityText: String {

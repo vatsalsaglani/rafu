@@ -378,6 +378,9 @@ extension RafuThemePalette {
     /// Resolves a terminal session's color TAG to this theme's token
     /// (terminal-manager.md T-D) — never a raw hex value, so every theme
     /// restyles tagged sessions automatically.
+    /// Presets resolve through the theme so they restyle with it; a
+    /// `.custom` hex is used verbatim, which is the point of letting the
+    /// user pick one.
     func color(for sessionColor: TerminalSessionColor) -> Color {
         switch sessionColor {
         case .accent: accent
@@ -386,6 +389,7 @@ extension RafuThemePalette {
         case .warning: warning
         case .error: error
         case .muted: textMuted
+        case .custom(let hex): Color(rafuHex: hex)
         }
     }
 }
@@ -393,6 +397,22 @@ extension RafuThemePalette {
 extension Color {
     nonisolated init(rafuHex: String) {
         self.init(nsColor: NSColor(rafuHex: rafuHex))
+    }
+
+    /// `#RRGGBB` in sRGB, or nil when the color has no RGB representation
+    /// (a pattern or catalog color that fails to convert). The inverse of
+    /// `init(rafuHex:)`, used to store a color picked from the system
+    /// picker — which yields device/P3 components that must be converted
+    /// before they mean anything as hex.
+    nonisolated var rafuHexString: String? {
+        guard let srgb = NSColor(self).usingColorSpace(.sRGB) else { return nil }
+        let channel = { (value: CGFloat) in Int((max(0, min(1, value)) * 255).rounded()) }
+        return String(
+            format: "#%02X%02X%02X",
+            channel(srgb.redComponent),
+            channel(srgb.greenComponent),
+            channel(srgb.blueComponent)
+        )
     }
 }
 

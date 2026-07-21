@@ -144,13 +144,35 @@ func sessionColorRoundTripsThroughRows() throws {
     #expect(controller.sessionColor == nil)
 }
 
-@Test("TerminalSessionColor's rawValue round-trips through Codable")
+@Test("TerminalSessionColor presets and custom hex both round-trip through Codable")
 func terminalSessionColorCodableRoundTrips() throws {
-    for color in TerminalSessionColor.allCases {
+    for color in TerminalSessionColor.presets {
         let encoded = try JSONEncoder().encode(color)
         let decoded = try JSONDecoder().decode(TerminalSessionColor.self, from: encoded)
         #expect(decoded == color)
     }
+    let custom = try #require(TerminalSessionColor.custom(fromHex: "#1E90FF"))
+    let encoded = try JSONEncoder().encode(custom)
+    #expect(try JSONDecoder().decode(TerminalSessionColor.self, from: encoded) == custom)
+}
+
+@Test("Custom hex parsing normalizes spellings and rejects non-hex")
+func terminalSessionColorCustomHexNormalizes() {
+    // Two spellings of one color must compare equal, or the selected-swatch
+    // ring and any future dedupe would miss.
+    #expect(TerminalSessionColor.custom(fromHex: "1e90ff") == .custom(hex: "#1E90FF"))
+    #expect(TerminalSessionColor.custom(fromHex: "#1E90FF") == .custom(hex: "#1E90FF"))
+    #expect(TerminalSessionColor.custom(fromHex: "#abc") == .custom(hex: "#AABBCC"))
+    #expect(TerminalSessionColor.custom(fromHex: "not-a-color") == nil)
+    #expect(TerminalSessionColor.custom(fromHex: "#12345") == nil)
+}
+
+@Test("A preset stays a preset and a custom stays custom through storage")
+func terminalSessionColorStorageValues() {
+    #expect(TerminalSessionColor.warning.storageValue == "warning")
+    #expect(TerminalSessionColor(storageValue: "warning") == .warning)
+    #expect(TerminalSessionColor(storageValue: "#1E90FF") == .custom(hex: "#1E90FF"))
+    #expect(TerminalSessionColor(storageValue: "nonsense") == nil)
 }
 
 // MARK: - tab label
