@@ -119,9 +119,6 @@ struct CodeEditorView: NSViewRepresentable {
         textView.isIncrementalSearchingEnabled = true
         textView.textContainerInset = NSSize(width: 16, height: 14)
         textView.font = theme.resolvedEditorFont()
-        textView.backgroundColor = NSColor(rafuHex: theme.editor.background)
-        textView.textColor = NSColor(rafuHex: theme.editor.foreground)
-        textView.insertionPointColor = NSColor(rafuHex: theme.editor.cursor)
         textView.selectedTextAttributes = [
             .backgroundColor: NSColor(rafuHex: theme.editor.selectionBackground)
         ]
@@ -130,6 +127,7 @@ struct CodeEditorView: NSViewRepresentable {
         textView.hoverAction = hover
         textView.hoverTheme = theme
         scrollView.documentView = textView
+        context.coordinator.applyEditorColors(theme, to: textView, scrollView: scrollView)
 
         let gutter = EditorGutterRulerView(
             scrollView: scrollView,
@@ -205,11 +203,8 @@ struct CodeEditorView: NSViewRepresentable {
             enabled: fileBlameAnnotationsEnabled, provider: fileBlameAnnotationsProvider)
         context.coordinator.updateAICompletion(
             enabled: aiCompletionEnabled, provider: aiCompletionProvider)
-        scrollView.backgroundColor = NSColor(rafuHex: theme.editor.background)
         guard let textView = scrollView.documentView as? RafuTextView else { return }
-        textView.backgroundColor = NSColor(rafuHex: theme.editor.background)
-        textView.textColor = NSColor(rafuHex: theme.editor.foreground)
-        textView.insertionPointColor = NSColor(rafuHex: theme.editor.cursor)
+        context.coordinator.applyEditorColors(theme, to: textView, scrollView: scrollView)
         textView.refreshMultiCaretOverlay()
         textView.navigateAction = navigate
         textView.hoverAction = hover
@@ -483,9 +478,48 @@ struct CodeEditorView: NSViewRepresentable {
         }
 
         func highlight() {
-            let selection = textView?.selectedRanges
+            // `syncGuardSuppression` only repaints attributes, which cannot
+            // move the selection, so the capture/restore this used to do was
+            // redundant — and reassigning `selectedRanges` fired a spurious
+            // `textViewDidChangeSelection` on the typing path.
             syncGuardSuppression(forceRepaint: true)
-            if let selection { textView?.selectedRanges = selection }
+        }
+
+        /// The theme colors last pushed into AppKit, keyed by their resolved
+        /// hex so an unchanged theme is a no-op.
+        private var appliedEditorColors: EditorColorSet?
+
+        /// Assigns the editor's theme colors ONLY when they actually change,
+        /// and reports whether it did.
+        ///
+        /// `-[NSTextView setTextColor:]` routes through
+        /// `_addToTypingAttributes:` → `setTypingAttributes:` →
+        /// `updateFontPanel`, which enumerates attributes over
+        /// `rangeForUserCharacterAttributeChange`. Assigning it on every
+        /// SwiftUI update — i.e. on every keystroke, since `textDidChange`
+        /// marks the document dirty and refreshes find state — put that whole
+        /// round trip on the typing path, which AGENTS budgets to one display
+        /// frame at p95. It was also the trigger in a user crash report
+        /// (`select-multi-words-and-update-error.txt`), where that enumeration
+        /// raised an `NSRangeException` from
+        /// `-[NSTextStorage ensureAttributesAreFixedInRange:]`. Guarding the
+        /// assignment keeps AppKit's text state untouched unless the theme
+        /// really changed.
+        @discardableResult
+        func applyEditorColors(
+            _ theme: RafuTheme,
+            to textView: RafuTextView,
+            scrollView: NSScrollView
+        ) -> Bool {
+            let colors = EditorColorSet(theme: theme)
+            guard appliedEditorColors != colors else { return false }
+            appliedEditorColors = colors
+            let background = NSColor(rafuHex: colors.background)
+            scrollView.backgroundColor = background
+            textView.backgroundColor = background
+            textView.textColor = NSColor(rafuHex: colors.foreground)
+            textView.insertionPointColor = NSColor(rafuHex: colors.cursor)
+            return true
         }
 
         /// Single chokepoint for guard-mode suppression. Reads

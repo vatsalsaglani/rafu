@@ -62,3 +62,21 @@ extension RafuTheme {
         NSColor(rafuHex: ui.textMuted ?? ui.textSecondary)
     }
 }
+
+/// The editor's theme-derived AppKit colors, compared by their resolved hex
+/// so `CodeEditorView.Coordinator.applyEditorColors` can skip AppKit entirely
+/// when the theme has not changed. Hex comparison rather than `NSColor`
+/// equality: `NSColor(rafuHex:)` round trips are not guaranteed to compare
+/// equal across colorspace representations, which would silently defeat the
+/// guard.
+nonisolated struct EditorColorSet: Equatable, Sendable {
+    let background: String
+    let foreground: String
+    let cursor: String
+
+    init(theme: RafuTheme) {
+        background = theme.editor.background
+        foreground = theme.editor.foreground
+        cursor = theme.editor.cursor
+    }
+}

@@ -133,3 +133,44 @@ its color/font is unset, so the scan it claimed to guard never ran. Any
 new draw-path test on `RafuTextView` must set every decoration
 property the code path under test depends on, and must use
 `bitmapImageRepForCachingDisplay`/`cacheDisplay`, never `.display()`.
+
+## AppKit text-selection and font-panel facts (verified 2026-07-21)
+
+Applies to: `RafuTextView`, `CodeEditorView`. Verified on Swift 6.2 / macOS
+26.5.2 with standalone compiled AppKit probes.
+
+**AppKit clamps every public selection setter.** `setSelectedRange(_:)`,
+`selectedRanges =`, and `setSelectedRanges(_:affinity:stillSelecting:)` all
+clamp an out-of-range value to the current storage length — e.g. restoring a
+captured `{12, 7}` after the buffer shrank to 2 characters yields `{2, 0}`,
+not a crash. Two consequences:
+
+- A defensive clamp inside a `setSelectedRanges` override would be dead code,
+  and would mask a genuinely stale range instead of surfacing it. Rafu
+  deliberately does NOT add one.
+- Storage edits made through the normal cycle (`shouldChangeText` →
+  `replaceCharacters` → `didChangeText`), inside `beginEditing`/`endEditing`,
+  or from a storage delegate all keep the selection in bounds.
+
+**`-[NSTextView setTextColor:]` is not cheap and is not local.** It routes
+through `_addToTypingAttributes:` → `setTypingAttributes:` →
+`updateFontPanel`, which enumerates attributes over
+`rangeForUserCharacterAttributeChange`. For an editable plain-text view that
+range is `{0, textStorage.length}` (NOT the selection); when the view is
+non-editable or non-selectable it is `{NSNotFound, 0}`, whose `NSMaxRange`
+overflows — the shape that makes `ensureAttributesAreFixedInRange:` raise
+`NSRangeException`. Never assign editor colors unconditionally from
+`updateNSView`: that puts the whole round trip on the typing path (AGENTS
+budgets one display frame at p95) and turns any transient inconsistency in
+AppKit's text state into a crash on the next display cycle.
+`CodeEditorView.Coordinator.applyEditorColors` guards the assignment on
+`EditorColorSet`, which compares the theme's resolved HEX (an
+`NSColor(rafuHex:)` round trip is not guaranteed to compare equal across
+colorspace representations, which would silently defeat the guard).
+
+**`updateFontPanel` is unreachable headlessly.** It early-returns unless the
+text view is first responder of a KEY window, and a `swift test` process
+cannot make a window key. A test asserting "assigning `textColor` does not
+throw" is therefore vacuously green — assert the guard and the
+selection-in-bounds invariant instead (`EditorThemeColorApplicationTests`,
+`EditorSelectionBoundsTests`).
