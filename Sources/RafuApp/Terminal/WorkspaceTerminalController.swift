@@ -312,6 +312,14 @@ final class WorkspaceTerminalController: Identifiable {
             self.onBell?(self.id)
         }
         view.installNotificationHandlers()
+        // Zero-config completion detection: agent TUIs paint constantly
+        // while working and go silent when waiting — a qualified burst
+        // followed by silence fires the SAME attention pipeline as BEL
+        // (the session still decides focus). Timing/byte-count only;
+        // output content is never inspected here.
+        view.onOutputActivity = { [weak self] bytes in
+            self?.noteOutputActivity(bytes: bytes)
+        }
         applyTheme(theme, to: view)
 
         view.startProcess(
@@ -350,7 +358,42 @@ final class WorkspaceTerminalController: Identifiable {
     /// Explicit close only — a shell that exits on its own goes through
     /// `processDidTerminate(exitCode:)` instead, which never calls
     /// `terminate()` since the process is already gone.
+    @ObservationIgnored private var quiescenceState = TerminalQuiescencePolicy.State.idle
+    @ObservationIgnored private var quiescenceTimer: Timer?
+    private static let quiescencePolicy = TerminalQuiescencePolicy()
+
+    private func noteOutputActivity(bytes: Int) {
+        // Only while genuinely running: tracking during `.bell` would
+        // re-fire attention (duplicate notifications) and `.exited` is dead.
+        guard status == .running else { return }
+        quiescenceState = Self.quiescencePolicy.advance(quiescenceState, bytes: bytes, at: Date())
+        guard quiescenceTimer == nil else { return }
+        quiescenceTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) {
+            [weak self] _ in
+            // Timers fire on the main run loop; same discipline as the
+            // SwiftTerm delegate shims.
+            MainActor.assumeIsolated { self?.quiescenceTick() }
+        }
+    }
+
+    private func quiescenceTick() {
+        let (fired, next) = Self.quiescencePolicy.checkQuiescence(quiescenceState, at: Date())
+        quiescenceState = next
+        if fired { onBell?(id) }
+        if case .idle = next {
+            quiescenceTimer?.invalidate()
+            quiescenceTimer = nil
+        }
+    }
+
+    private func stopQuiescenceTracking() {
+        quiescenceTimer?.invalidate()
+        quiescenceTimer = nil
+        quiescenceState = .idle
+    }
+
     func shutdown() {
+        stopQuiescenceTracking()
         terminalView?.terminate()
         terminalView = nil
         delegateProxy = nil
@@ -409,6 +452,7 @@ final class WorkspaceTerminalController: Identifiable {
     /// released since it is unusable once the process is gone. Internal
     /// (not `fileprivate`) so tests can drive it directly.
     func processDidTerminate(exitCode: Int32?) {
+        stopQuiescenceTracking()
         status = .exited(code: exitCode)
         terminalView = nil
         delegateProxy = nil

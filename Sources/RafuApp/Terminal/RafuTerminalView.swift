@@ -37,6 +37,23 @@ final class RafuTerminalView: LocalProcessTerminalView {
     /// `WorkspaceTerminalController.makeOrReuseView`.
     var onNotification: ((String) -> Void)?
 
+    /// Byte-level output activity, for the zero-config quiescence detector
+    /// (`TerminalQuiescencePolicy`): called with each pty read's byte count.
+    /// Content is never passed — timing and volume only.
+    var onOutputActivity: ((Int) -> Void)?
+
+    /// `LocalProcess` delivers pty reads here (the view is its delegate and
+    /// `dataReceived` is `open` — unlike `feed`, which is only `public`).
+    /// Tap the byte count for activity tracking, then let SwiftTerm parse
+    /// as normal.
+    nonisolated override func dataReceived(slice: ArraySlice<UInt8>) {
+        let count = slice.count
+        MainActor.assumeIsolated {
+            onOutputActivity?(count)
+        }
+        super.dataReceived(slice: slice)
+    }
+
     /// Parser handlers run synchronously inside `feed` on the main thread —
     /// the same delivery the `bell` override documents below.
     func installNotificationHandlers() {
