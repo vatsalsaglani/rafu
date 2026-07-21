@@ -15,73 +15,52 @@ struct WorkspaceWindowView: View {
             // AppKit-backed `HSplitView` keeps the sidebar an ordinary flush
             // pane while preserving drag-to-resize; ⌘B and the toolbar toggle
             // both drive `session.isSidebarCollapsed`.
-            HSplitView {
-                if !session.isSidebarCollapsed {
-                    WorkspaceSidebarView(session: session)
-                        .frame(minWidth: 200, idealWidth: 260, maxWidth: 420)
-                        .frame(maxHeight: .infinity)
-                }
-                HStack(spacing: 0) {
-                    // HSplitView is AppKit-backed and collapses to its
-                    // children's ideal size unless every level is forced to
-                    // fill; keep the explicit max frames and layout priority.
-                    // Issue #4: the terminal presents as an editor tab inside
-                    // `editorCanvas` now, not a separate docked panel here.
-                    HSplitView {
-                        editorCanvas
-                            .frame(minWidth: 480, minHeight: 220)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .layoutPriority(1)
-                        if session.descriptor != nil, session.navigatorMode != .files {
-                            WorkspaceUtilityPanelView(session: session)
-                                .frame(minWidth: 250, idealWidth: 310, maxWidth: 460)
-                                .frame(maxHeight: .infinity)
+            HStack(spacing: 0) {
+                // Mirrors `WorkspaceUtilityRail` on the right edge and holds
+                // the sidebar toggle. A vertical rail costs no vertical space,
+                // unlike the horizontal title bar it replaced.
+                WorkspaceSidebarRail(session: session)
+                Divider().overlay(theme.palette.borderSubtle)
+                HSplitView {
+                    if !session.isSidebarCollapsed {
+                        WorkspaceSidebarView(session: session)
+                            .frame(minWidth: 200, idealWidth: 260, maxWidth: 420)
+                            .frame(maxHeight: .infinity)
+                    }
+                    HStack(spacing: 0) {
+                        // HSplitView is AppKit-backed and collapses to its
+                        // children's ideal size unless every level is forced
+                        // to fill; keep the explicit max frames and layout
+                        // priority. Issue #4: the terminal presents as an
+                        // editor tab inside `editorCanvas` now, not a
+                        // separate docked panel here.
+                        HSplitView {
+                            editorCanvas
+                                .frame(minWidth: 480, minHeight: 220)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .layoutPriority(1)
+                            if session.descriptor != nil, session.navigatorMode != .files {
+                                WorkspaceUtilityPanelView(session: session)
+                                    .frame(minWidth: 250, idealWidth: 310, maxWidth: 460)
+                                    .frame(maxHeight: .infinity)
+                            }
                         }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .layoutPriority(1)
+                        Divider().overlay(theme.palette.borderSubtle)
+                        WorkspaceUtilityRail(session: session)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .layoutPriority(1)
-                    Divider().overlay(theme.palette.borderSubtle)
-                    WorkspaceUtilityRail(session: session)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .layoutPriority(1)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Divider()
             WorkspaceStatusBar(session: session)
         }
-        // `NavigationSplitView` used to contribute the system sidebar toggle;
-        // with the flat `HSplitView` we provide the one toggle ourselves
-        // (ADR 0002: exactly one sidebar toggle, plus the ⌘B keyboard path).
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    session.toggleSidebar()
-                } label: {
-                    Image(systemName: "sidebar.left")
-                }
-                .help("Toggle Sidebar (⌘B)")
-                .accessibilityLabel("Toggle Sidebar")
-            }
-            // The window title, CENTERED. The system inline title renders at
-            // the leading edge next to the traffic lights, which sits on top
-            // of the sidebar and reads as a broken leftover header — so the
-            // default title is removed below and re-added here as a quiet
-            // principal item in the middle of the titlebar.
-            ToolbarItem(placement: .principal) {
-                Text(session.windowTitle)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .accessibilityAddTraits(.isHeader)
-            }
-        }
-        // Hide the system's leading inline title; `navigationTitle` stays set
-        // so Mission Control, the Window menu, and the proxy icon keep the
-        // real title.
-        .toolbar(removing: .title)
+        .background(FlatWindowChrome(titleBarColor: NSColor(theme.palette.sidebarBackground)))
         .frame(minWidth: 720, minHeight: 480)
         .navigationTitle(session.windowTitle)
         .focusedSceneValue(\.workspaceSession, session)
@@ -132,10 +111,6 @@ struct WorkspaceWindowView: View {
         } message: {
             Text(session.cliInstallMessage ?? "")
         }
-        // Flat chrome (UI plan U1 / ADR 0012): drop the system toolbar band so
-        // the themed panels meet the titlebar edge-to-edge behind the traffic
-        // lights. Native toolbar items and window controls are retained.
-        .toolbarBackground(.hidden, for: .windowToolbar)
     }
 
     private var editorCanvas: some View {

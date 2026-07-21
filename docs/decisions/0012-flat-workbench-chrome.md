@@ -103,6 +103,65 @@ single explicit replacement rather than a second, competing toggle. ⌘B
 continues to drive the same state. No other consequence of this ADR
 changes.
 
+## Amendment (2026-07-21): no `NSToolbar` at all; the titlebar carries the title
+
+The custom toolbar toggle introduced by the amendment above is **withdrawn**,
+and Rafu now carries **no `NSToolbar`**. Two macOS 26 behaviors made a
+toolbar untenable for this ADR's flat chrome:
+
+1. **Every toolbar item is wrapped in a Liquid Glass capsule** with a border
+   and drop shadow. This applies to a bare `Text` used as a `.principal`
+   item too, so the centered window title rendered as a floating pill — the
+   same elevation this ADR exists to remove.
+2. **A window with a toolbar keeps its titlebar band permanently on screen
+   in full screen** (the Safari behavior), costing roughly 52pt of vertical
+   space. Without a toolbar, AppKit auto-hides the titlebar in full screen
+   and reveals it when the pointer reaches the top edge.
+
+Removing the toolbar does **not** center the system title, as first assumed:
+with `titlebarAppearsTransparent` the title draws at the **leading** edge,
+jammed against the traffic lights. Rafu therefore hides the system title
+(`titleVisibility = .hidden`) and draws no title text of its own: the title
+still identifies the window in Mission Control and the Window menu, while the
+workspace is identified by the sidebar and status bar. `FlatWindowChrome`
+(`Sources/RafuApp/Views/FlatWindowChrome.swift`) sets `fullSizeContentView`
++ `titlebarAppearsTransparent` directly on the `NSWindow`, because
+`.toolbarBackground(.hidden, for: .windowToolbar)` only takes effect while a
+toolbar exists.
+
+Applying that chrome **once is not enough**: AppKit rebuilds the window's
+frame view across a full-screen transition and restores the stock titlebar
+(`titleVisibility` back to `.visible`, `titlebarAppearsTransparent` back to
+`false`). After a full-screen round trip the opaque system band therefore
+reappeared, drew its leading title, and covered the title bar Rafu renders in
+that same zone — taking the sidebar toggle with it. `FlatWindowChrome`
+re-applies the chrome on `didEnterFullScreen`/`didExitFullScreen`, and on
+`didBecomeKey` as a cheap net for any other reset.
+`FlatWindowChromeTests` pins this (verified non-vacuous: reverting the
+re-apply fails them).
+
+**SwiftUI cannot lay content out inside the titlebar zone.** Verified three
+ways against the running app (screen-captured each time), all of which
+rendered nothing at all: `.ignoresSafeArea(.container, edges: .top)` on the
+window `VStack`, the same modifier on the title bar alone, and a top
+`.overlay` ignoring the safe area. Only *backgrounds* bleed into that zone.
+Anything Rafu draws must therefore live BELOW the titlebar zone. That is why
+the horizontal title bar was abandoned in favour of the left rail (below):
+the bar could not share the traffic-light row, so it cost a second ~28pt row.
+The zone itself is coloured by setting `NSWindow.backgroundColor` to the
+sidebar fill, so the strip carrying the traffic lights blends into the app
+chrome instead of reading as a foreign band.
+
+ADR 0002's single-toggle rule still holds. The one sidebar toggle lives in
+`WorkspaceSidebarRail`, a slim vertical icon rail on the window's LEFT edge
+that mirrors the existing `WorkspaceUtilityRail` on the right. A rail costs
+no vertical space, stays visible when the sidebar is collapsed, and needs no
+full-screen special-casing. Two earlier placements were withdrawn: the status
+bar (undiscoverable) and a horizontal title bar (which, because SwiftUI
+cannot draw into the titlebar zone, had to sit below it and cost ~56pt of
+vertical chrome). ⌘B continues to drive the same state. No other consequence
+of this ADR changes.
+
 ## Related plan, reference, and implementation paths
 
 - Plan: [`ui-flat-modern-refresh.md`](../plans/phases/ui-flat-modern-refresh.md)

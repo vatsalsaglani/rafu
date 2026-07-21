@@ -68,6 +68,41 @@ struct WorkspaceUtilityPanelView: View {
     }
 }
 
+/// Slim icon rail pinned to the window's LEFT edge, mirroring
+/// `WorkspaceUtilityRail` on the right. It carries the app's ONE sidebar
+/// toggle (ADR 0002), which needs a home that survives the sidebar being
+/// collapsed and full screen hiding the titlebar. A rail also costs no
+/// vertical space, unlike the horizontal title bar it replaced — and SwiftUI
+/// cannot draw into the titlebar zone at all (see `FlatWindowChrome`), so a
+/// toggle up there was never an option.
+struct WorkspaceSidebarRail: View {
+    @Bindable var session: WorkspaceSession
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Button("Toggle Sidebar", systemImage: "sidebar.left") {
+                withAnimation(.spring(duration: 0.25)) {
+                    session.toggleSidebar()
+                }
+            }
+            .buttonStyle(
+                RafuIconButtonStyle(isActive: !session.isSidebarCollapsed, size: 30, iconSize: 14)
+            )
+            .help(session.isSidebarCollapsed ? "Show Sidebar (⌘B)" : "Hide Sidebar (⌘B)")
+            .accessibilityLabel("Toggle Sidebar")
+            .accessibilityValue(session.isSidebarCollapsed ? "Hidden" : "Shown")
+            .accessibilityAddTraits(session.isSidebarCollapsed ? [] : .isSelected)
+            Spacer()
+        }
+        .padding(.top, 10)
+        .frame(width: 40)
+        .frame(maxHeight: .infinity)
+        .fixedSize(horizontal: true, vertical: false)
+        .background(theme.palette.sidebarBackground)
+    }
+}
+
 /// Slim icon rail pinned to the window's right edge. Toggles the utility panel.
 struct WorkspaceUtilityRail: View {
     @Bindable var session: WorkspaceSession
