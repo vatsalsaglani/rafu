@@ -626,6 +626,13 @@ struct CommandPaletteView: View {
                 session.newTerminalTab()
             },
             .init(
+                title: "Show Terminals", symbolName: "terminal",
+                keywords: ["shell", "sessions", "manager", "panel"]
+            ) {
+                dismiss()
+                session.navigatorMode = .terminals
+            },
+            .init(
                 title: "Install rafu CLI", detail: "Installs to ~/.local/bin",
                 symbolName: "terminal", keywords: ["command line"]
             ) {

@@ -229,6 +229,16 @@ struct RafuAppCommands: Commands {
                 }
             }
 
+            // No keyboard shortcut (terminal-manager.md T-B): a menu key
+            // equivalent is consumed app-wide before any first responder, so
+            // ⌃⇧T would permanently steal readline's transpose-chars from
+            // every embedded shell, and ⌘⇧T collides with "reopen closed
+            // tab". Menu + command palette is the path in v1.
+            Button("Show Terminals") {
+                workspaceSession?.toggleUtilityPane(.terminals)
+            }
+            .disabled(workspaceSession?.rootURL == nil)
+
             Button("Show Resources") {
                 workspaceSession?.showResources()
             }

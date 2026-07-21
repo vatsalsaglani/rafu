@@ -281,6 +281,15 @@ func revealTerminalSessionSelectsExistingTabWithoutDuplicating() throws {
         return
     }
     #expect(sessionID == controller.id)
+
+    // terminal-manager.md T-B: the panel's `isParked` derivation must agree
+    // — a session already presented as a tab is never parked, reveal or not.
+    let rows = TerminalsPanelModel.rows(
+        sessions: session.terminal.sessions,
+        presentedIDs: session.presentedTerminalSessionIDs,
+        workspaceRoot: session.rootURL?.path
+    )
+    #expect(rows.first { $0.id == controller.id }?.isParked == false)
 }
 
 @MainActor

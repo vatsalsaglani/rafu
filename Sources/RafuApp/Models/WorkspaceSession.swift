@@ -3,16 +3,25 @@ import Foundation
 import Observation
 import RafuCore
 
-enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable {
+// `nonisolated`: without it, the target's default `MainActor` isolation
+// (`Package.swift`) makes the custom `init(from:)` below MainActor-isolated,
+// which in turn makes the whole `Decodable` conformance MainActor-isolated —
+// unusable from a plain (non-`@MainActor`) `JSONDecoder().decode(...)` call
+// such as `WorkspaceRestorationStore.load()`'s `@concurrent` context or a
+// headless test. This is a pure, `Sendable` value type; it never needed
+// actor isolation.
+nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable {
     case files
     case search
     case sourceControl
+    case terminals
 
     var title: String {
         switch self {
         case .files: "Files"
         case .search: "Search"
         case .sourceControl: "Source Control"
+        case .terminals: "Terminals"
         }
     }
 
@@ -21,7 +30,19 @@ enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable {
         case .files: "doc.on.doc"
         case .search: "magnifyingglass"
         case .sourceControl: "arrow.triangle.branch"
+        case .terminals: "terminal"
         }
+    }
+
+    /// Tolerant decode: a persisted raw value this build does not know (an
+    /// older build reading a newer `RestorableWorkspace`) falls back to
+    /// `.files` instead of throwing. Without this, ONE unknown mode string
+    /// fails the whole `RestorableWorkspace` decode and
+    /// `restoreLastWorkspaceIfAvailable()`'s catch clears restoration —
+    /// losing the folder, open documents and split layout, not just the mode.
+    init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = WorkspaceNavigatorMode(rawValue: raw) ?? .files
     }
 }
 
@@ -427,6 +448,15 @@ final class WorkspaceSession {
         terminal.close(sessionID)
         synchronizeSelectionFromLayout()
         persistWorkspaceState()
+    }
+
+    /// Hides a session's tab if it has one, leaving the shell alive and parked
+    /// — the session-id counterpart to `hideTerminalTab(_:)`, used by the
+    /// terminals panel, which knows session ids and not `EditorTabID`s. A
+    /// no-op for an unknown or already-parked session.
+    func hideTerminalSession(_ sessionID: UUID) {
+        guard let tab = editorLayout.tab(matching: .terminal(sessionID: sessionID)) else { return }
+        hideTerminalTab(tab.id)
     }
 
     /// Reveals a terminal session as a tab: selects its existing tab if it

@@ -64,6 +64,8 @@ struct WorkspaceUtilityPanelView: View {
                     .disabled(session.descriptor == nil || session.isGitBusy)
                 }
             }
+        case .terminals:
+            WorkspaceTerminalsPanelView(session: session)
         }
     }
 }
@@ -112,6 +114,7 @@ struct WorkspaceUtilityRail: View {
         VStack(spacing: 8) {
             railButton(.search)
             railButton(.sourceControl)
+            railButton(.terminals)
             Spacer()
         }
         .padding(.top, 10)
@@ -124,15 +127,42 @@ struct WorkspaceUtilityRail: View {
     private func railButton(_ mode: WorkspaceNavigatorMode) -> some View {
         let hasWorkspace = session.descriptor != nil
         let isActive = hasWorkspace && session.navigatorMode == mode
-        return Button(mode.title, systemImage: mode.symbolName) {
-            withAnimation(.spring(duration: 0.25)) {
-                session.navigatorMode = isActive ? .files : mode
+        // Only computed for `.terminals` — deriving it for every rail
+        // button would needlessly walk `terminal.sessions` on every render.
+        let attentionCount =
+            mode == .terminals
+            ? TerminalsPanelModel.attentionCount(sessions: session.terminal.sessions)
+            : 0
+        let button =
+            Button(mode.title, systemImage: mode.symbolName) {
+                withAnimation(.spring(duration: 0.25)) {
+                    session.navigatorMode = isActive ? .files : mode
+                }
+            }
+            .buttonStyle(RafuIconButtonStyle(isActive: isActive, size: 30, iconSize: 14))
+            .disabled(!hasWorkspace)
+            .help(hasWorkspace ? mode.title : "\(mode.title) — open a folder first")
+            .accessibilityAddTraits(isActive ? .isSelected : [])
+            .overlay(alignment: .topTrailing) {
+                // Rail badge (terminal-manager.md T-B): always `0` today,
+                // since `TerminalSessionPresentation.needsAttention` returns
+                // `false` for every current `TerminalSessionStatus` — T-E's
+                // `.bell` case is the first thing that makes this render,
+                // and only that model function changes then, not this view.
+                if mode == .terminals, attentionCount > 0 {
+                    Circle()
+                        .fill(theme.palette.accent)
+                        .frame(width: 7, height: 7)
+                        .offset(x: -4, y: 4)
+                }
+            }
+        return Group {
+            if mode == .terminals, attentionCount > 0 {
+                button.accessibilityValue("\(attentionCount) needing attention")
+            } else {
+                button
             }
         }
-        .buttonStyle(RafuIconButtonStyle(isActive: isActive, size: 30, iconSize: 14))
-        .disabled(!hasWorkspace)
-        .help(hasWorkspace ? mode.title : "\(mode.title) — open a folder first")
-        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 }
 
