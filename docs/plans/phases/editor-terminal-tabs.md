@@ -72,6 +72,11 @@ same constraint the panel tabs already handle).
 
 ### T2 — Lifecycle policy (the correctness core)
 
+> **2026-07-21:** superseded/absorbed by
+> [`terminal-manager.md`](terminal-manager.md) stage T-A, which defines the
+> hide-vs-close verb split and the sessions-outlive-tabs lifecycle. Execute
+> T2 concerns through that phase, not this section.
+
 - **Hibernation exemption:** a terminal tab is never hibernated (a PTY
   can't be snapshot/restored) — it stays mounted but its *view* may be
   detached from the hierarchy when not visible; the shell keeps running.
