@@ -250,6 +250,27 @@ hover-pause; full-screen visibility (`.fullScreenAuxiliary`); Space
 switching; dock/undock recompute; Reduce Motion / Increase Contrast;
 VoiceOver reachability (with the honest fallback note if it fails).
 
+## Prior art (surveyed 2026-07-21)
+
+[open-vibe-island](https://github.com/Octane0411/open-vibe-island) (hook-based
+multi-agent notch monitor for OTHER apps' terminals, no reply capability) and
+[agent-notch](https://github.com/realfishsam/agent-notch) (ps/lsof-polling
+mascot display, ~30s state lag, reads Claude transcripts off disk) both
+validate the borderless-window-plus-fallback rendering approach. Rafu's HUD
+differs structurally because Rafu OWNS the pty: synchronous BEL instead of
+polling/hooks, a typed reply into stdin (neither offers one), and a bounded
+ephemeral snippet instead of transcript/hook payload access.
+
+Two requirements adopted from that survey:
+
+1. **Click-through everywhere except the HUD's own content** (agent-notch's
+   collapsed-window trick): the panel must set `ignoresMouseEvents` outside
+   its content so it never blocks menu items or windows beneath it.
+2. **Out-of-scope boundary, stated:** agents running OUTSIDE Rafu (e.g.
+   `claude` in Ghostty) are invisible to this HUD — no bell reaches us. If
+   that ever matters, it is a separate hooks-based phase (a small forwarder
+   CLI over the existing launcher IPC socket), not scope creep here.
+
 ## Risks, ranked
 
 1. **Focus stealing** — mitigated by the `canBecomeKey`-only-when-engaged
