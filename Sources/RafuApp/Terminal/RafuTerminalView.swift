@@ -17,6 +17,46 @@ import SwiftTerm
 final class RafuTerminalView: LocalProcessTerminalView {
     var onBell: (() -> Void)?
 
+    /// Fired for terminal NOTIFICATION escapes — the signals agent CLIs
+    /// actually emit when a turn finishes or input is needed, which plain
+    /// BEL detection missed entirely:
+    ///
+    /// - OSC 9  (`ESC ] 9 ; message BEL`) — the iTerm2-style notification
+    ///   Codex emits with `tui.notifications = true`, and Claude Code's
+    ///   "iterm2" notification channel.
+    /// - OSC 777 (`ESC ] 777 ; notify ; title ; body BEL`) — the
+    ///   rxvt/urgency convention some CLIs use.
+    ///
+    /// Neither reaches a `LocalProcessTerminalView` subclass through
+    /// delegate overrides: `TerminalView` never implements
+    /// `TerminalDelegate.notify`, so OSC 777 dies in the protocol-extension
+    /// no-op (the same statically-bound-witness trap as `bell`), and OSC 9
+    /// has no delegate at all. `Terminal.parser.oscHandlers` is the public
+    /// seam — handlers registered there win before SwiftTerm's built-ins.
+    /// Registered in `installNotificationHandlers()`, called once from
+    /// `WorkspaceTerminalController.makeOrReuseView`.
+    var onNotification: ((String) -> Void)?
+
+    /// Parser handlers run synchronously inside `feed` on the main thread —
+    /// the same delivery the `bell` override documents below.
+    func installNotificationHandlers() {
+        let terminal = getTerminal()
+        terminal.parser.oscHandlers[9] = { [weak self] data in
+            let message = String(decoding: data, as: UTF8.self)
+            self?.onNotification?(message)
+        }
+        terminal.parser.oscHandlers[777] = { [weak self] data in
+            // "notify;title;body" — surface "title: body" (or whatever
+            // subset exists) as the message.
+            let parts = String(decoding: data, as: UTF8.self)
+                .split(separator: ";", maxSplits: 2, omittingEmptySubsequences: false)
+                .map(String.init)
+            guard parts.first == "notify" else { return }
+            let message = parts.dropFirst().filter { !$0.isEmpty }.joined(separator: ": ")
+            self?.onNotification?(message)
+        }
+    }
+
     // `nonisolated`: the modern AppKit SDK overlay marks `NSView` (and so
     // `TerminalView`/`bell(source:)`, which SwiftTerm never annotates
     // itself) `@MainActor` — mirroring `WorkspaceTerminalController.swift`'s

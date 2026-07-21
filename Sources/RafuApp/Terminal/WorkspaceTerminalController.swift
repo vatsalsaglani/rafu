@@ -49,6 +49,12 @@ final class WorkspaceTerminalManager {
     @ObservationIgnored
     var sessionDidBell: (@MainActor (UUID) -> Void)?
 
+    /// Invoked whenever a session's `.bell` CLEARS (terminal-notch-hud.md)
+    /// — the counterpart to `sessionDidBell`, wired alongside it so the
+    /// notch HUD dismisses the moment attention clears for any reason.
+    @ObservationIgnored
+    var sessionDidClearAttention: (@MainActor (UUID) -> Void)?
+
     var selected: WorkspaceTerminalController? {
         sessions.first { $0.id == selectedID } ?? sessions.first
     }
@@ -69,6 +75,9 @@ final class WorkspaceTerminalManager {
         }
         session.onBell = { [weak self] id in
             self?.sessionDidBell?(id)
+        }
+        session.onAttentionCleared = { [weak self] id in
+            self?.sessionDidClearAttention?(id)
         }
         sessions.append(session)
         selectedID = session.id
@@ -194,6 +203,13 @@ final class WorkspaceTerminalController: Identifiable {
     @ObservationIgnored
     var onBell: (@MainActor (UUID) -> Void)?
 
+    /// Invoked when `.bell` actually CLEARS (terminal-notch-hud.md): the
+    /// HUD dismisses the moment attention clears for any reason — it does
+    /// not own that state. Wired by the manager in `newSession`, mirroring
+    /// `onBell`.
+    @ObservationIgnored
+    var onAttentionCleared: (@MainActor (UUID) -> Void)?
+
     var isRunning: Bool { status == .running }
 
     var shellDisplayName: String { shell.basename }
@@ -236,8 +252,12 @@ final class WorkspaceTerminalController: Identifiable {
     /// call this on their `.terminal` branch, and `revealTerminalSession`
     /// calls it directly since it mutates `editorLayout`/`terminal
     /// .selectedID` without going through either. A no-op outside `.bell`.
+    /// A real `.bell` → `.running` transition fires `onAttentionCleared` so
+    /// the notch HUD dismisses (terminal-notch-hud.md).
     func clearAttention() {
-        if status == .bell { status = .running }
+        guard status == .bell else { return }
+        status = .running
+        onAttentionCleared?(id)
     }
 
     /// Sends a notification reply's already-sanitized, single-line text
@@ -282,6 +302,16 @@ final class WorkspaceTerminalController: Identifiable {
             guard let self else { return }
             self.onBell?(self.id)
         }
+        // Agent CLIs signal "turn finished / input needed" with OSC 9/777
+        // notifications, not BEL — Codex with `tui.notifications = true`,
+        // Claude Code's iterm2 channel. Route them into the SAME attention
+        // pipeline as BEL: WorkspaceSession still decides focus, and the
+        // snippet/notification/HUD machinery downstream is unchanged.
+        view.onNotification = { [weak self] _ in
+            guard let self else { return }
+            self.onBell?(self.id)
+        }
+        view.installNotificationHandlers()
         applyTheme(theme, to: view)
 
         view.startProcess(
