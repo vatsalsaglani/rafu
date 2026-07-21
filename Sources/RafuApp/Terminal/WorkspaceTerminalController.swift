@@ -2,9 +2,24 @@ import AppKit
 import Observation
 import SwiftTerm
 
-/// Owns the set of terminal tabs for a workspace window (ADR 0004, amended).
-/// Sessions are created lazily — the first when the panel opens, more via the
-/// tab strip — and all are terminated when the workspace switches.
+/// A terminal session's lifecycle: `.idle` until its view is first mounted
+/// (spawn is lazy, ADR 0004), `.running` while the shell is alive, and
+/// `.exited(code:)` once it has quit — either naturally (SwiftTerm's
+/// `processTerminated` delegate callback, `code` carries the real exit
+/// status) or via explicit `shutdown()` (`code == nil`, since no process
+/// delivered one there).
+nonisolated enum TerminalSessionStatus: Equatable, Sendable {
+    case idle
+    case running
+    case exited(code: Int32?)
+}
+
+/// Owns the set of terminal sessions for a workspace window (ADR 0004,
+/// amended by ADR 0014 and the terminal-manager phase T-A: a session may be
+/// parked without an editor tab — see
+/// `WorkspaceSession.parkedTerminalSessions`). Sessions are created lazily —
+/// the first when the panel opens, more via the tab strip — and all are
+/// terminated when the workspace switches.
 @Observable
 @MainActor
 final class WorkspaceTerminalManager {
@@ -13,6 +28,14 @@ final class WorkspaceTerminalManager {
 
     @ObservationIgnored
     private var sessionCounter = 0
+    @ObservationIgnored
+    private var parkCounter = 0
+
+    /// Invoked whenever any session's shell exits naturally (never on an
+    /// explicit `close`/`shutdown`). `WorkspaceSession` wires this lazily —
+    /// see `installTerminalExitHandlerIfNeeded()`.
+    @ObservationIgnored
+    var sessionDidExit: (@MainActor (UUID, Int32?) -> Void)?
 
     var selected: WorkspaceTerminalController? {
         sessions.first { $0.id == selectedID } ?? sessions.first
@@ -21,19 +44,33 @@ final class WorkspaceTerminalManager {
     var hasSessions: Bool { !sessions.isEmpty }
 
     @discardableResult
-    func newSession(startingDirectory: String) -> WorkspaceTerminalController {
+    func newSession(startingDirectory: String, shell: TerminalShell) -> WorkspaceTerminalController
+    {
         sessionCounter += 1
         let session = WorkspaceTerminalController(
             index: sessionCounter,
-            startingDirectory: startingDirectory
+            startingDirectory: startingDirectory,
+            shell: shell
         )
+        session.onExit = { [weak self] id, exitCode in
+            self?.sessionDidExit?(id, exitCode)
+        }
         sessions.append(session)
         selectedID = session.id
         return session
     }
 
-    /// Terminates one tab's shell and removes it. Selection moves to the
-    /// nearest remaining tab.
+    /// Bumps this session to most-recently-parked, driving
+    /// `WorkspaceSession.parkedTerminalSessions`'s MRU ordering. A no-op for
+    /// an unknown id.
+    func notePark(_ id: UUID) {
+        guard let session = sessions.first(where: { $0.id == id }) else { return }
+        parkCounter += 1
+        session.markParked(sequence: parkCounter)
+    }
+
+    /// Terminates one session's shell and removes it. Selection moves to the
+    /// nearest remaining session.
     func close(_ id: UUID) {
         guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
         sessions[index].shutdown()
@@ -53,11 +90,12 @@ final class WorkspaceTerminalManager {
         sessions = []
         selectedID = nil
         sessionCounter = 0
+        parkCounter = 0
     }
 }
 
-/// One terminal tab: a lazily spawned login shell plus its SwiftTerm view.
-/// All SwiftTerm types stay behind this boundary.
+/// One terminal session: a lazily spawned login shell plus its SwiftTerm
+/// view. All SwiftTerm types stay behind this boundary.
 @Observable
 @MainActor
 final class WorkspaceTerminalController: Identifiable {
@@ -66,15 +104,23 @@ final class WorkspaceTerminalController: Identifiable {
     /// Directory the shell starts in; also the tooltip fallback until the
     /// shell reports its live working directory over OSC 7.
     let startingDirectory: String
-    private(set) var isRunning = false
+    /// The shell binary this session spawns (terminal-manager.md T-C).
+    let shell: TerminalShell
+    private(set) var status: TerminalSessionStatus = .idle
     private(set) var title: String
     /// Live working directory reported by the shell via OSC 7, when the
     /// prompt emits it (starship/powerlevel10k do; stock zsh may not).
     private(set) var currentDirectoryPath: String?
+    /// MRU sequence stamped by `WorkspaceTerminalManager.notePark(_:)` when
+    /// this session's tab is hidden; drives
+    /// `WorkspaceSession.parkedTerminalSessions`'s ordering. `0` until
+    /// parked at least once.
+    private(set) var parkSequence: Int = 0
 
-    init(index: Int, startingDirectory: String) {
+    init(index: Int, startingDirectory: String, shell: TerminalShell) {
         self.index = index
         self.startingDirectory = startingDirectory
+        self.shell = shell
         title = "Terminal \(index)"
     }
     /// Bumped whenever a fresh terminal view must replace the old one.
@@ -86,14 +132,18 @@ final class WorkspaceTerminalController: Identifiable {
     private var delegateProxy: DelegateProxy?
     @ObservationIgnored
     private var appliedStyleSignature = ""
+    /// Invoked once, on natural process exit, forwarded up to
+    /// `WorkspaceTerminalManager.sessionDidExit`. Wired by the manager in
+    /// `newSession`; `nil` otherwise.
+    @ObservationIgnored
+    var onExit: (@MainActor (UUID, Int32?) -> Void)?
 
-    var shellDisplayName: String {
-        (Self.userShell as NSString).lastPathComponent
-    }
+    var isRunning: Bool { status == .running }
 
-    private static var userShell: String {
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? ""
-        return shell.isEmpty ? "/bin/zsh" : shell
+    var shellDisplayName: String { shell.basename }
+
+    func markParked(sequence: Int) {
+        parkSequence = sequence
     }
 
     /// Returns the live terminal view, creating it and spawning the login
@@ -109,16 +159,14 @@ final class WorkspaceTerminalController: Identifiable {
         view.processDelegate = proxy
         applyTheme(theme, to: view)
 
-        let shell = Self.userShell
-        let shellName = (shell as NSString).lastPathComponent
         view.startProcess(
-            executable: shell,
-            args: ["-l"],
+            executable: shell.path,
+            args: shell.loginArguments,
             environment: nil,
-            execName: "-\(shellName)",
+            execName: "-\(shell.basename)",
             currentDirectory: startingDirectory
         )
-        isRunning = true
+        status = .running
         terminalView = view
 
         let shellPid = view.process.shellPid
@@ -144,12 +192,15 @@ final class WorkspaceTerminalController: Identifiable {
     }
 
     /// Terminates the shell and releases the emulator. Safe to call twice.
+    /// Explicit close only — a shell that exits on its own goes through
+    /// `processDidTerminate(exitCode:)` instead, which never calls
+    /// `terminate()` since the process is already gone.
     func shutdown() {
         terminalView?.terminate()
         terminalView = nil
         delegateProxy = nil
         appliedStyleSignature = ""
-        isRunning = false
+        status = .exited(code: nil)
 
         let controllerID = id
         Task {
@@ -194,8 +245,25 @@ final class WorkspaceTerminalController: Identifiable {
         return .monospacedSystemFont(ofSize: size, weight: .regular)
     }
 
-    fileprivate func processDidTerminate() {
-        isRunning = false
+    /// Natural process exit (SwiftTerm's delegate callback, not an explicit
+    /// `close`/`shutdown`). Per the terminal-manager T-A coordinator
+    /// decision, the session lingers as `.exited(code:)` — its tab (or
+    /// parked row) stays so the exit code and Restart Shell affordance
+    /// remain visible/usable; nothing here removes it from
+    /// `WorkspaceTerminalManager.sessions` or any tab. The emulator view is
+    /// released since it is unusable once the process is gone. Internal
+    /// (not `fileprivate`) so tests can drive it directly.
+    func processDidTerminate(exitCode: Int32?) {
+        status = .exited(code: exitCode)
+        terminalView = nil
+        delegateProxy = nil
+        appliedStyleSignature = ""
+
+        let controllerID = id
+        Task {
+            await ProcessResourceRegistry.shared.unregister(id: controllerID)
+        }
+        onExit?(id, exitCode)
     }
 
     fileprivate func updateTitle(_ newTitle: String) {
@@ -275,7 +343,7 @@ private final class DelegateProxy: NSObject, LocalProcessTerminalViewDelegate {
 
     nonisolated func processTerminated(source: TerminalView, exitCode: Int32?) {
         MainActor.assumeIsolated {
-            controller?.processDidTerminate()
+            controller?.processDidTerminate(exitCode: exitCode)
         }
     }
 }

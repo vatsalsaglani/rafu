@@ -284,16 +284,65 @@ final class WorkspaceSession {
     @ObservationIgnored
     let terminal = WorkspaceTerminalManager()
 
+    @ObservationIgnored
+    private let shellCatalog = TerminalShellCatalog()
+    @ObservationIgnored
+    private let preferredShellStore = PreferredShellStore()
+    /// `TerminalShellCatalog.shells()` reads `/etc/shells` and probes the
+    /// filesystem — compute it once per session lifetime and never call
+    /// `shellCatalog.shells()` directly from a `View.body`/`Commands` body.
+    @ObservationIgnored
+    private lazy var cachedTerminalShells: [TerminalShell] = shellCatalog.shells()
+
+    @ObservationIgnored
+    private var didInstallTerminalExitHandler = false
+
+    /// Shells discovered on this machine (terminal-manager.md T-C), default
+    /// first. See `cachedTerminalShells`'s doc comment for the caching rule.
+    var availableTerminalShells: [TerminalShell] { cachedTerminalShells }
+
+    private func preferredTerminalShell() -> TerminalShell {
+        let shells = availableTerminalShells
+        return preferredShellStore.resolved(in: shells)
+            ?? shells.first(where: \.isDefault)
+            ?? shells.first
+            ?? TerminalShell(
+                path: TerminalShellCatalog.environmentShellPath(), name: "Default", isDefault: true)
+    }
+
+    /// Wires `terminal.sessionDidExit` on first use — lazy so a workspace
+    /// that never opens a terminal never installs the hook. `[weak self]` is
+    /// mandatory: `terminal` is a stored, non-observed strong property, and a
+    /// strong `self` here would retain-cycle session → terminal → closure →
+    /// session.
+    private func installTerminalExitHandlerIfNeeded() {
+        guard !didInstallTerminalExitHandler else { return }
+        didInstallTerminalExitHandler = true
+        terminal.sessionDidExit = { [weak self] sessionID, exitCode in
+            self?.terminalSessionDidExit(sessionID, exitCode: exitCode)
+        }
+    }
+
+    /// A shell that exits naturally leaves its session `.exited` and its tab
+    /// (or parked row) in place — coordinator decision for terminal-manager
+    /// T-A: auto-closing would strand the Restart Shell affordance the
+    /// exited overlay/tab still offers. No layout mutation happens here;
+    /// this hook exists so later stages (T-B panel refresh, T-E attention
+    /// state) have one place to react to a natural exit.
+    private func terminalSessionDidExit(_ sessionID: UUID, exitCode: Int32?) {}
+
     /// Issue #4: the terminal presents as an ordinary editor tab (same
-    /// chrome as a file tab) rather than a separate docked panel, so "toggle
-    /// terminal" and "close tab" both act on the editor layout instead of a
-    /// boolean visibility flag. Closing always terminates the shell — the
-    /// simplest, leak-free contract (ADR 0004's "bounded" panel): there is
-    /// no hidden-but-still-running state to resurrect, only "open a fresh
-    /// one" via `newTerminalTab()`.
+    /// chrome as a file tab). Hiding and closing are different verbs
+    /// (terminal-manager.md T-A): ⌃`/`toggleTerminal` only removes the TAB
+    /// from the layout — the session stays alive in `terminal.sessions`,
+    /// parked, until revealed again, explicitly closed, or the workspace
+    /// switches. `closeTerminalTab(_:)` is the one that also terminates the
+    /// shell.
     func toggleTerminal() {
         if let selectedTerminalTabID {
-            closeTerminalTab(selectedTerminalTabID)
+            hideTerminalTab(selectedTerminalTabID)
+        } else if let parked = parkedTerminalSessions.first {
+            revealTerminalSession(parked.id)
         } else {
             newTerminalTab()
         }
@@ -311,24 +360,49 @@ final class WorkspaceSession {
 
     /// Opens a new terminal tab starting in the active file's directory,
     /// falling back to the workspace root, then the user's home. Spawns a
-    /// fresh `WorkspaceTerminalController` (lazy, per ADR 0004) and inserts
-    /// it into the focused editor group as a `.terminal` tab, presented with
-    /// the same chrome as a file tab.
-    func newTerminalTab() {
-        let controller = terminal.newSession(startingDirectory: preferredTerminalDirectory())
-        let groupID = editorLayout.focusedGroupID
-        let tab = EditorTabState(resource: .terminal(sessionID: controller.id))
-        editorLayout.insert(tab, in: groupID)
-        editorLayout.select(tab.id, in: groupID)
-        selectedDocumentID = nil
-        selectedTreePath = nil
+    /// fresh `WorkspaceTerminalController` (lazy, per ADR 0004) with the
+    /// preferred shell — or `shell` when one is explicitly chosen
+    /// (terminal-manager.md T-C, recorded as the new preferred shell) — and
+    /// reveals it in the focused editor group.
+    func newTerminalTab(shell: TerminalShell? = nil) {
+        installTerminalExitHandlerIfNeeded()
+        let resolvedShell = shell ?? preferredTerminalShell()
+        if let shell {
+            preferredShellStore.record(shell)
+        }
+        let controller = terminal.newSession(
+            startingDirectory: preferredTerminalDirectory(), shell: resolvedShell)
+        revealTerminalSession(controller.id)
+    }
+
+    /// Hides one terminal tab: removes it from the editor layout but leaves
+    /// its session running, parked in `terminal.sessions`
+    /// (terminal-manager.md T-A — the ⌃` "toggle away" half of hide-vs-close).
+    /// A no-op if `tabID` does not resolve to a live `.terminal` tab. Does
+    /// not touch `terminal.selectedID` directly;
+    /// `synchronizeSelectionFromLayout()` only updates it when the newly
+    /// focused tab is itself a terminal.
+    func hideTerminalTab(_ tabID: EditorTabID) {
+        guard let groupID = editorLayout.group(containing: tabID)?.id,
+            let tab = editorLayout.group(id: groupID)?.tabs.first(where: { $0.id == tabID }),
+            case .terminal(let sessionID) = tab.resource
+        else { return }
+        _ = editorLayout.closeTab(tabID)
+        terminal.notePark(sessionID)
+        synchronizeSelectionFromLayout()
         persistWorkspaceState()
     }
 
     /// Closes one terminal tab: removes it from the editor layout AND
     /// terminates its shell (`terminal.close(_:)`), so a closed terminal tab
     /// never leaves an orphaned process running. A no-op if `tabID` does not
-    /// resolve to a live `.terminal` tab.
+    /// resolve to a live `.terminal` tab. See `hideTerminalTab(_:)` for the
+    /// park-without-killing sibling used by ⌃`/`toggleTerminal`. Any future
+    /// generic layout-close path (close-others, close-all — neither exists
+    /// today) that may touch a `.terminal` tab must route through this
+    /// method or `hideTerminalTab(_:)` rather than calling
+    /// `editorLayout.closeTab(_:)` directly, to keep hide-vs-close an
+    /// explicit decision instead of an accidental orphaned process.
     func closeTerminalTab(_ tabID: EditorTabID) {
         guard let groupID = editorLayout.group(containing: tabID)?.id,
             let tab = editorLayout.group(id: groupID)?.tabs.first(where: { $0.id == tabID }),
@@ -337,6 +411,45 @@ final class WorkspaceSession {
         _ = editorLayout.closeTab(tabID)
         terminal.close(sessionID)
         synchronizeSelectionFromLayout()
+        persistWorkspaceState()
+    }
+
+    /// Removes a terminal session outright: drops its tab if it currently
+    /// has one anywhere in the layout, then terminates its shell. Used for
+    /// parked/exited sessions that have no tab to close through
+    /// `closeTerminalTab(_:)` — e.g. the future T-B sessions panel. A no-op
+    /// for an unknown session id.
+    func closeTerminalSession(_ sessionID: UUID) {
+        guard terminal.sessions.contains(where: { $0.id == sessionID }) else { return }
+        if let tab = editorLayout.tab(matching: .terminal(sessionID: sessionID)) {
+            _ = editorLayout.closeTab(tab.id)
+        }
+        terminal.close(sessionID)
+        synchronizeSelectionFromLayout()
+        persistWorkspaceState()
+    }
+
+    /// Reveals a terminal session as a tab: selects its existing tab if it
+    /// already has one anywhere in the layout (never duplicates), otherwise
+    /// inserts a fresh tab for it into the focused group and selects that.
+    /// Matches `newTerminalTab()`'s existing tab-selection behavior — clears
+    /// file selection, selects the session in `terminal`. A no-op for an
+    /// unknown session id.
+    func revealTerminalSession(_ sessionID: UUID) {
+        guard terminal.sessions.contains(where: { $0.id == sessionID }) else { return }
+        if let existingTab = editorLayout.tab(matching: .terminal(sessionID: sessionID)),
+            let groupID = editorLayout.group(containing: existingTab.id)?.id
+        {
+            editorLayout.select(existingTab.id, in: groupID)
+        } else {
+            let groupID = editorLayout.focusedGroupID
+            let tab = EditorTabState(resource: .terminal(sessionID: sessionID))
+            editorLayout.insert(tab, in: groupID)
+            editorLayout.select(tab.id, in: groupID)
+        }
+        selectedDocumentID = nil
+        selectedTreePath = nil
+        terminal.selectedID = sessionID
         persistWorkspaceState()
     }
 
@@ -368,6 +481,32 @@ final class WorkspaceSession {
     /// open documents but still has a tab to render (issue #4).
     var hasAnyEditorTabs: Bool {
         editorLayout.groupIDs.contains { editorLayout.group(id: $0)?.tabs.isEmpty == false }
+    }
+
+    /// Session ids currently shown as a `.terminal` tab anywhere in the
+    /// editor layout (any group, any split pane).
+    var presentedTerminalSessionIDs: Set<UUID> {
+        var ids = Set<UUID>()
+        for groupID in editorLayout.groupIDs {
+            guard let group = editorLayout.group(id: groupID) else { continue }
+            for tab in group.tabs {
+                if case .terminal(let sessionID) = tab.resource { ids.insert(sessionID) }
+            }
+        }
+        return ids
+    }
+
+    /// Sessions alive in `terminal.sessions` but not currently presented as
+    /// a tab (hidden via ⌃`/`hideTerminalTab(_:)`), most-recently-parked
+    /// first. Deliberately not dual-bookkept — derived from the layout each
+    /// call, so it can never drift from what is actually on screen. Do not
+    /// call from a `View.body` hot path; a caller that needs this every
+    /// frame should snapshot it once.
+    var parkedTerminalSessions: [WorkspaceTerminalController] {
+        let presented = presentedTerminalSessionIDs
+        return terminal.sessions
+            .filter { !presented.contains($0.id) }
+            .sorted { ($0.parkSequence, $0.index) > ($1.parkSequence, $1.index) }
     }
 
     /// Ids of documents whose editor is currently visible: the selected tab

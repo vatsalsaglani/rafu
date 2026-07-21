@@ -1552,9 +1552,12 @@ private struct EditorTabItem: View {
 /// Issue #4: a terminal tab, presented with the EXACT SAME chrome as
 /// `EditorTabItem` (icon, label, close button, hover, selected underline,
 /// trailing divider, drag/split context menu) — just backed by a live
-/// `WorkspaceTerminalController` instead of an `EditorDocument`. Closing
-/// always terminates the shell (`session.closeTerminalTab`); there is no
-/// dirty-state confirmation, since a terminal has no unsaved buffer.
+/// `WorkspaceTerminalController` instead of an `EditorDocument`. This tab's
+/// own ✕/context-menu "Close" always terminates the shell
+/// (`session.closeTerminalTab`); there is no dirty-state confirmation, since
+/// a terminal has no unsaved buffer. Hiding without killing the shell is a
+/// separate verb (⌃`/`toggleTerminal` → `session.hideTerminalTab`), not
+/// reachable from this tab item — see terminal-manager.md T-A.
 private struct EditorTerminalTabItem: View {
     @Environment(\.rafuTheme) private var theme
     @State private var isHovering = false

@@ -216,6 +216,19 @@ struct RafuAppCommands: Commands {
             }
             .keyboardShortcut("`", modifiers: [.control, .shift])
 
+            // Shown only when the catalog has ≥2 discovered shells
+            // (terminal-manager.md T-C) — a single-shell machine has
+            // nothing to choose between.
+            if let shells = workspaceSession?.availableTerminalShells, shells.count >= 2 {
+                Menu("New Terminal With Shell") {
+                    ForEach(shells) { shell in
+                        Button("\(shell.name) — \(shell.path)") {
+                            workspaceSession?.newTerminalTab(shell: shell)
+                        }
+                    }
+                }
+            }
+
             Button("Show Resources") {
                 workspaceSession?.showResources()
             }

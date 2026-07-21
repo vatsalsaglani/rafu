@@ -25,7 +25,7 @@ struct EditorTerminalTabContent: View {
 
     private var shellExitedOverlay: some View {
         VStack(spacing: 10) {
-            Text("Shell exited")
+            Text(exitedMessage)
                 .font(.callout.weight(.medium))
                 .foregroundStyle(theme.palette.textSecondary)
             Button("Restart Shell", systemImage: "arrow.clockwise") {
@@ -35,6 +35,16 @@ struct EditorTerminalTabContent: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.palette.editorBackground.opacity(0.85))
+    }
+
+    /// "Shell exited" for a shutdown with no reported exit code (explicit
+    /// close/restart) or a natural exit whose code SwiftTerm did not
+    /// deliver; "Shell exited (N)" once a real exit code is known.
+    private var exitedMessage: String {
+        if case .exited(let code?) = controller.status {
+            return "Shell exited (\(code))"
+        }
+        return "Shell exited"
     }
 }
 
