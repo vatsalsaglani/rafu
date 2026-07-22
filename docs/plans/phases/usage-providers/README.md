@@ -90,12 +90,12 @@ When the user reports "phase Wn is done on branch `<branch>`":
 
 | Phase | File | Branch | Status |
 |---|---|---|---|
-| W0 | [W0-shim.md](W0-shim.md) | `usage/w0` | Implemented (1096 tests, pending coordinator merge + GUI parity pass) |
-| W1 | [W1-cookie-infrastructure.md](W1-cookie-infrastructure.md) | — | blocked on W0 |
-| W2 | [W2-exact-percent-oauth.md](W2-exact-percent-oauth.md) | — | blocked on W0 |
-| W3 | [W3-local-sqlite-providers.md](W3-local-sqlite-providers.md) | — | blocked on W0 |
-| W4 | [W4-api-key-providers.md](W4-api-key-providers.md) | — | blocked on W0 |
-| W5 | [W5-local-token-providers.md](W5-local-token-providers.md) | — | blocked on W0 |
+| W0 | [W0-shim.md](W0-shim.md) | `usage/w0` (merged to main) | ✅ Merged (1096 tests, GUI parity verified) |
+| W1 | [W1-cookie-infrastructure.md](W1-cookie-infrastructure.md) | — | ready (W0 merged) |
+| W2 | [W2-exact-percent-oauth.md](W2-exact-percent-oauth.md) | — | ready (W0 merged) |
+| W3 | [W3-local-sqlite-providers.md](W3-local-sqlite-providers.md) | — | ready (W0 merged) |
+| W4 | [W4-api-key-providers.md](W4-api-key-providers.md) | — | ready (W0 merged) |
+| W5 | [W5-local-token-providers.md](W5-local-token-providers.md) | — | ready (W0 merged) |
 | W6 | [W6-cookie-providers-1.md](W6-cookie-providers-1.md) | — | blocked on W0+W1 |
 | W7 | [W7-cookie-providers-2.md](W7-cookie-providers-2.md) | — | blocked on W0+W1 |
 | W8 | [W8-alibaba-providers.md](W8-alibaba-providers.md) | — | blocked on W0+W1 |
