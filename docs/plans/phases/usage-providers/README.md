@@ -90,15 +90,15 @@ When the user reports "phase Wn is done on branch `<branch>`":
 
 | Phase | File | Branch | Status |
 |---|---|---|---|
-| W0 | [W0-shim.md](W0-shim.md) | `usage/w0` (merged to main) | ✅ Merged (1096 tests, GUI parity verified) |
-| W1 | [W1-cookie-infrastructure.md](W1-cookie-infrastructure.md) | — | ready (W0 merged) |
-| W2 | [W2-exact-percent-oauth.md](W2-exact-percent-oauth.md) | — | ready (W0 merged) |
-| W3 | [W3-local-sqlite-providers.md](W3-local-sqlite-providers.md) | — | ready (W0 merged) |
-| W4 | [W4-api-key-providers.md](W4-api-key-providers.md) | — | ready (W0 merged) |
-| W5 | [W5-local-token-providers.md](W5-local-token-providers.md) | — | ready (W0 merged) |
-| W6 | [W6-cookie-providers-1.md](W6-cookie-providers-1.md) | — | blocked on W0+W1 |
-| W7 | [W7-cookie-providers-2.md](W7-cookie-providers-2.md) | — | blocked on W0+W1 |
-| W8 | [W8-alibaba-providers.md](W8-alibaba-providers.md) | — | blocked on W0+W1 |
+| W0 | [W0-shim.md](W0-shim.md) | merged | ✅ Merged |
+| W1 | [W1-cookie-infrastructure.md](W1-cookie-infrastructure.md) | `codex/usage-w1-cookie-infrastructure` | ✅ Merged (1130 tests) |
+| W2 | [W2-exact-percent-oauth.md](W2-exact-percent-oauth.md) | `codex/usage-w2-exact-percent-oauth` (`3468252`) | ⛔ Blocked: needs shared credential bridge + ADR 0017 (see completion-updates) |
+| W3 | [W3-local-sqlite-providers.md](W3-local-sqlite-providers.md) | `codex/usage-w3-local-sqlite-providers` (`a400cb4`) | ✅ Complete, ready to merge (blocker resolved) |
+| W4 | [W4-api-key-providers.md](W4-api-key-providers.md) | `codex/usage-w4-api-key-providers` (uncommitted) | 🟡 Implemented, needs commit (see completion-updates) |
+| W5 | [W5-local-token-providers.md](W5-local-token-providers.md) | `codex/usage-w5-local-token-providers` | ✅ Merged (1130 tests) |
+| W6 | [W6-cookie-providers-1.md](W6-cookie-providers-1.md) | — | ready (W0+W1 merged) |
+| W7 | [W7-cookie-providers-2.md](W7-cookie-providers-2.md) | — | ready (W0+W1 merged) |
+| W8 | [W8-alibaba-providers.md](W8-alibaba-providers.md) | — | ready (W0+W1+W4 merged) |
 
 ## Per-phase goal-mode prompts
 
