@@ -431,6 +431,14 @@ final class NotchCompanionModel: NSObject {
         hostingView.autoresizingMask = [.width, .height]
         panel.contentView = hostingView
         panel.clickThroughRegions = NotchCompanionGeometry.clickThroughRegions(for: metrics)
+        // No window shadow while resting: `NSPanel`'s shadow paints a rim
+        // light around ALL edges — including the top — which reads as a
+        // bright outline separating the strip's black from the physical
+        // notch it must appear continuous with (the same seamlessness bug
+        // the v1 drop-down's band fix addressed). `reposition()` re-enables
+        // it for the peeked/pinned panel, where depth against window
+        // content below is wanted.
+        panel.hasShadow = false
         self.panel = panel
         panel.orderFrontRegardless()
         refreshEditorRows()
@@ -533,11 +541,13 @@ final class NotchCompanionModel: NSObject {
             }
             panel.setFrame(frame, display: true, animate: animated && !reduceMotion)
             panel.clickThroughRegions = NotchCompanionGeometry.clickThroughRegions(for: metrics)
+            panel.hasShadow = false
         case .peeking, .pinned:
             let frame = NotchCompanionGeometry.peekPanelFrame(
                 for: metrics, contentHeight: peekContentHeight())
             panel.setFrame(frame, display: true, animate: animated && !reduceMotion)
             panel.clickThroughRegions = []
+            panel.hasShadow = true
         }
     }
 
