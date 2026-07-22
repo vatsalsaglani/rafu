@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rafu — the agent weaves. You mend.</title>
+    <meta
+      name="description"
+      content="Rafu (રફૂ — darning) is a small, native macOS editor for the focused fixes that remain after a terminal coding agent has done the larger weave. Open the repository. Fix the .env. Review the diff. Commit."
+    />
+    <meta property="og:title" content="Rafu — the agent weaves. You mend." />
+    <meta
+      property="og:description"
+      content="A small, native macOS repository companion for the focused fixes that remain after your coding agent has done the larger weave."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/og.png" />
+    <meta name="theme-color" content="#10141C" />
+    <script>
+      (function () {
+        var stored = null;
+        try {
+          stored = localStorage.getItem("rafu-theme");
+        } catch (e) {}
+        var theme =
+          stored === "light" || stored === "dark"
+            ? stored
+            : window.matchMedia("(prefers-color-scheme: light)").matches
+              ? "light"
+              : "dark";
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

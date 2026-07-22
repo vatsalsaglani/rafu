@@ -1,0 +1,86 @@
+name: Deploy site
+
+# Publishes the landing + docs site (site/) to this repo's GitHub Pages,
+# but ONLY after the CI workflow has passed on main — so a broken build or
+# failing test never ships the website. It keys off CI via workflow_run
+# rather than a plain push trigger so "deploy after CI and tests pass" is
+# literally what happens.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  # Manual redeploy (e.g. after changing Pages settings) without a new commit.
+  workflow_dispatch:
+
+# Pages deployment needs these; contents stays read-only (we never push).
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One live deployment at a time; don't cancel an in-progress publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # workflow_run fires on ANY CI conclusion; gate on success. Manual runs
+    # (workflow_dispatch) always proceed.
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' ||
+          github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout the commit CI validated
+        uses: actions/checkout@v4
+        with:
+          # For workflow_run, check out the exact SHA CI ran on (not just
+          # the latest main); for manual runs, the default checkout is fine.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install dependencies
+        working-directory: site
+        run: npm ci
+
+      - name: Build
+        working-directory: site
+        env:
+          # Served at vatsalsaglani.github.io/rafu today. When a custom
+          # domain lands, set this to "/" and add a CNAME (see below).
+          SITE_BASE: /rafu/
+        run: npm run build
+
+      - name: SPA deep-link fallback + Jekyll opt-out
+        working-directory: site
+        run: |
+          # BrowserRouter deep links (e.g. /rafu/docs/x) have no matching
+          # file on Pages; serving index.html for 404s lets the router
+          # resolve them client-side.
+          cp dist/index.html dist/404.html
+          # `.nojekyll` also ships from public/, but re-assert it in case
+          # public/ ever loses it — Jekyll would otherwise drop _-prefixed
+          # files.
+          touch dist/.nojekyll
+          # For a future custom domain, uncomment and set SITE_BASE=/ above:
+          # echo "rafu.app" > dist/CNAME
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

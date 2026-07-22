@@ -10,6 +10,10 @@ remote-agent/target/
 *.trace
 *.log
 
+# Landing/docs site (site/) build artifacts — the Pages workflow installs
+# and builds fresh. `dist/` above already covers site/dist.
+node_modules/
+
 # Local credentials and environment overrides
 .env
 .env.*

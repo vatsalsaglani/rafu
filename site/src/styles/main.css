@@ -1,0 +1,347 @@
+@import "tailwindcss";
+
+/*
+ * Rafu design tokens — lifted from the app's bundled themes.
+ *   dark  = Indigo  (Resources/Themes/indigo.json)
+ *   light = Khadi   (Resources/Themes/khadi.json)
+ * Semantic vars flip via [data-theme]; Tailwind utilities reference them
+ * through @theme inline so `bg-bg`, `text-text`, `text-accent`… stay honest.
+ */
+
+:root,
+[data-theme="dark"] {
+  --bg: #10141c;
+  --surface: #151a24;
+  --elevated: #1b212d;
+  --hover: #1d2431;
+  --selection: #242c3c;
+  --border: #262e3e;
+  --border-strong: #333d52;
+  --text: #e7eaf2;
+  --text-2: #9aa3b8;
+  --text-3: #67718a;
+  --accent: #e3a857;
+  --accent-hover: #edb96f;
+  --on-accent: #201709;
+  --focus-ring: #e3a85766;
+  --error: #e06c75;
+  --warning: #d4a24e;
+  --info: #82a7f0;
+  --success: #7cc08a;
+  --git-added: #7cc08a;
+  --git-modified: #d2b958;
+  --git-deleted: #e06c75;
+  --diff-added-bg: #142e1d;
+  --diff-removed-bg: #331d20;
+  --editor-bg: #151a24;
+  --editor-line: #1a2030;
+  --gutter: #4b5670;
+  --gutter-active: #9aa3b8;
+  --syn-comment: #5f6980;
+  --syn-string: #9fc98f;
+  --syn-escape: #74bfcb;
+  --syn-number: #e0b36a;
+  --syn-constant: #e3a857;
+  --syn-keyword: #9d8ce8;
+  --syn-operator: #98a6c4;
+  --syn-punctuation: #6e7a94;
+  --syn-function: #74bfcb;
+  --syn-type: #82a7f0;
+  --syn-variable: #e7eaf2;
+  --syn-parameter: #c9d2e6;
+  --syn-property: #b8c2dc;
+  --syn-tag: #e08d8d;
+  --syn-attribute: #d2b958;
+  --syn-namespace: #a9b4ce;
+
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg: #f1ede3;
+  --surface: #faf7f0;
+  --elevated: #ffffff;
+  --hover: #efe9db;
+  --selection: #e7e0ce;
+  --border: #e3dccb;
+  --border-strong: #cfc6b0;
+  --text: #2b2f3a;
+  --text-2: #5d6474;
+  --text-3: #8a90a0;
+  --accent: #a2701f;
+  --accent-hover: #8a5d14;
+  --on-accent: #fff9ee;
+  --focus-ring: #a2701f55;
+  --error: #b3362e;
+  --warning: #8f6a10;
+  --info: #3557b7;
+  --success: #2e7d46;
+  --git-added: #2e7d46;
+  --git-modified: #8f6a10;
+  --git-deleted: #b3362e;
+  --diff-added-bg: #e3f2e6;
+  --diff-removed-bg: #fbe6e4;
+  --editor-bg: #faf7f0;
+  --editor-line: #f2ede1;
+  --gutter: #a8abb6;
+  --gutter-active: #5d6474;
+  --syn-comment: #8c8776;
+  --syn-string: #4e7d45;
+  --syn-escape: #1e7a87;
+  --syn-number: #9a5f12;
+  --syn-constant: #a2701f;
+  --syn-keyword: #6c4fc4;
+  --syn-operator: #55617a;
+  --syn-punctuation: #7a8294;
+  --syn-function: #1e7a87;
+  --syn-type: #3557b7;
+  --syn-variable: #2b2f3a;
+  --syn-parameter: #4a5568;
+  --syn-property: #52608f;
+  --syn-tag: #ad3b3b;
+  --syn-attribute: #8f6a10;
+  --syn-namespace: #5c6474;
+
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-elevated: var(--elevated);
+  --color-hover: var(--hover);
+  --color-selection: var(--selection);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text: var(--text);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-on-accent: var(--on-accent);
+  --color-focus-ring: var(--focus-ring);
+  --color-error: var(--error);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-success: var(--success);
+  --color-git-added: var(--git-added);
+  --color-git-modified: var(--git-modified);
+  --color-git-deleted: var(--git-deleted);
+  --color-diff-added-bg: var(--diff-added-bg);
+  --color-diff-removed-bg: var(--diff-removed-bg);
+  --color-editor-bg: var(--editor-bg);
+  --color-editor-line: var(--editor-line);
+  --color-gutter: var(--gutter);
+  --color-gutter-active: var(--gutter-active);
+  --color-syn-comment: var(--syn-comment);
+  --color-syn-string: var(--syn-string);
+  --color-syn-escape: var(--syn-escape);
+  --color-syn-number: var(--syn-number);
+  --color-syn-constant: var(--syn-constant);
+  --color-syn-keyword: var(--syn-keyword);
+  --color-syn-operator: var(--syn-operator);
+  --color-syn-punctuation: var(--syn-punctuation);
+  --color-syn-function: var(--syn-function);
+  --color-syn-type: var(--syn-type);
+  --color-syn-variable: var(--syn-variable);
+  --color-syn-parameter: var(--syn-parameter);
+  --color-syn-property: var(--syn-property);
+  --color-syn-tag: var(--syn-tag);
+  --color-syn-attribute: var(--syn-attribute);
+  --color-syn-namespace: var(--syn-namespace);
+
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Instrument Serif", "New York", Georgia, serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-bg text-text font-sans antialiased;
+    font-optical-sizing: auto;
+    text-rendering: optimizeLegibility;
+    transition: background-color 300ms ease, color 300ms ease;
+  }
+
+  ::selection {
+    background: var(--selection);
+    color: var(--text);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/* Dual-theme Shiki output: spans carry --shiki-dark / --shiki-light vars. */
+.shiki {
+  background-color: var(--shiki-dark-bg, var(--editor-bg)) !important;
+}
+.shiki span {
+  color: var(--shiki-dark);
+  font-style: var(--shiki-dark-font-style);
+  font-weight: var(--shiki-dark-font-weight);
+  text-decoration: var(--shiki-dark-text-decoration);
+}
+[data-theme="light"] .shiki {
+  background-color: var(--shiki-light-bg, var(--editor-bg)) !important;
+}
+[data-theme="light"] .shiki span {
+  color: var(--shiki-light);
+  font-style: var(--shiki-light-font-style);
+  font-weight: var(--shiki-light-font-weight);
+  text-decoration: var(--shiki-light-text-decoration);
+}
+
+/* Docs code blocks */
+.codeblock {
+  @apply overflow-hidden rounded-xl border border-border my-6;
+  background: var(--editor-bg);
+}
+.codeblock-header {
+  @apply flex items-center justify-between border-b border-border px-4 py-2;
+  background: color-mix(in srgb, var(--elevated) 60%, var(--editor-bg));
+}
+.codeblock-lang {
+  @apply font-mono text-xs text-text-3;
+}
+.codeblock-copy {
+  @apply font-sans text-xs text-text-3 transition-colors duration-150;
+}
+.codeblock-copy:hover {
+  color: var(--accent);
+}
+.codeblock pre {
+  @apply m-0 overflow-x-auto p-4 text-[13px] leading-relaxed font-mono;
+}
+.codeblock pre code {
+  @apply font-mono;
+}
+
+/* Docs prose */
+.docs-content {
+  @apply text-[15px] leading-[1.75] text-text-2;
+}
+.docs-content > *:first-child {
+  margin-top: 0;
+}
+.docs-content h1 {
+  @apply mt-0 mb-4 text-[2rem] font-semibold tracking-[-0.02em] leading-[1.15] text-text;
+}
+.docs-content h2 {
+  @apply mt-12 mb-4 text-[1.375rem] font-semibold tracking-[-0.015em] leading-[1.25] text-text;
+}
+.docs-content h3 {
+  @apply mt-9 mb-3 text-[1.0625rem] font-semibold tracking-[-0.01em] text-text;
+}
+.docs-content h4 {
+  @apply mt-8 mb-2 text-[0.9375rem] font-semibold text-text;
+}
+.docs-content p {
+  @apply my-4;
+}
+.docs-content strong {
+  @apply font-semibold text-text;
+}
+.docs-content a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  text-underline-offset: 3px;
+  transition: text-decoration-color 150ms ease;
+}
+.docs-content a:hover {
+  text-decoration-color: var(--accent);
+}
+.docs-content ul,
+.docs-content ol {
+  @apply my-4 pl-6;
+}
+.docs-content ul {
+  @apply list-disc;
+}
+.docs-content ol {
+  @apply list-decimal;
+}
+.docs-content li {
+  @apply my-1.5;
+}
+.docs-content li::marker {
+  color: var(--text-3);
+}
+.docs-content blockquote {
+  @apply my-6 border-l-2 pl-4 italic;
+  border-color: var(--accent);
+  color: var(--text-2);
+}
+.docs-content hr {
+  @apply my-10 border-border;
+}
+.docs-content code:not(pre code) {
+  @apply rounded-md px-1.5 py-0.5 font-mono text-[0.8125em];
+  background: var(--elevated);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.docs-content table {
+  @apply my-6 w-full border-collapse text-[0.875rem];
+}
+.docs-content th {
+  @apply border-b border-border-strong px-3 py-2 text-left font-semibold text-text;
+}
+.docs-content td {
+  @apply border-b border-border px-3 py-2 align-top;
+}
+.docs-content .heading-anchor {
+  @apply -ml-5 pr-2 no-underline opacity-0 transition-opacity duration-150;
+  color: var(--text-3);
+  text-decoration: none;
+}
+.docs-content h1:hover .heading-anchor,
+.docs-content h2:hover .heading-anchor,
+.docs-content h3:hover .heading-anchor,
+.docs-content h4:hover .heading-anchor {
+  opacity: 1;
+}
+.docs-content input[type="checkbox"] {
+  @apply mr-2;
+  accent-color: var(--accent);
+}
+
+/* Dithered cloth texture — the woven-cloth motif, as a dot matrix. */
+.dither {
+  background-image: radial-gradient(circle, currentColor 0.75px, transparent 0.75px);
+  background-size: 5px 5px;
+}
+
+@keyframes stitch-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
