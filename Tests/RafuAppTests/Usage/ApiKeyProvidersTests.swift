@@ -60,8 +60,14 @@ func apiKeyDescriptorContracts() {
     for descriptor in descriptors {
         #expect(descriptor.defaultEnabled == false)
         #expect(descriptor.authPattern == .apiKey)
-        #expect(descriptor.makeStrategies(empty).count == 1)
-        #expect(descriptor.makeStrategies(populated).count == 1)
+        // The strategy COUNT must be context-independent (the Settings
+        // visibility probe calls makeStrategies with an empty context). The
+        // exact number varies per provider and grows as phases add strategies
+        // (W8 appends a cookie strategy to Qwen), so assert independence +
+        // non-empty rather than a frozen count.
+        let emptyCount = descriptor.makeStrategies(empty).count
+        #expect(emptyCount > 0)
+        #expect(descriptor.makeStrategies(populated).count == emptyCount)
     }
     #expect(OpenRouterProvider.descriptor.disclosure.contains("Roo Code"))
     #expect(OpenRouterProvider.descriptor.disclosure.contains("BYO-key"))
