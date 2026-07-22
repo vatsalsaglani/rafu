@@ -219,3 +219,24 @@ already assigns it the bridge + ADR. No other phase touches these files
 ### Wave B (W6/W7/W8) — now unblocked
 W0+W1 are on main, so the cookie-provider phases can branch from main and
 run per their goal prompts in the README. W8 additionally waits on W4.
+
+---
+
+## Wave A complete (2026-07-23)
+
+All five Wave A phases are merged to `main`, in order: W1 (`c9de367`),
+W5 (`a90f523`), W3 (`21ba235`), W4 (`5aa9700`), W2 (`95da703`). Suite at
+**1191 tests**, `swift test --no-parallel` (the CI configuration)
+deterministically green, 0 warnings, lint clean. ADR 0017 (usage-provider
+trust transition) landed with W2.
+
+One observation, not a blocker: a single parallel-mode (`swift test`) run
+failed once immediately after the W2 merge build and did not reproduce in
+17 consecutive parallel runs afterward; serial is deterministic. W2's new
+tests are properly isolated (UUID-suffixed suites + credential prefixes,
+injected Keychain readers, no real Keychain / `.standard`). Treated as a
+one-off timing artifact; flagged here in case it resurfaces.
+
+Remaining: Wave B (W6 Antigravity/Grok/Kilo, W7 Windsurf/Amp/Droid/Warp,
+W8 Qoder + Qwen cookie path) — all unblocked (W0+W1+W4 merged), branch
+from `main` per the README goal prompts.
