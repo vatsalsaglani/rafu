@@ -64,6 +64,8 @@ export const docsNav: DocNavGroup[] = [
       { slug: "themes", title: "Themes" },
       { slug: "cli", title: "The rafu command" },
       { slug: "terminal", title: "The terminal" },
+      { slug: "notch-companion", title: "The notch companion" },
+      { slug: "usage-tracking", title: "Usage tracking" },
       { slug: "language-intelligence", title: "Language intelligence" },
       { slug: "shortcuts", title: "Keyboard shortcuts" },
     ],

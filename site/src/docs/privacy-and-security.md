@@ -56,6 +56,13 @@ never other file contents — and write nothing without an explicit accept.
 **Git.** Argument arrays with `--` path separators, trust prompts before hook-capable
 actions, hook output preserved and shown, no destructive reset/clean UI.
 
+**Usage tracking.** Every provider beyond the fully-local ones (see
+[Usage tracking](/docs/usage-tracking)) requires an explicit Connect, pasted key, or
+one-time cookie import before it makes a single request. Only metric fields — percent
+used, token totals, reset times — are ever read; message and prompt content are never
+touched. Pasted keys live in the Keychain; nothing is logged, and a failing or
+unauthenticated provider just doesn't show a tile.
+
 ## Local builds and Gatekeeper
 
 Until signed distribution ships, locally built bundles may be quarantined. The

@@ -1,4 +1,16 @@
-import { Braces, GitCompareArrows, GitFork, Layers, Lock, Palette, Sparkles, Terminal } from "lucide-react";
+import {
+  Braces,
+  Gauge,
+  GitCompareArrows,
+  GitFork,
+  Layers,
+  Lock,
+  Palette,
+  Radar,
+  Sparkles,
+  SquareTerminal,
+  Terminal,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { Reveal } from "../components/Reveal";
 
@@ -6,12 +18,12 @@ const features: { icon: ReactNode; title: string; body: string }[] = [
   {
     icon: <Layers size={18} strokeWidth={1.75} />,
     title: "Truly native",
-    body: "TextKit 2 editing, real windows, real menus, system appearance. No Electron, no WebView canvas — typing that never waits on anything.",
+    body: "TextKit 2 editing with real multiple cursors, real windows, real menus, system appearance. No Electron, no WebView canvas — typing that never waits on anything.",
   },
   {
     icon: <GitCompareArrows size={18} strokeWidth={1.75} />,
     title: "Git, at a glance",
-    body: "Changes, history with a real commit graph, branches, worktrees, side-by-side diffs, hunk staging, stash, and opt-in inline blame. See exactly what the agent did before you commit it.",
+    body: "Changes, history with a real commit graph, branches, worktrees, syntax-highlighted side-by-side diffs, hunk staging, stash, and opt-in inline blame. See exactly what the agent did before you commit it.",
   },
   {
     icon: <GitFork size={18} strokeWidth={1.75} />,
@@ -22,6 +34,21 @@ const features: { icon: ReactNode; title: string; body: string }[] = [
     icon: <Lock size={18} strokeWidth={1.75} />,
     title: "Explicit AI, on your terms",
     body: "Commit messages drafted from the diff scope you choose; .gitignore and .dockerignore suggestions with per-pattern reasons. Payloads previewed, secrets redacted — nothing is sent or written automatically.",
+  },
+  {
+    icon: <SquareTerminal size={18} strokeWidth={1.75} />,
+    title: "Terminals that stay put",
+    body: "Hide a session instead of killing it — the shell keeps running, one keystroke brings it back. Pick zsh, bash, fish, or nu, name and color each tab, and get a notification with a reply box when a backgrounded agent needs you.",
+  },
+  {
+    icon: <Radar size={18} strokeWidth={1.75} />,
+    title: "Ambient, not another window",
+    body: "A resting strip merges into the physical notch — invisible until it matters. Hover to see every open window's git status; when a session needs you, reply right there without leaving what you're doing.",
+  },
+  {
+    icon: <Gauge size={18} strokeWidth={1.75} />,
+    title: "Know the budget before you hit it",
+    body: "Real 5-hour and 7-day usage for the coding agents you actually run — Claude, Codex, Cursor, Cline, OpenCode, Copilot, and more — shown right in the notch. Read-only, opt-in per provider.",
   },
   {
     icon: <Braces size={18} strokeWidth={1.75} />,

@@ -51,8 +51,13 @@ One `⌘Z` reverts an entire multi-caret batch edit.
 
 | Action | Shortcut |
 |---|---|
-| Toggle Terminal panel | `` ⌃` `` |
+| Toggle Terminal (hide / reveal the most recent) | `` ⌃` `` |
 | New Terminal Tab | `` ⌃⇧` `` |
+
+New Terminal With Shell, Show Terminals, renaming a session, and picking its color all
+live in the Rafu menu, the Terminals panel, and the command palette without dedicated
+shortcuts — a keyboard-wide combination like `⌃⇧T` would collide with either a shell's
+own readline bindings or an existing app shortcut, so menu + palette is the path in v1.
 
 ## Notes
 
@@ -61,4 +66,6 @@ One `⌘Z` reverts an entire multi-caret batch edit.
 - Git hunk, stash, and blame actions live in the Rafu menu and command palette without
   dedicated shortcuts — an intentional choice, so future shortcut ownership stays
   unconflicted.
+- The notch companion is pointer-first: hover or click the strip, `Escape` collapses
+  it. There's no shortcut to open it from the keyboard yet.
 - `⌘P` owns Go to File; the system Print command is deliberately replaced.

@@ -81,4 +81,6 @@ Commit
 - [Workspaces](/docs/workspaces) — local today, SSH in a later release, one window each
 - [The editor](/docs/the-editor) — what the TextKit 2 editor does and doesn't do
 - [Worktrees](/docs/worktrees) — the agent in one tree, you in another
+- [The notch companion](/docs/notch-companion) — a strip that merges into the notch
+  and expands into every open window's git status
 - [Keyboard shortcuts](/docs/shortcuts) — the full, verified map

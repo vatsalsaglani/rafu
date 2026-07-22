@@ -13,7 +13,13 @@ a diff is document content, not a floating panel.
 
 - **Changes** — staged, unstaged, and untracked files, grouped and labeled (never
   color-only)
-- **Side-by-side and unified diffs** in the editor, with the theme's diff tokens
+- **Side-by-side and unified diffs** in the editor, syntax-highlighted with the same
+  Tree-sitter grammars and theme tokens the editor uses — not plain text with a
+  colored background
+- **Hover on the new side.** For a working-tree diff of a saved file, hovering the
+  right-hand (new) column resolves declarations and types through your LSP, same as
+  hovering in the editor. The old side never gets hover — that text may not exist on
+  disk anymore, so any answer about it would be a guess
 - **History with a real commit graph** — lanes capped at eight with an overflow
   indicator, branch/tag/upstream chips, and pagination for long histories
 - **Branches and worktrees** for orientation — worktrees get their own section

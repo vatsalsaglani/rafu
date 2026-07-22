@@ -30,7 +30,14 @@ today:
   `.gitignore` / `.dockerignore` suggestions that never write themselves
 - GitHub publishing through your own `gh` CLI
 - The `rafu` launcher with local IPC v1 (`rafu .`, `--goto`, window routing)
-- A lazy, bounded embedded terminal — now living in editor tabs
+- Multiple lazy, bounded terminal sessions per window — hide instead of kill, shell
+  selection including fish and nu, custom names and colors, bell-based attention with
+  a notification and reply
+- A notch companion on notched Macs: a resting strip that merges into the housing,
+  a hover panel listing open windows with live git status, and a cross-window
+  attention feed with inline reply
+- Read-only usage tracking for the coding agents and tools you connect — Claude,
+  Codex, Cursor, Cline, OpenCode, and more — opt-in per provider, shown in the notch
 
 ## Next
 
