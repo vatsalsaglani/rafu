@@ -212,6 +212,84 @@ func settingsModelSetEnabledPersists() {
     }
 }
 
+@MainActor
+@Test(
+    "UsageSettingsModel: strip order lists enabled providers in stored order and excludes disabled")
+func settingsModelStripOrderReflectsStoreAndEnabled() {
+    withIsolatedSuite { suite in
+        let stripStore = UsageStripOrderStore(suiteName: suite)
+        stripStore.setOrder([.cursor, .codex, .claude])
+        let enableStore = UsageEnableStore(suiteName: suite)
+        let model = UsageSettingsModel(
+            descriptors: [
+                ClaudeProvider.descriptor, CodexProvider.descriptor, CursorProvider.descriptor,
+            ],
+            enableStore: enableStore,
+            stripOrderStore: stripStore)
+        model.setEnabled(true, for: .claude)
+        model.setEnabled(true, for: .codex)
+        model.setEnabled(true, for: .cursor)
+
+        #expect(model.stripOrderedEnabledRows().map(\.id) == [.cursor, .codex, .claude])
+
+        // Disabling a provider drops it from the arrangement.
+        model.setEnabled(false, for: .codex)
+        #expect(model.stripOrderedEnabledRows().map(\.id) == [.cursor, .claude])
+    }
+}
+
+@MainActor
+@Test(
+    "UsageSettingsModel: moving a provider reorders the enabled strip and persists the full order")
+func settingsModelMoveStripProviderPersists() {
+    withIsolatedSuite { suite in
+        let stripStore = UsageStripOrderStore(suiteName: suite)
+        stripStore.setOrder([.claude, .codex, .cursor])
+        let model = UsageSettingsModel(
+            descriptors: [
+                ClaudeProvider.descriptor, CodexProvider.descriptor, CursorProvider.descriptor,
+            ],
+            enableStore: UsageEnableStore(suiteName: suite),
+            stripOrderStore: stripStore)
+        model.setEnabled(true, for: .claude)
+        model.setEnabled(true, for: .codex)
+        model.setEnabled(true, for: .cursor)
+
+        model.moveStripProvider(.cursor, up: true)
+        #expect(model.stripOrderedEnabledRows().map(\.id) == [.claude, .cursor, .codex])
+        #expect(stripStore.order() == [.claude, .cursor, .codex])
+
+        // Moving the first provider up is a no-op.
+        model.moveStripProvider(.claude, up: true)
+        #expect(model.stripOrderedEnabledRows().map(\.id) == [.claude, .cursor, .codex])
+    }
+}
+
+@MainActor
+@Test("UsageSettingsModel: a disabled provider keeps its place when re-enabled after a move")
+func settingsModelDisabledProviderRetainsOrderTail() {
+    withIsolatedSuite { suite in
+        let stripStore = UsageStripOrderStore(suiteName: suite)
+        stripStore.setOrder([.claude, .codex, .cursor])
+        let model = UsageSettingsModel(
+            descriptors: [
+                ClaudeProvider.descriptor, CodexProvider.descriptor, CursorProvider.descriptor,
+            ],
+            enableStore: UsageEnableStore(suiteName: suite),
+            stripOrderStore: stripStore)
+        model.setEnabled(true, for: .claude)
+        model.setEnabled(true, for: .cursor)
+        model.setEnabled(false, for: .codex)
+
+        // Reorder the enabled pair; the disabled provider is preserved at the tail.
+        model.moveStripProvider(.cursor, up: true)
+        #expect(stripStore.order() == [.cursor, .claude, .codex])
+
+        model.setEnabled(true, for: .codex)
+        #expect(model.stripOrderedEnabledRows().map(\.id) == [.cursor, .claude, .codex])
+    }
+}
+
 private actor SettingsConnectionGate {
     private var resultContinuation: CheckedContinuation<UsageOAuthCredentialLoadResult, Never>?
     private var startContinuation: CheckedContinuation<Void, Never>?

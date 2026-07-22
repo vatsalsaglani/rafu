@@ -4,8 +4,9 @@
   `UsageSupport.swift`, `UsageSQLite.swift`, `UsageStores.swift`,
   `UsageProviderRegistry.swift`, `UsageRegistryReader.swift`,
   `Sources/RafuApp/Usage/Providers/*Provider.swift`)
-- Last verified: Swift 6.2, macOS 26, 2026-07-23 (provider-input
-  completion follow-up)
+- Last verified: Swift 6.2, macOS 26, 2026-07-23 (CodexBar de-brand +
+  Antigravity `state.vscdb` token source + notch strip-order picker
+  follow-up; supersedes the provider-input completion follow-up)
 
 ## Rule or observed behavior
 
@@ -82,6 +83,34 @@
    `CookieHeaderCache.shared.header(for:)` through the production
    `UsageFetchContext.cookieHeader` closure; they never touch browser stores,
    prompt for Chromium Safe Storage, or request Safari access.
+
+9. **Antigravity's token lives in its own `state.vscdb`, not a JSON creds
+   file.** Antigravity is a VS Code fork; its signed-in OAuth token is a
+   single opaque string in `~/Library/Application Support/Antigravity/User/
+   globalStorage/state.vscdb`, `ItemTable` key
+   `antigravityUnifiedStateSync.oauthToken` — the same read-only-SQLite shape
+   Rafu already uses for Cursor/Windsurf (rule 3). It carries no expiry,
+   project id, or email, so `AntigravityLocalOAuthStrategy` uses it directly
+   as the Cloud Code bearer, derives the project id from the `loadCodeAssist`
+   response, and leaves identity unset. Antigravity does **not** persist a
+   readable `oauth_creds.json`; a running Antigravity IDE mints the token into
+   `state.vscdb`, and there is no in-app OAuth flow (kept out per the
+   trust-transition ADR). `AntigravityLocalOAuthStrategy(databasePath:
+   fileExists:)` is injectable exactly like `CursorVSCDBStrategy` so tests
+   build a temp `state.vscdb` instead of stubbing a file read — and any test
+   using the descriptor's default strategy must pin a nonexistent
+   `databasePath`, because the default reads a real machine path that exists
+   when Antigravity is installed on the test host.
+
+10. **The user chooses the notch strip order in Settings, not the code.**
+    `UsageSettingsModel` injects `UsageStripOrderStore` and exposes
+    `stripOrderedEnabledRows()` / `moveStripProvider(_:up:)`; the "Notch strip
+    order" Settings section reorders **enabled** providers with per-row
+    up/down buttons (keyboard-reachable, no drag-only path). It persists the
+    full effective order (enabled reordered, then disabled preserved at the
+    tail) via `setOrder`; `UsageDisplayPolicy.frontLine` still takes the first
+    `frontLineCap` (4) with data. Disabled providers are excluded from the
+    arrangement because they never produce a snapshot.
 
 ## Why it matters
 

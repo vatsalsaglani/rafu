@@ -8,25 +8,105 @@ struct UsageSettingsSection: View {
     @State private var model = UsageSettingsModel()
 
     var body: some View {
-        Section {
-            if model.visibleRows.isEmpty {
-                Text("No usage providers are available yet.")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(model.visibleRows) { row in
-                    UsageProviderRow(row: row, model: model)
+        Group {
+            UsageStripOrderSection(model: model)
+
+            Section {
+                if model.visibleRows.isEmpty {
+                    Text("No usage providers are available yet.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(model.visibleRows) { row in
+                        UsageProviderRow(row: row, model: model)
+                    }
                 }
+            } header: {
+                Text("Usage")
+            } footer: {
+                Text(
+                    "Rafu reads only metric fields — percent used, token totals, reset times — never message or prompt content. API keys and imported cookie headers are stored only in Rafu's Keychain. Provider tests and browser imports run only when you explicitly request them."
+                )
             }
-        } header: {
-            Text("Usage")
-        } footer: {
-            Text(
-                "Rafu reads only metric fields — percent used, token totals, reset times — never message or prompt content. API keys and imported cookie headers are stored only in Rafu's Keychain. Provider tests and browser imports run only when you explicitly request them."
-            )
         }
         .task {
             await model.loadInputStatuses()
         }
+    }
+}
+
+/// Lets the user arrange which enabled providers lead the notch front line.
+/// The first `stripFrontLineCap` entries with data render on the strip; the
+/// rest fall into the expandable overflow grid.
+private struct UsageStripOrderSection: View {
+    let model: UsageSettingsModel
+
+    var body: some View {
+        let rows = model.stripOrderedEnabledRows()
+        Section {
+            if rows.isEmpty {
+                Text("Enable a provider below to arrange the notch strip.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                    UsageStripOrderRow(
+                        position: index + 1,
+                        onStrip: index < model.stripFrontLineCap,
+                        displayName: row.displayName,
+                        canMoveUp: index > 0,
+                        canMoveDown: index < rows.count - 1,
+                        moveUp: { model.moveStripProvider(row.id, up: true) },
+                        moveDown: { model.moveStripProvider(row.id, up: false) })
+                }
+            }
+        } header: {
+            Text("Notch strip order")
+        } footer: {
+            Text(
+                "The first \(model.stripFrontLineCap) enabled providers with data appear on the notch front line, in this order. The rest stay under “more providers.”"
+            )
+        }
+    }
+}
+
+private struct UsageStripOrderRow: View {
+    let position: Int
+    let onStrip: Bool
+    let displayName: String
+    let canMoveUp: Bool
+    let canMoveDown: Bool
+    let moveUp: () -> Void
+    let moveDown: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(onStrip ? "\(position)" : "—")
+                .font(.body.monospacedDigit())
+                .foregroundStyle(onStrip ? .primary : .secondary)
+                .frame(width: 18, alignment: .trailing)
+                .accessibilityHidden(true)
+            Text(displayName)
+            if !onStrip {
+                Text("overflow")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(action: moveUp) {
+                Image(systemName: "chevron.up")
+            }
+            .buttonStyle(.borderless)
+            .disabled(!canMoveUp)
+            .accessibilityLabel("Move \(displayName) earlier in the strip")
+            Button(action: moveDown) {
+                Image(systemName: "chevron.down")
+            }
+            .buttonStyle(.borderless)
+            .disabled(!canMoveDown)
+            .accessibilityLabel("Move \(displayName) later in the strip")
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(
+            onStrip ? "On strip, position \(position)" : "In overflow")
     }
 }
 
@@ -97,8 +177,11 @@ final class UsageSettingsModel {
     private let enableStore: UsageEnableStore
     private let oauthConnector: UsageOAuthConnector
     private let inputClient: UsageProviderInputClient
+    private let stripOrderStore: UsageStripOrderStore
     private let defaultEnabledByID: [UsageProviderID: Bool]
+    private let rowsByID: [UsageProviderID: Row]
     private var enabledByID: [UsageProviderID: Bool] = [:]
+    private var stripOrderIDs: [UsageProviderID] = []
     private var isLoadingInputStatuses = false
     private var didLoadInputStatuses = false
 
@@ -110,12 +193,14 @@ final class UsageSettingsModel {
         enableStore: UsageEnableStore = UsageEnableStore(),
         oauthConnector: UsageOAuthConnector = UsageOAuthConnector(),
         inputClient: UsageProviderInputClient = .production,
+        stripOrderStore: UsageStripOrderStore = UsageStripOrderStore(),
         probeContext: UsageFetchContext = UsageSettingsModel.probeContext()
     ) {
         self.enableStore = enableStore
         self.oauthConnector = oauthConnector
         self.inputClient = inputClient
-        visibleRows = descriptors.compactMap { descriptor in
+        self.stripOrderStore = stripOrderStore
+        let rows = descriptors.compactMap { descriptor -> Row? in
             guard !descriptor.makeStrategies(probeContext).isEmpty else { return nil }
             return Row(
                 id: descriptor.id,
@@ -123,6 +208,10 @@ final class UsageSettingsModel {
                 disclosure: descriptor.disclosure,
                 authPattern: descriptor.authPattern)
         }
+        visibleRows = rows
+        rowsByID = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
+        stripOrderIDs = Self.effectiveStripOrder(
+            stored: stripOrderStore.order(), visibleIDs: rows.map(\.id))
         defaultEnabledByID = Dictionary(
             uniqueKeysWithValues: descriptors.map { ($0.id, $0.defaultEnabled) })
         for descriptor in descriptors {
@@ -155,6 +244,48 @@ final class UsageSettingsModel {
 
     func binding(for id: UsageProviderID) -> Binding<Bool> {
         Binding(get: { self.isEnabled(id) }, set: { self.setEnabled($0, for: id) })
+    }
+
+    // MARK: Notch strip order
+
+    /// The number of front-line strip slots the order's first entries fill.
+    var stripFrontLineCap: Int { UsageDisplayPolicy.frontLineCap }
+
+    /// Enabled providers in their stored strip order — the reorderable
+    /// candidates for the notch front line. Disabled providers never produce
+    /// a snapshot, so they are excluded from the arrangement entirely.
+    func stripOrderedEnabledRows() -> [Row] {
+        stripOrderIDs.compactMap { id in
+            guard isEnabled(id) else { return nil }
+            return rowsByID[id]
+        }
+    }
+
+    /// Moves `id` one position earlier (`up`) or later within the enabled
+    /// strip order and persists the full order. Disabled providers keep their
+    /// relative order at the tail so they resume their place if re-enabled.
+    func moveStripProvider(_ id: UsageProviderID, up: Bool) {
+        var enabled = stripOrderIDs.filter { isEnabled($0) }
+        guard let index = enabled.firstIndex(of: id) else { return }
+        let target = up ? index - 1 : index + 1
+        guard enabled.indices.contains(target) else { return }
+        enabled.swapAt(index, target)
+        let disabled = stripOrderIDs.filter { !isEnabled($0) }
+        stripOrderIDs = enabled + disabled
+        stripOrderStore.setOrder(stripOrderIDs)
+    }
+
+    /// Stored order (filtered to still-visible providers) first, then any
+    /// visible provider not yet arranged, in registry order — so a newly
+    /// shipped provider joins the tail rather than vanishing.
+    private static func effectiveStripOrder(
+        stored: [UsageProviderID], visibleIDs: [UsageProviderID]
+    ) -> [UsageProviderID] {
+        let visible = Set(visibleIDs)
+        var result = stored.filter { visible.contains($0) }
+        let placed = Set(result)
+        result.append(contentsOf: visibleIDs.filter { !placed.contains($0) })
+        return result
     }
 
     func connectionState(for id: UsageProviderID) -> ConnectionState {

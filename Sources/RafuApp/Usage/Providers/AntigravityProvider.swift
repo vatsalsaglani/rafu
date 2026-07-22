@@ -9,7 +9,7 @@ nonisolated enum AntigravityProvider {
         displayName: "Antigravity",
         authPattern: .piggybackNetwork,
         disclosure:
-            "Reads the unexpired access token in ~/.codexbar/antigravity/oauth_creds.json; sends only that token to cloudcode-pa.googleapis.com/v1internal:loadCodeAssist and cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels (and v1internal:retrieveUserQuota only when needed) to fetch model quota percentages.",
+            "Reads Antigravity's own signed-in OAuth token from its local state.vscdb; sends only that token to cloudcode-pa.googleapis.com/v1internal:loadCodeAssist and cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels (and v1internal:retrieveUserQuota only when needed) to fetch model quota percentages. No prompt or message content is read.",
         defaultEnabled: false,
         makeStrategies: { _ in [AntigravityLocalOAuthStrategy()] }
     )
@@ -21,13 +21,39 @@ nonisolated enum AntigravityUsageError: Error, Sendable, Equatable {
     case invalidResponse
 }
 
-/// Uses only the narrow credential-file capability available through
-/// `UsageFetchContext`. It never refreshes credentials, onboards an account,
-/// probes a process, or writes the source file.
+/// Reads Antigravity's own signed-in OAuth token from its read-only
+/// `state.vscdb` (the same VS Code-style local database Rafu already reads
+/// for Cursor/Windsurf), then sends only that token to Google's Cloud Code
+/// quota endpoints. It never refreshes credentials, onboards an account,
+/// probes a process, runs an OAuth flow, or writes the source database.
 nonisolated struct AntigravityLocalOAuthStrategy: UsageFetchStrategy {
     let id = "antigravity.local-oauth"
 
-    private static let credentialsPath = ".codexbar/antigravity/oauth_creds.json"
+    private let databasePath: String
+    private let fileExists: @Sendable (String) -> Bool
+
+    init(
+        databasePath: String = Self.defaultDatabasePath,
+        fileExists: @escaping @Sendable (String) -> Bool = { path in
+            FileManager.default.fileExists(atPath: path)
+        }
+    ) {
+        self.databasePath = databasePath
+        self.fileExists = fileExists
+    }
+
+    /// Antigravity persists its signed-in OAuth token under this
+    /// `ItemTable` key in its own `state.vscdb`.
+    private static let oauthTokenKey = "antigravityUnifiedStateSync.oauthToken"
+
+    static var defaultDatabasePath: String {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(
+                "Library/Application Support/Antigravity/User/globalStorage/state.vscdb"
+            )
+            .path
+    }
+
     private static let loadCodeAssistURL = URL(
         string: "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist")!
     private static let fetchAvailableModelsURL = URL(
@@ -38,11 +64,11 @@ nonisolated struct AntigravityLocalOAuthStrategy: UsageFetchStrategy {
     private static let maximumResponseBytes = 1 * 1_024 * 1_024
 
     func isAvailable(_ context: UsageFetchContext) async -> Bool {
-        Self.loadCredential(context) != nil
+        loadCredential() != nil
     }
 
     func fetch(_ context: UsageFetchContext) async throws -> UsageSnapshot {
-        guard let credential = Self.loadCredential(context) else {
+        guard let credential = loadCredential() else {
             throw AntigravityUsageError.missingCredential
         }
 
@@ -101,51 +127,6 @@ nonisolated struct AntigravityLocalOAuthStrategy: UsageFetchStrategy {
 
     func shouldFallback(on error: Error) -> Bool { false }
 
-    private struct Credential: Decodable, Sendable {
-        let accessToken: String?
-        let expiryDateMilliseconds: Double?
-        let idToken: String?
-        let email: String?
-        let projectID: String?
-
-        private enum CodingKeys: String, CodingKey {
-            case accessTokenSnake = "access_token"
-            case accessTokenCamel = "accessToken"
-            case expiryDateSnake = "expiry_date"
-            case expiresAtCamel = "expiresAt"
-            case idTokenSnake = "id_token"
-            case idTokenCamel = "idToken"
-            case email
-            case projectIDSnake = "project_id"
-            case projectIDCamel = "projectId"
-        }
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            accessToken =
-                try container.decodeIfPresent(String.self, forKey: .accessTokenSnake)
-                ?? container.decodeIfPresent(String.self, forKey: .accessTokenCamel)
-            idToken =
-                try container.decodeIfPresent(String.self, forKey: .idTokenSnake)
-                ?? container.decodeIfPresent(String.self, forKey: .idTokenCamel)
-            email = try container.decodeIfPresent(String.self, forKey: .email)
-            projectID =
-                try container.decodeIfPresent(String.self, forKey: .projectIDSnake)
-                ?? container.decodeIfPresent(String.self, forKey: .projectIDCamel)
-            if let value = try? container.decode(Double.self, forKey: .expiryDateSnake) {
-                expiryDateMilliseconds = value
-            } else if let value = try? container.decode(Double.self, forKey: .expiresAtCamel) {
-                expiryDateMilliseconds = value
-            } else if let value = try? container.decode(String.self, forKey: .expiryDateSnake) {
-                expiryDateMilliseconds = Double(value)
-            } else if let value = try? container.decode(String.self, forKey: .expiresAtCamel) {
-                expiryDateMilliseconds = Double(value)
-            } else {
-                expiryDateMilliseconds = nil
-            }
-        }
-    }
-
     private struct LoadedCredential: Sendable {
         let accessToken: String
         let projectID: String?
@@ -181,23 +162,22 @@ nonisolated struct AntigravityLocalOAuthStrategy: UsageFetchStrategy {
         let resetTime: String?
     }
 
-    private static func loadCredential(_ context: UsageFetchContext) -> LoadedCredential? {
-        guard let contents = context.readFile(Self.credentialsPath),
-            contents.utf8.count <= Self.maximumLocalFileBytes,
-            let data = contents.data(using: .utf8),
-            let credential = try? JSONDecoder().decode(Credential.self, from: data),
-            let accessToken = Self.cleanedCredential(credential.accessToken),
-            credential.expiryDateMilliseconds.map({ milliseconds in
-                milliseconds.isFinite
-                    && milliseconds / 1_000 > context.now.timeIntervalSince1970
-            }) != false
+    /// Reads Antigravity's opaque OAuth token from its own read-only
+    /// `state.vscdb` via the bound-parameter SQLite shim (the token never
+    /// enters SQL). The stored token carries no expiry, project, or email,
+    /// so the project id is derived from the `loadCodeAssist` response and
+    /// identity is left unset (Settings-only enrichment).
+    private func loadCredential() -> LoadedCredential? {
+        guard fileExists(databasePath),
+            let rows = try? UsageSQLite.query(
+                databasePath: databasePath,
+                sql: "SELECT value FROM ItemTable WHERE key = ? LIMIT 1;",
+                parameters: [Self.oauthTokenKey],
+                columns: ["value"]),
+            let accessToken = Self.cleanedCredential(rows.first?["value"])
         else { return nil }
 
-        return LoadedCredential(
-            accessToken: accessToken,
-            projectID: Self.cleanedIdentifier(credential.projectID),
-            identity: Self.email(fromIDToken: credential.idToken)
-                ?? Self.cleanedIdentity(credential.email))
+        return LoadedCredential(accessToken: accessToken, projectID: nil, identity: nil)
     }
 
     private static func cleanedCredential(_ raw: String?) -> String? {
@@ -218,34 +198,6 @@ nonisolated struct AntigravityLocalOAuthStrategy: UsageFetchStrategy {
             !value.contains("\n")
         else { return nil }
         return value
-    }
-
-    private static func cleanedIdentity(_ raw: String?) -> String? {
-        guard let value = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
-            !value.isEmpty,
-            value.utf8.count <= 512,
-            !value.contains("\r"),
-            !value.contains("\n")
-        else { return nil }
-        return value
-    }
-
-    private static func email(fromIDToken token: String?) -> String? {
-        guard let token, token.utf8.count <= Self.maximumLocalFileBytes else { return nil }
-        let parts = token.split(separator: ".", omittingEmptySubsequences: false)
-        guard parts.count >= 2 else { return nil }
-        var payload = String(parts[1])
-            .replacingOccurrences(of: "-", with: "+")
-            .replacingOccurrences(of: "_", with: "/")
-        let remainder = payload.count % 4
-        if remainder > 0 {
-            payload += String(repeating: "=", count: 4 - remainder)
-        }
-        guard let data = Data(base64Encoded: payload, options: .ignoreUnknownCharacters),
-            data.count <= Self.maximumLocalFileBytes,
-            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
-        return Self.cleanedIdentity(object["email"] as? String)
     }
 
     private static func projectBody(_ projectID: String?) -> [String: Any] {

@@ -27,7 +27,7 @@ nonisolated enum CopilotProvider {
         displayName: "GitHub Copilot",
         authPattern: .piggybackNetwork,
         disclosure:
-            "Unavailable: current CodexBar source exposes no discoverable local Copilot CLI or gh token; core usage requires a manually or device-flow supplied token.",
+            "Unavailable: no discoverable local Copilot CLI or gh token is exposed for reading; usage requires a manually or device-flow supplied token.",
         defaultEnabled: false,
         makeStrategies: { _ in [CopilotUnavailableLocalTokenStrategy()] }
     )

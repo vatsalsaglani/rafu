@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import Testing
 
 @testable import RafuApp
@@ -50,27 +51,46 @@ private struct CookieProviderSecretError: Error, Sendable, CustomStringConvertib
     var description: String { "transport included \(secret)" }
 }
 
-private func antigravityCredential(
-    now: Date,
-    accessToken: String = "antigravity-secret",
-    email: String = "gravity@example.com",
-    projectID: String? = nil,
-    expired: Bool = false
-) -> String {
-    let claims = try! JSONSerialization.data(withJSONObject: ["email": email])
-        .base64EncodedString()
-        .replacingOccurrences(of: "+", with: "-")
-        .replacingOccurrences(of: "/", with: "_")
-        .replacingOccurrences(of: "=", with: "")
-    var object: [String: Any] = [
-        "access_token": accessToken,
-        "id_token": "header.\(claims).signature",
-        "expiry_date": now.addingTimeInterval(expired ? -60 : 3_600).timeIntervalSince1970
-            * 1_000,
-    ]
-    if let projectID { object["project_id"] = projectID }
-    let data = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
-    return String(decoding: data, as: UTF8.self)
+private enum AntigravityFixtureError: Error { case open, exec, prepare, step }
+
+/// Writes a temporary `state.vscdb` holding Antigravity's OAuth token under
+/// its real `ItemTable` key, mirroring how the Cursor tests build a fixture
+/// database. A `nil` token creates the table but stores no row (signed-out).
+private func makeAntigravityDatabase(token: String?) throws -> (root: URL, database: URL) {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("AntigravityProviderTests-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let database = root.appendingPathComponent("state.vscdb")
+
+    var db: OpaquePointer?
+    guard sqlite3_open(database.path, &db) == SQLITE_OK else {
+        throw AntigravityFixtureError.open
+    }
+    defer { sqlite3_close(db) }
+    guard
+        sqlite3_exec(
+            db, "CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT);", nil, nil, nil)
+            == SQLITE_OK
+    else {
+        throw AntigravityFixtureError.exec
+    }
+
+    if let token {
+        var statement: OpaquePointer?
+        guard
+            sqlite3_prepare_v2(
+                db, "INSERT INTO ItemTable (key, value) VALUES (?, ?);", -1, &statement, nil)
+                == SQLITE_OK
+        else {
+            throw AntigravityFixtureError.prepare
+        }
+        defer { sqlite3_finalize(statement) }
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        sqlite3_bind_text(statement, 1, "antigravityUnifiedStateSync.oauthToken", -1, transient)
+        sqlite3_bind_text(statement, 2, token, -1, transient)
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw AntigravityFixtureError.step }
+    }
+    return (root, database)
 }
 
 private func grokAuth(
@@ -200,8 +220,10 @@ struct CookieProviders1Tests {
             ])
         #expect(KiloCodeProvider.descriptor.makeStrategies(populated).count == 2)
 
-        #expect(AntigravityProvider.descriptor.disclosure.contains("oauth_creds.json"))
+        #expect(AntigravityProvider.descriptor.disclosure.contains("state.vscdb"))
         #expect(AntigravityProvider.descriptor.disclosure.contains("retrieveUserQuota"))
+        #expect(
+            !AntigravityProvider.descriptor.disclosure.lowercased().contains("codexbar"))
         #expect(GrokBuildProvider.descriptor.disclosure.contains("sso and sso-rw"))
         #expect(GrokBuildProvider.descriptor.disclosure.contains("GetGrokCreditsConfig"))
         #expect(KiloCodeProvider.descriptor.disclosure.contains("~/.local/share/kilo/auth.json"))
@@ -217,7 +239,6 @@ struct CookieProviders1Tests {
         })
         let context = cookieProvidersContext(http: client)
         let descriptors = [
-            AntigravityProvider.descriptor,
             GrokBuildProvider.descriptor,
             KiloCodeProvider.descriptor,
         ]
@@ -227,20 +248,39 @@ struct CookieProviders1Tests {
                 await resolveUsageSnapshot(
                     strategies: descriptor.makeStrategies(context), context: context) == nil)
         }
+        // Antigravity reads a real on-disk state.vscdb path, so pin it to a
+        // nonexistent database rather than the machine default, which may
+        // exist when Antigravity is installed on the test host.
+        let missingDatabase = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AntigravityAbsent-\(UUID().uuidString)/state.vscdb").path
+        #expect(
+            await resolveUsageSnapshot(
+                strategies: [AntigravityLocalOAuthStrategy(databasePath: missingDatabase)],
+                context: context) == nil)
         #expect(await recorder.snapshot().isEmpty)
     }
 
-    @Test("Expired Antigravity OAuth credentials are unavailable and never refreshed")
-    func expiredAntigravityCredentialIsUnavailable() async {
-        let now = Date(timeIntervalSince1970: 2_000_000_000)
-        let context = cookieProvidersContext(
-            now: now,
-            readFile: { path in
-                path == ".codexbar/antigravity/oauth_creds.json"
-                    ? antigravityCredential(now: now, expired: true)
-                    : nil
-            })
-        #expect(await !AntigravityLocalOAuthStrategy().isAvailable(context))
+    @Test("Antigravity is unavailable without a readable state.vscdb token")
+    func antigravityWithoutTokenIsUnavailable() async throws {
+        let context = cookieProvidersContext()
+
+        // Missing database file.
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AntigravityMissing-\(UUID().uuidString)/state.vscdb").path
+        #expect(
+            await !AntigravityLocalOAuthStrategy(databasePath: missing).isAvailable(context))
+
+        // Present database, but signed out (no token row).
+        let signedOut = try makeAntigravityDatabase(token: nil)
+        #expect(
+            await !AntigravityLocalOAuthStrategy(databasePath: signedOut.database.path)
+                .isAvailable(context))
+
+        // Present database with a blank token is not a usable credential.
+        let blank = try makeAntigravityDatabase(token: "   ")
+        #expect(
+            await !AntigravityLocalOAuthStrategy(databasePath: blank.database.path)
+                .isAvailable(context))
     }
 
     @Test("Antigravity fixture maps most-consumed model groups and exact request chain")
@@ -291,19 +331,12 @@ struct CookieProviders1Tests {
                 return try cookieProviderResponse(for: request, status: 404, data: Data())
             }
         })
-        let context = cookieProvidersContext(
-            now: now,
-            readFile: { path in
-                path == ".codexbar/antigravity/oauth_creds.json"
-                    ? antigravityCredential(
-                        now: now,
-                        accessToken: "ag-token",
-                        email: "fixture@example.com")
-                    : nil
-            },
-            http: client)
+        let fixture = try makeAntigravityDatabase(token: "ag-token")
+        let context = cookieProvidersContext(now: now, http: client)
 
-        let snapshot = try await AntigravityLocalOAuthStrategy().fetch(context)
+        let snapshot = try await AntigravityLocalOAuthStrategy(
+            databasePath: fixture.database.path
+        ).fetch(context)
 
         #expect(snapshot.providerID == .antigravity)
         #expect(snapshot.windows.map(\.label) == ["Gemini Models", "Claude and GPT"])
@@ -313,7 +346,8 @@ struct CookieProviders1Tests {
                 UsageDateParsing.parseISO8601Fractional(geminiReset),
                 UsageDateParsing.parseISO8601Fractional(sharedReset),
             ])
-        #expect(snapshot.identity == "fixture@example.com")
+        // The opaque state.vscdb token carries no email; identity is unset.
+        #expect(snapshot.identity == nil)
         #expect(snapshot.costLine == nil)
         #expect(await recorder.snapshot().count == 2)
     }
@@ -347,12 +381,12 @@ struct CookieProviders1Tests {
                 return try cookieProviderResponse(for: request, status: 404, data: Data())
             }
         })
-        let context = cookieProvidersContext(
-            now: now,
-            readFile: { _ in antigravityCredential(now: now) },
-            http: client)
+        let fixture = try makeAntigravityDatabase(token: "antigravity-secret")
+        let context = cookieProvidersContext(now: now, http: client)
 
-        let snapshot = try await AntigravityLocalOAuthStrategy().fetch(context)
+        let snapshot = try await AntigravityLocalOAuthStrategy(
+            databasePath: fixture.database.path
+        ).fetch(context)
         #expect(snapshot.windows.map(\.percent) == [75])
         #expect(
             await recorder.snapshot().map { $0.url?.path } == [
@@ -363,17 +397,15 @@ struct CookieProviders1Tests {
     }
 
     @Test("Antigravity 401 is typed invalid credentials and hides the tile")
-    func antigravityUnauthorizedIsTyped() async {
+    func antigravityUnauthorizedIsTyped() async throws {
         let now = Date(timeIntervalSince1970: 2_000_000_000)
         let secret = "antigravity-secret-that-must-not-escape"
         let client = UsageHTTPClient(transport: { request in
             try cookieProviderResponse(for: request, status: 401, data: Data())
         })
-        let context = cookieProvidersContext(
-            now: now,
-            readFile: { _ in antigravityCredential(now: now, accessToken: secret) },
-            http: client)
-        let strategy = AntigravityLocalOAuthStrategy()
+        let fixture = try makeAntigravityDatabase(token: secret)
+        let context = cookieProvidersContext(now: now, http: client)
+        let strategy = AntigravityLocalOAuthStrategy(databasePath: fixture.database.path)
 
         do {
             _ = try await strategy.fetch(context)
@@ -619,19 +651,17 @@ struct CookieProviders1Tests {
     }
 
     @Test("Injected transport details containing W6 credentials are structurally redacted")
-    func transportErrorsAreRedacted() async {
+    func transportErrorsAreRedacted() async throws {
         let now = Date(timeIntervalSince1970: 2_000_000_000)
         let secret = "w6-secret-that-must-not-escape"
         let client = UsageHTTPClient(transport: { _ in
             throw CookieProviderSecretError(secret: secret)
         })
+        let antigravityFixture = try makeAntigravityDatabase(token: secret)
         let attempts: [(any UsageFetchStrategy, UsageFetchContext)] = [
             (
-                AntigravityLocalOAuthStrategy(),
-                cookieProvidersContext(
-                    now: now,
-                    readFile: { _ in antigravityCredential(now: now, accessToken: secret) },
-                    http: client)
+                AntigravityLocalOAuthStrategy(databasePath: antigravityFixture.database.path),
+                cookieProvidersContext(now: now, http: client)
             ),
             (
                 GrokBuildCachedCookieStrategy(),

@@ -131,8 +131,11 @@ func localTokenProviderDisclosures() {
     )
     #expect(
         CopilotProvider.descriptor.disclosure
-            == "Unavailable: current CodexBar source exposes no discoverable local Copilot CLI or gh token; core usage requires a manually or device-flow supplied token."
+            == "Unavailable: no discoverable local Copilot CLI or gh token is exposed for reading; usage requires a manually or device-flow supplied token."
     )
+    // The user-facing disclosure must not name CodexBar (attribution stays
+    // in the file-header comment, which is a legal condition of reuse).
+    #expect(!CopilotProvider.descriptor.disclosure.lowercased().contains("codexbar"))
 }
 
 // MARK: - Gemini CLI
