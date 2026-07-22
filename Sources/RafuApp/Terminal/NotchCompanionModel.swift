@@ -200,9 +200,19 @@ final class NotchCompanionModel: NSObject {
 
     private static let editorRowHeight: CGFloat = 56
     private static let emptyStateHeight: CGFloat = 64
-    /// The usage front line's single line plus its own top padding
-    /// (agent-usage-providers.md, "Multi-provider display in the notch").
-    private static let usageFrontLineHeight: CGFloat = 24
+    /// One front-line provider's OWN row height (agent-usage-providers.md,
+    /// "Multi-provider display in the notch", amended 2026-07-23: per-row
+    /// front line — each of the up-to-`UsageDisplayPolicy.frontLineCap`
+    /// providers gets its own row rather than sharing one joined line).
+    /// Matches `usageGridRowHeight`: both are one line of the same 10.5pt
+    /// monospaced font. Multiplied by `usageFrontLine.count` in
+    /// `peekContentHeight()`.
+    private static let usageFrontLineRowHeight: CGFloat = 16
+    /// The usage front line's own top padding
+    /// (`CompanionUsageStripView`'s `.padding(.top, RafuMetrics.space2)`),
+    /// added ONCE regardless of front-line row count — was folded into the
+    /// single-line `usageFrontLineHeight` pre-redesign.
+    private static let usageFrontLineTopPadding: CGFloat = RafuMetrics.space2
     /// The `▸ N more providers` disclosure line's own height, added only
     /// when there is at least one overflow provider.
     private static let usageDisclosureHeight: CGFloat = 18
@@ -725,14 +735,21 @@ final class NotchCompanionModel: NSObject {
         }
     }
 
-    private func peekContentHeight() -> CGFloat {
-        // A coarse fixed height for the single-line usage front line, same
+    /// `internal`, not `private`, so `NotchCompanionModelTests` can assert
+    /// its per-provider-row growth directly (headless — no live panel/
+    /// screen needed since this reads only already-computed model state).
+    func peekContentHeight() -> CGFloat {
+        // A coarse fixed height for the usage front line's rows, same
         // approximation `feedCardHeight` already makes — zero when there is
         // nothing to show (agent-usage-providers.md: the usage area is
         // absent entirely with zero enabled/renderable providers).
         let frontLine = usageFrontLine
         let overflow = usageOverflow
-        let usageFrontLineTerm: CGFloat = frontLine.isEmpty ? 0 : Self.usageFrontLineHeight
+        let usageFrontLineTerm: CGFloat =
+            frontLine.isEmpty
+            ? 0
+            : Self.usageFrontLineTopPadding + CGFloat(frontLine.count)
+                * Self.usageFrontLineRowHeight
         let usageDisclosureTerm: CGFloat = overflow.isEmpty ? 0 : Self.usageDisclosureHeight
         let usageGridTerm: CGFloat
         if isUsageOverflowExpanded, !overflow.isEmpty {

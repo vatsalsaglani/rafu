@@ -606,3 +606,76 @@ func frontLineTextMatchesPreW0Rendering() {
     let preW0Rendering = "Claude · 5h 100 tok · 7d 1.1K tok    Codex · 5h 3% · 7d 6%"
     #expect(rendered == preW0Rendering)
 }
+
+// MARK: - Window cap (agent-usage-providers.md, "Multi-provider display in
+// the notch", amended 2026-07-23: per-row front line). Each front-line
+// provider now gets its own row, so `renderedTile(for:displayName:windowCap:)`
+// caps a wide tile (e.g. a per-model Claude breakdown) to its first
+// `windowCap` windows, keeping every row one line.
+
+@Test("renderedTile: windowCap drops the third+ windows, keeping the surviving ones in order")
+func renderedTileWindowCapDropsExtraWindows() {
+    let snapshot = UsageSnapshot(
+        providerID: .claude,
+        windows: [
+            UsageWindow(label: "5h", percent: 33, tokens: nil, resetsAt: nil),
+            UsageWindow(label: "7d", percent: 37, tokens: nil, resetsAt: nil),
+            UsageWindow(label: "Fable 7d", percent: 48, tokens: nil, resetsAt: nil),
+        ], costLine: nil, identity: nil)
+
+    let tile = UsageDisplayPolicy.renderedTile(
+        for: snapshot, displayName: "Claude", windowCap: UsageDisplayPolicy.tileWindowCap)
+
+    #expect(tile.windows.map(\.text) == ["5h 33%", "7d 37%"])
+}
+
+@Test("renderedTile: windowCap nil (the default) renders every window, uncapped")
+func renderedTileWindowCapNilRendersAllWindows() {
+    let snapshot = UsageSnapshot(
+        providerID: .claude,
+        windows: [
+            UsageWindow(label: "5h", percent: 33, tokens: nil, resetsAt: nil),
+            UsageWindow(label: "7d", percent: 37, tokens: nil, resetsAt: nil),
+            UsageWindow(label: "Fable 7d", percent: 48, tokens: nil, resetsAt: nil),
+        ], costLine: nil, identity: nil)
+
+    let uncapped = UsageDisplayPolicy.renderedTile(for: snapshot, displayName: "Claude")
+
+    #expect(uncapped.windows.map(\.text) == ["5h 33%", "7d 37%", "Fable 7d 48%"])
+}
+
+@Test("renderedTile: a cost-only tile (no windows) is unaffected by windowCap")
+func renderedTileWindowCapIgnoresCostOnlyTile() {
+    let snapshot = UsageSnapshot(
+        providerID: .factoryDroid, windows: [], costLine: "$41.20", identity: nil)
+
+    let tile = UsageDisplayPolicy.renderedTile(
+        for: snapshot, displayName: "Factory", windowCap: UsageDisplayPolicy.tileWindowCap)
+
+    #expect(tile.windows.map(\.text) == ["$41.20"])
+}
+
+@Test("renderedTile: emphasis is still computed correctly on the surviving capped windows")
+func renderedTileWindowCapPreservesEmphasisOnSurvivors() {
+    let snapshot = UsageSnapshot(
+        providerID: .claude,
+        windows: [
+            UsageWindow(label: "5h", percent: 96, tokens: nil, resetsAt: nil),
+            UsageWindow(label: "7d", percent: 82, tokens: nil, resetsAt: nil),
+            UsageWindow(label: "Fable 7d", percent: 10, tokens: nil, resetsAt: nil),
+        ], costLine: nil, identity: nil)
+
+    let tile = UsageDisplayPolicy.renderedTile(
+        for: snapshot, displayName: "Claude", windowCap: UsageDisplayPolicy.tileWindowCap)
+
+    #expect(tile.windows.map(\.emphasis) == [.critical, .high])
+}
+
+@Test("frontLineWindowCap: nil for a sole front-line provider, tileWindowCap for two or more")
+func frontLineWindowCapSelectsPerProviderCount() {
+    #expect(UsageDisplayPolicy.frontLineWindowCap(providerCount: 1) == nil)
+    #expect(
+        UsageDisplayPolicy.frontLineWindowCap(providerCount: 2) == UsageDisplayPolicy.tileWindowCap)
+    #expect(
+        UsageDisplayPolicy.frontLineWindowCap(providerCount: 4) == UsageDisplayPolicy.tileWindowCap)
+}

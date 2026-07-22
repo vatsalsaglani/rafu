@@ -239,6 +239,20 @@ nonisolated enum UsageDisplayPolicy {
     static let frontLineCap = 4
     static let highUsageThreshold: Double = 80
     static let criticalUsageThreshold: Double = 95
+    /// A front-line tile's window count caps at this many
+    /// (agent-usage-providers.md, "Multi-provider display in the notch",
+    /// amended 2026-07-23: per-row front line). Each front-line provider
+    /// now gets its own row rather than sharing one joined line, so a
+    /// provider carrying 3+ windows (e.g. a per-model Claude breakdown:
+    /// `5h 33% · 7d 37% · Fable 7d 48%`) would still overflow that row's
+    /// width — capping to the first two windows keeps every row one line.
+    /// Providers already order the primary window first, so the surviving
+    /// windows are the most relevant ones. `frontLineWindowCap(providerCount:)`
+    /// below is the one exception: a SOLE front-line provider has the
+    /// whole row's width, so it renders uncapped. The overflow grid's
+    /// half-width tiles always apply this cap, regardless of provider
+    /// count.
+    static let tileWindowCap = 2
 
     /// Near-exhaustion emphasis for one rendered window — text/weight only,
     /// never color alone (AGENTS: "never communicate ... state using color
@@ -300,9 +314,21 @@ nonisolated enum UsageDisplayPolicy {
     /// single cost-only chunk when `windows` is empty but `costLine` is
     /// set, or a bare name when the snapshot carries neither (should not
     /// happen for a `renderable` snapshot, but never crashes).
-    static func renderedTile(for snapshot: UsageSnapshot, displayName: String) -> RenderedTile {
+    ///
+    /// `windowCap` (default `nil` = uncapped, keeping every existing
+    /// callsite source-compatible) drops `snapshot.windows` to its first
+    /// `windowCap` entries BEFORE mapping — a cost-only tile (no
+    /// `windows`) is unaffected by the cap either way. Pass
+    /// `UsageDisplayPolicy.tileWindowCap` (via `frontLineWindowCap(providerCount:)`
+    /// for the front line, or directly for the overflow grid) to keep a
+    /// tile's row to one line; see `tileWindowCap`'s doc comment.
+    static func renderedTile(
+        for snapshot: UsageSnapshot, displayName: String, windowCap: Int? = nil
+    ) -> RenderedTile {
         if !snapshot.windows.isEmpty {
-            let windows = snapshot.windows.map { window in
+            let cappedWindows =
+                windowCap.map { Array(snapshot.windows.prefix($0)) } ?? snapshot.windows
+            let windows = cappedWindows.map { window in
                 RenderedWindow(
                     text: windowText(window), emphasis: emphasis(forPercent: window.percent))
             }
@@ -317,11 +343,23 @@ nonisolated enum UsageDisplayPolicy {
         return RenderedTile(providerID: snapshot.providerID, displayName: displayName, windows: [])
     }
 
+    /// The window cap to apply to EVERY front-line tile, given how many
+    /// providers occupy the front line: `nil` (uncapped) for exactly one
+    /// provider — a sole row has the width for every window — and
+    /// `tileWindowCap` for two or more. A pure helper so
+    /// `CompanionUsageStripView`'s cap-selection logic is headless-testable
+    /// without a live `NotchCompanionModel`/screen.
+    static func frontLineWindowCap(providerCount: Int) -> Int? {
+        providerCount > 1 ? tileWindowCap : nil
+    }
+
     /// `"<displayName> · <window> · <window>"` — the ONE join format the
     /// pre-W0 `CompanionUsageStripView.tileSummary` used
     /// (`"\(tile.agent) · " + windows.joined(" · ")`), preserved exactly so
     /// a no-emphasis line renders byte-identical to before (see
-    /// `UsageCoreTests`' rendering-parity test).
+    /// `UsageCoreTests`' rendering-parity test). Also each front-line/
+    /// overflow row's `.accessibilityLabel` in the per-row redesign
+    /// (2026-07-23) — see `CompanionUsageStripView`.
     static func plainText(_ tile: RenderedTile) -> String {
         guard !tile.windows.isEmpty else { return tile.displayName }
         return "\(tile.displayName) · " + tile.windows.map(\.text).joined(separator: " · ")
@@ -329,6 +367,12 @@ nonisolated enum UsageDisplayPolicy {
 
     /// The full front-line string — every tile's `plainText`, joined by
     /// four spaces, matching the pre-W0 strip's tile separator exactly.
+    /// `CompanionUsageStripView` stopped using this for its own rendering
+    /// once the front line moved to one row per provider (2026-07-23) —
+    /// each row now carries its own `plainText` accessibility label
+    /// instead of one combined, 4-space-joined line — but it stays a pure,
+    /// directly-tested function (`UsageCoreTests`' rendering-parity test)
+    /// since nothing about the JOIN FORMAT itself changed.
     static func plainFrontLineText(_ tiles: [RenderedTile]) -> String {
         tiles.map(plainText).joined(separator: "    ")
     }

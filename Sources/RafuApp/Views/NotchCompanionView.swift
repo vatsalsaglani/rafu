@@ -177,22 +177,29 @@ struct CompanionWingsView: View {
 }
 
 /// The peek panel's usage area (agent-usage-providers.md, "Multi-provider
-/// display in the notch"): a front line of up to
-/// `UsageDisplayPolicy.frontLineCap` muted tiles, e.g. `Claude · 5h 1.2M
-/// tok · 7d 8.4M tok    Codex · 5h 3% · 7d 6%`, then — only when other
-/// enabled providers exist — a `▸ N more providers` disclosure that
-/// expands (per-peek) into a two-column grid of the rest. Hidden ENTIRELY
-/// when `model.usageFrontLine` is empty — no placeholder, no "usage
-/// unavailable" text. A monospaced font gives tabular numerals so tile
-/// values do not jitter as they refresh.
+/// display in the notch", amended 2026-07-23: per-row front line): a
+/// column-aligned, tiny-table front line of up to
+/// `UsageDisplayPolicy.frontLineCap` rows — one per provider, e.g.
+/// ```
+/// Claude   5h 33% · 7d 37%
+/// Codex    5h 12% · 7d 40%
+/// ```
+/// then — only when other enabled providers exist — a `▸ N more
+/// providers` disclosure that expands (per-peek) into a two-column grid
+/// of the rest. Hidden ENTIRELY when `model.usageFrontLine` is empty — no
+/// placeholder, no "usage unavailable" text. A monospaced font gives
+/// tabular numerals so tile values do not jitter as they refresh.
 ///
-/// The front line renders through an `AttributedString` built from
-/// `UsageDisplayPolicy.RenderedTile`s: a no-emphasis tile applies the same
-/// muted foreground to every run, so its RENDERED CHARACTERS are
-/// byte-identical to the pre-usage-registry strip's plain `Text(summary)`
-/// (see `UsageCoreTests`' rendering-parity assertion over
-/// `UsageDisplayPolicy.plainFrontLineText`, which this view's plain-text
-/// accessibility label also uses).
+/// Replaces the pre-2026-07-23 design, which joined every front-line
+/// tile into ONE `.lineLimit(1)` line by four spaces: with ≥2 enabled
+/// providers whose tiles are wide (e.g. Claude carrying a per-model
+/// window), that line truncated MID-TILE — an ellipsized percentage. Each
+/// row now gets the full strip width, and `UsageDisplayPolicy.tileWindowCap`
+/// caps a multi-provider tile to its first two windows (uncapped for a
+/// SOLE front-line provider, via `frontLineWindowCap(providerCount:)`) so
+/// a row never has to truncate at all. `UsageDisplayPolicy.plainText`
+/// still underlies each row's rendering and its own
+/// `.accessibilityLabel` — see that function's doc comment.
 struct CompanionUsageStripView: View {
     let model: NotchCompanionModel
     @Environment(\.rafuTheme) private var theme
@@ -200,12 +207,7 @@ struct CompanionUsageStripView: View {
     var body: some View {
         if !model.usageFrontLine.isEmpty {
             VStack(alignment: .leading, spacing: RafuMetrics.space1) {
-                Text(frontLineText)
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityLabel(plainFrontLineText)
+                frontLineRows
                 if !model.usageOverflow.isEmpty {
                     disclosureButton
                 }
@@ -218,16 +220,52 @@ struct CompanionUsageStripView: View {
         }
     }
 
+    /// One left-aligned, column-aligned row per front-line tile — `Grid`
+    /// gives the name column a shared width across rows so the strip scans
+    /// like a tiny table (see this type's doc comment). Each row is its
+    /// own accessibility element (`plainText(tile)`), which reads better
+    /// under VoiceOver than one combined multi-provider label ever did.
+    private var frontLineRows: some View {
+        Grid(
+            alignment: .leading, horizontalSpacing: RafuMetrics.space2,
+            verticalSpacing: RafuMetrics.space1
+        ) {
+            ForEach(frontLineTiles, id: \.providerID) { tile in
+                GridRow {
+                    Text(mutedRun(tile.displayName))
+                        .lineLimit(1)
+                    Text(windowsRun(tile))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(UsageDisplayPolicy.plainText(tile))
+            }
+        }
+        .font(.system(size: 10.5, design: .monospaced))
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The front-line tiles, each capped by `frontLineWindowCap(providerCount:)`
+    /// — uncapped when this provider is the front line's SOLE row (it has
+    /// the width for every window), `tileWindowCap` otherwise.
     private var frontLineTiles: [UsageDisplayPolicy.RenderedTile] {
-        model.usageFrontLine.map(renderedTile)
+        let snapshots = model.usageFrontLine
+        let cap = UsageDisplayPolicy.frontLineWindowCap(providerCount: snapshots.count)
+        return snapshots.map { renderedTile($0, windowCap: cap) }
     }
 
+    /// The overflow grid's tiles are always half-width, so they always cap
+    /// at `tileWindowCap` regardless of how many overflow providers exist.
     private var overflowTiles: [UsageDisplayPolicy.RenderedTile] {
-        model.usageOverflow.map(renderedTile)
+        model.usageOverflow.map { renderedTile($0, windowCap: UsageDisplayPolicy.tileWindowCap) }
     }
 
-    private func renderedTile(_ snapshot: UsageSnapshot) -> UsageDisplayPolicy.RenderedTile {
-        UsageDisplayPolicy.renderedTile(for: snapshot, displayName: displayName(for: snapshot))
+    private func renderedTile(_ snapshot: UsageSnapshot, windowCap: Int?)
+        -> UsageDisplayPolicy.RenderedTile
+    {
+        UsageDisplayPolicy.renderedTile(
+            for: snapshot, displayName: displayName(for: snapshot), windowCap: windowCap)
     }
 
     private func displayName(for snapshot: UsageSnapshot) -> String {
@@ -235,30 +273,13 @@ struct CompanionUsageStripView: View {
             ?? snapshot.providerID.rawValue
     }
 
-    private var plainFrontLineText: String {
-        UsageDisplayPolicy.plainFrontLineText(frontLineTiles)
-    }
-
-    /// Joins every front-line tile into one `AttributedString`, applying
-    /// the theme's muted color everywhere and overriding to accent
-    /// (+semibold) only for `.high`/`.critical` window chunks — a tile with
-    /// no emphasized window therefore carries a UNIFORM muted color, which
-    /// is what makes its rendered text equivalent to the old plain
-    /// `Text(summary)` (attributes never change the underlying characters).
-    private var frontLineText: AttributedString {
+    /// A tile's window chunks only, ` · `-joined, WITHOUT the display name
+    /// prefix — `frontLineRows`/`overflowGrid` render the name in its own
+    /// column/position instead. Applies the theme's muted color everywhere
+    /// and overrides to accent (+semibold) only for `.high`/`.critical`
+    /// chunks, via `windowRun(_:)`.
+    private func windowsRun(_ tile: UsageDisplayPolicy.RenderedTile) -> AttributedString {
         var result = AttributedString()
-        for (index, tile) in frontLineTiles.enumerated() {
-            if index > 0 {
-                result += mutedRun("    ")
-            }
-            result += tileRun(tile)
-        }
-        return result
-    }
-
-    private func tileRun(_ tile: UsageDisplayPolicy.RenderedTile) -> AttributedString {
-        guard !tile.windows.isEmpty else { return mutedRun(tile.displayName) }
-        var result = mutedRun("\(tile.displayName) · ")
         for (index, window) in tile.windows.enumerated() {
             if index > 0 {
                 result += mutedRun(" · ")

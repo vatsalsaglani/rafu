@@ -73,16 +73,7 @@ nonisolated struct FactoryDroidCookieStrategy: UsageFetchStrategy {
 
 private nonisolated enum FactoryDroidAuth {
     static let maximumCredentialBytes = 16 * 1_024
-    static let allowedCookieNames: Set<String> = [
-        "wos-session",
-        "__Secure-next-auth.session-token",
-        "next-auth.session-token",
-        "__Secure-authjs.session-token",
-        "__Host-authjs.csrf-token",
-        "authjs.session-token",
-        "session",
-        "access-token",
-    ]
+    static let allowedCookieNames = Set(UsageCookieImportCatalog.factoryDroidCookieNames)
 
     static func cleanedCredential(_ raw: String?) -> String? {
         guard var value = raw?.trimmingCharacters(in: .whitespacesAndNewlines),

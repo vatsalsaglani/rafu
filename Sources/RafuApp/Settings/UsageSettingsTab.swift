@@ -1,14 +1,9 @@
 import SwiftUI
 
 /// Settings > Usage (agent-usage-providers.md, "Registration panel"):
-/// registry-driven rows, one per provider whose `makeStrategies` actually
-/// resolves to at least one strategy — a stub provider (empty strategies,
-/// per usage-providers/W0-shim.md: "recommend hidden to keep the tab
-/// honest") never appears here at all, rather than showing as a dead
-/// "Not yet supported" row. In W0 that means only Claude and Codex are
-/// visible. Their local fallbacks remain independently toggleable, while
-/// their `piggybackNetwork` rows expose explicit Connect/Disconnect controls;
-/// later phases add rows as their providers' strategies stop returning `[]`.
+/// registry-driven rows, one per provider whose `makeStrategies` resolves to
+/// at least one strategy. Authentication-specific controls stay in Settings;
+/// periodic notch refreshes consume only previously stored inputs.
 struct UsageSettingsSection: View {
     @State private var model = UsageSettingsModel()
 
@@ -26,16 +21,55 @@ struct UsageSettingsSection: View {
             Text("Usage")
         } footer: {
             Text(
-                "Rafu reads only metric fields — percent used, token totals, reset times — never message or prompt content. Local usage stays enabled independently; Connect separately allows read-only exact usage requests for one provider."
+                "Rafu reads only metric fields — percent used, token totals, reset times — never message or prompt content. API keys and imported cookie headers are stored only in Rafu's Keychain. Provider tests and browser imports run only when you explicitly request them."
             )
+        }
+        .task {
+            await model.loadInputStatuses()
         }
     }
 }
 
-/// The section's state: which registry descriptors are currently visible
-/// (`makeStrategies` non-empty against a network/credential-free probe
-/// context) and each visible provider's enable state, backed by
-/// `UsageEnableStore`.
+nonisolated enum UsageAPIKeyInputIssue: Equatable, Sendable {
+    case keyRequired
+    case invalidKey
+    case keychainUnavailable
+    case testFailed
+    case cancelled
+}
+
+nonisolated enum UsageAPIKeyOperationState: Equatable, Sendable {
+    case loading
+    case idle
+    case saving
+    case saved
+    case testing
+    case removing
+    case succeeded
+    case failed(UsageAPIKeyInputIssue)
+}
+
+nonisolated enum UsageCookieInputIssue: Equatable, Sendable {
+    case needsFullDiskAccess
+    case noMatchingCookies
+    case browserUnavailable
+    case keychainUnavailable
+    case invalidRequest
+    case cancelled
+}
+
+nonisolated enum UsageCookieOperationState: Equatable, Sendable {
+    case loading
+    case idle
+    case importing
+    case imported(Browser)
+    case removing
+    case failed(UsageCookieInputIssue)
+}
+
+/// The section's state: registry visibility, enable state, OAuth consent, and
+/// redacted credential/cookie operation status. Secret text remains owned by
+/// each `SecureField`; this observable model never stores an API key or cookie.
 @MainActor
 @Observable
 final class UsageSettingsModel {
@@ -55,39 +89,57 @@ final class UsageSettingsModel {
 
     private(set) var visibleRows: [Row] = []
     private(set) var connectionStateByID: [UsageProviderID: ConnectionState] = [:]
+    private(set) var apiKeyStateByID: [UsageProviderID: UsageAPIKeyOperationState] = [:]
+    private(set) var hasStoredAPIKeyByID: [UsageProviderID: Bool] = [:]
+    private(set) var cookieStateByID: [UsageProviderID: UsageCookieOperationState] = [:]
+    private(set) var hasImportedCookieByID: [UsageProviderID: Bool] = [:]
 
     private let enableStore: UsageEnableStore
     private let oauthConnector: UsageOAuthConnector
+    private let inputClient: UsageProviderInputClient
     private let defaultEnabledByID: [UsageProviderID: Bool]
     private var enabledByID: [UsageProviderID: Bool] = [:]
+    private var isLoadingInputStatuses = false
+    private var didLoadInputStatuses = false
 
-    /// `probeContext` never performs real I/O — `UsageHTTPClient.noop`
-    /// always fails, `readFile`/`credential`/`cookieHeader` always return
-    /// `nil` — it exists purely so `descriptor.makeStrategies(_:)` can be
-    /// called to check whether a provider has landed yet, without risking
-    /// a network call or Keychain read from Settings simply opening.
+    /// `probeContext` never performs real I/O. It checks only whether a
+    /// descriptor has landed, without risking network, filesystem, or
+    /// Keychain access merely because Settings opened.
     init(
         descriptors: [UsageProviderDescriptor] = UsageProviderRegistry.all,
         enableStore: UsageEnableStore = UsageEnableStore(),
         oauthConnector: UsageOAuthConnector = UsageOAuthConnector(),
+        inputClient: UsageProviderInputClient = .production,
         probeContext: UsageFetchContext = UsageSettingsModel.probeContext()
     ) {
         self.enableStore = enableStore
         self.oauthConnector = oauthConnector
+        self.inputClient = inputClient
         visibleRows = descriptors.compactMap { descriptor in
             guard !descriptor.makeStrategies(probeContext).isEmpty else { return nil }
             return Row(
-                id: descriptor.id, displayName: descriptor.displayName,
-                disclosure: descriptor.disclosure, authPattern: descriptor.authPattern)
+                id: descriptor.id,
+                displayName: descriptor.displayName,
+                disclosure: descriptor.disclosure,
+                authPattern: descriptor.authPattern)
         }
         defaultEnabledByID = Dictionary(
             uniqueKeysWithValues: descriptors.map { ($0.id, $0.defaultEnabled) })
         for descriptor in descriptors {
             enabledByID[descriptor.id] = enableStore.isEnabled(
                 descriptor.id, default: descriptor.defaultEnabled)
-            if case .piggybackNetwork = descriptor.authPattern {
+            switch descriptor.authPattern {
+            case .piggybackNetwork:
                 connectionStateByID[descriptor.id] =
                     oauthConnector.hasConsent(for: descriptor.id) ? .connected : .disconnected
+            case .apiKey:
+                apiKeyStateByID[descriptor.id] = .loading
+                hasStoredAPIKeyByID[descriptor.id] = false
+            case .cookieImport:
+                cookieStateByID[descriptor.id] = .loading
+                hasImportedCookieByID[descriptor.id] = false
+            case .localZeroConfig:
+                break
             }
         }
     }
@@ -125,40 +177,463 @@ final class UsageSettingsModel {
         connectionStateByID[id] = .disconnected
     }
 
+    func loadInputStatuses() async {
+        guard !didLoadInputStatuses, !isLoadingInputStatuses else { return }
+        isLoadingInputStatuses = true
+        defer { isLoadingInputStatuses = false }
+
+        for row in visibleRows {
+            guard !Task.isCancelled else { return }
+            switch row.authPattern {
+            case .apiKey:
+                do {
+                    hasStoredAPIKeyByID[row.id] =
+                        try await inputClient.loadCredential(row.id) != nil
+                    guard !Task.isCancelled else { return }
+                    apiKeyStateByID[row.id] = .idle
+                } catch is CancellationError {
+                    return
+                } catch {
+                    apiKeyStateByID[row.id] = .failed(.keychainUnavailable)
+                }
+            case .cookieImport:
+                hasImportedCookieByID[row.id] = await inputClient.hasImportedCookie(row.id)
+                guard !Task.isCancelled else { return }
+                cookieStateByID[row.id] = .idle
+            case .localZeroConfig, .piggybackNetwork:
+                break
+            }
+        }
+        didLoadInputStatuses = true
+    }
+
+    func apiKeyState(for id: UsageProviderID) -> UsageAPIKeyOperationState {
+        apiKeyStateByID[id] ?? .idle
+    }
+
+    func hasStoredAPIKey(for id: UsageProviderID) -> Bool {
+        hasStoredAPIKeyByID[id] ?? false
+    }
+
+    @discardableResult
+    func saveAPIKey(_ draft: String, for id: UsageProviderID) async -> Bool {
+        guard !apiKeyOperationIsRunning(for: id) else { return false }
+        let candidate = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !candidate.isEmpty else {
+            apiKeyStateByID[id] = .failed(.keyRequired)
+            return false
+        }
+        guard let credential = UsageCredentialValidation.normalized(candidate) else {
+            apiKeyStateByID[id] = .failed(.invalidKey)
+            return false
+        }
+
+        apiKeyStateByID[id] = .saving
+        do {
+            try await inputClient.writeCredential(credential, id)
+            hasStoredAPIKeyByID[id] = true
+            apiKeyStateByID[id] = .saved
+            return true
+        } catch is CancellationError {
+            apiKeyStateByID[id] = .failed(.cancelled)
+        } catch {
+            apiKeyStateByID[id] = .failed(.keychainUnavailable)
+        }
+        return false
+    }
+
+    func testAPIKey(_ draft: String, for id: UsageProviderID, now: Date = Date()) async {
+        guard !apiKeyOperationIsRunning(for: id) else { return }
+
+        let rawCandidate = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let credential: String
+        if rawCandidate.isEmpty {
+            do {
+                guard let stored = try await inputClient.loadCredential(id) else {
+                    apiKeyStateByID[id] = .failed(.keyRequired)
+                    return
+                }
+                credential = stored
+                hasStoredAPIKeyByID[id] = true
+            } catch is CancellationError {
+                apiKeyStateByID[id] = .failed(.cancelled)
+                return
+            } catch {
+                apiKeyStateByID[id] = .failed(.keychainUnavailable)
+                return
+            }
+        } else {
+            guard let candidate = UsageCredentialValidation.normalized(rawCandidate) else {
+                apiKeyStateByID[id] = .failed(.invalidKey)
+                return
+            }
+            guard await saveAPIKey(candidate, for: id) else { return }
+            credential = candidate
+        }
+
+        guard !Task.isCancelled else {
+            apiKeyStateByID[id] = .failed(.cancelled)
+            return
+        }
+        apiKeyStateByID[id] = .testing
+        switch await inputClient.testAPIKey(id, credential, now) {
+        case .succeeded:
+            apiKeyStateByID[id] = .succeeded
+        case .failed:
+            apiKeyStateByID[id] = .failed(.testFailed)
+        case .cancelled:
+            apiKeyStateByID[id] = .failed(.cancelled)
+        }
+    }
+
+    func removeAPIKey(for id: UsageProviderID) async {
+        guard !apiKeyOperationIsRunning(for: id) else { return }
+        apiKeyStateByID[id] = .removing
+        do {
+            try await inputClient.removeCredential(id)
+            hasStoredAPIKeyByID[id] = false
+            apiKeyStateByID[id] = .idle
+        } catch is CancellationError {
+            apiKeyStateByID[id] = .failed(.cancelled)
+        } catch {
+            apiKeyStateByID[id] = .failed(.keychainUnavailable)
+        }
+    }
+
+    func clearAPIKeyFeedback(for id: UsageProviderID) {
+        switch apiKeyState(for: id) {
+        case .saved, .succeeded, .failed:
+            apiKeyStateByID[id] = .idle
+        case .loading, .idle, .saving, .testing, .removing:
+            break
+        }
+    }
+
+    func cookieState(for id: UsageProviderID) -> UsageCookieOperationState {
+        cookieStateByID[id] ?? .idle
+    }
+
+    func hasImportedCookie(for id: UsageProviderID) -> Bool {
+        hasImportedCookieByID[id] ?? false
+    }
+
+    func importCookies(for id: UsageProviderID, from browser: Browser) async {
+        guard !cookieOperationIsRunning(for: id) else { return }
+        cookieStateByID[id] = .importing
+        switch await inputClient.importCookies(id, browser) {
+        case .imported(let importedBrowser):
+            hasImportedCookieByID[id] = true
+            cookieStateByID[id] = .imported(importedBrowser)
+        case .needsFullDiskAccess:
+            cookieStateByID[id] = .failed(.needsFullDiskAccess)
+        case .noMatchingCookies:
+            cookieStateByID[id] = .failed(.noMatchingCookies)
+        case .browserUnavailable:
+            cookieStateByID[id] = .failed(.browserUnavailable)
+        case .storageFailed:
+            cookieStateByID[id] = .failed(.keychainUnavailable)
+        case .invalidRequest:
+            cookieStateByID[id] = .failed(.invalidRequest)
+        case .cancelled:
+            cookieStateByID[id] = .failed(.cancelled)
+        }
+    }
+
+    func removeCookies(for id: UsageProviderID) async {
+        guard !cookieOperationIsRunning(for: id) else { return }
+        cookieStateByID[id] = .removing
+        do {
+            try await inputClient.removeCookies(id)
+            hasImportedCookieByID[id] = false
+            cookieStateByID[id] = .idle
+        } catch is CancellationError {
+            cookieStateByID[id] = .failed(.cancelled)
+        } catch {
+            cookieStateByID[id] = .failed(.keychainUnavailable)
+        }
+    }
+
+    func clearCookieFeedback(for id: UsageProviderID) {
+        switch cookieState(for: id) {
+        case .imported, .failed:
+            cookieStateByID[id] = .idle
+        case .loading, .idle, .importing, .removing:
+            break
+        }
+    }
+
     static func probeContext() -> UsageFetchContext {
         UsageFetchContext(
-            now: Date(), readFile: { _ in nil }, http: .noop, credential: { _ in nil },
+            now: Date(),
+            readFile: { _ in nil },
+            http: .noop,
+            credential: { _ in nil },
             cookieHeader: { _ in nil })
+    }
+
+    private func apiKeyOperationIsRunning(for id: UsageProviderID) -> Bool {
+        switch apiKeyState(for: id) {
+        case .saving, .testing, .removing:
+            true
+        case .loading, .idle, .saved, .succeeded, .failed:
+            false
+        }
+    }
+
+    private func cookieOperationIsRunning(for id: UsageProviderID) -> Bool {
+        switch cookieState(for: id) {
+        case .importing, .removing:
+            true
+        case .loading, .idle, .imported, .failed:
+            false
+        }
     }
 }
 
-/// One provider's Settings row: display name + enable toggle on the header
-/// line, the disclosure line beneath it. `authPattern`-specific
-/// Connect/key-field/cookie-import affordances arrive with the phase that
-/// makes that pattern real (agent-usage-providers.md, "Registration
-/// panel") — W0 ships only `localZeroConfig` rows, which need nothing
-/// beyond the toggle.
 private struct UsageProviderRow: View {
     let row: UsageSettingsModel.Row
     let model: UsageSettingsModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 5) {
             Toggle(isOn: model.binding(for: row.id)) {
                 Text(row.displayName).font(.body.weight(.medium))
             }
             Text(row.disclosure)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            if case .piggybackNetwork = row.authPattern {
+
+            switch row.authPattern {
+            case .localZeroConfig:
+                EmptyView()
+            case .piggybackNetwork:
                 UsageOAuthConnectionControls(
                     providerName: row.displayName,
                     state: model.connectionState(for: row.id),
                     connect: { await model.connect(row.id) },
                     disconnect: { await model.disconnect(row.id) })
+            case .apiKey:
+                UsageAPIKeyControls(row: row, model: model)
+            case .cookieImport:
+                UsageCookieImportControls(row: row, model: model)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
+    }
+}
+
+private struct UsageAPIKeyControls: View {
+    let row: UsageSettingsModel.Row
+    let model: UsageSettingsModel
+
+    @State private var draft = ""
+    @State private var operationTask: Task<Void, Never>?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                SecureField(fieldPrompt, text: $draft)
+                    .textFieldStyle(.roundedBorder)
+                    .privacySensitive()
+                    .accessibilityLabel("\(row.displayName) API key")
+                    .onSubmit {
+                        guard canSave else { return }
+                        operationTask?.cancel()
+                        operationTask = Task {
+                            if await model.saveAPIKey(draft, for: row.id) {
+                                draft = ""
+                            }
+                        }
+                    }
+                Button("Save") {
+                    operationTask?.cancel()
+                    operationTask = Task {
+                        if await model.saveAPIKey(draft, for: row.id) {
+                            draft = ""
+                        }
+                    }
+                }
+                .disabled(!canSave)
+                .accessibilityLabel("Save \(row.displayName) API key")
+                Button("Test") {
+                    operationTask?.cancel()
+                    operationTask = Task {
+                        await model.testAPIKey(draft, for: row.id)
+                        if model.hasStoredAPIKey(for: row.id) {
+                            draft = ""
+                        }
+                    }
+                }
+                .disabled(!canTest)
+                .accessibilityLabel("Test \(row.displayName) API key")
+                if model.hasStoredAPIKey(for: row.id) {
+                    Button("Remove", role: .destructive) {
+                        operationTask?.cancel()
+                        operationTask = Task { await model.removeAPIKey(for: row.id) }
+                    }
+                    .disabled(isBusy)
+                    .accessibilityLabel("Remove \(row.displayName) API key")
+                }
+            }
+            Text(statusText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("API key status: \(statusText)")
+        }
+        .onChange(of: draft) {
+            if !draft.isEmpty {
+                model.clearAPIKeyFeedback(for: row.id)
+            }
+        }
+        .onDisappear {
+            operationTask?.cancel()
+        }
+    }
+
+    private var fieldPrompt: String {
+        model.hasStoredAPIKey(for: row.id) ? "API key stored in Keychain" : "API key"
+    }
+
+    private var canSave: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isBusy
+    }
+
+    private var canTest: Bool {
+        (canSave || model.hasStoredAPIKey(for: row.id)) && !isBusy
+    }
+
+    private var isBusy: Bool {
+        switch model.apiKeyState(for: row.id) {
+        case .loading, .saving, .testing, .removing:
+            true
+        case .idle, .saved, .succeeded, .failed:
+            false
+        }
+    }
+
+    private var statusText: String {
+        switch model.apiKeyState(for: row.id) {
+        case .loading:
+            "Checking Rafu's Keychain…"
+        case .idle:
+            model.hasStoredAPIKey(for: row.id)
+                ? "API key stored in Rafu's Keychain."
+                : "No API key stored."
+        case .saving:
+            "Saving to Rafu's Keychain…"
+        case .saved:
+            "API key saved in Rafu's Keychain."
+        case .testing:
+            "Testing one usage request…"
+        case .removing:
+            "Removing API key…"
+        case .succeeded:
+            "Test succeeded. Usage data is available."
+        case .failed(.keyRequired):
+            "Enter an API key before testing."
+        case .failed(.invalidKey):
+            "The API key contains an unsupported control character or is too large."
+        case .failed(.keychainUnavailable):
+            "Rafu couldn't access its Keychain item."
+        case .failed(.testFailed):
+            "Test failed. Check the key and provider availability."
+        case .failed(.cancelled):
+            "Test cancelled."
+        }
+    }
+}
+
+private struct UsageCookieImportControls: View {
+    let row: UsageSettingsModel.Row
+    let model: UsageSettingsModel
+
+    @State private var selectedBrowser = Browser.chrome
+    @State private var operationTask: Task<Void, Never>?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                Picker("Browser", selection: $selectedBrowser) {
+                    ForEach(Browser.allCases, id: \.rawValue) { browser in
+                        Text(browser.displayName).tag(browser)
+                    }
+                }
+                .frame(width: 170)
+                Button("Import from browser") {
+                    operationTask?.cancel()
+                    operationTask = Task {
+                        await model.importCookies(for: row.id, from: selectedBrowser)
+                    }
+                }
+                .disabled(isBusy)
+                .accessibilityLabel("Import \(row.displayName) session from browser")
+                if model.hasImportedCookie(for: row.id) {
+                    Button("Remove", role: .destructive) {
+                        operationTask?.cancel()
+                        operationTask = Task { await model.removeCookies(for: row.id) }
+                    }
+                    .disabled(isBusy)
+                    .accessibilityLabel("Remove imported \(row.displayName) browser session")
+                }
+            }
+            Text(statusText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Browser import status: \(statusText)")
+            if model.cookieState(for: row.id) == .failed(.needsFullDiskAccess) {
+                Label(
+                    "Safari cookie access requires Full Disk Access. In System Settings, open Privacy & Security > Full Disk Access, enable Rafu, then try the import again.",
+                    systemImage: "lock.shield"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .onChange(of: selectedBrowser) {
+            model.clearCookieFeedback(for: row.id)
+        }
+        .onDisappear {
+            operationTask?.cancel()
+        }
+    }
+
+    private var isBusy: Bool {
+        switch model.cookieState(for: row.id) {
+        case .loading, .importing, .removing:
+            true
+        case .idle, .imported, .failed:
+            false
+        }
+    }
+
+    private var statusText: String {
+        switch model.cookieState(for: row.id) {
+        case .loading:
+            "Checking Rafu's Keychain…"
+        case .idle:
+            model.hasImportedCookie(for: row.id)
+                ? "Imported browser session stored in Rafu's Keychain."
+                : "No browser session imported."
+        case .importing:
+            "Importing from \(selectedBrowser.displayName)…"
+        case .imported(let browser):
+            "Imported from \(browser.displayName) and stored in Rafu's Keychain."
+        case .removing:
+            "Removing imported browser session…"
+        case .failed(.needsFullDiskAccess):
+            "Safari access was denied."
+        case .failed(.noMatchingCookies):
+            "No matching signed-in session was found in this browser."
+        case .failed(.browserUnavailable):
+            "The browser store couldn't be read. Close the browser if needed, then try again."
+        case .failed(.keychainUnavailable):
+            "The session was found, but Rafu couldn't store it in Keychain."
+        case .failed(.invalidRequest):
+            "This provider doesn't have a valid browser-import request."
+        case .failed(.cancelled):
+            "Browser import cancelled."
+        }
     }
 }
 

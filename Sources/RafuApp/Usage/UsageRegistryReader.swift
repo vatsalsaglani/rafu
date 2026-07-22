@@ -75,6 +75,17 @@ nonisolated struct UsageRegistryReader: Sendable {
     /// this; it exists for a future single-file consumer (e.g. an
     /// `auth.json`/token-file read).
     static func productionContext(_ now: Date) -> UsageFetchContext {
+        productionContext(
+            now,
+            cookieHeader: { CookieHeaderCache.shared.header(for: $0) })
+    }
+
+    /// Injectable cookie closure keeps the production-context composition
+    /// fixture-testable without reading the developer's real Keychain.
+    static func productionContext(
+        _ now: Date,
+        cookieHeader: @escaping @Sendable (UsageProviderID) -> String?
+    ) -> UsageFetchContext {
         UsageFetchContext(
             now: now,
             readFile: { path in
@@ -86,8 +97,7 @@ nonisolated struct UsageRegistryReader: Sendable {
             // `snapshots(now:)` overlays its pre-resolved immutable map on
             // this base closure before any strategy sees the context.
             credential: { _ in nil },
-            // Cookie import lands in W1 — until then, no provider has one.
-            cookieHeader: { _ in nil }
+            cookieHeader: cookieHeader
         )
     }
 

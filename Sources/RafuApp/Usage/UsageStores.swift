@@ -107,6 +107,26 @@ nonisolated enum UsageCredentialStoreError: Error, Sendable {
     case emptySecret
 }
 
+/// Shared validation for user-entered usage secrets. HTTP header values may
+/// not contain control characters, and keeping the bound identical to the
+/// Keychain store prevents Settings from accepting a value persistence will
+/// later reject.
+nonisolated enum UsageCredentialValidation {
+    static let maximumSecretBytes = 16 * 1_024
+
+    static func normalized(_ rawValue: String) -> String? {
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty,
+            value.utf8.count <= maximumSecretBytes,
+            value.unicodeScalars.allSatisfy({ scalar in
+                scalar.value >= 0x20 && scalar.value != 0x7F
+                    && scalar != "\r" && scalar != "\n" && scalar != "\0"
+            })
+        else { return nil }
+        return value
+    }
+}
+
 /// The complete external-credential value that may cross the async registry
 /// bridge into `UsageFetchContext.credential`. Unknown keys are rejected so a
 /// refresh token, ID token, scopes, or provider metadata cannot accidentally
@@ -302,7 +322,7 @@ nonisolated enum UsageClaudeKeychainReadResult: Equatable, Sendable {
 /// Focused tests may inject this actor to exercise the transient in-memory
 /// cache, but never invoke its persistent Keychain methods.
 actor UsageCredentialStore {
-    static let maximumSecretBytes = 16 * 1_024
+    static let maximumSecretBytes = UsageCredentialValidation.maximumSecretBytes
     static let shared = UsageCredentialStore()
 
     private let servicePrefix: String
@@ -324,20 +344,21 @@ actor UsageCredentialStore {
             throw UsageCredentialStoreError.keychainFailure(status: status)
         }
         guard let data = result as? Data, data.count <= Self.maximumSecretBytes,
-            let value = String(data: data, encoding: .utf8)
+            let value = String(data: data, encoding: .utf8),
+            let normalized = UsageCredentialValidation.normalized(value)
         else {
             throw UsageCredentialStoreError.invalidStoredValue
         }
-        return value
+        return normalized
     }
 
     func setCredential(_ value: String, for id: UsageProviderID) throws {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        let data = Data(trimmed.utf8)
-        guard !data.isEmpty else { throw UsageCredentialStoreError.emptySecret }
-        guard data.count <= Self.maximumSecretBytes else {
+        guard !trimmed.isEmpty else { throw UsageCredentialStoreError.emptySecret }
+        guard let normalized = UsageCredentialValidation.normalized(trimmed) else {
             throw UsageCredentialStoreError.invalidStoredValue
         }
+        let data = Data(normalized.utf8)
 
         let query = baseQuery(for: id)
         let update: [String: Any] = [kSecValueData as String: data]

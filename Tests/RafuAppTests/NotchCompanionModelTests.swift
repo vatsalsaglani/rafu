@@ -445,6 +445,79 @@ func usageFrontLineDefaultOrderIncludesBoth() async {
     #expect(model.usageOverflow.isEmpty)
 }
 
+/// Builds a fixture reader with one enabled provider per given id, each
+/// carrying a single renderable window — enough to land every id in
+/// `usageFrontLine` (all counts here stay at/under `frontLineCap`).
+private func fixtureReader(providerIDs: [UsageProviderID]) -> UsageRegistryReader {
+    fixtureReader(
+        descriptors: providerIDs.map { id in
+            fixtureDescriptor(
+                id: id,
+                snapshot: UsageSnapshot(
+                    providerID: id,
+                    windows: [UsageWindow(label: "5h", percent: 10, tokens: nil, resetsAt: nil)],
+                    costLine: nil, identity: nil))
+        })
+}
+
+/// `peekContentHeight()`'s usage-front-line term (agent-usage-providers.md,
+/// "Multi-provider display in the notch", amended 2026-07-23: per-row
+/// front line): 0 providers contributes nothing, and each additional
+/// provider row grows the height by the SAME constant amount
+/// (`usageFrontLineRowHeight`) — proven here via deltas between provider
+/// counts rather than the private row-height constant itself, so the test
+/// does not need to know its literal value. The delta from 0→1 providers
+/// is strictly larger than the 1→2 delta because the front line's
+/// one-time top padding is folded into the FIRST row only, never repeated
+/// per row.
+@MainActor
+@Test(
+    "peekContentHeight: 0 with no snapshots, then grows by a constant per-provider amount, with a one-time top-padding term folded into the first row"
+)
+func peekContentHeightGrowsPerFrontLineProvider() async {
+    let zero = NotchCompanionModel()
+    zero.usageReader = fixtureReader(providerIDs: [])
+    await zero.refreshUsage()?.value
+
+    let one = NotchCompanionModel()
+    one.usageReader = fixtureReader(providerIDs: [.claude])
+    await one.refreshUsage()?.value
+
+    let two = NotchCompanionModel()
+    two.usageReader = fixtureReader(providerIDs: [.claude, .codex])
+    await two.refreshUsage()?.value
+
+    let four = NotchCompanionModel()
+    four.usageReader = fixtureReader(providerIDs: [.claude, .codex, .cline, .openCode])
+    await four.refreshUsage()?.value
+
+    #expect(zero.usageFrontLine.isEmpty)
+    #expect(one.usageFrontLine.count == 1)
+    #expect(two.usageFrontLine.count == 2)
+    #expect(four.usageFrontLine.count == 4)
+    // All four counts stay within `frontLineCap`, so none of these models
+    // has an overflow disclosure/grid term to also account for.
+    #expect(zero.usageOverflow.isEmpty)
+    #expect(four.usageOverflow.isEmpty)
+
+    let zeroToOneDelta = one.peekContentHeight() - zero.peekContentHeight()
+    let oneToTwoDelta = two.peekContentHeight() - one.peekContentHeight()
+    let twoToFourDelta = four.peekContentHeight() - two.peekContentHeight()
+
+    // 0 providers contributes nothing beyond the baseline every model
+    // already shares (empty editors list, no feed) — the front-line term
+    // is exactly 0, so 0→1 is entirely the first row's height plus its
+    // one-time top padding.
+    #expect(zeroToOneDelta > 0)
+    // 1→2 adds exactly one more row, no additional top padding.
+    #expect(oneToTwoDelta > 0)
+    // 2→4 adds exactly two more rows at the SAME per-row rate as 1→2.
+    #expect(twoToFourDelta == 2 * oneToTwoDelta)
+    // The 0→1 delta includes the one-time top-padding term that 1→2 does
+    // not, so it must be strictly larger than a single row's own height.
+    #expect(zeroToOneDelta > oneToTwoDelta)
+}
+
 @MainActor
 @Test("toggleUsageOverflow: flips isUsageOverflowExpanded")
 func toggleUsageOverflowFlipsExpandedState() {
