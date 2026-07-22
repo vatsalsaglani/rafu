@@ -109,6 +109,24 @@ final class EditorGutterRulerView: NSRulerView {
         needsDisplay = true
     }
 
+    /// Marks the cached line index stale and requests a redraw WITHOUT
+    /// recomputing thickness. Safe to call synchronously from inside a text
+    /// edit transaction — unlike `invalidateLineIndex()`, whose
+    /// `updateThickness()` calls `enclosingScrollView?.tile()`, which
+    /// re-enters TextKit layout. Running that tile inside
+    /// `NSTextStorageDelegate.textStorage(_:didProcessEditing:…)`, while a
+    /// just-inserted range was still settling, raised `-[NSLayoutManager
+    /// _fillLayoutHoleForCharacterRange:…]` on large pastes (crash report,
+    /// 2026-07-22) — the same "never touch AppKit text state synchronously
+    /// on the edit path" hazard as the prior caret-color and find crashes.
+    /// The edit-processing delegate calls this immediately (so line numbers
+    /// stay correct and a redraw is queued) and defers `updateThickness()`
+    /// to the next runloop turn, after `processEditing` returns.
+    func markLineIndexStale() {
+        lineIndexIsValid = false
+        needsDisplay = true
+    }
+
     /// Recomputes the gutter width from the current line count and, when it
     /// changes, re-tiles the scroll view so the document view is inset before
     /// anything draws. Computing thickness lazily inside `draw()` is too late:

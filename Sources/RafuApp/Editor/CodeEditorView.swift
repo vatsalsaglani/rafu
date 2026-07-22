@@ -1103,7 +1103,18 @@ struct CodeEditorView: NSViewRepresentable {
                     changeInLength: delta
                 )
                 if editedMask.contains(.editedCharacters) {
-                    gutterRuler?.invalidateLineIndex()
+                    // We are INSIDE the text storage's edit transaction here.
+                    // Mark the gutter stale + queue a redraw synchronously
+                    // (cheap, safe), but DEFER the thickness recompute: it
+                    // calls scrollView.tile(), which re-enters TextKit layout
+                    // and raised _fillLayoutHoleForCharacterRange on large
+                    // pastes when run during didProcessEditing (crash
+                    // 2026-07-22). The deferral runs it after processEditing
+                    // returns, when layout can generate safely.
+                    gutterRuler?.markLineIndexStale()
+                    DispatchQueue.main.async { [weak gutterRuler] in
+                        gutterRuler?.updateThickness()
+                    }
                     // A text edit invalidates any shown hover tooltip (its
                     // anchored range and payload may no longer be valid) and
                     // any shown GX2 peek popover (its anchored line/hunk may
