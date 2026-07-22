@@ -5,17 +5,17 @@ import Foundation
 /// and `AlibabaCodingPlanSettingsReader.swift` at commit
 /// cc8da27cec92029a6435bfee4a703a719290234e (MIT license).
 ///
-/// W4 implements only Alibaba Coding Plan's API-key path. The Alibaba Token
-/// Plan source is cookie-only and remains W8 scope.
+/// W4 implements Alibaba Coding Plan's API-key path. W8 appends the Alibaba
+/// Token Plan cookie path without restructuring the existing key strategy.
 nonisolated enum QwenProvider {
     static let descriptor = UsageProviderDescriptor(
         id: .qwen,
         displayName: "Qwen",
         authPattern: .apiKey,
         disclosure:
-            "Sends only the Alibaba Qwen API key you provide to modelstudio.console.alibabacloud.com or bailian.console.aliyun.com, according to your region preference, to fetch Coding Plan quota metrics.",
+            "Sends only the Alibaba Qwen API key or browser cookie you provide to modelstudio.console.alibabacloud.com or bailian.console.aliyun.com, according to your region preference, to fetch Coding Plan or Token Plan quota metrics.",
         defaultEnabled: false,
-        makeStrategies: { _ in [QwenAPIKeyStrategy()] }
+        makeStrategies: { _ in [QwenAPIKeyStrategy(), QwenCookieStrategy()] }
     )
 }
 
@@ -68,6 +68,40 @@ nonisolated enum QwenAPIRegion: String, CaseIterable, Sendable {
         case .international: "sfm_codingplan_public_intl"
         case .chinaMainland: "sfm_codingplan_public_cn"
         }
+    }
+
+    var tokenPlanDashboardURL: URL {
+        switch self {
+        case .international:
+            URL(
+                string:
+                    "https://modelstudio.console.alibabacloud.com/ap-southeast-1/?tab=plan#/efm/subscription/token-plan"
+            )!
+        case .chinaMainland:
+            URL(
+                string:
+                    "https://bailian.console.aliyun.com/cn-beijing?tab=plan#/efm/subscription/token-plan"
+            )!
+        }
+    }
+
+    var tokenPlanProductCode: String {
+        switch self {
+        case .international: "sfm_tokenplanteams_dp_intl"
+        case .chinaMainland: "sfm_tokenplanteams_dp_cn"
+        }
+    }
+
+    var tokenPlanQuotaURL: URL {
+        var components = URLComponents(
+            url: gatewayBaseURL.appendingPathComponent("data/api.json"),
+            resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "action", value: "GetSubscriptionSummary"),
+            URLQueryItem(name: "product", value: "BssOpenAPI-V3"),
+            URLQueryItem(name: "_tag", value: ""),
+        ]
+        return components.url!
     }
 
     var quotaURL: URL {
@@ -448,5 +482,373 @@ private nonisolated struct QwenTimestamp: Decodable, Sendable {
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = raw.count > 16 ? "yyyy-MM-dd HH:mm:ss" : "yyyy-MM-dd HH:mm"
         date = formatter.date(from: raw)
+    }
+}
+
+// MARK: - Alibaba Token Plan cookie path (W8)
+
+/// Adapted from CodexBar's `AlibabaTokenPlanAPIRegion.swift`,
+/// `AlibabaTokenPlanUsageFetcher.swift`, `AlibabaTokenPlanUsageSnapshot.swift`,
+/// `AlibabaTokenPlanCookieHeader.swift`, and
+/// `AlibabaCodingPlanCookieImporter.swift` at commit
+/// cc8da27cec92029a6435bfee4a703a719290234e (MIT license).
+nonisolated struct QwenCookieStrategy: UsageFetchStrategy {
+    let id = "qwen.cookie"
+
+    /// The upstream importer reads all cookies for this bounded domain set,
+    /// then validates `login_aliyunid_ticket` plus one account cookie. W1's
+    /// import call should therefore use `names: nil`, not a widened jar read.
+    static let cookieImportDomains = [
+        "bailian-singapore-cs.alibabacloud.com",
+        "bailian-cs.console.aliyun.com",
+        "bailian-beijing-cs.aliyuncs.com",
+        "modelstudio.console.alibabacloud.com",
+        "bailian.console.aliyun.com",
+        "free.aliyun.com",
+        "account.aliyun.com",
+        "signin.aliyun.com",
+        "passport.alibabacloud.com",
+        "console.alibabacloud.com",
+        "console.aliyun.com",
+        "alibabacloud.com",
+        "aliyun.com",
+    ]
+
+    private static let userAgent =
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        + "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+
+    private let region: QwenAPIRegion
+
+    init(region: QwenAPIRegion = QwenRegionPreference.load()) {
+        self.region = region
+    }
+
+    func isAvailable(_ context: UsageFetchContext) async -> Bool {
+        Self.credential(in: context) != nil
+    }
+
+    func fetch(_ context: UsageFetchContext) async throws -> UsageSnapshot {
+        guard let credential = Self.credential(in: context) else {
+            throw QwenUsageError.missingCredential
+        }
+
+        var request = URLRequest(url: region.tokenPlanQuotaURL)
+        request.httpMethod = "POST"
+        request.httpShouldHandleCookies = false
+        request.httpBody = Self.requestBody(
+            region: region, securityToken: credential.valuesByName["sec_token"])
+        request.setValue(
+            "application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.setValue("*/*", forHTTPHeaderField: "Accept")
+        request.setValue(credential.header, forHTTPHeaderField: "Cookie")
+        if let csrf = credential.valuesByName["login_aliyunid_csrf"]
+            ?? credential.valuesByName["csrf"]
+        {
+            request.setValue(csrf, forHTTPHeaderField: "x-xsrf-token")
+            request.setValue(csrf, forHTTPHeaderField: "x-csrf-token")
+        }
+        request.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue(region.gatewayBaseURL.absoluteString, forHTTPHeaderField: "Origin")
+        request.setValue(
+            region.tokenPlanDashboardURL.absoluteString,
+            forHTTPHeaderField: "Referer")
+
+        let data: Data
+        do {
+            (data, _) = try await context.http.send(request, provider: .qwen)
+        } catch UsageHTTPError.httpStatus(let status) where status == 401 || status == 403 {
+            throw QwenUsageError.unauthorized
+        }
+        return try Self.parse(data, now: context.now)
+    }
+
+    func shouldFallback(on _: Error) -> Bool { false }
+
+    static func parse(_ data: Data, now _: Date) throws -> UsageSnapshot {
+        guard !data.isEmpty else { throw QwenUsageError.invalidResponse }
+
+        let object: Any
+        do {
+            object = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            if let text = String(data: data, encoding: .utf8)?.lowercased(),
+                text.contains("<html"),
+                text.contains("login") || text.contains("sign in") || text.contains("signin")
+            {
+                throw QwenUsageError.unauthorized
+            }
+            throw QwenUsageError.invalidResponse
+        }
+        guard let root = expandedRoot(object) else { throw QwenUsageError.invalidResponse }
+        try validateStatus(root)
+
+        let summary = dictionary(forKeys: ["Data", "data"], in: root) ?? root
+        let total = double(forKeys: totalQuotaKeys, in: summary)
+        let remaining = double(forKeys: remainingQuotaKeys, in: summary)
+        let explicitUsed = double(forKeys: usedQuotaKeys, in: summary)
+        let used =
+            explicitUsed
+            ?? total.flatMap { total in
+                remaining.map { max(0, total - $0) }
+            }
+
+        guard let total, total > 0, let used, used >= 0,
+            remaining.map({ $0 >= 0 }) ?? true
+        else { throw QwenUsageError.invalidResponse }
+
+        let normalizedUsed = min(total, used)
+        let reset =
+            date(forKeys: resetDateKeys, in: summary)
+            ?? date(forKeys: resetDateKeys, in: root)
+        let totalCount = double(forKeys: subscriptionCountKeys, in: summary)
+        let suppliedPlan = string(forKeys: planNameKeys, in: summary)
+        let identity = suppliedPlan ?? ((totalCount ?? 0) > 0 || total > 0 ? "TOKEN PLAN" : nil)
+
+        return UsageSnapshot(
+            providerID: .qwen,
+            windows: [
+                UsageWindow(
+                    label: "monthly",
+                    percent: normalizedUsed / total * 100,
+                    tokens: nil,
+                    resetsAt: reset)
+            ],
+            costLine: quotaDetail(used: used, total: total, remaining: remaining),
+            identity: identity)
+    }
+
+    private struct CookieCredential {
+        let header: String
+        let valuesByName: [String: String]
+    }
+
+    private static let accountCookieNames = [
+        "login_aliyunid_pk", "login_current_pk", "login_aliyunid",
+    ]
+
+    private static func credential(in context: UsageFetchContext) -> CookieCredential? {
+        guard
+            let header = context.cookieHeader(.qwen)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+            !header.isEmpty
+        else { return nil }
+        let values = cookieValues(in: header)
+        guard values["login_aliyunid_ticket"] != nil,
+            accountCookieNames.contains(where: { values[$0] != nil })
+        else { return nil }
+        return CookieCredential(header: header, valuesByName: values)
+    }
+
+    private static func cookieValues(in header: String) -> [String: String] {
+        var values: [String: String] = [:]
+        for pair in header.split(separator: ";") {
+            let pieces = pair.split(separator: "=", maxSplits: 1)
+            guard pieces.count == 2 else { continue }
+            let name = pieces[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = pieces[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, !value.isEmpty else { continue }
+            values[name] = value
+        }
+        return values
+    }
+
+    private static func requestBody(region: QwenAPIRegion, securityToken: String?) -> Data {
+        let paramsData = try? JSONSerialization.data(
+            withJSONObject: ["ProductCode": region.tokenPlanProductCode])
+        let params = paramsData.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        var items = [
+            URLQueryItem(name: "product", value: "BssOpenAPI-V3"),
+            URLQueryItem(name: "action", value: "GetSubscriptionSummary"),
+            URLQueryItem(name: "params", value: params),
+            URLQueryItem(name: "region", value: region.currentRegionID),
+        ]
+        if let securityToken, !securityToken.isEmpty {
+            items.append(URLQueryItem(name: "sec_token", value: securityToken))
+        }
+        var components = URLComponents()
+        components.queryItems = items
+        return Data((components.percentEncodedQuery ?? "").utf8)
+    }
+
+    /// Expands only the source's known `successResponse.body` wrapper. This
+    /// avoids retaining or recursively walking arbitrary response content.
+    private static func expandedRoot(_ object: Any) -> [String: Any]? {
+        guard let root = object as? [String: Any] else { return nil }
+        for key in ["successResponse", "success_response"] {
+            guard let wrapper = root[key] else { continue }
+            if let dictionary = expandedDictionary(wrapper) {
+                if let body = dictionary["body"], let expanded = expandedDictionary(body) {
+                    return expanded
+                }
+                return dictionary
+            }
+        }
+        return root
+    }
+
+    private static func expandedDictionary(_ value: Any) -> [String: Any]? {
+        if let dictionary = value as? [String: Any] { return dictionary }
+        guard let string = value as? String, string.utf8.count <= 1_048_576,
+            let data = string.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data)
+        else { return nil }
+        return object as? [String: Any]
+    }
+
+    private static func validateStatus(_ root: [String: Any]) throws {
+        for key in ["successResponse", "success_response"] {
+            if let success = parsedBool(root[key]), !success {
+                if loginRequired(root) { throw QwenUsageError.unauthorized }
+                throw QwenUsageError.invalidResponse
+            }
+        }
+        if let success = bool(forKeys: ["Success", "success"], in: root), !success {
+            if loginRequired(root) { throw QwenUsageError.unauthorized }
+            throw QwenUsageError.invalidResponse
+        }
+        if let status = integer(forKeys: ["statusCode", "status_code", "Code", "code"], in: root),
+            status != 0, status != 200
+        {
+            if status == 401 || status == 403 || loginRequired(root) {
+                throw QwenUsageError.unauthorized
+            }
+            throw QwenUsageError.invalidResponse
+        }
+        if loginRequired(root) { throw QwenUsageError.unauthorized }
+    }
+
+    private static func loginRequired(_ root: [String: Any]) -> Bool {
+        let combined = [
+            string(forKeys: ["Code", "code", "status", "statusCode"], in: root),
+            string(forKeys: ["Message", "message", "msg", "statusMessage"], in: root),
+        ]
+        .compactMap { $0?.lowercased() }
+        .joined(separator: " ")
+        return combined.contains("needlogin") || combined.contains("login")
+            || combined.contains("postonlyortokenerror") || combined.contains("tokenerror")
+            || combined.contains("request has expired") || combined.contains("refresh page")
+            || combined.contains("请求已经过期")
+    }
+
+    private static let planNameKeys = [
+        "planName", "plan_name", "packageName", "package_name", "commodityName",
+        "commodity_name", "instanceName", "instance_name", "displayName", "display_name",
+        "ProductName", "productName", "name", "title", "planType", "plan_type",
+    ]
+    private static let usedQuotaKeys = [
+        "usedQuota", "used_quota", "usedCredits", "usedCredit", "consumedCredits", "usage",
+        "used", "usedAmount", "consumeAmount", "usedValue", "UsedValue", "consumedValue",
+        "ConsumedValue",
+    ]
+    private static let totalQuotaKeys = [
+        "totalQuota", "total_quota", "totalCredits", "totalCredit", "quota", "creditLimit",
+        "creditsTotal", "monthlyTotalQuota", "amount", "totalValue", "TotalValue",
+    ]
+    private static let remainingQuotaKeys = [
+        "remainingQuota", "remainQuota", "remainingCredits", "remainingCredit",
+        "availableCredits", "balance", "remaining", "availableAmount", "remainAmount",
+        "totalSurplusValue", "TotalSurplusValue", "surplusValue", "SurplusValue",
+    ]
+    private static let subscriptionCountKeys = [
+        "totalCount", "TotalCount", "subscriptionTotalNumber", "SubscriptionTotalNumber",
+    ]
+    private static let resetDateKeys = [
+        "nextRefreshTime", "resetTime", "periodEndTime", "billingCycleEnd",
+        "billCycleEndTime", "expireTime", "expirationTime", "endTime", "validEndTime",
+        "instanceEndTime", "nearestExpireDate", "NearestExpireDate",
+    ]
+
+    private static func dictionary(
+        forKeys keys: [String], in dictionary: [String: Any]
+    ) -> [String: Any]? {
+        keys.lazy.compactMap { dictionary[$0] as? [String: Any] }.first
+    }
+
+    private static func string(forKeys keys: [String], in dictionary: [String: Any]) -> String? {
+        for key in keys {
+            guard let value = dictionary[key] as? String else { continue }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return nil
+    }
+
+    private static func double(forKeys keys: [String], in dictionary: [String: Any]) -> Double? {
+        for key in keys {
+            if let number = dictionary[key] as? NSNumber { return number.doubleValue }
+            if let raw = dictionary[key] as? String {
+                let cleaned = raw.replacingOccurrences(of: ",", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if let value = Double(cleaned) { return value }
+            }
+        }
+        return nil
+    }
+
+    private static func integer(forKeys keys: [String], in dictionary: [String: Any]) -> Int? {
+        for key in keys {
+            if let number = dictionary[key] as? NSNumber { return number.intValue }
+            if let raw = dictionary[key] as? String, let value = Int(raw) { return value }
+        }
+        return nil
+    }
+
+    private static func bool(forKeys keys: [String], in dictionary: [String: Any]) -> Bool? {
+        for key in keys {
+            if let value = parsedBool(dictionary[key]) { return value }
+        }
+        return nil
+    }
+
+    private static func parsedBool(_ raw: Any?) -> Bool? {
+        if let value = raw as? Bool { return value }
+        if let number = raw as? NSNumber { return number.boolValue }
+        if let value = raw as? String {
+            switch value.lowercased() {
+            case "true", "1", "yes", "active", "valid", "normal": return true
+            case "false", "0", "no", "inactive", "invalid", "expired": return false
+            default: return nil
+            }
+        }
+        return nil
+    }
+
+    private static func date(forKeys keys: [String], in dictionary: [String: Any]) -> Date? {
+        for key in keys {
+            if let number = double(forKeys: [key], in: dictionary) {
+                let seconds = number > 1_000_000_000_000 ? number / 1_000 : number
+                if seconds > 1_000_000_000 { return Date(timeIntervalSince1970: seconds) }
+            }
+            if let raw = string(forKeys: [key], in: dictionary),
+                let value = UsageDateParsing.parseISO8601Fractional(raw)
+            {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private static func quotaDetail(
+        used: Double?, total: Double?, remaining: Double?
+    ) -> String? {
+        if let used, let total, total > 0 {
+            return "\(format(used)) / \(format(total)) credits used"
+        }
+        if let remaining, let total, total > 0 {
+            return "\(format(remaining)) / \(format(total)) credits left"
+        }
+        if let remaining { return "\(format(remaining)) credits left" }
+        return nil
+    }
+
+    private static func format(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = true
+        formatter.maximumFractionDigits = value.rounded() == value ? 0 : 2
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter.string(from: NSNumber(value: value)) ?? String(format: "%.2f", value)
     }
 }
