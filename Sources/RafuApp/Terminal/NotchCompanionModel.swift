@@ -59,6 +59,12 @@ final class NotchCompanionModel: NSObject {
     private(set) var hoverState: CompanionHoverState = .resting
     private(set) var editorRows: [CompanionEditorRow] = []
     private(set) var attentionCount: Int = 0
+    /// The live filter over `editorRows` (terminal-notch-hud.md NC-B,
+    /// "Search/filter") — workspace name OR git branch, never the usage
+    /// strip or attention feed. `private(set)`: the view mutates it only
+    /// through `setSearchQuery(_:)`, which also keeps the panel's geometry
+    /// in sync.
+    private(set) var searchQuery = ""
     /// The cross-window attention feed (terminal-notch-hud.md NC-C, "Peek",
     /// item 3) — newest-first, deduplicated by `sessionID`, capped at
     /// `maxFeedItems`. Populated by `WorkspaceSession.notifyIfNeeded(for:)`'s
@@ -66,11 +72,19 @@ final class NotchCompanionModel: NSObject {
     /// `clearFeedItem(sessionID:)` when that session's `.bell` clears for
     /// any reason (reveal, reply, tab selection).
     private(set) var feedItems: [CompanionFeedItem] = []
-    /// Whether a feed card's reply field is engaged — mirrors
-    /// `NotchHUDController.isReplyEngaged` exactly: the ONE input driving
-    /// whether the panel `canBecomeKey` (`engageReply()`/`disengageReply()`
-    /// below).
+    /// Whether a feed card's reply field is engaged — one of TWO inputs
+    /// (alongside `isSearchEngaged`) to `updateKeyStatus()`'s arbiter, which
+    /// is the ONE place that flips the panel's `canBecomeKey`
+    /// (`engageReply()`/`disengageReply()` below).
     private(set) var isReplyEngaged = false
+    /// Whether the search field is engaged — the other input to
+    /// `updateKeyStatus()`'s arbiter (`engageSearch()`/`disengageSearch()`
+    /// below). A second focusable field means neither one can flip
+    /// `allowsKeyStatus` unilaterally: focusing the search field while a
+    /// feed reply field is *also* still counted as engaged (a stale
+    /// `onChange` ordering edge case) must not drop key status out from
+    /// under the user mid-edit.
+    private(set) var isSearchEngaged = false
     /// Refreshed (not read from an environment) every time `editorRows` is
     /// recomputed — the strip belongs to no scene, mirroring how
     /// `NotchHUDController.theme` is captured by value rather than read from
@@ -170,6 +184,16 @@ final class NotchCompanionModel: NSObject {
     /// long-running session with many transient bells never grows this
     /// unbounded (terminal-notch-hud.md NC-C).
     private static let maxFeedItems = 20
+    /// The pinned filter field's own height, added to `peekContentHeight()`
+    /// whenever `isSearchFieldVisible` — an estimate (text field intrinsic
+    /// height plus `CompanionSearchFieldView`'s own vertical padding), not
+    /// a measured value.
+    private static let searchFieldHeight: CGFloat = 36
+    /// `isSearchFieldVisible` shows the field once the editors list is at
+    /// least this long — below it, the list is already short enough that
+    /// scanning it beats typing (a query already in progress stays visible
+    /// regardless of count, see `isSearchFieldVisible`).
+    private static let searchFieldThreshold = 6
 
     override init() {
         super.init()
@@ -249,6 +273,34 @@ final class NotchCompanionModel: NSObject {
         editorRows = CompanionEditorRow.editorRows(from: inputs)
         attentionCount = editorRows.reduce(0) { $0 + $1.attentionCount }
         reposition(animated: animated)
+    }
+
+    /// What `CompanionEditorsListView` actually renders — `editorRows`
+    /// narrowed by `searchQuery` through the pure `CompanionEditorRow`
+    /// filter (NC-A). The usage strip and attention feed are never filtered
+    /// (terminal-notch-hud.md NC-B, "Search/filter": scope is the editors
+    /// list only).
+    var visibleEditorRows: [CompanionEditorRow] {
+        CompanionEditorRow.filteredEditorRows(editorRows, query: searchQuery)
+    }
+
+    /// The field only earns its place once the list is long enough to
+    /// justify typing over scanning — but a query already in progress
+    /// (e.g. the list just shrank below the threshold as a result of
+    /// typing) keeps the field visible so clearing it does not also make
+    /// the field itself vanish out from under the user.
+    var isSearchFieldVisible: Bool {
+        editorRows.count >= Self.searchFieldThreshold
+            || !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// The view's ONLY write path to `searchQuery` — per-keystroke and
+    /// deliberately unanimated (AGENTS: "Typing-path work targets one
+    /// display frame"; a spring resize on every keystroke would read as
+    /// jittery, not intentional).
+    func setSearchQuery(_ query: String) {
+        searchQuery = query
+        reposition()
     }
 
     /// The testable seam (terminal-notch-hud.md NC-B): pure given a
@@ -337,19 +389,68 @@ final class NotchCompanionModel: NSObject {
         reposition()
     }
 
-    /// Reply-field engagement — the moment the panel MAY become key. Mirrors
-    /// `NotchHUDController.engageReply()` exactly: this is the FIRST place
-    /// the companion panel's `allowsKeyStatus` ever flips true (NC-B's
-    /// resting/peek surface never engages a text field).
+    /// Reply-field engagement — one of two fields (alongside the search
+    /// field) that can make the panel key. Never sets `allowsKeyStatus`
+    /// directly — see `updateKeyStatus()`, the ONE place that arbitrates
+    /// between the two so one field's disengagement can never stomp on the
+    /// other's still-active engagement.
     func engageReply() {
-        guard let panel else { return }
+        guard panel != nil else { return }
         isReplyEngaged = true
-        panel.allowsKeyStatus = true
-        panel.makeKey()
+        updateKeyStatus()
     }
 
     func disengageReply() {
         isReplyEngaged = false
+        updateKeyStatus()
+    }
+
+    /// Search-field engagement — mirrors `engageReply()`/`disengageReply()`
+    /// exactly, on the other half of `updateKeyStatus()`'s arbiter.
+    func engageSearch() {
+        guard panel != nil else { return }
+        isSearchEngaged = true
+        updateKeyStatus()
+    }
+
+    func disengageSearch() {
+        isSearchEngaged = false
+        updateKeyStatus()
+    }
+
+    /// THE key-status arbiter: the ONE place `allowsKeyStatus` is ever
+    /// written from an engage/disengage call — two independently focusable
+    /// fields (a feed card's reply field, the search field) means neither
+    /// can safely flip `allowsKeyStatus` on its own `onChange(of:
+    /// isFocused)` callback, since AppKit's focus hop from one field to the
+    /// other can transiently report BOTH as unfocused mid-transition; a
+    /// naive `disengageX() { allowsKeyStatus = false }` on the outgoing
+    /// field would drop key status out from under the incoming one. Instead
+    /// every engage/disengage only flips its own `is*Engaged` flag and
+    /// re-derives `wantsKey` from BOTH here. `wasKey`/`makeKey()` is
+    /// edge-guarded (only called on a false→true transition) because
+    /// `makeKey()` reactivates focus-follow behavior that would be
+    /// redundant — and, per NC-B/NC-C's non-activating-panel contract,
+    /// never activates the app — on an already-key panel.
+    private func updateKeyStatus() {
+        guard let panel else { return }
+        let wantsKey = isReplyEngaged || isSearchEngaged
+        let wasKey = panel.allowsKeyStatus
+        panel.allowsKeyStatus = wantsKey
+        if wantsKey && !wasKey {
+            panel.makeKey()
+        }
+    }
+
+    /// The "nothing should be able to make this panel key anymore" path —
+    /// used by `panelDidResignKey()` and `teardown()`, NEVER by a normal
+    /// disengage: those two call sites need both flags AND
+    /// `allowsKeyStatus` false unconditionally (not re-derived through
+    /// `updateKeyStatus()`, which would leave `allowsKeyStatus` true if the
+    /// OTHER field's flag happened to still read true at that instant).
+    private func clearKeyEngagement() {
+        isReplyEngaged = false
+        isSearchEngaged = false
         panel?.allowsKeyStatus = false
     }
 
@@ -446,7 +547,7 @@ final class NotchCompanionModel: NSObject {
 
     @objc
     private func panelDidResignKey() {
-        disengageReply()
+        clearKeyEngagement()
     }
 
     // MARK: - Usage refresh (terminal-notch-hud.md NC-D)
@@ -499,7 +600,8 @@ final class NotchCompanionModel: NSObject {
         cancelTimers()
         stopUsageTimer()
         usageRefreshTask?.cancel()
-        disengageReply()
+        clearKeyEngagement()
+        searchQuery = ""
         if let panel {
             NotificationCenter.default.removeObserver(
                 self, name: NSWindow.didResignKeyNotification, object: panel)
@@ -557,12 +659,17 @@ final class NotchCompanionModel: NSObject {
         // nothing to show (terminal-notch-hud.md NC-D: "hidden entirely
         // otherwise").
         let usageHeight: CGFloat = usageTiles.isEmpty ? 0 : Self.usageStripHeight
+        let searchHeight: CGFloat = isSearchFieldVisible ? Self.searchFieldHeight : 0
+        // Sized from `visibleEditorRows` (the FILTERED list), not
+        // `editorRows` — the panel shrinks/grows as a query narrows/widens
+        // what is actually shown, same 0.6-of-screen `maxPeekHeight` cap
+        // `reposition()` already applies downstream.
         let listHeight: CGFloat
-        if editorRows.isEmpty {
+        if visibleEditorRows.isEmpty {
             listHeight = Self.emptyStateHeight
         } else {
-            let rows = CGFloat(editorRows.count) * Self.editorRowHeight
-            let spacing = CGFloat(max(editorRows.count - 1, 0)) * RafuMetrics.space2
+            let rows = CGFloat(visibleEditorRows.count) * Self.editorRowHeight
+            let spacing = CGFloat(max(visibleEditorRows.count - 1, 0)) * RafuMetrics.space2
             listHeight = rows + spacing + RafuMetrics.space3 * 2
         }
         // The feed renders nothing (zero height) when empty — unlike the
@@ -576,7 +683,7 @@ final class NotchCompanionModel: NSObject {
             let spacing = CGFloat(max(feedItems.count - 1, 0)) * RafuMetrics.space2
             feedHeight = cards + spacing + RafuMetrics.space3
         }
-        return bandInset + usageHeight + listHeight + feedHeight
+        return bandInset + searchHeight + usageHeight + listHeight + feedHeight
     }
 
     // MARK: - Hover / pin (terminal-notch-hud.md NC-A `CompanionHoverPolicy`)
@@ -626,6 +733,14 @@ final class NotchCompanionModel: NSObject {
         let next = CompanionHoverPolicy.onHoverExitAfterGrace(hoverState)
         guard next != hoverState else { return }
         hoverState = next
+        if hoverState == .resting {
+            // Collapsing back to resting always starts the next peek with a
+            // blank filter — this is a live narrowing of the CURRENT
+            // session, not a saved/persisted search (brief: "no query
+            // persistence across peek open/close").
+            searchQuery = ""
+            disengageSearch()
+        }
         reposition(animated: true)
     }
 
@@ -646,15 +761,23 @@ final class NotchCompanionModel: NSObject {
         }
     }
 
-    /// Escape always collapses, and — the first behavior change once a feed
-    /// card's reply field can make the panel key (terminal-notch-hud.md
-    /// NC-C) — always disengages reply first, so a collapse never leaves
-    /// `allowsKeyStatus` true on a panel with no reply field left to focus.
+    /// Escape always collapses — `CompanionHoverPolicy.onEscape` always
+    /// returns `.resting`, regardless of pin state — and always disengages
+    /// reply first, so a collapse never leaves `allowsKeyStatus` true on a
+    /// panel with no field left to focus. Because Escape ALWAYS reaches
+    /// `.resting`, the search field is always cleared/disengaged too:
+    /// deliberately NOT a two-stage "first Escape clears the filter,
+    /// second Escape collapses" — that would contradict
+    /// `CompanionHoverPolicy.onEscape`'s always-`.resting` contract.
     func escapePressed() {
         cancelTimers()
         disengageReply()
         stopUsageTimer()
         let next = CompanionHoverPolicy.onEscape(hoverState)
+        if next == .resting {
+            searchQuery = ""
+            disengageSearch()
+        }
         guard next != hoverState else { return }
         hoverState = next
         reposition(animated: true)

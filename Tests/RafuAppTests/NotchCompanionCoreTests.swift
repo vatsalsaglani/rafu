@@ -117,6 +117,95 @@ func editorRowsOrderAndNoRepo() {
     #expect(rows[1].gitSummary == "⎇ main")
 }
 
+// MARK: - editorRows carries the raw branch
+
+@Test("editorRows: carries the raw git branch verbatim, independent of the formatted gitSummary")
+func editorRowsCarriesRawBranch() {
+    let withGit = CompanionEditorInput(
+        id: UUID(), name: "rafu", windowNumber: 1,
+        git: CompanionGitInput(
+            branch: "feature/notch-search", ahead: 0, behind: 0, dirtyCount: 3,
+            isDetached: false, isUnborn: false
+        ), statuses: [])
+    let withoutGit = CompanionEditorInput(
+        id: UUID(), name: "no-repo", windowNumber: 2, git: nil, statuses: [])
+
+    let rows = CompanionEditorRow.editorRows(from: [withGit, withoutGit])
+    #expect(rows[0].branch == "feature/notch-search")
+    #expect(rows[0].gitSummary == "⎇ feature/notch-search · 3±")
+    #expect(rows[1].branch == nil)
+}
+
+// MARK: - filteredEditorRows
+
+private func row(name: String, branch: String?) -> CompanionEditorRow {
+    CompanionEditorRow(
+        id: UUID(), name: name, windowNumber: 1, gitSummary: nil, runningCount: 0,
+        attentionCount: 0, exitedCount: 0, branch: branch)
+}
+
+@Test("filteredEditorRows: an empty (or whitespace-only) query returns every row, unchanged order")
+func filteredEditorRowsEmptyQueryReturnsAll() {
+    let rows = [row(name: "rafu", branch: "main"), row(name: "notes", branch: "dev")]
+    #expect(
+        CompanionEditorRow.filteredEditorRows(rows, query: "").map(\.name) == ["rafu", "notes"])
+    #expect(
+        CompanionEditorRow.filteredEditorRows(rows, query: "   ").map(\.name)
+            == ["rafu", "notes"])
+}
+
+@Test("filteredEditorRows: matches a substring of the workspace name")
+func filteredEditorRowsMatchesName() {
+    let rows = [row(name: "rafu", branch: "main"), row(name: "notes", branch: "dev")]
+    #expect(CompanionEditorRow.filteredEditorRows(rows, query: "raf").map(\.name) == ["rafu"])
+}
+
+@Test("filteredEditorRows: matches a substring of the raw git branch")
+func filteredEditorRowsMatchesBranch() {
+    let rows = [
+        row(name: "rafu", branch: "feature/notch-search"), row(name: "notes", branch: "main"),
+    ]
+    #expect(CompanionEditorRow.filteredEditorRows(rows, query: "notch").map(\.name) == ["rafu"])
+}
+
+@Test("filteredEditorRows: a query matching either name OR branch keeps both rows")
+func filteredEditorRowsMatchesNameOrBranch() {
+    let rows = [
+        row(name: "main-workspace", branch: "dev"), row(name: "notes", branch: "main"),
+        row(name: "other", branch: "other-branch"),
+    ]
+    #expect(
+        CompanionEditorRow.filteredEditorRows(rows, query: "main").map(\.name).sorted()
+            == ["main-workspace", "notes"])
+}
+
+@Test("filteredEditorRows: case-insensitive")
+func filteredEditorRowsCaseInsensitive() {
+    let rows = [row(name: "Rafu", branch: "Main")]
+    #expect(CompanionEditorRow.filteredEditorRows(rows, query: "rafu").map(\.name) == ["Rafu"])
+    #expect(CompanionEditorRow.filteredEditorRows(rows, query: "MAIN").map(\.name) == ["Rafu"])
+}
+
+@Test("filteredEditorRows: diacritic-insensitive")
+func filteredEditorRowsDiacriticInsensitive() {
+    let rows = [row(name: "café-notes", branch: "main")]
+    #expect(
+        CompanionEditorRow.filteredEditorRows(rows, query: "cafe").map(\.name) == ["café-notes"])
+}
+
+@Test("filteredEditorRows: no match against name or branch returns an empty result")
+func filteredEditorRowsNoMatchReturnsEmpty() {
+    let rows = [row(name: "rafu", branch: "main")]
+    #expect(CompanionEditorRow.filteredEditorRows(rows, query: "zzz").isEmpty)
+}
+
+@Test("filteredEditorRows: a row with no branch (no repo open) is matched by name only")
+func filteredEditorRowsNilBranchMatchesByNameOnly() {
+    let rows = [row(name: "rafu", branch: nil)]
+    #expect(CompanionEditorRow.filteredEditorRows(rows, query: "rafu").map(\.name) == ["rafu"])
+    #expect(CompanionEditorRow.filteredEditorRows(rows, query: "main").isEmpty)
+}
+
 // MARK: - gitSummary
 
 @Test("gitSummary: a clean repo on main renders as exactly '⎇ main'")

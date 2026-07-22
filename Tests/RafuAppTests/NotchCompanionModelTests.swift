@@ -207,6 +207,109 @@ func preferenceStoreRoundTrips() {
     #expect(store.isEnabled() == true)
 }
 
+// MARK: - Search/filter (terminal-notch-hud.md NC-B "Search/filter")
+
+@MainActor
+@Test("setSearchQuery: narrows visibleEditorRows without touching editorRows itself")
+func setSearchQueryFiltersVisibleEditorRows() {
+    let model = NotchCompanionModel()
+    // Held strongly for the test's duration — the registry is weak (mirrors
+    // `TerminalAttentionCenter`), so a session with no other owner would be
+    // pruned by the very next `register()` call, same gotcha
+    // `registerDroppableSession(in:)` above exists to exercise deliberately.
+    let rafu = session(named: "rafu", path: "/tmp/notch-companion-search-rafu")
+    let notes = session(named: "notes", path: "/tmp/notch-companion-search-notes")
+    model.register(rafu)
+    model.register(notes)
+    #expect(model.editorRows.count == 2)
+
+    model.setSearchQuery("raf")
+    #expect(model.editorRows.count == 2)
+    #expect(model.visibleEditorRows.map(\.name) == ["rafu"])
+
+    model.setSearchQuery("")
+    #expect(model.visibleEditorRows.map(\.name) == ["rafu", "notes"])
+}
+
+@MainActor
+@Test("setSearchQuery: a session registered while a query is active appears iff it matches")
+func setSearchQueryAppliesToLaterRegistrations() {
+    let model = NotchCompanionModel()
+    model.setSearchQuery("raf")
+    #expect(model.visibleEditorRows.isEmpty)
+
+    let other = session(named: "other", path: "/tmp/notch-companion-search-other")
+    model.register(other)
+    #expect(model.visibleEditorRows.isEmpty)
+
+    let rafu = session(named: "rafu", path: "/tmp/notch-companion-search-rafu-later")
+    model.register(rafu)
+    #expect(model.visibleEditorRows.map(\.name) == ["rafu"])
+}
+
+@MainActor
+@Test("isSearchFieldVisible: true once the editors list reaches the threshold, false below it")
+func isSearchFieldVisibleAtThreshold() {
+    let model = NotchCompanionModel()
+    let sessions = (0..<6).map {
+        session(named: "w\($0)", path: "/tmp/notch-companion-threshold-\($0)")
+    }
+    for workspace in sessions.prefix(5) {
+        model.register(workspace)
+    }
+    #expect(model.editorRows.count == 5)
+    #expect(model.isSearchFieldVisible == false)
+
+    model.register(sessions[5])
+    #expect(model.editorRows.count == 6)
+    #expect(model.isSearchFieldVisible == true)
+}
+
+@MainActor
+@Test("isSearchFieldVisible: an active query keeps the field visible even below the threshold")
+func isSearchFieldVisibleWithActiveQueryBelowThreshold() {
+    let model = NotchCompanionModel()
+    let rafu = session(named: "rafu", path: "/tmp/notch-companion-threshold-query")
+    model.register(rafu)
+    #expect(model.editorRows.count == 1)
+    #expect(model.isSearchFieldVisible == false)
+
+    model.setSearchQuery("raf")
+    #expect(model.isSearchFieldVisible == true)
+}
+
+@MainActor
+@Test("escapePressed: clears searchQuery and disengages search alongside collapsing to resting")
+func escapePressedClearsSearchQuery() {
+    let model = NotchCompanionModel()
+    model.clicked()
+    #expect(model.hoverState == .pinned)
+    model.setSearchQuery("raf")
+    #expect(model.searchQuery == "raf")
+
+    model.escapePressed()
+
+    #expect(model.hoverState == .resting)
+    #expect(model.searchQuery == "")
+    #expect(model.isSearchEngaged == false)
+}
+
+@MainActor
+@Test("engageSearch: a no-op with no panel showing — isSearchEngaged stays false")
+func engageSearchNoOpWithoutPanel() {
+    let model = NotchCompanionModel()
+    model.engageSearch()
+    #expect(model.isSearchEngaged == false)
+}
+
+@MainActor
+@Test("disengageSearch: always safe to call, even when never engaged")
+func disengageSearchAlwaysSafe() {
+    let model = NotchCompanionModel()
+    model.disengageSearch()
+    #expect(model.isSearchEngaged == false)
+}
+
 // MARK: - refreshUsage (terminal-notch-hud.md NC-D)
 
 /// `refreshUsage()` hops through `Task.detached` (AgentUsage.swift's parsers

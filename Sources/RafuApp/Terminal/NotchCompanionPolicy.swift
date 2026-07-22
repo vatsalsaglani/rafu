@@ -119,6 +119,12 @@ nonisolated struct CompanionEditorRow: Identifiable, Equatable, Sendable {
     let runningCount: Int
     let attentionCount: Int
     let exitedCount: Int
+    /// The raw branch name (`CompanionGitInput.branch`, `nil` when no
+    /// repository is open) — kept separate from `gitSummary`'s formatted
+    /// one-liner (`⎇ detached`, `⎇ main (unborn)`, `⎇ main · 3± · ↑2`) so
+    /// `filteredEditorRows(_:query:)` can match a plain branch name without
+    /// having to parse it back out of that display string.
+    let branch: String?
 
     /// Derives one row per input, in the given order (callers sort/filter
     /// `WorkspaceWindowRegistry` entries before calling this). Chip counts
@@ -145,8 +151,33 @@ nonisolated struct CompanionEditorRow: Identifiable, Equatable, Sendable {
                 gitSummary: input.git.map(gitSummary),
                 runningCount: runningCount,
                 attentionCount: attentionCount,
-                exitedCount: exitedCount
+                exitedCount: exitedCount,
+                branch: input.git?.branch
             )
+        }
+    }
+
+    /// The editors-list filter (terminal-notch-hud.md NC-B, "Search/filter"):
+    /// a plain, un-tokenized substring match against `name` OR `branch`,
+    /// case- and diacritic-insensitive — deliberately NOT
+    /// `RafuDropdownFilter`'s whitespace-tokenized AND semantics, since this
+    /// narrows a short, already-visible list as the user types rather than
+    /// searching fielded data. An empty (after trimming whitespace) query
+    /// returns `rows` unchanged, in their original order. Lives directly in
+    /// this type's primary declaration for the same isolation reason
+    /// `editorRows(from:)`/`gitSummary(_:)` do — see this type's doc comment.
+    static func filteredEditorRows(_ rows: [CompanionEditorRow], query: String)
+        -> [CompanionEditorRow]
+    {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return rows }
+        let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
+        return rows.filter { row in
+            if row.name.range(of: trimmed, options: options) != nil { return true }
+            if let branch = row.branch, branch.range(of: trimmed, options: options) != nil {
+                return true
+            }
+            return false
         }
     }
 

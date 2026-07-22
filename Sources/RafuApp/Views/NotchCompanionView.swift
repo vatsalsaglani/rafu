@@ -17,6 +17,13 @@ struct NotchCompanionView: View {
         VStack(spacing: 0) {
             CompanionWingsView(model: model)
             if model.hoverState != .resting {
+                // Pinned ABOVE the scroll view — it must stay reachable
+                // (and visible) while the results below it scroll, not
+                // travel with them (terminal-notch-hud.md NC-B,
+                // "Search/filter").
+                if model.isSearchFieldVisible {
+                    CompanionSearchFieldView(model: model)
+                }
                 // Internal scroll: the panel's HEIGHT is capped by
                 // `NotchCompanionGeometry.peekPanelFrame` (many editor
                 // windows/feed cards must not march the panel off the
@@ -206,24 +213,28 @@ struct CompanionUsageStripView: View {
 }
 
 /// The peek panel's editors list (terminal-notch-hud.md, "Peek", item 2) —
-/// one card per open workspace window. Shown only while `hoverState !=
-/// .resting`; empty-state text fills the same space per AGENTS' panel/tab
-/// top-alignment rule so a single-row (or zero-row) list never floats the
-/// whole strip toward the screen's vertical middle.
+/// one card per open workspace window, narrowed by
+/// `model.searchQuery` through `model.visibleEditorRows`. Shown only while
+/// `hoverState != .resting`; empty-state text fills the same space per
+/// AGENTS' panel/tab top-alignment rule so a single-row (or zero-row) list
+/// never floats the whole strip toward the screen's vertical middle. NOT
+/// wrapped in an explicit animation — per-keystroke filtering must read as
+/// immediate (Reduce Motion parity with every other typing path), never as
+/// rows springing in/out.
 struct CompanionEditorsListView: View {
     let model: NotchCompanionModel
     @Environment(\.rafuTheme) private var theme
 
     var body: some View {
         Group {
-            if model.editorRows.isEmpty {
-                Text("No open editors")
+            if model.visibleEditorRows.isEmpty {
+                Text(emptyStateText)
                     .font(.system(size: 11))
                     .foregroundStyle(theme.palette.textMuted)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 VStack(spacing: RafuMetrics.space2) {
-                    ForEach(model.editorRows) { row in
+                    ForEach(model.visibleEditorRows) { row in
                         CompanionEditorRowView(row: row) {
                             model.focusEditor(row.id)
                         }
@@ -233,6 +244,83 @@ struct CompanionEditorsListView: View {
                 .frame(maxWidth: .infinity, alignment: .top)
             }
         }
+    }
+
+    private var emptyStateText: String {
+        guard !model.searchQuery.isEmpty else { return "No open editors" }
+        return "No editors match “\(model.searchQuery)”"
+    }
+}
+
+/// The editors-list filter field (terminal-notch-hud.md NC-B,
+/// "Search/filter") — narrows `model.editorRows` by workspace name OR git
+/// branch as the user types, through `model.setSearchQuery(_:)`. Shown only
+/// while `model.isSearchFieldVisible`; pinned above the scrolling results
+/// (`NotchCompanionView`'s wiring), so it never scrolls with them. Its own
+/// focus is the SECOND path (alongside a feed card's reply field) that can
+/// make the panel key — routed through `model.engageSearch()`/
+/// `disengageSearch()`, never `allowsKeyStatus` directly (see
+/// `NotchCompanionModel.updateKeyStatus()`).
+private struct CompanionSearchFieldView: View {
+    @Bindable var model: NotchCompanionModel
+    @FocusState private var searchFocused: Bool
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        HStack(spacing: RafuMetrics.space2) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11))
+                .foregroundStyle(theme.palette.textMuted)
+            TextField("Filter editors…", text: queryBinding)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .focused($searchFocused)
+                .accessibilityLabel("Filter editors by name or branch")
+            if !model.searchQuery.isEmpty {
+                Button {
+                    model.setSearchQuery("")
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.palette.textMuted)
+                .accessibilityLabel("Clear filter")
+            }
+        }
+        .rafuField(isFocused: searchFocused)
+        .padding(.horizontal, RafuMetrics.space3)
+        .padding(.vertical, RafuMetrics.space2)
+        .onChange(of: searchFocused) { _, focused in
+            if focused {
+                model.engageSearch()
+            } else {
+                model.disengageSearch()
+            }
+        }
+        // Screenshot-verified gap: a ROW click (`model.focusEditor(_:)`)
+        // brings a DIFFERENT real window to key status, which resigns this
+        // panel's key status and fires `panelDidResignKey()` →
+        // `clearKeyEngagement()` — but that clears `model.isSearchEngaged`
+        // from OUTSIDE this view, and SwiftUI's `@FocusState` does NOT
+        // reset to `false` on its own just because the window is no longer
+        // key. Left unhandled, `searchFocused` stays stuck at `true`
+        // forever after, so a later click never produces a false→true
+        // transition, `onChange(of: searchFocused)` never fires again, and
+        // the field becomes permanently unfocusable until the panel
+        // round-trips through `.resting` (which recreates this view).
+        // Mirroring the model's own external state back into the
+        // `@FocusState` closes that gap.
+        .onChange(of: model.isSearchEngaged) { _, engaged in
+            if !engaged { searchFocused = false }
+        }
+    }
+
+    private var queryBinding: Binding<String> {
+        Binding(
+            get: { model.searchQuery },
+            set: { model.setSearchQuery($0) }
+        )
     }
 }
 
