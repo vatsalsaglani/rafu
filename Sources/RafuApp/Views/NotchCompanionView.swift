@@ -129,43 +129,37 @@ struct CompanionWingsView: View {
         .accessibilityAddTraits(.isButton)
     }
 
-    /// The Rafu glyph, alone — rendered only once the strip has actually
-    /// widened to the wings pill (`isStripExpanded`); nothing draws behind
-    /// the physical housing at notch-only width.
+    /// The Rafu glyph, alone, ALWAYS visible (user decision 2026-07-22:
+    /// the resting strip carries compact wings sized so the glyph sits
+    /// clear of the physical cutout). No fixed wing width — the same
+    /// layout serves the compact resting strip and the expanded pill; the
+    /// outer Spacer pushes the wings apart to whatever width the frame
+    /// grants.
     private var leftWing: some View {
-        HStack(spacing: RafuMetrics.space1) {
-            if model.isStripExpanded {
-                RafuBrandMarkView()
-                    .frame(width: 14, height: 14)
-            }
-        }
-        .frame(width: NotchCompanionGeometry.wingWidth, alignment: .leading)
-        .padding(.leading, RafuMetrics.space2)
+        RafuBrandMarkView()
+            .frame(width: 14, height: 14)
+            .padding(.leading, RafuMetrics.space2 + 2)
     }
 
-    /// The open-editor count, plus the attention dot + count once a session
-    /// needs attention — also gated behind `isStripExpanded` (see
-    /// `leftWing`'s doc comment).
+    /// The open-editor count, always visible, plus the attention dot +
+    /// count once a session needs attention.
     private var rightWing: some View {
         HStack(spacing: RafuMetrics.space1) {
-            if model.isStripExpanded {
-                Text("\(model.editorRows.count)")
+            if model.attentionCount > 0 {
+                Circle()
+                    .fill(theme.palette.accent)
+                    .frame(width: 6, height: 6)
+                Text("\(model.attentionCount)")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .monospacedDigit()
-                    .foregroundStyle(theme.palette.textPrimary)
-                if model.attentionCount > 0 {
-                    Circle()
-                        .fill(theme.palette.accent)
-                        .frame(width: 6, height: 6)
-                    Text("\(model.attentionCount)")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(theme.palette.accent)
-                }
+                    .foregroundStyle(theme.palette.accent)
             }
+            Text("\(model.editorRows.count)")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(theme.palette.textPrimary)
         }
-        .frame(width: NotchCompanionGeometry.wingWidth, alignment: .trailing)
-        .padding(.trailing, RafuMetrics.space2)
+        .padding(.trailing, RafuMetrics.space2 + 2)
     }
 
     /// "Rafu — N editors open" / "..., N terminals needing attention"

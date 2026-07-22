@@ -23,26 +23,27 @@ nonisolated enum NotchCompanionGeometry {
         (metrics.frame.height * maxPeekHeightFraction).rounded()
     }
 
-    /// How far the resting strip extends past the SOFTWARE notch rect on
-    /// each side. The physical cutout is slightly wider than the AppKit
-    /// aux-area gap on real panels (user photo, 2026-07-22), so an
-    /// exactly-notch-sized strip disappears entirely behind the housing —
-    /// losing both the hover affordance and any hint the companion exists.
-    /// A small lip keeps a subtle black edge visible beside the physical
-    /// notch while still reading as part of the housing.
-    static let restingOverhang: CGFloat = 16
+    /// The resting strip's compact wing on each side of the SOFTWARE notch
+    /// rect. Two constraints set the size (user photos, 2026-07-22): the
+    /// physical cutout is WIDER than the AppKit aux-area gap, so anything
+    /// inside ~16pt of the software notch edge hides behind the housing —
+    /// and the resting strip must show the glyph (left) and editor count
+    /// (right) at all times, which needs visible room beyond that dead
+    /// zone. 44pt ≈ 16pt hidden + content + padding.
+    static let restingWingWidth: CGFloat = 44
 
-    /// The always-present resting strip: the physical notch rect plus a
-    /// `restingOverhang` lip on each side — nearly coinciding with the
-    /// housing, but never fully hidden behind it. No wings, no content.
-    /// `nil` when the screen has no notch (`NotchHUDGeometry.notchRect(for:)`
-    /// is nil) — the resting strip does not exist without a notch to hug; a
+    /// The always-present resting strip: the notch plus a compact
+    /// `restingWingWidth` wing each side — snug against the housing but
+    /// with enough visible lip for the always-on glyph + editor count.
+    /// Hover expands to `expandedStripFrame` for breathing room. `nil`
+    /// when the screen has no notch (`NotchHUDGeometry.notchRect(for:)` is
+    /// nil) — the resting strip does not exist without a notch to hug; a
     /// permanent floating bar under an external monitor's menu bar is
     /// clutter (terminal-notch-hud.md, "Resting": the Settings toggle
     /// defaults OFF on non-notch displays).
     static func restingStripFrame(for metrics: NotchScreenMetrics) -> CGRect? {
         guard let notch = NotchHUDGeometry.notchRect(for: metrics) else { return nil }
-        let width = notch.width + restingOverhang * 2
+        let width = notch.width + restingWingWidth * 2
         return CGRect(
             x: notch.midX - width / 2,
             y: metrics.frame.maxY - notch.height,

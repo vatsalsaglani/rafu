@@ -313,11 +313,12 @@ func attentionFeedStableForEqualTimestamps() {
 
 @Test("restingStripFrame: exactly the physical notch rect")
 func restingStripFrameRealMetrics() {
-    // Notch (763, 185 wide) plus the 16pt resting lip each side: the
-    // physical cutout is wider than the software notch, so an exact-notch
-    // strip vanished entirely behind the housing (user photo, 2026-07-22).
+    // Notch (763, 185 wide) plus the 44pt compact wing each side: wide
+    // enough that the always-on glyph + editor count clear the physical
+    // cutout (which is wider than the software notch; user photos,
+    // 2026-07-22).
     let frame = NotchCompanionGeometry.restingStripFrame(for: realNotchMetrics)
-    #expect(frame == CGRect(x: 747, y: 1074, width: 217, height: 33))
+    #expect(frame == CGRect(x: 719, y: 1074, width: 273, height: 33))
     #expect(frame?.maxY == realNotchMetrics.frame.maxY)
 }
 
