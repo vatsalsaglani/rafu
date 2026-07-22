@@ -94,9 +94,28 @@ func stripOrderStoreFallsBackOnUnrecognizedIDs() {
     "UsageSettingsModel: only descriptors with at least one strategy against the probe are visible")
 func settingsModelHidesStubProviders() {
     withIsolatedSuite { suite in
+        // Test the visibility MECHANISM with a controlled pair — a real
+        // descriptor (non-empty strategies) shows, a synthetic stub (empty
+        // strategies) hides — NOT a frozen provider list. The exact visible
+        // set grows as each Wn phase makes its providers' `makeStrategies`
+        // non-empty, so asserting it against the full registry would break
+        // on every phase merge (it was the sole cross-phase blocker for
+        // W3/W4/W5).
+        let stub = UsageProviderDescriptor(
+            id: .warp, displayName: "Stub", authPattern: .cookieImport,
+            disclosure: "", defaultEnabled: false, makeStrategies: { _ in [] })
         let model = UsageSettingsModel(
-            descriptors: UsageProviderRegistry.all, enableStore: UsageEnableStore(suiteName: suite))
-        #expect(model.visibleRows.map(\.id) == [.claude, .codex])
+            descriptors: [ClaudeProvider.descriptor, stub],
+            enableStore: UsageEnableStore(suiteName: suite))
+        #expect(model.visibleRows.map(\.id) == [.claude])
+
+        // The always-real local providers stay visible against the full
+        // registry no matter which phases have landed.
+        let full = UsageSettingsModel(
+            descriptors: UsageProviderRegistry.all,
+            enableStore: UsageEnableStore(suiteName: suite))
+        #expect(full.visibleRows.map(\.id).contains(.claude))
+        #expect(full.visibleRows.map(\.id).contains(.codex))
     }
 }
 
