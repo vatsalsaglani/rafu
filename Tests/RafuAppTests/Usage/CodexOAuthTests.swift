@@ -8,14 +8,66 @@ import Testing
 private func codexOAuthContext(
     now: Date = Date(timeIntervalSince1970: 1_800_000_000),
     http: UsageHTTPClient = .noop,
-    credential: String? = "connected-token"
+    credential: String? = nil,
+    reads: CodexSynchronousCounter? = nil
 ) -> UsageFetchContext {
     UsageFetchContext(
         now: now,
-        readFile: { _ in nil },
+        readFile: { _ in
+            reads?.increment()
+            return nil
+        },
         http: http,
         credential: { id in id == .codex ? credential : nil },
         cookieHeader: { _ in nil })
+}
+
+private func codexEnvelope(
+    token: String,
+    accountID: String? = "account-123",
+    expiresAt: Date? = nil
+) -> String {
+    guard
+        let encoded = UsageExternalCredentialEnvelope(
+            accessToken: token, accountID: accountID, expiresAt: expiresAt
+        ).encoded()
+    else { fatalError("test envelope must encode") }
+    return encoded
+}
+
+private func codexAuth(
+    token: String,
+    accountID: String = "account-123",
+    lastRefresh: Date?,
+    camelCase: Bool = false
+) -> String {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let refreshField =
+        lastRefresh.map {
+            ",\n  \"\(camelCase ? "lastRefresh" : "last_refresh")\": \"\(formatter.string(from: $0))\""
+        } ?? ""
+    return """
+        {
+          "tokens": {
+            "\(camelCase ? "accessToken" : "access_token")": "\(token)",
+            "\(camelCase ? "refreshToken" : "refresh_token")": "must-not-cross-the-bridge",
+            "\(camelCase ? "accountId" : "account_id")": "\(accountID)",
+            "id_token": "must-not-cross-the-bridge"
+          }\(refreshField)
+        }
+        """
+}
+
+private func codexJWT(expiresAt: Date?) -> String {
+    func base64URL(_ value: String) -> String {
+        Data(value.utf8).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+    let payload = expiresAt.map { #"{"exp":\#($0.timeIntervalSince1970)}"# } ?? #"{"sub":"user"}"#
+    return "\(base64URL(#"{"alg":"none"}"#)).\(base64URL(payload)).signature"
 }
 
 private actor CodexRequestRecorder {
@@ -34,7 +86,7 @@ private actor CodexAttemptCounter {
     }
 }
 
-private final class CodexReadCounter: Sendable {
+private final class CodexSynchronousCounter: Sendable {
     private let countStorage = Mutex(0)
 
     var count: Int { countStorage.withLock { $0 } }
@@ -66,30 +118,18 @@ private struct CodexHostileTransportError: Error, CustomStringConvertible, Senda
     let description: String
 }
 
-private func codexAuth(
-    token: String,
-    accountID: String = "account-123",
-    lastRefresh: Date?,
-    camelCase: Bool = false
-) -> String {
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    let refreshField =
-        lastRefresh.map {
-            ",\n  \"\(camelCase ? "lastRefresh" : "last_refresh")\": \"\(formatter.string(from: $0))\""
-        } ?? ""
-    let accessKey = camelCase ? "accessToken" : "access_token"
-    let refreshKey = camelCase ? "refreshToken" : "refresh_token"
-    let accountKey = camelCase ? "accountId" : "account_id"
-    return """
-        {
-          "tokens": {
-            "\(accessKey)": "\(token)",
-            "\(refreshKey)": "unused-refresh-token",
-            "\(accountKey)": "\(accountID)"
-          }\(refreshField)
+enum CodexFileCondition: CaseIterable, Equatable, Sendable {
+    case valid
+    case absent
+
+    func contents(now: Date) -> String? {
+        switch self {
+        case .valid:
+            codexAuth(token: "file-token", lastRefresh: now.addingTimeInterval(-60))
+        case .absent:
+            nil
         }
-        """
+    }
 }
 
 private let codexUsageFixture = """
@@ -110,39 +150,70 @@ private let codexUsageFixture = """
     }
     """
 
-@Test("Codex OAuth credentials parse current snake_case auth.json fields")
-func codexOAuthCredentialsParseSnakeCase() throws {
-    let refresh = Date(timeIntervalSince1970: 1_799_999_000)
-    let credentials = try #require(
-        CodexOAuthCredentials.parse(
-            contents: codexAuth(token: "snake-token", lastRefresh: refresh)))
-
-    #expect(credentials.accessToken == "snake-token")
-    #expect(credentials.accountID == "account-123")
-    #expect(credentials.lastRefresh == refresh)
-}
-
-@Test("Codex OAuth credentials parse legacy camelCase auth.json fields")
-func codexOAuthCredentialsParseCamelCase() throws {
-    let refresh = Date(timeIntervalSince1970: 1_799_999_000)
-    let credentials = try #require(
-        CodexOAuthCredentials.parse(
+@Test(
+    "Codex parser accepts snake/camel auth fields and discards refresh and ID tokens",
+    arguments: [false, true])
+func codexCredentialParserProducesMinimalEnvelope(camelCase: Bool) throws {
+    let envelope = try #require(
+        UsageExternalCredentialParser.codex(
             contents: codexAuth(
-                token: "camel-token", lastRefresh: refresh, camelCase: true)))
+                token: "access-token", lastRefresh: Date(), camelCase: camelCase)))
 
-    #expect(credentials.accessToken == "camel-token")
-    #expect(credentials.accountID == "account-123")
-    #expect(credentials.lastRefresh == refresh)
+    #expect(envelope.accessToken == "access-token")
+    #expect(envelope.accountID == "account-123")
+    let encoded = try #require(envelope.encoded())
+    #expect(!encoded.contains("refresh"))
+    #expect(!encoded.contains("id_token"))
 }
 
-@Test("Codex OAuth resolves $CODEX_HOME before the default auth path without file I/O")
+@Test(
+    "Codex parser allows old or missing last_refresh because JWT exp is authoritative",
+    arguments: [false, true])
+func codexParserIgnoresLastRefresh(missing: Bool) throws {
+    let old = Date(timeIntervalSince1970: 1_700_000_000)
+    let envelope = try #require(
+        UsageExternalCredentialParser.codex(
+            contents: codexAuth(
+                token: "opaque-token", lastRefresh: missing ? nil : old)))
+
+    #expect(envelope.accessToken == "opaque-token")
+    #expect(envelope.expiresAt == nil)
+    #expect(envelope.isUsable(for: .codex, at: Date(timeIntervalSince1970: 1_800_000_000)))
+}
+
+@Test("Codex auth URL honors CODEX_HOME without reading the filesystem")
 func codexOAuthResolvesConfiguredHome() {
-    let configured = CodexOAuthStrategy.configuredAuthURL(
+    let configured = UsageOAuthConnector.codexAuthURL(
         environment: ["CODEX_HOME": "/tmp/rafu-codex-home"])
 
     #expect(configured?.path == "/tmp/rafu-codex-home/auth.json")
-    #expect(CodexOAuthStrategy.configuredAuthURL(environment: [:]) == nil)
-    #expect(CodexOAuthStrategy.configuredAuthURL(environment: ["CODEX_HOME": "  "]) == nil)
+    #expect(UsageOAuthConnector.codexAuthURL(environment: [:]) == nil)
+    #expect(UsageOAuthConnector.codexAuthURL(environment: ["CODEX_HOME": "  "]) == nil)
+}
+
+@Test("Codex Connect never consults Claude Code Keychain", arguments: CodexFileCondition.allCases)
+func codexConnectorNeverReadsClaudeKeychain(condition: CodexFileCondition) async {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let suite = "CodexConnectorTests.\(UUID().uuidString)"
+    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    let consent = UsageNetworkConsentStore(suiteName: suite)
+    let credentialStore = UsageCredentialStore(servicePrefix: "test.codex.\(UUID().uuidString)")
+    let keychainReads = CodexSynchronousCounter()
+    let connector = UsageOAuthConnector(
+        credentialFileReader: { id in id == .codex ? condition.contents(now: now) : nil },
+        claudeKeychainReader: {
+            keychainReads.increment()
+            return .accessDenied
+        },
+        credentialStore: credentialStore,
+        consentStore: consent)
+
+    let result = await connector.connect(.codex, now: now)
+
+    #expect(keychainReads.count == 0)
+    #expect(result == (condition == .valid ? .connected : .failed(.credentialsUnavailable)))
+    #expect(consent.hasConsent(for: .codex) == (condition == .valid))
+    #expect(await credentialStore.transientExternalCredential(for: .codex) == nil)
 }
 
 @Test("Codex OAuth maps primary and secondary wham windows with reset dates")
@@ -156,10 +227,10 @@ func codexOAuthMapsUsageFixture() throws {
     #expect(snapshot.windows[1].resetsAt == Date(timeIntervalSince1970: 1_800_604_800))
 }
 
-@Test("Codex descriptor strategy count and OAuth-first order are independent of context")
-func codexOAuthStrategyCountAndOrderAreStable() {
-    let empty = codexOAuthContext(credential: nil)
-    let connected = codexOAuthContext(credential: "connected-token")
+@Test("Codex descriptor strategy order and count are context-independent")
+func codexOAuthStrategyOrderIsStable() {
+    let empty = codexOAuthContext()
+    let connected = codexOAuthContext(credential: codexEnvelope(token: "opaque-token"))
 
     #expect(
         CodexProvider.descriptor.makeStrategies(empty).map(\.id) == [
@@ -171,57 +242,44 @@ func codexOAuthStrategyCountAndOrderAreStable() {
         ])
 }
 
-@Test("Codex OAuth requires the connection gate before reading auth.json")
-func codexOAuthMissingGateFallsBackWithoutReadingAuth() async {
-    let reads = CodexReadCounter()
-    let oauth = CodexOAuthStrategy(authContents: { _ in
-        reads.increment()
-        return "must-not-be-read"
-    })
+@Test("Codex OAuth strategy never reads files and a missing envelope uses local fallback")
+func codexOAuthMissingEnvelopeFallsBackWithoutFileRead() async {
+    let reads = CodexSynchronousCounter()
     let attempts = CodexAttemptCounter()
     let result = await resolveUsageSnapshot(
-        strategies: [oauth, CodexFixtureLocalStrategy(attempts: attempts)],
-        context: codexOAuthContext(credential: nil))
+        strategies: [CodexOAuthStrategy(), CodexFixtureLocalStrategy(attempts: attempts)],
+        context: codexOAuthContext(reads: reads))
 
     #expect(result?.windows.first?.percent == 44)
     #expect(reads.count == 0)
     #expect(await attempts.count == 1)
 }
 
-@Test("Codex OAuth stale auth.json uses local fallback without refreshing")
-func codexOAuthStaleCredentialsFallBack() async {
+@Test("An expired Codex JWT envelope falls back locally without a network request")
+func codexExpiredJWTFallsBackWithoutNetwork() async throws {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
-    let oauth = CodexOAuthStrategy(authContents: { _ in
-        codexAuth(
-            token: "stale-token",
-            lastRefresh: now.addingTimeInterval(-9 * 24 * 60 * 60))
+    let token = codexJWT(expiresAt: now.addingTimeInterval(-1))
+    let parsed = try #require(
+        UsageExternalCredentialParser.codex(
+            contents: codexAuth(token: token, lastRefresh: nil)))
+    let encoded = try #require(parsed.encoded())
+    let network = CodexSynchronousCounter()
+    let http = UsageHTTPClient(transport: { _ in
+        network.increment()
+        throw CodexHostileTransportError(description: "must not run")
     })
     let attempts = CodexAttemptCounter()
     let result = await resolveUsageSnapshot(
-        strategies: [oauth, CodexFixtureLocalStrategy(attempts: attempts)],
-        context: codexOAuthContext(now: now))
+        strategies: [CodexOAuthStrategy(), CodexFixtureLocalStrategy(attempts: attempts)],
+        context: codexOAuthContext(now: now, http: http, credential: encoded))
 
     #expect(result?.windows.first?.percent == 44)
+    #expect(network.count == 0)
     #expect(await attempts.count == 1)
 }
 
-@Test("Codex OAuth auth.json without last_refresh uses local fallback and never refreshes")
-func codexOAuthMissingLastRefreshFallsBack() async {
-    let oauth = CodexOAuthStrategy(authContents: { _ in
-        codexAuth(token: "unrefreshable-token", lastRefresh: nil)
-    })
-    let attempts = CodexAttemptCounter()
-    let result = await resolveUsageSnapshot(
-        strategies: [oauth, CodexFixtureLocalStrategy(attempts: attempts)],
-        context: codexOAuthContext())
-
-    #expect(result?.windows.first?.percent == 44)
-    #expect(await attempts.count == 1)
-}
-
-@Test("Codex OAuth sends the file token, account id, honest UA, and exact wham headers")
-func codexOAuthRequestUsesFileTokenAndExactHeaders() async throws {
-    let now = Date(timeIntervalSince1970: 1_800_000_000)
+@Test("An opaque Codex token without JWT exp may request the exact wham endpoint")
+func codexOAuthOpaqueTokenUsesExactHeaders() async throws {
     let recorder = CodexRequestRecorder()
     let url = try #require(URL(string: "https://chatgpt.com/backend-api/wham/usage"))
     let http = UsageHTTPClient(transport: { request in
@@ -230,12 +288,11 @@ func codexOAuthRequestUsesFileTokenAndExactHeaders() async throws {
             HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil))
         return (Data(codexUsageFixture.utf8), response)
     })
-    let strategy = CodexOAuthStrategy(authContents: { _ in
-        codexAuth(token: "file-token", lastRefresh: now.addingTimeInterval(-60))
-    })
 
-    let snapshot = try await strategy.fetch(
-        codexOAuthContext(now: now, http: http, credential: "stored-token"))
+    let snapshot = try await CodexOAuthStrategy().fetch(
+        codexOAuthContext(
+            http: http,
+            credential: codexEnvelope(token: "opaque-token", accountID: "account-123")))
     let request = try #require(await recorder.request)
 
     #expect(snapshot.windows.first?.percent == 22.5)
@@ -244,16 +301,15 @@ func codexOAuthRequestUsesFileTokenAndExactHeaders() async throws {
     #expect(request.cachePolicy == .reloadIgnoringLocalCacheData)
     #expect(request.timeoutInterval == 15)
     #expect(request.httpShouldHandleCookies == false)
-    #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer file-token")
+    #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer opaque-token")
     #expect(request.value(forHTTPHeaderField: "ChatGPT-Account-Id") == "account-123")
     #expect(request.value(forHTTPHeaderField: "Accept") == "application/json")
     #expect(
-        request.value(forHTTPHeaderField: "User-Agent")
-            == "Rafu/\(RafuBuildInformation.version)")
+        request.value(forHTTPHeaderField: "User-Agent") == "Rafu/\(RafuBuildInformation.version)")
 }
 
-@Test("Codex OAuth uses the injected credential only when auth.json is absent")
-func codexOAuthUsesInjectedCredentialWhenAuthIsAbsent() async throws {
+@Test("A Codex envelope without an account id omits the account header")
+func codexOAuthOmitsMissingAccountHeader() async throws {
     let recorder = CodexRequestRecorder()
     let url = try #require(URL(string: "https://chatgpt.com/backend-api/wham/usage"))
     let http = UsageHTTPClient(transport: { request in
@@ -262,39 +318,35 @@ func codexOAuthUsesInjectedCredentialWhenAuthIsAbsent() async throws {
             HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil))
         return (Data(codexUsageFixture.utf8), response)
     })
-    let strategy = CodexOAuthStrategy(authContents: { _ in nil })
 
-    _ = try await strategy.fetch(codexOAuthContext(http: http, credential: "stored-token"))
-    let request = try #require(await recorder.request)
+    _ = try await CodexOAuthStrategy().fetch(
+        codexOAuthContext(
+            http: http,
+            credential: codexEnvelope(token: "opaque-token", accountID: nil)))
 
-    #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer stored-token")
-    #expect(request.value(forHTTPHeaderField: "ChatGPT-Account-Id") == nil)
+    #expect(await recorder.request?.value(forHTTPHeaderField: "ChatGPT-Account-Id") == nil)
 }
 
-@Test("Codex OAuth falls back to local usage only for 401 or 403")
-func codexOAuthAuthenticationRejectionFallsBack() async throws {
-    for status in [401, 403] {
-        let url = try #require(URL(string: "https://chatgpt.com/backend-api/wham/usage"))
-        let http = UsageHTTPClient(transport: { _ in
-            let response = try #require(
-                HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil))
-            return (Data(), response)
-        })
-        let attempts = CodexAttemptCounter()
-        let result = await resolveUsageSnapshot(
-            strategies: [
-                CodexOAuthStrategy(authContents: { _ in nil }),
-                CodexFixtureLocalStrategy(attempts: attempts),
-            ],
-            context: codexOAuthContext(http: http))
+@Test("Codex OAuth falls back locally only for authentication rejection", arguments: [401, 403])
+func codexOAuthAuthenticationRejectionFallsBack(status: Int) async throws {
+    let url = try #require(URL(string: "https://chatgpt.com/backend-api/wham/usage"))
+    let http = UsageHTTPClient(transport: { _ in
+        let response = try #require(
+            HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil))
+        return (Data(), response)
+    })
+    let attempts = CodexAttemptCounter()
+    let result = await resolveUsageSnapshot(
+        strategies: [CodexOAuthStrategy(), CodexFixtureLocalStrategy(attempts: attempts)],
+        context: codexOAuthContext(
+            http: http, credential: codexEnvelope(token: "opaque-token")))
 
-        #expect(result?.windows.first?.percent == 44)
-        #expect(await attempts.count == 1)
-    }
+    #expect(result?.windows.first?.percent == 44)
+    #expect(await attempts.count == 1)
 }
 
-@Test("Codex OAuth malformed wham response hides the tile without local fallback")
-func codexOAuthMalformedResponseDoesNotFallBack() async throws {
+@Test("Codex malformed wham usage hides the tile instead of fabricating a local result")
+func codexOAuthMalformedResponseHidesTile() async throws {
     let url = try #require(URL(string: "https://chatgpt.com/backend-api/wham/usage"))
     let http = UsageHTTPClient(transport: { _ in
         let response = try #require(
@@ -303,33 +355,33 @@ func codexOAuthMalformedResponseDoesNotFallBack() async throws {
     })
     let attempts = CodexAttemptCounter()
     let result = await resolveUsageSnapshot(
-        strategies: [
-            CodexOAuthStrategy(authContents: { _ in nil }),
-            CodexFixtureLocalStrategy(attempts: attempts),
-        ],
-        context: codexOAuthContext(http: http))
+        strategies: [CodexOAuthStrategy(), CodexFixtureLocalStrategy(attempts: attempts)],
+        context: codexOAuthContext(
+            http: http, credential: codexEnvelope(token: "opaque-token")))
 
     #expect(result == nil)
     #expect(await attempts.count == 0)
 }
 
-@Test("Codex OAuth hostile transport diagnostics are redacted and do not fall back")
-func codexOAuthTransportErrorIsRedacted() async throws {
+@Test("Codex hostile transport diagnostics are redacted and never use local fallback")
+func codexOAuthTransportErrorIsRedacted() async {
     let secret = "codex-super-secret"
     let http = UsageHTTPClient(transport: { _ in
         throw CodexHostileTransportError(
             description: "Authorization: Bearer \(secret); ChatGPT-Account-Id: account-123")
     })
-    let strategy = CodexOAuthStrategy(authContents: { _ in nil })
+    let strategy = CodexOAuthStrategy()
+    let credential = codexEnvelope(token: secret)
     let attempts = CodexAttemptCounter()
     let result = await resolveUsageSnapshot(
         strategies: [strategy, CodexFixtureLocalStrategy(attempts: attempts)],
-        context: codexOAuthContext(http: http, credential: secret))
+        context: codexOAuthContext(http: http, credential: credential))
 
     #expect(result == nil)
     #expect(await attempts.count == 0)
     do {
-        _ = try await strategy.fetch(codexOAuthContext(http: http, credential: secret))
+        _ = try await strategy.fetch(
+            codexOAuthContext(http: http, credential: credential))
         Issue.record("expected a redacted transport failure")
     } catch {
         let description = String(describing: error)
@@ -339,24 +391,20 @@ func codexOAuthTransportErrorIsRedacted() async throws {
     }
 }
 
-@Test("Codex OAuth 429 and other server failures hide the tile without local fallback")
-func codexOAuthNonAuthenticationHTTPFailuresDoNotFallBack() async throws {
-    for status in [429, 500] {
-        let url = try #require(URL(string: "https://chatgpt.com/backend-api/wham/usage"))
-        let http = UsageHTTPClient(transport: { _ in
-            let response = try #require(
-                HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil))
-            return (Data(), response)
-        })
-        let attempts = CodexAttemptCounter()
-        let result = await resolveUsageSnapshot(
-            strategies: [
-                CodexOAuthStrategy(authContents: { _ in nil }),
-                CodexFixtureLocalStrategy(attempts: attempts),
-            ],
-            context: codexOAuthContext(http: http))
+@Test("Codex 429 and server errors hide the tile without local fallback", arguments: [429, 500])
+func codexOAuthNonAuthenticationFailuresHideTile(status: Int) async throws {
+    let url = try #require(URL(string: "https://chatgpt.com/backend-api/wham/usage"))
+    let http = UsageHTTPClient(transport: { _ in
+        let response = try #require(
+            HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil))
+        return (Data(), response)
+    })
+    let attempts = CodexAttemptCounter()
+    let result = await resolveUsageSnapshot(
+        strategies: [CodexOAuthStrategy(), CodexFixtureLocalStrategy(attempts: attempts)],
+        context: codexOAuthContext(
+            http: http, credential: codexEnvelope(token: "opaque-token")))
 
-        #expect(result == nil)
-        #expect(await attempts.count == 0)
-    }
+    #expect(result == nil)
+    #expect(await attempts.count == 0)
 }

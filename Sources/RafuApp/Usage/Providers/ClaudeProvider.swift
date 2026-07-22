@@ -3,36 +3,6 @@
 import Foundation
 import RafuCore
 
-/// Claude Code's `~/.claude/.credentials.json` OAuth record. The CLI stores
-/// `expiresAt` as milliseconds since 1970 (not seconds).
-nonisolated struct ClaudeOAuthCredentials: Equatable, Sendable {
-    let accessToken: String
-    let expiresAt: Date?
-
-    static func parse(contents: String) -> ClaudeOAuthCredentials? {
-        guard let data = contents.data(using: .utf8),
-            let root = try? JSONDecoder().decode(Root.self, from: data),
-            let oauth = root.claudeAiOauth,
-            let accessToken = oauth.accessToken?.trimmingCharacters(
-                in: .whitespacesAndNewlines),
-            !accessToken.isEmpty
-        else { return nil }
-
-        return ClaudeOAuthCredentials(
-            accessToken: accessToken,
-            expiresAt: oauth.expiresAt.map { Date(timeIntervalSince1970: $0 / 1_000) })
-    }
-
-    private struct Root: Decodable {
-        let claudeAiOauth: OAuth?
-    }
-
-    private struct OAuth: Decodable {
-        let accessToken: String?
-        let expiresAt: Double?
-    }
-}
-
 /// Payload failures carry no response body or credential material, keeping
 /// every surfaced description safe to log.
 nonisolated enum ClaudeOAuthStrategyError: Error, Equatable, Sendable {
@@ -40,38 +10,20 @@ nonisolated enum ClaudeOAuthStrategyError: Error, Equatable, Sendable {
     case invalidResponse
 }
 
-/// Exact Claude usage from the CLI's OAuth session. The injected Rafu
-/// credential is an explicit connection/consent gate: until it exists this
-/// strategy does not even read Claude's credential file, much less perform a
-/// network request. Once connected, the live CLI file wins; the injected
-/// credential value is used only when the file is absent.
+/// Exact Claude usage from the CLI's OAuth session. Credential discovery and
+/// consent happen before context construction; this strategy parses only the
+/// minimal envelope supplied by `UsageRegistryReader` and never touches the
+/// filesystem or either application's Keychain.
 nonisolated struct ClaudeOAuthStrategy: UsageFetchStrategy {
     let id = "claude.oauth"
 
-    private let credentialsContents: @Sendable (UsageFetchContext) -> String?
-
-    init(
-        credentialsContents: @escaping @Sendable (UsageFetchContext) -> String? = {
-            $0.readFile(".claude/.credentials.json")
-        }
-    ) {
-        self.credentialsContents = credentialsContents
-    }
-
     func isAvailable(_ context: UsageFetchContext) async -> Bool {
-        guard let connectionCredential = Self.connectionCredential(in: context) else {
-            return false
-        }
-        return resolvedCredentials(context: context, connectionCredential: connectionCredential)
-            != nil
+        Self.credential(in: context) != nil
     }
 
     func fetch(_ context: UsageFetchContext) async throws -> UsageSnapshot {
         try Task.checkCancellation()
-        guard let connectionCredential = Self.connectionCredential(in: context),
-            let credentials = resolvedCredentials(
-                context: context, connectionCredential: connectionCredential)
-        else {
+        guard let credential = Self.credential(in: context) else {
             throw ClaudeOAuthStrategyError.credentialUnavailable
         }
         guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else {
@@ -82,7 +34,7 @@ nonisolated struct ClaudeOAuthStrategy: UsageFetchStrategy {
             url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
         request.httpMethod = "GET"
         request.httpShouldHandleCookies = false
-        request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(credential.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
@@ -133,23 +85,14 @@ nonisolated struct ClaudeOAuthStrategy: UsageFetchStrategy {
             providerID: .claude, windows: windows, costLine: nil, identity: nil)
     }
 
-    private func resolvedCredentials(
-        context: UsageFetchContext, connectionCredential: String
-    ) -> ClaudeOAuthCredentials? {
-        if let contents = credentialsContents(context) {
-            guard let credentials = ClaudeOAuthCredentials.parse(contents: contents),
-                let expiresAt = credentials.expiresAt,
-                expiresAt > context.now
-            else { return nil }
-            return credentials
-        }
-        return ClaudeOAuthCredentials(accessToken: connectionCredential, expiresAt: nil)
-    }
-
-    private static func connectionCredential(in context: UsageFetchContext) -> String? {
-        let credential = context.credential(.claude)?.trimmingCharacters(
-            in: .whitespacesAndNewlines)
-        return if let credential, !credential.isEmpty { credential } else { nil }
+    private static func credential(
+        in context: UsageFetchContext
+    ) -> UsageExternalCredentialEnvelope? {
+        guard let value = context.credential(.claude),
+            let envelope = UsageExternalCredentialEnvelope.parse(value),
+            envelope.isUsable(for: .claude, at: context.now)
+        else { return nil }
+        return envelope
     }
 
     private static func mapWindow(_ source: Response.Window?, label: String) -> UsageWindow? {
@@ -367,7 +310,7 @@ nonisolated enum ClaudeProvider {
         displayName: "Claude",
         authPattern: .piggybackNetwork,
         disclosure:
-            "Reads recent Claude Code transcripts locally for an estimate. When explicitly connected, reads ~/.claude/.credentials.json and sends its OAuth token only to api.anthropic.com for exact usage percentages.",
+            "Reads recent Claude Code transcripts locally for an estimate. Connect authorizes Rafu to read Claude Code credentials and make read-only exact usage requests only to api.anthropic.com; disconnect keeps local estimates enabled.",
         defaultEnabled: true,
         makeStrategies: { _ in [ClaudeOAuthStrategy(), ClaudeLocalTranscriptStrategy()] }
     )

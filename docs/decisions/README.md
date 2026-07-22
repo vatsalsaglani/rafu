@@ -26,6 +26,7 @@ Accepted ADRs take precedence over older plan suggestions when they explicitly s
 | [0014](0014-terminal-as-editor-tab.md) | Proposed | Present terminal sessions as first-class, ephemeral (non-restored) editor tabs alongside file tabs, narrowing ADR 0004's bottom-panel-only placement; full lifecycle policy (restoration, cap, agent-workflow polish) remains future scope in `editor-terminal-tabs.md` |
 | [0015](0015-github-publishing-via-system-gh.md) | Accepted | Publish to GitHub via the user's own `gh` CLI (account lookup + `repo create --push`), never a bundled OAuth flow or GitHub REST client |
 | [0016](0016-terminal-attention-notifications.md) | Proposed; amended 2026-07-22 | Terminal bell attention notifications carry a bounded (6-line/512-byte, control-stripped, viewport-only) output snippet and accept a user-typed reply routed back into the session's pty by a minted UUID; on by default with authorization requested lazily on first actual notify, not at launch. Amendment: the notch companion's peek panel is a third, mutually-exclusive attention surface, and the companion may read other AI tools' local usage files read-only for counts/percentages/timestamps only, never content, never logged/cached/transmitted |
+| [0017](0017-usage-provider-trust-transition.md) | Accepted | Keep local provider enablement separate from explicit credential-bearing network consent; external CLI tokens remain minimal, bounded, memory-only, file-first, no-refresh, and redacted |
 
 Unresolved choices are tracked in [`open-decisions.md`](open-decisions.md).
 
