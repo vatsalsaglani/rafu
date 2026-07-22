@@ -20,8 +20,10 @@ nonisolated enum CompanionHoverState: Equatable, Sendable {
 /// click, Escape) to the next state — it does not run the clock itself.
 nonisolated enum CompanionHoverPolicy {
     /// Hover must dwell this long before a bare hover becomes a peek
-    /// (terminal-notch-hud.md: "300ms dwell").
-    static let dwellSeconds: Double = 0.3
+    /// (coordinator decision: shortened from the original 300ms — peeking is
+    /// now a cheap width pop to the wings pill, not a downward panel, so a
+    /// snappier dwell reads as responsive rather than accidental).
+    static let dwellSeconds: Double = 0.15
     /// Mouse-out grace before an un-pinned peek collapses
     /// (terminal-notch-hud.md: "400ms grace").
     static let graceSeconds: Double = 0.4
@@ -53,16 +55,17 @@ nonisolated enum CompanionHoverPolicy {
     }
 
     /// Feed-vs-drop-down arbitration (terminal-notch-hud.md, "Attention"
-    /// section): while the companion panel is open (peeking or pinned), a
-    /// new bell routes into the attention feed inside the panel instead of
-    /// spawning the separate v1 event drop-down; while resting, the v1
-    /// drop-down is what surfaces the event.
+    /// section, amended by the RESTING/HOVER redesign): the panel only ever
+    /// shows content while `.pinned` — `.peeking` is now just the wings pill
+    /// with no downward panel to route a card into — so a new bell routes
+    /// into the attention feed ONLY while pinned; both `.resting` and
+    /// `.peeking` surface the event through the v1 drop-down.
     static func companionArbitration(
         hoverState: CompanionHoverState
     ) -> (routeToFeed: Bool, showDropDown: Bool) {
         switch hoverState {
-        case .peeking, .pinned: (true, false)
-        case .resting: (false, true)
+        case .pinned: (true, false)
+        case .resting, .peeking: (false, true)
         }
     }
 }

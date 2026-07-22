@@ -489,10 +489,11 @@ final class WorkspaceSession {
         {
             let snippet = controller.recentOutputSnippet()
             // Feed-vs-drop-down arbitration (terminal-notch-hud.md NC-C,
-            // "Attention"): while the companion peek panel is open, the
-            // event lands in its cross-window attention feed instead of
-            // spawning the separate v1 drop-down — a bell never produces
-            // both.
+            // "Attention"): the event lands in the companion's cross-window
+            // attention feed only while the panel is pinned — a bare
+            // hover-dwell peek is now just the wings pill with no downward
+            // panel to route into — otherwise it spawns the separate v1
+            // drop-down; a bell never produces both.
             let arbitration = CompanionHoverPolicy.companionArbitration(
                 hoverState: NotchCompanionModel.shared.hoverState)
             if arbitration.routeToFeed {

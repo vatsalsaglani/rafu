@@ -328,6 +328,15 @@ final class NotchCompanionModel: NSObject {
             || !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
+    /// Whether the strip is showing anything wider than the bare notch rect
+    /// (coordinator decision: notch-only while calm and resting; expands to
+    /// the wings pill on attention, hover-dwell, or click). Drives
+    /// `CompanionWingsView`'s content gate — no glyph/count text renders
+    /// behind the physical housing at notch-only width.
+    var isStripExpanded: Bool {
+        hoverState != .resting || attentionCount > 0
+    }
+
     /// The view's ONLY write path to `searchQuery` — per-keystroke and
     /// deliberately unanimated (AGENTS: "Typing-path work targets one
     /// display frame"; a spring resize on every keystroke would read as
@@ -565,7 +574,14 @@ final class NotchCompanionModel: NSObject {
         hostingView.frame = NSRect(origin: .zero, size: frame.size)
         hostingView.autoresizingMask = [.width, .height]
         panel.contentView = hostingView
-        panel.clickThroughRegions = NotchCompanionGeometry.clickThroughRegions(for: metrics)
+        // Click-through regions must stay EMPTY, even over the notch-only
+        // resting strip: `NotchHUDPassthroughHostingView.hitTest` returns
+        // `nil` inside a click-through region, which also suppresses
+        // SwiftUI's `.onHover` there — a click-through notch region would
+        // make the notch-only resting strip un-hoverable, so attention
+        // could never dwell-expand it. The v1 drop-down sets its own
+        // `clickThroughRegions` independently and is unaffected.
+        panel.clickThroughRegions = []
         // No window shadow while resting: `NSPanel`'s shadow paints a rim
         // light around ALL edges — including the top — which reads as a
         // bright outline separating the strip's black from the physical
@@ -653,11 +669,13 @@ final class NotchCompanionModel: NSObject {
         hoverState = .resting
     }
 
-    /// Recomputes the panel's frame/click-through regions from the CURRENT
-    /// screen for the CURRENT `hoverState` — resting stays pinned to
-    /// `restingStripFrame` with the notch click-through; peeking/pinned
-    /// grows downward to `peekPanelFrame`, matching content height, with the
-    /// whole panel interactive (no click-through while open).
+    /// Recomputes the panel's frame from the CURRENT screen for the CURRENT
+    /// `hoverState` — resting stays pinned to the bare notch rect
+    /// (`restingStripFrame`) while calm, or expands to the wings pill
+    /// (`expandedStripFrame`) while attention is active; peeking grows to
+    /// the SAME wings pill (band height, no downward panel); pinned grows
+    /// downward to `peekPanelFrame`, matching content height. Click-through
+    /// regions are always empty (see `presentPanel`'s doc comment).
     ///
     /// `animated` (terminal-notch-hud.md NC-E, "Peek": "Spring expand,
     /// cross-fade under Reduce Motion"): `true` only at the two hover-state
@@ -679,14 +697,26 @@ final class NotchCompanionModel: NSObject {
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         switch hoverState {
         case .resting:
-            guard let frame = NotchCompanionGeometry.restingStripFrame(for: metrics) else {
+            let restingFrame =
+                attentionCount > 0
+                ? NotchCompanionGeometry.expandedStripFrame(for: metrics)
+                : NotchCompanionGeometry.restingStripFrame(for: metrics)
+            guard let frame = restingFrame else {
                 teardown()
                 return
             }
             panel.setFrame(frame, display: true, animate: animated && !reduceMotion)
-            panel.clickThroughRegions = NotchCompanionGeometry.clickThroughRegions(for: metrics)
+            panel.clickThroughRegions = []
             panel.hasShadow = false
-        case .peeking, .pinned:
+        case .peeking:
+            guard let frame = NotchCompanionGeometry.expandedStripFrame(for: metrics) else {
+                teardown()
+                return
+            }
+            panel.setFrame(frame, display: true, animate: animated && !reduceMotion)
+            panel.clickThroughRegions = []
+            panel.hasShadow = false
+        case .pinned:
             let frame = NotchCompanionGeometry.peekPanelFrame(
                 for: metrics, contentHeight: peekContentHeight())
             panel.setFrame(frame, display: true, animate: animated && !reduceMotion)
@@ -777,8 +807,10 @@ final class NotchCompanionModel: NSObject {
         guard next != hoverState else { return }
         hoverState = next
         refreshTheme()
+        // No `refreshUsage()` here: peeking is now a band-height wings pill
+        // with no panel content — usage only shows once pinned (`clicked()`
+        // below).
         refreshEditorRows(animated: true)
-        refreshUsage()
     }
 
     private func graceTimerFired() {
@@ -809,8 +841,8 @@ final class NotchCompanionModel: NSObject {
         hoverState = CompanionHoverPolicy.onClick(hoverState)
         refreshTheme()
         refreshEditorRows(animated: true)
-        refreshUsage()
         if hoverState == .pinned {
+            refreshUsage()
             startUsageTimerIfNeeded()
         } else {
             stopUsageTimer()

@@ -164,6 +164,35 @@ func refreshEditorRowsAggregatesAttentionCount() {
     #expect(model.editorRows.count == 2)
 }
 
+// MARK: - isStripExpanded
+
+@MainActor
+@Test(
+    "isStripExpanded: false while resting with no attention; true once a session bells; false again once cleared"
+)
+func isStripExpandedFollowsAttentionWhileResting() {
+    let model = NotchCompanionModel()
+    #expect(model.hoverState == .resting)
+    #expect(model.isStripExpanded == false)
+
+    let noisy = session(named: "noisy", path: "/tmp/notch-companion-strip-expanded")
+    noisy.newTerminalTab()
+    noisy.terminal.sessions[0].markRunningForTesting()
+    model.register(noisy)
+    #expect(model.isStripExpanded == false)
+
+    noisy.terminal.sessions[0].noteBell()
+    model.refreshEditorRows()
+    #expect(model.attentionCount == 1)
+    #expect(model.hoverState == .resting)
+    #expect(model.isStripExpanded == true)
+
+    noisy.terminal.sessions[0].clearAttention()
+    model.refreshEditorRows()
+    #expect(model.attentionCount == 0)
+    #expect(model.isStripExpanded == false)
+}
+
 // MARK: - focusEditor
 
 @MainActor

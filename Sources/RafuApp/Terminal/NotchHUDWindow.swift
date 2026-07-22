@@ -49,11 +49,13 @@ final class NotchHUDPanel: NSPanel {
     /// (terminal-notch-hud.md NC-B) — see `NotchHUDPassthroughHostingView`,
     /// the ONE place this actually takes effect (AppKit hit-testing is
     /// view-level, not window-level). Empty for the v1 attention drop-down
-    /// (the whole panel stays interactive, unchanged from N-2); the
-    /// companion resting strip sets this to
-    /// `NotchCompanionGeometry.clickThroughRegions(for:)` — the physical
-    /// notch — and clears it back to empty while peeking/pinned, when the
-    /// whole expanded panel is interactive.
+    /// (the whole panel stays interactive, unchanged from N-2). The
+    /// companion strip ALSO always leaves this empty, even at notch-only
+    /// resting width: `NotchHUDPassthroughHostingView.hitTest` returning
+    /// `nil` inside a click-through region also suppresses SwiftUI's
+    /// `.onHover` there, which would make a click-through notch region
+    /// un-hoverable and so unable to ever dwell-expand
+    /// (`NotchCompanionModel.presentPanel`'s doc comment).
     var clickThroughRegions: [CGRect] = [] {
         didSet {
             (contentView as? any NotchHUDPassthroughHosting)?.clickThroughRegions =
@@ -109,8 +111,9 @@ protocol NotchHUDPassthroughHosting: AnyObject {
 ///
 /// Generic over the SwiftUI root so both the v1 attention drop-down
 /// (`NotchHUDView`, `clickThroughRegions` always empty — see
-/// `NotchHUDController.presentPanel()`) and the companion resting strip
-/// (`NotchCompanionView`, notch-only regions) share one implementation
+/// `NotchHUDController.presentPanel()`) and the companion strip
+/// (`NotchCompanionView`, ALSO always empty — see `NotchHUDPanel
+/// .clickThroughRegions`'s doc comment above) share one implementation
 /// instead of duplicating the hit-test override per root type.
 final class NotchHUDPassthroughHostingView<Content: View>: NSHostingView<Content>,
     NotchHUDPassthroughHosting

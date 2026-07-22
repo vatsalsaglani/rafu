@@ -1,11 +1,14 @@
 import SwiftUI
 
-/// The notch companion strip's content (terminal-notch-hud.md NC-B):
-/// resting shows only the wings row; hovering (dwell) or clicking expands
-/// it downward into the editors list. PRESENTATION ONLY — every value shown
-/// here already lives on `NotchCompanionModel`; this view never touches a
-/// `WorkspaceSession` directly. The strip belongs to no scene, so the theme
-/// is injected into the environment manually, mirroring `NotchHUDView`.
+/// The notch companion strip's content (terminal-notch-hud.md NC-B, amended
+/// by the RESTING/HOVER redesign): resting shows nothing at notch-only width
+/// (or the wings row, glyph-only content, once attention is active); a
+/// hover-dwell widens the strip to the wings pill with no downward panel;
+/// only a CLICK (pinning) grows a downward panel with the editors list.
+/// PRESENTATION ONLY — every value shown here already lives on
+/// `NotchCompanionModel`; this view never touches a `WorkspaceSession`
+/// directly. The strip belongs to no scene, so the theme is injected into
+/// the environment manually, mirroring `NotchHUDView`.
 struct NotchCompanionView: View {
     let model: NotchCompanionModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -16,7 +19,7 @@ struct NotchCompanionView: View {
     var body: some View {
         VStack(spacing: 0) {
             CompanionWingsView(model: model)
-            if model.hoverState != .resting {
+            if model.hoverState == .pinned {
                 // Pinned ABOVE the scroll view — it must stay reachable
                 // (and visible) while the results below it scroll, not
                 // travel with them (terminal-notch-hud.md NC-B,
@@ -93,13 +96,17 @@ struct NotchCompanionView: View {
     }
 }
 
-/// The always-present wings row (terminal-notch-hud.md, "Resting"): left
-/// wing is the Rafu mark + open-editor count, right wing is the attention
-/// dot + count (hidden entirely when calm). The row IS the click target —
-/// see `NotchHUDPanel.clickThroughRegions`/`NotchHUDPassthroughHostingView`
-/// for why a tap landing in the notch gap between the wings never reaches
-/// this gesture at all (AppKit already refused the hit test upstream), so a
-/// single `onTapGesture` on the whole row is equivalent to "wings only".
+/// The wings row (terminal-notch-hud.md, "Resting", amended by the
+/// RESTING/HOVER redesign): left wing is the Rafu mark, right wing is the
+/// open-editor count plus the attention dot + count (hidden entirely when
+/// calm). Both wings render NOTHING at notch-only width — `isStripExpanded`
+/// gates their content so no text ever draws behind the physical housing;
+/// content only appears once the strip has actually widened to the pill
+/// (attention while resting, hover-dwell, or pinned). The row IS the click
+/// target — since `NotchHUDPanel.clickThroughRegions` is always empty for
+/// this panel (see `NotchCompanionModel.presentPanel`'s doc comment), a
+/// single `onTapGesture` on the whole row covers the full strip, notch gap
+/// included.
 struct CompanionWingsView: View {
     let model: NotchCompanionModel
     @Environment(\.rafuTheme) private var theme
@@ -116,38 +123,45 @@ struct CompanionWingsView: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(summaryLabel)
         .accessibilityHint(
-            model.hoverState == .resting
-                ? "Activates to show open editors" : "Activates to collapse"
+            model.hoverState == .pinned
+                ? "Activates to collapse" : "Activates to show open editors"
         )
         .accessibilityAddTraits(.isButton)
     }
 
+    /// The Rafu glyph, alone — rendered only once the strip has actually
+    /// widened to the wings pill (`isStripExpanded`); nothing draws behind
+    /// the physical housing at notch-only width.
     private var leftWing: some View {
         HStack(spacing: RafuMetrics.space1) {
-            RafuBrandMarkView()
-                .frame(width: 14, height: 14)
-            Text("\(model.editorRows.count)")
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(theme.palette.textPrimary)
+            if model.isStripExpanded {
+                RafuBrandMarkView()
+                    .frame(width: 14, height: 14)
+            }
         }
         .frame(width: NotchCompanionGeometry.wingWidth, alignment: .leading)
         .padding(.leading, RafuMetrics.space2)
     }
 
-    /// Nothing when calm — the right wing only renders content once a
-    /// session needs attention (terminal-notch-hud.md, "Resting": "nothing
-    /// when calm").
+    /// The open-editor count, plus the attention dot + count once a session
+    /// needs attention — also gated behind `isStripExpanded` (see
+    /// `leftWing`'s doc comment).
     private var rightWing: some View {
         HStack(spacing: RafuMetrics.space1) {
-            if model.attentionCount > 0 {
-                Circle()
-                    .fill(theme.palette.accent)
-                    .frame(width: 6, height: 6)
-                Text("\(model.attentionCount)")
+            if model.isStripExpanded {
+                Text("\(model.editorRows.count)")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .monospacedDigit()
-                    .foregroundStyle(theme.palette.accent)
+                    .foregroundStyle(theme.palette.textPrimary)
+                if model.attentionCount > 0 {
+                    Circle()
+                        .fill(theme.palette.accent)
+                        .frame(width: 6, height: 6)
+                    Text("\(model.attentionCount)")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(theme.palette.accent)
+                }
             }
         }
         .frame(width: NotchCompanionGeometry.wingWidth, alignment: .trailing)
@@ -318,7 +332,8 @@ struct CompanionUsageStripView: View {
 /// The peek panel's editors list (terminal-notch-hud.md, "Peek", item 2) —
 /// one card per open workspace window, narrowed by
 /// `model.searchQuery` through `model.visibleEditorRows`. Shown only while
-/// `hoverState != .resting`; empty-state text fills the same space per
+/// `hoverState == .pinned` (only a click grows the downward panel; see
+/// `NotchCompanionView`'s doc comment); empty-state text fills the same space per
 /// AGENTS' panel/tab top-alignment rule so a single-row (or zero-row) list
 /// never floats the whole strip toward the screen's vertical middle. NOT
 /// wrapped in an explicit animation — per-keystroke filtering must read as

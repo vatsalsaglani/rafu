@@ -58,24 +58,24 @@ func hoverEscapeTable() {
     #expect(CompanionHoverPolicy.onEscape(.pinned) == .resting)
 }
 
-@Test("dwell and grace durations are the documented 300ms/400ms")
+@Test("dwell and grace durations are the documented 150ms/400ms")
 func hoverDurations() {
-    #expect(CompanionHoverPolicy.dwellSeconds == 0.3)
+    #expect(CompanionHoverPolicy.dwellSeconds == 0.15)
     #expect(CompanionHoverPolicy.graceSeconds == 0.4)
 }
 
 // MARK: - companionArbitration
 
-@Test("companionArbitration: peeking/pinned route to the feed; resting shows the v1 drop-down")
+@Test("companionArbitration: only pinned routes to the feed; resting/peeking show the v1 drop-down")
 func companionArbitrationTable() {
-    #expect(
-        CompanionHoverPolicy.companionArbitration(hoverState: .peeking)
-            == (routeToFeed: true, showDropDown: false))
     #expect(
         CompanionHoverPolicy.companionArbitration(hoverState: .pinned)
             == (routeToFeed: true, showDropDown: false))
     #expect(
         CompanionHoverPolicy.companionArbitration(hoverState: .resting)
+            == (routeToFeed: false, showDropDown: true))
+    #expect(
+        CompanionHoverPolicy.companionArbitration(hoverState: .peeking)
             == (routeToFeed: false, showDropDown: true))
 }
 
@@ -311,18 +311,33 @@ func attentionFeedStableForEqualTimestamps() {
 
 // MARK: - NotchCompanionGeometry
 
-@Test("restingStripFrame: notch + two 90pt wings, centered on the notch, pinned to screen top")
+@Test("restingStripFrame: exactly the physical notch rect")
 func restingStripFrameRealMetrics() {
+    // Notch (763, 185 wide) plus the 16pt resting lip each side: the
+    // physical cutout is wider than the software notch, so an exact-notch
+    // strip vanished entirely behind the housing (user photo, 2026-07-22).
     let frame = NotchCompanionGeometry.restingStripFrame(for: realNotchMetrics)
-    // notchMidX 855.5, width 185 + 180 = 365 → x 673, y at screen top (1074),
-    // height equal to the notch band (33).
-    #expect(frame == CGRect(x: 673, y: 1074, width: 365, height: 33))
+    #expect(frame == CGRect(x: 747, y: 1074, width: 217, height: 33))
     #expect(frame?.maxY == realNotchMetrics.frame.maxY)
 }
 
 @Test("restingStripFrame: nil when the screen has no notch")
 func restingStripFrameNilWithoutNotch() {
     #expect(NotchCompanionGeometry.restingStripFrame(for: nonNotchMetrics) == nil)
+}
+
+@Test("expandedStripFrame: notch + two 90pt wings, centered on the notch, pinned to screen top")
+func expandedStripFrameRealMetrics() {
+    let frame = NotchCompanionGeometry.expandedStripFrame(for: realNotchMetrics)
+    // notchMidX 855.5, width 185 + 180 = 365 → x 673, y at screen top (1074),
+    // height equal to the notch band (33).
+    #expect(frame == CGRect(x: 673, y: 1074, width: 365, height: 33))
+    #expect(frame?.maxY == realNotchMetrics.frame.maxY)
+}
+
+@Test("expandedStripFrame: nil when the screen has no notch")
+func expandedStripFrameNilWithoutNotch() {
+    #expect(NotchCompanionGeometry.expandedStripFrame(for: nonNotchMetrics) == nil)
 }
 
 @Test("leftWingRect/rightWingRect: flush against the notch's edges, 90pt wide")
@@ -334,24 +349,6 @@ func wingRects() {
 
     #expect(NotchCompanionGeometry.leftWingRect(for: nonNotchMetrics) == nil)
     #expect(NotchCompanionGeometry.rightWingRect(for: nonNotchMetrics) == nil)
-}
-
-@Test("clickThroughRegions: non-empty over a notch and excludes both wings")
-func clickThroughRegionsExcludeWings() {
-    let regions = NotchCompanionGeometry.clickThroughRegions(for: realNotchMetrics)
-    #expect(!regions.isEmpty)
-    let left = NotchCompanionGeometry.leftWingRect(for: realNotchMetrics)
-    let right = NotchCompanionGeometry.rightWingRect(for: realNotchMetrics)
-    // The click-through region is exactly the notch, and it does not equal
-    // either wing rect.
-    #expect(regions == [CGRect(x: 763, y: 1074, width: 185, height: 33)])
-    #expect(!regions.contains(left ?? .zero))
-    #expect(!regions.contains(right ?? .zero))
-}
-
-@Test("clickThroughRegions: empty when there is no notch")
-func clickThroughRegionsEmptyWithoutNotch() {
-    #expect(NotchCompanionGeometry.clickThroughRegions(for: nonNotchMetrics) == [])
 }
 
 @Test("peekPanelFrame: grows downward only, pinned at the strip's top edge")

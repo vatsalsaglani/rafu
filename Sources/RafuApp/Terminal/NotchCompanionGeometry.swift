@@ -23,15 +23,43 @@ nonisolated enum NotchCompanionGeometry {
         (metrics.frame.height * maxPeekHeightFraction).rounded()
     }
 
-    /// The always-present resting strip: the notch band plus a `wingWidth`
-    /// wing on each side, horizontally centered on the notch, pinned to the
-    /// screen top with height equal to the notch band
-    /// (`metrics.safeAreaTopInset`). `nil` when the screen has no notch
-    /// (`NotchHUDGeometry.notchRect(for:)` is nil) — the resting strip does
-    /// not exist without a notch to hug; a permanent floating bar under an
-    /// external monitor's menu bar is clutter (terminal-notch-hud.md,
-    /// "Resting": the Settings toggle defaults OFF on non-notch displays).
+    /// How far the resting strip extends past the SOFTWARE notch rect on
+    /// each side. The physical cutout is slightly wider than the AppKit
+    /// aux-area gap on real panels (user photo, 2026-07-22), so an
+    /// exactly-notch-sized strip disappears entirely behind the housing —
+    /// losing both the hover affordance and any hint the companion exists.
+    /// A small lip keeps a subtle black edge visible beside the physical
+    /// notch while still reading as part of the housing.
+    static let restingOverhang: CGFloat = 16
+
+    /// The always-present resting strip: the physical notch rect plus a
+    /// `restingOverhang` lip on each side — nearly coinciding with the
+    /// housing, but never fully hidden behind it. No wings, no content.
+    /// `nil` when the screen has no notch (`NotchHUDGeometry.notchRect(for:)`
+    /// is nil) — the resting strip does not exist without a notch to hug; a
+    /// permanent floating bar under an external monitor's menu bar is
+    /// clutter (terminal-notch-hud.md, "Resting": the Settings toggle
+    /// defaults OFF on non-notch displays).
     static func restingStripFrame(for metrics: NotchScreenMetrics) -> CGRect? {
+        guard let notch = NotchHUDGeometry.notchRect(for: metrics) else { return nil }
+        let width = notch.width + restingOverhang * 2
+        return CGRect(
+            x: notch.midX - width / 2,
+            y: metrics.frame.maxY - notch.height,
+            width: width,
+            height: notch.height
+        )
+    }
+
+    /// The wings pill the strip animates out to once it needs to show
+    /// content — attention while resting, or hover-dwell/click (coordinator
+    /// decision): the notch band plus a `wingWidth` wing on each side,
+    /// horizontally centered on the notch, pinned to the screen top with
+    /// height equal to the notch band (`metrics.safeAreaTopInset`). This is
+    /// the OLD `restingStripFrame` math, now named for what it actually is —
+    /// the expanded (not resting) strip. `nil` when the screen has no notch,
+    /// mirroring `restingStripFrame`.
+    static func expandedStripFrame(for metrics: NotchScreenMetrics) -> CGRect? {
         guard let notch = NotchHUDGeometry.notchRect(for: metrics) else { return nil }
         let width = notch.width + wingWidth * 2
         return CGRect(
@@ -55,21 +83,6 @@ nonisolated enum NotchCompanionGeometry {
     static func rightWingRect(for metrics: NotchScreenMetrics) -> CGRect? {
         guard let notch = NotchHUDGeometry.notchRect(for: metrics) else { return nil }
         return CGRect(x: notch.maxX, y: notch.minY, width: wingWidth, height: notch.height)
-    }
-
-    /// Regions of the resting strip that must stay click-through so the
-    /// strip never blocks a menu-bar click (terminal-notch-hud.md,
-    /// "Resting": "click-through everywhere except the wings"). The strip
-    /// is built EXACTLY as `leftWing ∪ notch ∪ rightWing` with no other
-    /// gap — `restingStripFrame`'s x/width are derived from `notch` and
-    /// `wingWidth` so the three rects always tile precisely — so the only
-    /// non-wing region is the physical notch itself, sitting between the
-    /// two wings. Hit-testing must return `nil` over every rect in this
-    /// list. Empty when there is no notch (no strip exists to click
-    /// through).
-    static func clickThroughRegions(for metrics: NotchScreenMetrics) -> [CGRect] {
-        guard let notch = NotchHUDGeometry.notchRect(for: metrics) else { return [] }
-        return [notch]
     }
 
     /// The peek panel's frame (terminal-notch-hud.md NC-A/NC-B, "Peek":
