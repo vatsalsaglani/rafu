@@ -38,6 +38,25 @@ strategies + shared snapshot shape, not the browser/WebView machinery.
 | **OpenCode / OpenCode Go** | local SQLite `~/.local/share/opencode/opencode.db` (sum `$.cost` from `message`/`part` rows) + `~/.local/share/opencode/auth.json` presence check | $ spend vs caps (session/weekly/monthly) → % | **No** (fully local) | **U-C.** Cheapest add — same class as our Codex parser, just SQLite instead of JSONL. Web/Zen enrichment: skip |
 | **Cline** | none — needs an API key (env `CLINE_API_KEY` or user-entered) → `GET https://api.cline.bot/api/v1/users/me/plan/usage-limits` | `five_hour`/`weekly`/`monthly` `percentUsed` + `resetsAt` | Yes | **U-D.** Only provider needing a Settings credential field (stored in OUR Keychain, per AGENTS) |
 
+### Provider inclusion criteria (decided 2026-07-22: NOT CodexBar parity)
+
+CodexBar's 63+ providers are its whole product; Rafu's strip answers one
+question — "do the agents I run beside Rafu have budget left?" We adopt
+its ARCHITECTURE (so adding a provider is a descriptor, not a rewrite),
+not its catalog. A provider is added only when BOTH hold:
+
+1. It is a coding agent/tool someone plausibly runs in a terminal beside
+   Rafu (no voice APIs, no generic metering dashboards).
+2. Its data is reachable zero-config (local files / its own stored
+   token) or via a pasted API key — never browser cookies, never
+   dashboard scraping.
+
+Each shipped parser is a standing bet on another company's private
+format; the roster stays small so every number shown stays trustworthy.
+Tier now: Claude, Codex, Cursor, OpenCode, Cline. Later candidates
+(Gemini CLI, Copilot CLI, OpenRouter-style key+credits endpoints) are
+one-descriptor evaluations against these criteria, on demand.
+
 ### What we deliberately do NOT adopt from CodexBar
 
 - **Browser cookie import** (Safari needs Full Disk Access; huge privacy
