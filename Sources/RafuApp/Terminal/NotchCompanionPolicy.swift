@@ -214,6 +214,148 @@ nonisolated struct CompanionEditorRow: Identifiable, Equatable, Sendable {
     }
 }
 
+/// Pure display derivations for the companion peek panel's usage area
+/// (agent-usage-providers.md, "Multi-provider display in the notch"):
+/// front-line selection (up to 4, user-ordered, from `UsageStripOrderStore`)
+/// vs. the overflow partition, near-exhaustion emphasis (≥80%/≥95%), and
+/// the tile TEXT each renders to — `Name · 5h 82% · 7d 41%` (cost-only:
+/// `Name · $41.20`). `Emphasis` is a plain `Sendable` enum, never a
+/// `Color`, so this type stays UI-agnostic and headless-testable —
+/// `CompanionUsageStripView` (`NotchCompanionView.swift`) maps `Emphasis`
+/// to a theme color/weight when building its `AttributedString`.
+///
+/// Landed in W0's S2 stage (ahead of the S4 companion-model/view wiring)
+/// because `UsageCoreTests`' Claude/Codex rendering-parity assertion
+/// needs it to exist; see the W0 implementor handoff for this staging
+/// note. Every member lives directly in this type's primary declaration —
+/// see `CompanionEditorRow`'s doc comment above for why.
+nonisolated enum UsageDisplayPolicy {
+    /// The peek panel's usage front line shows at most this many tiles
+    /// (agent-usage-providers.md: "up to 4 tiles the user picks and orders
+    /// in Settings").
+    static let frontLineCap = 4
+    static let highUsageThreshold: Double = 80
+    static let criticalUsageThreshold: Double = 95
+
+    /// Near-exhaustion emphasis for one rendered window — text/weight only,
+    /// never color alone (AGENTS: "never communicate ... state using color
+    /// alone"). `.critical` also adds a `⚠` glyph directly into the
+    /// rendered text (see `windowText(_:)`), so the SIGNAL survives even
+    /// where the view applies no color at all.
+    nonisolated enum Emphasis: Equatable, Sendable {
+        case normal, high, critical
+    }
+
+    /// One window's already-formatted text plus the emphasis level a
+    /// renderer should apply to just that chunk.
+    nonisolated struct RenderedWindow: Equatable, Sendable {
+        let text: String
+        let emphasis: Emphasis
+    }
+
+    /// One provider's fully rendered tile: a display name and its ordered
+    /// window chunks (or a single cost-only chunk when the snapshot has no
+    /// windows but does have a `costLine`).
+    nonisolated struct RenderedTile: Equatable, Sendable {
+        let providerID: UsageProviderID
+        let displayName: String
+        let windows: [RenderedWindow]
+    }
+
+    /// Up to `cap` snapshots for the front line: the user's `order` first
+    /// (in that exact sequence), then any remaining renderable snapshot
+    /// NOT named in `order`, in `snapshots`' own (registry) order — so a
+    /// newly enabled provider the user has not yet arranged still appears
+    /// somewhere rather than silently vanishing into overflow forever.
+    static func frontLine(
+        from snapshots: [UsageSnapshot], order: [UsageProviderID], cap: Int = frontLineCap
+    ) -> [UsageSnapshot] {
+        let byID = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.providerID, $0) })
+        var picked = order.compactMap { byID[$0] }
+        let pickedIDs = Set(picked.map(\.providerID))
+        picked.append(contentsOf: snapshots.filter { !pickedIDs.contains($0.providerID) })
+        return Array(picked.prefix(cap))
+    }
+
+    /// Every snapshot not selected into `frontLine`, preserving
+    /// `snapshots`' original order.
+    static func overflow(from snapshots: [UsageSnapshot], frontLine: [UsageSnapshot])
+        -> [UsageSnapshot]
+    {
+        let frontLineIDs = Set(frontLine.map(\.providerID))
+        return snapshots.filter { !frontLineIDs.contains($0.providerID) }
+    }
+
+    /// A two-column grid's row count for `count` overflow tiles — `0` for
+    /// no tiles, otherwise `ceil(count / 2)`.
+    static func gridRows(for count: Int) -> Int {
+        count <= 0 ? 0 : Int((Double(count) / 2).rounded(.up))
+    }
+
+    /// One tile's rendering: one `RenderedWindow` per window (percent OR
+    /// token form — never both, matching the shipped strip verbatim), or a
+    /// single cost-only chunk when `windows` is empty but `costLine` is
+    /// set, or a bare name when the snapshot carries neither (should not
+    /// happen for a `renderable` snapshot, but never crashes).
+    static func renderedTile(for snapshot: UsageSnapshot, displayName: String) -> RenderedTile {
+        if !snapshot.windows.isEmpty {
+            let windows = snapshot.windows.map { window in
+                RenderedWindow(
+                    text: windowText(window), emphasis: emphasis(forPercent: window.percent))
+            }
+            return RenderedTile(
+                providerID: snapshot.providerID, displayName: displayName, windows: windows)
+        }
+        if let costLine = snapshot.costLine {
+            return RenderedTile(
+                providerID: snapshot.providerID, displayName: displayName,
+                windows: [RenderedWindow(text: costLine, emphasis: .normal)])
+        }
+        return RenderedTile(providerID: snapshot.providerID, displayName: displayName, windows: [])
+    }
+
+    /// `"<displayName> · <window> · <window>"` — the ONE join format the
+    /// pre-W0 `CompanionUsageStripView.tileSummary` used
+    /// (`"\(tile.agent) · " + windows.joined(" · ")`), preserved exactly so
+    /// a no-emphasis line renders byte-identical to before (see
+    /// `UsageCoreTests`' rendering-parity test).
+    static func plainText(_ tile: RenderedTile) -> String {
+        guard !tile.windows.isEmpty else { return tile.displayName }
+        return "\(tile.displayName) · " + tile.windows.map(\.text).joined(separator: " · ")
+    }
+
+    /// The full front-line string — every tile's `plainText`, joined by
+    /// four spaces, matching the pre-W0 strip's tile separator exactly.
+    static func plainFrontLineText(_ tiles: [RenderedTile]) -> String {
+        tiles.map(plainText).joined(separator: "    ")
+    }
+
+    /// A window's rendered text: `"<label> <percent>%"` (append `⚠` at
+    /// `criticalUsageThreshold`+), `"<label> <compact tokens> tok"`, or the
+    /// bare label when neither is set — identical shape to the pre-W0
+    /// `CompanionUsageStripView.windowSummary`.
+    private static func windowText(_ window: UsageWindow) -> String {
+        if let percent = window.percent {
+            var text = "\(window.label) \(Int(percent.rounded()))%"
+            if percent >= criticalUsageThreshold {
+                text += " ⚠"
+            }
+            return text
+        }
+        if let tokens = window.tokens {
+            return "\(window.label) \(UsageFormat.compactTokenCount(tokens)) tok"
+        }
+        return window.label
+    }
+
+    private static func emphasis(forPercent percent: Double?) -> Emphasis {
+        guard let percent else { return .normal }
+        if percent >= criticalUsageThreshold { return .critical }
+        if percent >= highUsageThreshold { return .high }
+        return .normal
+    }
+}
+
 /// One session currently needing attention, as the companion panel's
 /// attention feed shows it (terminal-notch-hud.md NC-A, "Attention feed") —
 /// the same already-bounded/sanitized shape as `NotchHUDEvent`, plus the

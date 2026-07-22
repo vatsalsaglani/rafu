@@ -44,6 +44,18 @@ func enableStoreSetAndReadBack() {
     }
 }
 
+@Test("UsageEnableStore: every registry descriptor's default is honored when unset")
+func enableStoreHonorsEveryDescriptorDefault() {
+    withIsolatedSuite { suite in
+        let store = UsageEnableStore(suiteName: suite)
+        for descriptor in UsageProviderRegistry.all {
+            #expect(
+                store.isEnabled(descriptor.id, default: descriptor.defaultEnabled)
+                    == descriptor.defaultEnabled)
+        }
+    }
+}
+
 // MARK: - UsageStripOrderStore
 
 @Test("UsageStripOrderStore: an unset order defaults to [claude, codex]")
