@@ -2,8 +2,17 @@
 
 Status: planned (2026-07-22). Extends the shipped Notch Companion usage
 strip (terminal-notch-hud.md NC-D) from two hardcoded local parsers to a
-provider registry covering more agents and better data. No implementation
-yet — this document is the brainstorm outcome and staged plan.
+provider registry covering more agents and better data.
+
+**Execution model (decided 2026-07-22): parallel worktrees.** This plan
+is split into nine phases (W0 shim + eight fan-out phases) engineered
+for independent agents in separate git worktrees with disjoint owned
+paths, merged locally by the coordinator. The authoritative split,
+dependency graph, ground rules, merge protocol, and per-phase goal-mode
+prompts live in [`usage-providers/README.md`](usage-providers/README.md).
+The U-A…U-F staging table below is SUPERSEDED by that split (it remains
+as scope reference; W0≈U-A, W2≈U-B(+ADR), W3≈U-C, W4≈U-D+OpenRouter+Qwen,
+W1/W6–W8≈U-E/U-F).
 
 Depends on: Notch Companion (shipped), `AgentUsage.swift` (the current
 `AgentUsageProvider`/`AgentUsageReader` seam), ADR 0016 amendment (reading
