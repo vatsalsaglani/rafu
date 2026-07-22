@@ -2,7 +2,7 @@ import { Button } from "../components/Button";
 import { DownloadButton } from "../components/DownloadButton";
 import { Reveal } from "../components/Reveal";
 import { SeamStitch } from "../components/SeamStitch";
-import { GITHUB_URL } from "../lib/site";
+import { asset, GITHUB_URL } from "../lib/site";
 import { useTheme } from "../lib/theme";
 
 export function Cta() {
@@ -12,7 +12,7 @@ export function Cta() {
       {/* The cloth returns, quiet, behind the final ask */}
       <div aria-hidden="true" className="pointer-events-none absolute inset-0">
         <img
-          src={theme === "dark" ? "/media/hero-indigo.webp" : "/media/hero-khadi.webp"}
+          src={asset(theme === "dark" ? "/media/hero-indigo.webp" : "/media/hero-khadi.webp")}
           alt=""
           loading="lazy"
           decoding="async"

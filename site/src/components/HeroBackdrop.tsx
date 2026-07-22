@@ -1,5 +1,6 @@
 import { motion, useReducedMotion, useScroll, useTransform } from "motion/react";
 import { useEffect, useRef } from "react";
+import { asset } from "../lib/site";
 import { useTheme } from "../lib/theme";
 
 /**
@@ -52,13 +53,16 @@ export function HeroBackdrop() {
             loop
             playsInline
             preload="auto"
-            poster={dark ? "/media/hero-poster.webp" : "/media/hero-khadi.webp"}
+            poster={asset(dark ? "/media/hero-poster.webp" : "/media/hero-khadi.webp")}
           >
-            <source src={dark ? "/media/hero-loop.mp4" : "/media/hero-loop-khadi.mp4"} type="video/mp4" />
+            <source
+              src={asset(dark ? "/media/hero-loop.mp4" : "/media/hero-loop-khadi.mp4")}
+              type="video/mp4"
+            />
           </video>
         ) : (
           <img
-            src={dark ? "/media/hero-poster.webp" : "/media/hero-khadi.webp"}
+            src={asset(dark ? "/media/hero-poster.webp" : "/media/hero-khadi.webp")}
             alt=""
             className="h-full w-full object-cover"
             style={{ opacity: dark ? 0.45 : 0.55 }}

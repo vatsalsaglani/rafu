@@ -2,7 +2,14 @@
 <html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- SVG first (scales, wins on modern Chromium/Firefox); a PNG fallback
+         covers browsers/tab bars with flaky SVG favicon support (older
+         Safari especially) and the apple-touch-icon covers pinned tabs and
+         bookmarks — none of these are decorative, each is a real fallback
+         path some browser actually takes. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" sizes="any" />
+    <link rel="icon" type="image/png" href="/favicon-32.png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Rafu — the agent weaves. You mend.</title>
     <meta
