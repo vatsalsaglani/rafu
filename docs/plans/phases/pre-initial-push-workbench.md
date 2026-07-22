@@ -237,3 +237,28 @@ sessions-outlive-tabs lifecycle; new
 (Proposed) records the attention-notification reversals and their
 security argument. See `terminal-manager.md` for the corrected T-A/T-D
 claims and the accepted unbounded-exited-session-row trade-off.
+
+### 2026-07-22: T-F v2 — Notch Companion (NC-A through NC-E)
+
+Advisor→implementor→documentor pass for
+[`terminal-notch-hud.md`](terminal-notch-hud.md): a persistent notch
+companion built on the shipped v1 attention HUD, landed across all five
+stages (NC-A model/geometry, NC-B resting strip + click-through + peek,
+NC-C attention feed + drop-down arbitration + git one-liner, NC-D Codex/
+Claude usage tiles, NC-E Settings toggle + non-notch default-off +
+polish). Advisor-reviewed with no P0/P1 findings; two P2 hardenings
+applied (per-panel observer teardown on screen-parameter changes; the
+attention feed's coupling to the `.hud` surface preference confirmed
+intentional and documented). Verified: 1054 tests passing in both
+`swift test` and `swift test --no-parallel`, 0 build warnings, lint
+clean, real on-notch-hardware GUI verification. New reference notes:
+[`notch-companion.md`](../../references/notch-companion.md) and
+[`nonisolated-extension-isolation-trap.md`](../../references/nonisolated-extension-isolation-trap.md)
+(a general Swift-concurrency gotcha found during NC-A, not notch-
+specific). Amended [ADR 0016](../../decisions/0016-terminal-attention-notifications.md)
+(2026-07-22) for the companion as a third, mutually-exclusive attention
+surface and the new read-only, local-only, counts/percentages/timestamps-
+only capability of reading other AI tools' local usage files. Owed:
+VoiceOver discoverability of the resting/peek states has not yet been
+empirically tested with real VoiceOver (accessible fallback paths are
+unaffected).

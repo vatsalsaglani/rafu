@@ -1,9 +1,64 @@
 # T-F v2 — Notch Companion
 
-Status: planned (v2 redesign, 2026-07-22). The v1 event-driven HUD is
-SHIPPED (appears on attention, seamless housing merge, bounded snippet,
-inline reply, quiescence detection) and becomes the attention layer of
-this larger design. Baseline 987 tests, 0 warnings.
+Status: Implemented (2026-07-22). All five stages NC-A through NC-E are
+shipped, advisor-reviewed (no P0/P1 findings), and verified with real
+on-notch-hardware GUI verification. The v1 event-driven HUD (appears on
+attention, seamless housing merge, bounded snippet, inline reply,
+quiescence detection) remains the attention layer, now unified visually
+with the companion shell. Baseline: 1054 tests passing in both
+`swift test` and `swift test --no-parallel`, 0 build warnings, lint clean.
+
+## Stage outcomes (2026-07-22)
+
+- **NC-A** — `NotchCompanionModel` (weak multi-session registry, editor
+  row/attention-feed derivation, hover/pin policy) and wing geometry
+  shipped, pure and headless-tested. Uncovered the
+  `nonisolated`-does-not-propagate-into-a-bare-`extension` runtime trap
+  (see [`nonisolated-extension-isolation-trap.md`](../../references/nonisolated-extension-isolation-trap.md));
+  fixed by moving the affected pure statics into their type's primary
+  body.
+- **NC-B** — Resting strip window shipped: click-through everywhere
+  except the wings (AppKit `hitTest` override converting to screen
+  coordinates), hover-to-peek expansion with the editors list, and
+  click-to-focus-window. Click-through verified with real `CGEvent`
+  clicks against a live menu bar menu, not just view-hierarchy state.
+- **NC-C** — Attention feed in the peek panel, v1 drop-down arbitration
+  (deterministic: peeked/pinned panel takes the bell as a feed card,
+  resting state gets the v1 drop-down, never both), and the git
+  one-liner (`⎇ main · 3± · ↑2`) shipped.
+- **NC-D** — Usage providers shipped: Codex real 5h/7d rate-limit
+  percentages from rollout files, Claude 5h/7d token totals from
+  transcript `usage` objects (Claude exposes no rate-limit percentage, so
+  its tile never fakes one). Parsers pure/injectable, bounded, off-main,
+  60s TTL.
+- **NC-E** — "Show notch companion" Settings toggle (default on) shipped;
+  on non-notch displays the strip never renders (geometry derivation
+  returns nil) rather than introducing a second preference. Polish pass
+  covered Reduce Motion/Reduce Transparency/Increase Contrast and a
+  real-hardware GUI verification pass across all companion states.
+
+## Hardening applied post-implementation
+
+Two P2-level items from the advisor's read-only review were applied
+before handoff:
+
+1. Per-panel notification-observer teardown on screen-parameter-driven
+   panel recreation (the companion panel, unlike the persistent v1
+   drop-down panel, is recreated when screen parameters change, so its
+   observers must be attached/removed per-instance rather than once for
+   the app's lifetime).
+2. The attention feed's coupling to the existing `.hud` attention-surface
+   preference was confirmed as intentional (not a bug) and documented so
+   it is not mistaken for one later — see the ADR 0016 amendment and
+   [`notch-companion.md`](../../references/notch-companion.md).
+
+## Owed verification
+
+VoiceOver discoverability of the resting/peek states while NOT key
+(i.e., before the reply field engages `allowsKeyStatus`) has not yet been
+empirically tested with real VoiceOver. The accessible fallback path
+(Terminals panel, Source Control panel, v1 drop-down) is unaffected and
+already key-able. Recorded as an open item, not a resolved claim.
 
 Depends on: terminal-manager phase (T-A…T-E), ADR 0016, the shipped v1 HUD
 window/geometry/policy stack, `WorkspaceWindowRegistry`,
@@ -204,11 +259,17 @@ and full-screen behavior, second display.
 5. Unbounded transcript scans: the Claude aggregator must bound work
    (newest N files, size caps, mtime cutoff at the 7d window).
 
-## Documentation on completion
+## Documentation on completion (done, 2026-07-22)
 
-- Amend ADR 0016: the companion as the third surface; reading other
-  tools' local usage files (new capability, read-only, local-only).
-- Reference note: codex rollout `rate_limits` shape, claude transcript
+- Amended ADR 0016: the companion as the third surface; reading other
+  tools' local usage files (new capability, read-only, local-only). See
+  the 2026-07-22 amendment in
+  [`0016-terminal-attention-notifications.md`](../../decisions/0016-terminal-attention-notifications.md).
+- Reference notes: codex rollout `rate_limits` shape, claude transcript
   `usage` shape (as observed, with the drift warning), wing geometry, and
-  whatever the click-through/menu-bar verification actually revealed.
-- Update this doc + phases README.
+  the click-through/focus/observer-teardown nuances the verification
+  revealed — [`notch-companion.md`](../../references/notch-companion.md).
+  The `nonisolated`-extension isolation trap found during NC-A was split
+  into its own general Swift-concurrency note:
+  [`nonisolated-extension-isolation-trap.md`](../../references/nonisolated-extension-isolation-trap.md).
+- Updated this doc (stage outcomes above) and the phases README.

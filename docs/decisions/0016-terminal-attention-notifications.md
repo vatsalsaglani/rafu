@@ -112,12 +112,61 @@ Revisit if a future phase wants notifications to carry more than a
 viewport-bounded snippet (e.g. full-session summaries), or if reply routing
 needs to target something other than a single live pty session.
 
+## Amendment (2026-07-22): Notch companion as a third attention surface, and reading other tools' local usage files
+
+The Notch Companion v2 (`terminal-notch-hud.md`, stages NC-A…NC-E) adds a
+persistent resting strip and hover/pin peek panel built on this ADR's v1
+attention HUD. Two changes are durable enough to record here rather than
+only in the phase document:
+
+- **A third attention surface, arbitrated deterministically.** Bell
+  attention (`.bell`, this ADR's existing snippet/reply mechanics,
+  unchanged) now has three possible landings instead of two
+  (notification, drop-down): while the companion panel is peeked or
+  pinned, a bell lands as a card in the panel's attention feed instead of
+  spawning the v1 drop-down; while the panel is resting, the v1 drop-down
+  behavior is unchanged. The two are mutually exclusive — never both for
+  the same bell, and the bounded snippet is still read exactly once
+  regardless of which surface consumes it. `TerminalAttentionSurface`
+  (notification/drop-down/none) gains no new case; the companion strip has
+  its own independent "Show notch companion" toggle, and the feed is
+  gated on the existing `.hud` surface preference — a user with the
+  companion enabled but the attention surface preference set to
+  notification-only or none still sees the wing dot/chip counts, but the
+  feed itself never populates. This is intentional coupling (the feed and
+  the drop-down are two presentations of one notch attention surface), not
+  a bug.
+- **New capability: reading other AI coding tools' local usage files.**
+  The companion's usage tiles read Codex's local rollout files
+  (`~/.codex/sessions/**/rollout-*.jsonl`, `payload.rate_limits` objects)
+  and Claude Code's local transcript files
+  (`~/.claude/projects/**/*.jsonl`, `message.usage` token objects) to
+  show 5h/7d budget tiles. This is new: Rafu has not previously read
+  another tool's on-disk state. The constraints, verified in the shipped
+  implementation:
+  - Read-only, local-only — no network call, no write, no IPC with the
+    other tool.
+  - Extracts ONLY token counts, percentages, and timestamps; the parsers
+    never touch prompt/response/message content fields.
+  - Nothing parsed is logged, cached to disk, or transmitted anywhere;
+    results live in memory with a 60s TTL.
+  - Reads are bounded (newest Codex rollout file only, tail-read capped at
+    256KB; newest 30 Claude transcripts within a 7-day window, each
+    tail-read capped at 256KB) and run off the main actor.
+  - Parsers treat every field as optional and version-tolerant; a
+    malformed or missing file hides that tile rather than fabricating a
+    number or crashing. Codex exposes true rate-limit percentages; Claude
+    exposes only token totals (no rate-limit percentage), so the Claude
+    tile shows tokens and never fakes a percentage.
+
 ## Related plan, reference, and implementation paths
 
 - Plan: [`terminal-manager.md`](../plans/phases/terminal-manager.md) (stage
-  T-E)
+  T-E); [`terminal-notch-hud.md`](../plans/phases/terminal-notch-hud.md)
+  (stages NC-A…NC-E, the 2026-07-22 amendment)
 - Amended: [`0004-embedded-terminal.md`](0004-embedded-terminal.md)
-- Reference: [`terminal-signals-and-shell-catalog.md`](../references/terminal-signals-and-shell-catalog.md)
+- Reference: [`terminal-signals-and-shell-catalog.md`](../references/terminal-signals-and-shell-catalog.md),
+  [`notch-companion.md`](../references/notch-companion.md)
 - `Sources/RafuApp/Terminal/RafuTerminalView.swift`
 - `Sources/RafuApp/Terminal/TerminalAttentionNotifier.swift`
 - `Sources/RafuApp/Terminal/TerminalAttentionPolicy.swift`
