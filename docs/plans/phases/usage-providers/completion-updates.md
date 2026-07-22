@@ -240,3 +240,50 @@ one-off timing artifact; flagged here in case it resurfaces.
 Remaining: Wave B (W6 Antigravity/Grok/Kilo, W7 Windsurf/Amp/Droid/Warp,
 W8 Qoder + Qwen cookie path) — all unblocked (W0+W1+W4 merged), branch
 from `main` per the README goal prompts.
+
+---
+
+## Wave B complete — 9-phase plan done (2026-07-23)
+
+All three Wave B phases merged to `main` in order: W6 (`3c35fc1`, Antigravity
+/ Grok Build / Kilo Code), W7 (`d819c11`, Windsurf / Amp / Factory Droid /
+Warp), W8 (`da76965`, Qoder + Qwen cookie path). Suite at **1238 tests**,
+`swift test --no-parallel` (the CI configuration) deterministically green, 0
+warnings, lint clean. All 19 roster providers now exist on main across four
+auth patterns (local, OAuth, API-key, cookie).
+
+W8's blocker was the same coordinator-owned-test pattern as Wave A: the
+W4-owned `ApiKeyProvidersTests` hard-coded each API-key provider at exactly 1
+strategy, but W8 correctly gives Qwen two (`qwen.api-key`, `qwen.cookie`).
+Fixed on main (`fe8cb69`) by asserting the count is context-INDEPENDENT
+(empty == populated, > 0) rather than frozen — the same robustness fix used
+for `UsageStoreTests`. W8's implementation was complete but uncommitted in its
+worktree (the agent correctly refused to commit a red branch); the coordinator
+committed its three owned files after the shared test was fixed, then merged.
+
+### Coordinator follow-ups still OPEN (not owned by any provider phase)
+
+These were intentionally left untouched by W6/W7/W8 and are required to make
+the cookie providers actually functional end-to-end:
+
+1. **Production `cookieHeader` wiring.** `UsageRegistryReader`'s production
+   context still supplies `cookieHeader: { _ in nil }` (W0). Every cookie
+   strategy (Grok, Kilo, Factory, Qoder, Qwen-cookie, W6/W7 cookie paths) is
+   ready to consume W1's `CookieHeaderCache` but reads nil until this one-line
+   wiring lands: `cookieHeader: { CookieHeaderCache.shared.header(for: $0) }`.
+2. **Settings cookie-import UI + credential entry.** The Usage tab still lacks
+   the per-provider "Import from browser" action (W1's importer), the API-key
+   entry fields (Cline/OpenRouter/Qwen/Amp/Warp/Factory), and the Claude/Codex
+   "Connect" consent buttons — the fourth registration-row pattern from the
+   parent plan. Until then, network/cookie providers have no way to be
+   populated from the UI.
+3. **GUI verification pass** of the multi-provider notch grid + Usage tab with
+   real credentials (coordinator, on main).
+
+### Note: pre-existing flaky test (unrelated to usage)
+
+`MultiCaretUndoDiagnosticTests` ("Undo of a multi-caret edit survives an
+in-flight stale token request", from the `lane/multi-cursor` merge) fails
+intermittently under PARALLEL `swift test` and passes on re-run; it is timing-
+sensitive and unrelated to the usage providers. Serial (CI) is deterministic.
+Flagged for a separate fix.

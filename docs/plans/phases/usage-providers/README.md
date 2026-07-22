@@ -96,9 +96,9 @@ When the user reports "phase Wn is done on branch `<branch>`":
 | W3 | [W3-local-sqlite-providers.md](W3-local-sqlite-providers.md) | `codex/usage-w3-local-sqlite-providers` | ✅ Merged (1139 tests) |
 | W4 | [W4-api-key-providers.md](W4-api-key-providers.md) | `codex/usage-w4-api-key-providers` (`3c8ebff`) | ✅ Merged (1154 tests) |
 | W5 | [W5-local-token-providers.md](W5-local-token-providers.md) | `codex/usage-w5-local-token-providers` | ✅ Merged (1130 tests) |
-| W6 | [W6-cookie-providers-1.md](W6-cookie-providers-1.md) | — | ready (W0+W1 merged) |
-| W7 | [W7-cookie-providers-2.md](W7-cookie-providers-2.md) | — | ready (W0+W1 merged) |
-| W8 | [W8-alibaba-providers.md](W8-alibaba-providers.md) | — | ready (W0+W1+W4 all merged) |
+| W6 | [W6-cookie-providers-1.md](W6-cookie-providers-1.md) | `codex/usage-w6-*` | ✅ Merged (1206 tests) |
+| W7 | [W7-cookie-providers-2.md](W7-cookie-providers-2.md) | `codex/usage-w7-*` | ✅ Merged (1224 tests) |
+| W8 | [W8-alibaba-providers.md](W8-alibaba-providers.md) | `codex/usage-w8-*` | ✅ Merged (1238 tests) — plan complete |
 
 ## Per-phase goal-mode prompts
 
