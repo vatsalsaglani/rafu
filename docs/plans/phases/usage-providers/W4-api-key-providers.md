@@ -3,6 +3,11 @@
 Providers registered with a pasted API key stored in Rafu's own
 Keychain (shim `UsageStores` credential store). All opt-in, default OFF.
 
+**Contract rule:** `makeStrategies` must return the same strategy COUNT
+regardless of `context` (Settings' visibility probe calls it with a
+no-op/empty context) — all credential/availability gating belongs in
+`isAvailable`, never in the strategy list's length.
+
 ## Owned paths
 
 - `Sources/RafuApp/Usage/Providers/ClineProvider.swift`

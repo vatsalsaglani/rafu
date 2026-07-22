@@ -6,6 +6,11 @@ plan deliberately does not guess them. If a provider proves cookie-ONLY
 in current source, stub its strategies as unavailable, note it in the
 handoff (it moves to Wave B), and do not implement cookies here.
 
+**Contract rule:** `makeStrategies` must return the same strategy COUNT
+regardless of `context` (Settings' visibility probe calls it with a
+no-op/empty context) — all credential/availability gating belongs in
+`isAvailable`, never in the strategy list's length.
+
 ## Owned paths
 
 - `Sources/RafuApp/Usage/Providers/GeminiCLIProvider.swift`
