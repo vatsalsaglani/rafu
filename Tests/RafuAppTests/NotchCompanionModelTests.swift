@@ -310,38 +310,72 @@ func disengageSearchAlwaysSafe() {
     #expect(model.isSearchEngaged == false)
 }
 
-// MARK: - refreshUsage (terminal-notch-hud.md NC-D)
+// MARK: - refreshUsage (agent-usage-providers.md, "Multi-provider display
+// in the notch")
 
-/// `refreshUsage()` hops through `Task.detached` (AgentUsage.swift's parsers
-/// are pure/`Sendable`, so this genuinely runs off the main actor) and
-/// assigns back on the main actor — awaiting the returned task, rather than
-/// a fixed sleep, is what proves completion here (AGENTS: "Await async APIs
-/// directly; do not use fixed sleeps as synchronization").
-@MainActor
-@Test("refreshUsage: populates usageTiles from the injected reader")
-func refreshUsagePopulatesTilesFromInjectedReader() async {
-    let model = NotchCompanionModel()
-    let codexContents = """
-        {"timestamp":"2026-07-18T14:49:29.225Z","type":"event_msg","payload":{"rate_limits":{"limit_id":"codex","primary":{"used_percent":12.0,"window_minutes":300,"resets_at":1},"secondary":null}}}
-        """
-    model.usageReader = AgentUsageReader(
-        newestCodexRollout: { codexContents },
-        recentClaudeTranscriptLines: { _ in [] }
+/// A fixture `UsageFetchStrategy` that always returns a canned snapshot —
+/// mirrors `UsageCoreTests`' `StubStrategy` but lives here too since
+/// Swift's `private` visibility does not cross files.
+private struct FixtureUsageStrategy: UsageFetchStrategy {
+    let id: String
+    let snapshot: UsageSnapshot
+    func isAvailable(_ context: UsageFetchContext) async -> Bool { true }
+    func fetch(_ context: UsageFetchContext) async throws -> UsageSnapshot { snapshot }
+    func shouldFallback(on error: Error) -> Bool { false }
+}
+
+private func fixtureDescriptor(id: UsageProviderID, snapshot: UsageSnapshot)
+    -> UsageProviderDescriptor
+{
+    UsageProviderDescriptor(
+        id: id, displayName: id.rawValue, authPattern: .localZeroConfig, disclosure: "fixture",
+        defaultEnabled: true,
+        makeStrategies: { _ in [FixtureUsageStrategy(id: id.rawValue, snapshot: snapshot)] }
     )
+}
+
+private func fixtureReader(descriptors: [UsageProviderDescriptor]) -> UsageRegistryReader {
+    UsageRegistryReader(
+        descriptors: descriptors,
+        makeContext: { now in
+            UsageFetchContext(
+                now: now, readFile: { _ in nil }, http: .noop, credential: { _ in nil },
+                cookieHeader: { _ in nil })
+        },
+        isEnabled: { _ in true }
+    )
+}
+
+/// `refreshUsage()` hops through `Task.detached` (`UsageRegistryReader
+/// .snapshots(now:)` and its strategies are pure/`Sendable`, so this
+/// genuinely runs off the main actor) and assigns back on the main actor —
+/// awaiting the returned task, rather than a fixed sleep, is what proves
+/// completion here (AGENTS: "Await async APIs directly; do not use fixed
+/// sleeps as synchronization").
+@MainActor
+@Test("refreshUsage: populates usageSnapshots from the injected reader")
+func refreshUsagePopulatesSnapshotsFromInjectedReader() async {
+    let model = NotchCompanionModel()
+    let snapshot = UsageSnapshot(
+        providerID: .codex,
+        windows: [UsageWindow(label: "5h", percent: 12.0, tokens: nil, resetsAt: nil)],
+        costLine: nil, identity: nil)
+    model.usageReader = fixtureReader(descriptors: [
+        fixtureDescriptor(id: .codex, snapshot: snapshot)
+    ])
 
     let task = model.refreshUsage()
     await task?.value
 
-    #expect(model.usageTiles.map(\.agent) == ["Codex"])
-    #expect(model.usageTiles.first?.windows.first?.percent == 12.0)
+    #expect(model.usageSnapshots.map(\.providerID) == [.codex])
+    #expect(model.usageSnapshots.first?.windows.first?.percent == 12.0)
 }
 
 @MainActor
 @Test("refreshUsage: a second call within the TTL is suppressed unless forced")
 func refreshUsageRespectsTTLUnlessForced() async {
     let model = NotchCompanionModel()
-    model.usageReader = AgentUsageReader(
-        newestCodexRollout: { nil }, recentClaudeTranscriptLines: { _ in [] })
+    model.usageReader = fixtureReader(descriptors: [])
 
     let first = model.refreshUsage()
     #expect(first != nil)
@@ -353,4 +387,55 @@ func refreshUsageRespectsTTLUnlessForced() async {
     let forced = model.refreshUsage(force: true)
     #expect(forced != nil)
     await forced?.value
+}
+
+// MARK: - Usage front-line/overflow (agent-usage-providers.md,
+// "Multi-provider display in the notch")
+
+@MainActor
+@Test(
+    "usageFrontLine/usageOverflow: default order (claude, codex) selects both into the front line")
+func usageFrontLineDefaultOrderIncludesBoth() async {
+    let model = NotchCompanionModel()
+    let claudeSnapshot = UsageSnapshot(
+        providerID: .claude,
+        windows: [UsageWindow(label: "5h", percent: nil, tokens: 10, resetsAt: nil)],
+        costLine: nil, identity: nil)
+    let codexSnapshot = UsageSnapshot(
+        providerID: .codex,
+        windows: [UsageWindow(label: "5h", percent: 3.0, tokens: nil, resetsAt: nil)],
+        costLine: nil, identity: nil)
+    model.usageReader = fixtureReader(descriptors: [
+        fixtureDescriptor(id: .claude, snapshot: claudeSnapshot),
+        fixtureDescriptor(id: .codex, snapshot: codexSnapshot),
+    ])
+
+    await model.refreshUsage()?.value
+
+    #expect(model.usageFrontLine.map(\.providerID) == [.claude, .codex])
+    #expect(model.usageOverflow.isEmpty)
+}
+
+@MainActor
+@Test("toggleUsageOverflow: flips isUsageOverflowExpanded")
+func toggleUsageOverflowFlipsExpandedState() {
+    let model = NotchCompanionModel()
+    #expect(model.isUsageOverflowExpanded == false)
+    model.toggleUsageOverflow()
+    #expect(model.isUsageOverflowExpanded == true)
+    model.toggleUsageOverflow()
+    #expect(model.isUsageOverflowExpanded == false)
+}
+
+@MainActor
+@Test("escapePressed: collapsing to .resting resets isUsageOverflowExpanded to false")
+func escapePressedResetsUsageOverflowExpanded() {
+    let model = NotchCompanionModel()
+    model.clicked()
+    model.toggleUsageOverflow()
+    #expect(model.isUsageOverflowExpanded == true)
+
+    model.escapePressed()
+
+    #expect(model.isUsageOverflowExpanded == false)
 }

@@ -97,11 +97,38 @@ final class NotchCompanionModel: NSObject {
     /// up with the physical housing without hardcoding a pixel value that
     /// could drift from a real screen's `safeAreaInsets.top`.
     private(set) var bandInset: CGFloat = 0
-    /// The usage strip's tiles (terminal-notch-hud.md NC-D, "Peek", item 1)
-    /// — empty hides the strip entirely. Computed off-main by
-    /// `refreshUsage()`; never populated synchronously, so panel
-    /// presentation never blocks on file I/O.
-    private(set) var usageTiles: [AgentUsageTile] = []
+    /// Every enabled provider's usage snapshot (agent-usage-providers.md,
+    /// "Multi-provider display in the notch") — empty hides the whole
+    /// usage area. Computed off-main by `refreshUsage()`; never populated
+    /// synchronously, so panel presentation never blocks on file I/O (or,
+    /// once network strategies land, a network round-trip).
+    private(set) var usageSnapshots: [UsageSnapshot] = []
+    /// Whether the overflow grid (every enabled provider past the
+    /// front-line cap) is expanded — per-peek, never persisted, and always
+    /// reset to `false` when the panel collapses back to `.resting`
+    /// (`graceTimerFired()`/`escapePressed()`), so the NEXT peek always
+    /// starts collapsed.
+    private(set) var isUsageOverflowExpanded = false
+    /// The user's front-line ordering (agent-usage-providers.md: "up to 4
+    /// tiles the user picks and orders in Settings"). Not a test seam —
+    /// every headless test either asserts `usageSnapshots` directly or
+    /// constructs its own `UsageDisplayPolicy` inputs.
+    @ObservationIgnored
+    private var usageStripOrderStore = UsageStripOrderStore()
+
+    /// Up to `UsageDisplayPolicy.frontLineCap` snapshots, in the user's
+    /// order — the single muted line shown whenever the peek panel is
+    /// open (`CompanionUsageStripView`).
+    var usageFrontLine: [UsageSnapshot] {
+        UsageDisplayPolicy.frontLine(from: usageSnapshots, order: usageStripOrderStore.order())
+    }
+
+    /// Every enabled snapshot NOT selected into `usageFrontLine` — sits
+    /// behind the `▸ N more providers` disclosure, expanded (per-peek)
+    /// into a two-column grid via `toggleUsageOverflow()`.
+    var usageOverflow: [UsageSnapshot] {
+        UsageDisplayPolicy.overflow(from: usageSnapshots, frontLine: usageFrontLine)
+    }
 
     // MARK: - Weak session registry (mirrors `TerminalAttentionCenter`)
 
@@ -131,11 +158,12 @@ final class NotchCompanionModel: NSObject {
 
     // MARK: - Usage (terminal-notch-hud.md NC-D)
 
-    /// The reader test seam — production default does the real (bounded)
-    /// file walking; tests substitute fixture-returning closures, mirroring
-    /// `deliverReply`/`revealSession` above.
+    /// The reader test seam — production default resolves the real
+    /// registry (`UsageProviderRegistry.all`, real files/network/Keychain);
+    /// tests substitute a `UsageRegistryReader` built from fixture
+    /// descriptors, mirroring `deliverReply`/`revealSession` above.
     @ObservationIgnored
-    var usageReader = AgentUsageReader()
+    var usageReader = UsageRegistryReader()
     @ObservationIgnored
     private var usageRefreshTask: Task<Void, Never>?
     @ObservationIgnored
@@ -172,9 +200,15 @@ final class NotchCompanionModel: NSObject {
 
     private static let editorRowHeight: CGFloat = 56
     private static let emptyStateHeight: CGFloat = 64
-    /// The usage strip's single line plus its own top padding
-    /// (terminal-notch-hud.md NC-D, "Peek", item 1).
-    private static let usageStripHeight: CGFloat = 24
+    /// The usage front line's single line plus its own top padding
+    /// (agent-usage-providers.md, "Multi-provider display in the notch").
+    private static let usageFrontLineHeight: CGFloat = 24
+    /// The `▸ N more providers` disclosure line's own height, added only
+    /// when there is at least one overflow provider.
+    private static let usageDisclosureHeight: CGFloat = 18
+    /// One row of the two-column overflow grid — added `gridRows` times,
+    /// and only while `isUsageOverflowExpanded`.
+    private static let usageGridRowHeight: CGFloat = 16
     /// A coarse fixed height per feed card, same approximation
     /// `editorRowHeight` already makes (real content — snippet line count,
     /// wrapped names — is not measured here). Sized for a card with a
@@ -552,9 +586,10 @@ final class NotchCompanionModel: NSObject {
 
     // MARK: - Usage refresh (terminal-notch-hud.md NC-D)
 
-    /// Recomputes `usageTiles` OFF the main actor (the reader's closures and
-    /// the pure parsers all run inside `Task.detached`) and assigns the
-    /// result back on the main actor when done. TTL-gated unless `force` —
+    /// Recomputes `usageSnapshots` OFF the main actor (the registry's
+    /// strategies — file reads today, network calls in later phases — all
+    /// run inside `Task.detached`) and assigns the result back on the main
+    /// actor when done. TTL-gated unless `force` —
     /// `dwellTimerFired()`/`clicked()` call this unconditionally (subject to
     /// the TTL), the periodic pinned-state timer passes `force: true` since
     /// its whole point is a fresh read on its own schedule. Returns the
@@ -572,14 +607,21 @@ final class NotchCompanionModel: NSObject {
         usageRefreshTask?.cancel()
         let reader = usageReader
         let task = Task { [weak self] in
-            let tiles = await Task.detached(priority: .utility) {
-                reader.tiles(now: now)
+            let snapshots = await Task.detached(priority: .utility) {
+                await reader.snapshots(now: now)
             }.value
             guard !Task.isCancelled else { return }
-            self?.usageTiles = tiles
+            self?.usageSnapshots = snapshots
         }
         usageRefreshTask = task
         return task
+    }
+
+    /// Expands/collapses the overflow grid (per-peek, unpersisted) —
+    /// `CompanionUsageStripView`'s `▸ N more providers` disclosure button.
+    func toggleUsageOverflow() {
+        isUsageOverflowExpanded.toggle()
+        reposition()
     }
 
     private func startUsageTimerIfNeeded() {
@@ -654,11 +696,21 @@ final class NotchCompanionModel: NSObject {
     }
 
     private func peekContentHeight() -> CGFloat {
-        // A coarse fixed height for the single-line usage strip, same
+        // A coarse fixed height for the single-line usage front line, same
         // approximation `feedCardHeight` already makes — zero when there is
-        // nothing to show (terminal-notch-hud.md NC-D: "hidden entirely
-        // otherwise").
-        let usageHeight: CGFloat = usageTiles.isEmpty ? 0 : Self.usageStripHeight
+        // nothing to show (agent-usage-providers.md: the usage area is
+        // absent entirely with zero enabled/renderable providers).
+        let frontLine = usageFrontLine
+        let overflow = usageOverflow
+        let usageFrontLineTerm: CGFloat = frontLine.isEmpty ? 0 : Self.usageFrontLineHeight
+        let usageDisclosureTerm: CGFloat = overflow.isEmpty ? 0 : Self.usageDisclosureHeight
+        let usageGridTerm: CGFloat
+        if isUsageOverflowExpanded, !overflow.isEmpty {
+            let rows = UsageDisplayPolicy.gridRows(for: overflow.count)
+            usageGridTerm = CGFloat(rows) * Self.usageGridRowHeight
+        } else {
+            usageGridTerm = 0
+        }
         let searchHeight: CGFloat = isSearchFieldVisible ? Self.searchFieldHeight : 0
         // Sized from `visibleEditorRows` (the FILTERED list), not
         // `editorRows` — the panel shrinks/grows as a query narrows/widens
@@ -683,7 +735,8 @@ final class NotchCompanionModel: NSObject {
             let spacing = CGFloat(max(feedItems.count - 1, 0)) * RafuMetrics.space2
             feedHeight = cards + spacing + RafuMetrics.space3
         }
-        return bandInset + searchHeight + usageHeight + listHeight + feedHeight
+        return bandInset + searchHeight + usageFrontLineTerm + usageDisclosureTerm + usageGridTerm
+            + listHeight + feedHeight
     }
 
     // MARK: - Hover / pin (terminal-notch-hud.md NC-A `CompanionHoverPolicy`)
@@ -740,6 +793,9 @@ final class NotchCompanionModel: NSObject {
             // persistence across peek open/close").
             searchQuery = ""
             disengageSearch()
+            // Same "next peek starts fresh" rule for the usage overflow
+            // grid (agent-usage-providers.md: "per-peek, never persisted").
+            isUsageOverflowExpanded = false
         }
         reposition(animated: true)
     }
@@ -777,6 +833,7 @@ final class NotchCompanionModel: NSObject {
         if next == .resting {
             searchQuery = ""
             disengageSearch()
+            isUsageOverflowExpanded = false
         }
         guard next != hoverState else { return }
         hoverState = next
