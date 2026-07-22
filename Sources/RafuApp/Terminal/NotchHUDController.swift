@@ -281,7 +281,11 @@ final class NotchHUDController: NSObject, NotchHUDPresenting {
             name: NSWindow.didResignKeyNotification,
             object: panel
         )
-        let hostingView = NSHostingView(rootView: NotchHUDView(controller: self))
+        // `NotchHUDPassthroughHostingView` (terminal-notch-hud.md NC-B): the
+        // v1 drop-down never sets `panel.clickThroughRegions`, so
+        // `clickThroughRegions` stays empty and `hitTest(_:)` falls straight
+        // through to `super.hitTest` — identical to a plain `NSHostingView`.
+        let hostingView = NotchHUDPassthroughHostingView(rootView: NotchHUDView(controller: self))
         hostingView.frame = NSRect(origin: .zero, size: target.size)
         hostingView.autoresizingMask = [.width, .height]
         panel.contentView = hostingView

@@ -49,6 +49,10 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
         // `WorkspaceSession`, and it stays free of `import
         // UserNotifications` itself — the static method is the seam.
         SystemTerminalAttentionNotifier.registerCategoryAndDelegate()
+        // The resting strip is app-global, not per-window — activate it
+        // once at launch (idempotent; a no-op on a non-notch/disabled
+        // machine, terminal-notch-hud.md NC-B).
+        NotchCompanionModel.shared.activateIfEnabled()
     }
 
     func applicationWillTerminate(_ notification: Notification) {

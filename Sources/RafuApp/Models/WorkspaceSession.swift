@@ -388,9 +388,14 @@ final class WorkspaceSession {
 
     /// `.bell` cleared for any reason (tab selected, session revealed,
     /// reply sent): the notch HUD dismisses — it re-presents attention
-    /// state, it does not own it (terminal-notch-hud.md).
+    /// state, it does not own it (terminal-notch-hud.md). The companion
+    /// strip's resting-state attention dot re-derives from the same
+    /// `.bell`/`.running`/`.exited` statuses, so it refreshes here too
+    /// (terminal-notch-hud.md NC-B) — cheap and only on an actual state
+    /// change, never polled.
     private func terminalSessionDidClearAttention(_ sessionID: UUID) {
         resolvedAttentionHUD().attentionCleared(for: sessionID)
+        NotchCompanionModel.shared.refreshEditorRows()
     }
 
     /// A shell that exits naturally leaves its session `.exited` and its tab
@@ -398,8 +403,12 @@ final class WorkspaceSession {
     /// T-A: auto-closing would strand the Restart Shell affordance the
     /// exited overlay/tab still offers. No layout mutation happens here;
     /// this hook exists so later stages (T-B panel refresh, T-E attention
-    /// state) have one place to react to a natural exit.
-    private func terminalSessionDidExit(_ sessionID: UUID, exitCode: Int32?) {}
+    /// state) have one place to react to a natural exit. The companion
+    /// strip's exited-chip count re-derives here too (terminal-notch-hud.md
+    /// NC-B).
+    private func terminalSessionDidExit(_ sessionID: UUID, exitCode: Int32?) {
+        NotchCompanionModel.shared.refreshEditorRows()
+    }
 
     /// The terminal session id backing the FOCUSED group's selected tab,
     /// when that tab is a `.terminal` — distinct from `selectedTerminalTabID`
@@ -433,6 +442,10 @@ final class WorkspaceSession {
         )
         guard shouldRaise else { return }
         controller.noteBell()
+        // The companion strip's resting-state attention dot re-derives
+        // here too (terminal-notch-hud.md NC-B) — see
+        // `terminalSessionDidClearAttention` for the clearing half.
+        NotchCompanionModel.shared.refreshEditorRows()
         notifyIfNeeded(for: controller)
     }
 

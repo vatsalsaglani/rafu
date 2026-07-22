@@ -27,6 +27,14 @@ struct WorkspaceSceneRoot: View {
             )
             .task {
                 MemoryPressureMonitor.shared.register(session)
+                // NOT `installTerminalHandlersIfNeeded()`'s lazy
+                // `TerminalAttentionCenter.shared.register(self)` point: the
+                // companion strip's left-wing count is "open editor
+                // windows", not "windows that have opened a terminal", so
+                // it registers here — every window's lifecycle path,
+                // mirroring `MemoryPressureMonitor` (terminal-notch-hud.md
+                // NC-B).
+                NotchCompanionModel.shared.register(session)
                 // An externally requested folder (rafu CLI / Finder) wins
                 // over last-workspace restoration for a fresh window.
                 if let url = ExternalOpenRequests.shared.take() {
@@ -47,6 +55,7 @@ struct WorkspaceSceneRoot: View {
             }
             .onDisappear {
                 WorkspaceWindowRegistry.shared.deregister(session: session)
+                NotchCompanionModel.shared.unregister(session)
             }
     }
 

@@ -1,0 +1,256 @@
+import SwiftUI
+
+/// The notch companion strip's content (terminal-notch-hud.md NC-B):
+/// resting shows only the wings row; hovering (dwell) or clicking expands
+/// it downward into the editors list. PRESENTATION ONLY — every value shown
+/// here already lives on `NotchCompanionModel`; this view never touches a
+/// `WorkspaceSession` directly. The strip belongs to no scene, so the theme
+/// is injected into the environment manually, mirroring `NotchHUDView`.
+struct NotchCompanionView: View {
+    let model: NotchCompanionModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    private var theme: RafuTheme { model.theme }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            CompanionWingsView(model: model)
+            if model.hoverState != .resting {
+                CompanionEditorsListView(model: model)
+                    .transition(listTransition)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(surfaceColor)
+        .overlay(alignment: .bottom) {
+            if contrast == .increased {
+                Rectangle()
+                    .fill(theme.palette.borderStrong)
+                    .frame(height: RafuMetrics.hairline)
+            }
+        }
+        .clipShape(shellShape)
+        .onHover { hovering in
+            if hovering { model.hoverEntered() } else { model.hoverExited() }
+        }
+        .onKeyPress(.escape) {
+            model.escapePressed()
+            return .handled
+        }
+        .animation(
+            reduceMotion ? .easeOut(duration: 0.12) : .easeOut(duration: 0.18),
+            value: model.hoverState
+        )
+        .environment(\.rafuTheme, theme)
+    }
+
+    /// Always true black (terminal-notch-hud.md, "Resting": "housing-black
+    /// presence") — unlike `NotchHUDView`'s HUD, which also appears on
+    /// non-notch screens and keeps a themed fallback there, the companion
+    /// strip only ever exists on a notched screen
+    /// (`NotchCompanionModel.activateIfEnabled()` tears it down otherwise),
+    /// so there is no non-notch branch to account for.
+    private var surfaceColor: Color { Color.black }
+
+    /// Bottom-rounded, flush with the screen's top edge — the strip reads
+    /// as hanging from the physical housing, matching `NotchHUDView`'s
+    /// `hudShape` technique.
+    private var shellShape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: 0,
+            bottomLeadingRadius: RafuMetrics.radiusPanel,
+            bottomTrailingRadius: RafuMetrics.radiusPanel,
+            topTrailingRadius: 0,
+            style: .continuous
+        )
+    }
+
+    /// Reduce Motion: cross-fade only, no slide (matching `NotchHUDView`'s
+    /// transition rule).
+    private var listTransition: AnyTransition {
+        reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top))
+    }
+}
+
+/// The always-present wings row (terminal-notch-hud.md, "Resting"): left
+/// wing is the Rafu mark + open-editor count, right wing is the attention
+/// dot + count (hidden entirely when calm). The row IS the click target —
+/// see `NotchHUDPanel.clickThroughRegions`/`NotchHUDPassthroughHostingView`
+/// for why a tap landing in the notch gap between the wings never reaches
+/// this gesture at all (AppKit already refused the hit test upstream), so a
+/// single `onTapGesture` on the whole row is equivalent to "wings only".
+struct CompanionWingsView: View {
+    let model: NotchCompanionModel
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        HStack(spacing: 0) {
+            leftWing
+            Spacer(minLength: 0)
+            rightWing
+        }
+        .frame(height: max(model.bandInset, 1))
+        .contentShape(Rectangle())
+        .onTapGesture { model.clicked() }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(summaryLabel)
+        .accessibilityHint(
+            model.hoverState == .resting
+                ? "Activates to show open editors" : "Activates to collapse"
+        )
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private var leftWing: some View {
+        HStack(spacing: RafuMetrics.space1) {
+            RafuBrandMarkView()
+                .frame(width: 14, height: 14)
+            Text("\(model.editorRows.count)")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(theme.palette.textPrimary)
+        }
+        .frame(width: NotchCompanionGeometry.wingWidth, alignment: .leading)
+        .padding(.leading, RafuMetrics.space2)
+    }
+
+    /// Nothing when calm — the right wing only renders content once a
+    /// session needs attention (terminal-notch-hud.md, "Resting": "nothing
+    /// when calm").
+    private var rightWing: some View {
+        HStack(spacing: RafuMetrics.space1) {
+            if model.attentionCount > 0 {
+                Circle()
+                    .fill(theme.palette.accent)
+                    .frame(width: 6, height: 6)
+                Text("\(model.attentionCount)")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(theme.palette.accent)
+            }
+        }
+        .frame(width: NotchCompanionGeometry.wingWidth, alignment: .trailing)
+        .padding(.trailing, RafuMetrics.space2)
+    }
+
+    private var summaryLabel: String {
+        let count = model.editorRows.count
+        let editors = "\(count) open editor\(count == 1 ? "" : "s")"
+        guard model.attentionCount > 0 else { return editors }
+        return "\(editors), \(model.attentionCount) needing attention"
+    }
+}
+
+/// The peek panel's editors list (terminal-notch-hud.md, "Peek", item 2) —
+/// one card per open workspace window. Shown only while `hoverState !=
+/// .resting`; empty-state text fills the same space per AGENTS' panel/tab
+/// top-alignment rule so a single-row (or zero-row) list never floats the
+/// whole strip toward the screen's vertical middle.
+struct CompanionEditorsListView: View {
+    let model: NotchCompanionModel
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        Group {
+            if model.editorRows.isEmpty {
+                Text("No open editors")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.palette.textMuted)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                VStack(spacing: RafuMetrics.space2) {
+                    ForEach(model.editorRows) { row in
+                        CompanionEditorRowView(row: row) {
+                            model.focusEditor(row.id)
+                        }
+                    }
+                }
+                .padding(RafuMetrics.space3)
+                .frame(maxWidth: .infinity, alignment: .top)
+            }
+        }
+    }
+}
+
+/// One editor window's row: name + window number, the git one-liner (hidden
+/// when no repository is open), and terminal chips — each chip shown only
+/// when its count is non-zero (terminal-notch-hud.md, "Peek", item 2).
+private struct CompanionEditorRowView: View {
+    let row: CompanionEditorRow
+    let focus: () -> Void
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        Button(action: focus) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: RafuMetrics.space2) {
+                    Text(row.name)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(theme.palette.textPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text("#\(row.windowNumber)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.palette.textMuted)
+                    Spacer(minLength: 0)
+                    chips
+                }
+                if let gitSummary = row.gitSummary {
+                    Text(gitSummary)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(theme.palette.textSecondary)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, RafuMetrics.space2)
+            .padding(.vertical, RafuMetrics.space2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
+                    .fill(theme.palette.cardBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
+                    .strokeBorder(
+                        theme.palette.borderSubtle.opacity(0.5), lineWidth: RafuMetrics.hairline)
+            )
+        }
+        .buttonStyle(.plain)
+        .help("Focus this editor window")
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityText)
+        .accessibilityHint("Activates to focus this editor window")
+    }
+
+    @ViewBuilder
+    private var chips: some View {
+        HStack(spacing: RafuMetrics.space1) {
+            if row.runningCount > 0 {
+                chip("▶ \(row.runningCount)", theme.palette.textSecondary)
+            }
+            if row.attentionCount > 0 {
+                chip("● \(row.attentionCount)", theme.palette.accent)
+            }
+            if row.exitedCount > 0 {
+                chip("◼ \(row.exitedCount)", theme.palette.textMuted)
+            }
+        }
+    }
+
+    private func chip(_ text: String, _ color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .medium))
+            .monospacedDigit()
+            .foregroundStyle(color)
+    }
+
+    private var accessibilityText: String {
+        var parts = [row.name, "window \(row.windowNumber)"]
+        if let gitSummary = row.gitSummary { parts.append(gitSummary) }
+        if row.runningCount > 0 { parts.append("\(row.runningCount) running") }
+        if row.attentionCount > 0 { parts.append("\(row.attentionCount) needing attention") }
+        if row.exitedCount > 0 { parts.append("\(row.exitedCount) exited") }
+        return parts.joined(separator: ", ")
+    }
+}

@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 
 /// The ONLY place `NSScreen` is read for HUD geometry (terminal-notch-hud.md
 /// N-1): builds the pure `NotchScreenMetrics` value that every downstream
@@ -44,6 +45,22 @@ final class NotchHUDPanel: NSPanel {
     /// is key; wired to the controller's dismiss.
     var onCancel: (() -> Void)?
 
+    /// SCREEN-coordinate regions that must stay click-through
+    /// (terminal-notch-hud.md NC-B) — see `NotchHUDPassthroughHostingView`,
+    /// the ONE place this actually takes effect (AppKit hit-testing is
+    /// view-level, not window-level). Empty for the v1 attention drop-down
+    /// (the whole panel stays interactive, unchanged from N-2); the
+    /// companion resting strip sets this to
+    /// `NotchCompanionGeometry.clickThroughRegions(for:)` — the physical
+    /// notch — and clears it back to empty while peeking/pinned, when the
+    /// whole expanded panel is interactive.
+    var clickThroughRegions: [CGRect] = [] {
+        didSet {
+            (contentView as? any NotchHUDPassthroughHosting)?.clickThroughRegions =
+                clickThroughRegions
+        }
+    }
+
     override var canBecomeKey: Bool { allowsKeyStatus }
 
     init(contentRect: NSRect) {
@@ -68,5 +85,52 @@ final class NotchHUDPanel: NSPanel {
 
     override func cancelOperation(_ sender: Any?) {
         onCancel?()
+    }
+}
+
+/// Type-erased seam onto `NotchHUDPassthroughHostingView<Content>`'s
+/// `clickThroughRegions` — `NotchHUDPanel.clickThroughRegions`'s `didSet`
+/// needs to reach into `contentView` without knowing which SwiftUI root the
+/// panel is currently hosting.
+protocol NotchHUDPassthroughHosting: AnyObject {
+    var clickThroughRegions: [CGRect] { get set }
+}
+
+/// The hit-transparent content view (terminal-notch-hud.md NC-B, "Resting":
+/// "click-through everywhere except the wings"). AppKit's mouse routing is
+/// entirely view-level — there is no window-level "click-through this
+/// rect" API — so this is the ONE place `NotchHUDPanel.clickThroughRegions`
+/// takes effect: `hitTest(_:)` returning `nil` for a point tells AppKit no
+/// view in this window claims it, which is exactly the mechanism the
+/// notch-utility prior art (agent-notch's technique notes,
+/// terminal-notch-hud.md's "Prior art" section) uses to let an unclaimed
+/// click fall through to whatever is behind the window — the real menu bar
+/// content flanking the notch, in this case.
+///
+/// Generic over the SwiftUI root so both the v1 attention drop-down
+/// (`NotchHUDView`, `clickThroughRegions` always empty — see
+/// `NotchHUDController.presentPanel()`) and the companion resting strip
+/// (`NotchCompanionView`, notch-only regions) share one implementation
+/// instead of duplicating the hit-test override per root type.
+final class NotchHUDPassthroughHostingView<Content: View>: NSHostingView<Content>,
+    NotchHUDPassthroughHosting
+{
+    var clickThroughRegions: [CGRect] = []
+
+    /// This view is always installed as `NSWindow.contentView` — the root
+    /// of the hierarchy, no superview — so AppKit hands `hitTest(_:)` a
+    /// point already in the WINDOW's own coordinate system (the documented
+    /// "superview's coordinate system" contract degenerates to the window
+    /// itself for a view with no superview). `window.convertPoint(toScreen:)`
+    /// is therefore the correct, direct conversion to the SCREEN coordinates
+    /// `clickThroughRegions` is expressed in (matching
+    /// `NotchCompanionGeometry`'s own coordinate space).
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let window, !clickThroughRegions.isEmpty else { return super.hitTest(point) }
+        let screenPoint = window.convertPoint(toScreen: point)
+        if clickThroughRegions.contains(where: { $0.contains(screenPoint) }) {
+            return nil
+        }
+        return super.hitTest(point)
     }
 }
