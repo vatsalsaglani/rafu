@@ -86,3 +86,39 @@ func stripOrderStoreFallsBackOnUnrecognizedIDs() {
         #expect(store.order() == UsageStripOrderStore.defaultOrder)
     }
 }
+
+// MARK: - UsageSettingsModel (Settings "Usage" tab)
+
+@MainActor
+@Test(
+    "UsageSettingsModel: only descriptors with at least one strategy against the probe are visible")
+func settingsModelHidesStubProviders() {
+    withIsolatedSuite { suite in
+        let model = UsageSettingsModel(
+            descriptors: UsageProviderRegistry.all, enableStore: UsageEnableStore(suiteName: suite))
+        #expect(model.visibleRows.map(\.id) == [.claude, .codex])
+    }
+}
+
+@MainActor
+@Test("UsageSettingsModel: isEnabled reads the descriptor default until explicitly changed")
+func settingsModelDefaultsFromDescriptor() {
+    withIsolatedSuite { suite in
+        let model = UsageSettingsModel(
+            descriptors: [ClaudeProvider.descriptor],
+            enableStore: UsageEnableStore(suiteName: suite))
+        #expect(model.isEnabled(.claude) == true)
+    }
+}
+
+@MainActor
+@Test("UsageSettingsModel: setEnabled updates both in-memory state and the persisted store")
+func settingsModelSetEnabledPersists() {
+    withIsolatedSuite { suite in
+        let store = UsageEnableStore(suiteName: suite)
+        let model = UsageSettingsModel(descriptors: [ClaudeProvider.descriptor], enableStore: store)
+        model.setEnabled(false, for: .claude)
+        #expect(model.isEnabled(.claude) == false)
+        #expect(store.isEnabled(.claude, default: true) == false)
+    }
+}
