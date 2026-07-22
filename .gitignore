@@ -19,3 +19,7 @@ remote-agent/target/
 error-report.txt
 
 docs/issues/images/
+
+cmd-f-error.txt
+
+select-multi-words-and-update-error.txt
