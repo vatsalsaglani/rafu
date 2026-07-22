@@ -206,3 +206,48 @@ func preferenceStoreRoundTrips() {
     store.setEnabled(true)
     #expect(store.isEnabled() == true)
 }
+
+// MARK: - refreshUsage (terminal-notch-hud.md NC-D)
+
+/// `refreshUsage()` hops through `Task.detached` (AgentUsage.swift's parsers
+/// are pure/`Sendable`, so this genuinely runs off the main actor) and
+/// assigns back on the main actor — awaiting the returned task, rather than
+/// a fixed sleep, is what proves completion here (AGENTS: "Await async APIs
+/// directly; do not use fixed sleeps as synchronization").
+@MainActor
+@Test("refreshUsage: populates usageTiles from the injected reader")
+func refreshUsagePopulatesTilesFromInjectedReader() async {
+    let model = NotchCompanionModel()
+    let codexContents = """
+        {"timestamp":"2026-07-18T14:49:29.225Z","type":"event_msg","payload":{"rate_limits":{"limit_id":"codex","primary":{"used_percent":12.0,"window_minutes":300,"resets_at":1},"secondary":null}}}
+        """
+    model.usageReader = AgentUsageReader(
+        newestCodexRollout: { codexContents },
+        recentClaudeTranscriptLines: { _ in [] }
+    )
+
+    let task = model.refreshUsage()
+    await task?.value
+
+    #expect(model.usageTiles.map(\.agent) == ["Codex"])
+    #expect(model.usageTiles.first?.windows.first?.percent == 12.0)
+}
+
+@MainActor
+@Test("refreshUsage: a second call within the TTL is suppressed unless forced")
+func refreshUsageRespectsTTLUnlessForced() async {
+    let model = NotchCompanionModel()
+    model.usageReader = AgentUsageReader(
+        newestCodexRollout: { nil }, recentClaudeTranscriptLines: { _ in [] })
+
+    let first = model.refreshUsage()
+    #expect(first != nil)
+    await first?.value
+
+    let second = model.refreshUsage()
+    #expect(second == nil)
+
+    let forced = model.refreshUsage(force: true)
+    #expect(forced != nil)
+    await forced?.value
+}

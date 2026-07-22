@@ -83,6 +83,11 @@ final class NotchCompanionModel: NSObject {
     /// up with the physical housing without hardcoding a pixel value that
     /// could drift from a real screen's `safeAreaInsets.top`.
     private(set) var bandInset: CGFloat = 0
+    /// The usage strip's tiles (terminal-notch-hud.md NC-D, "Peek", item 1)
+    /// — empty hides the strip entirely. Computed off-main by
+    /// `refreshUsage()`; never populated synchronously, so panel
+    /// presentation never blocks on file I/O.
+    private(set) var usageTiles: [AgentUsageTile] = []
 
     // MARK: - Weak session registry (mirrors `TerminalAttentionCenter`)
 
@@ -110,6 +115,29 @@ final class NotchCompanionModel: NSObject {
     @ObservationIgnored
     var preferenceStore = NotchCompanionPreferenceStore()
 
+    // MARK: - Usage (terminal-notch-hud.md NC-D)
+
+    /// The reader test seam — production default does the real (bounded)
+    /// file walking; tests substitute fixture-returning closures, mirroring
+    /// `deliverReply`/`revealSession` above.
+    @ObservationIgnored
+    var usageReader = AgentUsageReader()
+    @ObservationIgnored
+    private var usageRefreshTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var lastUsageRefreshDate: Date?
+    @ObservationIgnored
+    private var usageRefreshTimer: Timer?
+    /// Never refresh more than this often, even if `refreshUsage()` is
+    /// called from multiple triggers in quick succession (dwell + a
+    /// same-tick click).
+    private static let usageRefreshTTL: TimeInterval = 60
+    /// The periodic refresh interval while pinned — deliberately a "few
+    /// minutes", not aggressive polling: usage budgets do not change fast
+    /// enough to justify anything shorter, and both sources are read-only
+    /// file scans off-main.
+    private static let usageTimerInterval: TimeInterval = 180
+
     // MARK: - Test seams (mirroring NotchHUDController's reply/reveal routes)
 
     /// The reply route. Production default: the existing,
@@ -130,6 +158,9 @@ final class NotchCompanionModel: NSObject {
 
     private static let editorRowHeight: CGFloat = 56
     private static let emptyStateHeight: CGFloat = 64
+    /// The usage strip's single line plus its own top padding
+    /// (terminal-notch-hud.md NC-D, "Peek", item 1).
+    private static let usageStripHeight: CGFloat = 24
     /// A coarse fixed height per feed card, same approximation
     /// `editorRowHeight` already makes (real content — snippet line count,
     /// wrapped names — is not measured here). Sized for a card with a
@@ -402,8 +433,56 @@ final class NotchCompanionModel: NSObject {
         disengageReply()
     }
 
+    // MARK: - Usage refresh (terminal-notch-hud.md NC-D)
+
+    /// Recomputes `usageTiles` OFF the main actor (the reader's closures and
+    /// the pure parsers all run inside `Task.detached`) and assigns the
+    /// result back on the main actor when done. TTL-gated unless `force` —
+    /// `dwellTimerFired()`/`clicked()` call this unconditionally (subject to
+    /// the TTL), the periodic pinned-state timer passes `force: true` since
+    /// its whole point is a fresh read on its own schedule. Returns the
+    /// spawned task (`nil` when the TTL suppressed the call) so tests can
+    /// await completion instead of polling.
+    @discardableResult
+    func refreshUsage(force: Bool = false) -> Task<Void, Never>? {
+        let now = Date()
+        if !force, let last = lastUsageRefreshDate,
+            now.timeIntervalSince(last) < Self.usageRefreshTTL
+        {
+            return nil
+        }
+        lastUsageRefreshDate = now
+        usageRefreshTask?.cancel()
+        let reader = usageReader
+        let task = Task { [weak self] in
+            let tiles = await Task.detached(priority: .utility) {
+                reader.tiles(now: now)
+            }.value
+            guard !Task.isCancelled else { return }
+            self?.usageTiles = tiles
+        }
+        usageRefreshTask = task
+        return task
+    }
+
+    private func startUsageTimerIfNeeded() {
+        guard usageRefreshTimer == nil else { return }
+        usageRefreshTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.usageTimerInterval, repeats: true
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { _ = self?.refreshUsage(force: true) }
+        }
+    }
+
+    private func stopUsageTimer() {
+        usageRefreshTimer?.invalidate()
+        usageRefreshTimer = nil
+    }
+
     private func teardown() {
         cancelTimers()
+        stopUsageTimer()
+        usageRefreshTask?.cancel()
         disengageReply()
         if let panel {
             NotificationCenter.default.removeObserver(
@@ -439,6 +518,11 @@ final class NotchCompanionModel: NSObject {
     }
 
     private func peekContentHeight() -> CGFloat {
+        // A coarse fixed height for the single-line usage strip, same
+        // approximation `feedCardHeight` already makes — zero when there is
+        // nothing to show (terminal-notch-hud.md NC-D: "hidden entirely
+        // otherwise").
+        let usageHeight: CGFloat = usageTiles.isEmpty ? 0 : Self.usageStripHeight
         let listHeight: CGFloat
         if editorRows.isEmpty {
             listHeight = Self.emptyStateHeight
@@ -458,7 +542,7 @@ final class NotchCompanionModel: NSObject {
             let spacing = CGFloat(max(feedItems.count - 1, 0)) * RafuMetrics.space2
             feedHeight = cards + spacing + RafuMetrics.space3
         }
-        return bandInset + listHeight + feedHeight
+        return bandInset + usageHeight + listHeight + feedHeight
     }
 
     // MARK: - Hover / pin (terminal-notch-hud.md NC-A `CompanionHoverPolicy`)
@@ -500,6 +584,7 @@ final class NotchCompanionModel: NSObject {
         hoverState = next
         refreshTheme()
         refreshEditorRows()
+        refreshUsage()
     }
 
     private func graceTimerFired() {
@@ -519,6 +604,12 @@ final class NotchCompanionModel: NSObject {
         hoverState = CompanionHoverPolicy.onClick(hoverState)
         refreshTheme()
         refreshEditorRows()
+        refreshUsage()
+        if hoverState == .pinned {
+            startUsageTimerIfNeeded()
+        } else {
+            stopUsageTimer()
+        }
     }
 
     /// Escape always collapses, and — the first behavior change once a feed
@@ -528,6 +619,7 @@ final class NotchCompanionModel: NSObject {
     func escapePressed() {
         cancelTimers()
         disengageReply()
+        stopUsageTimer()
         let next = CompanionHoverPolicy.onEscape(hoverState)
         guard next != hoverState else { return }
         hoverState = next

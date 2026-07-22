@@ -18,6 +18,7 @@ struct NotchCompanionView: View {
             CompanionWingsView(model: model)
             if model.hoverState != .resting {
                 VStack(spacing: RafuMetrics.space2) {
+                    CompanionUsageStripView(model: model)
                     CompanionEditorsListView(model: model)
                     CompanionAttentionFeedView(model: model)
                 }
@@ -143,6 +144,50 @@ struct CompanionWingsView: View {
         let editors = "\(count) open editor\(count == 1 ? "" : "s")"
         guard model.attentionCount > 0 else { return editors }
         return "\(editors), \(model.attentionCount) needing attention"
+    }
+}
+
+/// The peek panel's usage strip (terminal-notch-hud.md NC-D, "Peek", item
+/// 1): one muted line per agent that has data, e.g. `Claude · 5h 1.2M tok ·
+/// 7d 8.4M tok    Codex · 5h 3% · 7d 6%`. Hidden ENTIRELY when
+/// `model.usageTiles` is empty — no placeholder, no "usage unavailable"
+/// text — matching the spec's "hidden entirely otherwise". A monospaced
+/// font gives tabular numerals so the tile values do not jitter as they
+/// refresh.
+struct CompanionUsageStripView: View {
+    let model: NotchCompanionModel
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        if !model.usageTiles.isEmpty {
+            Text(summary)
+                .font(.system(size: 10.5, design: .monospaced))
+                .foregroundStyle(theme.palette.textMuted)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, RafuMetrics.space3)
+                .padding(.top, RafuMetrics.space2)
+                .accessibilityLabel(summary)
+        }
+    }
+
+    private var summary: String {
+        model.usageTiles.map(Self.tileSummary).joined(separator: "    ")
+    }
+
+    private static func tileSummary(_ tile: AgentUsageTile) -> String {
+        "\(tile.agent) · " + tile.windows.map(windowSummary).joined(separator: " · ")
+    }
+
+    private static func windowSummary(_ window: AgentUsageWindow) -> String {
+        if let percent = window.percent {
+            return "\(window.label) \(Int(percent.rounded()))%"
+        }
+        if let tokens = window.tokens {
+            return "\(window.label) \(AgentUsageFormat.compactTokenCount(tokens)) tok"
+        }
+        return window.label
     }
 }
 
