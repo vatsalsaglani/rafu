@@ -1,4 +1,192 @@
+// Portions of the OAuth request/response shapes are adapted from CodexBar
+// (https://github.com/steipete/CodexBar), used under its MIT license.
 import Foundation
+import RafuCore
+
+/// Payload failures carry no response body or credential material, keeping
+/// every surfaced description safe to log.
+nonisolated enum ClaudeOAuthStrategyError: Error, Equatable, Sendable {
+    case credentialUnavailable
+    case invalidResponse
+}
+
+/// Exact Claude usage from the CLI's OAuth session. Credential discovery and
+/// consent happen before context construction; this strategy parses only the
+/// minimal envelope supplied by `UsageRegistryReader` and never touches the
+/// filesystem or either application's Keychain.
+nonisolated struct ClaudeOAuthStrategy: UsageFetchStrategy {
+    let id = "claude.oauth"
+
+    func isAvailable(_ context: UsageFetchContext) async -> Bool {
+        Self.credential(in: context) != nil
+    }
+
+    func fetch(_ context: UsageFetchContext) async throws -> UsageSnapshot {
+        try Task.checkCancellation()
+        guard let credential = Self.credential(in: context) else {
+            throw ClaudeOAuthStrategyError.credentialUnavailable
+        }
+        guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else {
+            throw ClaudeOAuthStrategyError.invalidResponse
+        }
+
+        var request = URLRequest(
+            url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+        request.httpMethod = "GET"
+        request.httpShouldHandleCookies = false
+        request.setValue("Bearer \(credential.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        request.setValue(
+            "Rafu/\(RafuBuildInformation.version)", forHTTPHeaderField: "User-Agent")
+
+        do {
+            let (data, _) = try await context.http.send(request, provider: .claude)
+            try Task.checkCancellation()
+            return try Self.parseUsage(data)
+        } catch {
+            if Task.isCancelled { throw CancellationError() }
+            throw error
+        }
+    }
+
+    /// Only an authentication rejection may use the local estimate. A
+    /// malformed payload, transport failure, 429, or other server response
+    /// hides the tile instead of replacing an exact fetch with stale-looking
+    /// local data.
+    func shouldFallback(on error: Error) -> Bool {
+        if error as? ClaudeOAuthStrategyError == .credentialUnavailable { return true }
+        guard case UsageHTTPError.httpStatus(let status) = error else { return false }
+        return status == 401 || status == 403
+    }
+
+    static func parseUsage(_ data: Data) throws -> UsageSnapshot {
+        let response: Response
+        do {
+            response = try JSONDecoder().decode(Response.self, from: data)
+        } catch {
+            throw ClaudeOAuthStrategyError.invalidResponse
+        }
+
+        var windows: [UsageWindow] = []
+        if let window = Self.mapWindow(response.fiveHour, label: "5h") {
+            windows.append(window)
+        }
+        if let window = Self.mapWindow(response.sevenDay, label: "7d") {
+            windows.append(window)
+        }
+        if let window = Self.firstScopedWeeklyWindow(response.limits) {
+            windows.append(window)
+        }
+        guard !windows.isEmpty else { throw ClaudeOAuthStrategyError.invalidResponse }
+
+        return UsageSnapshot(
+            providerID: .claude, windows: windows, costLine: nil, identity: nil)
+    }
+
+    private static func credential(
+        in context: UsageFetchContext
+    ) -> UsageExternalCredentialEnvelope? {
+        guard let value = context.credential(.claude),
+            let envelope = UsageExternalCredentialEnvelope.parse(value),
+            envelope.isUsable(for: .claude, at: context.now)
+        else { return nil }
+        return envelope
+    }
+
+    private static func mapWindow(_ source: Response.Window?, label: String) -> UsageWindow? {
+        guard let source, let percent = validPercent(source.utilization) else { return nil }
+        return UsageWindow(
+            label: label, percent: percent, tokens: nil,
+            resetsAt: source.resetsAt.flatMap(UsageDateParsing.parseISO8601Fractional))
+    }
+
+    /// The shared snapshot surface intentionally carries at most three
+    /// windows. Preserve the two account-wide lanes and then add the first
+    /// valid model-scoped weekly lane, de-duplicated by model identity.
+    private static func firstScopedWeeklyWindow(_ limits: [Response.Limit]?) -> UsageWindow? {
+        guard let limits else { return nil }
+        var seenModels: Set<String> = []
+        for limit in limits {
+            guard limit.kind == "weekly_scoped", limit.group == "weekly",
+                let percent = validPercent(limit.percent),
+                let modelName = nonEmpty(limit.scope?.model?.displayName)
+            else { continue }
+
+            let identity = nonEmpty(limit.scope?.model?.id) ?? modelName
+            let normalizedIdentity = identity.folding(
+                options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            guard normalizedIdentity != "all models", normalizedIdentity != "all-models",
+                seenModels.insert(normalizedIdentity).inserted
+            else { continue }
+
+            return UsageWindow(
+                label: "\(modelName) 7d", percent: percent, tokens: nil,
+                resetsAt: limit.resetsAt.flatMap(UsageDateParsing.parseISO8601Fractional))
+        }
+        return nil
+    }
+
+    private static func validPercent(_ value: Double?) -> Double? {
+        guard let value, value.isFinite, (0...100).contains(value) else { return nil }
+        return value
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return if let trimmed, !trimmed.isEmpty { trimmed } else { nil }
+    }
+
+    private struct Response: Decodable {
+        let fiveHour: Window?
+        let sevenDay: Window?
+        let limits: [Limit]?
+
+        enum CodingKeys: String, CodingKey {
+            case fiveHour = "five_hour"
+            case sevenDay = "seven_day"
+            case limits
+        }
+
+        struct Window: Decodable {
+            let utilization: Double?
+            let resetsAt: String?
+
+            enum CodingKeys: String, CodingKey {
+                case utilization
+                case resetsAt = "resets_at"
+            }
+        }
+
+        struct Limit: Decodable {
+            let kind: String?
+            let group: String?
+            let percent: Double?
+            let resetsAt: String?
+            let scope: Scope?
+
+            enum CodingKeys: String, CodingKey {
+                case kind, group, percent, scope
+                case resetsAt = "resets_at"
+            }
+        }
+
+        struct Scope: Decodable {
+            let model: Model?
+        }
+
+        struct Model: Decodable {
+            let id: String?
+            let displayName: String?
+
+            enum CodingKeys: String, CodingKey {
+                case id
+                case displayName = "display_name"
+            }
+        }
+    }
+}
 
 /// Claude's local, zero-config usage strategy — migrated unchanged from the
 /// shipped `ClaudeUsageParser` (terminal-notch-hud.md NC-D, "Data sources"):
@@ -113,19 +301,17 @@ nonisolated struct ClaudeLocalTranscriptStrategy: UsageFetchStrategy {
     }
 }
 
-/// Claude's registry entry. Local, zero-config, on by default — matches
-/// the shipped strip's pre-W0 behavior exactly (agent-usage-providers.md:
-/// "the shipped local-only parsers ... stay on by default"). W2 adds an
-/// exact-percent OAuth strategy ahead of this one; W0 ships only the local
-/// transcript estimate.
+/// Claude's registry entry keeps the local estimate on by default. Exact
+/// OAuth usage is attempted first only after an explicit Rafu connection
+/// credential exists; the ordered strategy count never depends on context.
 nonisolated enum ClaudeProvider {
     static let descriptor = UsageProviderDescriptor(
         id: .claude,
         displayName: "Claude",
-        authPattern: .localZeroConfig,
+        authPattern: .piggybackNetwork,
         disclosure:
-            "Reads recent Claude Code transcripts under ~/.claude/projects to estimate token usage in the trailing 5h/7d windows. Local only — no network, no credentials.",
+            "Reads recent Claude Code transcripts locally for an estimate. Connect authorizes Rafu to read Claude Code credentials and make read-only exact usage requests only to api.anthropic.com; disconnect keeps local estimates enabled.",
         defaultEnabled: true,
-        makeStrategies: { _ in [ClaudeLocalTranscriptStrategy()] }
+        makeStrategies: { _ in [ClaudeOAuthStrategy(), ClaudeLocalTranscriptStrategy()] }
     )
 }

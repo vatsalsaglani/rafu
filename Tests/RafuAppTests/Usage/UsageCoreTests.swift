@@ -45,6 +45,39 @@ private func snapshot(_ id: UsageProviderID = .claude, percent: Double = 10) -> 
         costLine: nil, identity: nil)
 }
 
+private actor RegistryBridgeRecorder {
+    private(set) var events: [String] = []
+    private(set) var requestedIDs: [UsageProviderID] = []
+    private(set) var credentials: [UsageProviderID: String?] = [:]
+
+    func recordEvent(_ event: String) {
+        events.append(event)
+    }
+
+    func recordRequestedIDs(_ ids: [UsageProviderID]) {
+        requestedIDs = ids
+    }
+
+    func recordCredential(_ credential: String?, for id: UsageProviderID) {
+        credentials[id] = credential
+    }
+}
+
+private struct RegistryCredentialCaptureStrategy: UsageFetchStrategy {
+    let id: String
+    let providerID: UsageProviderID
+    let recorder: RegistryBridgeRecorder
+
+    func isAvailable(_ context: UsageFetchContext) async -> Bool { true }
+
+    func fetch(_ context: UsageFetchContext) async throws -> UsageSnapshot {
+        await recorder.recordCredential(context.credential(providerID), for: providerID)
+        return snapshot(providerID)
+    }
+
+    func shouldFallback(on error: Error) -> Bool { false }
+}
+
 // MARK: - resolveUsageSnapshot pipeline
 
 @Test("resolveUsageSnapshot: the first available, succeeding strategy wins")
@@ -437,7 +470,8 @@ func usageRegistryReaderComposesBothSnapshots() async {
     let reader = UsageRegistryReader(
         descriptors: [claudeDescriptor, codexDescriptor],
         makeContext: { now in fixtureContext(now: now) },
-        isEnabled: { _ in true }
+        isEnabled: { _ in true },
+        resolveCredentials: { _, _ in [:] }
     )
 
     let snapshots = await reader.snapshots(now: now)
@@ -461,7 +495,8 @@ func usageRegistryReaderSkipsDisabledDescriptor() async {
     let reader = UsageRegistryReader(
         descriptors: [codexDescriptor],
         makeContext: { now in fixtureContext(now: now) },
-        isEnabled: { _ in false }
+        isEnabled: { _ in false },
+        resolveCredentials: { _, _ in [:] }
     )
 
     #expect(await reader.snapshots(now: now).isEmpty)
@@ -473,8 +508,62 @@ func usageRegistryReaderSkipsEmptyStrategies() async {
     let reader = UsageRegistryReader(
         descriptors: [ClineProvider.descriptor],
         makeContext: { now in fixtureContext(now: now) },
-        isEnabled: { _ in true }
+        isEnabled: { _ in true },
+        resolveCredentials: { _, _ in [:] }
     )
+    #expect(await reader.snapshots(now: Date()).isEmpty)
+}
+
+@Test(
+    "UsageRegistryReader resolves enabled IDs before context and captures resolved plus base credentials"
+)
+func usageRegistryReaderCredentialBridgeOrdering() async {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let recorder = RegistryBridgeRecorder()
+    func descriptor(_ id: UsageProviderID) -> UsageProviderDescriptor {
+        UsageProviderDescriptor(
+            id: id, displayName: id.rawValue, authPattern: .localZeroConfig,
+            disclosure: "fixture", defaultEnabled: true,
+            makeStrategies: { _ in
+                [
+                    RegistryCredentialCaptureStrategy(
+                        id: "\(id.rawValue).capture", providerID: id, recorder: recorder)
+                ]
+            })
+    }
+    let reader = UsageRegistryReader(
+        descriptors: [descriptor(.claude), descriptor(.codex), descriptor(.cline)],
+        makeContext: { now in
+            await recorder.recordEvent("context")
+            return fixtureContext(
+                now: now,
+                credential: { id in id == .codex ? "base-codex" : nil })
+        },
+        isEnabled: { $0 != .cline },
+        resolveCredentials: { ids, _ in
+            await recorder.recordEvent("resolver")
+            await recorder.recordRequestedIDs(ids)
+            return [.claude: "resolved-claude"]
+        })
+
+    let snapshots = await reader.snapshots(now: now)
+
+    #expect(snapshots.map(\.providerID) == [.claude, .codex])
+    #expect(await recorder.events == ["resolver", "context"])
+    #expect(await recorder.requestedIDs == [.claude, .codex])
+    #expect(await recorder.credentials[.claude] == "resolved-claude")
+    #expect(await recorder.credentials[.codex] == "base-codex")
+    #expect(await recorder.credentials[.cline] == nil)
+}
+
+@Test("UsageRegistryReader accepts a synchronous makeContext closure after the async bridge")
+func usageRegistryReaderSyncContextClosureStillCompiles() async {
+    let reader = UsageRegistryReader(
+        descriptors: [],
+        makeContext: { now in fixtureContext(now: now) },
+        isEnabled: { _ in true },
+        resolveCredentials: { _, _ in [:] })
+
     #expect(await reader.snapshots(now: Date()).isEmpty)
 }
 

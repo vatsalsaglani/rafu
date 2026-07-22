@@ -1,4 +1,132 @@
+// Portions of the OAuth request/response shapes are adapted from CodexBar
+// (https://github.com/steipete/CodexBar), used under its MIT license.
 import Foundation
+import RafuCore
+
+nonisolated enum CodexOAuthStrategyError: Error, Equatable, Sendable {
+    case credentialUnavailable
+    case invalidResponse
+}
+
+/// Exact Codex rate-limit percentages from ChatGPT's wham endpoint. The
+/// strategy consumes only the minimal pre-resolved context envelope; auth
+/// file discovery and JWT expiry validation stay in the credential bridge.
+nonisolated struct CodexOAuthStrategy: UsageFetchStrategy {
+    let id = "codex.oauth"
+
+    func isAvailable(_ context: UsageFetchContext) async -> Bool {
+        Self.credential(in: context) != nil
+    }
+
+    func fetch(_ context: UsageFetchContext) async throws -> UsageSnapshot {
+        try Task.checkCancellation()
+        guard let credential = Self.credential(in: context) else {
+            throw CodexOAuthStrategyError.credentialUnavailable
+        }
+        guard let url = URL(string: "https://chatgpt.com/backend-api/wham/usage") else {
+            throw CodexOAuthStrategyError.invalidResponse
+        }
+
+        var request = URLRequest(
+            url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+        request.httpMethod = "GET"
+        request.httpShouldHandleCookies = false
+        request.setValue("Bearer \(credential.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(
+            "Rafu/\(RafuBuildInformation.version)", forHTTPHeaderField: "User-Agent")
+        if let accountID = credential.accountID {
+            request.setValue(accountID, forHTTPHeaderField: "ChatGPT-Account-Id")
+        }
+
+        do {
+            let (data, _) = try await context.http.send(request, provider: .codex)
+            try Task.checkCancellation()
+            return try Self.parseUsage(data)
+        } catch {
+            if Task.isCancelled { throw CancellationError() }
+            throw error
+        }
+    }
+
+    func shouldFallback(on error: Error) -> Bool {
+        if error as? CodexOAuthStrategyError == .credentialUnavailable { return true }
+        guard case UsageHTTPError.httpStatus(let status) = error else { return false }
+        return status == 401 || status == 403
+    }
+
+    static func parseUsage(_ data: Data) throws -> UsageSnapshot {
+        let response: Response
+        do {
+            response = try JSONDecoder().decode(Response.self, from: data)
+        } catch {
+            throw CodexOAuthStrategyError.invalidResponse
+        }
+        guard let rateLimit = response.rateLimit else {
+            throw CodexOAuthStrategyError.invalidResponse
+        }
+
+        let windows = [rateLimit.primaryWindow, rateLimit.secondaryWindow].compactMap(
+            Self.mapWindow)
+        guard !windows.isEmpty else { throw CodexOAuthStrategyError.invalidResponse }
+        return UsageSnapshot(providerID: .codex, windows: windows, costLine: nil, identity: nil)
+    }
+
+    private static func credential(
+        in context: UsageFetchContext
+    ) -> UsageExternalCredentialEnvelope? {
+        guard let value = context.credential(.codex),
+            let envelope = UsageExternalCredentialEnvelope.parse(value),
+            envelope.isUsable(for: .codex, at: context.now)
+        else { return nil }
+        return envelope
+    }
+
+    private static func mapWindow(_ source: Response.Window?) -> UsageWindow? {
+        guard let source, source.usedPercent.isFinite,
+            (0...100).contains(source.usedPercent), source.limitWindowSeconds > 0
+        else { return nil }
+
+        return UsageWindow(
+            label: CodexLocalRolloutStrategy.label(
+                forWindowMinutes: source.limitWindowSeconds / 60),
+            percent: source.usedPercent,
+            tokens: nil,
+            resetsAt: source.resetAt > 0
+                ? Date(timeIntervalSince1970: source.resetAt)
+                : nil)
+    }
+
+    private struct Response: Decodable {
+        let rateLimit: RateLimit?
+
+        enum CodingKeys: String, CodingKey {
+            case rateLimit = "rate_limit"
+        }
+
+        struct RateLimit: Decodable {
+            let primaryWindow: Window?
+            let secondaryWindow: Window?
+
+            enum CodingKeys: String, CodingKey {
+                case primaryWindow = "primary_window"
+                case secondaryWindow = "secondary_window"
+            }
+        }
+
+        struct Window: Decodable {
+            let usedPercent: Double
+            let resetAt: Double
+            let limitWindowSeconds: Double
+
+            enum CodingKeys: String, CodingKey {
+                case usedPercent = "used_percent"
+                case resetAt = "reset_at"
+                case limitWindowSeconds = "limit_window_seconds"
+            }
+        }
+    }
+}
 
 /// Codex's local, zero-config usage strategy — migrated unchanged from the
 /// shipped `CodexUsageParser` (terminal-notch-hud.md NC-D, "Data sources"):
@@ -118,18 +246,17 @@ nonisolated struct CodexLocalRolloutStrategy: UsageFetchStrategy {
     }
 }
 
-/// Codex's registry entry. Local, zero-config, on by default — matches the
-/// shipped strip's pre-W0 behavior exactly. An OAuth freshness strategy
-/// (`~/.codex/auth.json` → `wham/usage`) is deferred to a later phase; W0
-/// ships only the local rollout-tail estimate.
+/// Codex's registry entry keeps its shipped local rollout behavior on by
+/// default. Exact OAuth usage is attempted first only after explicit Rafu
+/// connection state exists; strategy order/count are context-independent.
 nonisolated enum CodexProvider {
     static let descriptor = UsageProviderDescriptor(
         id: .codex,
         displayName: "Codex",
-        authPattern: .localZeroConfig,
+        authPattern: .piggybackNetwork,
         disclosure:
-            "Reads the newest Codex session rollout under ~/.codex/sessions to report its last-seen 5h/7d rate-limit percentages. Local only — no network, no credentials.",
+            "Reads the newest Codex rollout locally for last-seen usage. Connect authorizes Rafu to read Codex auth.json and make read-only exact usage requests only to chatgpt.com; disconnect keeps local usage enabled.",
         defaultEnabled: true,
-        makeStrategies: { _ in [CodexLocalRolloutStrategy()] }
+        makeStrategies: { _ in [CodexOAuthStrategy(), CodexLocalRolloutStrategy()] }
     )
 }

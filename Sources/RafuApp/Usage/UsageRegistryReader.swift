@@ -12,20 +12,27 @@ import Foundation
 /// a W0-owned file alongside the rest of the shared shim; see the W0
 /// handoff for this (documented, non-behavioral) addition.
 nonisolated struct UsageRegistryReader: Sendable {
+    typealias CredentialResolver =
+        @Sendable ([UsageProviderID], Date) async -> [UsageProviderID: String]
+
     let descriptors: [UsageProviderDescriptor]
-    let makeContext: @Sendable (Date) -> UsageFetchContext
+    let makeContext: @Sendable (Date) async -> UsageFetchContext
     let isEnabled: @Sendable (UsageProviderID) -> Bool
+    let resolveCredentials: CredentialResolver
 
     init(
         descriptors: [UsageProviderDescriptor] = UsageProviderRegistry.all,
-        makeContext: @escaping @Sendable (Date) -> UsageFetchContext = UsageRegistryReader
+        makeContext: @escaping @Sendable (Date) async -> UsageFetchContext = UsageRegistryReader
             .productionContext,
         isEnabled: @escaping @Sendable (UsageProviderID) -> Bool = UsageRegistryReader
-            .productionIsEnabled
+            .productionIsEnabled,
+        resolveCredentials: @escaping CredentialResolver = UsageRegistryReader
+            .productionCredentials
     ) {
         self.descriptors = descriptors
         self.makeContext = makeContext
         self.isEnabled = isEnabled
+        self.resolveCredentials = resolveCredentials
     }
 
     /// Resolves every enabled, strategy-bearing descriptor through
@@ -35,10 +42,19 @@ nonisolated struct UsageRegistryReader: Sendable {
     /// providers read whichever slice of it they need (`credential`/
     /// `cookieHeader` are keyed by `UsageProviderID`).
     func snapshots(now: Date) async -> [UsageSnapshot] {
-        let context = makeContext(now)
+        let enabledDescriptors = descriptors.filter { isEnabled($0.id) }
+        let resolvedCredentials = await resolveCredentials(
+            enabledDescriptors.map(\.id), now)
+        let baseContext = await makeContext(now)
+        let context = UsageFetchContext(
+            now: baseContext.now,
+            readFile: baseContext.readFile,
+            http: baseContext.http,
+            credential: { id in resolvedCredentials[id] ?? baseContext.credential(id) },
+            cookieHeader: baseContext.cookieHeader)
+
         var results: [UsageSnapshot] = []
-        for descriptor in descriptors {
-            guard isEnabled(descriptor.id) else { continue }
+        for descriptor in enabledDescriptors {
             let strategies = descriptor.makeStrategies(context)
             guard !strategies.isEmpty else { continue }
             guard
@@ -67,10 +83,8 @@ nonisolated struct UsageRegistryReader: Sendable {
                 return try? String(contentsOf: url, encoding: .utf8)
             },
             http: UsageHTTPClient(),
-            // No W0 strategy reads a credential — bridging
-            // `UsageCredentialStore`'s actor-isolated reads into this
-            // SYNCHRONOUS closure is left to whichever phase adds the
-            // first credentialed strategy; see the W0 handoff.
+            // `snapshots(now:)` overlays its pre-resolved immutable map on
+            // this base closure before any strategy sees the context.
             credential: { _ in nil },
             // Cookie import lands in W1 — until then, no provider has one.
             cookieHeader: { _ in nil }
@@ -80,5 +94,55 @@ nonisolated struct UsageRegistryReader: Sendable {
     static func productionIsEnabled(_ id: UsageProviderID) -> Bool {
         guard let descriptor = UsageProviderRegistry.descriptor(for: id) else { return false }
         return UsageEnableStore().isEnabled(id, default: descriptor.defaultEnabled)
+    }
+
+    /// Auth-file and Keychain reads are pre-resolved off the caller's actor,
+    /// then captured as immutable strings by the synchronous context closure.
+    /// External OAuth credentials require separate network consent and never
+    /// use Rafu's persistent Keychain namespace.
+    @concurrent
+    static func productionCredentials(
+        _ ids: [UsageProviderID], now: Date
+    ) async -> [UsageProviderID: String] {
+        let consentStore = UsageNetworkConsentStore()
+        var credentials: [UsageProviderID: String] = [:]
+
+        for id in ids {
+            switch id {
+            case .claude, .codex:
+                guard consentStore.hasConsent(for: id) else { continue }
+
+                if let contents = UsageOAuthConnector.productionCredentialFile(for: id) {
+                    let envelope: UsageExternalCredentialEnvelope?
+                    switch id {
+                    case .claude:
+                        envelope = UsageExternalCredentialParser.claude(contents: contents)
+                    case .codex:
+                        envelope = UsageExternalCredentialParser.codex(contents: contents)
+                    default:
+                        envelope = nil
+                    }
+                    if let envelope, envelope.isUsable(for: id, at: now),
+                        let encoded = envelope.encoded()
+                    {
+                        credentials[id] = encoded
+                        continue
+                    }
+                }
+
+                if let transient = await UsageCredentialStore.shared
+                    .transientExternalCredential(for: id),
+                    let envelope = UsageExternalCredentialEnvelope.parse(transient),
+                    envelope.isUsable(for: id, at: now)
+                {
+                    credentials[id] = transient
+                }
+            default:
+                if let credential = try? await UsageCredentialStore.shared.credential(for: id) {
+                    credentials[id] = credential
+                }
+            }
+        }
+        return credentials
     }
 }

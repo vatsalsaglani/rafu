@@ -56,6 +56,76 @@ func enableStoreHonorsEveryDescriptorDefault() {
     }
 }
 
+// MARK: - Network consent and external credential envelope
+
+@Test("UsageNetworkConsentStore defaults false independently from local enablement")
+func networkConsentDefaultsFalseAndIsIndependent() {
+    withIsolatedSuite { suite in
+        let consent = UsageNetworkConsentStore(suiteName: suite)
+        let enable = UsageEnableStore(suiteName: suite)
+
+        #expect(enable.isEnabled(.claude, default: true))
+        #expect(!consent.hasConsent(for: .claude))
+
+        consent.setConsent(true, for: .claude)
+        #expect(consent.hasConsent(for: .claude))
+        #expect(enable.isEnabled(.claude, default: true))
+
+        enable.setEnabled(false, for: .claude)
+        #expect(!enable.isEnabled(.claude, default: true))
+        #expect(consent.hasConsent(for: .claude))
+    }
+}
+
+@Test("External credential envelope encodes only the three allowed fields")
+func externalCredentialEnvelopeOmitsForbiddenMaterial() throws {
+    let envelope = UsageExternalCredentialEnvelope(
+        accessToken: "access-token",
+        accountID: "account-123",
+        expiresAt: Date(timeIntervalSince1970: 1_800_000_000))
+    let encoded = try #require(envelope.encoded())
+    let object = try #require(
+        try JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [String: Any])
+
+    #expect(Set(object.keys) == ["accessToken", "accountID", "expiresAt"])
+    #expect(!encoded.contains("refresh"))
+    #expect(!encoded.contains("idToken"))
+    #expect(!encoded.contains("scopes"))
+    #expect(!encoded.contains("metadata"))
+}
+
+@Test("External credential envelope rejects malformed, unknown-key, and oversized values")
+func externalCredentialEnvelopeRejectsInvalidValues() {
+    #expect(UsageExternalCredentialEnvelope.parse("not-json") == nil)
+    #expect(
+        UsageExternalCredentialEnvelope.parse(
+            #"{"accessToken":"token","refreshToken":"forbidden"}"#) == nil)
+    #expect(
+        UsageExternalCredentialEnvelope(
+            accessToken: String(
+                repeating: "x", count: UsageExternalCredentialEnvelope.maximumEncodedBytes),
+            accountID: nil,
+            expiresAt: nil
+        ).encoded() == nil)
+    #expect(
+        UsageExternalCredentialParser.codex(
+            contents: String(
+                repeating: "x", count: UsageExternalCredentialParser.maximumSourceBytes + 1))
+            == nil)
+}
+
+@Test("Transient external cache rejects malformed and oversized envelope strings")
+func transientExternalCacheIsBounded() async {
+    let store = UsageCredentialStore(servicePrefix: "test.transient.\(UUID().uuidString)")
+    #expect(await store.setTransientExternalCredential("not-json", for: .claude) == false)
+    #expect(
+        await store.setTransientExternalCredential(
+            String(
+                repeating: "x", count: UsageExternalCredentialEnvelope.maximumEncodedBytes + 1),
+            for: .claude) == false)
+    #expect(await store.transientExternalCredential(for: .claude) == nil)
+}
+
 // MARK: - UsageStripOrderStore
 
 @Test("UsageStripOrderStore: an unset order defaults to [claude, codex]")
@@ -140,4 +210,95 @@ func settingsModelSetEnabledPersists() {
         #expect(model.isEnabled(.claude) == false)
         #expect(store.isEnabled(.claude, default: true) == false)
     }
+}
+
+private actor SettingsConnectionGate {
+    private var resultContinuation: CheckedContinuation<UsageOAuthCredentialLoadResult, Never>?
+    private var startContinuation: CheckedContinuation<Void, Never>?
+    private var didStart = false
+    private(set) var callCount = 0
+
+    func load() async -> UsageOAuthCredentialLoadResult {
+        callCount += 1
+        didStart = true
+        startContinuation?.resume()
+        startContinuation = nil
+        return await withCheckedContinuation { continuation in
+            resultContinuation = continuation
+        }
+    }
+
+    func waitUntilStarted() async {
+        if didStart { return }
+        await withCheckedContinuation { continuation in
+            startContinuation = continuation
+        }
+    }
+
+    func finish(_ result: UsageOAuthCredentialLoadResult) {
+        guard let resultContinuation else {
+            Issue.record("connection loader was not waiting")
+            return
+        }
+        self.resultContinuation = nil
+        resultContinuation.resume(returning: result)
+    }
+}
+
+@MainActor
+@Test("UsageSettingsModel exposes connecting before await and rejects duplicate Connect actions")
+func settingsModelConnectStateAndDuplicateGuard() async throws {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let suite = isolatedSuiteName()
+    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    let gate = SettingsConnectionGate()
+    let credentialStore = UsageCredentialStore(servicePrefix: "test.settings.\(UUID().uuidString)")
+    let connector = UsageOAuthConnector(
+        credentialLoader: { _, _ in await gate.load() },
+        credentialStore: credentialStore,
+        consentStore: UsageNetworkConsentStore(suiteName: suite))
+    let model = UsageSettingsModel(
+        descriptors: [ClaudeProvider.descriptor],
+        enableStore: UsageEnableStore(suiteName: suite),
+        oauthConnector: connector)
+    let envelope = UsageExternalCredentialEnvelope(
+        accessToken: "token", accountID: nil,
+        expiresAt: now.addingTimeInterval(3_600))
+
+    let firstConnect = Task { await model.connect(.claude, now: now) }
+    await gate.waitUntilStarted()
+    #expect(model.connectionState(for: .claude) == .connecting)
+
+    await model.connect(.claude, now: now)
+    #expect(await gate.callCount == 1)
+
+    await gate.finish(.credential(envelope, cacheTransiently: false))
+    await firstConnect.value
+    #expect(model.connectionState(for: .claude) == .connected)
+    #expect(model.isEnabled(.claude))
+
+    await model.disconnect(.claude)
+    #expect(model.connectionState(for: .claude) == .disconnected)
+    #expect(model.isEnabled(.claude))
+}
+
+@MainActor
+@Test("UsageSettingsModel maps a fixed connector failure into failed state")
+func settingsModelFailedTransition() async {
+    let suite = isolatedSuiteName()
+    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    let connector = UsageOAuthConnector(
+        credentialLoader: { _, _ in .failed(.credentialAccessDenied) },
+        credentialStore: UsageCredentialStore(
+            servicePrefix: "test.settings.\(UUID().uuidString)"),
+        consentStore: UsageNetworkConsentStore(suiteName: suite))
+    let model = UsageSettingsModel(
+        descriptors: [ClaudeProvider.descriptor],
+        enableStore: UsageEnableStore(suiteName: suite),
+        oauthConnector: connector)
+
+    await model.connect(.claude)
+
+    #expect(model.connectionState(for: .claude) == .failed(.credentialAccessDenied))
+    #expect(model.isEnabled(.claude))
 }
