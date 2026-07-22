@@ -1,306 +1,214 @@
-# T-F — Notch HUD for terminal attention
+# T-F v2 — Notch Companion
 
-Status: planned, not started. Prepared 2026-07-21 against the completed
-terminal-manager phase (T-A…T-E, 960 tests, 0 warnings). Supersedes the
-earlier sketch version of this document.
+Status: planned (v2 redesign, 2026-07-22). The v1 event-driven HUD is
+SHIPPED (appears on attention, seamless housing merge, bounded snippet,
+inline reply, quiescence detection) and becomes the attention layer of
+this larger design. Baseline 987 tests, 0 warnings.
 
-Depends on: [`terminal-manager.md`](terminal-manager.md) T-E and ADR 0016.
-Every data-path primitive the HUD needs already exists, is tested, and is
-security-reviewed; **T-F is presentation only**. If an implementation finds
-itself re-reading the terminal buffer, re-sanitizing replies, or opening a
-second route into a pty, it has gone wrong — stop and re-read this line.
+Depends on: terminal-manager phase (T-A…T-E), ADR 0016, the shipped v1 HUD
+window/geometry/policy stack, `WorkspaceWindowRegistry`,
+`TerminalAttentionCenter`.
 
-## What the user asked for
+## Vision
 
-"Show the notification from the MacBook notch, show the agent's last reply
-there, and let me type my command there and send it instead of navigating
-back to the app."
+The notch stops being dead space and becomes Rafu's **always-on companion
+strip**: a quiet, housing-black presence that tells you at a glance how
+many editors are open and whether anything needs you — and on hover,
+expands into a control surface where you can jump to any editor, read what
+an agent just said, reply to it, and see your Claude/Codex usage budget.
+The user lives in terminals running agents; the notch is where "is anything
+waiting on me?" gets answered without switching windows.
 
-## Ground truth: the platform has no notch API (verified on this machine)
+## Prior art and the license line
 
-There is no Dynamic Island equivalent on macOS. The system exposes only
-geometry, probed live on this MacBook Air (1710×1107 points):
+UX inspiration: [open-vibe-island](https://github.com/Octane0411/open-vibe-island)
+(session cards, usage strip, expand-on-demand) and
+[agent-notch](https://github.com/realfishsam/agent-notch) (click-through
+resting state). **open-vibe-island is GPL v3 and Rafu is MIT: NO code may
+be copied from it — ideas and interaction patterns only.** Anyone found
+porting its source must stop and rewrite from the behavior description in
+this document. (agent-notch's technique notes are already absorbed; same
+rule applies.)
 
-```
-safeAreaInsets:        top: 33.0            ← menu-bar/notch band height
-auxiliaryTopLeftArea:  (0,    1074, 763, 33) ← usable strip LEFT of the notch
-auxiliaryTopRightArea: (948,  1074, 762, 33) ← usable strip RIGHT of the notch
-```
+Structural difference that shapes everything below: those tools monitor
+agents in OTHER apps' terminals via hooks/polling. Rafu owns its terminals
+(synchronous bell/OSC/quiescence signals, direct pty reply) and its
+editors (live git state, window focus), so the companion is richer and
+faster for Rafu sessions — and deliberately does not try to see non-Rafu
+terminals (a future hooks phase could; out of scope, see Non-goals).
 
-Therefore the notch rect itself is derivable, not queryable:
+## The three states
 
-- `notchWidth = auxTopRight.minX - auxTopLeft.maxX` (= 185pt here)
-- `notchHeight = safeAreaInsets.top` (= 33pt here)
-- On a screen with NO notch, both auxiliary areas are nil → fall back.
+### 1. Resting (always present, the default)
 
-Every app that appears to "use the notch" (NotchNook, boring.notch,
-DynamicLake) draws a borderless always-on-top `NSWindow` positioned in that
-band and fakes the shape. That is what T-F builds — which is why it is its
-own phase: a new window subsystem with lifecycle, focus, input,
-multi-display and accessibility obligations, verifiable only by GUI pass.
+A slim housing-black strip hugging the notch — the notch band plus two
+small "wings" (~90pt each side), total width ≈ notch + 180pt:
 
-## Existing seams the HUD plugs into (verified symbols, current tree)
+- **Left wing:** the Rafu glyph (the zigzag mark, theme-accent tinted) +
+  the number of open editor windows ("3").
+- **Right wing:** nothing when calm. When sessions need attention: an
+  accent dot + count ("2"), the same signal as the rail badge.
+- Height = the band (33pt). Nothing hangs below. Blends with the housing;
+  the wings render over the menu bar's empty center region.
+- **Click-through everywhere except the wings** — resting must never
+  block menu items. Wings are hover/click targets.
+- Reduce Transparency/Increase Contrast: the wings stay solid black with
+  a hairline edge; the glyph/count carry the state, never color alone.
+- A Settings toggle ("Show notch companion") controls existence; default
+  ON on notched displays, OFF on non-notch displays (a permanent floating
+  bar under an external monitor's menu bar is clutter; the v1 attention
+  HUD still appears there on demand).
 
-| Need | Existing, tested primitive |
-|---|---|
-| "A session needs attention" trigger | `WorkspaceSession.notifyIfNeeded(for:)` (`WorkspaceSession.swift:430`) — the exact point that decides a bell deserves surfacing; the HUD hook goes beside the notifier call, gated by the same `TerminalAttentionPolicy.shouldNotify` inputs |
-| The output snippet | `WorkspaceTerminalController.recentOutputSnippet()` → `TerminalAttentionPolicy.snippet` (bounded 6 lines / 512 bytes, control-stripped; `TerminalAttentionPolicy.swift:44`) |
-| Reply sanitization | `TerminalAttentionPolicy.sanitizedReply(_:maxBytes:)` (`:65`) — one line, 1024-byte cap |
-| Reply routing to the right pty | `TerminalAttentionCenter.shared.deliverReply(_:to:)` (`TerminalAttentionCenter.swift:42`) — UUID-routed, drop-on-dead-session |
-| Display name / color | `WorkspaceTerminalController.displayName` / `sessionColor` |
-| Preference storage pattern | `TerminalNotificationPreferenceStore` (suite-injectable, default-on) |
-| Attention lifecycle | `.bell` set by `noteBell()`, cleared by tab selection — the HUD dismises when the state clears, it does NOT own the state |
+### 2. Peek (hover, or click to pin)
 
-Privacy rules carry over verbatim from ADR 0016: the snippet is passed by
-value into the HUD view and dropped; never logged, persisted, or
-transmitted. The HUD shows it on screen — that is its job — but it must not
-survive dismissal in any store.
+Hovering either wing (300ms dwell) — or clicking, which PINS it open —
+expands the strip downward into the companion panel. Mouse-out (400ms
+grace) collapses unless pinned; Escape always collapses. Spring expand,
+cross-fade under Reduce Motion.
 
-## Product decisions locked by this doc
+Panel anatomy, top to bottom (housing-black shell, THEME-TOKEN content —
+cards use `cardBackground`, text uses the text tokens, accents/attention
+use `accent`, session colors keep their border language from the panel):
 
-1. **One arbitration preference, not two booleans.** Replace the single
-   `terminalBellNotificationsEnabled` bool with
-   `TerminalAttentionSurface: String enum { notification, hud, both, none }`,
-   default `.both`. Migration: existing key absent → `.both`; existing
-   `false` → `.none`; existing `true` → `.both`. The old key is read once
-   for migration and then superseded — document in the store.
-   Rationale: HUD + banner both firing for one bell is noise the user has
-   to configure away; an enum makes the arbitration explicit and testable.
-2. **The HUD never steals focus while you type elsewhere.** It appears
-   without activating; keyboard focus moves to it ONLY when the user
-   clicks its reply field (or presses the global reveal shortcut, N-C).
-   A HUD that grabs the keystroke you were typing into your editor is
-   worse than no HUD.
-3. **Non-notch displays get the same HUD, anchored top-center under the
-   menu bar.** Most external monitors have no notch; a notch-only feature
-   would be invisible exactly where many users work. Same window, same
-   content, different anchor rect.
-4. **The HUD is a queue of one.** If a second session bells while the HUD
-   is up, the HUD shows the newest and a "+N more" chip that reveals the
-   Terminals panel on click. No carousel, no stacking — the panel is the
-   many-sessions surface.
-5. **Auto-dismiss after 12s without interaction**, immediately on reply
-   send, on Escape, on clicking the session name (which reveals the tab),
-   and the moment the session's `.bell` clears for any other reason
-   (e.g. the user clicked the tab directly). Hovering pauses the timer.
-6. Reduce Motion: cross-fade only, no slide. Increase Contrast: solid
-   background + defined border. If VoiceOver focus cannot be made to reach
-   a non-activating panel reliably, the notification remains the
-   accessible path and the reference note must say so plainly.
+1. **Usage strip** (when data exists; hidden entirely otherwise):
+   `Claude · 5h ▓▓░ 128k tok · 7d 1.2M tok    Codex · 5h 17% · 7d 6%`
+   — Codex shows true percentages, Claude shows token volume (see Data
+   sources for why they differ). Muted, single line, tabular numerals.
+2. **Editors list** — one row per open workspace window, from
+   `WorkspaceWindowRegistry`:
+   - workspace name + window number
+   - **git one-liner** (the "git summary" question — yes, but exactly one
+     line): `⎇ main · 3± · ↑2` (branch, dirty count, ahead/behind), from
+     the session's existing `gitSnapshot`/`gitBranchSnapshot`. No graphs,
+     no history — the Source Control panel is one click away.
+   - terminal chips: `▶ 2` running, `● 1` attention (accent), `◼ 1` exited
+   - Click row → focus that window (`makeKeyAndOrderFront` via the
+     registry). Click the attention chip → focus the window AND reveal the
+     belling session's tab.
+3. **Attention feed** — one card per session currently in `.bell`, newest
+   first, ACROSS ALL WINDOWS (this replaces v1's queue-of-one when the
+   panel is open; the resting dot still shows the count):
+   - session color border, display name, editor name, relative time
+   - the bounded snippet (same 6-line/512-byte read, same privacy rules)
+   - inline reply field + Send (existing sanitize → deliverReply path)
+   - "Open" button → focus window + reveal tab (clears `.bell`)
+4. **Footer:** "New Terminal" (focused window) · "Show Terminals panel".
 
-## Architecture
+### 3. Attention (event-driven, unchanged v1 behavior, restyled)
 
-### N-1. Geometry (pure, headless-testable — write this first)
+When a session bells and the panel is NOT open: the v1 drop-down appears
+under the notch exactly as shipped (compact → expanded, reply, timers),
+now visually unified with the companion (same shell, same card language).
+If the user is hovering/pinned, the event lands in the attention feed
+instead of spawning the separate drop-down. The
+`TerminalAttentionSurface` preference gains no new cases; the companion
+strip has its own toggle.
 
-`Sources/RafuApp/Terminal/NotchHUDGeometry.swift`
+## Data sources (verified on this machine, 2026-07-22)
 
-```swift
-/// Everything the layout needs from a screen, captured as plain values so
-/// the math is testable without NSScreen.
-nonisolated struct NotchScreenMetrics: Equatable, Sendable {
-    let frame: CGRect                 // screen frame in global coords
-    let safeAreaTopInset: CGFloat     // 0 on non-notch displays
-    let auxiliaryTopLeft: CGRect?     // nil on non-notch displays
-    let auxiliaryTopRight: CGRect?
-}
+- **Editors / git / terminals:** already live in-process
+  (`WorkspaceWindowRegistry`, per-session `gitSnapshot`,
+  `WorkspaceTerminalManager`). A new `@MainActor` aggregation model
+  (`NotchCompanionModel`) holds WEAK session references (registered
+  alongside `TerminalAttentionCenter`) and derives rows; all derivation
+  pure and headless-testable.
+- **Codex usage:** `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` contains
+  `rate_limits` snapshots with `primary`/`secondary` windows carrying
+  `used_percent`, `window_minutes` (verified: a real rollout on this
+  machine shows `used_percent: 0.0, window_minutes: 10080`). Parse the
+  NEWEST rollout's latest snapshot, read-only, at panel-open + every few
+  minutes while pinned. True percentages.
+- **Claude usage:** `~/.claude/projects/**/*.jsonl` transcripts carry
+  per-message `usage` token objects (verified) but NOT rate-limit
+  percentages. v1 of the strip therefore shows **token totals** for
+  trailing 5h/7d windows (ccusage-style aggregation, newest files only,
+  bounded scan). Exact percentages would need Claude's statusline bridge
+  (config-touching, opt-in) — explicitly deferred; the strip's Claude
+  tile says "tokens", never fakes a %.
+- Privacy rules: usage parsing reads TOKEN COUNTS and timestamps only —
+  never prompt/response content; nothing leaves the machine; nothing is
+  cached to disk by Rafu. Reading other tools' local files is a new
+  capability → note in the ADR amendment.
 
-nonisolated enum NotchHUDGeometry {
-    /// The notch rect in screen coordinates, or nil when the screen has
-    /// none (both auxiliary areas nil, or inset == 0).
-    static func notchRect(for metrics: NotchScreenMetrics) -> CGRect?
+## Non-goals (v2)
 
-    /// Where the HUD window goes: hanging just below the notch and
-    /// matching at least its width (expanded state grows downward), or —
-    /// no notch — top-center just below the menu bar. Always fully within
-    /// `frame`.
-    static func hudFrame(
-        for metrics: NotchScreenMetrics,
-        contentSize: CGSize,
-        state: NotchHUDState        // .compact / .expanded
-    ) -> CGRect
-}
-```
+- Permission-approval buttons (open-vibe-island's Yes/No/Always Allow):
+  requires installing PreToolUse hooks into agent configs — a
+  config-touching integration deserving its own phase (T-G) with an
+  explicit opt-in installer flow. Not here.
+- Seeing agents in non-Rafu terminals (Ghostty etc.) — same future hooks
+  phase.
+- Claude statusline bridge for exact percentages — deferred, opt-in.
+- Music/media/clipboard notch gadgets. Rafu is a repository companion.
 
-The ONLY place `NSScreen` is read is a small `@MainActor` adapter that
-builds `NotchScreenMetrics` from a real screen; everything downstream is
-pure. Screen choice: the screen containing the key window, else
-`NSScreen.main`, recomputed on
-`NSApplication.didChangeScreenParametersNotification` (dock/undock,
-resolution change — the churn source called out by prior chrome work).
+## Architecture deltas from shipped v1
 
-### N-2. The panel (`Sources/RafuApp/Terminal/NotchHUDWindow.swift`)
+| Piece | v1 (shipped) | v2 delta |
+|---|---|---|
+| Window | one event panel, appears on bell | + a persistent resting strip (same `NotchHUDPanel` class, second instance or widened single window with three layout states — implementor's call; click-through regions via `ignoresMouseEvents` + hit-test override) |
+| Geometry | notch rect + hudFrame | + wing layout (aux-area math already probed), + expanded panel sizing driven by content |
+| Model | `NotchHUDController` (event, queue-of-one) | + `NotchCompanionModel`: weak multi-session registry, editor rows, attention feed, usage tiles; controller consumes it |
+| Policy | dismiss/queue/surfaces | + hover dwell/grace timing policy (pure), + pin state, + "feed vs drop-down" arbitration |
+| Usage | — | `AgentUsageProvider` protocol + `CodexUsageProvider` / `ClaudeUsageProvider` (pure parsers over injected file contents; the ONLY file readers are thin adapters) |
 
-`final class NotchHUDPanel: NSPanel`:
-
-- `styleMask: [.borderless, .nonactivatingPanel]`
-- `level = .statusBar` (floats over normal windows, below screensaver)
-- `collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]`
-  — `.fullScreenAuxiliary` is REQUIRED or the HUD vanishes exactly when an
-  agent-watching user is full-screened (the scenario this exists for)
-- `isOpaque = false`, `backgroundColor = .clear`, `hasShadow = true`
-- `hidesOnDeactivate = false`, `isMovable = false`
-- Content: `NSHostingView(rootView: NotchHUDView(model:))`
-- **Focus recipe (the fiddliest part, budget iteration):**
-  `canBecomeKey` returns `true` ONLY while the reply field is engaged
-  (a flag the view model flips when the user clicks the field). Appear
-  without `makeKey` — `orderFrontRegardless()`. On reply send or Escape,
-  `resignKey` and re-activate nothing (the previous app keeps focus
-  because we never stole it).
-- Known trap from this repo's own chrome work: **verify with screenshots,
-  not reasoning** — capture the window by ID at each state exactly as the
-  FlatWindowChrome/title-bar work did. Empirical loop is the method here.
-
-### N-3. Controller (`Sources/RafuApp/Terminal/NotchHUDController.swift`)
-
-`@MainActor final class NotchHUDController` — app-global singleton beside
-`TerminalAttentionCenter` (same weak-session registry justification: bells
-arrive with window context, but the HUD is one-per-Mac, not one-per-window).
-
-```swift
-func show(_ event: NotchHUDEvent)      // NotchHUDEvent { sessionID, title, snippet, color }
-func dismiss(reason: DismissReason)
-func attentionCleared(for sessionID: UUID)   // called by the session when .bell clears
-```
-
-Pure decision helpers (tested):
-
-```swift
-nonisolated enum NotchHUDPolicy {
-    /// Queue-of-one: newest event wins; count of superseded ones feeds
-    /// the "+N more" chip.
-    static func merge(current: NotchHUDEvent?, incoming: NotchHUDEvent,
-                      pendingCount: Int) -> (shown: NotchHUDEvent, pendingCount: Int)
-    static func shouldDismiss(didReply: Bool, escapePressed: Bool,
-                              secondsSinceInteraction: Double,
-                              stillNeedsAttention: Bool, isHovered: Bool) -> Bool
-    static func surfaces(for preference: TerminalAttentionSurface,
-                         authorized: Bool) -> (notification: Bool, hud: Bool)
-}
-```
-
-`WorkspaceSession.notifyIfNeeded(for:)` changes exactly one way: it asks
-`NotchHUDPolicy.surfaces(...)` and calls the notifier and/or
-`NotchHUDController.shared.show(...)` accordingly. The HUD path does NOT
-require notification authorization — it is our own window.
-
-### N-4. The view (`Sources/RafuApp/Views/NotchHUDView.swift`)
-
-Two states:
-
-- **Compact** (initial): a pill hanging under the notch — session color
-  edge (same border language as the panel cards), status glyph, display
-  name, first snippet line, "+N more" chip when queued. Click anywhere
-  non-field → reveal the session's tab and dismiss.
-- **Expanded** (click, or immediately when spawned by hover-over-notch in
-  a later iteration — NOT v1): full bounded snippet (monospaced, up to the
-  6 stored lines), reply `TextField` + Send. Reply path:
-  `TerminalAttentionPolicy.sanitizedReply` →
-  `TerminalAttentionCenter.shared.deliverReply` → dismiss. Identical
-  contract to the notification reply — same trailing-newline, same
-  drop-if-dead semantics, and the session's `.bell` clears on send.
-
-Styling per ADR 0012: flat, theme tokens, `RafuMetrics` radii, hairline
-border (or the session color as the border, matching the panel cards), no
-glass. The HUD reads the CURRENT theme via the same resolution
-`WorkspaceSceneRoot` uses; note the HUD belongs to no window/scene, so the
-theme must be passed into the controller on show (from the belling
-session's workspace) rather than read from an `@Environment`.
-
-### N-5. Settings
-
-Settings → General: a `Picker("Terminal attention", …)` over
-`TerminalAttentionSurface` (Notification / Notch HUD / Both / Off),
-replacing the current toggle, with the migration described above. Help
-text keeps ADR 0016's honesty: "Replies you type are sent to that
-terminal."
+Focus rules, reply path, snippet bounds, privacy: unchanged from v1/ADR
+0016. The strip's wings accept clicks without activating the app;
+keyboard focus still moves only when the reply field is engaged.
 
 ## Stages
 
 | Stage | Contents | Size |
 |---|---|---|
-| N-A | Geometry + policy (pure) + preference enum & migration + tests | S |
-| N-B | Panel window + compact view + show/dismiss lifecycle + screenshot-verified placement | M/L |
-| N-C | Expanded state + reply field + focus recipe + settings picker + arbitration wiring | M |
+| NC-A | `NotchCompanionModel` + row/feed derivations + hover/pin policy (pure, tested); wing geometry | M |
+| NC-B | Resting strip window (click-through, wings, counts) + hover→peek expand with editors list + focus-window action | M/L |
+| NC-C | Attention feed in the panel + v1 drop-down arbitration + git one-liner | M |
+| NC-D | Usage providers (Codex % first — real data verified; Claude tokens second) + usage strip | M |
+| NC-E | Settings toggle, non-notch default-off behavior, polish pass (Reduce Motion/Transparency, VoiceOver), screenshot-verified states | S/M |
 
-Ship N-A+N-B together (visible, no input risk), then N-C.
+Each stage lands with its tests and the standard gates (`swift build` 0
+warnings; `swift test` AND `--no-parallel` green; format fix+lint clean;
+screenshot-verified GUI pass for every visual state — the empirical
+method is mandatory, this is the fourth chrome surface).
 
-## Tests (headless — the minority; be honest about it)
+## Tests (headless core)
 
-- `notchRect`: this machine's real metrics (1710×1107, inset 33, aux areas
-  as probed above) → rect (763, 1074, 185, 33); nil for zero-inset/nil-aux
-  metrics; synthetic ultrawide metrics.
-- `hudFrame`: hangs below the notch, horizontally centered on it, clamped
-  within frame; non-notch fallback top-center below menu bar; expanded
-  grows downward only.
-- `NotchHUDPolicy.merge`: queue-of-one semantics, pending count.
-- `shouldDismiss` truth table incl. hover-pauses-timer.
-- `surfaces(for:)`: all four enum cases × authorized true/false —
-  `.hud` must not depend on authorization; `.notification` must.
-- Preference migration: absent → `.both`; legacy true → `.both`; legacy
-  false → `.none`; round-trip of all four raw values (suite-injected
-  defaults, cleaned up, per the standing test rule).
-- Reply path: spy on `TerminalAttentionCenter` — send calls it exactly
-  once with sanitized text; empty reply is a no-op.
+- Wing/panel geometry incl. click-through region math (pure rect logic).
+- Hover policy truth table: dwell, grace, pin overrides, Escape.
+- Editor-row derivation from N fake sessions (names, git one-liner
+  formatting incl. detached/no-repo, terminal chip counts).
+- Attention-feed ordering, cross-window aggregation, clear-on-reveal.
+- Feed-vs-drop-down arbitration (panel open swallows the event).
+- Usage parsers over fixture strings: real codex rollout snapshot shape
+  (used_percent/window_minutes), claude usage-object aggregation into 5h/7d
+  buckets, malformed/missing files → tile hidden (never a crash, never a
+  fake number).
+- Registry weak-reference hygiene (closed window drops its row).
 
-**GUI-only (the majority — screenshot-driven, per this repo's established
-empirical method):** placement under the real notch; non-notch fallback on
-an external display; focus non-theft while typing in the editor; click
-field → type → Send lands in the right terminal; Escape; auto-dismiss and
-hover-pause; full-screen visibility (`.fullScreenAuxiliary`); Space
-switching; dock/undock recompute; Reduce Motion / Increase Contrast;
-VoiceOver reachability (with the honest fallback note if it fails).
+GUI-only: everything visual (four states × light/dark × Increase
+Contrast), click-through over menu items, focus non-theft, cross-Space
+and full-screen behavior, second display.
 
-## Prior art (surveyed 2026-07-21)
+## Risks
 
-[open-vibe-island](https://github.com/Octane0411/open-vibe-island) (hook-based
-multi-agent notch monitor for OTHER apps' terminals, no reply capability) and
-[agent-notch](https://github.com/realfishsam/agent-notch) (ps/lsof-polling
-mascot display, ~30s state lag, reads Claude transcripts off disk) both
-validate the borderless-window-plus-fallback rendering approach. Rafu's HUD
-differs structurally because Rafu OWNS the pty: synchronous BEL instead of
-polling/hooks, a typed reply into stdin (neither offers one), and a bounded
-ephemeral snippet instead of transcript/hook payload access.
-
-Two requirements adopted from that survey:
-
-1. **Click-through everywhere except the HUD's own content** (agent-notch's
-   collapsed-window trick): the panel must set `ignoresMouseEvents` outside
-   its content so it never blocks menu items or windows beneath it.
-2. **Out-of-scope boundary, stated:** agents running OUTSIDE Rafu (e.g.
-   `claude` in Ghostty) are invisible to this HUD — no bell reaches us. If
-   that ever matters, it is a separate hooks-based phase (a small forwarder
-   CLI over the existing launcher IPC socket), not scope creep here.
-
-## Risks, ranked
-
-1. **Focus stealing** — mitigated by the `canBecomeKey`-only-when-engaged
-   recipe; verified by typing in the editor while the HUD appears.
-2. **Full-screen invisibility** — `.fullScreenAuxiliary` + GUI check.
-3. **Geometry churn** on screen-parameter changes — recompute on
-   notification; pure function makes it cheap and testable.
-4. **Double surfacing** (HUD + banner) — the arbitration enum; default
-   `.both` is deliberate (banner persists in Notification Center, HUD is
-   ephemeral) but the user can pick one.
-5. **Theme access without a scene** — passed on show; a HUD shown from
-   window A after switching window B's theme shows A's theme; acceptable,
-   note it.
-6. This is the third chrome surface to fight macOS 26 (ADR 0012's
-   amendments; the titlebar zone lesson). **Method requirement, learned
-   the hard way: screenshot the real window at every step; do not reason
-   from API docs.**
-
-## Verification gates
-
-`swift build` 0 warnings; `swift test` AND `swift test --no-parallel`
-green (baseline 960 + new); `./script/format.sh --fix` then `--lint`
-clean; `./script/build_and_run.sh` GUI pass covering the list above on
-the built-in (notched) display and, if available, an external one.
+1. A PERSISTENT overlay raises the bar: any flicker, focus theft, or
+   menu-bar interference is now always-on. Click-through correctness is
+   the top risk; screenshot + real-menu-click verification required.
+2. Hover expansion near the menu bar can fight menu tracking — the dwell
+   delay and wing-only hit targets exist for this; verify against real
+   menu usage.
+3. Usage file formats are OTHER TOOLS' internals and will drift: parsers
+   must treat every field as optional, version-tolerant, and hide the
+   tile on any parse failure. Never block the panel on file I/O — parse
+   off-main, cache in memory with a short TTL.
+4. GPL contamination (see the license line). Review diffs for lifted code.
+5. Unbounded transcript scans: the Claude aggregator must bound work
+   (newest N files, size caps, mtime cutoff at the 7d window).
 
 ## Documentation on completion
 
-- Amend ADR 0016: the HUD as a second presentation surface, the
-  arbitration enum, and the focus-model guarantee.
-- Reference note: real `NSScreen` notch geometry semantics (with this
-  machine's probed numbers), the non-activating-panel focus recipe, and
-  whatever the screenshot loop actually revealed.
-- Update this doc's status + phases README row.
+- Amend ADR 0016: the companion as the third surface; reading other
+  tools' local usage files (new capability, read-only, local-only).
+- Reference note: codex rollout `rate_limits` shape, claude transcript
+  `usage` shape (as observed, with the drift warning), wing geometry, and
+  whatever the click-through/menu-bar verification actually revealed.
+- Update this doc + phases README.
