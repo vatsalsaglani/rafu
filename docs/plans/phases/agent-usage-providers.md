@@ -38,34 +38,74 @@ strategies + shared snapshot shape, not the browser/WebView machinery.
 | **OpenCode / OpenCode Go** | local SQLite `~/.local/share/opencode/opencode.db` (sum `$.cost` from `message`/`part` rows) + `~/.local/share/opencode/auth.json` presence check | $ spend vs caps (session/weekly/monthly) → % | **No** (fully local) | **U-C.** Cheapest add — same class as our Codex parser, just SQLite instead of JSONL. Web/Zen enrichment: skip |
 | **Cline** | none — needs an API key (env `CLINE_API_KEY` or user-entered) → `GET https://api.cline.bot/api/v1/users/me/plan/usage-limits` | `five_hour`/`weekly`/`monthly` `percentUsed` + `resetsAt` | Yes | **U-D.** Only provider needing a Settings credential field (stored in OUR Keychain, per AGENTS) |
 
-### Provider inclusion criteria (decided 2026-07-22: NOT CodexBar parity)
+### Provider roster (user-decided 2026-07-22; supersedes the earlier
+### "five providers, no cookies" criteria)
 
-CodexBar's 63+ providers are its whole product; Rafu's strip answers one
-question — "do the agents I run beside Rafu have budget left?" We adopt
-its ARCHITECTURE (so adding a provider is a descriptor, not a rewrite),
-not its catalog. A provider is added only when BOTH hold:
+We adopt CodexBar's architecture AND a substantial slice of its catalog —
+every provider below exists in CodexBar's MIT source as adaptable prior
+art. The filter stays "coding agents/tools, not generic API metering",
+but the user explicitly widened both the roster and the auth rules:
+**browser-cookie import is now an allowed auth pattern** (per-provider
+opt-in; Chromium-family cookies work directly, Safari requires the user
+to grant Full Disk Access — documented plainly, never demanded).
 
-1. It is a coding agent/tool someone plausibly runs in a terminal beside
-   Rafu (no voice APIs, no generic metering dashboards).
-2. Its data is reachable zero-config (local files / its own stored
-   token) or via a pasted API key — never browser cookies, never
-   dashboard scraping.
+Tier 1 (target roster, 17):
 
-Each shipped parser is a standing bet on another company's private
-format; the roster stays small so every number shown stays trustworthy.
-Tier now: Claude, Codex, Cursor, OpenCode, Cline. Later candidates
-(Gemini CLI, Copilot CLI, OpenRouter-style key+credits endpoints) are
-one-descriptor evaluations against these criteria, on demand.
+1. Claude (local token/transcripts; cookies also allowed for the web %)
+2. Codex (rollouts; auth.json OAuth; cookies allowed)
+3. Cline / ClinePass incl. pay-as-you-go (API key)
+4. OpenCode (local db; cookies for workspace %)
+5. OpenCode Go / Zen (local db + web enrichment)
+6. Cursor (state.vscdb token; cookies as fallback)
+7. Antigravity
+8. Grok Build (xAI)
+9. Gemini CLI
+10. Kilo Code
+11. GitHub Copilot (premium-request quotas; huge install base)
+12. Windsurf (Cascade credits)
+13. Amp (Sourcegraph)
+14. Factory Droid
+15. OpenRouter (key + credits endpoint — ALSO the honest coverage for
+    Roo Code and BYO-key Cline setups; see Roo note below)
+16. Kimi / Moonshot (Kimi CLI)
+17. Warp (AI request quota in the terminal itself)
+
+**Roo Code note:** NOT in CodexBar's catalog — no prior art. Roo is
+BYO-key, so its spend lands on the backing key (OpenRouter/Anthropic/…);
+the OpenRouter tile plus vendor tiles IS Roo coverage. A dedicated Roo
+tile would require net-new reverse engineering; deferred unless demand
+appears.
+
+Tier 2 (in CodexBar's catalog, one-descriptor adds on demand): Augment,
+Zed, Kiro, JetBrains AI/Junie, Devin, Codebuff, CommandCode.
+
+Skip: non-coding APIs (ElevenLabs, Deepgram, Perplexity, Poe, Manus…),
+infra clouds (Bedrock, Vertex AI, Azure OpenAI), proxy/router niches
+(LiteLLM, LLMProxy, ClawRouter, Sub2API, ZenMux…), Ollama (local, no
+quota to display), and regional model vendors absent user demand.
+
+With cookies now allowed, the Settings "Usage" tab's row anatomy gains a
+FOURTH fill pattern: **cookie-import** (per-provider "Import from
+browser" action with a browser picker; the Safari/Full-Disk-Access
+requirement stated inline; imported cookie headers cached in memory and
+Rafu's own Keychain only). The strip stays glanceable-only; with 17
+possible tiles the peek panel's usage section becomes a wrapping compact
+grid past 2-3 enabled providers, and Settings gains per-provider "show
+in strip" ordering so users pick their front-line tiles.
 
 ### What we deliberately do NOT adopt from CodexBar
 
-- **Browser cookie import** (Safari needs Full Disk Access; huge privacy
-  surface, gate/circuit-breaker complexity). Rejected for Rafu outright.
+- ~~Browser cookie import~~ — REVERSED by the user 2026-07-22 (see the
+  roster section): cookie import is now an allowed, per-provider opt-in
+  auth pattern. Chromium-family reads work directly; Safari requires the
+  user to grant Full Disk Access, stated inline in Settings and never
+  demanded. We still adopt CodexBar's access-gate discipline (back off
+  after failures, never re-read cookies on a background cadence).
 - **WKWebView dashboard scraping** and **PTY-driving agent CLIs** for
   usage. Fragile, heavyweight, and against Rafu's calm-native posture.
 - **In-app login flows.** Rafu piggybacks on sessions the user's agents
-  already own, or takes a pasted API key; it never runs its own OAuth
-  browser dance for third-party tools.
+  already own, imported cookies, or a pasted API key; it never runs its
+  own OAuth browser dance for third-party tools.
 
 ## The trust transition (ADR required before U-B)
 
@@ -151,7 +191,8 @@ and NO "set up usage" call-to-action in the panel.
 | U-B | Claude exact %: credentials-FILE read → `api/oauth/usage` fetch strategy ahead of the transcript fallback; opt-in toggle; Keychain path only via explicit "Connect" button in Settings; ADR lands WITH this stage | M |
 | U-C | OpenCode local SQLite provider (no network — can ship default-on) + Cursor provider (state.vscdb token → usage-summary; opt-in) | M |
 | U-D | Cline: API-key field (Rafu Keychain) + usage-limits fetch; opt-in | S |
-| U-E (optional) | Codex OAuth freshness (auth.json → wham/usage) behind the same opt-in pattern; near-exhaustion emphasis polish | S/M |
+| U-E | Codex OAuth freshness (auth.json → wham/usage); cookie-import infrastructure (browser picker, Rafu-Keychain cookie cache, access-gate backoff, Safari/FDA disclosure) as a shared strategy kind | M |
+| U-F | Roster wave 2 (one descriptor each, CodexBar-adapted): Copilot, Gemini CLI, Antigravity, Grok Build, Kilo, Windsurf, Amp, Factory Droid, OpenRouter, Kimi/Moonshot, Warp — landed in small batches, each with fixture tests; "show in strip" ordering + wrapping usage grid past 2-3 tiles | L (batched) |
 
 Gates per stage: the standard six (build 0 warnings, both test modes,
 format lint, staged-app launch, screenshot pass for UI stages) plus, for
