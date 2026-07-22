@@ -93,7 +93,7 @@ When the user reports "phase Wn is done on branch `<branch>`":
 | W0 | [W0-shim.md](W0-shim.md) | merged | ✅ Merged |
 | W1 | [W1-cookie-infrastructure.md](W1-cookie-infrastructure.md) | `codex/usage-w1-cookie-infrastructure` | ✅ Merged (1130 tests) |
 | W2 | [W2-exact-percent-oauth.md](W2-exact-percent-oauth.md) | `codex/usage-w2-exact-percent-oauth` (`3468252`) | ⛔ Blocked: needs shared credential bridge + ADR 0017 (see completion-updates) |
-| W3 | [W3-local-sqlite-providers.md](W3-local-sqlite-providers.md) | `codex/usage-w3-local-sqlite-providers` (`a400cb4`) | ✅ Complete, ready to merge (blocker resolved) |
+| W3 | [W3-local-sqlite-providers.md](W3-local-sqlite-providers.md) | `codex/usage-w3-local-sqlite-providers` | ✅ Merged (1139 tests) |
 | W4 | [W4-api-key-providers.md](W4-api-key-providers.md) | `codex/usage-w4-api-key-providers` (uncommitted) | 🟡 Implemented, needs commit (see completion-updates) |
 | W5 | [W5-local-token-providers.md](W5-local-token-providers.md) | `codex/usage-w5-local-token-providers` | ✅ Merged (1130 tests) |
 | W6 | [W6-cookie-providers-1.md](W6-cookie-providers-1.md) | — | ready (W0+W1 merged) |
