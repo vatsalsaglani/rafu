@@ -17,8 +17,12 @@ struct NotchCompanionView: View {
         VStack(spacing: 0) {
             CompanionWingsView(model: model)
             if model.hoverState != .resting {
-                CompanionEditorsListView(model: model)
-                    .transition(listTransition)
+                VStack(spacing: RafuMetrics.space2) {
+                    CompanionEditorsListView(model: model)
+                    CompanionAttentionFeedView(model: model)
+                }
+                .frame(maxWidth: .infinity, alignment: .top)
+                .transition(listTransition)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -252,5 +256,171 @@ private struct CompanionEditorRowView: View {
         if row.attentionCount > 0 { parts.append("\(row.attentionCount) needing attention") }
         if row.exitedCount > 0 { parts.append("\(row.exitedCount) exited") }
         return parts.joined(separator: ", ")
+    }
+}
+
+/// The cross-window attention feed (terminal-notch-hud.md NC-C, "Peek", item
+/// 3): one card per session currently in `.bell`, newest first, shown below
+/// the editors list whenever the peek panel is open. Renders nothing when
+/// empty — unlike `CompanionEditorsListView`, the feed has no empty state to
+/// reserve space for; the resting strip's right-wing dot is already the
+/// "anything waiting?" signal.
+struct CompanionAttentionFeedView: View {
+    let model: NotchCompanionModel
+
+    var body: some View {
+        if !model.feedItems.isEmpty {
+            VStack(spacing: RafuMetrics.space2) {
+                ForEach(model.feedItems) { item in
+                    CompanionFeedCardView(model: model, item: item)
+                }
+            }
+            .padding(.horizontal, RafuMetrics.space3)
+            .padding(.bottom, RafuMetrics.space3)
+            .frame(maxWidth: .infinity, alignment: .top)
+        }
+    }
+}
+
+/// One session's attention card: session-color border (the same
+/// Terminals-panel/drop-down card language), display name + editor name +
+/// relative time, the bounded snippet, an inline reply field + Send, and an
+/// "Open" button that reveals the session's tab. Reuses `NotchHUDView`'s
+/// expanded snippet/reply visual treatment verbatim so the two surfaces read
+/// as one companion, restyled only by their container.
+///
+/// The reply field's focus is the FIRST path that ever engages
+/// `NotchCompanionModel`'s panel key status (terminal-notch-hud.md NC-C) —
+/// mirroring `NotchHUDView`'s own `replyFocused` →
+/// `engageReply()`/`disengageReply()` recipe exactly.
+private struct CompanionFeedCardView: View {
+    let model: NotchCompanionModel
+    let item: CompanionFeedItem
+    @State private var replyText = ""
+    @FocusState private var replyFocused: Bool
+    @Environment(\.rafuTheme) private var theme
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: RafuMetrics.space2) {
+            header
+            snippetBlock
+            replyRow
+        }
+        .padding(RafuMetrics.space3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
+                .fill(theme.palette.cardBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
+                .strokeBorder(borderColor, lineWidth: borderWidth)
+        )
+        .onChange(of: replyFocused) { _, focused in
+            if focused {
+                model.engageReply()
+            } else {
+                model.disengageReply()
+            }
+        }
+    }
+
+    /// The session color IS the border, matching `NotchHUDView.borderColor`
+    /// and the Terminals panel cards; Increase Contrast always gets a
+    /// defined border.
+    private var borderColor: Color {
+        if let color = item.color {
+            return theme.palette.color(for: color)
+        }
+        return contrast == .increased
+            ? theme.palette.borderStrong
+            : theme.palette.borderSubtle.opacity(0.6)
+    }
+
+    private var borderWidth: CGFloat {
+        item.color != nil ? 2 : RafuMetrics.hairline
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: RafuMetrics.space2) {
+            Image(systemName: TerminalSessionPresentation.symbol(.bell))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(theme.palette.accent)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(theme.palette.textPrimary)
+                    .lineLimit(1)
+                Text(item.editorName)
+                    .font(.system(size: 10))
+                    .foregroundStyle(theme.palette.textMuted)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: RafuMetrics.space2)
+            Text(item.timestamp, style: .relative)
+                .font(.system(size: 10))
+                .foregroundStyle(theme.palette.textMuted)
+            Button("Open") {
+                model.revealFeedSession(item.sessionID)
+            }
+            .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+            .help("Reveal this terminal in its window")
+            .accessibilityHint("Activates to reveal the terminal tab and clear this card")
+        }
+    }
+
+    /// The full bounded snippet — same one-line-per-row, monospaced
+    /// treatment as `NotchHUDView.snippetBlock(_:)`, filled with
+    /// `fieldBackground` (rather than `cardBackground`, which this card's
+    /// own shell already uses) so the output area still reads as distinct
+    /// content inside the card.
+    private var snippetBlock: some View {
+        let lines = item.snippet.split(separator: "\n", omittingEmptySubsequences: false)
+        return VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                Text(String(line))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(theme.palette.textPrimary.opacity(0.85))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, RafuMetrics.space2)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusField, style: .continuous)
+                .fill(theme.palette.fieldBackground)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Recent output")
+    }
+
+    private var replyRow: some View {
+        HStack(spacing: RafuMetrics.space2) {
+            TextField("Reply to \(item.title)…", text: $replyText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .focused($replyFocused)
+                .onSubmit(send)
+                .padding(.horizontal, RafuMetrics.space2)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: RafuMetrics.radiusField, style: .continuous)
+                        .fill(theme.palette.fieldBackground)
+                )
+                .accessibilityLabel("Reply to \(item.title)")
+            Button("Send", action: send)
+                .buttonStyle(RafuProminentButtonStyle(compact: true))
+                .disabled(replyText.trimmingCharacters(in: .whitespaces).isEmpty)
+                .help("Send the reply to that terminal")
+        }
+    }
+
+    private func send() {
+        model.sendReply(replyText, to: item.sessionID)
+        replyText = ""
     }
 }

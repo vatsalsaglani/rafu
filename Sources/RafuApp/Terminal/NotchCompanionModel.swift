@@ -59,6 +59,18 @@ final class NotchCompanionModel: NSObject {
     private(set) var hoverState: CompanionHoverState = .resting
     private(set) var editorRows: [CompanionEditorRow] = []
     private(set) var attentionCount: Int = 0
+    /// The cross-window attention feed (terminal-notch-hud.md NC-C, "Peek",
+    /// item 3) — newest-first, deduplicated by `sessionID`, capped at
+    /// `maxFeedItems`. Populated by `WorkspaceSession.notifyIfNeeded(for:)`'s
+    /// feed-vs-drop-down arbitration when the peek panel is open; cleared by
+    /// `clearFeedItem(sessionID:)` when that session's `.bell` clears for
+    /// any reason (reveal, reply, tab selection).
+    private(set) var feedItems: [CompanionFeedItem] = []
+    /// Whether a feed card's reply field is engaged — mirrors
+    /// `NotchHUDController.isReplyEngaged` exactly: the ONE input driving
+    /// whether the panel `canBecomeKey` (`engageReply()`/`disengageReply()`
+    /// below).
+    private(set) var isReplyEngaged = false
     /// Refreshed (not read from an environment) every time `editorRows` is
     /// recomputed — the strip belongs to no scene, mirroring how
     /// `NotchHUDController.theme` is captured by value rather than read from
@@ -98,10 +110,35 @@ final class NotchCompanionModel: NSObject {
     @ObservationIgnored
     var preferenceStore = NotchCompanionPreferenceStore()
 
+    // MARK: - Test seams (mirroring NotchHUDController's reply/reveal routes)
+
+    /// The reply route. Production default: the existing,
+    /// security-reviewed `TerminalAttentionCenter.deliverReply` — the ONLY
+    /// delivery path (matches `NotchHUDController.deliverReply` verbatim).
+    @ObservationIgnored
+    var deliverReply: (String, UUID) -> Void = { text, sessionID in
+        TerminalAttentionCenter.shared.deliverReply(text, to: sessionID)
+    }
+    /// Reveal route (presentation only). Production default: the center's
+    /// weak-registry lookup; tests substitute a spy.
+    @ObservationIgnored
+    var revealSession: (UUID) -> Void = { sessionID in
+        TerminalAttentionCenter.shared.revealTerminalSession(sessionID)
+    }
+
     // MARK: - Layout constants (peek panel content sizing)
 
     private static let editorRowHeight: CGFloat = 56
     private static let emptyStateHeight: CGFloat = 64
+    /// A coarse fixed height per feed card, same approximation
+    /// `editorRowHeight` already makes (real content — snippet line count,
+    /// wrapped names — is not measured here). Sized for a card with a
+    /// header row, a ~3-line snippet, and a reply row.
+    private static let feedCardHeight: CGFloat = 150
+    /// Feed items are ephemeral attention state, not history — capped so a
+    /// long-running session with many transient bells never grows this
+    /// unbounded (terminal-notch-hud.md NC-C).
+    private static let maxFeedItems = 20
 
     override init() {
         super.init()
@@ -221,13 +258,79 @@ final class NotchCompanionModel: NSObject {
         return order + 1
     }
 
-    /// Focuses the workspace window backing a companion row (row click, or
-    /// — until NC-C's per-session reveal lands — the attention chip too).
-    /// A no-op once the session's window has closed.
+    /// Focuses the workspace window backing a companion row (row click). A
+    /// no-op once the session's window has closed. The attention chip's
+    /// per-session reveal is `revealFeedSession(_:)` below, which also
+    /// clears that session's feed card.
     func focusEditor(_ id: UUID) {
         entries.removeAll { $0.session == nil }
         guard let session = entries.first(where: { $0.id == id })?.session else { return }
         WorkspaceWindowRegistry.shared.focus(session: session)
+    }
+
+    // MARK: - Attention feed (terminal-notch-hud.md NC-C)
+
+    /// Adds (or replaces) a feed card. A session already in the feed is
+    /// dropped and re-inserted at the front — a second bell from the same
+    /// session REPLACES its card rather than duplicating it, regardless of
+    /// timestamp ordering — then `CompanionFeedItem.attentionFeed(from:)`
+    /// re-sorts newest-first and the result is capped to `maxFeedItems`
+    /// (oldest dropped first). Called from
+    /// `WorkspaceSession.notifyIfNeeded(for:)`'s feed-vs-drop-down
+    /// arbitration; a no-op on panel geometry when no panel is showing
+    /// (`reposition()` guards on `panel != nil`).
+    func pushFeedItem(_ item: CompanionFeedItem) {
+        var items = feedItems
+        items.removeAll { $0.sessionID == item.sessionID }
+        items.insert(item, at: 0)
+        feedItems = Array(CompanionFeedItem.attentionFeed(from: items).prefix(Self.maxFeedItems))
+        reposition()
+    }
+
+    /// Removes a session's feed card, for any reason its `.bell` cleared
+    /// (reveal, reply, tab selection) — wired from
+    /// `WorkspaceSession.terminalSessionDidClearAttention(_:)`. A no-op for
+    /// an unknown session id.
+    func clearFeedItem(sessionID: UUID) {
+        let before = feedItems.count
+        feedItems.removeAll { $0.sessionID == sessionID }
+        guard feedItems.count != before else { return }
+        reposition()
+    }
+
+    /// Reply-field engagement — the moment the panel MAY become key. Mirrors
+    /// `NotchHUDController.engageReply()` exactly: this is the FIRST place
+    /// the companion panel's `allowsKeyStatus` ever flips true (NC-B's
+    /// resting/peek surface never engages a text field).
+    func engageReply() {
+        guard let panel else { return }
+        isReplyEngaged = true
+        panel.allowsKeyStatus = true
+        panel.makeKey()
+    }
+
+    func disengageReply() {
+        isReplyEngaged = false
+        panel?.allowsKeyStatus = false
+    }
+
+    /// Sanitizes through the ONE approved path
+    /// (`TerminalAttentionPolicy.sanitizedReply`, matching
+    /// `NotchHUDController.sendReply()` verbatim), delivers through the
+    /// injected `deliverReply` route, then clears the card — an empty reply
+    /// is a no-op (the card stays up).
+    func sendReply(_ text: String, to sessionID: UUID) {
+        guard let sanitized = TerminalAttentionPolicy.sanitizedReply(text) else { return }
+        deliverReply(sanitized, sessionID)
+        clearFeedItem(sessionID: sessionID)
+    }
+
+    /// "Open": reveals the session's tab (focusing its owning window) and
+    /// clears its feed card — mirroring `NotchHUDController
+    /// .revealSessionAndDismiss()`'s "reveal clears bell" reasoning.
+    func revealFeedSession(_ sessionID: UUID) {
+        revealSession(sessionID)
+        clearFeedItem(sessionID: sessionID)
     }
 
     // MARK: - Activation (existence, not hover state)
@@ -274,6 +377,16 @@ final class NotchCompanionModel: NSObject {
         bandInset = NotchHUDGeometry.bandInset(for: metrics)
         let panel = NotchHUDPanel(contentRect: frame)
         panel.onCancel = { [weak self] in self?.escapePressed() }
+        // Key status went elsewhere (e.g. the user clicked out while a feed
+        // card's reply field was engaged): disengage so a later engagement
+        // starts non-activating again — mirrors
+        // `NotchHUDController.panelDidResignKey` exactly.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(self.panelDidResignKey),
+            name: NSWindow.didResignKeyNotification,
+            object: panel
+        )
         let hostingView = NotchHUDPassthroughHostingView(rootView: NotchCompanionView(model: self))
         hostingView.frame = NSRect(origin: .zero, size: frame.size)
         hostingView.autoresizingMask = [.width, .height]
@@ -284,9 +397,19 @@ final class NotchCompanionModel: NSObject {
         refreshEditorRows()
     }
 
+    @objc
+    private func panelDidResignKey() {
+        disengageReply()
+    }
+
     private func teardown() {
         cancelTimers()
-        panel?.orderOut(nil)
+        disengageReply()
+        if let panel {
+            NotificationCenter.default.removeObserver(
+                self, name: NSWindow.didResignKeyNotification, object: panel)
+            panel.orderOut(nil)
+        }
         panel = nil
         hoverState = .resting
     }
@@ -324,7 +447,18 @@ final class NotchCompanionModel: NSObject {
             let spacing = CGFloat(max(editorRows.count - 1, 0)) * RafuMetrics.space2
             listHeight = rows + spacing + RafuMetrics.space3 * 2
         }
-        return bandInset + listHeight
+        // The feed renders nothing (zero height) when empty — unlike the
+        // editors list, it has no empty state to reserve space for
+        // (terminal-notch-hud.md NC-C).
+        let feedHeight: CGFloat
+        if feedItems.isEmpty {
+            feedHeight = 0
+        } else {
+            let cards = CGFloat(feedItems.count) * Self.feedCardHeight
+            let spacing = CGFloat(max(feedItems.count - 1, 0)) * RafuMetrics.space2
+            feedHeight = cards + spacing + RafuMetrics.space3
+        }
+        return bandInset + listHeight + feedHeight
     }
 
     // MARK: - Hover / pin (terminal-notch-hud.md NC-A `CompanionHoverPolicy`)
@@ -387,8 +521,13 @@ final class NotchCompanionModel: NSObject {
         refreshEditorRows()
     }
 
+    /// Escape always collapses, and — the first behavior change once a feed
+    /// card's reply field can make the panel key (terminal-notch-hud.md
+    /// NC-C) — always disengages reply first, so a collapse never leaves
+    /// `allowsKeyStatus` true on a panel with no reply field left to focus.
     func escapePressed() {
         cancelTimers()
+        disengageReply()
         let next = CompanionHoverPolicy.onEscape(hoverState)
         guard next != hoverState else { return }
         hoverState = next

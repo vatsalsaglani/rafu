@@ -396,6 +396,10 @@ final class WorkspaceSession {
     private func terminalSessionDidClearAttention(_ sessionID: UUID) {
         resolvedAttentionHUD().attentionCleared(for: sessionID)
         NotchCompanionModel.shared.refreshEditorRows()
+        // The attention feed re-presents `.bell`, it does not own it either
+        // (terminal-notch-hud.md NC-C) — see `notifyIfNeeded(for:)`'s
+        // arbitration for the half that populates a feed card.
+        NotchCompanionModel.shared.clearFeedItem(sessionID: sessionID)
     }
 
     /// A shell that exits naturally leaves its session `.exited` and its tab
@@ -475,20 +479,44 @@ final class WorkspaceSession {
         // The HUD surface (terminal-notch-hud.md): needs NO authorization —
         // it is our own window — so it shows synchronously, gated on the
         // same attention state the notification checks. The snippet is read
-        // ONLY here, now that the HUD will actually show — the same single
-        // sanctioned read the notification makes, passed by value and
-        // dropped on HUD dismissal (ADR 0016's privacy rules, verbatim).
+        // ONLY here, now that the HUD (or the companion feed) will actually
+        // show it — the same single sanctioned read the notification makes,
+        // passed by value and dropped on dismissal/clear (ADR 0016's
+        // privacy rules, verbatim). Read exactly once, whichever surface
+        // fires (terminal-notch-hud.md NC-C).
         if NotchHUDPolicy.surfaces(for: preference, authorized: false).hud,
             controller.status == .bell
         {
-            resolvedAttentionHUD().show(
-                NotchHUDEvent(
-                    sessionID: controller.id,
-                    title: controller.displayName,
-                    snippet: controller.recentOutputSnippet(),
-                    color: controller.sessionColor),
-                theme: hudThemeProvider()
-            )
+            let snippet = controller.recentOutputSnippet()
+            // Feed-vs-drop-down arbitration (terminal-notch-hud.md NC-C,
+            // "Attention"): while the companion peek panel is open, the
+            // event lands in its cross-window attention feed instead of
+            // spawning the separate v1 drop-down — a bell never produces
+            // both.
+            let arbitration = CompanionHoverPolicy.companionArbitration(
+                hoverState: NotchCompanionModel.shared.hoverState)
+            if arbitration.routeToFeed {
+                NotchCompanionModel.shared.pushFeedItem(
+                    CompanionFeedItem(
+                        id: UUID(),
+                        sessionID: controller.id,
+                        title: controller.displayName,
+                        editorName: descriptor?.displayName ?? RafuBuildInformation.appName,
+                        snippet: snippet,
+                        timestamp: Date(),
+                        color: controller.sessionColor
+                    )
+                )
+            } else if arbitration.showDropDown {
+                resolvedAttentionHUD().show(
+                    NotchHUDEvent(
+                        sessionID: controller.id,
+                        title: controller.displayName,
+                        snippet: snippet,
+                        color: controller.sessionColor),
+                    theme: hudThemeProvider()
+                )
+            }
         }
 
         // The notification surface keeps its lazy, first-bell authorization
