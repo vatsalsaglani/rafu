@@ -3,6 +3,22 @@
 The headline upgrade: real rate-limit percentages using tokens the
 user's CLIs already store. Also owns the trust-transition ADR.
 
+**Contract rule:** `makeStrategies` must return the same strategy COUNT
+regardless of `context` (Settings' visibility probe calls it with a
+no-op/empty context) — all credential/availability gating belongs in
+`isAvailable`, never in the strategy list's length.
+
+**Credential bridge:** `UsageFetchContext.credential` is a sync
+`@Sendable (UsageProviderID) -> String?`, but `UsageCredentialStore` is
+an `actor`. Pre-resolve the credentials you need into a `Sendable
+[UsageProviderID: String]` inside the async `UsageRegistryReader.
+snapshots(now:)` before building the context, and have the sync
+`credential` closure close over that dict. `UsageFetchContext` itself
+does not change. Turning `UsageRegistryReader.makeContext` from
+`@Sendable (Date) -> UsageFetchContext` into `async` is source-compatible
+with existing sync call sites (function subtyping), so it lands here at
+near-zero rebase cost even if W3/W4/W5 already merged.
+
 ## Owned paths
 
 - `Sources/RafuApp/Usage/Providers/ClaudeProvider.swift` (extend — keep

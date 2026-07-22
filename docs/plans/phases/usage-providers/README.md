@@ -90,7 +90,7 @@ When the user reports "phase Wn is done on branch `<branch>`":
 
 | Phase | File | Branch | Status |
 |---|---|---|---|
-| W0 | [W0-shim.md](W0-shim.md) | — | not started (SERIAL, FIRST) |
+| W0 | [W0-shim.md](W0-shim.md) | `usage/w0` | Implemented (1096 tests, pending coordinator merge + GUI parity pass) |
 | W1 | [W1-cookie-infrastructure.md](W1-cookie-infrastructure.md) | — | blocked on W0 |
 | W2 | [W2-exact-percent-oauth.md](W2-exact-percent-oauth.md) | — | blocked on W0 |
 | W3 | [W3-local-sqlite-providers.md](W3-local-sqlite-providers.md) | — | blocked on W0 |

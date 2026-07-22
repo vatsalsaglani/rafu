@@ -168,47 +168,150 @@ struct CompanionWingsView: View {
     }
 }
 
-/// The peek panel's usage strip (terminal-notch-hud.md NC-D, "Peek", item
-/// 1): one muted line per agent that has data, e.g. `Claude · 5h 1.2M tok ·
-/// 7d 8.4M tok    Codex · 5h 3% · 7d 6%`. Hidden ENTIRELY when
-/// `model.usageTiles` is empty — no placeholder, no "usage unavailable"
-/// text — matching the spec's "hidden entirely otherwise". A monospaced
-/// font gives tabular numerals so the tile values do not jitter as they
-/// refresh.
+/// The peek panel's usage area (agent-usage-providers.md, "Multi-provider
+/// display in the notch"): a front line of up to
+/// `UsageDisplayPolicy.frontLineCap` muted tiles, e.g. `Claude · 5h 1.2M
+/// tok · 7d 8.4M tok    Codex · 5h 3% · 7d 6%`, then — only when other
+/// enabled providers exist — a `▸ N more providers` disclosure that
+/// expands (per-peek) into a two-column grid of the rest. Hidden ENTIRELY
+/// when `model.usageFrontLine` is empty — no placeholder, no "usage
+/// unavailable" text. A monospaced font gives tabular numerals so tile
+/// values do not jitter as they refresh.
+///
+/// The front line renders through an `AttributedString` built from
+/// `UsageDisplayPolicy.RenderedTile`s: a no-emphasis tile applies the same
+/// muted foreground to every run, so its RENDERED CHARACTERS are
+/// byte-identical to the pre-usage-registry strip's plain `Text(summary)`
+/// (see `UsageCoreTests`' rendering-parity assertion over
+/// `UsageDisplayPolicy.plainFrontLineText`, which this view's plain-text
+/// accessibility label also uses).
 struct CompanionUsageStripView: View {
     let model: NotchCompanionModel
     @Environment(\.rafuTheme) private var theme
 
     var body: some View {
-        if !model.usageTiles.isEmpty {
-            Text(summary)
-                .font(.system(size: 10.5, design: .monospaced))
-                .foregroundStyle(theme.palette.textMuted)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, RafuMetrics.space3)
-                .padding(.top, RafuMetrics.space2)
-                .accessibilityLabel(summary)
+        if !model.usageFrontLine.isEmpty {
+            VStack(alignment: .leading, spacing: RafuMetrics.space1) {
+                Text(frontLineText)
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityLabel(plainFrontLineText)
+                if !model.usageOverflow.isEmpty {
+                    disclosureButton
+                }
+                if model.isUsageOverflowExpanded, !model.usageOverflow.isEmpty {
+                    overflowGrid
+                }
+            }
+            .padding(.horizontal, RafuMetrics.space3)
+            .padding(.top, RafuMetrics.space2)
         }
     }
 
-    private var summary: String {
-        model.usageTiles.map(Self.tileSummary).joined(separator: "    ")
+    private var frontLineTiles: [UsageDisplayPolicy.RenderedTile] {
+        model.usageFrontLine.map(renderedTile)
     }
 
-    private static func tileSummary(_ tile: AgentUsageTile) -> String {
-        "\(tile.agent) · " + tile.windows.map(windowSummary).joined(separator: " · ")
+    private var overflowTiles: [UsageDisplayPolicy.RenderedTile] {
+        model.usageOverflow.map(renderedTile)
     }
 
-    private static func windowSummary(_ window: AgentUsageWindow) -> String {
-        if let percent = window.percent {
-            return "\(window.label) \(Int(percent.rounded()))%"
+    private func renderedTile(_ snapshot: UsageSnapshot) -> UsageDisplayPolicy.RenderedTile {
+        UsageDisplayPolicy.renderedTile(for: snapshot, displayName: displayName(for: snapshot))
+    }
+
+    private func displayName(for snapshot: UsageSnapshot) -> String {
+        UsageProviderRegistry.descriptor(for: snapshot.providerID)?.displayName
+            ?? snapshot.providerID.rawValue
+    }
+
+    private var plainFrontLineText: String {
+        UsageDisplayPolicy.plainFrontLineText(frontLineTiles)
+    }
+
+    /// Joins every front-line tile into one `AttributedString`, applying
+    /// the theme's muted color everywhere and overriding to accent
+    /// (+semibold) only for `.high`/`.critical` window chunks — a tile with
+    /// no emphasized window therefore carries a UNIFORM muted color, which
+    /// is what makes its rendered text equivalent to the old plain
+    /// `Text(summary)` (attributes never change the underlying characters).
+    private var frontLineText: AttributedString {
+        var result = AttributedString()
+        for (index, tile) in frontLineTiles.enumerated() {
+            if index > 0 {
+                result += mutedRun("    ")
+            }
+            result += tileRun(tile)
         }
-        if let tokens = window.tokens {
-            return "\(window.label) \(AgentUsageFormat.compactTokenCount(tokens)) tok"
+        return result
+    }
+
+    private func tileRun(_ tile: UsageDisplayPolicy.RenderedTile) -> AttributedString {
+        guard !tile.windows.isEmpty else { return mutedRun(tile.displayName) }
+        var result = mutedRun("\(tile.displayName) · ")
+        for (index, window) in tile.windows.enumerated() {
+            if index > 0 {
+                result += mutedRun(" · ")
+            }
+            result += windowRun(window)
         }
-        return window.label
+        return result
+    }
+
+    private func windowRun(_ window: UsageDisplayPolicy.RenderedWindow) -> AttributedString {
+        var run = AttributedString(window.text)
+        switch window.emphasis {
+        case .normal:
+            run.foregroundColor = theme.palette.textMuted
+        case .high, .critical:
+            run.foregroundColor = theme.palette.accent
+            run.font = .system(size: 10.5, weight: .semibold, design: .monospaced)
+        }
+        return run
+    }
+
+    private func mutedRun(_ text: String) -> AttributedString {
+        var run = AttributedString(text)
+        run.foregroundColor = theme.palette.textMuted
+        return run
+    }
+
+    private var disclosureButton: some View {
+        Button {
+            model.toggleUsageOverflow()
+        } label: {
+            Text(
+                "▸ \(model.usageOverflow.count) more provider\(model.usageOverflow.count == 1 ? "" : "s")"
+            )
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundStyle(theme.palette.textMuted)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(model.usageOverflow.count) more usage providers")
+        .accessibilityHint(
+            model.isUsageOverflowExpanded ? "Activates to collapse" : "Activates to expand"
+        )
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private var overflowGrid: some View {
+        LazyVGrid(
+            columns: [
+                GridItem(.flexible(), alignment: .leading),
+                GridItem(.flexible(), alignment: .leading),
+            ],
+            alignment: .leading, spacing: RafuMetrics.space1
+        ) {
+            ForEach(overflowTiles, id: \.providerID) { tile in
+                Text(UsageDisplayPolicy.plainText(tile))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(theme.palette.textMuted)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
     }
 }
 

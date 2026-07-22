@@ -149,3 +149,64 @@ advisor decides; recommend hidden to keep the tab honest.
 - `AGENTS.md`, `Package.swift` untouched.
 - Handoff lists: exact public symbol inventory (for W1–W8 reference),
   anything the stubs need that the contract lacks.
+
+## Status
+
+**Implemented** (2026-07-22, branch `usage/w0`, 1096 tests green in
+`swift test` AND `swift test --no-parallel`, 0 warnings, lint clean;
+advisor-reviewed SAFE TO MERGE, no P0) — pending coordinator merge + GUI
+parity pass.
+
+## Handoff to W1–W8 (read this before writing a provider)
+
+Public symbol inventory: the contract types/names in this file's
+"contract" section above shipped byte-compatible — `UsageProviderID` (19
+cases), `UsageWindow`, `UsageSnapshot` (+ `.renderable`),
+`UsageAuthPattern`, `UsageFetchContext`, `nonisolated protocol
+UsageFetchStrategy`, `UsageProviderDescriptor`, `resolveUsageSnapshot`
+pipeline (`UsageProviderCore.swift`); `UsageHTTPClient`/`UsageHTTPError`
++ `RateLimitGate` actor, `LocalUsageFiles`,
+`UsageFormat.compactTokenCount`, `UsageDateParsing`
+(`UsageSupport.swift`); read-only `UsageSQLite.swift`; `UsageEnableStore`,
+`UsageStripOrderStore`, `UsageCredentialStore` actor
+(`UsageStores.swift`); `UsageProviderRegistry.swift` (19 descriptors);
+`UsageRegistryReader.swift`.
+
+1. **`makeStrategies` must be context-independent in its COUNT.** The
+   Settings visibility probe (`UsageSettingsModel`) hides a provider
+   whenever `descriptor.makeStrategies(probeContext).isEmpty`, where the
+   probe context has `http: .noop` and nil `credential`/`readFile`/
+   `cookieHeader`. A provider written as `makeStrategies: { ctx in
+   ctx.credential(.foo) != nil ? [S()] : [] }` would be INVISIBLE in
+   Settings — the user could never enter the key to make it available.
+   Rule: `makeStrategies` returns its full, fixed strategy list
+   UNCONDITIONALLY for any context; all availability/credential/cookie
+   gating belongs inside `UsageFetchStrategy.isAvailable`, never in the
+   strategy count.
+
+2. **Credential bridge recipe (for W2, the first credentialed
+   strategy).** `UsageFetchContext.credential` is a sync `@Sendable
+   (UsageProviderID) -> String?`, but `UsageCredentialStore` is an
+   `actor`. The fix: pre-resolve the needed credentials into a
+   `Sendable [UsageProviderID: String]` INSIDE the async
+   `UsageRegistryReader.snapshots(now:)`, before building the context,
+   and have the sync `credential` closure close over that dict.
+   `UsageFetchContext` — the frozen type all 8 worktrees compile
+   against — does NOT change. Turning `UsageRegistryReader.makeContext`
+   from `@Sendable (Date) -> UsageFetchContext` into `async` is
+   SOURCE-COMPATIBLE with existing sync call sites (function
+   subtyping), so it can land in W2 even after W3/W4/W5 have already
+   merged, at near-zero rebase cost.
+
+3. **`readFile` is single-file, not a directory scanner.**
+   `UsageFetchContext.readFile` is `(String) -> String?` for one path.
+   Local providers that need directory scans (newest-N files, tail-N
+   bytes) must use `LocalUsageFiles` (or their own injected closure)
+   directly, NOT `context.readFile`. `readFile` stays in the contract
+   for single-file consumers (e.g. W2/W5 `auth.json`-style reads;
+   Cursor's `state.vscdb` path goes through `UsageSQLite` instead).
+
+Also for the coordinator: the post-merge parity screenshot compare must
+use a usage fixture below 80% — the ≥80% accent-semibold / ≥95% `⚠`
+styling is intended new behavior in this change, not a parity
+regression.

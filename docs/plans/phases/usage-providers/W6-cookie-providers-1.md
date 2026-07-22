@@ -4,6 +4,11 @@ WAVE B: requires W0 AND W1 merged to main before this worktree is cut.
 Verify `Sources/RafuApp/Usage/Cookies/BrowserCookieImporter.swift`
 exists on your branch before starting; if absent, STOP and report.
 
+**Contract rule:** `makeStrategies` must return the same strategy COUNT
+regardless of `context` (Settings' visibility probe calls it with a
+no-op/empty context) — all credential/availability gating belongs in
+`isAvailable`, never in the strategy list's length.
+
 ## Owned paths
 
 - `Sources/RafuApp/Usage/Providers/AntigravityProvider.swift`

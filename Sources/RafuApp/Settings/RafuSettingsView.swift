@@ -70,6 +70,13 @@ struct RafuSettingsView: View {
                 }
                 .formStyle(.grouped)
             }
+
+            Tab("Usage", systemImage: "gauge.medium") {
+                Form {
+                    UsageSettingsSection()
+                }
+                .formStyle(.grouped)
+            }
         }
         .environment(\.rafuTheme, activeTheme)
         .preferredColorScheme(preferredColorScheme)

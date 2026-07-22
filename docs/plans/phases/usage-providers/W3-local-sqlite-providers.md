@@ -4,6 +4,11 @@ Zero-config providers whose primary data is local SQLite owned by the
 user's own tools. Uses the shim's `UsageSQLite` only — no new SQLite
 code.
 
+**Contract rule:** `makeStrategies` must return the same strategy COUNT
+regardless of `context` (Settings' visibility probe calls it with a
+no-op/empty context) — all credential/availability gating belongs in
+`isAvailable`, never in the strategy list's length.
+
 ## Owned paths
 
 - `Sources/RafuApp/Usage/Providers/CursorProvider.swift`

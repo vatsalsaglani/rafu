@@ -5,6 +5,11 @@ WAVE B: requires W0 AND W1 merged. ALSO reads (never modifies) the
 worktree is cut, STOP and report; this phase APPENDS Qwen's cookie
 strategy to that file and must not race it.
 
+**Contract rule:** `makeStrategies` must return the same strategy COUNT
+regardless of `context` (Settings' visibility probe calls it with a
+no-op/empty context) — all credential/availability gating belongs in
+`isAvailable`, never in the strategy list's length.
+
 ## Owned paths
 
 - `Sources/RafuApp/Usage/Providers/QoderProvider.swift`
