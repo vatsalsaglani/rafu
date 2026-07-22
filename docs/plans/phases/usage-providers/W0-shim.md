@@ -23,8 +23,20 @@ Modified (for the LAST time by anyone in this plan):
 - `Sources/RafuApp/Settings/RafuSettingsView.swift` — add the Usage tab
 - `Sources/RafuApp/Terminal/NotchCompanionModel.swift` /
   `Sources/RafuApp/Views/NotchCompanionView.swift` — tiles come from the
-  registry; usage section wraps to a compact grid past 2–3 tiles;
-  show-in-strip ordering respected
+  registry, per the parent plan's "Multi-provider display in the notch"
+  section (BINDING): resting strip never shows usage; peek panel = a
+  front line of ≤4 user-ordered tiles (single muted line, defaults to
+  detected local providers) + all other enabled providers behind one
+  `▸ N more providers` disclosure expanding (per-peek, unpersisted) to
+  a two-column grid inside the existing ScrollView; tile text
+  `Name · 5h 82% · 7d 41%` (cost-only: `Name · $41.20`); ≥80% accent
+  semibold, ≥95% adds `⚠` (never color alone); no icons, no
+  urgency-based reordering; failed/expired tiles vanish silently (only
+  Settings explains). `peekContentHeight()` gains front-line and
+  expanded-grid-rows terms. Pure derivations (front-line selection from
+  the show-in-strip store, overflow partition, emphasis thresholds,
+  grid row math) live in a `nonisolated` policy type with headless
+  tests.
 - `Sources/RafuApp/Terminal/AgentUsage.swift` — existing Codex/Claude
   local parsers MIGRATE into their provider files; this file shrinks to
   whatever the companion still needs or is deleted

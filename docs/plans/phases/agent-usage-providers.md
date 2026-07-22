@@ -164,6 +164,36 @@ Rules, to be codified in a new ADR:
   ≥80%: the number goes accent; never color alone — the % text IS the
   signal). No alerts, no notifications — glanceable only, for now.
 
+## Multi-provider display in the notch (decided 2026-07-22; W0 builds it)
+
+The resting strip NEVER shows usage — wings stay editors + attention
+(calm contract; budgets aren't urgent enough for resting pixels).
+
+The peek panel's usage area has two zones:
+
+1. **Front line** — up to 4 tiles the user picks and orders in Settings
+   ("Show in strip" toggle + order). Renders as the current single
+   muted line. Default: the auto-detected local providers (Claude,
+   Codex) in detection order.
+2. **Overflow** — every other enabled provider sits behind ONE
+   disclosure line (`▸ 7 more providers`); expanding it (per-peek,
+   never persisted) reveals a two-column compact grid inside the
+   existing ScrollView — the 60% height cap + internal scroll already
+   govern any tile count. `peekContentHeight()` gains a front-line term
+   and, only while expanded, a grid-rows term.
+
+Tile anatomy (both zones): `Name · 5h 82% · 7d 41%` — primary window
+first, tabular numerals; cost-only providers render `Name · $41.20`.
+Near-exhaustion emphasis: ≥80% → accent semibold number; ≥95% → adds a
+`⚠` glyph (text + glyph carry the signal, never color alone). No
+provider icons in v1; no urgency-based reordering — the user's order is
+stable, emphasis changes, position doesn't.
+
+Failure/staleness: a failed or token-expired provider's tile silently
+disappears from the notch; ONLY its Settings row explains ("token
+expired · Reconnect"). The notch never explains, it just shows what is
+currently true.
+
 ## Registration panel (decided 2026-07-22: Settings ONLY, own tab)
 
 Provider registration lives exclusively in a new Settings **"Usage"**
