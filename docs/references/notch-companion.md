@@ -95,6 +95,47 @@ are ordinary key-able surfaces. This has NOT yet been empirically tested
 with real VoiceOver — track as an open verification item, not a resolved
 claim.
 
+**8. Two independently focusable fields on one non-activating panel need a
+single OR-of-reasons key-status arbiter, not per-field flag-flipping.** NC-B
+added a pinned editors-search field alongside the existing feed reply
+field, so the panel now has two SwiftUI controls that each need
+`allowsKeyStatus`/`makeKey()` while focused. If each field's own
+`.onChange(of: isFocused)` set `allowsKeyStatus` directly, an AppKit focus
+hop from one field to the other can transiently report BOTH as unfocused
+mid-transition, and the outgoing field's disengage would drop key status
+out from under the incoming field. The shipped fix in
+`NotchCompanionModel`: each field only toggles its OWN boolean engagement
+flag (`isReplyEngaged`/`isSearchEngaged`, both `private(set)`); a single
+`updateKeyStatus()` arbiter derives `panel.allowsKeyStatus = isReplyEngaged
+|| isSearchEngaged` and calls `makeKey()` only on a false→true edge (this
+supersedes rule 3's older claim that `makeKey()` has exactly one call
+site — it is now the panel's sole `allowsKeyStatus` write location that
+matters, guarded per-field). A separate `clearKeyEngagement()`
+unconditionally zeroes BOTH flags and sets `allowsKeyStatus = false`
+without going through the arbiter, for genuine window-level key loss
+(`panelDidResignKey`, `teardown`) — using `updateKeyStatus()` there instead
+would incorrectly leave `allowsKeyStatus` true if the other field still
+thought it was engaged. This generalizes: any borderless/non-activating
+panel hosting more than one focusable control must arbitrate key status
+through one OR-of-reasons function, never per-control.
+
+**9. The peek panel's editors-search field is threshold-gated, pinned
+above the internal scroll, and its query is ephemeral.** The field
+(`CompanionSearchFieldView`) appears once `editorRows.count >=
+searchFieldThreshold` (6) OR the trimmed query is already non-empty (so
+narrowing the list below 6 via typing does not also make the field
+disappear out from under the user). It sits directly under
+`CompanionWingsView` and above the internal `ScrollView` that hosts the
+usage strip, editors list, and attention feed, so it stays reachable while
+results below it scroll. Filtering (`CompanionEditorRow.filteredEditorRows`)
+narrows only the editors list — the usage strip and attention feed are
+never filtered — via a plain, un-tokenized, case- and
+diacritic-insensitive substring match against `name` OR the raw `branch`
+field (kept separate from the decorated `gitSummary` one-liner, which is
+lossy for detached-HEAD/unborn-branch states). `searchQuery` is cleared on
+every collapse back to `.resting` — it is not persisted and does not
+survive a hide/show cycle.
+
 ## Why it matters
 
 The companion is a persistent, always-on overlay near the menu bar; any
@@ -117,6 +158,12 @@ change without notice.
 - Real on-notch-hardware GUI verification pass covering all companion
   states (resting, peek/hover, pinned, attention feed, usage tiles) with
   0 build warnings and lint clean.
+- The editors-search key-status arbitration (rule 8) was verified with a
+  real on-notch-hardware screenshot pass alternating focus between the
+  feed reply field and the new search field, confirming the panel stays
+  key throughout the hop instead of resigning mid-transition; the full
+  suite passed at 1072 tests in both `swift test` and `swift test
+  --no-parallel`, 0 build warnings, lint clean.
 
 ## Verification
 
@@ -126,6 +173,8 @@ swift test
 swift test --no-parallel
 rg -n "makeKey\(\)" Sources/RafuApp
 rg -n "auxiliaryTopLeftArea|auxiliaryTopRightArea|safeAreaInsets" Sources/RafuApp/Notch
+rg -n "isReplyEngaged|isSearchEngaged|updateKeyStatus|clearKeyEngagement" Sources/RafuApp/Terminal/NotchCompanionModel.swift
+rg -n "filteredEditorRows|searchFieldThreshold" Sources/RafuApp/Terminal/NotchCompanionPolicy.swift Sources/RafuApp/Terminal/NotchCompanionModel.swift
 ```
 
 ## Related code, ADRs, and phases
@@ -134,8 +183,16 @@ rg -n "auxiliaryTopLeftArea|auxiliaryTopRightArea|safeAreaInsets" Sources/RafuAp
 - `Sources/RafuApp/Notch/NotchHUDPolicy.swift`
 - `Sources/RafuApp/Notch/AgentUsageProvider.swift` (and
   `CodexUsageProvider`/`ClaudeUsageProvider`)
+- `Sources/RafuApp/Terminal/NotchCompanionModel.swift`
+  (`updateKeyStatus()`/`clearKeyEngagement()`, `isReplyEngaged`/
+  `isSearchEngaged`, `visibleEditorRows`, `isSearchFieldVisible`,
+  `setSearchQuery(_:)`)
+- `Sources/RafuApp/Terminal/NotchCompanionPolicy.swift`
+  (`CompanionEditorRow.branch`, `filteredEditorRows(_:query:)`)
+- `Sources/RafuApp/Views/NotchCompanionView.swift` (`CompanionSearchFieldView`
+  pinned above the internal `ScrollView`)
 - [`terminal-notch-hud.md`](../plans/phases/terminal-notch-hud.md) (stages
-  NC-A…NC-E)
+  NC-A…NC-E, editors-search follow-up)
 - [`0016-terminal-attention-notifications.md`](../decisions/0016-terminal-attention-notifications.md)
   (2026-07-22 amendment)
 - [`terminal-signals-and-shell-catalog.md`](terminal-signals-and-shell-catalog.md)

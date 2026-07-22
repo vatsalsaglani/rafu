@@ -262,3 +262,22 @@ only capability of reading other AI tools' local usage files. Owed:
 VoiceOver discoverability of the resting/peek states has not yet been
 empirically tested with real VoiceOver (accessible fallback paths are
 unaffected).
+
+### 2026-07-22: Notch companion post-NC-E follow-ups (shadow, peek scroll, editors search)
+
+Advisor→implementor→documentor pass adding a pinned, threshold-gated
+(≥6 rows) search/filter field to the notch companion peek panel's EDITORS
+LIST (name-or-branch, case-/diacritic-insensitive, query cleared on every
+collapse to `.resting`), alongside two prior post-NC-E follow-ups: the
+resting-strip shadow removal (seamless-with-the-notch fix) and the peek
+panel's 0.6-of-screen height cap with an internal `ScrollView`. Introduced
+`CompanionEditorRow.branch` and the pure `filteredEditorRows(_:query:)`
+filter, and a key-status arbitration fix
+(`NotchCompanionModel.updateKeyStatus()`/`clearKeyEngagement()`) for two
+independently focusable fields (feed reply, editors search) sharing one
+non-activating `NSPanel`. Verified: 1072 tests passing in both `swift
+test` and `swift test --no-parallel`, 0 build warnings, lint clean, real
+on-notch-hardware screenshot pass. Extended
+[`notch-companion.md`](../../references/notch-companion.md) (rules 8–9)
+and [`terminal-notch-hud.md`](terminal-notch-hud.md)'s post-NC-E
+follow-ups section; no ADR changes.

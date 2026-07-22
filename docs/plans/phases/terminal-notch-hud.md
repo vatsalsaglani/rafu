@@ -52,6 +52,41 @@ before handoff:
    it is not mistaken for one later — see the ADR 0016 amendment and
    [`notch-companion.md`](../../references/notch-companion.md).
 
+## Post-NC-E follow-ups (2026-07-22)
+
+Three small increments landed after the NC-A…NC-E stage sequence closed,
+each advisor→implementor→documentor reviewed and verified:
+
+- **Resting-strip shadow removal.** `NSPanel.hasShadow` is set `false`
+  while resting (`NotchCompanionModel`'s `presentPanel`/`reposition`),
+  because a panel shadow paints a rim light around all edges — including
+  the top — that reads as a bright outline separating the strip's black
+  from the physical notch it must appear seamless with. `reposition()`
+  re-enables the shadow (`hasShadow = true`) for the peeked/pinned panel,
+  where depth against window content below is wanted.
+- **Peek height cap + internal scroll.** The peek/pinned panel's frame is
+  capped at 0.6-of-screen height (`NotchCompanionGeometry.peekPanelFrame`)
+  so many editor windows or feed cards cannot march the panel off the
+  bottom of the screen; overflow scrolls inside an internal
+  `ScrollView(.vertical)` (`NotchCompanionView`) instead of growing the
+  window.
+- **Editors-list search/filter.** A pinned search field
+  (`CompanionSearchFieldView`) appears above the internal scroll once
+  `editorRows.count >= 6` or a query is already active, filtering the
+  EDITORS LIST (not the usage strip or attention feed) by workspace name
+  OR raw git branch, case- and diacritic-insensitive substring
+  (`CompanionEditorRow.filteredEditorRows`). `CompanionEditorRow` gained a
+  raw `branch: String?` separate from the decorated `gitSummary`, which is
+  lossy for detached/unborn states. The query is ephemeral — cleared on
+  every collapse to `.resting`. Clicking a filtered row still focuses that
+  window. Introducing the field's own focus surfaced a key-status
+  arbitration nuance (two independently focusable fields — the feed reply
+  field and the new search field — on one non-activating panel): see
+  [`notch-companion.md`](../../references/notch-companion.md) rule 8
+  (`updateKeyStatus()`/`clearKeyEngagement()` arbiter). Verified: 1072
+  tests passing in both `swift test` and `swift test --no-parallel`, 0
+  build warnings, lint clean, real on-notch-hardware screenshot pass.
+
 ## Owed verification
 
 VoiceOver discoverability of the resting/peek states while NOT key
