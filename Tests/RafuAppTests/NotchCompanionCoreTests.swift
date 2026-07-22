@@ -285,6 +285,24 @@ func peekPanelFrameClamps() {
     #expect(realNotchMetrics.frame.contains(frame))
 }
 
+@Test("peekPanelFrame: oversized content caps at maxPeekHeight, not screen height")
+func peekPanelFrameCapsAtMaxPeekHeight() {
+    let cap = NotchCompanionGeometry.maxPeekHeight(for: realNotchMetrics)
+    #expect(cap == (realNotchMetrics.frame.height * 0.6).rounded())
+    let frame = NotchCompanionGeometry.peekPanelFrame(
+        for: realNotchMetrics, contentHeight: 5000)
+    #expect(frame.height == cap)
+    // Still pinned to the strip's top edge — the cap trims the BOTTOM.
+    #expect(frame.maxY == realNotchMetrics.frame.maxY)
+}
+
+@Test("peekPanelFrame: content below the cap keeps sizing to content")
+func peekPanelFrameBelowCapUnchanged() {
+    let frame = NotchCompanionGeometry.peekPanelFrame(
+        for: realNotchMetrics, contentHeight: 300)
+    #expect(frame.height == 300)
+}
+
 @Test("peekPanelFrame: without a notch, anchors top-center just below the menu bar")
 func peekPanelFrameNonNotchFallback() {
     let frame = NotchCompanionGeometry.peekPanelFrame(for: nonNotchMetrics, contentHeight: 300)

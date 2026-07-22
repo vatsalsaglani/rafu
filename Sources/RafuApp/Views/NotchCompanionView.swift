@@ -17,12 +17,20 @@ struct NotchCompanionView: View {
         VStack(spacing: 0) {
             CompanionWingsView(model: model)
             if model.hoverState != .resting {
-                VStack(spacing: RafuMetrics.space2) {
-                    CompanionUsageStripView(model: model)
-                    CompanionEditorsListView(model: model)
-                    CompanionAttentionFeedView(model: model)
+                // Internal scroll: the panel's HEIGHT is capped by
+                // `NotchCompanionGeometry.peekPanelFrame` (many editor
+                // windows/feed cards must not march the panel off the
+                // bottom of the screen), so overflow scrolls here instead
+                // of growing the window.
+                ScrollView(.vertical) {
+                    VStack(spacing: RafuMetrics.space2) {
+                        CompanionUsageStripView(model: model)
+                        CompanionEditorsListView(model: model)
+                        CompanionAttentionFeedView(model: model)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .top)
                 }
-                .frame(maxWidth: .infinity, alignment: .top)
+                .scrollIndicators(.automatic)
                 .transition(listTransition)
             }
         }

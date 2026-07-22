@@ -12,6 +12,17 @@ nonisolated enum NotchCompanionGeometry {
     /// The peek panel's width before clamping to the screen frame.
     static let panelWidth: CGFloat = 420
 
+    /// The peek panel never grows past this fraction of the screen height —
+    /// beyond it, `NotchCompanionView`'s internal `ScrollView` takes over.
+    /// Without the cap, dozens of editor windows/feed cards marched the
+    /// panel off the bottom of the screen (observed at 29 windows).
+    static let maxPeekHeightFraction: CGFloat = 0.6
+
+    /// The tallest frame `peekPanelFrame` will produce for `metrics`.
+    static func maxPeekHeight(for metrics: NotchScreenMetrics) -> CGFloat {
+        (metrics.frame.height * maxPeekHeightFraction).rounded()
+    }
+
     /// The always-present resting strip: the notch band plus a `wingWidth`
     /// wing on each side, horizontally centered on the notch, pinned to the
     /// screen top with height equal to the notch band
@@ -82,7 +93,7 @@ nonisolated enum NotchCompanionGeometry {
             topY = metrics.visibleFrame.maxY
         }
         let width = min(panelWidth, metrics.frame.width)
-        let height = min(contentHeight, metrics.frame.height)
+        let height = min(contentHeight, maxPeekHeight(for: metrics))
         let x = min(max(centerX - width / 2, metrics.frame.minX), metrics.frame.maxX - width)
         let y = min(max(topY - height, metrics.frame.minY), metrics.frame.maxY - height)
         return CGRect(x: x, y: y, width: width, height: height)
