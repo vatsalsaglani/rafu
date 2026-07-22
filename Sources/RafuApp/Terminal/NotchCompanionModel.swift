@@ -212,6 +212,14 @@ final class NotchCompanionModel: NSObject {
     }
 
     func unregister(_ session: WorkspaceSession) {
+        // Drop any attention-feed cards belonging to this closing window's
+        // sessions while the session object is still alive to enumerate —
+        // window teardown never fires `terminalSessionDidClearAttention`, so
+        // without this a card could linger until Open/Send or the 20-item
+        // cap evicted it.
+        for controller in session.terminal.sessions {
+            clearFeedItem(sessionID: controller.id)
+        }
         entries.removeAll { $0.session == nil || $0.session === session }
         refreshEditorRows()
     }

@@ -267,6 +267,10 @@ nonisolated struct AgentUsageReader: Sendable {
     /// append-only transcript, so a bounded tail read captures them without
     /// ever loading a multi-hundred-megabyte log in full.
     static let maxBytesPerClaudeFile = 256 * 1_024
+    /// The Codex parser wants the LAST `rate_limits` line, which is near the
+    /// end, so a bounded tail read suffices — symmetric with the Claude cap
+    /// and avoids a multi-MB transient allocation on every refresh.
+    static let maxBytesPerCodexFile = 256 * 1_024
 
     private let newestCodexRolloutContents: @Sendable () -> String?
     private let recentClaudeTranscriptLines: @Sendable (Date) -> [String]
@@ -320,7 +324,9 @@ nonisolated struct AgentUsageReader: Sendable {
                     url.lastPathComponent.hasPrefix("rollout-") && url.pathExtension == "jsonl"
                 })
         else { return nil }
-        return try? String(contentsOf: newestURL, encoding: .utf8)
+        // Tail-read only: the newest `rate_limits` snapshot is at the end.
+        let tail = tailLines(of: newestURL, maxBytes: maxBytesPerCodexFile)
+        return tail.isEmpty ? nil : tail.joined(separator: "\n")
     }
 
     /// The newest `maxClaudeTranscriptFiles` `*.jsonl` files anywhere under
