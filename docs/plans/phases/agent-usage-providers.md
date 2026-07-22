@@ -49,7 +49,7 @@ but the user explicitly widened both the roster and the auth rules:
 opt-in; Chromium-family cookies work directly, Safari requires the user
 to grant Full Disk Access — documented plainly, never demanded).
 
-Tier 1 (target roster, 17):
+Tier 1 (target roster, 19):
 
 1. Claude (local token/transcripts; cookies also allowed for the web %)
 2. Codex (rollouts; auth.json OAuth; cookies allowed)
@@ -69,6 +69,12 @@ Tier 1 (target roster, 17):
     Roo Code and BYO-key Cline setups; see Roo note below)
 16. Kimi / Moonshot (Kimi CLI)
 17. Warp (AI request quota in the terminal itself)
+18. Qwen — Alibaba coding/token plan, the quota `qwen-code` draws from
+    (API key `ALIBABA_QWEN_API_KEY` or cookies; intl + `.com.cn` regions;
+    CodexBar's `Alibaba` provider)
+19. Qoder — Alibaba's agentic IDE (cookie-ONLY:
+    `qoder.com/api/v2/me/usages/big_model_credits`, dual-region;
+    eligible precisely because cookie auth is now allowed)
 
 **Roo Code note:** NOT in CodexBar's catalog — no prior art. Roo is
 BYO-key, so its spend lands on the backing key (OpenRouter/Anthropic/…);
@@ -192,7 +198,7 @@ and NO "set up usage" call-to-action in the panel.
 | U-C | OpenCode local SQLite provider (no network — can ship default-on) + Cursor provider (state.vscdb token → usage-summary; opt-in) | M |
 | U-D | Cline: API-key field (Rafu Keychain) + usage-limits fetch; opt-in | S |
 | U-E | Codex OAuth freshness (auth.json → wham/usage); cookie-import infrastructure (browser picker, Rafu-Keychain cookie cache, access-gate backoff, Safari/FDA disclosure) as a shared strategy kind | M |
-| U-F | Roster wave 2 (one descriptor each, CodexBar-adapted): Copilot, Gemini CLI, Antigravity, Grok Build, Kilo, Windsurf, Amp, Factory Droid, OpenRouter, Kimi/Moonshot, Warp — landed in small batches, each with fixture tests; "show in strip" ordering + wrapping usage grid past 2-3 tiles | L (batched) |
+| U-F | Roster wave 2 (one descriptor each, CodexBar-adapted): Copilot, Gemini CLI, Antigravity, Grok Build, Kilo, Windsurf, Amp, Factory Droid, OpenRouter, Kimi/Moonshot, Warp, Qwen (Alibaba plans), Qoder — landed in small batches, each with fixture tests; "show in strip" ordering + wrapping usage grid past 2-3 tiles | L (batched) |
 
 Gates per stage: the standard six (build 0 warnings, both test modes,
 format lint, staged-app launch, screenshot pass for UI stages) plus, for
