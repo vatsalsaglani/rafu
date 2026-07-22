@@ -7,6 +7,7 @@ struct RafuSettingsView: View {
     @AppStorage("showsProcessMemory") private var showsProcessMemory = false
     @AppStorage("terminalAttentionSurface") private var terminalAttentionSurface =
         TerminalAttentionSurface.both.rawValue
+    @AppStorage(NotchCompanionPreferenceStore.defaultsKey) private var notchCompanionEnabled = true
     @Environment(\.colorScheme) private var systemScheme
 
     var body: some View {
@@ -36,6 +37,13 @@ struct RafuSettingsView: View {
                         .help(
                             "Where to surface a background terminal session that bells (e.g. an agent CLI finishing or needing input): a system notification, a HUD below the notch, both, or neither. Replies you type are sent to that terminal. macOS will ask to allow notifications the first time a notification would post."
                         )
+                        Toggle("Show notch companion", isOn: $notchCompanionEnabled)
+                            .help(
+                                "A persistent strip hugging the notch on notched Macs, showing your open editor windows and whether any agent needs attention. Displays without a notch never show this strip; the attention HUD still appears there on demand when a terminal session needs you."
+                            )
+                            .onChange(of: notchCompanionEnabled) { _, _ in
+                                NotchCompanionModel.shared.activateIfEnabled()
+                            }
                     }
                 }
                 .formStyle(.grouped)

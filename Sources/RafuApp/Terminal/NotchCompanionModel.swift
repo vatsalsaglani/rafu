@@ -231,7 +231,7 @@ final class NotchCompanionModel: NSObject {
     /// happens only at the points that actually present something on
     /// screen (`presentPanel`, opening the peek panel) — see
     /// `refreshTheme()`'s doc comment.
-    func refreshEditorRows() {
+    func refreshEditorRows(animated: Bool = false) {
         entries.removeAll { $0.session == nil }
         let inputs = entries.compactMap { entry -> CompanionEditorInput? in
             guard let session = entry.session else { return nil }
@@ -240,7 +240,7 @@ final class NotchCompanionModel: NSObject {
         }
         editorRows = CompanionEditorRow.editorRows(from: inputs)
         attentionCount = editorRows.reduce(0) { $0 + $1.attentionCount }
-        reposition()
+        reposition(animated: animated)
     }
 
     /// The testable seam (terminal-notch-hud.md NC-B): pure given a
@@ -498,21 +498,37 @@ final class NotchCompanionModel: NSObject {
     /// `restingStripFrame` with the notch click-through; peeking/pinned
     /// grows downward to `peekPanelFrame`, matching content height, with the
     /// whole panel interactive (no click-through while open).
-    private func reposition() {
+    ///
+    /// `animated` (terminal-notch-hud.md NC-E, "Peek": "Spring expand,
+    /// cross-fade under Reduce Motion"): `true` only at the two hover-state
+    /// TRANSITION call sites (`dwellTimerFired()`/`clicked()` opening,
+    /// `graceTimerFired()`/`escapePressed()` collapsing) — every other call
+    /// site (register/unregister, feed push/clear, screen-parameter
+    /// changes) is a passive content/geometry refresh of whatever state is
+    /// already showing and stays instant, matching
+    /// `NotchHUDController.reposition(animated:)`'s own `animated: false` at
+    /// its passive call site. `NSWorkspace.shared
+    /// .accessibilityDisplayShouldReduceMotion` is the same AppKit-level
+    /// signal `NotchHUDController` already reads (not the SwiftUI
+    /// `\.accessibilityReduceMotion` environment key, which has no
+    /// environment to live in for a window-frame resize happening outside
+    /// any view's `body`).
+    private func reposition(animated: Bool = false) {
         guard let panel, let metrics = NotchScreenAdapter.currentMetrics() else { return }
         bandInset = NotchHUDGeometry.bandInset(for: metrics)
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         switch hoverState {
         case .resting:
             guard let frame = NotchCompanionGeometry.restingStripFrame(for: metrics) else {
                 teardown()
                 return
             }
-            panel.setFrame(frame, display: true)
+            panel.setFrame(frame, display: true, animate: animated && !reduceMotion)
             panel.clickThroughRegions = NotchCompanionGeometry.clickThroughRegions(for: metrics)
         case .peeking, .pinned:
             let frame = NotchCompanionGeometry.peekPanelFrame(
                 for: metrics, contentHeight: peekContentHeight())
-            panel.setFrame(frame, display: true)
+            panel.setFrame(frame, display: true, animate: animated && !reduceMotion)
             panel.clickThroughRegions = []
         }
     }
@@ -583,7 +599,7 @@ final class NotchCompanionModel: NSObject {
         guard next != hoverState else { return }
         hoverState = next
         refreshTheme()
-        refreshEditorRows()
+        refreshEditorRows(animated: true)
         refreshUsage()
     }
 
@@ -592,7 +608,7 @@ final class NotchCompanionModel: NSObject {
         let next = CompanionHoverPolicy.onHoverExitAfterGrace(hoverState)
         guard next != hoverState else { return }
         hoverState = next
-        reposition()
+        reposition(animated: true)
     }
 
     /// A click on a wing: pins open (or, already pinned, toggles back to a
@@ -603,7 +619,7 @@ final class NotchCompanionModel: NSObject {
         cancelTimers()
         hoverState = CompanionHoverPolicy.onClick(hoverState)
         refreshTheme()
-        refreshEditorRows()
+        refreshEditorRows(animated: true)
         refreshUsage()
         if hoverState == .pinned {
             startUsageTimerIfNeeded()
@@ -623,7 +639,7 @@ final class NotchCompanionModel: NSObject {
         let next = CompanionHoverPolicy.onEscape(hoverState)
         guard next != hoverState else { return }
         hoverState = next
-        reposition()
+        reposition(animated: true)
     }
 
     private func cancelTimers() {

@@ -139,11 +139,17 @@ struct CompanionWingsView: View {
         .padding(.trailing, RafuMetrics.space2)
     }
 
+    /// "Rafu — N editors open" / "..., N terminals needing attention"
+    /// (terminal-notch-hud.md NC-E) — prefixed with the app name because
+    /// this element has no window title or menu-bar icon a VoiceOver user
+    /// could otherwise anchor it to.
     private var summaryLabel: String {
         let count = model.editorRows.count
-        let editors = "\(count) open editor\(count == 1 ? "" : "s")"
-        guard model.attentionCount > 0 else { return editors }
-        return "\(editors), \(model.attentionCount) needing attention"
+        let editors = "\(count) editor\(count == 1 ? "" : "s") open"
+        guard model.attentionCount > 0 else { return "Rafu — \(editors)" }
+        let attention = model.attentionCount
+        return
+            "Rafu — \(editors), \(attention) terminal\(attention == 1 ? "" : "s") needing attention"
     }
 }
 
@@ -389,9 +395,13 @@ private struct CompanionFeedCardView: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: RafuMetrics.space2) {
+            // Decorative — the bell/attention state is spoken through
+            // `accessibilityLabel` below, not this glyph (VoiceOver: "name +
+            // editor + 'needs attention'", terminal-notch-hud.md NC-E).
             Image(systemName: TerminalSessionPresentation.symbol(.bell))
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(theme.palette.accent)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.title)
                     .font(.system(size: 12, weight: .semibold))
@@ -402,6 +412,8 @@ private struct CompanionFeedCardView: View {
                     .foregroundStyle(theme.palette.textMuted)
                     .lineLimit(1)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(item.title), \(item.editorName), needs attention")
             Spacer(minLength: RafuMetrics.space2)
             Text(item.timestamp, style: .relative)
                 .font(.system(size: 10))
