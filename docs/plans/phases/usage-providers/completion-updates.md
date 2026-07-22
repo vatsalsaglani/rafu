@@ -261,24 +261,25 @@ for `UsageStoreTests`. W8's implementation was complete but uncommitted in its
 worktree (the agent correctly refused to commit a red branch); the coordinator
 committed its three owned files after the shared test was fixed, then merged.
 
-### Coordinator follow-ups still OPEN (not owned by any provider phase)
+### Coordinator input follow-ups implemented (2026-07-23)
 
-These were intentionally left untouched by W6/W7/W8 and are required to make
-the cookie providers actually functional end-to-end:
+These were intentionally left untouched by W6/W7/W8 and were completed
+together on `main` as one credential-handling follow-up:
 
 1. **Production `cookieHeader` wiring.** `UsageRegistryReader`'s production
-   context still supplies `cookieHeader: { _ in nil }` (W0). Every cookie
-   strategy (Grok, Kilo, Factory, Qoder, Qwen-cookie, W6/W7 cookie paths) is
-   ready to consume W1's `CookieHeaderCache` but reads nil until this one-line
-   wiring lands: `cookieHeader: { CookieHeaderCache.shared.header(for: $0) }`.
-2. **Settings cookie-import UI + credential entry.** The Usage tab still lacks
-   the per-provider "Import from browser" action (W1's importer), the API-key
-   entry fields (Cline/OpenRouter/Qwen/Amp/Warp/Factory), and the Claude/Codex
-   "Connect" consent buttons — the fourth registration-row pattern from the
-   parent plan. Until then, network/cookie providers have no way to be
-   populated from the UI.
-3. **GUI verification pass** of the multi-provider notch grid + Usage tab with
-   real credentials (coordinator, on main).
+   context now supplies
+   `cookieHeader: { CookieHeaderCache.shared.header(for: $0) }`, so periodic
+   refreshes consume only Rafu's minimized cache and never browser stores.
+2. **Settings cookie-import UI + credential entry.** The Usage tab now has
+   masked Keychain-backed Save/Test/Remove controls for Amp, Cline, Kilo Code,
+   OpenRouter, Qwen, and Warp; plus a browser picker and explicit
+   Import/Remove flow for Factory Droid, Grok Build, and Qoder. Safari's typed
+   Full Disk Access failure renders inline guidance. Claude/Codex Connect was
+   already present from W2.
+3. **Verification.** Fixture-only coverage proves the input state transitions,
+   bounded provider cookie requests, and reader composition without touching
+   a real browser, Keychain, credential, or network. Full test and staged-app
+   results are recorded in the implementation handoff.
 
 ### Note: pre-existing flaky test (unrelated to usage)
 

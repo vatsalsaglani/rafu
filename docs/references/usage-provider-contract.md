@@ -4,8 +4,8 @@
   `UsageSupport.swift`, `UsageSQLite.swift`, `UsageStores.swift`,
   `UsageProviderRegistry.swift`, `UsageRegistryReader.swift`,
   `Sources/RafuApp/Usage/Providers/*Provider.swift`)
-- Last verified: Swift 6.2, macOS 26, 2026-07-22 (W0 shim,
-  branch `usage/w0`, 1096 tests)
+- Last verified: Swift 6.2, macOS 26, 2026-07-23 (provider-input
+  completion follow-up)
 
 ## Rule or observed behavior
 
@@ -61,33 +61,62 @@
    cookie gating must live inside each strategy's `isAvailable`, never in
    whether the strategy is included in the returned array.
 
+6. **Settings keeps secret values out of observable state.** API-key text is
+   owned only by the row's masked `SecureField`. `UsageSettingsModel` stores
+   redacted presence/operation states, while an injected
+   `UsageProviderInputClient` moves the value directly into
+   `UsageCredentialStore` and the one-shot test fetch. Keys are trimmed,
+   bounded to 16 KiB, and rejected if they contain control characters before
+   either Keychain persistence or HTTP-header use.
+
+7. **A browser importer is one-shot user intent.** Construct
+   `BrowserCookieImporter.userInitiated()` inside each Import button action;
+   never retain one importer for retries. Its authorization can be claimed
+   once, and a fresh value ensures every retry comes from a fresh explicit
+   click. Settings consumes `importCookieHeaderOutcome` so Safari's typed
+   Full Disk Access failure stays actionable, then stores only a minimized
+   provider-scoped header through `CookieHeaderCache`.
+
+8. **Import and refresh are deliberately separate.** Settings is the only
+   browser-read path. Periodic usage refreshes call only
+   `CookieHeaderCache.shared.header(for:)` through the production
+   `UsageFetchContext.cookieHeader` closure; they never touch browser stores,
+   prompt for Chromium Safe Storage, or request Safari access.
+
 ## Why it matters
 
 These are the seams every downstream usage-provider phase (W1–W8) writes
 against without being able to see W0's internals; getting any of them
 wrong either traps at runtime (main-actor isolation), leaks a secret into
 a log, corrupts/writes into a file that isn't Rafu's, or silently locks a
-user out of enabling a provider in Settings.
+user out of enabling a provider in Settings. The input rules also prevent a
+background refresh from becoming a surprise browser/Keychain consent action
+and prevent secrets from lingering in model diagnostics.
 
 ## Reproduction or evidence
 
-W0 implementation (`usage/w0` branch, 4 commits): `swift test` and
-`swift test --no-parallel` both green (1096 tests), 0 warnings, lint
-clean, advisor read-only review: SAFE TO MERGE, no P0 findings. See
-`docs/plans/phases/usage-providers/W0-shim.md` "Handoff to W1–W8" for
-the full symbol inventory these rules attach to.
+W0 established rules 1–5. The 2026-07-23 provider-input follow-up added
+fixture-only Settings tests covering the exact six API-key rows, three
+cookie-import rows, secret validation, save/test behavior, Safari Full Disk
+Access state, cookie removal, bounded import catalogs, and production-context
+cookie composition. No test touches a real browser, Keychain, or network.
 
 ## Verification
 
-`swift test` (targets `UsageCoreTests`, `UsageStoreTests`, and any
-provider-specific redaction/availability tests added by W1–W8) plus
-`swift test --no-parallel`; `./script/format.sh --lint`.
+`swift test` (including `UsageProviderInputTests`, `UsageCoreTests`,
+`UsageStoreTests`, and provider-specific redaction/availability tests) plus
+`swift test --no-parallel`; `./script/format.sh --lint`; and the canonical
+staged-app Settings launch pass for input-row layout and keyboard reachability.
 
 ## Related code, ADRs, and phases
 
 - `Sources/RafuApp/Usage/UsageProviderCore.swift`,
   `UsageSupport.swift`, `UsageSQLite.swift`, `UsageStores.swift`,
   `UsageProviderRegistry.swift`, `UsageRegistryReader.swift`
+- `Sources/RafuApp/Usage/UsageProviderInputs.swift`,
+  `Sources/RafuApp/Usage/Cookies/BrowserCookieImporter.swift`,
+  `Sources/RafuApp/Usage/Cookies/CookieHeaderCache.swift`,
+  `Sources/RafuApp/Settings/UsageSettingsTab.swift`
 - `docs/plans/phases/usage-providers/W0-shim.md` (contract + handoff),
   `W2-exact-percent-oauth.md` (first credentialed strategy, credential
   bridge landing point), `W3`–`W8` phase files (contract-rule callout)

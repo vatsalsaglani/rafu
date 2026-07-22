@@ -1,6 +1,7 @@
 # U — Agent usage providers (Cursor, Cline, OpenCode, exact Claude %)
 
-Status: planned (2026-07-22). Extends the shipped Notch Companion usage
+Status: implemented (2026-07-23), including the coordinator-owned Settings
+input and cookie-reader follow-up. Extends the shipped Notch Companion usage
 strip (terminal-notch-hud.md NC-D) from two hardcoded local parsers to a
 provider registry covering more agents and better data.
 
@@ -172,15 +173,35 @@ The resting strip NEVER shows usage — wings stay editors + attention
 The peek panel's usage area has two zones:
 
 1. **Front line** — up to 4 tiles the user picks and orders in Settings
-   ("Show in strip" toggle + order). Renders as the current single
-   muted line. Default: the auto-detected local providers (Claude,
-   Codex) in detection order.
+   ("Show in strip" toggle + order). Default: the auto-detected local
+   providers (Claude, Codex) in detection order.
 2. **Overflow** — every other enabled provider sits behind ONE
    disclosure line (`▸ 7 more providers`); expanding it (per-peek,
    never persisted) reveals a two-column compact grid inside the
    existing ScrollView — the 60% height cap + internal scroll already
    govern any tile count. `peekContentHeight()` gains a front-line term
    and, only while expanded, a grid-rows term.
+
+**Amended 2026-07-23: Per-row front-line layout supersedes single-line
+rendering.** The front line now renders as a SwiftUI `Grid` with one
+provider per row (up to 4 rows), aligned name column + windows column,
+monospaced 10.5pt. Each row has `.lineLimit(1)` and its own accessibility
+label via `UsageDisplayPolicy.plainText(tile)`. Rationale: a single line
+cannot hold 4 variable-width tiles without truncating percentages; the
+per-row design honors the user's 4-tile selection without ellipsis.
+
+**Window cap:** `UsageDisplayPolicy.tileWindowCap = 2` applies contextually.
+When 2+ providers are on the front line, each shows only its first 2 windows
+(via `frontLineWindowCap(providerCount:)` → nil for 1, 2 for 2+). A SOLE
+front-line provider (providerCount = 1) renders all its windows uncapped,
+keeping per-model detail visible (e.g. Claude's `Fable 7d 48%`). Overflow
+grid tiles always cap at 2 windows. Emphasis (≥80% accent-semibold,
+≥95% ⚠) applies to surviving windows only.
+
+**Height:** `NotchCompanionModel`'s single `usageFrontLineHeight = 24`
+replaced by per-row `usageFrontLineRowHeight = 16` + one-time
+`usageFrontLineTopPadding` (`RafuMetrics.space2`). `peekContentHeight()`
+widened from `private` to internal so tests can verify per-row growth.
 
 Tile anatomy (both zones): `Name · 5h 82% · 7d 41%` — primary window
 first, tabular numerals; cost-only providers render `Name · $41.20`.

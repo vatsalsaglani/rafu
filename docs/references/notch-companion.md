@@ -136,6 +136,24 @@ lossy for detached-HEAD/unborn-branch states). `searchQuery` is cleared on
 every collapse back to `.resting` — it is not persisted and does not
 survive a hide/show cycle.
 
+**10. Front-line usage rendering: per-row Grid layout with contextual
+window capping.** The peek panel's front-line usage area (up to 4
+user-ordered providers) renders as a SwiftUI `Grid`/`GridRow`, one provider
+per row, with aligned name and windows columns, monospaced 10.5pt.
+Each row has `.lineLimit(1)` and its own accessibility label. Window capping
+is contextual: `UsageDisplayPolicy.tileWindowCap = 2`, but
+`frontLineWindowCap(providerCount:)` returns `nil` (uncapped) when a sole
+provider occupies the front line, allowing per-model detail to show (e.g.
+Claude's `Fable 7d 48%`); for 2+ front-line providers, it returns `2`,
+truncating to first 2 windows per tile. Overflow grid tiles (behind the
+disclosure line) always cap at 2 windows. Emphasis (≥80% accent-semibold,
+≥95% ⚠ glyph) applies to surviving windows. Height layout uses
+`usageFrontLineRowHeight = 16` per row + one-time `usageFrontLineTopPadding`
+(RafuMetrics.space2), replacing the prior single-row `usageFrontLineHeight`.
+`peekContentHeight()` widened from `private` to internal visibility for test
+assertion of per-row growth (matches other internal pure derivations like
+`usageFrontLine`).
+
 ## Why it matters
 
 The companion is a persistent, always-on overlay near the menu bar; any
