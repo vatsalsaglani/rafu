@@ -62,6 +62,26 @@ struct RafuAppCommands: Commands {
                 .keyboardShortcut(.downArrow, modifiers: [.command, .option])
                 .disabled(workspaceSession?.selectedDocument == nil)
             Divider()
+            // Move/Duplicate Line deliberately carry NO `.keyboardShortcut`.
+            // Plain Option+Up/Down and Shift+Option+Up/Down are handled by
+            // `RafuTextView.keyDown(with:)` instead, scoped to the editor's
+            // first responder only — a SwiftUI key-equivalent here would
+            // hijack ordinary Option+arrow paragraph-navigation everywhere
+            // else (command palette, find bar, settings fields) and the
+            // embedded terminal. These items stay reachable via the menu and
+            // Full Keyboard Access.
+            Button("Move Line Up") { workspaceSession?.moveLineUp() }
+                .disabled(workspaceSession?.selectedDocument == nil)
+            Button("Move Line Down") { workspaceSession?.moveLineDown() }
+                .disabled(workspaceSession?.selectedDocument == nil)
+            Button("Duplicate Line Up") { workspaceSession?.duplicateLineUp() }
+                .disabled(workspaceSession?.selectedDocument == nil)
+            Button("Duplicate Line Down") { workspaceSession?.duplicateLineDown() }
+                .disabled(workspaceSession?.selectedDocument == nil)
+            Button("Delete Line") { workspaceSession?.deleteLine() }
+                .keyboardShortcut("k", modifiers: [.command, .shift])
+                .disabled(workspaceSession?.selectedDocument == nil)
+            Divider()
             Button("Find in File…") { workspaceSession?.showDocumentFind() }
                 .keyboardShortcut("f", modifiers: .command)
                 .disabled(workspaceSession?.selectedDocument == nil)
