@@ -174,6 +174,31 @@ func tabIndentExtendsWithTab() {
     #expect(insertion == "\n\t\t")
 }
 
+@Test(
+    """
+    Newline insertion on an empty line is always plain "\\n", even right \
+    after a brace — this is what keeps `CodeEditorView.Coordinator`'s \
+    auto-indent `shouldChangeTextIn` delegate from rewriting \
+    `LineManipulation.duplicateAbove(text:selection:)`'s insertion when the \
+    duplicated line is blank (that insertion is also exactly "\\n" and lands \
+    at the caret's exact current selection, so it takes the same code path \
+    a plain Return keypress would)
+    """
+)
+func newlineInsertionOnEmptyLineIsAlwaysPlain() {
+    // Caret on the empty line between "{" and "}".
+    let text = "if x {\n\n}"
+    let emptyLineStart = 7
+    #expect(
+        AutoIndenter.newlineInsertion(
+            forCaretAt: emptyLineStart, in: text, fileExtension: "swift") == "\n")
+    // Same for Python's ":" trigger.
+    let pythonText = "def run():\n\n    pass"
+    #expect(
+        AutoIndenter.newlineInsertion(forCaretAt: 11, in: pythonText, fileExtension: "py") == "\n"
+    )
+}
+
 @Test("Newline at file start and mid-line uses only the text before the caret")
 func newlineUsesTextBeforeCaret() {
     #expect(AutoIndenter.newlineInsertion(forCaretAt: 0, in: "", fileExtension: "swift") == "\n")
@@ -213,6 +238,222 @@ func unmatchedBrackets() {
 func bracketScanIsBounded() {
     let text = "(" + String(repeating: "x", count: BracketMatcher.scanLimit + 10) + ")"
     #expect(BracketMatcher.matchedRanges(in: text, caretLocation: 1) == nil)
+}
+
+// MARK: - LineManipulation
+
+@Test("Moving a middle line up swaps it with the preceding line")
+func moveUpSwapsMiddleLine() {
+    let text = "a\nb\nc\nd\n"
+    // Caret at the start of "c".
+    let edit = LineManipulation.moveUp(text: text, selection: NSRange(location: 4, length: 0))
+    #expect(edit != nil)
+    guard let edit else { return }
+    let ns = text as NSString
+    let result = ns.replacingCharacters(in: edit.replacementRange, with: edit.replacementText)
+    #expect(result == "a\nc\nb\nd\n")
+    #expect(edit.newSelection == NSRange(location: 2, length: 0))
+}
+
+@Test("Moving a middle line down swaps it with the following line")
+func moveDownSwapsMiddleLine() {
+    let text = "a\nb\nc\nd\n"
+    // Caret at the start of "b".
+    let edit = LineManipulation.moveDown(text: text, selection: NSRange(location: 2, length: 0))
+    #expect(edit != nil)
+    guard let edit else { return }
+    let ns = text as NSString
+    let result = ns.replacingCharacters(in: edit.replacementRange, with: edit.replacementText)
+    #expect(result == "a\nc\nb\nd\n")
+    #expect(edit.newSelection == NSRange(location: 4, length: 0))
+}
+
+@Test("Moving a multi-line selection block up carries the whole block")
+func moveUpMovesMultiLineBlock() {
+    let text = "a\nb\nc\nd\n"
+    // Selection covering "b\nc" (lines 2-3).
+    let edit = LineManipulation.moveUp(text: text, selection: NSRange(location: 2, length: 3))
+    #expect(edit != nil)
+    guard let edit else { return }
+    let ns = text as NSString
+    let result = ns.replacingCharacters(in: edit.replacementRange, with: edit.replacementText)
+    #expect(result == "b\nc\na\nd\n")
+}
+
+@Test("Moving the first line up is a no-op")
+func moveUpAtFirstLineIsNoOp() {
+    let text = "a\nb\nc\n"
+    #expect(LineManipulation.moveUp(text: text, selection: NSRange(location: 0, length: 0)) == nil)
+}
+
+@Test("Moving the last line down is a no-op")
+func moveDownAtLastLineIsNoOp() {
+    let text = "a\nb\nc\n"
+    // Caret on the trailing empty line after the final newline.
+    let length = (text as NSString).length
+    #expect(
+        LineManipulation.moveDown(text: text, selection: NSRange(location: length, length: 0))
+            == nil)
+}
+
+@Test("Moving the last line without a trailing newline up preserves EOF shape")
+func moveUpLastLineWithoutTrailingNewline() {
+    let text = "line1\nline2\nline3"
+    let ns = text as NSString
+    let selection = NSRange(location: ns.length, length: 0)
+    let edit = LineManipulation.moveUp(text: text, selection: selection)
+    #expect(edit != nil)
+    guard let edit else { return }
+    let result = ns.replacingCharacters(in: edit.replacementRange, with: edit.replacementText)
+    #expect(result == "line1\nline3\nline2")
+    #expect(!result.hasSuffix("\n"))
+}
+
+@Test("Moving a line down into the last, trailing-newline-free position preserves EOF shape")
+func moveDownIntoLastLineWithoutTrailingNewline() {
+    let text = "a\nb\nc"
+    // Caret at the start of "b".
+    let edit = LineManipulation.moveDown(text: text, selection: NSRange(location: 2, length: 0))
+    #expect(edit != nil)
+    guard let edit else { return }
+    let ns = text as NSString
+    let result = ns.replacingCharacters(in: edit.replacementRange, with: edit.replacementText)
+    #expect(result == "a\nc\nb")
+    #expect(!result.hasSuffix("\n"))
+}
+
+@Test("Duplicate above inserts an identical copy before the block")
+func duplicateAboveInMiddle() {
+    let text = "a\nb\nc\n"
+    let edit = LineManipulation.duplicateAbove(
+        text: text, selection: NSRange(location: 2, length: 0))
+    #expect(edit != nil)
+    guard let edit else { return }
+    let ns = text as NSString
+    let result = ns.replacingCharacters(in: edit.replacementRange, with: edit.replacementText)
+    #expect(result == "a\nb\nb\nc\n")
+}
+
+@Test("Duplicate above at end of file with no trailing newline adds one between copies")
+func duplicateAboveAtEOFWithoutTrailingNewline() {
+    let text = "abc"
+    let ns = text as NSString
+    let edit = LineManipulation.duplicateAbove(
+        text: text, selection: NSRange(location: ns.length, length: 0))
+    #expect(edit != nil)
+    guard let edit else { return }
+    let result = ns.replacingCharacters(in: edit.replacementRange, with: edit.replacementText)
+    #expect(result == "abc\nabc")
+}
+
+@Test("Duplicate below inserts an identical copy after the block and moves selection into it")
+func duplicateBelowInMiddle() {
+    let text = "a\nb\nc\n"
+    let edit = LineManipulation.duplicateBelow(
+        text: text, selection: NSRange(location: 2, length: 0))
+    #expect(edit != nil)
+    guard let edit else { return }
+    let ns = text as NSString
+    let result = ns.replacingCharacters(in: edit.replacementRange, with: edit.replacementText)
+    #expect(result == "a\nb\nb\nc\n")
+    #expect(edit.newSelection == NSRange(location: 4, length: 0))
+}
+
+@Test("Duplicate below at end of file with no trailing newline inserts a separating newline")
+func duplicateBelowAtEOFWithoutTrailingNewline() {
+    let text = "abc"
+    let edit = LineManipulation.duplicateBelow(
+        text: text, selection: NSRange(location: 1, length: 0))
+    #expect(edit != nil)
+    guard let edit else { return }
+    let ns = text as NSString
+    let result = ns.replacingCharacters(in: edit.replacementRange, with: edit.replacementText)
+    #expect(result == "abc\nabc")
+    #expect(edit.newSelection == NSRange(location: 5, length: 0))
+}
+
+@Test("Deleting a middle line removes it and preserves the caret column")
+func deleteMiddleLine() {
+    let text = "a\nbb\nc\n"
+    // Caret at column 1 on "bb".
+    let edit = LineManipulation.deleteLines(text: text, selection: NSRange(location: 3, length: 0))
+    #expect(edit != nil)
+    guard let edit else { return }
+    let ns = text as NSString
+    let result = ns.replacingCharacters(in: edit.replacementRange, with: edit.replacementText)
+    #expect(result == "a\nc\n")
+    // "c" (1 character) is shorter than the deleted line's column (1, from
+    // "bb"), so the caret clamps to just past "c" rather than overshooting.
+    #expect(edit.newSelection == NSRange(location: 3, length: 0))
+}
+
+@Test("Deleting the last line without a trailing newline leaves no blank tail")
+func deleteLastLineWithoutTrailingNewline() {
+    let text = "a\nb\nc"
+    let ns = text as NSString
+    let edit = LineManipulation.deleteLines(
+        text: text, selection: NSRange(location: ns.length, length: 0))
+    #expect(edit != nil)
+    guard let edit else { return }
+    let result = ns.replacingCharacters(in: edit.replacementRange, with: edit.replacementText)
+    #expect(result == "a\nb")
+    #expect(!result.hasSuffix("\n"))
+    #expect(edit.newSelection == NSRange(location: 3, length: 0))
+}
+
+@Test("Deleting the only line clears the document")
+func deleteOnlyLine() {
+    let text = "solo"
+    let edit = LineManipulation.deleteLines(text: text, selection: NSRange(location: 2, length: 0))
+    #expect(edit != nil)
+    guard let edit else { return }
+    let ns = text as NSString
+    let result = ns.replacingCharacters(in: edit.replacementRange, with: edit.replacementText)
+    #expect(result.isEmpty)
+    #expect(edit.newSelection == NSRange(location: 0, length: 0))
+}
+
+@Test("Every LineManipulation transform no-ops on an empty document")
+func lineManipulationGuardsEmptyDocument() {
+    let empty = ""
+    let selection = NSRange(location: 0, length: 0)
+    #expect(LineManipulation.moveUp(text: empty, selection: selection) == nil)
+    #expect(LineManipulation.moveDown(text: empty, selection: selection) == nil)
+    #expect(LineManipulation.duplicateAbove(text: empty, selection: selection) == nil)
+    #expect(LineManipulation.duplicateBelow(text: empty, selection: selection) == nil)
+    #expect(LineManipulation.deleteLines(text: empty, selection: selection) == nil)
+}
+
+@Test("CRLF line endings round-trip without corruption across move/duplicate/delete")
+func lineManipulationHandlesCRLF() {
+    let text = "a\r\nb\r\nc\r\n"
+    let ns = text as NSString
+
+    // Caret on "b" (line 2); moving up swaps it with "a".
+    let moved = LineManipulation.moveUp(text: text, selection: NSRange(location: 3, length: 0))
+    #expect(moved != nil)
+    if let moved {
+        let result = ns.replacingCharacters(in: moved.replacementRange, with: moved.replacementText)
+        #expect(result == "b\r\na\r\nc\r\n")
+    }
+
+    let duplicated = LineManipulation.duplicateBelow(
+        text: text, selection: NSRange(location: 0, length: 0))
+    #expect(duplicated != nil)
+    if let duplicated {
+        let result = ns.replacingCharacters(
+            in: duplicated.replacementRange, with: duplicated.replacementText)
+        #expect(result == "a\r\na\r\nb\r\nc\r\n")
+    }
+
+    let deleted = LineManipulation.deleteLines(
+        text: text, selection: NSRange(location: 3, length: 0))
+    #expect(deleted != nil)
+    if let deleted {
+        let result = ns.replacingCharacters(
+            in: deleted.replacementRange, with: deleted.replacementText)
+        #expect(result == "a\r\nc\r\n")
+    }
 }
 
 // MARK: - Editor decoration views

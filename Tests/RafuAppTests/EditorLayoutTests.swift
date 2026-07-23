@@ -27,6 +27,94 @@ func editorLayoutRestorationRoundTrip() throws {
     #expect(restored.groupIDs == [initialGroup.id, newGroupID])
 }
 
+@Test("EditorGroupState.move reorders forward, backward, clamps out-of-range, and no-ops in place")
+func editorGroupStateMoveReordersAndClamps() throws {
+    let tabs = (0..<4).map {
+        EditorTabState(resource: .file(URL(fileURLWithPath: "/tmp/\($0).swift")))
+    }
+    let ids = tabs.map(\.id)
+
+    // Moving forward (i < j): A (0) to insertion index 2 (between B and C)
+    // lands it immediately after B — the central off-by-one case, since
+    // removing A first shifts C's original index 2 down to 1.
+    var forward = EditorGroupState(tabs: tabs)
+    forward.move(ids[0], toInsertionIndex: 2)
+    #expect(forward.tabs.map(\.id) == [ids[1], ids[0], ids[2], ids[3]])
+
+    // Moving backward (i > j): D (3) to insertion index 1 (between A and B)
+    // lands it immediately after A.
+    var backward = EditorGroupState(tabs: tabs)
+    backward.move(ids[3], toInsertionIndex: 1)
+    #expect(backward.tabs.map(\.id) == [ids[0], ids[3], ids[1], ids[2]])
+
+    // i == j: dropping a tab back onto its own current slot is a no-op.
+    var sameIndex = EditorGroupState(tabs: tabs)
+    sameIndex.move(ids[1], toInsertionIndex: 1)
+    #expect(sameIndex.tabs.map(\.id) == ids)
+
+    // Dropping a tab immediately after itself is ALSO a no-op — the
+    // off-by-one correction must treat index == currentIndex + 1 the same
+    // as index == currentIndex.
+    var justAfterSelf = EditorGroupState(tabs: tabs)
+    justAfterSelf.move(ids[1], toInsertionIndex: 2)
+    #expect(justAfterSelf.tabs.map(\.id) == ids)
+
+    // Out-of-range requests clamp instead of crashing: a negative request
+    // clamps to the front, an overshoot clamps to the end.
+    var clampedFront = EditorGroupState(tabs: tabs)
+    clampedFront.move(ids[3], toInsertionIndex: -5)
+    #expect(clampedFront.tabs.map(\.id) == [ids[3], ids[0], ids[1], ids[2]])
+
+    var clampedEnd = EditorGroupState(tabs: tabs)
+    clampedEnd.move(ids[0], toInsertionIndex: 999)
+    #expect(clampedEnd.tabs.map(\.id) == [ids[1], ids[2], ids[3], ids[0]])
+
+    // An unknown tab ID is a no-op.
+    var unknown = EditorGroupState(tabs: tabs)
+    unknown.move(EditorTabID(), toInsertionIndex: 0)
+    #expect(unknown.tabs.map(\.id) == ids)
+}
+
+@Test("EditorGroupState.move never changes selection, even for the moved tab")
+func editorGroupStateMovePreservesSelection() {
+    let tabs = (0..<3).map {
+        EditorTabState(resource: .file(URL(fileURLWithPath: "/tmp/\($0).swift")))
+    }
+    var group = EditorGroupState(tabs: tabs, selectedTabID: tabs[0].id)
+    group.move(tabs[0].id, toInsertionIndex: 2)
+    #expect(group.selectedTabID == tabs[0].id)
+}
+
+@Test("EditorLayoutState.reorderTab is a no-op for an unknown tab, group, or non-member tab")
+func editorLayoutStateReorderTabRejectsInvalidRequests() throws {
+    let tabA = EditorTabState(resource: .file(URL(fileURLWithPath: "/tmp/a.swift")))
+    let tabB = EditorTabState(resource: .file(URL(fileURLWithPath: "/tmp/b.swift")))
+    let groupA = EditorGroupState(tabs: [tabA])
+    let groupB = EditorGroupState(tabs: [tabB])
+    var layout = EditorLayoutState(
+        root: .split(
+            id: EditorSplitID(), axis: .horizontal, fraction: 0.5,
+            first: .group(groupA), second: .group(groupB)),
+        focusedGroupID: groupA.id
+    )
+
+    // Unknown group.
+    let unknownGroupResult = layout.reorderTab(tabA.id, in: EditorGroupID(), toInsertionIndex: 0)
+    #expect(!unknownGroupResult)
+    // Unknown tab.
+    let unknownTabResult = layout.reorderTab(EditorTabID(), in: groupA.id, toInsertionIndex: 0)
+    #expect(!unknownTabResult)
+    // Tab exists but is not a member of the named group.
+    let nonMemberResult = layout.reorderTab(tabB.id, in: groupA.id, toInsertionIndex: 0)
+    #expect(!nonMemberResult)
+    // A same-slot request resolves to no actual change.
+    let sameSlotResult = layout.reorderTab(tabA.id, in: groupA.id, toInsertionIndex: 0)
+    #expect(!sameSlotResult)
+
+    #expect(layout.group(id: groupA.id)?.tabs.map(\.id) == [tabA.id])
+    #expect(layout.group(id: groupB.id)?.tabs.map(\.id) == [tabB.id])
+}
+
 @Test("Moving the last tab out of a group collapses its redundant split")
 func movingLastTabCollapsesSourceGroup() throws {
     let firstTab = EditorTabState(resource: .file(URL(fileURLWithPath: "/tmp/first.swift")))
