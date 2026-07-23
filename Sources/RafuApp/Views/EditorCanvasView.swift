@@ -100,112 +100,126 @@ private struct EditorGroupView: View {
     @Bindable var session: WorkspaceSession
 
     var body: some View {
-        GeometryReader { proxy in
-            VStack(spacing: 0) {
-                EditorGroupTabBar(group: group, session: session)
-                Divider()
-                if let document = selectedDocument {
-                    EditorBreadcrumbView(session: session, document: document)
-                }
-                if isFindPresented, let document = selectedDocument {
-                    DocumentFindBar(
-                        state: session.findState(for: document),
-                        showsReplace: $session.isDocumentReplacePresented,
-                        close: session.dismissDocumentFind
-                    )
-                    Divider()
-                }
-                if let terminalController = selectedTerminalController {
-                    // Issue #4: a terminal tab's content replaces the
-                    // document ZStack entirely while selected — only one
-                    // terminal is ever mounted at a time per group, since
-                    // `WorkspaceTerminalController.makeOrReuseView` reuses
-                    // the same live `LocalProcessTerminalView` (and its
-                    // scrollback) across remounts, unlike a document's
-                    // bounded-working-set hibernation.
-                    EditorTerminalTabContent(controller: terminalController)
-                } else if loadedDocuments.isEmpty {
-                    ContentUnavailableView(
-                        "Empty Editor Group",
-                        systemImage: "rectangle.split.2x1",
-                        description: Text("Drag a tab here or open a file from the sidebar.")
-                    )
-                } else {
-                    // The bounded working set: every LOADED document in this
-                    // group stays mounted so TextKit keeps owning its live
-                    // text (dirty non-visible buffers included — the
-                    // data-safety invariant). Only the selected editor is
-                    // visible and interactive; the rest are inert (invisible,
-                    // no hit testing, no first-responder path, accessibility
-                    // hidden, no drop forwarding) but mounted. Hibernated
-                    // documents are omitted entirely and remount from disk on
-                    // reselection.
-                    ZStack {
-                        ForEach(loadedDocuments) { document in
-                            let isActive = document.id == selectedDocument?.id
-                            EditorDocumentView(
-                                document: document,
-                                findState: session.findState(for: document),
-                                gitLineChangesProvider: { [weak session, weak document] in
-                                    guard let session, let document else { return nil }
-                                    return await session.gutterLineChanges(for: document)
-                                },
-                                requestGitRefresh: { [weak session] in
-                                    guard let session else { return }
-                                    Task { await session.refreshGit() }
-                                },
-                                dropForwarding: isActive ? dropForwarding : nil,
-                                navigate: { [weak session] kind in
-                                    session?.navigate(kind: kind)
-                                },
-                                hover: { [weak session, weak document] offset in
-                                    guard let session, let document else { return nil }
-                                    return await session.hoverInfo(
-                                        at: document.url, utf16Offset: offset)
-                                },
-                                inlineBlameEnabled: session.isInlineBlameEnabled,
-                                inlineBlameProvider: { [weak session, weak document] in
-                                    guard let session, let document else { return nil }
-                                    return await session.inlineBlame(for: document)
-                                },
-                                fileBlameAnnotationsEnabled: session.isFileBlameAnnotationsEnabled,
-                                fileBlameAnnotationsProvider: { [weak session, weak document] in
-                                    guard let session, let document else { return nil }
-                                    return await session.fileBlameAnnotations(for: document)
-                                },
-                                aiCompletionEnabled: session.isAICompletionEnabled,
-                                aiCompletionProvider: {
-                                    [weak session, weak document] prefix, suffix in
-                                    guard let session, let document else { return nil }
-                                    return await session.inlineCompletion(
-                                        prefix: prefix, suffix: suffix,
-                                        fileName: document.displayName)
-                                },
-                                gitPeekActions: gitPeekActions(for: document)
-                            )
-                            .id(document.id)
-                            .opacity(isActive ? 1 : 0)
-                            .allowsHitTesting(isActive)
-                            .accessibilityHidden(!isActive)
+        VStack(spacing: 0) {
+            // The tab strip owns its own drop target
+            // (`TabStripReorderDropDelegate`, wired up inside
+            // `EditorGroupTabBar` below), and the group's own split/move
+            // `.onDrop` — attached further down, only to the body BELOW this
+            // tab bar — deliberately excludes the tab bar's frame. Before
+            // this split, a single group-wide `.onDrop` covered the tab bar
+            // too, and its edge-band geometry always classified any point
+            // within the tab bar's height as the "top" split edge, so every
+            // tab-bar drop resolved as a top split instead of a reorder.
+            EditorGroupTabBar(group: group, session: session)
+            Divider()
+            GeometryReader { proxy in
+                VStack(spacing: 0) {
+                    if let document = selectedDocument {
+                        EditorBreadcrumbView(session: session, document: document)
+                    }
+                    if isFindPresented, let document = selectedDocument {
+                        DocumentFindBar(
+                            state: session.findState(for: document),
+                            showsReplace: $session.isDocumentReplacePresented,
+                            close: session.dismissDocumentFind
+                        )
+                        Divider()
+                    }
+                    if let terminalController = selectedTerminalController {
+                        // Issue #4: a terminal tab's content replaces the
+                        // document ZStack entirely while selected — only one
+                        // terminal is ever mounted at a time per group, since
+                        // `WorkspaceTerminalController.makeOrReuseView` reuses
+                        // the same live `LocalProcessTerminalView` (and its
+                        // scrollback) across remounts, unlike a document's
+                        // bounded-working-set hibernation.
+                        EditorTerminalTabContent(controller: terminalController)
+                    } else if loadedDocuments.isEmpty {
+                        ContentUnavailableView(
+                            "Empty Editor Group",
+                            systemImage: "rectangle.split.2x1",
+                            description: Text("Drag a tab here or open a file from the sidebar.")
+                        )
+                    } else {
+                        // The bounded working set: every LOADED document in
+                        // this group stays mounted so TextKit keeps owning
+                        // its live text (dirty non-visible buffers included —
+                        // the data-safety invariant). Only the selected
+                        // editor is visible and interactive; the rest are
+                        // inert (invisible, no hit testing, no
+                        // first-responder path, accessibility hidden, no drop
+                        // forwarding) but mounted. Hibernated documents are
+                        // omitted entirely and remount from disk on
+                        // reselection.
+                        ZStack {
+                            ForEach(loadedDocuments) { document in
+                                let isActive = document.id == selectedDocument?.id
+                                EditorDocumentView(
+                                    document: document,
+                                    findState: session.findState(for: document),
+                                    gitLineChangesProvider: { [weak session, weak document] in
+                                        guard let session, let document else { return nil }
+                                        return await session.gutterLineChanges(for: document)
+                                    },
+                                    requestGitRefresh: { [weak session] in
+                                        guard let session else { return }
+                                        Task { await session.refreshGit() }
+                                    },
+                                    dropForwarding: isActive ? dropForwarding : nil,
+                                    navigate: { [weak session] kind in
+                                        session?.navigate(kind: kind)
+                                    },
+                                    hover: { [weak session, weak document] offset in
+                                        guard let session, let document else { return nil }
+                                        return await session.hoverInfo(
+                                            at: document.url, utf16Offset: offset)
+                                    },
+                                    inlineBlameEnabled: session.isInlineBlameEnabled,
+                                    inlineBlameProvider: { [weak session, weak document] in
+                                        guard let session, let document else { return nil }
+                                        return await session.inlineBlame(for: document)
+                                    },
+                                    fileBlameAnnotationsEnabled: session
+                                        .isFileBlameAnnotationsEnabled,
+                                    fileBlameAnnotationsProvider: {
+                                        [weak session, weak document] in
+                                        guard let session, let document else { return nil }
+                                        return await session.fileBlameAnnotations(for: document)
+                                    },
+                                    aiCompletionEnabled: session.isAICompletionEnabled,
+                                    aiCompletionProvider: {
+                                        [weak session, weak document] prefix, suffix in
+                                        guard let session, let document else { return nil }
+                                        return await session.inlineCompletion(
+                                            prefix: prefix, suffix: suffix,
+                                            fileName: document.displayName)
+                                    },
+                                    gitPeekActions: gitPeekActions(for: document)
+                                )
+                                .id(document.id)
+                                .opacity(isActive ? 1 : 0)
+                                .allowsHitTesting(isActive)
+                                .accessibilityHidden(!isActive)
+                            }
                         }
                     }
                 }
-            }
-            .overlay {
-                if isDropTargeted {
-                    EditorSplitPreviewOverlay(edge: hoveredDropEdge)
+                .overlay {
+                    if isDropTargeted {
+                        EditorSplitPreviewOverlay(edge: hoveredDropEdge)
+                    }
                 }
-            }
-            .onDrop(
-                of: [.rafuEditorDrag],
-                delegate: EditorDropDelegate(
-                    groupID: group.id,
-                    size: proxy.size,
-                    hoveredEdge: $hoveredDropEdge,
-                    isTargeted: $isDropTargeted,
-                    session: session
+                .onDrop(
+                    of: [.rafuEditorDrag],
+                    delegate: EditorDropDelegate(
+                        groupID: group.id,
+                        size: proxy.size,
+                        hoveredEdge: $hoveredDropEdge,
+                        isTargeted: $isDropTargeted,
+                        session: session
+                    )
                 )
-            )
+            }
         }
     }
 
@@ -313,6 +327,14 @@ private struct EditorGroupView: View {
                     session.handleEditorFileDrop(path: path, on: group.id, edge: edge)
                 }
                 return true
+            },
+            performFiles: { location, size, paths in
+                guard !paths.isEmpty else { return false }
+                let edge = EditorDropGeometry.target(at: location, in: size)
+                isDropTargeted = false
+                hoveredDropEdge = nil
+                session.handleEditorFileDrops(paths: paths, on: group.id, edge: edge)
+                return true
             }
         )
     }
@@ -413,6 +435,110 @@ private struct EditorDropDelegate: DropDelegate {
         case .file(let path):
             session.handleEditorFileDrop(path: path, on: groupID, edge: edge)
         }
+    }
+}
+
+/// Accumulates every visible tab row's frame (in `EditorGroupTabBar`'s named
+/// coordinate space) so the reorder drop delegate can turn a pointer
+/// x-coordinate into an insertion index. Last-write-wins on a colliding key
+/// is fine here — a given `EditorTabID` only ever contributes one frame per
+/// layout pass.
+private struct TabStripFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [EditorTabID: CGRect] = [:]
+
+    static func reduce(value: inout [EditorTabID: CGRect], nextValue: () -> [EditorTabID: CGRect]) {
+        value.merge(nextValue()) { _, next in next }
+    }
+}
+
+/// The tab strip's own drop target: reorders a tab within `groupID` when
+/// dragged from this same strip, or moves it here at the hovered slot when
+/// dragged from a different group's strip. Scoped to `groupID` and layered
+/// on the tab strip itself so a drag never reaches the group's split/move
+/// delegate while hovering the strip (`EditorGroupView.body` scopes that
+/// delegate to the body below the tab bar for exactly this reason).
+///
+/// Registered for `.rafuEditorDrag` ONLY — never `.fileURL` — so a real
+/// Finder file dropped on the tab bar falls through untouched for whatever
+/// handles Finder-originated drops. A `.file` case of `.rafuEditorDrag`
+/// itself (the Files-navigator-to-editor payload) is also ignored here: the
+/// tab strip only reorders/relocates tabs, it does not open files in place.
+private struct TabStripReorderDropDelegate: DropDelegate {
+    let groupID: EditorGroupID
+    let orderedTabIDs: [EditorTabID]
+    let tabFrames: [EditorTabID: CGRect]
+    let reduceMotion: Bool
+    @Binding var hoveredInsertionIndex: Int?
+    let session: WorkspaceSession
+
+    func dropEntered(info: DropInfo) {
+        hoveredInsertionIndex = insertionIndex(for: info.location)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        let index = insertionIndex(for: info.location)
+        if index != hoveredInsertionIndex {
+            if reduceMotion {
+                hoveredInsertionIndex = index
+            } else {
+                withAnimation(.spring(duration: 0.22)) { hoveredInsertionIndex = index }
+            }
+        }
+        // Matches `EditorDropDelegate.dropUpdated`: `.copy` is the operation
+        // that reliably validates for an `.onDrag`-originated session on
+        // macOS. The underlying action is always a layout reorder/move,
+        // never a data copy.
+        return DropProposal(operation: .copy)
+    }
+
+    func dropExited(info: DropInfo) {
+        hoveredInsertionIndex = nil
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let index = insertionIndex(for: info.location)
+        hoveredInsertionIndex = nil
+
+        guard info.itemProviders(for: [.rafuEditorDrag]).first != nil else { return false }
+
+        // Same-process fast path, mirroring `EditorDropDelegate.performDrop`.
+        if let payload = session.activeEditorDrag {
+            session.clearEditorDrag()
+            guard case .tab(let value) = payload, let uuid = UUID(uuidString: value) else {
+                return false
+            }
+            session.reorderOrMoveEditorTab(
+                EditorTabID(rawValue: uuid), to: groupID, atInsertionIndex: index)
+            return true
+        }
+
+        // Cross-window fallback. `action` closes over only `session`,
+        // `groupID`, and the already-resolved `index` (never `self`, which
+        // isn't `Sendable`) — safe to hand to the off-actor load handler
+        // because it only ever runs after hopping back onto the main actor.
+        let action: @MainActor @Sendable (EditorDragPayload) -> Void = {
+            [session, groupID, index] payload in
+            session.clearEditorDrag()
+            guard case .tab(let value) = payload, let uuid = UUID(uuidString: value) else {
+                return
+            }
+            session.reorderOrMoveEditorTab(
+                EditorTabID(rawValue: uuid), to: groupID, atInsertionIndex: index)
+        }
+        let providers = info.itemProviders(for: [.rafuEditorDrag])
+        guard let provider = providers.first else { return false }
+        _ = provider.loadDataRepresentation(for: .rafuEditorDrag) { data, _ in
+            guard let data, let payload = try? EditorDragPayload(data: data) else { return }
+            Task { @MainActor in
+                action(payload)
+            }
+        }
+        return true
+    }
+
+    private func insertionIndex(for location: CGPoint) -> Int {
+        let frames = orderedTabIDs.compactMap { tabFrames[$0] }
+        return TabStripDrop.insertionIndex(forX: location.x, tabFrames: frames)
     }
 }
 
@@ -666,7 +792,19 @@ private struct EmptyEditorView: View {
 }
 
 private struct EditorGroupTabBar: View {
+    /// Named coordinate space shared by every tab row's frame preference and
+    /// the reorder drop delegate's pointer location, so both agree on the
+    /// same origin regardless of horizontal scroll offset — the space is
+    /// anchored to the strip's own scrolled content, not the screen, so a
+    /// tab's captured frame and the drop pointer's `x` stay comparable even
+    /// mid-scroll.
+    private static let coordinateSpaceName = "editorTabStrip"
+
     @Environment(\.rafuTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var tabFrames: [EditorTabID: CGRect] = [:]
+    @State private var hoveredInsertionIndex: Int?
+
     let group: EditorGroupState
     @Bindable var session: WorkspaceSession
 
@@ -675,38 +813,45 @@ private struct EditorGroupTabBar: View {
             ScrollView(.horizontal) {
                 HStack(spacing: 0) {
                     ForEach(group.tabs) { tab in
-                        switch tab.resource {
-                        case .file:
-                            if let document = session.document(for: tab) {
-                                EditorTabItem(
-                                    tabID: tab.id,
-                                    groupID: group.id,
-                                    document: document,
-                                    isSelected: tab.id == group.selectedTabID,
-                                    session: session
-                                )
+                        tabRow(for: tab)
+                            .background {
+                                GeometryReader { proxy in
+                                    Color.clear.preference(
+                                        key: TabStripFramePreferenceKey.self,
+                                        value: [
+                                            tab.id: proxy.frame(
+                                                in: .named(Self.coordinateSpaceName))
+                                        ]
+                                    )
+                                }
                             }
-                        case .terminal(let sessionID):
-                            // Issue #4: same tab chrome as a file tab (icon,
-                            // label, close button, selected underline) —
-                            // just backed by a live terminal session instead
-                            // of an `EditorDocument`.
-                            if let controller = session.terminal.sessions.first(where: {
-                                $0.id == sessionID
-                            }) {
-                                EditorTerminalTabItem(
-                                    tabID: tab.id,
-                                    groupID: group.id,
-                                    controller: controller,
-                                    isSelected: tab.id == group.selectedTabID,
-                                    session: session
-                                )
-                            }
-                        case .restorable:
-                            EmptyView()
-                        }
                     }
                 }
+                .coordinateSpace(.named(Self.coordinateSpaceName))
+                // Forces the enclosing NSScrollView's legacy scroller off —
+                // `.scrollIndicators(.hidden)` alone does not do this under
+                // System Settings → Appearance → "Show scroll bars: Always"
+                // (see docs/references/scrollview-legacy-scroller-always-setting.md).
+                .background(ScrollerHidingConfigurator())
+                .onPreferenceChange(TabStripFramePreferenceKey.self) { tabFrames = $0 }
+                .overlay(alignment: .topLeading) { insertionIndicator }
+                // A dedicated reorder target scoped to the strip itself, one
+                // level DEEPER than the group's split/move `.onDrop`, which
+                // now only spans the body below the tab bar (see
+                // `EditorGroupView.body`) — so a tab-bar drop never has a
+                // chance to resolve as a split in the first place instead of
+                // relying on cross-target hit-test priority.
+                .onDrop(
+                    of: [.rafuEditorDrag],
+                    delegate: TabStripReorderDropDelegate(
+                        groupID: group.id,
+                        orderedTabIDs: group.tabs.map(\.id),
+                        tabFrames: tabFrames,
+                        reduceMotion: reduceMotion,
+                        hoveredInsertionIndex: $hoveredInsertionIndex,
+                        session: session
+                    )
+                )
             }
             .scrollIndicators(.hidden)
             if let document = selectedDocument, document.supportsPresentationModes {
@@ -723,6 +868,9 @@ private struct EditorGroupTabBar: View {
                 )
                 .padding(.horizontal, 6)
             }
+            if group.tabs.count > 1 {
+                overflowTabMenu
+            }
         }
         .frame(height: RafuMetrics.tabBarHeight)
         .background(theme.palette.tabBarBackground)
@@ -734,6 +882,126 @@ private struct EditorGroupTabBar: View {
             let tab = group.tabs.first(where: { $0.id == selectedTabID })
         else { return nil }
         return session.document(for: tab)
+    }
+
+    @ViewBuilder
+    private func tabRow(for tab: EditorTabState) -> some View {
+        switch tab.resource {
+        case .file:
+            if let document = session.document(for: tab) {
+                EditorTabItem(
+                    tabID: tab.id,
+                    groupID: group.id,
+                    document: document,
+                    isSelected: tab.id == group.selectedTabID,
+                    session: session
+                )
+            }
+        case .terminal(let sessionID):
+            // Issue #4: same tab chrome as a file tab (icon, label, close
+            // button, selected underline) — just backed by a live terminal
+            // session instead of an `EditorDocument`. Reordered as a peer of
+            // file tabs (ADR 0014): the frame-capture `ForEach` above treats
+            // every row identically, and reordering never touches park/close
+            // semantics.
+            if let controller = session.terminal.sessions.first(where: { $0.id == sessionID }) {
+                EditorTerminalTabItem(
+                    tabID: tab.id,
+                    groupID: group.id,
+                    controller: controller,
+                    isSelected: tab.id == group.selectedTabID,
+                    session: session
+                )
+            }
+        case .restorable:
+            EmptyView()
+        }
+    }
+
+    /// A thin accent bar marking the slot a dragged tab would land in —
+    /// SwiftUI's `.rafuEditorDrag` counterpart to `EditorSplitPreviewOverlay`.
+    /// Positioned from the ordered tab frames captured by
+    /// `TabStripFramePreferenceKey`; `nil` while nothing is hovering the
+    /// strip.
+    @ViewBuilder
+    private var insertionIndicator: some View {
+        if let hoveredInsertionIndex {
+            let frames = group.tabs.compactMap { tabFrames[$0.id] }
+            let x = indicatorX(forInsertionIndex: hoveredInsertionIndex, tabFrames: frames)
+            Rectangle()
+                .fill(theme.palette.accent)
+                .frame(width: 2)
+                .frame(maxHeight: .infinity)
+                .offset(x: x - 1)
+                .accessibilityHidden(true)
+        }
+    }
+
+    /// The x-coordinate (in the strip's named coordinate space) for the
+    /// insertion-indicator bar: flush with the leading edge of the first tab
+    /// when inserting at the start, flush with the trailing edge of the last
+    /// tab when inserting at the end, and centered in the gap between two
+    /// tabs otherwise.
+    private func indicatorX(forInsertionIndex index: Int, tabFrames: [CGRect]) -> CGFloat {
+        guard !tabFrames.isEmpty else { return 0 }
+        if index <= 0 { return tabFrames[0].minX }
+        if index >= tabFrames.count { return tabFrames[tabFrames.count - 1].maxX }
+        return (tabFrames[index - 1].maxX + tabFrames[index].minX) / 2
+    }
+
+    /// Discoverable overflow affordance: pinned OUTSIDE the horizontally
+    /// scrolling tab strip so it never scrolls with the tabs, listing every
+    /// tab in `group.tabs` so a tab scrolled out of view is still reachable
+    /// without hunting through the scroller. Hidden for a single tab, where
+    /// there is nothing to disambiguate.
+    private var overflowTabMenu: some View {
+        Menu {
+            ForEach(group.tabs) { tab in
+                overflowTabMenuItem(for: tab)
+            }
+        } label: {
+            Image(systemName: "chevron.down")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(theme.palette.textSecondary)
+                .frame(width: 22, height: 22)
+                .contentShape(.rect)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .padding(.trailing, 4)
+        .help("Show all tabs")
+        .accessibilityLabel("Show all tabs")
+    }
+
+    @ViewBuilder
+    private func overflowTabMenuItem(for tab: EditorTabState) -> some View {
+        switch tab.resource {
+        case .file:
+            if let document = session.document(for: tab) {
+                overflowTabMenuButton(title: document.displayName, tab: tab)
+            }
+        case .terminal(let sessionID):
+            if let controller = session.terminal.sessions.first(where: { $0.id == sessionID }) {
+                overflowTabMenuButton(
+                    title: TerminalSessionPresentation.tabLabel(controller.displayName), tab: tab)
+            }
+        case .restorable:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func overflowTabMenuButton(title: String, tab: EditorTabState) -> some View {
+        Button {
+            session.selectEditorTab(tab.id, in: group.id)
+        } label: {
+            if tab.id == group.selectedTabID {
+                Label(title, systemImage: "checkmark")
+            } else {
+                Text(title)
+            }
+        }
     }
 }
 
@@ -1680,7 +1948,9 @@ private struct EditorDocumentView: View {
                 GuardBannerView(document: document)
             }
             Group {
-                if document.isBitmapImage {
+                if document.isVideo {
+                    VideoPreviewView(url: document.url)
+                } else if document.isBitmapImage {
                     ImagePreviewView(url: document.url)
                 } else if document.isMarkdown || document.isSVG {
                     MarkdownEditorPresentation(

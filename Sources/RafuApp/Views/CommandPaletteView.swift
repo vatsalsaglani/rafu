@@ -633,6 +633,13 @@ struct CommandPaletteView: View {
                 session.navigatorMode = .terminals
             },
             .init(
+                title: "Show Runs", symbolName: "list.bullet.rectangle",
+                keywords: ["conductor", "agents", "workflow", "panel"]
+            ) {
+                dismiss()
+                session.navigatorMode = .runs
+            },
+            .init(
                 title: "Install rafu CLI", detail: "Installs to ~/.local/bin",
                 symbolName: "terminal", keywords: ["command line"]
             ) {

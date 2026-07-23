@@ -66,6 +66,8 @@ struct WorkspaceUtilityPanelView: View {
             }
         case .terminals:
             WorkspaceTerminalsPanelView(session: session)
+        case .runs:
+            ConductorRunsPanelView(session: session)
         }
     }
 }
@@ -115,6 +117,7 @@ struct WorkspaceUtilityRail: View {
             railButton(.search)
             railButton(.sourceControl)
             railButton(.terminals)
+            railButton(.runs)
             Spacer()
         }
         .padding(.top, 10)
