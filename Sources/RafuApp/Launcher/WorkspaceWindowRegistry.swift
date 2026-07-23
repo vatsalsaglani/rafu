@@ -82,6 +82,26 @@ final class WorkspaceWindowRegistry {
         for id in deadIDs { pendingByWindowID.removeValue(forKey: id) }
     }
 
+    /// Live workspace window count — prunes dead entries first so a window
+    /// closed outside the registry (e.g. the red traffic-light button)
+    /// doesn't linger as a phantom count. Cmd+W's empty-window branch uses
+    /// this to distinguish "close only this window" from "this is the last
+    /// window; fall back to the existing quit-confirmation UX".
+    func liveWorkspaceWindowCount() -> Int {
+        pruneDeadEntries()
+        return entries.count
+    }
+
+    /// Closes exactly the tracked window for `session`, never
+    /// `NSApp.terminate`. SwiftUI's `dismissWindow` closes every window in a
+    /// `WindowGroup`, so per-window close must go through the AppKit window
+    /// this registry already tracks. A no-op if the session has no live
+    /// tracked window.
+    func closeWindow(for session: WorkspaceSession) {
+        pruneDeadEntries()
+        entries[ObjectIdentifier(session)]?.window?.performClose(nil)
+    }
+
     func snapshots() -> [OpenWorkspaceRoot] {
         pruneDeadEntries()
         return entries.values
