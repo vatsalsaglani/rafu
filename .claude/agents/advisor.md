@@ -8,7 +8,7 @@ disallowedTools: Write, Edit, NotebookEdit
 model: claude-opus-4-8
 permissionMode: plan
 effort: high
-maxTurns: 30
+maxTurns: 60
 color: purple
 ---
 
