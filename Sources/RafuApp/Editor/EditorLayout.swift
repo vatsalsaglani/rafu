@@ -98,6 +98,24 @@ nonisolated struct EditorGroupState: Codable, Equatable, Identifiable, Sendable 
         }
         return removed
     }
+
+    /// Reorders `tabID` within this group to land at `requestedIndex`, a
+    /// position expressed among the group's tabs BEFORE removal (e.g. `2`
+    /// means "the slot between the original third and fourth tabs"). Removing
+    /// the tab first shifts every later index down by one, so a request at or
+    /// after the tab's own current position is adjusted by one to land in the
+    /// same visual slot — this off-by-one correction is what makes a no-op
+    /// drop (back onto the tab's own position, or the slot immediately after
+    /// it) round-trip to the identical order instead of drifting by one.
+    /// Selection is untouched: a pure reorder never changes which tab is
+    /// selected, even when the selected tab is the one being moved.
+    mutating func move(_ tabID: EditorTabID, toInsertionIndex requestedIndex: Int) {
+        guard let currentIndex = tabs.firstIndex(where: { $0.id == tabID }) else { return }
+        let clampedRequest = min(max(requestedIndex, 0), tabs.count)
+        let tab = tabs.remove(at: currentIndex)
+        let targetIndex = clampedRequest > currentIndex ? clampedRequest - 1 : clampedRequest
+        tabs.insert(tab, at: min(max(targetIndex, 0), tabs.count))
+    }
 }
 
 nonisolated enum EditorSplitAxis: String, Codable, Sendable {
@@ -369,6 +387,29 @@ nonisolated struct EditorLayoutState: Codable, Equatable, Sendable {
         focusedGroupID =
             root.group(id: destinationGroupID) != nil
             ? destinationGroupID : root.groupIDs.first ?? focusedGroupID
+        return true
+    }
+
+    /// Reorders `tabID` within `groupID` (see
+    /// `EditorGroupState.move(_:toInsertionIndex:)`). Returns `false` — and
+    /// leaves `focusedGroupID` untouched — for an unknown tab/group, a tab
+    /// that isn't a member of `groupID`, or a request that resolves to no
+    /// actual change in order (dropping a tab back onto its own slot), so a
+    /// no-op drag never flips focus or looks like a layout change to callers
+    /// deciding whether to persist.
+    @discardableResult
+    mutating func reorderTab(
+        _ tabID: EditorTabID,
+        in groupID: EditorGroupID,
+        toInsertionIndex requestedIndex: Int
+    ) -> Bool {
+        guard let group = root.group(id: groupID), group.tabs.contains(where: { $0.id == tabID })
+        else { return false }
+        let before = group.tabs.map(\.id)
+        guard root.updateGroup(id: groupID, { $0.move(tabID, toInsertionIndex: requestedIndex) })
+        else { return false }
+        guard root.group(id: groupID)?.tabs.map(\.id) != before else { return false }
+        focusedGroupID = groupID
         return true
     }
 

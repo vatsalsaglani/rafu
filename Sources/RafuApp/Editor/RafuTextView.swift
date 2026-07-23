@@ -77,26 +77,67 @@ final class RafuTextView: NSTextView {
         // matching this package's deployment target, so no availability
         // guard is needed.
         textView.writingToolsBehavior = .none
-        // `acceptableDragTypes` is overridden below to refuse file/URL
-        // drags; `updateDragTypeRegistration()` refreshes the view's
-        // registered pasteboard types from that override immediately
-        // (NSTextView normally calls it on property changes like
-        // `isEditable`, not on init).
-        textView.updateDragTypeRegistration()
         return textView
     }
 
-    /// Refuses file and URL drags (from Finder or the sidebar's private
-    /// editor-drag type) so dropping a file onto the text view never inserts
-    /// its path as text. String/RTF types stay registered so in-editor text
-    /// drag-and-drop keeps working.
-    override var acceptableDragTypes: [NSPasteboard.PasteboardType] {
-        let excluded: Set<NSPasteboard.PasteboardType> = [
-            .fileURL,
-            .URL,
-            NSPasteboard.PasteboardType("NSFilenamesPboardType"),
-        ]
-        return super.acceptableDragTypes.filter { !excluded.contains($0) }
+    // MARK: - Finder file drag routing
+
+    /// This view keeps AppKit's DEFAULT `acceptableDragTypes` (file/URL
+    /// types included), so it is the deepest registered `NSView` under the
+    /// pointer for a Finder file drag — the same "deepest registered
+    /// destination wins" rule that requires `EditorDropForwardingScrollView`
+    /// to register for `.rafuEditorDrag` separately. Finder usually also
+    /// advertises a `public.utf8-plain-text` string representation of the
+    /// dropped path(s), which would otherwise win as an ordinary text-view
+    /// paste of the raw path. These overrides classify the drag first and
+    /// forward an `.externalFiles` drag to the enclosing
+    /// `EditorDropForwardingScrollView`'s existing Finder-drop handling;
+    /// everything else — a `.rafuEditorDrag` payload (never actually
+    /// reaches this view; it isn't registered for that type) and ordinary
+    /// in-editor text selection drag — falls through to `super` unchanged.
+    private func draggingKind(_ sender: NSDraggingInfo) -> EditorDragKind {
+        let identifiers = Set((sender.draggingPasteboard.types ?? []).map(\.rawValue))
+        return EditorDragKind.classify(typeIdentifiers: identifiers)
+    }
+
+    private var forwardingScrollView: EditorDropForwardingScrollView? {
+        enclosingScrollView as? EditorDropForwardingScrollView
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if draggingKind(sender) == .externalFiles, let forwardingScrollView {
+            return forwardingScrollView.draggingEntered(sender)
+        }
+        return super.draggingEntered(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if draggingKind(sender) == .externalFiles, let forwardingScrollView {
+            return forwardingScrollView.draggingUpdated(sender)
+        }
+        return super.draggingUpdated(sender)
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        if let sender, draggingKind(sender) == .externalFiles, let forwardingScrollView {
+            forwardingScrollView.draggingExited(sender)
+            return
+        }
+        super.draggingExited(sender)
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        if draggingKind(sender) == .externalFiles, let forwardingScrollView {
+            return forwardingScrollView.prepareForDragOperation(sender)
+        }
+        return super.prepareForDragOperation(sender)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        if draggingKind(sender) == .externalFiles, let forwardingScrollView {
+            return forwardingScrollView.performDragOperation(sender)
+        }
+        return super.performDragOperation(sender)
     }
 
     var currentLineHighlightColor: NSColor? {
@@ -357,6 +398,30 @@ final class RafuTextView: NSTextView {
             collapseToPrimaryCaret()
             return
         }
+        // Option+Up/Down moves the current line block; Shift+Option+Up/Down
+        // duplicates it. Handled here — NOT as a SwiftUI `.keyboardShortcut`
+        // — because plain Option+arrow is standard paragraph-navigation in
+        // every other `NSTextView`/`NSTextField` (command palette, find bar,
+        // settings fields) and is consumed by the embedded SwiftTerm
+        // terminal; a global key-equivalent would hijack it everywhere. This
+        // scopes the override to the code editor's first responder only,
+        // mirroring the terminal-command precedent in `RafuAppCommands`.
+        // `.command`/`.control` are excluded so ⌘⌥↑/↓ (Add Caret Above/Below)
+        // and any control-modified navigation fall through untouched.
+        if event.keyCode == 126 || event.keyCode == 125,
+            event.modifierFlags.contains(.option),
+            !event.modifierFlags.contains(.command),
+            !event.modifierFlags.contains(.control),
+            !hasMarkedText(), !hasMultipleCarets
+        {
+            let direction: CaretDirection = event.keyCode == 126 ? .above : .below
+            if event.modifierFlags.contains(.shift) {
+                duplicateSelectedLines(direction)
+            } else {
+                moveSelectedLines(direction)
+            }
+            return
+        }
         super.keyDown(with: event)
     }
 
@@ -469,6 +534,66 @@ final class RafuTextView: NSTextView {
         )
         applyCaretRanges(collapsed)
         scrollRangeToVisible(collapsed.primaryRange)
+    }
+
+    // MARK: - Line manipulation (move / duplicate / delete)
+
+    /// Option+Up (`.up`) / Option+Down (`.down`): swaps the current line
+    /// block with its neighbor. Dispatched from `keyDown(with:)`, not a
+    /// SwiftUI key-equivalent (see `RafuAppCommands`'s Move Up/Down menu
+    /// items) — plain Option+arrow is standard paragraph-navigation
+    /// everywhere else, including the embedded terminal, so this only fires
+    /// while this text view is the first responder.
+    func moveSelectedLines(_ direction: CaretDirection) {
+        guard isEditable, let textStorage, !hasMarkedText(), !hasMultipleCarets else { return }
+        let selection = selectedRange()
+        let edit =
+            direction == .above
+            ? LineManipulation.moveUp(text: string, selection: selection)
+            : LineManipulation.moveDown(text: string, selection: selection)
+        guard let edit,
+            shouldChangeText(in: edit.replacementRange, replacementString: edit.replacementText)
+        else { return }
+        textStorage.replaceCharacters(in: edit.replacementRange, with: edit.replacementText)
+        didChangeText()
+        undoManager?.setActionName(direction == .above ? "Move Line Up" : "Move Line Down")
+        setSelectedRange(edit.newSelection)
+        scrollRangeToVisible(edit.newSelection)
+    }
+
+    /// Shift+Option+Up (`.above`) / Shift+Option+Down (`.below`): duplicates
+    /// the current line block above or below itself. Dispatched from
+    /// `keyDown(with:)` alongside `moveSelectedLines(_:)`.
+    func duplicateSelectedLines(_ direction: CaretDirection) {
+        guard isEditable, let textStorage, !hasMarkedText(), !hasMultipleCarets else { return }
+        let selection = selectedRange()
+        let edit =
+            direction == .above
+            ? LineManipulation.duplicateAbove(text: string, selection: selection)
+            : LineManipulation.duplicateBelow(text: string, selection: selection)
+        guard let edit,
+            shouldChangeText(in: edit.replacementRange, replacementString: edit.replacementText)
+        else { return }
+        textStorage.replaceCharacters(in: edit.replacementRange, with: edit.replacementText)
+        didChangeText()
+        undoManager?.setActionName(
+            direction == .above ? "Duplicate Line Up" : "Duplicate Line Down")
+        setSelectedRange(edit.newSelection)
+        scrollRangeToVisible(edit.newSelection)
+    }
+
+    /// ⌘⇧K: deletes the current line block.
+    func deleteSelectedLines() {
+        guard isEditable, let textStorage, !hasMarkedText(), !hasMultipleCarets else { return }
+        let selection = selectedRange()
+        guard let edit = LineManipulation.deleteLines(text: string, selection: selection),
+            shouldChangeText(in: edit.replacementRange, replacementString: edit.replacementText)
+        else { return }
+        textStorage.replaceCharacters(in: edit.replacementRange, with: edit.replacementText)
+        didChangeText()
+        undoManager?.setActionName("Delete Line")
+        setSelectedRange(edit.newSelection)
+        scrollRangeToVisible(edit.newSelection)
     }
 
     /// Issue #5a: a single-character opening bracket/quote typed over a

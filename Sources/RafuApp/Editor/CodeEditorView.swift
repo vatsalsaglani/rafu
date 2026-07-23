@@ -183,6 +183,21 @@ struct CodeEditorView: NSViewRepresentable {
         document.addCaretBelowAction = { [weak textView] in
             textView?.addCaret(direction: .below)
         }
+        document.moveLineUpAction = { [weak textView] in
+            textView?.moveSelectedLines(.above)
+        }
+        document.moveLineDownAction = { [weak textView] in
+            textView?.moveSelectedLines(.below)
+        }
+        document.duplicateLineUpAction = { [weak textView] in
+            textView?.duplicateSelectedLines(.above)
+        }
+        document.duplicateLineDownAction = { [weak textView] in
+            textView?.duplicateSelectedLines(.below)
+        }
+        document.deleteLineAction = { [weak textView] in
+            textView?.deleteSelectedLines()
+        }
         return scrollView
     }
 
@@ -250,6 +265,11 @@ struct CodeEditorView: NSViewRepresentable {
         coordinator.document.selectAllOccurrencesAction = nil
         coordinator.document.addCaretAboveAction = nil
         coordinator.document.addCaretBelowAction = nil
+        coordinator.document.moveLineUpAction = nil
+        coordinator.document.moveLineDownAction = nil
+        coordinator.document.duplicateLineUpAction = nil
+        coordinator.document.duplicateLineDownAction = nil
+        coordinator.document.deleteLineAction = nil
     }
 
     @MainActor

@@ -77,6 +77,21 @@ nonisolated enum EditorDropGeometry {
     }
 }
 
+/// Pure geometry helper for reordering within a tab strip: given a horizontal
+/// drop location and the ordered frames of the strip's current tabs (in tab
+/// order), which array index the dragged tab should land at. This is a
+/// classic "insert before the first tab whose midpoint is at or past the
+/// pointer" computation — the count of frames whose midpoint is strictly left
+/// of `x` is exactly that index, and it degrades gracefully to `0` for an
+/// empty or not-yet-laid-out strip.
+nonisolated enum TabStripDrop {
+    static func insertionIndex(forX x: CGFloat, tabFrames: [CGRect]) -> Int {
+        guard !tabFrames.isEmpty else { return 0 }
+        let index = tabFrames.filter { $0.midX < x }.count
+        return min(max(index, 0), tabFrames.count)
+    }
+}
+
 /// Handlers an editor group injects into its AppKit scroll view so drags over
 /// the text area drive the same overlay and split logic as drags over the
 /// group's SwiftUI chrome. Locations are top-left-origin points in the scroll
@@ -86,14 +101,24 @@ struct EditorDropForwarding {
     let updated: (CGPoint, CGSize) -> Void
     let exited: () -> Void
     let perform: (CGPoint, CGSize, EditorDragPayload?) -> Bool
+    /// Handles one or more Finder file paths dropped directly onto the
+    /// AppKit text view or scroll view (an `.externalFiles`-classified drag,
+    /// never `.rafuEditorDrag`). The split edge nearest `location` applies
+    /// only to the FIRST path; the rest of a multi-file Finder drop open
+    /// into the resulting group with a `nil` edge, mirroring one "open these
+    /// files" action rather than splitting once per file.
+    let performFiles: (CGPoint, CGSize, [String]) -> Bool
 }
 
-/// The editor's scroll view registers for the private editor-drag type and
-/// forwards dragging events out to SwiftUI. Necessary because AppKit routes a
-/// drag session to the deepest registered NSView under the pointer: over the
-/// text area that's this subtree, and without registration here the group's
-/// SwiftUI `.onDrop` never fires — the drop preview used to work only over
-/// the thin SwiftUI tab-bar strip.
+/// The editor's scroll view registers for the private editor-drag type AND
+/// Finder's file-URL type, forwarding dragging events out to SwiftUI.
+/// Necessary because AppKit routes a drag session to the deepest registered
+/// NSView under the pointer: over the text area that's this subtree, and
+/// without registration here the group's SwiftUI `.onDrop` never fires — the
+/// drop preview used to work only over the thin SwiftUI tab-bar strip. Also
+/// the fallback destination `RafuTextView` forwards an `.externalFiles` drag
+/// to (see `RafuTextView`'s drag overrides) since the text view itself has
+/// no split-preview overlay state.
 final class EditorDropForwardingScrollView: NSScrollView {
     var dropForwarding: EditorDropForwarding? {
         didSet {
@@ -101,16 +126,18 @@ final class EditorDropForwardingScrollView: NSScrollView {
             if dropForwarding == nil {
                 unregisterDraggedTypes()
             } else {
-                registerForDraggedTypes([Self.dragType])
+                registerForDraggedTypes([Self.dragType, Self.fileURLType])
             }
         }
     }
 
     private static let dragType = NSPasteboard.PasteboardType(
         UTType.rafuEditorDrag.identifier)
+    private static let fileURLType = NSPasteboard.PasteboardType.fileURL
 
-    private func hasEditorPayload(_ sender: NSDraggingInfo) -> Bool {
-        sender.draggingPasteboard.types?.contains(Self.dragType) == true
+    private func dragKind(_ sender: NSDraggingInfo) -> EditorDragKind {
+        let identifiers = Set((sender.draggingPasteboard.types ?? []).map(\.rawValue))
+        return EditorDragKind.classify(typeIdentifiers: identifiers)
     }
 
     /// Drag location converted to this view's bounds with a top-left origin,
@@ -124,13 +151,13 @@ final class EditorDropForwardingScrollView: NSScrollView {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard let dropForwarding, hasEditorPayload(sender) else { return [] }
+        guard let dropForwarding, dragKind(sender) != .text else { return [] }
         dropForwarding.updated(topLeftLocation(sender), bounds.size)
         return .copy
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard let dropForwarding, hasEditorPayload(sender) else { return [] }
+        guard let dropForwarding, dragKind(sender) != .text else { return [] }
         dropForwarding.updated(topLeftLocation(sender), bounds.size)
         return .copy
     }
@@ -140,15 +167,28 @@ final class EditorDropForwardingScrollView: NSScrollView {
     }
 
     override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        dropForwarding != nil && hasEditorPayload(sender)
+        dropForwarding != nil && dragKind(sender) != .text
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard let dropForwarding, hasEditorPayload(sender) else { return false }
-        let payload = sender.draggingPasteboard
-            .data(forType: Self.dragType)
-            .flatMap { try? EditorDragPayload(data: $0) }
-        return dropForwarding.perform(topLeftLocation(sender), bounds.size, payload)
+        guard let dropForwarding else { return false }
+        switch dragKind(sender) {
+        case .internalPayload:
+            let payload = sender.draggingPasteboard
+                .data(forType: Self.dragType)
+                .flatMap { try? EditorDragPayload(data: $0) }
+            return dropForwarding.perform(topLeftLocation(sender), bounds.size, payload)
+        case .externalFiles:
+            let urls =
+                (sender.draggingPasteboard.readObjects(
+                    forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+                    as? [URL]) ?? []
+            guard !urls.isEmpty else { return false }
+            return dropForwarding.performFiles(
+                topLeftLocation(sender), bounds.size, urls.map(\.path))
+        case .text:
+            return false
+        }
     }
 
     /// macOS 26 tiles vertical rulers as OVERLAYS: `super.tile()` keeps the

@@ -286,6 +286,178 @@ nonisolated enum BlockCommenter {
     }
 }
 
+/// The result of a `LineManipulation` transform: a single `NSTextStorage`
+/// replacement plus the selection the caller should restore afterward.
+/// `nil` from any `LineManipulation` function means the transform is a no-op
+/// at the buffer's edge (e.g. moving the first line up).
+nonisolated struct LineEdit: Equatable, Sendable {
+    let replacementRange: NSRange
+    let replacementText: String
+    let newSelection: NSRange
+}
+
+/// Pure move/duplicate/delete-line transforms (VS Code's Option+Up/Down,
+/// Shift+Option+Up/Down, and ⌘⇧K). Every function starts from
+/// `NSString.lineRange(for:)` to find the whole-line block the selection
+/// touches, so a multi-line selection moves/duplicates/deletes as one unit.
+/// All Foundation line APIs used here (`lineRange(for:)`,
+/// `getLineStart(_:end:contentsEnd:for:)`) already treat "\n", "\r", and
+/// "\r\n" as a single line terminator, so CRLF documents round-trip
+/// correctly with no special-casing.
+nonisolated enum LineManipulation {
+    /// Moves the selection's line block up by one line, swapping it with the
+    /// preceding line. `nil` when the block already starts at the first line.
+    static func moveUp(text: String, selection: NSRange) -> LineEdit? {
+        let ns = text as NSString
+        guard ns.length > 0 else { return nil }
+        let selection = clamped(selection, to: ns.length)
+        let blockRange = ns.lineRange(for: selection)
+        guard blockRange.location > 0 else { return nil }
+
+        let prevLineRange = ns.lineRange(for: NSRange(location: blockRange.location - 1, length: 0))
+        let combinedRange = NSRange(
+            location: prevLineRange.location,
+            length: NSMaxRange(blockRange) - prevLineRange.location
+        )
+        let (blockBody, blockTerm) = decomposeLine(blockRange, in: ns)
+        let (prevBody, prevTerm) = decomposeLine(prevLineRange, in: ns)
+        let replacementText = blockBody + prevTerm + prevBody + blockTerm
+
+        let offsetInBlock = selection.location - blockRange.location
+        let newSelection = NSRange(
+            location: combinedRange.location + offsetInBlock, length: selection.length)
+        return LineEdit(
+            replacementRange: combinedRange, replacementText: replacementText,
+            newSelection: newSelection)
+    }
+
+    /// Moves the selection's line block down by one line, swapping it with
+    /// the following line. `nil` when the block already reaches end of file.
+    static func moveDown(text: String, selection: NSRange) -> LineEdit? {
+        let ns = text as NSString
+        guard ns.length > 0 else { return nil }
+        let selection = clamped(selection, to: ns.length)
+        let blockRange = ns.lineRange(for: selection)
+        guard NSMaxRange(blockRange) < ns.length else { return nil }
+
+        let nextLineRange = ns.lineRange(for: NSRange(location: NSMaxRange(blockRange), length: 0))
+        let combinedRange = NSRange(
+            location: blockRange.location,
+            length: NSMaxRange(nextLineRange) - blockRange.location
+        )
+        let (blockBody, blockTerm) = decomposeLine(blockRange, in: ns)
+        let (nextBody, nextTerm) = decomposeLine(nextLineRange, in: ns)
+        let replacementText = nextBody + blockTerm + blockBody + nextTerm
+
+        let offsetInBlock = selection.location - blockRange.location
+        let prefixLength = (nextBody as NSString).length + (blockTerm as NSString).length
+        let newSelection = NSRange(
+            location: combinedRange.location + prefixLength + offsetInBlock,
+            length: selection.length)
+        return LineEdit(
+            replacementRange: combinedRange, replacementText: replacementText,
+            newSelection: newSelection)
+    }
+
+    /// Inserts a copy of the selection's line block immediately above it.
+    /// The selection itself is left unchanged: since the inserted copy is
+    /// identical to the original block, the caret lands on the same visible
+    /// content either way.
+    static func duplicateAbove(text: String, selection: NSRange) -> LineEdit? {
+        let ns = text as NSString
+        guard ns.length > 0 else { return nil }
+        let selection = clamped(selection, to: ns.length)
+        let blockRange = ns.lineRange(for: selection)
+        let (blockBody, blockTerm) = decomposeLine(blockRange, in: ns)
+        let insertionText = blockBody + (blockTerm.isEmpty ? "\n" : blockTerm)
+        return LineEdit(
+            replacementRange: NSRange(location: blockRange.location, length: 0),
+            replacementText: insertionText,
+            newSelection: selection)
+    }
+
+    /// Inserts a copy of the selection's line block immediately below it and
+    /// moves the selection into the new (duplicate) copy, matching VS Code's
+    /// Copy Line Down.
+    static func duplicateBelow(text: String, selection: NSRange) -> LineEdit? {
+        let ns = text as NSString
+        guard ns.length > 0 else { return nil }
+        let selection = clamped(selection, to: ns.length)
+        let blockRange = ns.lineRange(for: selection)
+        let (blockBody, blockTerm) = decomposeLine(blockRange, in: ns)
+        let insertionText = blockTerm.isEmpty ? "\n" + blockBody : blockBody + blockTerm
+        let insertionLength = (insertionText as NSString).length
+        let newSelection = NSRange(
+            location: selection.location + insertionLength, length: selection.length)
+        return LineEdit(
+            replacementRange: NSRange(location: NSMaxRange(blockRange), length: 0),
+            replacementText: insertionText,
+            newSelection: newSelection)
+    }
+
+    /// Deletes the selection's whole line block. When the block is the
+    /// file's final line with no trailing terminator, the preceding line's
+    /// terminator is absorbed into the deletion too, so no blank line is
+    /// left dangling at the end of the file. The new caret keeps its
+    /// original column on the line that now occupies the deleted block's
+    /// position, clamped to that line's length.
+    static func deleteLines(text: String, selection: NSRange) -> LineEdit? {
+        let ns = text as NSString
+        guard ns.length > 0 else { return nil }
+        let selection = clamped(selection, to: ns.length)
+        let blockRange = ns.lineRange(for: selection)
+        let column = selection.location - blockRange.location
+
+        var deletionRange = blockRange
+        let (_, blockTerm) = decomposeLine(blockRange, in: ns)
+        if NSMaxRange(blockRange) == ns.length, blockTerm.isEmpty, blockRange.location > 0 {
+            var precedingContentsEnd = 0
+            ns.getLineStart(
+                nil, end: nil, contentsEnd: &precedingContentsEnd,
+                for: NSRange(location: blockRange.location - 1, length: 0))
+            deletionRange = NSRange(
+                location: precedingContentsEnd,
+                length: NSMaxRange(blockRange) - precedingContentsEnd)
+        }
+
+        let newLength = ns.length - deletionRange.length
+        let caretBase = min(deletionRange.location, newLength)
+        let newText = ns.replacingCharacters(in: deletionRange, with: "") as NSString
+        let newLineRange = newText.lineRange(for: NSRange(location: caretBase, length: 0))
+        let (newLineBody, _) = decomposeLine(newLineRange, in: newText)
+        let clampedColumn = min(column, (newLineBody as NSString).length)
+        let newSelection = NSRange(
+            location: newLineRange.location + clampedColumn, length: 0)
+        return LineEdit(
+            replacementRange: deletionRange, replacementText: "", newSelection: newSelection)
+    }
+
+    /// Splits `range` into its content (everything up to but excluding the
+    /// final line's terminator) and that terminator (`""` when `range` ends
+    /// at end-of-file with no trailing newline). `range` may span multiple
+    /// physical lines; internal line terminators stay part of the content.
+    private static func decomposeLine(_ range: NSRange, in ns: NSString) -> (
+        content: String, terminator: String
+    ) {
+        guard range.length > 0 else { return ("", "") }
+        var contentsEnd = 0
+        ns.getLineStart(
+            nil, end: nil, contentsEnd: &contentsEnd,
+            for: NSRange(location: NSMaxRange(range) - 1, length: 0))
+        let content = ns.substring(
+            with: NSRange(location: range.location, length: contentsEnd - range.location))
+        let terminator = ns.substring(
+            with: NSRange(location: contentsEnd, length: NSMaxRange(range) - contentsEnd))
+        return (content, terminator)
+    }
+
+    private static func clamped(_ range: NSRange, to length: Int) -> NSRange {
+        let location = min(max(range.location, 0), length)
+        let len = min(max(range.length, 0), length - location)
+        return NSRange(location: location, length: len)
+    }
+}
+
 /// Pure newline auto-indentation: copy the caret line's leading whitespace and
 /// add one level after a block opener.
 nonisolated enum AutoIndenter {
