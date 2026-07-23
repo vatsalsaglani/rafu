@@ -84,6 +84,31 @@ final class WorkspaceTerminalManager {
         return session
     }
 
+    /// Conductor seam (ADR 0018, conductor/C0-shim.md): a session that hosts
+    /// an arbitrary executable + argv + cwd + env under the PTY instead of a
+    /// login shell. Deliberately a SECOND entry point rather than a
+    /// parameter on `newSession(startingDirectory:shell:)` — the login-shell
+    /// path's behavior must stay byte-identical, and everything downstream
+    /// (exit/bell/attention wiring, `ProcessResourceRegistry` registration)
+    /// is shared unchanged. Exercised by tests only until C1.
+    @discardableResult
+    func newSession(spec: TerminalProcessSpec) -> WorkspaceTerminalController {
+        sessionCounter += 1
+        let session = WorkspaceTerminalController(index: sessionCounter, spec: spec)
+        session.onExit = { [weak self] id, exitCode in
+            self?.sessionDidExit?(id, exitCode)
+        }
+        session.onBell = { [weak self] id in
+            self?.sessionDidBell?(id)
+        }
+        session.onAttentionCleared = { [weak self] id in
+            self?.sessionDidClearAttention?(id)
+        }
+        sessions.append(session)
+        selectedID = session.id
+        return session
+    }
+
     /// Bumps this session to most-recently-parked, driving
     /// `WorkspaceSession.parkedTerminalSessions`'s MRU ordering. A no-op for
     /// an unknown id.
@@ -182,6 +207,28 @@ final class WorkspaceTerminalController: Identifiable {
         self.startingDirectory = startingDirectory
         self.shell = shell
     }
+
+    /// Conductor seam (conductor/C0-shim.md): spawn `spec` under the PTY
+    /// instead of a login shell. `userName` is seeded from the role badge so
+    /// `displayName` reads "advisor" rather than the CLI's basename, and
+    /// `shell` is synthesized from the spec's executable purely so
+    /// `shellDisplayName` and the name fallback stay meaningful — nothing on
+    /// this path ever spawns a login shell.
+    init(index: Int, spec: TerminalProcessSpec) {
+        self.index = index
+        startingDirectory = spec.currentDirectoryPath
+        shell = TerminalShell(
+            path: spec.executableURL.path, name: spec.roleBadge, isDefault: false)
+        processSpec = spec
+        userName = spec.roleBadge
+    }
+
+    /// Non-`nil` only for a Conductor session. `nil` keeps the login-shell
+    /// path exactly as it was; a stored property with a `nil` default lets
+    /// the original initializer above stay untouched.
+    @ObservationIgnored
+    private(set) var processSpec: TerminalProcessSpec?
+
     /// Bumped whenever a fresh terminal view must replace the old one.
     private(set) var generation = 0
 
@@ -322,13 +369,28 @@ final class WorkspaceTerminalController: Identifiable {
         }
         applyTheme(theme, to: view)
 
-        view.startProcess(
-            executable: shell.path,
-            args: shell.loginArguments,
-            environment: nil,
-            execName: "-\(shell.basename)",
-            currentDirectory: startingDirectory
-        )
+        // A Conductor session spawns its spec; everything else spawns the
+        // login shell exactly as before. Only this call differs — status,
+        // view retention, and `ProcessResourceRegistry` registration below
+        // are shared by both paths.
+        if let processSpec {
+            let launch = processSpec.resolvedLaunch()
+            view.startProcess(
+                executable: launch.executable,
+                args: launch.arguments,
+                environment: launch.environment,
+                execName: launch.execName,
+                currentDirectory: launch.currentDirectory
+            )
+        } else {
+            view.startProcess(
+                executable: shell.path,
+                args: shell.loginArguments,
+                environment: nil,
+                execName: "-\(shell.basename)",
+                currentDirectory: startingDirectory
+            )
+        }
         status = .running
         terminalView = view
 
