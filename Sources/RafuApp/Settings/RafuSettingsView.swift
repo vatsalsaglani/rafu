@@ -77,6 +77,13 @@ struct RafuSettingsView: View {
                 }
                 .formStyle(.grouped)
             }
+
+            Tab("Agents", systemImage: "person.2.badge.gearshape") {
+                Form {
+                    ConductorSettingsSection()
+                }
+                .formStyle(.grouped)
+            }
         }
         .environment(\.rafuTheme, activeTheme)
         .preferredColorScheme(preferredColorScheme)
