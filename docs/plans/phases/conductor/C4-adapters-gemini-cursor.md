@@ -2,7 +2,7 @@
 
 - **Branch:** `conductor/c4-adapters-gemini-cursor` (Wave A, branch after C0)
 - **Depends on:** C0 shim on `main`
-- **Status:** Planned
+- **Status:** Implemented (headless gates green; GUI pass intentionally deferred)
 
 ## Mission
 
