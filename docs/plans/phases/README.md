@@ -51,6 +51,7 @@ Bootstrap itself did **not** claim TextKit editing, Tree-sitter, SSH, launcher I
 | ├ [Multi-cursor editing](multi-cursor-editing.md) | Merged (2026-07-18); interactive gesture checklist owed | Fan-out prerequisites | Bounded multi-caret v1 (⌥-click, ⌘D, ⌘⇧L, carets above/below) |
 | ├ [Git depth](git-depth-blame-stash-hunks.md) | Merged (2026-07-18); manual stage/stash/blame UI pass owed; ADR 0011 Proposed | G0 contract commit; stash approved by user; ADR 0011 | Hunk staging, stash, blame — explicit and bounded |
 | └ [CLI ↔ app IPC v1](cli-app-ipc.md) | Merged (2026-07-18); nine-item manual checklist owed; ADR 0009 Proposed | I0 contract commit; ADR 0009 | Socket protocol, routing, `--goto`, `--new-window`; `--wait` deferred |
+| [Conductor — multi-provider agent orchestration](conductor/README.md) | C0 shim implemented on `main` (2026-07-24), headless gates green; staged-app GUI pass outstanding; C1–C7 planned; ADR 0018 Accepted | ADR 0018; terminal manager + worktrees + diff canvas + usage registry (all shipped) | C0 shim serial, then C1 engine ∥ C2–C4 adapters (Claude Code, Codex, OpenCode, Cline, Kimi, Gemini, Cursor — all with model selection), then C5 pipelines, then C6 workflow library ∥ C7 polish; delegated auth, file handoffs, gated merge-back |
 
 Memory resilience and language intelligence execute as the two-lane worktree
 split defined in `language-intelligence.md`: lane 1

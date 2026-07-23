@@ -26,13 +26,17 @@
   text-view drop target — it already registers `public.utf8-plain-text`
   (etc.) by default, and a `Transferable`/`.draggable(String)`-style payload
   will paste as plain text if a text view is anywhere under the drop point.
-  The real fix for "don't let a tab/file drag land as pasted text" is
-  overriding `NSTextView.acceptableDragTypes` to exclude
-  `.fileURL`/`.URL`/`NSFilenamesPboardType` and calling
-  `updateDragTypeRegistration()` once after building the view (AppKit calls
-  it automatically on property changes like `isEditable`, not on init). Do
-  not call `unregisterDraggedTypes()` wholesale — that would also break
-  in-editor text drag-and-drop.
+  
+  **CORRECTION (2026-07-24):** Excluding `.fileURL`/`.URL`/`NSFilenamesPboardType` from
+  `acceptableDragTypes` stops INTERNAL drag payloads (tab/file drags with a
+  private UTI) from being misread as text, but it does NOT solve real Finder
+  file drops — the text type is still registered and still consumes the drop.
+  The actual fix for "don't let real Finder files land as pasted text" is
+  classifying the FULL pasteboard type-identifier set with precedence
+  (`rafuEditorDrag` > `.fileURL` > text) and forwarding accordingly, not
+  registration exclusion alone. See [`appkit-drag-destination-type-precedence.md`](appkit-drag-destination-type-precedence.md)
+  for the complete classification fix. The `acceptableDragTypes` exclusion
+  remains useful for the internal-payload case; it is insufficient by itself.
 - `DropProposal(operation: .move)` from an `.onDrag`-originated SwiftUI drag
   session can be rejected by macOS's drag source mask, silently preventing
   `performDrop` from firing even once the UTI conformance problem above is

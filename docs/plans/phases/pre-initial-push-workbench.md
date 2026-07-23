@@ -281,3 +281,19 @@ on-notch-hardware screenshot pass. Extended
 [`notch-companion.md`](../../references/notch-companion.md) (rules 8–9)
 and [`terminal-notch-hud.md`](terminal-notch-hud.md)'s post-NC-E
 follow-ups section; no ADR changes.
+
+### 2026-07-24: Five workbench polish workstreams (shortcuts, window close, tab reorder, external files + media preview)
+
+Five parallel implementor workstreams landed verified on `main`, building toward workbench completeness:
+
+1. **Editor line-manipulation shortcuts** (Option+↑/↓ move, Shift+Option+↓ duplicate, ⌘⇧K delete): dispatched from `RafuTextView.keyDown(with:)` NOT as global menu equivalents (which would hijack paragraph-navigation in every text field app-wide); single undo step per operation; CRLF round-trips correctly; multi-caret non-goal this pass (identified for follow-up). New reference: [`line-manipulation-shortcuts.md`](../../references/line-manipulation-shortcuts.md).
+
+2. **Cmd+W window close resolution order:** focused tab (file, terminal, or restorable) → open Git diff → empty window (close this one if others exist, else quit confirmation). Per-window targeting via `WorkspaceWindowRegistry.closeWindow(for:)` because SwiftUI `dismissWindow` closes all windows in a `WindowGroup`. Terminal close does NOT park (per ADR 0014). Includes high-value testing finding: AppKit `performClose` crashes intermittently under swift-testing parallel execution; mitigation extracted pure decision logic for unit tests. New reference: [`editor-window-close-resolution-order.md`](../../references/editor-window-close-resolution-order.md).
+
+3. **Tab-strip scrollbar fix** (already documented per concurrent workstream #3): validated existing [`scrollview-legacy-scroller-always-setting.md`](../../references/scrollview-legacy-scroller-always-setting.md).
+
+4. **Editor tab reorder vs. split** (three-zone drop model): tab-strip reorder, edge-band split, center move. Prior bug: single group-wide drop target's edge band always contained the tab bar, forcing every tab drop to split. Fix: structural scope (tab bar's drop delegate scoped to exclude group split handler). Off-by-one insertion-index correction. Named coordinate space for scroll-aware reordering. Sidebar files on tab bar now harmless no-ops. New reference: [`editor-tab-reorder-drop-zones.md`](../../references/editor-tab-reorder-drop-zones.md).
+
+5. **Finder file drop opens content + video preview:** opens arbitrary external files (outside workspace root) as first-class tabs with atomic writes to original paths; media matrix (bitmap/SVG via NSImage, `.mp4`/`.mov`/`.m4v` via new AVKit `VideoPreviewView`, UTF-8 ≤4 MB as text, >4 MB or non-UTF-8 error). Video player releases `AVPlayer` on `.onDisappear` to preserve idle memory budget. Requires pasteboard type classification with precedence (`rafuEditorDrag` > `.fileURL` > text) — NOT the incomplete `acceptableDragTypes` exclusion approach. New ADR: [`0019-external-file-opening-and-media-preview.md`](../../decisions/0019-external-file-opening-and-media-preview.md). New reference on AppKit drag precedence: [`appkit-drag-destination-type-precedence.md`](../../references/appkit-drag-destination-type-precedence.md). Corrected existing [`drag-and-drop-custom-uttype.md`](../../references/drag-and-drop-custom-uttype.md) to note the incomplete nature of the `acceptableDragTypes` fix and cross-link the correct type-classification solution.
+
+Verified: 1294 tests passing in both `swift test` and `swift test --no-parallel`, 0 build warnings, lint clean, `./script/build_and_run.sh --verify` launches successfully. Manual GUI passes (keyboard shortcuts, multi-window Cmd+W, tab drag/reorder, Finder drops of each file type, video playback) pending user acceptance pass on real hardware.
