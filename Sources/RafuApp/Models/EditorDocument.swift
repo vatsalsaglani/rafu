@@ -129,6 +129,27 @@ final class EditorDocument: Identifiable {
     @ObservationIgnored
     var addCaretBelowAction: (() -> Void)?
 
+    /// Moves the caret's current line block up/down (VS Code's
+    /// Option+Up/Down) or duplicates it above/below (Shift+Option+Up/Down).
+    /// Set by the mounted `CodeEditorView`; `nil` when no text view backs
+    /// this document.
+    @ObservationIgnored
+    var moveLineUpAction: (() -> Void)?
+
+    @ObservationIgnored
+    var moveLineDownAction: (() -> Void)?
+
+    @ObservationIgnored
+    var duplicateLineUpAction: (() -> Void)?
+
+    @ObservationIgnored
+    var duplicateLineDownAction: (() -> Void)?
+
+    /// Deletes the caret's current line block (⌘⇧K). Set by the mounted
+    /// `CodeEditorView`; `nil` when no text view backs this document.
+    @ObservationIgnored
+    var deleteLineAction: (() -> Void)?
+
     /// Opens the GX2 hunk-peek popover at the caret's current line — the
     /// "Peek Change at Line" command's editor-side entry point. Set by the
     /// mounted `CodeEditorView`; `nil` when no text view backs this
@@ -213,12 +234,21 @@ final class EditorDocument: Identifiable {
         "png", "jpg", "jpeg", "gif", "bmp", "tiff", "tif", "webp", "heic", "heif", "ico",
     ]
 
+    /// Extensions natively previewed with AVKit's `VideoPlayer` instead of
+    /// the UTF-8 text loader, which would otherwise fail these as
+    /// `.fileTooLarge`/`.notUTF8`. QuickTime/MP4-family containers only —
+    /// this is not a general media-format guarantee.
+    static let videoExtensions: Set<String> = ["mp4", "mov", "m4v"]
+
     var displayName: String { url.lastPathComponent }
     var iconName: String { FileTypePresentation.symbol(for: url, isDirectory: false) }
     var isMarkdown: Bool { ["md", "markdown"].contains(url.pathExtension.lowercased()) }
     var isSVG: Bool { url.pathExtension.lowercased() == "svg" }
     var isBitmapImage: Bool {
         Self.bitmapImageExtensions.contains(url.pathExtension.lowercased())
+    }
+    var isVideo: Bool {
+        Self.videoExtensions.contains(url.pathExtension.lowercased())
     }
     /// Documents that offer the Edit/Preview/Split mode control.
     var supportsPresentationModes: Bool { isMarkdown || isSVG }

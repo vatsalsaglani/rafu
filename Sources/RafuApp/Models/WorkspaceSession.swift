@@ -15,6 +15,9 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
     case search
     case sourceControl
     case terminals
+    /// Conductor runs (ADR 0018, conductor/C0-shim.md). The tolerant decode
+    /// below already protects restoration for builds that predate this case.
+    case runs
 
     var title: String {
         switch self {
@@ -22,6 +25,7 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
         case .search: "Search"
         case .sourceControl: "Source Control"
         case .terminals: "Terminals"
+        case .runs: "Runs"
         }
     }
 
@@ -31,6 +35,7 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
         case .search: "magnifyingglass"
         case .sourceControl: "arrow.triangle.branch"
         case .terminals: "terminal"
+        case .runs: "list.bullet.rectangle"
         }
     }
 
@@ -190,6 +195,29 @@ final class WorkspaceSession {
     var openFolderErrorTitle = "Unable to Open Folder"
     var openFolderErrorMessage = ""
 
+    /// Conductor run seams (ADR 0018, conductor/C0-shim.md), pre-landed here
+    /// exactly as the git phase pre-landed its seams so C1's run engine and
+    /// C5's runs navigator fill them WITHOUT editing this shared file.
+    ///
+    /// Empty in C0: runs are repo data read from `.rafu/runs/`, and Rafu
+    /// reads nothing merely because a folder opened.
+    var conductorRuns: [ConductorRunManifest] = []
+    /// The run the `.runs` panel and (C5) the run-detail canvas are showing.
+    var selectedConductorRunID: String?
+
+    /// This window's run engine — C1 FILLS IT (`conductor/C1-single-role-runs
+    /// .md`). Pre-landed here because C1 may not add stored properties to
+    /// this shared file without stopping to report, and because one window
+    /// owns exactly one run controller, the same way it owns one terminal
+    /// manager.
+    ///
+    /// Constructing it does NO work: it only captures the adapter registry
+    /// (seven pure value types) and holds `.idle` state. Nothing runs, and
+    /// no `.rafu/` path is touched, until C1's explicit user-initiated run
+    /// (ADR 0018).
+    @ObservationIgnored
+    let conductorRunController = ConductorRunController()
+
     let workspaceSearch = WorkspaceSearchModel()
 
     @ObservationIgnored
@@ -289,6 +317,15 @@ final class WorkspaceSession {
 
     func toggleUtilityPane(_ mode: WorkspaceNavigatorMode) {
         navigatorMode = navigatorMode == mode ? .files : mode
+    }
+
+    /// Reveals a Conductor run (ADR 0018). C0 only records the selection and
+    /// opens the `.runs` navigator so the seam is typed and exercised; C5
+    /// adds the editor-hosted run-detail canvas behind the same call, so no
+    /// caller changes when it lands. Reading run evidence starts nothing.
+    func openConductorRun(_ runID: String) {
+        selectedConductorRunID = runID
+        navigatorMode = .runs
     }
 
     /// Drives `WorkspaceWindowView`'s `NavigationSplitView` column
@@ -1859,18 +1896,87 @@ final class WorkspaceSession {
         selectedDocument.saveAction?()
     }
 
+    /// Cmd+W's first-priority target: the selected tab in the FOCUSED
+    /// editor group, if any. Mirrors the tab strip's own close semantics per
+    /// resource kind — a file tab keeps the dirty-save confirmation
+    /// (`requestClose`), a terminal tab terminates its shell via
+    /// `closeTerminalTab` rather than parking it (ADR 0014 — a generic
+    /// close defaults to close, never `hideTerminalTab`), and a
+    /// `.restorable` placeholder tab closes outright since it backs no
+    /// live process or dirty document (`EditorTabResource.isRestorable`).
+    /// Returns `false` when the focused group has no selected tab, so
+    /// `requestCloseActiveTab()` can fall through to its git-diff and
+    /// empty-window branches.
+    private func closeFocusedTabIfPresent() -> Bool {
+        guard let group = editorLayout.group(id: editorLayout.focusedGroupID),
+            let selectedTabID = group.selectedTabID,
+            let tab = group.tabs.first(where: { $0.id == selectedTabID })
+        else { return false }
+
+        switch tab.resource {
+        case .file:
+            guard let document = document(for: tab) else { return false }
+            requestClose(document)
+        case .terminal:
+            closeTerminalTab(tab.id)
+        case .restorable:
+            _ = editorLayout.closeTab(tab.id)
+            synchronizeSelectionFromLayout()
+            persistWorkspaceState()
+        }
+        return true
+    }
+
+    /// What `requestCloseActiveTab()` does once a window is confirmed
+    /// truly empty (no tab, no Git diff). Pulled out as a pure function of
+    /// its inputs — rather than inlined against `NSApp`/`WorkspaceWindowRegistry`
+    /// — so the decision is unit-testable without driving real AppKit
+    /// window-closing machinery.
+    enum EmptyWindowCloseAction: Equatable {
+        /// Other workspace windows remain open: close only this one.
+        case closeWindow
+        /// This is the last window and the user opted out of the
+        /// confirmation prompt.
+        case quitWithoutConfirmation
+        /// This is the last window: show the existing quit-confirmation UX.
+        case presentQuitConfirmation
+    }
+
+    static func resolveEmptyWindowCloseAction(
+        hasOtherWorkspaceWindows: Bool,
+        quitWithoutEmptyWindowConfirmation: Bool
+    ) -> EmptyWindowCloseAction {
+        if hasOtherWorkspaceWindows { return .closeWindow }
+        return quitWithoutEmptyWindowConfirmation
+            ? .quitWithoutConfirmation : .presentQuitConfirmation
+    }
+
+    /// Cmd+W. Resolves in order: the focused group's selected tab (file,
+    /// terminal, or restorable placeholder); else an editor-hosted Git
+    /// diff; else — a truly empty window — closes only THIS window when
+    /// other workspace windows remain open, and otherwise preserves the
+    /// existing last-window quit-confirmation UX. Closing only this
+    /// window (rather than `NSApp.terminate`) is required because an empty
+    /// focused window used to quit every open workspace window.
     func requestCloseActiveTab() {
-        if let selectedDocument {
-            requestClose(selectedDocument)
+        if closeFocusedTabIfPresent() {
             return
         }
         if gitOpenDiff != nil {
             closeGitDiff()
             return
         }
-        if UserDefaults.standard.bool(forKey: "quitWithoutEmptyWindowConfirmation") {
+        let hasOtherWorkspaceWindows = WorkspaceWindowRegistry.shared.liveWorkspaceWindowCount() > 1
+        switch Self.resolveEmptyWindowCloseAction(
+            hasOtherWorkspaceWindows: hasOtherWorkspaceWindows,
+            quitWithoutEmptyWindowConfirmation: UserDefaults.standard.bool(
+                forKey: "quitWithoutEmptyWindowConfirmation")
+        ) {
+        case .closeWindow:
+            WorkspaceWindowRegistry.shared.closeWindow(for: self)
+        case .quitWithoutConfirmation:
             NSApp.terminate(nil)
-        } else {
+        case .presentQuitConfirmation:
             isQuitConfirmationPresented = true
         }
     }
@@ -1930,6 +2036,26 @@ final class WorkspaceSession {
         selectedDocument?.addCaretBelowAction?()
     }
 
+    func moveLineUp() {
+        selectedDocument?.moveLineUpAction?()
+    }
+
+    func moveLineDown() {
+        selectedDocument?.moveLineDownAction?()
+    }
+
+    func duplicateLineUp() {
+        selectedDocument?.duplicateLineUpAction?()
+    }
+
+    func duplicateLineDown() {
+        selectedDocument?.duplicateLineDownAction?()
+    }
+
+    func deleteLine() {
+        selectedDocument?.deleteLineAction?()
+    }
+
     func selectEditorTab(_ tabID: EditorTabID, in groupID: EditorGroupID) {
         guard let tab = editorLayout.group(id: groupID)?.tabs.first(where: { $0.id == tabID })
         else { return }
@@ -1967,6 +2093,30 @@ final class WorkspaceSession {
 
     func moveEditorTab(_ tabID: EditorTabID, to groupID: EditorGroupID) {
         guard editorLayout.moveTab(tabID, to: groupID) else { return }
+        synchronizeSelectionFromLayout()
+        updateHibernationStates()
+        persistWorkspaceState()
+    }
+
+    /// The tab-strip counterpart to `moveEditorTab`/`splitEditorTab`: a tab
+    /// dropped on a tab strip either reorders in place (same group) or moves
+    /// into `groupID` at the hovered slot (a different group's strip),
+    /// instead of always appending to the end or splitting. Unknown tab IDs
+    /// are ignored, mirroring `handleEditorTabDrop`; a same-group drop that
+    /// resolves to no actual reorder (dropping a tab back where it already
+    /// is) skips every side effect so it never flips focus or churns
+    /// persistence.
+    func reorderOrMoveEditorTab(
+        _ tabID: EditorTabID,
+        to groupID: EditorGroupID,
+        atInsertionIndex index: Int
+    ) {
+        guard let sourceGroupID = editorLayout.group(containing: tabID)?.id else { return }
+        let didChange =
+            sourceGroupID == groupID
+            ? editorLayout.reorderTab(tabID, in: groupID, toInsertionIndex: index)
+            : editorLayout.moveTab(tabID, to: groupID, at: index)
+        guard didChange else { return }
         synchronizeSelectionFromLayout()
         updateHibernationStates()
         persistWorkspaceState()
@@ -2046,6 +2196,28 @@ final class WorkspaceSession {
         recordAccess(document)
         updateHibernationStates()
         persistWorkspaceState()
+    }
+
+    /// A Finder drop of multiple files onto a group: opens every path via
+    /// `handleEditorFileDrop`, applying the hovered split `edge` only to the
+    /// FIRST file so the drop doesn't split once per file. Subsequent files
+    /// open (or reuse their tab) in the resulting group with a `nil` edge,
+    /// mirroring one "open these files" action. Directory rejection and
+    /// already-open-tab dedupe are unchanged — each path still goes through
+    /// `handleEditorFileDrop`'s own guards.
+    func handleEditorFileDrops(paths: [String], on groupID: EditorGroupID, edge: EditorSplitEdge?) {
+        guard let firstPath = paths.first else { return }
+        handleEditorFileDrop(path: firstPath, on: groupID, edge: edge)
+        guard paths.count > 1 else { return }
+        // The first drop may have split off a new group (a non-nil edge); the
+        // remaining files land in whichever group now holds the first file so
+        // they end up together instead of splitting again.
+        let targetGroupID =
+            editorLayout.tab(matching: .file(URL(fileURLWithPath: firstPath)))
+            .flatMap { editorLayout.group(containing: $0.id)?.id } ?? groupID
+        for path in paths.dropFirst() {
+            handleEditorFileDrop(path: path, on: targetGroupID, edge: nil)
+        }
     }
 
     func document(for tab: EditorTabState) -> EditorDocument? {
