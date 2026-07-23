@@ -3,7 +3,7 @@
 - **Branch:** `conductor/c3-adapters-opencode-cline-kimi` (Wave A, branch after C0)
 - **Depends on:** C0 shim on `main`; C2 is the quality template (read its
   reference note if merged, but do not depend on its code)
-- **Status:** Planned
+- **Status:** Implemented (zero-warning gate blocked outside C3; Kimi unverified locally)
 
 ## Mission
 

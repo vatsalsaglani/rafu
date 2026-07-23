@@ -3,68 +3,145 @@ import Testing
 
 @testable import RafuApp
 
-/// `KimiAdapter` — OWNED BY PHASE C3
-/// (`docs/plans/phases/conductor/C3-adapters-opencode-cline-kimi.md`).
-/// C3 REWRITES THIS FILE when it implements the adapter.
-///
-/// C0 keeps every per-adapter assertion in a per-adapter file on purpose:
-/// C2, C3, and C4 run in PARALLEL worktrees, so a single shared "all seven
-/// adapters are still stubs" test would force all three branches to edit the
-/// same line to make their own gate pass — exactly the conflict C0 exists to
-/// prevent.
-///
-/// The second test below is NOT a stub assertion and must survive C3's
-/// rewrite.
-
-@Test("KimiAdapter is registered and degrades honestly until C3 implements it")
-func kimiAdapterIsAnHonestStub() async {
-    let adapter = KimiAdapter()
-    #expect(adapter.id == .kimi)
-    #expect(ConductorAdapterRegistry.adapter(for: .kimi) is KimiAdapter)
-
-    // The truthful "we have not implemented this yet" answers — never an
-    // optimistic guess about the user's machine.
-    let probe = await adapter.probe()
-    #expect(!probe.installed)
-    #expect(probe.executableURL == nil)
-    #expect(probe.version == nil)
-    #expect(await adapter.authStatus() == .unknown)
-    #expect(adapter.curatedModels().isEmpty)
-    #expect(await adapter.discoverModels() == nil)
-    #expect(!adapter.supportsModelDiscovery)
-
-    let invocation = adapter.invocation(
-        prompt: "anything",
-        model: "",
-        autonomy: .readOnly,
-        workingDirectory: URL(fileURLWithPath: "/tmp/rafu-c0-workdir"),
-        runDirectory: URL(fileURLWithPath: "/tmp/rafu-c0-run"),
-        handoffDirectory: URL(fileURLWithPath: "/tmp/rafu-c0-run/step-1"))
-    // A stub that somehow reached a run must FAIL the step, never exit
-    // cleanly and let the engine record work that did not happen.
-    #expect(invocation.executableURL.path == "/usr/bin/false")
-    #expect(invocation.arguments.isEmpty)
-    // A SUPERSET, not an exact key set: C3 may add whatever its own CLI
-    // needs without touching a shared test.
-    #expect(
-        Set(invocation.environment.keys).isSuperset(of: [
-            RafuConductorEnvironment.handoff,
-            RafuConductorEnvironment.runDirectory,
-            RafuConductorEnvironment.path,
-        ]))
-    // The run root is whatever the caller passed, never derived from the
-    // handoff directory.
-    #expect(invocation.environment[RafuConductorEnvironment.runDirectory] == "/tmp/rafu-c0-run")
-    #expect(invocation.environment[RafuConductorEnvironment.handoff] == "/tmp/rafu-c0-run/step-1")
+private func kimiFixture(_ name: String) throws -> String {
+    guard let fixture = KimiAdapterFixtures.named(name) else {
+        throw CocoaError(.fileNoSuchFile)
+    }
+    return fixture
 }
 
-@Test("KimiAdapter agrees with itself about model discovery")
-func kimiAdapterDiscoveryFlagIsHonest() async {
-    // Two sources of truth that must never disagree. `true` + nil degrades
-    // visibly to "unsupported", but `false` + a non-nil list is SILENT:
-    // Settings never renders Refresh models, so the discovered models are
-    // unreachable and nothing reports an error.
-    let adapter = KimiAdapter()
-    let discovered = await adapter.discoverModels()
-    #expect(adapter.supportsModelDiscovery == (discovered != nil))
+private func kimiResult(
+    stdout: String = "",
+    completion: C3AdapterCommandResult.Completion = .exited(0)
+) -> C3AdapterCommandResult {
+    C3AdapterCommandResult(
+        completion: completion,
+        standardOutput: Data(stdout.utf8),
+        standardError: Data())
+}
+
+private func unavailableKimiRuntime() -> C3AdapterRuntime {
+    C3AdapterRuntime(
+        resolveExecutable: { _, _ in nil },
+        run: { _, _, _, _, _ in kimiResult(completion: .launchFailed) })
+}
+
+private let kimiExecutable = URL(fileURLWithPath: "/Users/fixture/.local/bin/kimi")
+private let kimiWorkingDirectory = URL(fileURLWithPath: "/tmp/rafu-c3-worktree")
+private let kimiRunDirectory = URL(fileURLWithPath: "/tmp/rafu-c3-run")
+private let kimiHandoffDirectory = URL(fileURLWithPath: "/tmp/rafu-c3-run/step-1")
+
+@Test("Kimi is registered and an absent executable degrades honestly")
+func kimiAbsentProbeAndMetadata() async {
+    let adapter = KimiAdapter(runtime: unavailableKimiRuntime())
+    #expect(adapter.id == .kimi)
+    #expect(adapter.defaultEnabled)
+    #expect(ConductorAdapterRegistry.adapter(for: .kimi) is KimiAdapter)
+    #expect(await adapter.probe() == .notInstalled)
+    #expect(await adapter.authStatus() == .unknown)
+    #expect(!adapter.supportsModelDiscovery)
+    #expect(await adapter.discoverModels() == nil)
+    #expect(adapter.supportsModelDiscovery == ((await adapter.discoverModels()) != nil))
+    #expect(
+        adapter.curatedModels().map(\.id) == [
+            "kimi-for-coding", "kimi-k2.6", "kimi-k2-thinking",
+        ])
+}
+
+@Test("Kimi upstream-documented fixture is explicitly not a local verification")
+func kimiDocumentedFixtureClassification() async throws {
+    let version = try kimiFixture("documented-version-1.49.0.txt")
+    let help = try kimiFixture("documented-help-1.49.0.txt")
+    #expect(help.contains("DOCUMENTED-UPSTREAM-NOT-RECORDED-LOCALLY"))
+
+    let classification = KimiAdapter.classifyProbe(
+        executableURL: kimiExecutable,
+        versionResult: kimiResult(stdout: version),
+        helpResult: kimiResult(stdout: help))
+    #expect(classification.probe.installed)
+    #expect(classification.probe.version == "1.49.0")
+    #expect(classification.supportedAutonomies == [.worktreeWrite])
+}
+
+@Test("Kimi installed without prompt flags is marked no-headless and supports nothing")
+func kimiNoHeadlessModeClassification() {
+    let classification = KimiAdapter.classifyProbe(
+        executableURL: kimiExecutable,
+        versionResult: kimiResult(stdout: "2.0.0\n"),
+        helpResult: kimiResult(stdout: "Usage: kimi\ninteractive terminal\n"))
+    #expect(classification.probe.installed)
+    #expect(
+        classification.probe.version?.contains("installed, but no supported headless mode") == true)
+    #expect(classification.supportedAutonomies.isEmpty)
+}
+
+@Test("Kimi read-only always fails closed with no prompt argv")
+func kimiReadOnlyUnsupported() {
+    let hostile = "inspect; rm -rf / and $(whoami) and `id`"
+    let adapter = KimiAdapter(executableURL: kimiExecutable)
+    let invocation = adapter.invocation(
+        prompt: hostile,
+        model: "kimi-k2.6",
+        autonomy: .readOnly,
+        workingDirectory: kimiWorkingDirectory,
+        runDirectory: kimiRunDirectory,
+        handoffDirectory: kimiHandoffDirectory)
+    #expect(invocation.executableURL.path == "/usr/bin/false")
+    #expect(invocation.arguments.isEmpty)
+    #expect(!invocation.arguments.contains(hostile))
+}
+
+@Test(
+    "Kimi documented print-mode argv never automates the TUI or adds conflicting permission flags",
+    arguments: [
+        ("", ["--print", "-p", "HOSTILE", "--output-format=stream-json"]),
+        (
+            "kimi-k2-thinking",
+            [
+                "--print", "-p", "HOSTILE", "--output-format=stream-json", "--model",
+                "kimi-k2-thinking",
+            ]
+        ),
+    ])
+func kimiWorktreeInvocation(model: String, expectedArguments: [String]) {
+    let hostile = "implement; rm -rf / and $(whoami) and `id`"
+    let adapter = KimiAdapter(executableURL: kimiExecutable)
+    let invocation = adapter.invocation(
+        prompt: hostile,
+        model: model,
+        autonomy: .worktreeWrite,
+        workingDirectory: kimiWorkingDirectory,
+        runDirectory: kimiRunDirectory,
+        handoffDirectory: kimiHandoffDirectory)
+    let expected = expectedArguments.map { $0 == "HOSTILE" ? hostile : $0 }
+
+    #expect(invocation.executableURL == kimiExecutable)
+    #expect(invocation.arguments == expected)
+    #expect(invocation.arguments.filter { $0 == hostile }.count == 1)
+    #expect(!invocation.arguments.contains("--plan"))
+    #expect(!invocation.arguments.contains("--auto"))
+    #expect(!invocation.arguments.contains("--yolo"))
+    #expect(!invocation.arguments.contains("--tui"))
+}
+
+@Test("Kimi path correction and run-directory environment stay exact")
+func kimiPathCorrection() {
+    let adapter = KimiAdapter(executableURL: kimiExecutable)
+    let invocation = adapter.invocation(
+        prompt: "implement",
+        model: "",
+        autonomy: .worktreeWrite,
+        workingDirectory: kimiWorkingDirectory,
+        runDirectory: kimiRunDirectory,
+        handoffDirectory: kimiHandoffDirectory)
+    let path = invocation.environment[RafuConductorEnvironment.path] ?? ""
+    let components = path.split(separator: ":").map(String.init)
+
+    #expect(components.first == "/Users/fixture/.local/bin")
+    #expect(components.filter { $0 == "/Users/fixture/.local/bin" }.count == 1)
+    #expect(path.hasSuffix(RafuConductorEnvironment.curatedPath))
+    #expect(invocation.environment[RafuConductorEnvironment.runDirectory] == kimiRunDirectory.path)
+    #expect(
+        invocation.environment[RafuConductorEnvironment.handoff]
+            == kimiHandoffDirectory.path)
 }
