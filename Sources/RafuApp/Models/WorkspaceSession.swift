@@ -324,6 +324,7 @@ final class WorkspaceSession {
     /// adds the editor-hosted run-detail canvas behind the same call, so no
     /// caller changes when it lands. Reading run evidence starts nothing.
     func openConductorRun(_ runID: String) {
+        installTerminalHandlersIfNeeded()
         selectedConductorRunID = runID
         navigatorMode = .runs
     }
