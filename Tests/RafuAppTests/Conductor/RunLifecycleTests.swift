@@ -56,7 +56,39 @@ private func makeTemporaryRunRoot() throws -> URL {
     let root = FileManager.default.temporaryDirectory
         .appending(path: "rafu-run-tests-\(UUID().uuidString)", directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    try initializeRunRepository(at: root)
     return root
+}
+
+private func initializeRunRepository(at root: URL) throws {
+    try runLifecycleGit(["init", "-b", "main"], at: root)
+    try Data("fixture\n".utf8).write(to: root.appending(path: "fixture.txt"))
+    for arguments in [
+        ["config", "user.email", "tests@rafu.invalid"],
+        ["config", "user.name", "Rafu Tests"],
+        ["add", "fixture.txt"],
+        ["commit", "-m", "Fixture"],
+    ] {
+        try runLifecycleGit(arguments, at: root)
+    }
+}
+
+private func runLifecycleGit(_ arguments: [String], at root: URL) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = arguments
+    process.currentDirectoryURL = root
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    try process.run()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+        throw RunRepositoryError.initializationFailed
+    }
+}
+
+private enum RunRepositoryError: Error {
+    case initializationFailed
 }
 
 @MainActor
@@ -164,7 +196,7 @@ func abortTerminatesChildAndPreservesEvidence() async throws {
 }
 
 @MainActor
-@Test("Unsafe handoff paths and writable roles never reach a launcher")
+@Test("Unsafe handoff paths never reach a launcher")
 func unsafeRequestsNeverLaunch() async throws {
     let root = try makeTemporaryRunRoot()
     defer { try? FileManager.default.removeItem(at: root) }
@@ -179,16 +211,5 @@ func unsafeRequestsNeverLaunch() async throws {
     #expect(
         controller.state
             == .failed("The role's handoff artifact must be a safe relative path."))
-    #expect(launcher.specification == nil)
-
-    await controller.start(
-        ConductorRunRequest(
-            role: runRole(autonomy: .worktreeWrite),
-            taskPrompt: "Implement.",
-            runID: "write-run"),
-        launcher: launcher)
-    #expect(
-        controller.state
-            == .failed("A writable role cannot start until its isolated worktree is ready."))
     #expect(launcher.specification == nil)
 }

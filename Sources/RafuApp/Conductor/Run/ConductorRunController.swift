@@ -44,7 +44,7 @@ nonisolated enum ConductorRunError: Error, Equatable, LocalizedError, Sendable {
     case invalidHandoffArtifact
     case emptyTaskPrompt
     case adapterUnavailable
-    case writableRoleRequiresWorktree
+    case worktreeFailure(ConductorWorktreeError)
     case processFailed(Int32?)
     case missingHandoffArtifact
     case unableToPersistEvidence
@@ -61,8 +61,8 @@ nonisolated enum ConductorRunError: Error, Equatable, LocalizedError, Sendable {
             "Enter a task prompt before starting the run."
         case .adapterUnavailable:
             "The selected agent adapter is unavailable."
-        case .writableRoleRequiresWorktree:
-            "A writable role cannot start until its isolated worktree is ready."
+        case .worktreeFailure(let error):
+            error.errorDescription
         case .processFailed(let code):
             code.map { "The agent process exited with status \($0)." }
                 ?? "The agent process exited without a status."
@@ -182,10 +182,16 @@ final class ConductorRunController {
     private let evidenceService = ConductorRunEvidenceService()
 
     @ObservationIgnored
+    private let worktreeService = ConductorWorktreeService()
+
+    @ObservationIgnored
     private var activeGeneration: UUID?
 
     @ObservationIgnored
     private var activeEvidence: ConductorRunEvidence?
+
+    @ObservationIgnored
+    private(set) var activeWorkspacePlan: ConductorWorkspacePlan?
 
     @ObservationIgnored
     private var activeLauncher: (any ConductorRunProcessLaunching)?
@@ -243,6 +249,7 @@ final class ConductorRunController {
         activeLauncher = launcher
         activeSessionID = nil
         activeEvidence = nil
+        activeWorkspacePlan = nil
         manifest = nil
         transition(to: .preparing)
 
@@ -253,11 +260,6 @@ final class ConductorRunController {
             }
             guard let store else {
                 throw ConductorRunError.workspaceNotAttached
-            }
-            guard request.role.autonomy == .readOnly else {
-                // Increment 2 replaces this refusal with the Rafu-owned
-                // worktree path. Never run a writable role in the checkout.
-                throw ConductorRunError.writableRoleRequiresWorktree
             }
             guard let adapter = adapter(for: request.role.provider) else {
                 throw ConductorRunError.adapterUnavailable
@@ -282,12 +284,25 @@ final class ConductorRunController {
                 throw ConductorRunError.adapterUnavailable
             }
 
+            let workspacePlan: ConductorWorkspacePlan
+            do {
+                workspacePlan = try await worktreeService.plan(
+                    workspaceRoot: store.directory.workspaceRoot,
+                    runID: request.runID,
+                    autonomy: request.role.autonomy,
+                    baseReference: request.baseReference)
+            } catch let error as ConductorWorktreeError {
+                throw ConductorRunError.worktreeFailure(error)
+            }
+            try Self.requireCurrent(generation, activeGeneration)
+            activeWorkspacePlan = workspacePlan
+
             let now = Date()
             var newManifest = ConductorRunManifest(
                 id: request.runID,
                 workflowName: request.role.name,
-                baseCommit: request.baseReference,
-                worktreeBranch: "",
+                baseCommit: workspacePlan.baseCommit,
+                worktreeBranch: workspacePlan.branchName ?? "",
                 createdAt: now,
                 updatedAt: now,
                 steps: [
@@ -309,17 +324,24 @@ final class ConductorRunController {
             try await store.save(newManifest)
             try Self.requireCurrent(generation, activeGeneration)
 
+            do {
+                try await worktreeService.materialize(workspacePlan)
+            } catch let error as ConductorWorktreeError {
+                throw ConductorRunError.worktreeFailure(error)
+            }
+            try Self.requireCurrent(generation, activeGeneration)
+
             let invocation = adapter.invocation(
                 prompt: prompt,
                 model: request.role.model,
                 autonomy: request.role.autonomy,
-                workingDirectory: store.directory.workspaceRoot,
+                workingDirectory: workspacePlan.executionRoot,
                 runDirectory: evidence.runDirectory,
                 handoffDirectory: evidence.handoffDirectory)
             let specification = TerminalProcessSpec(
                 executableURL: invocation.executableURL,
                 arguments: invocation.arguments,
-                currentDirectoryPath: store.directory.workspaceRoot.path,
+                currentDirectoryPath: workspacePlan.executionRoot.path,
                 environment: invocation.environment,
                 roleBadge: request.role.name)
 
