@@ -592,9 +592,14 @@ func claudeAuthClassification() {
 func conductorProbeRunnerTimesOut() async {
     let runner = ConductorProbeProcessRunner(
         timeout: .milliseconds(40), maximumOutputBytes: 1_024)
+    // 30s, not ~2s: the runner polls its deadline every 20ms, so under a
+    // starved scheduler (parallel test load) a short-lived child can EXIT
+    // before the poller ever wakes, and the outcome becomes "completed"
+    // instead of `.timedOut` — an observed 2/6 flake at "2". The child never
+    // actually sleeps this long: the timeout path SIGTERMs it immediately.
     let outcome = await runner.run(
         executableURL: URL(fileURLWithPath: "/bin/sleep"),
-        arguments: ["2"],
+        arguments: ["30"],
         environment: ["PATH": "/usr/bin:/bin"],
         outputPolicy: .discard)
 
@@ -616,9 +621,12 @@ func conductorProbeRunnerCancels() async {
             await registrationLatch.signal(processIdentifier: processIdentifier)
         })
     let task = Task {
+        // "30" for the same starvation reason as the timeout test above:
+        // the child must outlive any scheduler stall so cancellation, not
+        // natural exit, is always what ends it. It is SIGTERMed on cancel.
         await runner.run(
             executableURL: URL(fileURLWithPath: "/bin/sleep"),
-            arguments: ["2"],
+            arguments: ["30"],
             environment: ["PATH": "/usr/bin:/bin"],
             outputPolicy: .discard)
     }
