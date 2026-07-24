@@ -119,6 +119,56 @@ need in its handoff instead of editing it.
   documentor writes note/ADR files — but never shared doc indexes; intended
   index rows go in the final report.
 
+## Preflight and stop conditions (learned from C1 and C5)
+
+Two failure modes wasted real time in Wave A/B. Both are prompt/process bugs,
+not agent mistakes — every phase prompt now carries the fixes below.
+
+### Preflight is SELF-HEALING, not a tripwire
+
+The worktree tooling frequently lands a new worktree in **detached HEAD**
+(`## HEAD (no branch)`). That is a setup detail, not a reason to refuse work.
+Run each check ONCE and act:
+
+| Condition | Action |
+|---|---|
+| On the phase branch, tree clean | Proceed. |
+| Detached HEAD or wrong branch, tree clean | **Fix it yourself and proceed:** `git checkout <branch>` if it exists, else `git checkout -b <branch> main`. Say what you did in the report. |
+| Tree dirty with edits you did not make | STOP — that is someone else's in-flight work. |
+| A prerequisite phase is missing from history | STOP and name what is missing. |
+
+**Never re-run an unchanged read-only check hoping for a different answer.** A
+second `git status` cannot contradict the first. C1 and C5 each burned three
+identical checks before declaring "blocked" — one check, one decision.
+
+### A shared-file need is a HANDOFF, not a halt
+
+Phases are forbidden from editing shared/unowned files, and the coordinator
+(working on `main`) owns those changes. When you discover that your phase needs
+one — a signature change, a new seam, a fix in a file you do not own:
+
+1. **Do every part of the phase that does NOT depend on it, first.** Land it in
+   verified, committed stages.
+2. Then report the need with: the exact file and line, why the phase cannot
+   proceed without it, and a **concrete proposed signature or diff**.
+3. Only stop entirely if the blocked seam is genuinely a prerequisite for
+   *everything* in the phase — and say so explicitly.
+
+**Never end a phase with zero commits when independent work existed.** C5's
+seam report was correct and well-evidenced, but it delivered nothing runnable;
+the coordinator then implemented the whole phase from scratch. Partial delivery
+plus a precise handoff is always better than a clean halt.
+
+### Warnings and failures you did not cause
+
+- A warning in a file with no diff from your phase is a masked baseline
+  warning (see the ground rules above): report it, never fix it, never let it
+  block your gate.
+- A test failing in an integration-owned file is a STOP-AND-REPORT.
+- A test that fails once under parallel `swift test` but passes under
+  `--no-parallel` and on re-run is scheduler starvation, not your regression —
+  note it and move on.
+
 ## Merge protocol (coordinator, on `main`)
 
 When the user reports "phase Cn is done on branch `<branch>`":

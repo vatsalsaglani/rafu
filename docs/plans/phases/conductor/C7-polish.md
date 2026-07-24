@@ -81,20 +81,47 @@ C6's Library files, `Package.swift`.
 
 > /goal Implement phase C7 exactly as scoped in
 > docs/plans/phases/conductor/C7-polish.md. Read that file AND
-> docs/plans/phases/conductor/README.md AND
+> docs/plans/phases/conductor/README.md (including its "Preflight and stop
+> conditions" section — it is binding) AND
 > docs/decisions/0018-conductor-external-agent-orchestration.md first, in
-> that order, then AGENTS.md. First run `git status --short --branch`; you
-> must be on branch conductor/c7-polish with a clean tree, and C0+C1+C5
-> must be present in this branch's history — if not, STOP and report. Use
-> the advisor→implementor→documentor workflow per increment. All tests run
-> against FakeConductorAdapter and fixture usage snapshots — no live
+> that order, then AGENTS.md.
+>
+> PREFLIGHT — run each check ONCE and act; do not re-run an unchanged
+> read-only check hoping for a different answer. Run `git status --short
+> --branch`. If you are on conductor/c7-polish with a clean tree, proceed.
+> If you are in detached HEAD or on another branch and the tree is CLEAN,
+> fix it yourself and proceed: `git checkout conductor/c7-polish` if that
+> branch exists, else `git checkout -b conductor/c7-polish main` — then say
+> what you did in your report. STOP only if (a) the tree is dirty with
+> edits you did not make, or (b) C0+C1+C5 are missing from history
+> (Sources/RafuApp/Conductor/Run/ConductorWorkflowController.swift and a
+> real Views/ConductorRunDetailCanvas.swift must exist).
+>
+> Use the advisor→implementor→documentor workflow per increment. All tests
+> run against FakeConductorAdapter and fixture usage snapshots — no live
 > providers, no real vendor CLIs. Honesty rules: no fake cost numbers, no
-> resurrected processes, interrupted runs park with explicit verbs. Obey
-> the README worktree ground rules (headless gates only, commit on this
-> branch, never push/merge, touch ONLY your owned paths; the notch
+> resurrected processes, interrupted runs park with explicit verbs.
+> User-facing strings say "Ensemble", never "Conductor"; new internal
+> symbols keep the Conductor* prefix (ADR 0018 Naming). Obey the README
+> worktree ground rules (headless gates only, commit on this branch in
+> verified stages, never push/merge, touch ONLY your owned paths; the notch
 > companion hunks are minimal, additive, one isolated flagged commit; do
-> NOT touch ConductorRunsPanelView.swift — C6 owns it this wave). Finish
-> with one consolidated report: per increment — changes, files, test
-> delta, deviations, evidence; then the isolated notch commit id, deferred
-> GUI/manual checks (notch hardware, real VoiceOver, Release memory
-> evidence), intended doc-index rows, and remaining risks.
+> NOT touch ConductorRunsPanelView.swift — C6 owns it this wave).
+>
+> IF YOU NEED A FILE YOU DO NOT OWN (a run-engine signature, a usage or
+> notch seam, anything outside your owned paths): that is a HANDOFF to the
+> coordinator, not a halt. First complete and commit every part of the
+> phase that does NOT depend on it — the four scope areas (usage-per-run,
+> notch/attention, resume/recovery, accessibility+accounting) are largely
+> independent, so a block in one is never a block in all — then report the
+> need with the exact file/line, why it is required, and a concrete
+> proposed signature or diff. Do not end this phase with zero commits when
+> independent work existed. A warning or test failure in a file your phase
+> never touched is not yours: report it, do not fix it, do not let it block
+> your gate.
+>
+> Finish with one consolidated report: per increment — changes, files, test
+> delta, deviations, evidence; then any coordinator handoffs (with proposed
+> diffs), the isolated notch commit id, deferred GUI/manual checks (notch
+> hardware, real VoiceOver, Release memory evidence), intended doc-index
+> rows, and remaining risks.
