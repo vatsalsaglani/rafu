@@ -42,6 +42,15 @@ final class RafuTerminalView: LocalProcessTerminalView {
     /// Content is never passed — timing and volume only.
     var onOutputActivity: ((Int) -> Void)?
 
+    /// Conductor run-evidence hook (`conductor/C1-single-role-runs.md`): called with the raw pty
+    /// slice for every read, for a Conductor session's controller to tee
+    /// into `.rafu/runs/<id>/logs/output.log`. Distinct from
+    /// `onOutputActivity` above — that hook stays count-only, never content,
+    /// for the unrelated attention/quiescence pipeline; this is the one and
+    /// only seam that ever hands actual bytes out of this view, and only a
+    /// Conductor session's controller wires it.
+    var onOutputCapture: ((ArraySlice<UInt8>) -> Void)?
+
     /// `LocalProcess` delivers pty reads here (the view is its delegate and
     /// `dataReceived` is `open` — unlike `feed`, which is only `public`).
     /// Tap the byte count for activity tracking, then let SwiftTerm parse
@@ -49,6 +58,7 @@ final class RafuTerminalView: LocalProcessTerminalView {
     nonisolated override func dataReceived(slice: ArraySlice<UInt8>) {
         MainActor.assumeIsolated {
             onOutputActivity?(slice.count)
+            onOutputCapture?(slice)
             super.dataReceived(slice: slice)
         }
     }

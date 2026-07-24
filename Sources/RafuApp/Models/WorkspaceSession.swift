@@ -199,8 +199,11 @@ final class WorkspaceSession {
     /// exactly as the git phase pre-landed its seams so C1's run engine and
     /// C5's runs navigator fill them WITHOUT editing this shared file.
     ///
-    /// Empty in C0: runs are repo data read from `.rafu/runs/`, and Rafu
-    /// reads nothing merely because a folder opened.
+    /// C1 reloads persisted manifests eagerly (`reloadConductorRuns(for:)`,
+    /// called from both `openLocalWorkspace(at:)` and
+    /// `restoreLastWorkspaceIfAvailable()`), so this reflects `.rafu/runs/`
+    /// as read at the moment a workspace opens, replaces, or restores — not
+    /// only when the `.runs` navigator panel happens to be mounted.
     var conductorRuns: [ConductorRunManifest] {
         conductorRunController.runs
     }
@@ -1028,11 +1031,23 @@ final class WorkspaceSession {
         languageIntelligence.workspaceDidClose()
         RecentWorkspacesStore().record(url: url, displayName: name)
         Task { await refreshWorkspace() }
+        reloadConductorRuns(for: url)
         startFileWatcher()
         languageIntelligence.workspaceDidOpen(root: url)
         persistWorkspaceState()
 
         previousSecurityScopedURL?.stopAccessingSecurityScopedResource()
+    }
+
+    /// Loads persisted `.rafu/runs/` manifests for `url`, independent of
+    /// whether the `.runs` navigator panel is mounted (`ConductorRunsPanelView`
+    /// separately reloads on `.task(id:)` for its own live-attachment case —
+    /// this is a second, idempotent, read-only caller of the same
+    /// evidence-only path, not a replacement for it). Called from both
+    /// `openLocalWorkspace(at:)` and `restoreLastWorkspaceIfAvailable()`, the
+    /// two funnels that give a window a new workspace root.
+    private func reloadConductorRuns(for url: URL) {
+        Task { await conductorRunController.attachAndReload(workspaceRoot: url) }
     }
 
     /// Starts (or restarts) the FSEvents watcher on the current root so
@@ -3641,6 +3656,7 @@ final class WorkspaceSession {
             await refreshWorkspace()
 
             languageIntelligence.workspaceDidOpen(root: resolved.url)
+            reloadConductorRuns(for: resolved.url)
             for relativePath in restored.openRelativePaths {
                 let url = resolved.url.appending(path: relativePath)
                 guard FileManager.default.fileExists(atPath: url.path) else { continue }

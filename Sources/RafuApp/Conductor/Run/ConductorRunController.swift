@@ -512,7 +512,9 @@ final class ConductorRunController {
                 arguments: invocation.arguments,
                 currentDirectoryPath: workspacePlan.executionRoot.path,
                 environment: invocation.environment,
-                roleBadge: request.role.name)
+                roleBadge: request.role.name,
+                outputLogURL: evidence.logsDirectory.appending(
+                    path: "output.log", directoryHint: .notDirectory))
 
             newManifest.steps[0].status = .running
             newManifest.steps[0].startedAt = Date()

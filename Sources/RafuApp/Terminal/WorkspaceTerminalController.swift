@@ -238,6 +238,13 @@ final class WorkspaceTerminalController: Identifiable {
     private var delegateProxy: DelegateProxy?
     @ObservationIgnored
     private var appliedStyleSignature = ""
+    /// Non-`nil` only for a Conductor session whose spec names an
+    /// `outputLogURL` — the login-shell path never constructs one.
+    /// Retained so its consumer `Task` (and the `FileHandle` it owns) stay
+    /// alive for the session's lifetime; released once `finish()` has been
+    /// called from both process-exit paths below.
+    @ObservationIgnored
+    private var outputCapture: ConductorRunOutputCapture?
     /// Invoked once, on natural process exit, forwarded up to
     /// `WorkspaceTerminalManager.sessionDidExit`. Wired by the manager in
     /// `newSession`; `nil` otherwise.
@@ -374,6 +381,16 @@ final class WorkspaceTerminalController: Identifiable {
         // view retention, and `ProcessResourceRegistry` registration below
         // are shared by both paths.
         if let processSpec {
+            // Run-evidence capture (`conductor/C1-single-role-runs.md`):
+            // only a Conductor spec that names an `outputLogURL` gets one —
+            // the login-shell branch below never constructs a capture.
+            if let outputLogURL = processSpec.outputLogURL {
+                let capture = ConductorRunOutputCapture(outputLogURL: outputLogURL)
+                outputCapture = capture
+                view.onOutputCapture = { [weak capture] slice in
+                    capture?.record(slice)
+                }
+            }
             let launch = processSpec.resolvedLaunch()
             view.startProcess(
                 executable: launch.executable,
@@ -460,6 +477,8 @@ final class WorkspaceTerminalController: Identifiable {
         terminalView = nil
         delegateProxy = nil
         appliedStyleSignature = ""
+        outputCapture?.finish()
+        outputCapture = nil
         status = .exited(code: nil)
 
         let controllerID = id
@@ -519,6 +538,8 @@ final class WorkspaceTerminalController: Identifiable {
         terminalView = nil
         delegateProxy = nil
         appliedStyleSignature = ""
+        outputCapture?.finish()
+        outputCapture = nil
 
         let controllerID = id
         Task {

@@ -435,6 +435,38 @@ nonisolated struct TerminalProcessSpec: Equatable, Sendable {
     /// Short role label ("advisor", "implementor") shown as the session's
     /// name in the terminal tab and panel row.
     let roleBadge: String
+    /// Where `WorkspaceTerminalController` tees this run's raw PTY output
+    /// for evidence (`.rafu/runs/<id>/logs/output.log`), `nil` for a plain
+    /// login shell. Deliberately UNUSED by `resolvedLaunch()` below — this
+    /// stays a pure SwiftTerm launch mapping; only the terminal controller
+    /// (never a shell env var or argv) consumes this URL, so it can never
+    /// reach the child process or a log line.
+    let outputLogURL: URL?
+
+    /// Explicit, not synthesized: a `let` property with a default-value
+    /// initializer is excluded from Swift's synthesized memberwise
+    /// initializer entirely (verified against the Swift 6.2 toolchain — it
+    /// is not merely optional-with-a-default, it is unreachable through any
+    /// initializer), so `outputLogURL` needs this one explicit initializer
+    /// to stay both immutable and settable by `ConductorRunController`.
+    /// Every existing call site keeps compiling unchanged because
+    /// `outputLogURL` defaults to `nil` here exactly as it would have from a
+    /// synthesized init.
+    init(
+        executableURL: URL,
+        arguments: [String],
+        currentDirectoryPath: String,
+        environment: [String: String],
+        roleBadge: String,
+        outputLogURL: URL? = nil
+    ) {
+        self.executableURL = executableURL
+        self.arguments = arguments
+        self.currentDirectoryPath = currentDirectoryPath
+        self.environment = environment
+        self.roleBadge = roleBadge
+        self.outputLogURL = outputLogURL
+    }
 
     /// Pure mapping onto `SwiftTerm.LocalProcessTerminalView.startProcess`.
     /// Declared in the PRIMARY body (never a bare extension) so it stays
