@@ -656,6 +656,21 @@ struct CommandPaletteView: View {
             },
         ]
 
+        if session.rootURL != nil, session.conductorRunController.canStartNewRun {
+            commands.append(
+                .init(
+                    id: "conductor.new-run",
+                    title: "New Run…",
+                    symbolName: "person.crop.rectangle.stack",
+                    keywords: ["conductor", "agent", "role", "task"]
+                ) {
+                    dismiss()
+                    session.navigatorMode = .runs
+                    session.conductorRunController.presentNewRun()
+                }
+            )
+        }
+
         if let openDiff = session.gitOpenDiff,
             !session.isGitBusy,
             !session.isGitHunkActionBusy,
