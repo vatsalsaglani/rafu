@@ -2,7 +2,7 @@
 
 - **Branch:** `conductor/c1-single-role-runs` (Wave A, branch after C0 merges)
 - **Depends on:** C0 shim on `main`
-- **Status:** Implemented except eager workspace-open reload and PTY output evidence capture (require C0 seam extensions)
+- **Status:** Merged to main (commits ac3f1ab + 7b4bba0); deferred GUI checks listed in exit criteria
 
 ## Mission
 

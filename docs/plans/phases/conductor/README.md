@@ -143,7 +143,7 @@ git worktree add ../rafu-conductor-polish   -b conductor/c7-polish
 | Phase | File | Branch | Status |
 |---|---|---|---|
 | C0 | [C0-shim.md](C0-shim.md) | main (serial) | Merged (all gates + GUI pass green) |
-| C1 | [C1-single-role-runs.md](C1-single-role-runs.md) | `conductor/c1-single-role-runs` | In progress |
+| C1 | [C1-single-role-runs.md](C1-single-role-runs.md) | main | Merged 2026-07-25 (ac3f1ab + 7b4bba0; run engine + output capture + eager reload seams) |
 | C2 | [C2-adapters-claude-codex.md](C2-adapters-claude-codex.md) | `conductor/c2-adapters-claude-codex` | Merged 2026-07-24 (`7a2ab62`; both CLIs probe-verified) |
 | C3 | [C3-adapters-opencode-cline-kimi.md](C3-adapters-opencode-cline-kimi.md) | `conductor/c3-adapters-opencode-cline-kimi` | Merged 2026-07-24 (`b2ed160`; OpenCode + Cline verified, Kimi unverified/absent) |
 | C4 | [C4-adapters-gemini-cursor.md](C4-adapters-gemini-cursor.md) | `conductor/c4-adapters-gemini-cursor` | Merged 2026-07-24 (`4fa45cb`; Cursor verified logged-out, Gemini unverified/absent) |

@@ -59,6 +59,9 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`conductor-adapter-claude-codex.md`](conductor-adapter-claude-codex.md) | Changing Claude Code or Codex Conductor discovery, auth probes, model choices, autonomy mapping, invocation argv, or bounded probe lifecycle |
 | [`conductor-adapter-opencode-cline-kimi.md`](conductor-adapter-opencode-cline-kimi.md) | Implementing or re-verifying OpenCode, Cline, or Kimi Conductor adapters: CLI versions/argv, autonomy support limits, bounded probes, auth metadata, model discovery parsing/caps, PATH handling, and exact re-probe commands |
 | [`conductor-adapter-gemini-cursor.md`](conductor-adapter-gemini-cursor.md) | Probing or changing the best-effort Gemini CLI and Cursor CLI adapters: verified invocation/auth surfaces, autonomy limits, credential environment boundaries, fixtures, and re-verification commands |
+| [`swift-6-2-memberwise-initializer-default-property.md`](swift-6-2-memberwise-initializer-default-property.md) | Adding an optional stored property with a default-value initializer to a `struct`: why it is excluded from the synthesized memberwise initializer and the explicit `init` pattern for backward compatibility |
+| [`conductor-pty-output-capture-pattern.md`](conductor-pty-output-capture-pattern.md) | Safe off-main byte-tee for live PTY output capture without frame-budget violation: O(1) main-actor accounting, bounded cap, single-producer AsyncStream, nonisolated static file I/O, and task cleanup on dealloc |
+| [`workspace-lifecycle-dual-funnel.md`](workspace-lifecycle-dual-funnel.md) | Workspace-open work that must fire on TWO code paths: `openLocalWorkspace(at:)` for explicit open/replace, and `restoreLastWorkspaceIfAvailable()` for window state restoration (the paths do not call each other) |
 
 ## Reference-note template
 
