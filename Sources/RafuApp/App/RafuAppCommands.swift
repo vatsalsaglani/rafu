@@ -267,6 +267,52 @@ struct RafuAppCommands: Commands {
 
             Divider()
 
+            // Ensemble (ADR 0018, conductor/C5-pipelines.md). No keyboard
+            // shortcuts here for the same reason as the terminal group above:
+            // a menu key equivalent is consumed app-wide before any first
+            // responder, and these verbs are reachable via the menu, the
+            // command palette, and the run-detail canvas's own buttons.
+            Button("Show Runs") {
+                workspaceSession?.navigatorMode = .runs
+            }
+            .disabled(workspaceSession?.rootURL == nil)
+
+            Button("New Ensemble Run…") {
+                workspaceSession?.navigatorMode = .runs
+                workspaceSession?.conductorRunController.presentNewRun()
+            }
+            .disabled(
+                workspaceSession.map {
+                    !$0.conductorRunController.canStartNewRun
+                        || $0.conductorWorkflowController.isInFlight
+                } ?? true
+            )
+
+            Button("Approve Gate") {
+                guard let workflow = workspaceSession?.conductorWorkflowController else { return }
+                Task { await workflow.approveGate() }
+            }
+            .disabled(!isAwaitingWorkflowGate(workspaceSession))
+
+            Button("Revise Gate Artifact") {
+                guard let session = workspaceSession else { return }
+                session.conductorWorkflowController.reviseArtifact(in: session)
+            }
+            .disabled(!isAwaitingWorkflowGate(workspaceSession))
+
+            Button("Abort Run") {
+                workspaceSession?.conductorWorkflowController.abort()
+            }
+            .disabled(workspaceSession?.conductorWorkflowController.isInFlight != true)
+
+            Button("Retry Failed Step") {
+                guard let workflow = workspaceSession?.conductorWorkflowController else { return }
+                Task { await workflow.retryFailedStep() }
+            }
+            .disabled(!isWorkflowFailed(workspaceSession))
+
+            Divider()
+
             Button("Go to Definition") {
                 workspaceSession?.navigate(kind: .definition)
             }
@@ -308,5 +354,15 @@ struct RafuAppCommands: Commands {
 
     private func hasTrackedChanges(in session: WorkspaceSession) -> Bool {
         session.gitSnapshot?.changes.contains { $0.kind != .untracked } == true
+    }
+
+    private func isAwaitingWorkflowGate(_ session: WorkspaceSession?) -> Bool {
+        guard case .awaitingGate = session?.conductorWorkflowController.state else { return false }
+        return true
+    }
+
+    private func isWorkflowFailed(_ session: WorkspaceSession?) -> Bool {
+        guard case .failed = session?.conductorWorkflowController.state else { return false }
+        return true
     }
 }

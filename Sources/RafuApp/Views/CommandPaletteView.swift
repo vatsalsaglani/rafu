@@ -656,17 +656,72 @@ struct CommandPaletteView: View {
             },
         ]
 
-        if session.rootURL != nil, session.conductorRunController.canStartNewRun {
+        if session.rootURL != nil, session.conductorRunController.canStartNewRun,
+            !session.conductorWorkflowController.isInFlight
+        {
             commands.append(
                 .init(
                     id: "conductor.new-run",
                     title: "New Run…",
                     symbolName: "person.crop.rectangle.stack",
-                    keywords: ["ensemble", "agent", "role", "task"]
+                    keywords: ["ensemble", "agent", "role", "task", "workflow"]
                 ) {
                     dismiss()
                     session.navigatorMode = .runs
                     session.conductorRunController.presentNewRun()
+                }
+            )
+        }
+
+        if case .awaitingGate = session.conductorWorkflowController.state {
+            commands.append(
+                .init(
+                    id: "conductor.approve-gate",
+                    title: "Approve Gate",
+                    symbolName: "checkmark.circle",
+                    keywords: ["ensemble", "workflow", "run"]
+                ) {
+                    dismiss()
+                    Task { await session.conductorWorkflowController.approveGate() }
+                }
+            )
+            commands.append(
+                .init(
+                    id: "conductor.revise-gate-artifact",
+                    title: "Revise Gate Artifact",
+                    symbolName: "pencil.circle",
+                    keywords: ["ensemble", "workflow", "artifact"]
+                ) {
+                    dismiss()
+                    session.conductorWorkflowController.reviseArtifact(in: session)
+                }
+            )
+        }
+
+        if session.conductorWorkflowController.isInFlight {
+            commands.append(
+                .init(
+                    id: "conductor.abort-run",
+                    title: "Abort Run",
+                    symbolName: "xmark.circle",
+                    keywords: ["ensemble", "workflow", "stop"]
+                ) {
+                    dismiss()
+                    session.conductorWorkflowController.abort()
+                }
+            )
+        }
+
+        if case .failed = session.conductorWorkflowController.state {
+            commands.append(
+                .init(
+                    id: "conductor.retry-failed-step",
+                    title: "Retry Failed Step",
+                    symbolName: "arrow.clockwise",
+                    keywords: ["ensemble", "workflow", "retry"]
+                ) {
+                    dismiss()
+                    Task { await session.conductorWorkflowController.retryFailedStep() }
                 }
             )
         }

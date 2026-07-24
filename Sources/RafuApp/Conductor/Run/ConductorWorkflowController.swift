@@ -135,6 +135,13 @@ final class ConductorWorkflowController {
         !Self.isInFlight(state)
     }
 
+    /// Whether a run is currently mid-flight — the gating condition menu and
+    /// palette commands (Stage B) disable "New Run…" with, mirroring
+    /// `ConductorRunController`'s equivalent shape.
+    var isInFlight: Bool {
+        Self.isInFlight(state)
+    }
+
     /// Raised the moment a gate parks the run (a step gate or the terminal
     /// merge gate) — the Stage B attention/HUD seam. Deliberately carries
     /// only the workflow name and the relevant agent name, never artifact or
@@ -596,6 +603,17 @@ final class ConductorWorkflowController {
         let relative = Self.relativePath(
             of: evidence.artifactURL, from: store.directory.workspaceRoot)
         session.openFile(atRelativePath: relative)
+    }
+
+    /// Reveals the live terminal for `stepIndex`, mirroring
+    /// `ConductorRunController.revealLiveTerminal(for:in:)` — a no-op unless
+    /// this step is the run's CURRENTLY active one and a session is recorded
+    /// for it (encapsulates `stepSessionIDs`, which stays private).
+    func revealLiveTerminal(stepIndex: Int, in workspaceSession: WorkspaceSession) {
+        guard Self.activeStepIndex(in: state) == stepIndex,
+            let sessionID = stepSessionIDs[stepIndex]
+        else { return }
+        workspaceSession.revealTerminalSession(sessionID)
     }
 
     /// Stops the live child (if any) and parks the run. Evidence and the

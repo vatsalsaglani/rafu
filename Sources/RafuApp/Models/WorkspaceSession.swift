@@ -210,6 +210,14 @@ final class WorkspaceSession {
     /// The run the `.runs` panel and (C5) the run-detail canvas are showing.
     var selectedConductorRunID: String?
 
+    /// Non-nil while the editor canvas hosts the run-detail timeline (C5).
+    /// Distinct from `selectedConductorRunID` (the panel's own selection,
+    /// which persists across canvas visibility): revealing a live step's
+    /// terminal must REPLACE the canvas, not sit behind it, so
+    /// `revealTerminalSession(_:)` clears this while leaving the panel
+    /// selection alone.
+    var conductorRunCanvasID: String?
+
     /// This window's run engine — C1 FILLS IT (`conductor/C1-single-role-runs
     /// .md`). Pre-landed here because C1 may not add stored properties to
     /// this shared file without stopping to report, and because one window
@@ -222,6 +230,20 @@ final class WorkspaceSession {
     /// (ADR 0018).
     @ObservationIgnored
     let conductorRunController = ConductorRunController()
+
+    /// This window's C5 pipeline engine — a PEER of `conductorRunController`,
+    /// publishing every manifest write through it (`ConductorRunController
+    /// .publish`). `lazy` so a window that never starts a workflow run never
+    /// constructs it; `onGateReady` is wired once, here, rather than at every
+    /// call site.
+    @ObservationIgnored
+    private(set) lazy var conductorWorkflowController: ConductorWorkflowController = {
+        let controller = ConductorWorkflowController(runsPublisher: conductorRunController)
+        controller.onGateReady = { [weak self] runName, stepName in
+            self?.raiseConductorGateAttention(runName: runName, stepName: stepName)
+        }
+        return controller
+    }()
 
     let workspaceSearch = WorkspaceSearchModel()
 
@@ -333,6 +355,28 @@ final class WorkspaceSession {
         selectedConductorRunID = runID
         navigatorMode = .runs
         conductorRunController.revealLiveTerminal(for: runID, in: self)
+    }
+
+    /// Hosts the run-detail timeline in the editor canvas (C5) — the Runs
+    /// panel's row-selection path. Clears the file selection so
+    /// `EditorCanvasView` routes to the canvas instead of a document, the
+    /// same additive branch pattern `GitStandaloneDiffCanvas` established.
+    func showConductorRunDetail(_ runID: String) {
+        selectedConductorRunID = runID
+        navigatorMode = .runs
+        conductorRunCanvasID = runID
+        selectedDocumentID = nil
+        selectedTreePath = nil
+    }
+
+    /// Leaves the run-detail canvas, falling back to the last open document
+    /// tab (if any) exactly like `closeGitDiff()`'s fallback.
+    func closeConductorRunDetail() {
+        guard conductorRunCanvasID != nil else { return }
+        conductorRunCanvasID = nil
+        if selectedDocumentID == nil, let fallback = openDocuments.last {
+            select(fallback)
+        }
     }
 
     /// Drives `WorkspaceWindowView`'s `NavigationSplitView` column
@@ -588,6 +632,44 @@ final class WorkspaceSession {
         }
     }
 
+    /// Surfaces a C5 gate becoming ready through the SAME HUD/notification
+    /// arbitration `notifyIfNeeded(for:)` uses for a terminal bell, but with
+    /// its OWN bounded strings: the workflow name and the step name that
+    /// reached the gate, and NOTHING else. Deliberately never calls
+    /// `recentOutputSnippet()` or reads an artifact/prompt — a gate
+    /// notification is a "come look" signal, not evidence (ADR 0018). The
+    /// event carries a FRESH `UUID`, never a real terminal session id
+    /// (coordinator decision): there is no live pty to reply into for a
+    /// gate, so an unrecognized id simply drops reply routing silently —
+    /// the same safe-by-construction fallback `TerminalAttentionCenter
+    /// .deliverReply` already has for any unknown id.
+    func raiseConductorGateAttention(runName: String, stepName: String) {
+        let preference = terminalAttentionSurfaceStore.surface()
+        let eventID = UUID()
+        let title = runName
+        let body = "\(stepName) is ready for review."
+
+        if NotchHUDPolicy.surfaces(for: preference, authorized: false).hud {
+            resolvedAttentionHUD().show(
+                NotchHUDEvent(sessionID: eventID, title: title, snippet: body, color: nil),
+                theme: hudThemeProvider())
+        }
+
+        guard NotchHUDPolicy.surfaces(for: preference, authorized: true).notification else {
+            return
+        }
+        let notifier = resolvedAttentionNotifier()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let authorized = await notifier.requestAuthorizationIfNeeded()
+            let surfaces = NotchHUDPolicy.surfaces(
+                for: self.terminalAttentionSurfaceStore.surface(), authorized: authorized)
+            guard surfaces.notification else { return }
+            notifier.post(
+                TerminalAttentionNotification(sessionID: eventID, title: title, body: body))
+        }
+    }
+
     private func resolvedAttentionHUD() -> any NotchHUDPresenting {
         if let attentionHUD { return attentionHUD }
         let hud = NotchHUDController.shared
@@ -771,6 +853,10 @@ final class WorkspaceSession {
         selectedDocumentID = nil
         selectedTreePath = nil
         terminal.selectedID = sessionID
+        // A live step's terminal must REPLACE the run-detail canvas, not sit
+        // behind it (C5) — the panel selection (`selectedConductorRunID`)
+        // is untouched, only the canvas visibility clears.
+        conductorRunCanvasID = nil
         // Revealing (unlike a plain layout selection change) doesn't route
         // through `selectEditorTab`/`synchronizeSelectionFromLayout`, so
         // this is the third bell-clear hook (terminal-manager.md T-E):
@@ -1048,6 +1134,7 @@ final class WorkspaceSession {
     /// two funnels that give a window a new workspace root.
     private func reloadConductorRuns(for url: URL) {
         Task { await conductorRunController.attachAndReload(workspaceRoot: url) }
+        conductorWorkflowController.attach(workspaceRoot: url)
     }
 
     /// Starts (or restarts) the FSEvents watcher on the current root so
@@ -2586,7 +2673,9 @@ final class WorkspaceSession {
     func closeGitDiff() {
         let wasSelected = selectedDocumentID == nil
         gitOpenDiff = nil
-        if wasSelected, let fallback = openDocuments.last {
+        // A run diff opened from the run-detail canvas (C5) returns to the
+        // timeline, not a document fallback — the canvas is still hosting.
+        if wasSelected, conductorRunCanvasID == nil, let fallback = openDocuments.last {
             select(fallback)
         }
     }

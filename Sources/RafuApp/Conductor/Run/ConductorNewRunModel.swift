@@ -128,6 +128,7 @@ nonisolated struct ConductorAgentCatalog: Sendable {
 nonisolated enum ConductorNewRunInputError: Error, Equatable, LocalizedError, Sendable {
     case workspaceUnavailable
     case agentUnavailable
+    case workflowUnavailable
     case emptyTaskPrompt
 
     var errorDescription: String? {
@@ -136,20 +137,43 @@ nonisolated enum ConductorNewRunInputError: Error, Equatable, LocalizedError, Se
             "Open a local workspace before starting a run."
         case .agentUnavailable:
             "Choose an agent file before starting the run."
+        case .workflowUnavailable:
+            "Choose a workflow file before starting the run."
         case .emptyTaskPrompt:
             "Enter a task prompt before starting the run."
         }
     }
 }
 
+/// Single role (C1) or a multi-step pipeline (C5) — the New Run sheet's mode
+/// picker. Switching modes never clears the task prompt: only the
+/// role/workflow selection is mode-specific.
+nonisolated enum ConductorNewRunMode: String, CaseIterable, Identifiable, Sendable {
+    case singleRole
+    case workflow
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .singleRole: "Single Role"
+        case .workflow: "Workflow"
+        }
+    }
+}
+
 /// Window-owned launch-form state. The role prompt remains inside the parsed
 /// file definition and the task prompt remains ephemeral until the explicit
-/// Run action asks `ConductorRunController` to persist the run evidence.
+/// Run action asks `ConductorRunController`/`ConductorWorkflowController` to
+/// persist the run evidence.
 @Observable
 @MainActor
 final class ConductorNewRunModel {
     var agents: [ConductorAgentFile] = []
     var selectedAgentID: ConductorAgentFile.ID?
+    var mode: ConductorNewRunMode = .singleRole
+    var workflows: [ConductorWorkflowFile] = []
+    var selectedWorkflowID: ConductorWorkflowFile.ID?
     var taskPrompt = ""
     var baseReference = "HEAD"
     private(set) var isLoading = false
@@ -160,15 +184,32 @@ final class ConductorNewRunModel {
     private let catalog: ConductorAgentCatalog
 
     @ObservationIgnored
+    private let workflowCatalog: ConductorWorkflowCatalog
+
+    @ObservationIgnored
     private var loadedWorkspaceRoot: URL?
 
-    init(catalog: ConductorAgentCatalog = ConductorAgentCatalog()) {
+    init(
+        catalog: ConductorAgentCatalog = ConductorAgentCatalog(),
+        workflowCatalog: ConductorWorkflowCatalog = ConductorWorkflowCatalog()
+    ) {
         self.catalog = catalog
+        self.workflowCatalog = workflowCatalog
     }
 
     var canStart: Bool {
-        !isLoading && !isStarting && selectedAgent != nil
-            && !taskPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard !isLoading, !isStarting,
+            !taskPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return false }
+        switch mode {
+        case .singleRole:
+            return selectedAgent != nil
+        case .workflow:
+            guard let selectedWorkflow else { return false }
+            let resolved = try? ConductorWorkflowBinder.resolve(
+                workflow: selectedWorkflow.definition, agents: agents)
+            return resolved != nil
+        }
     }
 
     var selectedAgent: ConductorAgentFile? {
@@ -176,10 +217,35 @@ final class ConductorNewRunModel {
         return agents.first { $0.id == selectedAgentID }
     }
 
+    var selectedWorkflow: ConductorWorkflowFile? {
+        guard let selectedWorkflowID else { return nil }
+        return workflows.first { $0.id == selectedWorkflowID }
+    }
+
+    /// The resolved step preview for the selected workflow (agent name →
+    /// role definition, index-aligned with `selectedWorkflow.definition
+    /// .steps`), or the typed binder failure — shown inline before Run
+    /// enables, per-step, so an unmatched agent name is visible immediately
+    /// rather than surfacing later as a launch-time failure.
+    var resolvedWorkflowSteps: Result<[ConductorAgentDefinition], ConductorWorkflowBinderError>? {
+        guard let selectedWorkflow else { return nil }
+        do {
+            let roles = try ConductorWorkflowBinder.resolve(
+                workflow: selectedWorkflow.definition, agents: agents)
+            return .success(roles)
+        } catch let error as ConductorWorkflowBinderError {
+            return .failure(error)
+        } catch {
+            return .failure(.unknownAgent(name: ""))
+        }
+    }
+
     func load(workspaceRoot: URL?) async {
         guard let workspaceRoot else {
             agents = []
             selectedAgentID = nil
+            workflows = []
+            selectedWorkflowID = nil
             errorMessage = ConductorNewRunInputError.workspaceUnavailable.errorDescription
             return
         }
@@ -195,12 +261,18 @@ final class ConductorNewRunModel {
         }
 
         do {
-            let loaded = try await catalog.load(workspaceRoot: root)
+            let loadedAgents = try await catalog.load(workspaceRoot: root)
+            try Task.checkCancellation()
+            let loadedWorkflows = try await workflowCatalog.load(workspaceRoot: root)
             try Task.checkCancellation()
             guard loadedWorkspaceRoot == root else { return }
-            agents = loaded
-            if !loaded.contains(where: { $0.id == selectedAgentID }) {
-                selectedAgentID = loaded.first?.id
+            agents = loadedAgents
+            if !loadedAgents.contains(where: { $0.id == selectedAgentID }) {
+                selectedAgentID = loadedAgents.first?.id
+            }
+            workflows = loadedWorkflows
+            if !loadedWorkflows.contains(where: { $0.id == selectedWorkflowID }) {
+                selectedWorkflowID = loadedWorkflows.first?.id
             }
         } catch is CancellationError {
             return
@@ -209,11 +281,18 @@ final class ConductorNewRunModel {
             agents = []
             selectedAgentID = nil
             errorMessage = error.errorDescription
+        } catch let error as ConductorWorkflowCatalogError {
+            guard loadedWorkspaceRoot == root else { return }
+            workflows = []
+            selectedWorkflowID = nil
+            errorMessage = error.errorDescription
         } catch {
             guard loadedWorkspaceRoot == root else { return }
             agents = []
             selectedAgentID = nil
-            errorMessage = "Rafu could not read this workspace's agent files."
+            workflows = []
+            selectedWorkflowID = nil
+            errorMessage = "Rafu could not read this workspace's agent or workflow files."
         }
     }
 
@@ -231,6 +310,30 @@ final class ConductorNewRunModel {
         let base = baseReference.trimmingCharacters(in: .whitespacesAndNewlines)
         return ConductorRunRequest(
             role: selectedAgent.definition,
+            taskPrompt: task,
+            baseReference: base.isEmpty ? "HEAD" : base,
+            runID: runID)
+    }
+
+    func requestWorkflow(
+        runID: String = UUID().uuidString.lowercased()
+    ) throws -> ConductorWorkflowRunRequest {
+        guard loadedWorkspaceRoot != nil else {
+            throw ConductorNewRunInputError.workspaceUnavailable
+        }
+        guard let selectedWorkflow else {
+            throw ConductorNewRunInputError.workflowUnavailable
+        }
+        let task = taskPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !task.isEmpty else {
+            throw ConductorNewRunInputError.emptyTaskPrompt
+        }
+        let roles = try ConductorWorkflowBinder.resolve(
+            workflow: selectedWorkflow.definition, agents: agents)
+        let base = baseReference.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ConductorWorkflowRunRequest(
+            workflow: selectedWorkflow.definition,
+            roles: roles,
             taskPrompt: task,
             baseReference: base.isEmpty ? "HEAD" : base,
             runID: runID)
@@ -272,6 +375,55 @@ final class ConductorNewRunModel {
         case .running, .awaitingArtifact, .awaitingMergeGate, .completed:
             return true
         case .failed(let reason):
+            errorMessage = reason
+        case .aborted:
+            errorMessage = "The run was aborted before launch completed."
+        case .idle, .preparing:
+            errorMessage = "Rafu could not launch the run."
+        }
+        return false
+    }
+
+    /// Returns `true` only after the workflow engine's first step has
+    /// launched, mirroring `start(in:)` exactly for the pipeline path.
+    func startWorkflow(in session: WorkspaceSession) async -> Bool {
+        let request: ConductorWorkflowRunRequest
+        do {
+            request = try self.requestWorkflow()
+        } catch let error as ConductorNewRunInputError {
+            errorMessage = error.errorDescription
+            return false
+        } catch let error as ConductorWorkflowBinderError {
+            errorMessage = error.errorDescription
+            return false
+        } catch {
+            errorMessage = "Rafu could not prepare this run."
+            return false
+        }
+
+        guard let workspaceRoot = session.rootURL else {
+            errorMessage = ConductorNewRunInputError.workspaceUnavailable.errorDescription
+            return false
+        }
+        isStarting = true
+        errorMessage = nil
+        defer { isStarting = false }
+
+        let controller = session.conductorWorkflowController
+        controller.attach(workspaceRoot: workspaceRoot)
+        guard controller.canStartNewRun else {
+            errorMessage = "Finish the current run before starting another."
+            return false
+        }
+        let launcher = WorkspaceConductorRunLauncher(
+            workspaceSession: session,
+            runID: request.runID)
+        await controller.start(request, launcher: launcher)
+
+        switch controller.state {
+        case .runningStep, .awaitingArtifact, .awaitingGate, .awaitingMergeGate, .completed:
+            return true
+        case .failed(_, let reason):
             errorMessage = reason
         case .aborted:
             errorMessage = "The run was aborted before launch completed."
