@@ -10,7 +10,7 @@
 
 Turn single-role runs into multi-role pipelines: execute a
 `.rafu/workflows/*.md` definition step by step with explicit user gates
-between roles, pass artifacts forward, and give the Conductor its real UI —
+between roles, pass artifacts forward, and give the Ensemble its real UI —
 the Runs navigator panel and the editor-hosted run timeline canvas. This is
 where advisor → gate → implementor → gate → documentor becomes something
 you click through in Rafu with three different vendors doing the work.

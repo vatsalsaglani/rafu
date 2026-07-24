@@ -662,7 +662,7 @@ struct CommandPaletteView: View {
                     id: "conductor.new-run",
                     title: "New Run…",
                     symbolName: "person.crop.rectangle.stack",
-                    keywords: ["conductor", "agent", "role", "task"]
+                    keywords: ["ensemble", "agent", "role", "task"]
                 ) {
                     dismiss()
                     session.navigatorMode = .runs

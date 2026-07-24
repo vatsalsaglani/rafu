@@ -1,8 +1,8 @@
-# Conductor adapters: OpenCode, Cline, and Kimi CLI
+# Ensemble adapters: OpenCode, Cline, and Kimi CLI
 
 ## Applies to
 
-Use this note when implementing, reviewing, or re-verifying Rafu's Conductor
+Use this note when implementing, reviewing, or re-verifying Rafu's Ensemble
 adapters for OpenCode, Cline, or Kimi CLI. It records the locally observed CLI
 surfaces, the upstream-only Kimi invocation, the autonomy guarantees Rafu may
 honestly claim, and the bounded metadata-probe contract.
@@ -35,7 +35,7 @@ rather than guessing.
 ## OpenCode 1.18.4
 
 The executable resolved to
-`/Users/vatsalsaglani/.opencode/bin/opencode`, outside the curated Conductor
+`/Users/vatsalsaglani/.opencode/bin/opencode`, outside the curated Ensemble
 `PATH`. The installed help verified the `run` subcommand and its `--format`,
 `--dir`, `--model`, and `--auto` options. Rafu constructs this argv:
 
@@ -49,7 +49,7 @@ option.
 
 Only `worktreeWrite` is supported. OpenCode's named `plan` agent is an agent
 configuration, not a verified filesystem sandbox, so it does not satisfy the
-Conductor's read-only guarantee. A read-only invocation therefore fails
+Ensemble's read-only guarantee. A read-only invocation therefore fails
 closed instead of passing `--agent plan`.
 
 `opencode models --pure` returned 66 model identifiers in 2,320 bytes. Dynamic
@@ -250,11 +250,11 @@ Do not run `build_and_run.sh` for this adapter-only phase.
 - `Tests/RafuAppTests/Conductor/ClineAdapterTests.swift`
 - `Tests/RafuAppTests/Conductor/KimiAdapterTests.swift`
 - [ADR 0018](../decisions/0018-conductor-external-agent-orchestration.md)
-- [Conductor execution plan](../plans/phases/conductor/README.md)
+- [Ensemble execution plan](../plans/phases/conductor/README.md)
 - [C3 phase](../plans/phases/conductor/C3-adapters-opencode-cline-kimi.md)
 
 ## Intended index row (integration-owned; not edited here)
 
 ```markdown
-| [`conductor-adapter-opencode-cline-kimi.md`](conductor-adapter-opencode-cline-kimi.md) | Implementing or re-verifying OpenCode, Cline, or Kimi Conductor adapters: CLI versions/argv, autonomy support limits, bounded probes, auth metadata, model discovery parsing/caps, PATH handling, and exact re-probe commands |
+| [`conductor-adapter-opencode-cline-kimi.md`](conductor-adapter-opencode-cline-kimi.md) | Implementing or re-verifying OpenCode, Cline, or Kimi Ensemble adapters: CLI versions/argv, autonomy support limits, bounded probes, auth metadata, model discovery parsing/caps, PATH handling, and exact re-probe commands |
 ```

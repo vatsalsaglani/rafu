@@ -1,4 +1,4 @@
-# Gemini CLI and Cursor CLI Conductor adapters
+# Gemini CLI and Cursor CLI Ensemble adapters
 
 - **Applies to:** C4 binary discovery, capability probes, delegated-auth
   classification, model choices, and invocation construction for Gemini CLI
@@ -275,7 +275,7 @@ C4 worktree contract permits headless gates only.
 - [`GeminiCLIAdapterTests.swift`](../../Tests/RafuAppTests/Conductor/GeminiCLIAdapterTests.swift)
 - [`CursorAdapterTests.swift`](../../Tests/RafuAppTests/Conductor/CursorAdapterTests.swift)
 - [`C4-adapters-gemini-cursor.md`](../plans/phases/conductor/C4-adapters-gemini-cursor.md)
-- [`Conductor execution plan`](../plans/phases/conductor/README.md)
+- [`Ensemble execution plan`](../plans/phases/conductor/README.md)
 - [ADR 0018](../decisions/0018-conductor-external-agent-orchestration.md)
 - [`conductor-pty-spawn-and-child-environment.md`](conductor-pty-spawn-and-child-environment.md)
 - [Gemini CLI automation](https://geminicli.com/docs/cli/tutorials/automation/)

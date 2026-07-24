@@ -20,7 +20,7 @@ orchestration capability lands here.
   record the delta in the run manifest per step ("this implementor step
   moved your Codex window ~N%"). Best-effort and honest: providers without
   metering, or steps too fast to resolve a delta, show nothing — never a
-  fake number. Metering stays its own trust domain: the Conductor reads
+  fake number. Metering stays its own trust domain: the Ensemble reads
   `UsageRegistryReader` snapshots only, never provider credentials.
 - Run detail canvas shows per-step and per-run cost lines when available.
 
@@ -45,13 +45,13 @@ orchestration capability lands here.
 
 ### Accessibility + resource accounting
 
-- Full pass over Conductor surfaces: VoiceOver labels/rotor order on the
+- Full pass over Ensemble surfaces: VoiceOver labels/rotor order on the
   panel and timeline, Full Keyboard Access reachability for every verb,
   Reduce Motion (no decorative animation on step transitions), text-size
   resilience, no color-only state anywhere.
 - Child agent processes appear attributed in the Resources surface via
   `ProcessResourceRegistry` (name = role + provider); idle Rafu with no
-  active run shows zero Conductor overhead — record Release-build evidence
+  active run shows zero Ensemble overhead — record Release-build evidence
   per the AGENTS.md performance rule.
 
 ## Owned paths

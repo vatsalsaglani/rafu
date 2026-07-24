@@ -1,7 +1,28 @@
-# ADR 0018: The Conductor — orchestrate external agent CLIs, embed none
+# ADR 0018: The Ensemble — orchestrate external agent CLIs, embed none
 
 - **Status:** Accepted (narrows the "embedded coding agent" initial non-goal)
-- **Date:** 2026-07-24
+- **Date:** 2026-07-24 (renamed 2026-07-25; see Naming)
+
+## Naming
+
+This feature was designed and first implemented as "the Conductor". On
+2026-07-25 the user renamed it **Ensemble**: [conductor.build](https://www.conductor.build)
+is an established Mac product in this exact category (parallel Claude
+Code/Codex/Cursor agents in isolated workspaces with review-and-merge), so
+keeping the name would read as derivative. The rename is deliberately
+**product-surface only**:
+
+- All user-visible strings and all documentation prose say **Ensemble**.
+- Internal Swift symbols keep the `Conductor*` prefix, and the phase docs
+  keep the `docs/plans/phases/conductor/` folder, `conductor/*` branch
+  names, and `conductor-*` reference-note filenames. These are pre-rename
+  history, never shipped to users, and renaming them mid-fan-out would
+  churn every phase contract for zero user value.
+- New user-facing strings must say Ensemble; new internal symbols continue
+  the `Conductor*` prefix for consistency with the existing family.
+- "Conductor" still appears, correctly, where docs refer to the third-party
+  conductor.build product itself (e.g. as a design reference in ADR 0012 and
+  the flat-UI refresh plan).
 
 ## Context
 
@@ -28,7 +49,7 @@ Rafu already owns every hard subsystem the feature needs: terminal sessions as
 editor-tab peers with an attention pipeline (ADR 0004/0014/0016), git worktree
 creation and removal (`GitService`, git-experience phase), editor-hosted
 side-by-side diff review, a provider registry + settings pattern and per-vendor
-usage metering (ADR 0017), and the notch companion. The Conductor is a thin
+usage metering (ADR 0017), and the notch companion. The Ensemble is a thin
 coordination layer over shipped machinery, not a new engine.
 
 Alternatives considered:
@@ -47,7 +68,7 @@ Alternatives considered:
 
 ## Decision
 
-- Rafu gains a **Conductor**: it runs *roles* (agent definitions) and
+- Rafu gains an **Ensemble**: it runs *roles* (agent definitions) and
   *workflows* (ordered role pipelines with user gates) by spawning external,
   user-installed agent CLIs as child processes. Rafu itself embeds no agent,
   no model client, and no extension host. Nothing executes without a visible,
@@ -114,8 +135,8 @@ Alternatives considered:
 - Ongoing maintenance: vendor CLIs churn flags monthly. Adapters therefore
   keep verified invocation shapes in reference notes with probe procedures,
   and degrade to "adapter needs update" rather than misbehaving.
-- Usage metering (ADR 0017) and the Conductor stay separate trust domains:
-  metering may read local usage files/cookies read-only; the Conductor holds
+- Usage metering (ADR 0017) and the Ensemble stay separate trust domains:
+  metering may read local usage files/cookies read-only; the Ensemble holds
   nothing and delegates everything.
 
 **Revisit triggers:** a vendor removing or licensing-away headless CLI mode

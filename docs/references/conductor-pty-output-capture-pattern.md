@@ -1,4 +1,4 @@
-# Conductor PTY output capture: safe off-main byte-tee without frame-budget violation
+# Ensemble PTY output capture: safe off-main byte-tee without frame-budget violation
 
 - Applies to: `Sources/RafuApp/Conductor/Run/ConductorRunOutputCapture.swift`, `Sources/RafuApp/Terminal/RafuTerminalView.swift` (the `onOutputCapture` hook), and any future evidence capture from a live PTY stream
 - Last verified: Swift 6.2 / macOS 26 / SwiftTerm 1.14.0 / 2026-07-25 (phase C1)
@@ -33,7 +33,7 @@ Verification:
 # Build, run tests, measure typing latency under live output capture
 swift build
 swift test
-# GUI verification: open a Conductor run, watch terminal output scroll in real time,
+# GUI verification: open an Ensemble run, watch terminal output scroll in real time,
 # measure typing latency in a file edit — should remain responsive (< 1 frame at 60 Hz)
 ./script/build_and_run.sh --verify
 ```

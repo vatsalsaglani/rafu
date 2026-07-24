@@ -31,7 +31,7 @@ chosen scope on demand — never edited in place:
 
 - `advise-implement-document` — the flagship three-role pipeline (ports the
   repo's `.claude/agents` advisor/implementor/documentor pattern to
-  Conductor format; roles default to distinct providers as a demonstration
+  Ensemble format; roles default to distinct providers as a demonstration
   of the multi-vendor point, with models left for the user to bind).
 - `review-only` — one read-only reviewer role.
 - `implement-review` — mutating implementor + read-only reviewer + merge

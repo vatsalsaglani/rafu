@@ -76,4 +76,4 @@ Verification: `swift build` exits 0; all call sites compile unchanged; new code 
 ## Related code, ADRs, and phases
 
 - `Sources/RafuApp/Conductor/ConductorCore.swift` — `TerminalProcessSpec` (lines 428–469), which includes an explicit init comment explaining this behavior
-- Conductor phase C1 implementation (commit 7b4bba0), where this pattern was first needed for the `outputLogURL` field
+- Ensemble phase C1 implementation (commit 7b4bba0), where this pattern was first needed for the `outputLogURL` field

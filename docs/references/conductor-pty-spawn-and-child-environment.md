@@ -1,4 +1,4 @@
-# Conductor PTY spawn: `forkpty` under parallel tests, and the child's missing `PATH`
+# Ensemble PTY spawn: `forkpty` under parallel tests, and the child's missing `PATH`
 
 - Applies to: `Sources/RafuApp/Conductor/` (adapter `invocation(...)` and
   `RafuConductorEnvironment`), `Sources/RafuApp/Terminal/`
@@ -53,7 +53,7 @@ supplies `TERM`, `COLORTERM`, `LANG`, plus `LOGNAME`/`USER`/`DISPLAY`/
 
 With no `PATH`, `execvp` falls back to `confstr(_CS_PATH)`, roughly
 `/usr/bin:/bin`. That reaches neither Homebrew nor `~/.local/bin`. Every
-CLI on the Conductor roster is a Node/Bun program that resolves its
+CLI on the Ensemble roster is a Node/Bun program that resolves its
 interpreter via shebang and then shells out to `git`, `rg`, or `node`, so
 an empty search path fails the child at its **first subprocess**, not at
 launch — a confusing, late failure.
@@ -117,7 +117,7 @@ swift test
 swift test --no-parallel
 ./script/format.sh --lint
 
-# No shell interpolation anywhere in the Conductor tree (argv arrays only):
+# No shell interpolation anywhere in the Ensemble tree (argv arrays only):
 rg -n "/bin/sh|bash -c|NSTask" Sources/RafuApp/Conductor   # expect 0 hits
 ```
 

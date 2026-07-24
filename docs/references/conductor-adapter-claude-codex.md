@@ -1,4 +1,4 @@
-# Conductor Claude Code and Codex adapters
+# Ensemble Claude Code and Codex adapters
 
 - Applies to: `ClaudeCodeAdapter`, `CodexAdapter`, their shared bounded
   metadata-probe support, and C1 code that probes and invokes these adapters
@@ -27,7 +27,7 @@ Autonomy maps as follows:
 
 `bypassPermissions` is the installed CLI's explicit unattended permission
 mode. It is a vendor-level permission bypass, not an operating-system sandbox.
-Rafu restricts its use to the Conductor-created worktree for
+Rafu restricts its use to the Ensemble-created worktree for
 `worktreeWrite`. The adapter does not also pass a separate
 dangerous-skip-permissions flag.
 
@@ -217,5 +217,5 @@ The intended `docs/references/README.md` index row, to be added by the shared
 index owner, is:
 
 ```markdown
-| [`conductor-adapter-claude-codex.md`](conductor-adapter-claude-codex.md) | Changing Claude Code or Codex Conductor discovery, auth probes, model choices, autonomy mapping, invocation argv, or bounded probe lifecycle |
+| [`conductor-adapter-claude-codex.md`](conductor-adapter-claude-codex.md) | Changing Claude Code or Codex Ensemble discovery, auth probes, model choices, autonomy mapping, invocation argv, or bounded probe lifecycle |
 ```

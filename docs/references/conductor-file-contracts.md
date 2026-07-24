@@ -1,4 +1,4 @@
-# Conductor `.rafu/` file contracts: layout, parsers, manifest encoding, invocation
+# Ensemble `.rafu/` file contracts: layout, parsers, manifest encoding, invocation
 
 - Applies to: `Sources/RafuApp/Conductor/` (`RafuDotDirectory.swift`,
   `ConductorAgentFileParser.swift`, `ConductorWorkflowFileParser.swift`,

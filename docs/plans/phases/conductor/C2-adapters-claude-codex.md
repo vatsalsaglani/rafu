@@ -50,7 +50,7 @@ wins. Record the verified shapes in
 
 ## Child-process PATH (C0 contract — applies to every adapter phase)
 
-A Conductor child gets **no inherited `PATH`**: SwiftTerm's PTY environment
+An Ensemble child gets **no inherited `PATH`**: SwiftTerm's PTY environment
 omits it, so `RafuConductorEnvironment.curatedPath` supplies a fixed,
 auditable list (`/usr/local/bin`, `/opt/homebrew/bin`, `~/.local/bin`,
 `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`). Two consequences are binding on

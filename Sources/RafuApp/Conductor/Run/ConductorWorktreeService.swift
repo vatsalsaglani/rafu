@@ -39,9 +39,9 @@ nonisolated enum ConductorWorktreeError: Error, Equatable, LocalizedError, Senda
         case .invalidRunID:
             "The generated run identifier is invalid."
         case .repositoryHasNoCommit:
-            "Create an initial commit before starting a Conductor run."
+            "Create an initial commit before starting an Ensemble run."
         case .repositoryUnavailable:
-            "Open a Git workspace before starting a Conductor run."
+            "Open a Git workspace before starting an Ensemble run."
         case .unableToCreateWorktree:
             "Rafu could not create the run worktree."
         case .unableToDiscardWorktree:

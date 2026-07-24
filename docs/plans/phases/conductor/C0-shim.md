@@ -1,4 +1,4 @@
-# C0 — Conductor shared shim and contracts
+# C0 — Ensemble shared shim and contracts
 
 - **Runs:** serial, on `main` (integration-owner work; blocks every other
   conductor phase)
@@ -8,7 +8,7 @@
 
 ## Mission
 
-Create every shared Conductor file so C1–C7 can fan out with zero merge
+Create every shared Ensemble file so C1–C7 can fan out with zero merge
 conflicts. C0 ships compiling contracts, stubs, and placeholder UI — no real
 adapter logic, no run execution. The contract names and file layout below are
 binding on later phases; changing them after C0 merges requires a

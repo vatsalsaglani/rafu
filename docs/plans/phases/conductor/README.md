@@ -1,11 +1,19 @@
-# Conductor — parallel worktree execution plan
+# Ensemble — parallel worktree execution plan
 
 Parent decision: [ADR 0018](../../../decisions/0018-conductor-external-agent-orchestration.md)
 (orchestrate external agent CLIs, embed none; delegated auth; file-based
 handoffs; Rafu-owned worktrees; gated merge-back). This folder splits the
-Conductor into EIGHT phases (C0–C7) engineered for parallel execution by
+Ensemble into EIGHT phases (C0–C7) engineered for parallel execution by
 independent agents in separate git worktrees, then local merges back into
 `main` by the coordinator.
+
+**Naming (ADR 0018, Naming section):** the feature was built as "the
+Conductor" and renamed **Ensemble** on 2026-07-25 (conductor.build is an
+existing product in this category). User-visible strings and doc prose say
+Ensemble; internal `Conductor*` Swift symbols, this folder's path, the
+`conductor/*` branch names, and `conductor-*` note filenames deliberately
+keep the historical prefix. Phase agents: never put "Conductor" in a
+user-facing string; never rename existing `Conductor*` symbols.
 
 Supported CLI roster (all with model selection): **Claude Code, Codex,
 OpenCode, Cline, Kimi CLI, Gemini CLI, Cursor CLI.** Gemini and Cursor are
@@ -38,7 +46,7 @@ but do not depend on C1 to build or test.
 
 ## The zero-conflict rule (why this fans out safely)
 
-C0 creates EVERYTHING shared: the Conductor core (IDs, agent/workflow/run
+C0 creates EVERYTHING shared: the Ensemble core (IDs, agent/workflow/run
 models, autonomy levels, the adapter protocol, frontmatter parsers, run
 store), the adapter registry listing all seven CLIs, one compiling STUB
 adapter file per CLI plus a test-only fake adapter, the `.rafu/` directory

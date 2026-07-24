@@ -31,7 +31,7 @@ struct ConductorRunsPanelView: View {
                     Label("No Runs Yet", systemImage: WorkspaceNavigatorMode.runs.symbolName)
                 } description: {
                     Text(
-                        "Conductor runs appear here once a run has been started. Rafu never starts one on its own."
+                        "Ensemble runs appear here once a run has been started. Rafu never starts one on its own."
                     )
                 } actions: {
                     Button("New Run…", systemImage: "plus") {
@@ -117,7 +117,7 @@ private struct ConductorNewRunSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("New Conductor Run")
+                Text("New Ensemble Run")
                     .font(.title2.weight(.semibold))
                 Text("Choose a repository role. Rafu starts nothing until you select Run.")
                     .font(.callout)
