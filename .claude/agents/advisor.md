@@ -5,7 +5,7 @@ description: >
   non-trivial features, fixes, refactors, migrations, or architectural changes.
 tools: Read, Grep, Glob, Bash
 disallowedTools: Write, Edit, NotebookEdit
-model: claude-opus-4-8
+model: claude-opus-5
 permissionMode: plan
 effort: high
 maxTurns: 60
