@@ -1,47 +1,203 @@
 import Foundation
 import Observation
 
-/// Where a run stands from the UI's point of view. Pure and `nonisolated`
-/// so the panel, the run-detail canvas, and the (future) notch companion can
-/// all derive from it without touching the controller.
+/// Where a single-role C1 run stands. Every mutation is owned by
+/// `ConductorRunController` on the main actor; persisted step status remains
+/// the coarser, C0-defined evidence envelope.
 nonisolated enum ConductorRunState: Equatable, Sendable {
-    /// No run has been started in this window.
     case idle
-    case preparingWorktree
-    case running(stepIndex: Int)
-    /// Stopped at a user gate; the next step waits for explicit approval.
-    case awaitingGate(stepIndex: Int)
+    case preparing
+    case running
+    case awaitingArtifact
+    case awaitingMergeGate
     case completed
     case failed(String)
     case aborted
 }
 
-/// The run engine's window-level seam — STUB. C1 owns the real
-/// implementation (`docs/plans/phases/conductor/C1-single-role-runs.md`):
-/// worktree lifecycle, PTY execution through `TerminalProcessSpec`, handoff
-/// capture, and the diff gate.
+/// One visible, user-initiated role run.
+nonisolated struct ConductorRunRequest: Sendable {
+    let role: ConductorAgentDefinition
+    let taskPrompt: String
+    let baseReference: String
+    let runID: String
+
+    init(
+        role: ConductorAgentDefinition,
+        taskPrompt: String,
+        baseReference: String = "HEAD",
+        runID: String = UUID().uuidString.lowercased()
+    ) {
+        self.role = role
+        self.taskPrompt = taskPrompt
+        self.baseReference = baseReference
+        self.runID = runID
+    }
+}
+
+/// Structural failures only. Prompt, artifact, and process-output content
+/// never appears in these values, so persisting a reason in the manifest
+/// cannot leak run evidence into an app log later.
+nonisolated enum ConductorRunError: Error, Equatable, LocalizedError, Sendable {
+    case workspaceNotAttached
+    case invalidRunID
+    case invalidHandoffArtifact
+    case emptyTaskPrompt
+    case adapterUnavailable
+    case writableRoleRequiresWorktree
+    case processFailed(Int32?)
+    case missingHandoffArtifact
+    case unableToPersistEvidence
+
+    var errorDescription: String? {
+        switch self {
+        case .workspaceNotAttached:
+            "Open a local workspace before starting a run."
+        case .invalidRunID:
+            "The generated run identifier is invalid."
+        case .invalidHandoffArtifact:
+            "The role's handoff artifact must be a safe relative path."
+        case .emptyTaskPrompt:
+            "Enter a task prompt before starting the run."
+        case .adapterUnavailable:
+            "The selected agent adapter is unavailable."
+        case .writableRoleRequiresWorktree:
+            "A writable role cannot start until its isolated worktree is ready."
+        case .processFailed(let code):
+            code.map { "The agent process exited with status \($0)." }
+                ?? "The agent process exited without a status."
+        case .missingHandoffArtifact:
+            "The agent exited successfully without creating its handoff artifact."
+        case .unableToPersistEvidence:
+            "Rafu could not persist the run evidence."
+        }
+    }
+}
+
+/// Main-actor launch boundary used by the real terminal bridge in increment
+/// 3 and by C1's controllable headless fake. The callback must not fire
+/// synchronously from `launch`: the returned id is how the controller
+/// attributes the later exit.
+@MainActor
+protocol ConductorRunProcessLaunching: AnyObject {
+    func launch(
+        specification: TerminalProcessSpec,
+        onExit: @escaping @MainActor @Sendable (UUID, Int32?) -> Void
+    ) throws -> UUID
+
+    func terminate(sessionID: UUID)
+}
+
+/// The run's private evidence layout. The handoff and logs directories are
+/// created before the process specification is handed to a launcher.
+nonisolated struct ConductorRunEvidence: Equatable, Sendable {
+    let runDirectory: URL
+    let handoffDirectory: URL
+    let logsDirectory: URL
+    let promptURL: URL
+    let artifactURL: URL
+}
+
+nonisolated struct ConductorRunEvidenceService: Sendable {
+    @concurrent
+    func prepare(
+        directory: RafuDotDirectory,
+        runID: String,
+        handoffArtifact: String,
+        prompt: String
+    ) async throws -> ConductorRunEvidence {
+        guard ConductorRunStore.isValidRunID(runID),
+            let artifactComponents = Self.safePathComponents(handoffArtifact)
+        else {
+            throw ConductorRunError.invalidHandoffArtifact
+        }
+
+        let manager = FileManager.default
+        let runDirectory = directory.runDirectoryURL(for: runID)
+        let handoffDirectory = runDirectory.appending(path: "handoff", directoryHint: .isDirectory)
+        let logsDirectory = runDirectory.appending(path: "logs", directoryHint: .isDirectory)
+        try manager.createDirectory(
+            at: handoffDirectory, withIntermediateDirectories: true)
+        try manager.createDirectory(
+            at: logsDirectory, withIntermediateDirectories: true)
+
+        var artifactURL = handoffDirectory
+        for component in artifactComponents {
+            artifactURL.append(path: component)
+        }
+        try manager.createDirectory(
+            at: artifactURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true)
+
+        let promptURL = runDirectory.appending(path: "prompt.md", directoryHint: .notDirectory)
+        try Data(prompt.utf8).write(to: promptURL, options: .atomic)
+        return ConductorRunEvidence(
+            runDirectory: runDirectory,
+            handoffDirectory: handoffDirectory,
+            logsDirectory: logsDirectory,
+            promptURL: promptURL,
+            artifactURL: artifactURL)
+    }
+
+    @concurrent
+    func artifactExists(at url: URL) async -> Bool {
+        guard
+            let values = try? url.resourceValues(forKeys: [
+                .isRegularFileKey, .isSymbolicLinkKey,
+            ])
+        else { return false }
+        return values.isRegularFile == true && values.isSymbolicLink != true
+    }
+
+    private static func safePathComponents(_ path: String) -> [String]? {
+        guard !path.isEmpty, !path.hasPrefix("/"), !path.utf8.contains(0) else { return nil }
+        let components = path.split(separator: "/", omittingEmptySubsequences: false)
+        guard
+            !components.isEmpty,
+            components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." })
+        else { return nil }
+        return components.map(String.init)
+    }
+}
+
+/// Window-scoped single-role run engine.
 ///
-/// C0 lands ONLY the type, its observable state, and the persistence seam so
-/// C1 adds files under `Conductor/Run/` without editing anything shared.
-/// There is deliberately no `start()` here: nothing may execute until C1
-/// implements the whole user-initiated, visible run (ADR 0018).
+/// UI-visible transitions stay on `MainActor`. Directory preparation,
+/// evidence reads, and manifest writes use `@concurrent` value services.
+/// Reentrancy is guarded by `activeGeneration`: every result arriving after
+/// abort or after a newer run is ignored.
 @Observable
 @MainActor
 final class ConductorRunController {
     private(set) var state: ConductorRunState = .idle
-    /// The manifest of the run this controller is showing, once one exists.
     private(set) var manifest: ConductorRunManifest?
 
-    /// Where run evidence is read from and written to. `nil` until a
-    /// workspace with a root is attached.
     @ObservationIgnored
     private(set) var store: ConductorRunStore?
 
-    /// The adapters this controller may use. Injectable so C1's tests can
-    /// substitute `FakeConductorAdapter` for a provider without touching the
-    /// shared registry.
     @ObservationIgnored
     let adapters: [any ConductorCLIAdapter]
+
+    @ObservationIgnored
+    private let evidenceService = ConductorRunEvidenceService()
+
+    @ObservationIgnored
+    private var activeGeneration: UUID?
+
+    @ObservationIgnored
+    private var activeEvidence: ConductorRunEvidence?
+
+    @ObservationIgnored
+    private var activeLauncher: (any ConductorRunProcessLaunching)?
+
+    @ObservationIgnored
+    private var activeSessionID: UUID?
+
+    @ObservationIgnored
+    private var operationTask: Task<Void, Never>?
+
+    @ObservationIgnored
+    private var persistenceTask: Task<Void, Never>?
 
     init(adapters: [any ConductorCLIAdapter] = ConductorAdapterRegistry.all) {
         self.adapters = adapters
@@ -51,18 +207,327 @@ final class ConductorRunController {
         adapters.first { $0.id == id }
     }
 
-    /// Points the controller at a workspace. Deliberately does NOT seed
-    /// `.rafu/` — Rafu must not write into a user's repository merely
-    /// because a folder opened (see `RafuDotDirectory.seed()`); C1 seeds
-    /// from the run-start path.
+    /// Attaching reads and writes nothing. Starting the explicit run is the
+    /// only path that seeds `.rafu/`.
     func attach(workspaceRoot: URL?) {
         store = workspaceRoot.map { ConductorRunStore(workspaceRoot: $0) }
     }
 
-    /// Loads a persisted run for display. Reading evidence is safe and
-    /// user-initiated; it starts nothing.
+    /// Synchronous UI bridge. The owned task is cancellable through
+    /// `abort()`; tests can call and await `start` directly.
+    func begin(
+        _ request: ConductorRunRequest,
+        launcher: any ConductorRunProcessLaunching
+    ) {
+        guard !Self.isInFlight(state) else { return }
+        operationTask?.cancel()
+        operationTask = Task { [weak self] in
+            guard let self else { return }
+            await self.start(request, launcher: launcher)
+            if !Self.isInFlight(self.state) {
+                self.operationTask = nil
+            }
+        }
+    }
+
+    /// Prepares and launches one role. Returns once the child has been
+    /// attributed and the FSM has entered `.running`.
+    func start(
+        _ request: ConductorRunRequest,
+        launcher: any ConductorRunProcessLaunching
+    ) async {
+        guard !Self.isInFlight(state) else { return }
+
+        let generation = UUID()
+        activeGeneration = generation
+        activeLauncher = launcher
+        activeSessionID = nil
+        activeEvidence = nil
+        manifest = nil
+        transition(to: .preparing)
+
+        do {
+            let prompt = try Self.resolvedPrompt(for: request)
+            guard ConductorRunStore.isValidRunID(request.runID) else {
+                throw ConductorRunError.invalidRunID
+            }
+            guard let store else {
+                throw ConductorRunError.workspaceNotAttached
+            }
+            guard request.role.autonomy == .readOnly else {
+                // Increment 2 replaces this refusal with the Rafu-owned
+                // worktree path. Never run a writable role in the checkout.
+                throw ConductorRunError.writableRoleRequiresWorktree
+            }
+            guard let adapter = adapter(for: request.role.provider) else {
+                throw ConductorRunError.adapterUnavailable
+            }
+
+            try Task.checkCancellation()
+            _ = try await store.directory.seed()
+            try Self.requireCurrent(generation, activeGeneration)
+
+            let evidence = try await evidenceService.prepare(
+                directory: store.directory,
+                runID: request.runID,
+                handoffArtifact: request.role.handoffArtifact,
+                prompt: prompt)
+            try Self.requireCurrent(generation, activeGeneration)
+            activeEvidence = evidence
+
+            let probe = await adapter.probe()
+            try Task.checkCancellation()
+            try Self.requireCurrent(generation, activeGeneration)
+            guard probe.installed, probe.executableURL != nil else {
+                throw ConductorRunError.adapterUnavailable
+            }
+
+            let now = Date()
+            var newManifest = ConductorRunManifest(
+                id: request.runID,
+                workflowName: request.role.name,
+                baseCommit: request.baseReference,
+                worktreeBranch: "",
+                createdAt: now,
+                updatedAt: now,
+                steps: [
+                    ConductorRunManifest.Step(
+                        agentName: request.role.name,
+                        binding: ConductorRunManifest.AgentBinding(
+                            provider: request.role.provider,
+                            model: request.role.model,
+                            autonomy: request.role.autonomy,
+                            adapterVersion: probe.version),
+                        inputArtifacts: [],
+                        handoffArtifact: request.role.handoffArtifact,
+                        gateAfter: true,
+                        status: .pending,
+                        startedAt: nil,
+                        finishedAt: nil)
+                ])
+            manifest = newManifest
+            try await store.save(newManifest)
+            try Self.requireCurrent(generation, activeGeneration)
+
+            let invocation = adapter.invocation(
+                prompt: prompt,
+                model: request.role.model,
+                autonomy: request.role.autonomy,
+                workingDirectory: store.directory.workspaceRoot,
+                runDirectory: evidence.runDirectory,
+                handoffDirectory: evidence.handoffDirectory)
+            let specification = TerminalProcessSpec(
+                executableURL: invocation.executableURL,
+                arguments: invocation.arguments,
+                currentDirectoryPath: store.directory.workspaceRoot.path,
+                environment: invocation.environment,
+                roleBadge: request.role.name)
+
+            newManifest.steps[0].status = .running
+            newManifest.steps[0].startedAt = Date()
+            newManifest.updatedAt = Date()
+            manifest = newManifest
+            try await store.save(newManifest)
+            try Self.requireCurrent(generation, activeGeneration)
+
+            transition(to: .running)
+            let sessionID = try launcher.launch(
+                specification: specification
+            ) { [weak self] sessionID, exitCode in
+                self?.processDidExit(sessionID: sessionID, exitCode: exitCode)
+            }
+            activeSessionID = sessionID
+        } catch is CancellationError {
+            guard activeGeneration == generation else { return }
+            markAborted()
+        } catch let error as ConductorRunError {
+            guard activeGeneration == generation else { return }
+            recordFailure(error)
+        } catch {
+            guard activeGeneration == generation else { return }
+            recordFailure(.unableToPersistEvidence)
+        }
+    }
+
+    /// Natural terminal exit. Exit zero advances to an off-main artifact
+    /// check; any other status fails without inspecting captured output.
+    func processDidExit(sessionID: UUID, exitCode: Int32?) {
+        guard activeSessionID == sessionID, state == .running else { return }
+        activeSessionID = nil
+
+        guard exitCode == 0 else {
+            recordFailure(.processFailed(exitCode))
+            return
+        }
+        guard let evidence = activeEvidence, let generation = activeGeneration else {
+            recordFailure(.missingHandoffArtifact)
+            return
+        }
+
+        transition(to: .awaitingArtifact)
+        operationTask?.cancel()
+        operationTask = Task { [weak self, evidenceService] in
+            let exists = await evidenceService.artifactExists(at: evidence.artifactURL)
+            try? Task.checkCancellation()
+            guard let self, self.activeGeneration == generation else { return }
+            if exists {
+                self.markAwaitingMergeGate()
+            } else {
+                self.recordFailure(.missingHandoffArtifact)
+            }
+            self.operationTask = nil
+        }
+    }
+
+    /// Stops the child or pending evidence work and records `.aborted`.
+    /// User files and worktrees are deliberately untouched.
+    func abort() {
+        guard Self.isInFlight(state) else { return }
+        operationTask?.cancel()
+        operationTask = nil
+        if let activeSessionID {
+            activeLauncher?.terminate(sessionID: activeSessionID)
+        }
+        markAborted()
+    }
+
+    /// Increment 1's minimal gate resolution. Increment 4 expands this to
+    /// apply/keep/discard; keeping never mutates or removes user work.
+    func keepWorktree() async {
+        guard state == .awaitingMergeGate else { return }
+        transition(to: .completed)
+        updateStep(status: .completed, finishedAt: Date())
+        activeGeneration = nil
+        activeLauncher = nil
+        activeSessionID = nil
+        await persistCurrentManifest()
+    }
+
+    /// Loads persisted evidence for display and starts no process.
     func showRun(id: String) async throws {
         guard let store else { return }
         manifest = try await store.load(runID: id)
+    }
+
+    /// Headless tests await the exact task that owns the current artifact
+    /// check or manifest write; no sleeps or polling.
+    func waitForPendingOperation() async {
+        let operationTask = operationTask
+        await operationTask?.value
+        let persistenceTask = persistenceTask
+        await persistenceTask?.value
+    }
+
+    private func markAwaitingMergeGate() {
+        transition(to: .awaitingMergeGate)
+        updateStep(status: .awaitingGate, finishedAt: Date())
+        scheduleManifestSave()
+    }
+
+    private func markAborted() {
+        transition(to: .aborted)
+        updateStep(status: .aborted, finishedAt: Date())
+        activeGeneration = nil
+        activeLauncher = nil
+        activeSessionID = nil
+        scheduleManifestSave()
+    }
+
+    private func recordFailure(_ error: ConductorRunError) {
+        let reason = error.errorDescription ?? "The run failed."
+        transition(to: .failed(reason))
+        updateStep(status: .failed(reason), finishedAt: Date())
+        activeGeneration = nil
+        activeLauncher = nil
+        activeSessionID = nil
+        scheduleManifestSave()
+    }
+
+    private func updateStep(status: RunStepStatus, finishedAt: Date?) {
+        guard var manifest, !manifest.steps.isEmpty else { return }
+        manifest.steps[0].status = status
+        manifest.steps[0].finishedAt = finishedAt
+        manifest.updatedAt = Date()
+        self.manifest = manifest
+    }
+
+    private func scheduleManifestSave() {
+        persistenceTask?.cancel()
+        guard let store, let manifest else {
+            persistenceTask = nil
+            return
+        }
+        persistenceTask = Task { [weak self] in
+            try? await store.save(manifest)
+            self?.persistenceTask = nil
+        }
+    }
+
+    private func persistCurrentManifest() async {
+        guard let store, let manifest else { return }
+        try? await store.save(manifest)
+    }
+
+    private func transition(to next: ConductorRunState) {
+        precondition(
+            Self.canTransition(from: state, to: next),
+            "Invalid Conductor run transition: \(state) -> \(next)")
+        state = next
+    }
+
+    private static func resolvedPrompt(for request: ConductorRunRequest) throws -> String {
+        let task = request.taskPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !task.isEmpty else { throw ConductorRunError.emptyTaskPrompt }
+        let rolePrompt = request.role.promptBody.trimmingCharacters(in: .whitespacesAndNewlines)
+        return """
+            \(rolePrompt)
+
+            Task:
+            \(task)
+
+            Write the required handoff artifact to \
+            $\(RafuConductorEnvironment.handoff)/\(request.role.handoffArtifact).
+            """
+    }
+
+    private static func requireCurrent(_ expected: UUID, _ actual: UUID?) throws {
+        try Task.checkCancellation()
+        guard actual == expected else { throw CancellationError() }
+    }
+
+    private static func isInFlight(_ state: ConductorRunState) -> Bool {
+        switch state {
+        case .preparing, .running, .awaitingArtifact, .awaitingMergeGate:
+            true
+        case .idle, .completed, .failed, .aborted:
+            false
+        }
+    }
+
+    private static func canTransition(
+        from current: ConductorRunState,
+        to next: ConductorRunState
+    ) -> Bool {
+        switch (current, next) {
+        case (.idle, .preparing),
+            (.completed, .preparing),
+            (.failed, .preparing),
+            (.aborted, .preparing),
+            (.preparing, .running),
+            (.preparing, .failed),
+            (.preparing, .aborted),
+            (.running, .awaitingArtifact),
+            (.running, .failed),
+            (.running, .aborted),
+            (.awaitingArtifact, .awaitingMergeGate),
+            (.awaitingArtifact, .failed),
+            (.awaitingArtifact, .aborted),
+            (.awaitingMergeGate, .completed),
+            (.awaitingMergeGate, .failed),
+            (.awaitingMergeGate, .aborted):
+            true
+        default:
+            false
+        }
     }
 }
