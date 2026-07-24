@@ -142,11 +142,11 @@ git worktree add ../rafu-conductor-polish   -b conductor/c7-polish
 
 | Phase | File | Branch | Status |
 |---|---|---|---|
-| C0 | [C0-shim.md](C0-shim.md) | main (serial) | Implemented (headless gates green; GUI pass pending) |
-| C1 | [C1-single-role-runs.md](C1-single-role-runs.md) | `conductor/c1-single-role-runs` | Planned |
-| C2 | [C2-adapters-claude-codex.md](C2-adapters-claude-codex.md) | `conductor/c2-adapters-claude-codex` | Planned |
-| C3 | [C3-adapters-opencode-cline-kimi.md](C3-adapters-opencode-cline-kimi.md) | `conductor/c3-adapters-opencode-cline-kimi` | Planned |
-| C4 | [C4-adapters-gemini-cursor.md](C4-adapters-gemini-cursor.md) | `conductor/c4-adapters-gemini-cursor` | Planned |
+| C0 | [C0-shim.md](C0-shim.md) | main (serial) | Merged (all gates + GUI pass green) |
+| C1 | [C1-single-role-runs.md](C1-single-role-runs.md) | `conductor/c1-single-role-runs` | In progress |
+| C2 | [C2-adapters-claude-codex.md](C2-adapters-claude-codex.md) | `conductor/c2-adapters-claude-codex` | Merged 2026-07-24 (`7a2ab62`; both CLIs probe-verified) |
+| C3 | [C3-adapters-opencode-cline-kimi.md](C3-adapters-opencode-cline-kimi.md) | `conductor/c3-adapters-opencode-cline-kimi` | Merged 2026-07-24 (`b2ed160`; OpenCode + Cline verified, Kimi unverified/absent) |
+| C4 | [C4-adapters-gemini-cursor.md](C4-adapters-gemini-cursor.md) | `conductor/c4-adapters-gemini-cursor` | Merged 2026-07-24 (`4fa45cb`; Cursor verified logged-out, Gemini unverified/absent) |
 | C5 | [C5-pipelines.md](C5-pipelines.md) | `conductor/c5-pipelines` | Planned |
 | C6 | [C6-workflow-library.md](C6-workflow-library.md) | `conductor/c6-workflow-library` | Planned |
 | C7 | [C7-polish.md](C7-polish.md) | `conductor/c7-polish` | Planned |
