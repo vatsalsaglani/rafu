@@ -103,6 +103,59 @@ nonisolated struct ConductorRunEvidence: Equatable, Sendable {
     let logsDirectory: URL
     let promptURL: URL
     let artifactURL: URL
+    /// Where THIS step's own evidence lives inside `runDirectory` — equal to
+    /// `runDirectory` for a C1 single-role run (`.singleRole`), and a nested
+    /// `steps/<NN>-<slug>-a<attempt>/` directory for a C5 pipeline step.
+    /// Nothing outside this file constructs one.
+    let stepDirectory: URL
+}
+
+/// Where one evidence directory sits inside a run. `.singleRole` reproduces
+/// C1's flat layout (`stepComponents` empty, so `stepDirectory ==
+/// runDirectory`); `.step(index:agentName:attempt:)` is C5's per-step,
+/// per-attempt nesting.
+nonisolated struct ConductorRunEvidenceLayout: Equatable, Sendable {
+    let stepComponents: [String]
+
+    static let singleRole = ConductorRunEvidenceLayout(stepComponents: [])
+
+    /// `index` is 0-based; the on-disk directory name is 1-based
+    /// (`01`, `02`, …) so evidence sorts in execution order in a Finder or
+    /// file listing.
+    static func step(index: Int, agentName: String, attempt: Int) -> Self {
+        ConductorRunEvidenceLayout(
+            stepComponents: [
+                "steps",
+                "\(String(format: "%02d", index + 1))-\(slug(agentName))-a\(attempt)",
+            ])
+    }
+
+    /// Sanitizes a user-authored role name into a single, safe path
+    /// component. Agent names come from `.rafu/agents/*.md` frontmatter the
+    /// user controls, so this must never let a name produce `".."`, a `"/"`,
+    /// or a leading `"."` — every non `[a-z0-9]` run (after lowercasing)
+    /// collapses to one `"-"`, and the result is trimmed and length-bounded.
+    static func slug(_ name: String) -> String {
+        var collapsed = ""
+        var previousWasSeparator = false
+        for scalar in name.lowercased().unicodeScalars {
+            if ("a"..."z").contains(scalar) || ("0"..."9").contains(scalar) {
+                collapsed.unicodeScalars.append(scalar)
+                previousWasSeparator = false
+            } else if !previousWasSeparator {
+                collapsed.append("-")
+                previousWasSeparator = true
+            }
+        }
+        var trimmed = collapsed
+        while trimmed.hasPrefix("-") { trimmed.removeFirst() }
+        while trimmed.hasSuffix("-") { trimmed.removeLast() }
+        if trimmed.count > 32 {
+            trimmed = String(trimmed.prefix(32))
+            while trimmed.hasSuffix("-") { trimmed.removeLast() }
+        }
+        return trimmed.isEmpty ? "step" : trimmed
+    }
 }
 
 nonisolated struct ConductorRunEvidenceService: Sendable {
@@ -110,6 +163,7 @@ nonisolated struct ConductorRunEvidenceService: Sendable {
     func prepare(
         directory: RafuDotDirectory,
         runID: String,
+        layout: ConductorRunEvidenceLayout = .singleRole,
         handoffArtifact: String,
         prompt: String
     ) async throws -> ConductorRunEvidence {
@@ -121,8 +175,22 @@ nonisolated struct ConductorRunEvidenceService: Sendable {
 
         let manager = FileManager.default
         let runDirectory = directory.runDirectoryURL(for: runID)
-        let handoffDirectory = runDirectory.appending(path: "handoff", directoryHint: .isDirectory)
-        let logsDirectory = runDirectory.appending(path: "logs", directoryHint: .isDirectory)
+        var stepDirectory = runDirectory
+        for component in layout.stepComponents {
+            stepDirectory.append(path: component, directoryHint: .isDirectory)
+        }
+        if !layout.stepComponents.isEmpty {
+            // A retry must never mix attempts: the layout already encodes the
+            // attempt number, so an existing directory here means this exact
+            // step+attempt already has evidence on disk.
+            guard !manager.fileExists(atPath: stepDirectory.path) else {
+                throw ConductorRunError.unableToPersistEvidence
+            }
+        }
+
+        let handoffDirectory = stepDirectory.appending(
+            path: "handoff", directoryHint: .isDirectory)
+        let logsDirectory = stepDirectory.appending(path: "logs", directoryHint: .isDirectory)
         try manager.createDirectory(
             at: handoffDirectory, withIntermediateDirectories: true)
         try manager.createDirectory(
@@ -136,14 +204,15 @@ nonisolated struct ConductorRunEvidenceService: Sendable {
             at: artifactURL.deletingLastPathComponent(),
             withIntermediateDirectories: true)
 
-        let promptURL = runDirectory.appending(path: "prompt.md", directoryHint: .notDirectory)
+        let promptURL = stepDirectory.appending(path: "prompt.md", directoryHint: .notDirectory)
         try Data(prompt.utf8).write(to: promptURL, options: .atomic)
         return ConductorRunEvidence(
             runDirectory: runDirectory,
             handoffDirectory: handoffDirectory,
             logsDirectory: logsDirectory,
             promptURL: promptURL,
-            artifactURL: artifactURL)
+            artifactURL: artifactURL,
+            stepDirectory: stepDirectory)
     }
 
     @concurrent
@@ -261,6 +330,9 @@ final class ConductorRunController {
     private let mergeGateService = ConductorMergeGateService()
 
     @ObservationIgnored
+    private let roleLaunch = ConductorRoleLaunchService()
+
+    @ObservationIgnored
     private let manifestWrites: ConductorRunManifestWriteQueue
 
     @ObservationIgnored
@@ -375,6 +447,27 @@ final class ConductorRunController {
         newRunPresentation = ConductorNewRunPresentation()
     }
 
+    /// The single seam every pipeline manifest write goes through: updates
+    /// the in-memory runs list immediately and enqueues the on-disk write
+    /// behind this controller's serialized manifest-write queue.
+    /// `ConductorWorkflowController` (C5) is a PEER of this controller, not a
+    /// wrapper, and must never call `store.save` directly — this is the only
+    /// door.
+    @discardableResult
+    func publish(_ manifest: ConductorRunManifest) -> Task<Void, Never>? {
+        upsertRun(manifest)
+        guard let store else { return nil }
+        return manifestWrites.enqueue(manifest, to: store)
+    }
+
+    /// The write queue's currently in-flight task, if any — the same task
+    /// `waitForPendingOperation()` awaits below, exposed so a peer controller
+    /// publishing through `publish(_:)` can await persistence deterministically
+    /// in headless tests.
+    var pendingManifestWrite: Task<Void, Never>? {
+        manifestWrites.pendingTask
+    }
+
     func revealLiveTerminal(
         for runID: String,
         in workspaceSession: WorkspaceSession
@@ -422,7 +515,8 @@ final class ConductorRunController {
         transition(to: .preparing)
 
         do {
-            let prompt = try Self.resolvedPrompt(for: request)
+            let prompt = try ConductorPromptComposer.singleRole(
+                role: request.role, taskPrompt: request.taskPrompt)
             guard ConductorRunStore.isValidRunID(request.runID) else {
                 throw ConductorRunError.invalidRunID
             }
@@ -445,12 +539,9 @@ final class ConductorRunController {
             try Self.requireCurrent(generation, activeGeneration)
             activeEvidence = evidence
 
-            let probe = await adapter.probe()
+            let resolved = try await roleLaunch.resolve(adapter)
             try Task.checkCancellation()
             try Self.requireCurrent(generation, activeGeneration)
-            guard probe.installed, probe.executableURL != nil else {
-                throw ConductorRunError.adapterUnavailable
-            }
 
             let workspacePlan: ConductorWorkspacePlan
             do {
@@ -476,11 +567,8 @@ final class ConductorRunController {
                 steps: [
                     ConductorRunManifest.Step(
                         agentName: request.role.name,
-                        binding: ConductorRunManifest.AgentBinding(
-                            provider: request.role.provider,
-                            model: request.role.model,
-                            autonomy: request.role.autonomy,
-                            adapterVersion: probe.version),
+                        binding: ConductorRoleLaunchService.binding(
+                            role: request.role, resolved: resolved),
                         inputArtifacts: [],
                         handoffArtifact: request.role.handoffArtifact,
                         gateAfter: true,
@@ -500,21 +588,13 @@ final class ConductorRunController {
             }
             try Self.requireCurrent(generation, activeGeneration)
 
-            let invocation = adapter.invocation(
+            let specification = roleLaunch.specification(
+                role: request.role,
                 prompt: prompt,
-                model: request.role.model,
-                autonomy: request.role.autonomy,
-                workingDirectory: workspacePlan.executionRoot,
-                runDirectory: evidence.runDirectory,
-                handoffDirectory: evidence.handoffDirectory)
-            let specification = TerminalProcessSpec(
-                executableURL: invocation.executableURL,
-                arguments: invocation.arguments,
-                currentDirectoryPath: workspacePlan.executionRoot.path,
-                environment: invocation.environment,
-                roleBadge: request.role.name,
-                outputLogURL: evidence.logsDirectory.appending(
-                    path: "output.log", directoryHint: .notDirectory))
+                evidence: evidence,
+                plan: workspacePlan,
+                resolved: resolved,
+                roleBadge: request.role.name)
 
             newManifest.steps[0].status = .running
             newManifest.steps[0].startedAt = Date()
@@ -821,21 +901,6 @@ final class ConductorRunController {
             Self.canTransition(from: state, to: next),
             "Invalid Conductor run transition: \(state) -> \(next)")
         state = next
-    }
-
-    private static func resolvedPrompt(for request: ConductorRunRequest) throws -> String {
-        let task = request.taskPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !task.isEmpty else { throw ConductorRunError.emptyTaskPrompt }
-        let rolePrompt = request.role.promptBody.trimmingCharacters(in: .whitespacesAndNewlines)
-        return """
-            \(rolePrompt)
-
-            Task:
-            \(task)
-
-            Write the required handoff artifact to \
-            $\(RafuConductorEnvironment.handoff)/\(request.role.handoffArtifact).
-            """
     }
 
     private static func requireCurrent(_ expected: UUID, _ actual: UUID?) throws {

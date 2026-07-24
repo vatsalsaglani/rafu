@@ -60,6 +60,123 @@ private func runPersistenceManifest(
         ])
 }
 
+private func writeWorkflow(
+    named fileName: String,
+    name: String,
+    to root: URL,
+    steps: String
+) throws {
+    let workflows = root.appending(path: ".rafu/workflows", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: workflows, withIntermediateDirectories: true)
+    let text = """
+        ---
+        name: \(name)
+        steps:
+        \(steps)
+        ---
+        """
+    try Data(text.utf8).write(to: workflows.appending(path: fileName), options: .atomic)
+}
+
+@Test("Opening an absent workflow catalog is read-only and does not seed .rafu")
+func absentWorkflowCatalogDoesNotSeedRafu() async throws {
+    let root = try makeRunPersistenceRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let files = try await ConductorWorkflowCatalog().load(workspaceRoot: root)
+
+    #expect(files.isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: root.appending(path: ".rafu").path))
+}
+
+@Test("Workflow catalog loads pipeline Markdown files in stable file order")
+func workflowCatalogLoadsPipelinesInStableOrder() async throws {
+    let root = try makeRunPersistenceRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try writeWorkflow(
+        named: "z-ship.md", name: "Ship", to: root,
+        steps: "  - advisor\n  - implementor <- brief.md [gate]")
+    try writeWorkflow(named: "a-review.md", name: "Review", to: root, steps: "  - advisor")
+
+    let files = try await ConductorWorkflowCatalog().load(workspaceRoot: root)
+
+    #expect(
+        files.map(\.relativePath) == [
+            ".rafu/workflows/a-review.md",
+            ".rafu/workflows/z-ship.md",
+        ])
+    #expect(files.map(\.definition.name) == ["Review", "Ship"])
+    #expect(files[1].definition.steps.count == 2)
+    #expect(files[1].definition.steps[1].gateAfter)
+}
+
+@Test("Workflow catalog refuses pipeline-file symlinks")
+func workflowCatalogRefusesSymlinks() async throws {
+    let root = try makeRunPersistenceRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let outside = root.appending(path: "outside.md")
+    try Data(
+        """
+        ---
+        steps:
+          - advisor
+        ---
+        """.utf8
+    ).write(to: outside)
+    let workflows = root.appending(path: ".rafu/workflows", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: workflows, withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(
+        at: workflows.appending(path: "linked.md"),
+        withDestinationURL: outside)
+
+    await #expect(
+        throws: ConductorWorkflowCatalogError.unsafeWorkflowFile("linked.md")
+    ) {
+        _ = try await ConductorWorkflowCatalog().load(workspaceRoot: root)
+    }
+}
+
+@Test("The workflow binder matches a step's agentName by parsed name, then by file stem")
+func workflowBinderMatchesByNameThenStem() throws {
+    let byName = ConductorAgentFile(
+        relativePath: ".rafu/agents/one.md",
+        definition: ConductorAgentDefinition(
+            name: "Advisor", provider: .claudeCode, model: "fake-fast", autonomy: .readOnly,
+            handoffArtifact: "brief.md", promptBody: "Assess."))
+    let byStem = ConductorAgentFile(
+        relativePath: ".rafu/agents/implementor.md",
+        definition: ConductorAgentDefinition(
+            name: "Some Display Name", provider: .claudeCode, model: "fake-fast",
+            autonomy: .worktreeWrite, handoffArtifact: "patch.md", promptBody: "Implement."))
+    let workflow = ConductorWorkflowDefinition(
+        name: "pipeline",
+        steps: [
+            ConductorWorkflowDefinition.Step(
+                agentName: "Advisor", inputArtifacts: [], gateAfter: false),
+            ConductorWorkflowDefinition.Step(
+                agentName: "implementor", inputArtifacts: ["brief.md"], gateAfter: false),
+        ])
+
+    let resolved = try ConductorWorkflowBinder.resolve(
+        workflow: workflow, agents: [byName, byStem])
+
+    #expect(resolved.map(\.name) == ["Advisor", "Some Display Name"])
+}
+
+@Test("The workflow binder throws a typed error for an unmatched agent name")
+func workflowBinderThrowsForUnknownAgent() throws {
+    let workflow = ConductorWorkflowDefinition(
+        name: "pipeline",
+        steps: [
+            ConductorWorkflowDefinition.Step(
+                agentName: "ghost", inputArtifacts: [], gateAfter: false)
+        ])
+
+    #expect(throws: ConductorWorkflowBinderError.unknownAgent(name: "ghost")) {
+        try ConductorWorkflowBinder.resolve(workflow: workflow, agents: [])
+    }
+}
+
 @Test("Opening an absent agent catalog is read-only and does not seed .rafu")
 func absentAgentCatalogDoesNotSeedRafu() async throws {
     let root = try makeRunPersistenceRoot()

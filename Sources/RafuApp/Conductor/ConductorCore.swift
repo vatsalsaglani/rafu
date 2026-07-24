@@ -212,6 +212,29 @@ nonisolated struct ConductorRunManifest: Codable, Equatable, Sendable {
     let createdAt: Date
     var updatedAt: Date
     var steps: [Step]
+    /// The gate currently parking this run, `nil` when none is open (C5:
+    /// `ConductorWorkflowController` sets this alongside the parked step's
+    /// `.awaitingGate` status; C1 single-role runs never set it — their
+    /// merge gate is expressed purely through `ConductorRunState`). `var`
+    /// with a default keeps this additive: the synthesized memberwise init
+    /// still accepts every existing call site unchanged (a `let` with a
+    /// default value is EXCLUDED from Swift's synthesized memberwise init —
+    /// see `TerminalProcessSpec`'s note above — but a `var` with a default is
+    /// not), and `JSONEncoder`'s default `encodeIfPresent` behavior for
+    /// `Optional` properties omits a `nil` key entirely, so a C1-era
+    /// manifest's on-disk shape is unaffected.
+    var gate: Gate? = nil
+
+    /// One open gate: which kind, and which step it follows (or precedes,
+    /// for the terminal `.merge` gate).
+    nonisolated struct Gate: Codable, Equatable, Sendable {
+        nonisolated enum Kind: String, Codable, Sendable {
+            case step
+            case merge
+        }
+        let kind: Kind
+        let stepIndex: Int
+    }
 
     /// What a role resolved to at the moment the run started. Stored per
     /// step so re-reading an old manifest never depends on today's
@@ -234,6 +257,14 @@ nonisolated struct ConductorRunManifest: Codable, Equatable, Sendable {
         var status: RunStepStatus
         var startedAt: Date?
         var finishedAt: Date?
+        /// 1-based attempt number; `nil` means attempt 1 (a C1-era manifest,
+        /// or a C5 step that has not yet been retried). The manifest records
+        /// only the CURRENT attempt — prior attempts' evidence persists on
+        /// disk under their own `-a<N>` directory, untouched.
+        var attempt: Int? = nil
+        /// Run-relative path to this step's evidence directory, e.g.
+        /// `"steps/01-advisor-a1"`. `nil` for C1's flat single-role layout.
+        var evidencePath: String? = nil
     }
 }
 
