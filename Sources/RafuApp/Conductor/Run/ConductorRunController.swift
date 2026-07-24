@@ -35,6 +35,13 @@ nonisolated struct ConductorRunRequest: Sendable {
     }
 }
 
+/// Item-driven sheet token. It is deliberately ephemeral and is never part
+/// of workspace restoration, so reopening Rafu cannot resurrect a launch
+/// form or start a process.
+nonisolated struct ConductorNewRunPresentation: Equatable, Identifiable, Sendable {
+    let id = UUID()
+}
+
 /// Structural failures only. Prompt, artifact, and process-output content
 /// never appears in these values, so persisting a reason in the manifest
 /// cannot leak run evidence into an app log later.
@@ -171,13 +178,23 @@ nonisolated struct ConductorRunEvidenceService: Sendable {
 final class ConductorRunController {
     private(set) var state: ConductorRunState = .idle
     private(set) var manifest: ConductorRunManifest?
+    private(set) var runs: [ConductorRunManifest] = []
+    private(set) var runsLoadError: String?
     private(set) var mergeGateFiles: [ConductorMergeGateFile] = []
     private(set) var mergeGateError: String?
     private(set) var hasAppliedToWorkspace = false
     private(set) var isResolvingMergeGate = false
+    var newRunPresentation: ConductorNewRunPresentation?
+
+    var canStartNewRun: Bool {
+        !Self.isInFlight(state)
+    }
 
     @ObservationIgnored
     private(set) var store: ConductorRunStore?
+
+    @ObservationIgnored
+    private var attachedWorkspaceRoot: URL?
 
     @ObservationIgnored
     let adapters: [any ConductorCLIAdapter]
@@ -212,6 +229,9 @@ final class ConductorRunController {
     @ObservationIgnored
     private var persistenceTask: Task<Void, Never>?
 
+    @ObservationIgnored
+    private var persistenceGeneration: UUID?
+
     init(adapters: [any ConductorCLIAdapter] = ConductorAdapterRegistry.all) {
         self.adapters = adapters
     }
@@ -221,9 +241,93 @@ final class ConductorRunController {
     }
 
     /// Attaching reads and writes nothing. Starting the explicit run is the
-    /// only path that seeds `.rafu/`.
+    /// only path that seeds `.rafu/`. Moving this window to another workspace
+    /// aborts (but never deletes) an in-flight run before replacing the store.
     func attach(workspaceRoot: URL?) {
-        store = workspaceRoot.map { ConductorRunStore(workspaceRoot: $0) }
+        let root = workspaceRoot?.standardizedFileURL
+        guard root != attachedWorkspaceRoot else { return }
+
+        if Self.isInFlight(state) {
+            abort()
+            guard !Self.isInFlight(state) else {
+                runsLoadError = "Finish the current run action before opening another workspace."
+                return
+            }
+        }
+
+        attachedWorkspaceRoot = root
+        store = root.map { ConductorRunStore(workspaceRoot: $0) }
+        state = .idle
+        manifest = nil
+        runs = []
+        runsLoadError = nil
+        mergeGateFiles = []
+        mergeGateError = nil
+        hasAppliedToWorkspace = false
+        isResolvingMergeGate = false
+        activeGeneration = nil
+        activeEvidence = nil
+        activeWorkspacePlan = nil
+        activeLauncher = nil
+        activeSessionID = nil
+    }
+
+    /// Reloads persisted manifests for the attached workspace. This is a
+    /// read-only evidence operation: no adapter is probed and no terminal is
+    /// reconstructed.
+    func reloadRuns() async {
+        guard let store, let attachedWorkspaceRoot else {
+            runs = []
+            runsLoadError = nil
+            return
+        }
+
+        do {
+            let ids = try await store.listRunIDs()
+            var loaded: [ConductorRunManifest] = []
+            loaded.reserveCapacity(ids.count)
+            for id in ids {
+                try Task.checkCancellation()
+                if let manifest = try await store.load(runID: id) {
+                    loaded.append(manifest)
+                }
+            }
+            try Task.checkCancellation()
+            guard self.attachedWorkspaceRoot == attachedWorkspaceRoot else { return }
+            runs = Self.sortedRuns(loaded)
+            if let manifest {
+                upsertRun(manifest)
+            }
+            runsLoadError = nil
+        } catch is CancellationError {
+            return
+        } catch let error as ConductorRunStoreError {
+            guard self.attachedWorkspaceRoot == attachedWorkspaceRoot else { return }
+            runs = []
+            runsLoadError = error.errorDescription
+        } catch {
+            guard self.attachedWorkspaceRoot == attachedWorkspaceRoot else { return }
+            runs = []
+            runsLoadError = "Rafu could not read the saved run manifests."
+        }
+    }
+
+    func attachAndReload(workspaceRoot: URL?) async {
+        attach(workspaceRoot: workspaceRoot)
+        await reloadRuns()
+    }
+
+    func presentNewRun() {
+        guard canStartNewRun else { return }
+        newRunPresentation = ConductorNewRunPresentation()
+    }
+
+    func revealLiveTerminal(
+        for runID: String,
+        in workspaceSession: WorkspaceSession
+    ) {
+        guard manifest?.id == runID, let activeSessionID else { return }
+        workspaceSession.revealTerminalSession(activeSessionID)
     }
 
     /// Synchronous UI bridge. The owned task is cancellable through
@@ -334,6 +438,7 @@ final class ConductorRunController {
             manifest = newManifest
             try await store.save(newManifest)
             try Self.requireCurrent(generation, activeGeneration)
+            upsertRun(newManifest)
 
             do {
                 try await worktreeService.materialize(workspacePlan)
@@ -362,6 +467,7 @@ final class ConductorRunController {
             manifest = newManifest
             try await store.save(newManifest)
             try Self.requireCurrent(generation, activeGeneration)
+            upsertRun(newManifest)
 
             transition(to: .running)
             let sessionID = try launcher.launch(
@@ -565,6 +671,9 @@ final class ConductorRunController {
     func showRun(id: String) async throws {
         guard let store else { return }
         manifest = try await store.load(runID: id)
+        if let manifest {
+            upsertRun(manifest)
+        }
     }
 
     /// Headless tests await the exact task that owns the current artifact
@@ -616,23 +725,49 @@ final class ConductorRunController {
         manifest.steps[0].finishedAt = finishedAt
         manifest.updatedAt = Date()
         self.manifest = manifest
+        upsertRun(manifest)
     }
 
     private func scheduleManifestSave() {
         persistenceTask?.cancel()
         guard let store, let manifest else {
             persistenceTask = nil
+            persistenceGeneration = nil
             return
         }
+        let generation = UUID()
+        persistenceGeneration = generation
         persistenceTask = Task { [weak self] in
             try? await store.save(manifest)
+            guard self?.persistenceGeneration == generation else { return }
             self?.persistenceTask = nil
+            self?.persistenceGeneration = nil
         }
     }
 
     private func persistCurrentManifest() async {
         guard let store, let manifest else { return }
         try? await store.save(manifest)
+    }
+
+    private func upsertRun(_ manifest: ConductorRunManifest) {
+        if let index = runs.firstIndex(where: { $0.id == manifest.id }) {
+            runs[index] = manifest
+        } else {
+            runs.append(manifest)
+        }
+        runs = Self.sortedRuns(runs)
+    }
+
+    private static func sortedRuns(
+        _ runs: [ConductorRunManifest]
+    ) -> [ConductorRunManifest] {
+        runs.sorted {
+            if $0.createdAt != $1.createdAt {
+                return $0.createdAt > $1.createdAt
+            }
+            return $0.id > $1.id
+        }
     }
 
     private func transition(to next: ConductorRunState) {
