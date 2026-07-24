@@ -12,7 +12,7 @@ struct EditorCanvasView: View {
             if session.descriptor == nil {
                 WorkspaceWelcomeView(session: session, openFolder: openFolder)
             } else if !session.hasAnyEditorTabs && session.gitOpenDiff == nil
-                && session.gitOpenBlame == nil
+                && session.gitOpenBlame == nil && session.conductorRunCanvasID == nil
             {
                 EmptyEditorView(
                     workspaceName: session.descriptor?.displayName ?? "Workspace",
@@ -28,6 +28,8 @@ struct EditorCanvasView: View {
                 )
             } else if let openDiff = session.gitOpenDiff, session.selectedDocumentID == nil {
                 GitStandaloneDiffCanvas(openDiff: openDiff, session: session)
+            } else if session.conductorRunCanvasID != nil, session.selectedDocumentID == nil {
+                ConductorRunDetailCanvas(session: session)
             } else {
                 EditorLayoutTreeView(node: session.editorLayout.root, session: session)
             }
