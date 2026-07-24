@@ -71,6 +71,66 @@ parser throws `malformedStep(line:)` rather than producing a bogus agent
 name. A bogus name would otherwise fail much later, at run time, with a
 far worse diagnostic.
 
+### Pipeline directory layout (`.rafu/runs/<id>/steps/<NN>-<slug>-a<N>/`) — C5 pipelines
+
+When a workflow executes, each step's evidence lives under a directory keyed by step index, sanitized agent name, and attempt number:
+
+```
+.rafu/runs/<id>/
+  steps/
+    00-advisor-a0/
+      prompt.md
+      handoff/
+        ...
+      logs/
+        ...
+    01-implementor-a0/
+      prompt.md
+      handoff/
+        ...
+      logs/
+        ...
+    01-implementor-a1/    # First retry uses -a1
+      prompt.md
+      handoff/
+        ...
+      logs/
+        ...
+```
+
+**Slug sanitizer:** agent names are lowercased and truncated to alphanumeric + hyphens (e.g., `Claude Code` → `claude-code`). Uppercase, special characters, and spaces become hyphens or are stripped. A step's slug is stable across retries in the same run (only the `-a<N>` suffix changes).
+
+**Attempt numbering:** `-a0` for first execution, `-a1` for first retry, `-a2` for second retry, etc. Retry never mutates prior evidence; each attempt gets its own directory.
+
+### Run manifest optional fields (C5 pipelines) — backward-compatible decode
+
+The manifest schema adds three optional fields, all with decode-compatible defaults:
+
+```json
+{
+  "steps": [
+    {
+      "index": 0,
+      "agent": "advisor",
+      "status": {"state": "completed"},
+      "attempt": 0,           // NEW: attempt number (default 0)
+      "evidencePath": "steps/00-advisor-a0",  // NEW: step directory path relative to run root
+      "gate": {               // NEW: if present, indicates a gate after this step
+        "kind": "step",       // "step" or "merge"
+        "stepIndex": 0        // which step (for "step" kind; omitted for "merge")
+      }
+    }
+  ]
+}
+```
+
+**Backward compatibility:** pre-C5 manifests omit `attempt`, `evidencePath`, and `gate`. A C5 reader decodes these as missing and infers:
+- `attempt = 0` (first execution).
+- `evidencePath = "<step-slug>-a0"` (derived from step index and agent name).
+- `gate = null` (no gate).
+
+A C5 manifest read by C1 or earlier silently ignores these fields because they are at the optional tail of each step object.
+
 ### Run manifest encoding (`.rafu/runs/<id>/manifest.json`)
 
 `RunStepStatus` is persisted through a **hand-written envelope**:
@@ -111,6 +171,13 @@ resolves `RAFU_RUN_DIR` to the **shared `.rafu/runs/` root**, which would
 let a write-enabled agent clobber every other run's evidence — with no
 error, no failing test, and no log line. Passing both explicitly converts
 a silent wrong value into a compile-time requirement on every adapter.
+
+**Environment variables passed to the child:**
+
+- `RAFU_RUN_DIR` — always the run root (`.rafu/runs/<id>/`), regardless of whether the step is single-role or multi-step.
+- `RAFU_HANDOFF` — the step's own handoff directory (e.g., `.rafu/runs/<id>/steps/00-advisor-a0/handoff/` for a pipeline step, or `.rafu/runs/<id>/handoff/` for a single-role run).
+
+Both are always passed; in C1's single-role context they happen to be the same run root, but the distinction enables C5 pipelines to use a shared worktree while each step reads/writes within its own step directory.
 
 ## Why it matters
 

@@ -4,7 +4,11 @@
 - **Depends on:** C0 shim + C1 run engine on `main` (verify both in branch
   history before starting). Real adapters (C2–C4) are NOT required — all
   engine tests use `FakeConductorAdapter`.
-- **Status:** Planned
+- **Status:** Implemented on main (2026-07-25)
+  - Commits: fc33a99 (Stage A: C1 composition seam + workflow engine + gates/retry), c5c83de (isolated EditorCanvasView routing hunk), a89309a (Stage B: runs panel, timeline canvas, gate attention, e2e fixture), c58eef1 (advisor-review defect fixes)
+  - Note: coordinator-implemented directly on main after phase agent's correct stop-and-report on missing C1 seam; the conductor/c5-pipelines branch was abandoned unused
+  - Verification: 0 warnings; 1479 tests parallel + serial; lint clean; staged-app GUI verify passed
+  - Deferred GUI checks: panel/timeline eyeball, VoiceOver on gate verbs, second window, Reduce Motion, and real advisor(Claude)→gate→implementor(Codex) manual pipeline
 
 ## Mission
 

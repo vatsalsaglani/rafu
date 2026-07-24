@@ -155,7 +155,7 @@ git worktree add ../rafu-conductor-polish   -b conductor/c7-polish
 | C2 | [C2-adapters-claude-codex.md](C2-adapters-claude-codex.md) | `conductor/c2-adapters-claude-codex` | Merged 2026-07-24 (`7a2ab62`; both CLIs probe-verified) |
 | C3 | [C3-adapters-opencode-cline-kimi.md](C3-adapters-opencode-cline-kimi.md) | `conductor/c3-adapters-opencode-cline-kimi` | Merged 2026-07-24 (`b2ed160`; OpenCode + Cline verified, Kimi unverified/absent) |
 | C4 | [C4-adapters-gemini-cursor.md](C4-adapters-gemini-cursor.md) | `conductor/c4-adapters-gemini-cursor` | Merged 2026-07-24 (`4fa45cb`; Cursor verified logged-out, Gemini unverified/absent) |
-| C5 | [C5-pipelines.md](C5-pipelines.md) | `conductor/c5-pipelines` | Planned |
+| C5 | [C5-pipelines.md](C5-pipelines.md) | main | Implemented on main (commits fc33a99/c5c83de/a89309a/c58eef1; coordinator-implemented after stop-and-report; 0 warnings, 1479 tests, GUI verified) |
 | C6 | [C6-workflow-library.md](C6-workflow-library.md) | `conductor/c6-workflow-library` | Planned |
 | C7 | [C7-polish.md](C7-polish.md) | `conductor/c7-polish` | Planned |
 
