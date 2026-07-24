@@ -18,6 +18,7 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`cli-app-ipc.md`](cli-app-ipc.md) | Changing the CLI ↔ app Unix-domain socket protocol: framing/codec, same-user listener, request routing/window focus, goto selection, or the CLI connect/fallback flow |
 | [`cli-app-location.md`](cli-app-location.md) | How `rafu <path>` finds Rafu.app: real executable path via `_NSGetExecutablePath` (not argv[0]), symlink-based install, dangling-link handling, and the argv[0]/PATH gotcha |
 | [`ui-design-language.md`](ui-design-language.md) | Implementing or auditing UI surfaces, color/spacing/radius tokens, form fields, card anatomy, button styles, or titled sheets |
+| [`flat-window-chrome-titlebar-merge.md`](flat-window-chrome-titlebar-merge.md) | Changing window chrome, the titlebar-zone content merge, the `_NSTitlebarDecorationView` inactive-band scrub, traffic-light hover-reveal, or full-screen chrome re-apply |
 | [`local-editor-vertical-slice.md`](local-editor-vertical-slice.md) | Changing local file trees, open buffers, Markdown/Mermaid preview, JSON themes, or Git capture |
 | [`mermaid-native-preview.md`](mermaid-native-preview.md) | Changing Mermaid parsing, diagram-type classification, layered layout, Canvas flow/sequence rendering, or the honest unsupported/malformed fallback |
 | [`memory-and-file-indexing.md`](memory-and-file-indexing.md) | Changing the lazy sidebar tree, the background ⌘P file-name index, `WorkspaceChangeSet` directory tracking, or file-ranking behavior |

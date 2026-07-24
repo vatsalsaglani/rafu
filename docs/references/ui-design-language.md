@@ -27,7 +27,7 @@
 
 - **Custom ButtonStyle and sheet keyboard shortcuts:** SwiftUI's `ButtonStyle` modifier does **not** confer window default/cancel semantics that `.defaultAction`/`.cancelAction` keyboard shortcuts require. Sheets must apply `.keyboardShortcut(.defaultAction)` to the prominent button and `.keyboardShortcut(.cancelAction)` to the secondary/cancel button **independently** of any button style. This ensures sheets respond to Return/Escape correctly.
 
-- **Unified titlebar:** `.toolbarBackground(.hidden, for: .windowToolbar)` removes the native toolbar visual band, allowing the themed canvas to run edge-to-edge behind traffic lights while keeping the native toolbar items and window controls intact. This requires keeping the scene as `WindowGroup` and not adding custom window decorations.
+- **Unified titlebar (superseded):** the original `.toolbarBackground(.hidden, for: .windowToolbar)` treatment predates dropping the `NSToolbar` entirely. The current recipe — `FlatWindowChrome` + `.ignoresSafeArea(.top)` content merge, the `_NSTitlebarDecorationView` scrub, and traffic-light hover-reveal — is documented in [`flat-window-chrome-titlebar-merge.md`](flat-window-chrome-titlebar-merge.md).
 
 - **Surface-to-token mapping** (every visible surface routes through one of these):
   - Window/pane canvas: `appBackground` (baseline app background, solid).

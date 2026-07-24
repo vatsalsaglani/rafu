@@ -49,6 +49,19 @@ swift test
 
 `swift test`: 1294 tests passing, 0 build warnings. `./script/format.sh --lint`: clean. `./script/build_and_run.sh --verify`: app launches successfully. Manual GUI verification (drag Finder files of various types to editor canvas, verify they open as tabs) pending user acceptance pass.
 
+## SwiftUI group region also accepts `.fileURL` (2026-07-25)
+
+The AppKit forwarding above only covers drags over the TEXT editor's scroll
+view. `EditorGroupView`'s SwiftUI `.onDrop` (and the empty editor's) now
+registers `[.rafuEditorDrag, .fileURL]`, so an external file dragged over a
+terminal tab, an image/video preview, or the empty editor gets the same
+split-preview overlay and drop handling (`EditorDropDelegate.
+performExternalFileDrop` → `handleEditorFileDrops`). Deepest-destination
+routing keeps this conflict-free: over text the scroll view still wins; the
+tab strip's reorder delegate stays `.rafuEditorDrag`-only. A terminal view
+that registers file types itself would still win over the group region
+(standard path-paste behavior).
+
 ## Related code, ADRs, and phases
 
 - `Sources/RafuApp/Editor/EditorDragClassification.swift` — pure `EditorDragKind` enum and classification logic
