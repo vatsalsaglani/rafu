@@ -175,6 +175,36 @@ func cleanDiscardNeedsNoConfirmation() async throws {
     #expect(!FileManager.default.fileExists(atPath: worktreeURL.path))
 }
 
+@Test("Ignored worktree files require explicit discard confirmation")
+func ignoredFilesRequireDiscardConfirmation() async throws {
+    let repository = try makeRunRepository()
+    defer { try? FileManager.default.removeItem(at: repository.container) }
+    try Data("private.txt\n".utf8).write(
+        to: repository.root.appending(path: ".gitignore"))
+    try runGit(["add", ".gitignore"], at: repository.root)
+    try runGit(["commit", "-m", "Ignore private file"], at: repository.root)
+    let service = ConductorWorktreeService()
+    let plan = try await service.plan(
+        workspaceRoot: repository.root,
+        runID: "ignored-discard",
+        autonomy: .worktreeWrite,
+        baseReference: "HEAD")
+    try await service.materialize(plan)
+    let worktreeURL = try #require(plan.worktreeURL)
+    let ignoredURL = worktreeURL.appending(path: "private.txt")
+    try Data("user work\n".utf8).write(to: ignoredURL)
+
+    let unconfirmed = try await service.discard(plan, confirmedDirty: false)
+
+    #expect(unconfirmed == .confirmationRequired)
+    #expect(FileManager.default.fileExists(atPath: ignoredURL.path))
+
+    let confirmed = try await service.discard(plan, confirmedDirty: true)
+
+    #expect(confirmed == .removed)
+    #expect(!FileManager.default.fileExists(atPath: worktreeURL.path))
+}
+
 private func runGit(_ arguments: [String], at root: URL) throws {
     _ = try gitOutput(arguments, at: root)
 }

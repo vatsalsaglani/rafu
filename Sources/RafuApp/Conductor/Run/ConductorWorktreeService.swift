@@ -164,27 +164,69 @@ nonisolated struct ConductorWorktreeService: Sendable {
         guard let snapshot = try await gitService.snapshot(at: worktreeURL) else {
             throw ConductorWorktreeError.worktreeOwnershipChanged
         }
+        let containsIgnoredFiles = try await hasIgnoredFiles(at: worktreeURL)
 
-        if !snapshot.changes.isEmpty {
+        if !snapshot.changes.isEmpty || containsIgnoredFiles {
             guard confirmedDirty else { return .confirmationRequired }
             try await checkedRun(
                 ["reset", "--hard", plan.baseCommit], at: worktreeURL)
-            try await checkedRun(["clean", "-fd"], at: worktreeURL)
+            try await checkedRun(["clean", "-fdx"], at: worktreeURL)
             try await verify(plan, requiresBaseCommit: true)
             guard
                 let cleaned = try await gitService.snapshot(at: worktreeURL),
-                cleaned.changes.isEmpty
+                cleaned.changes.isEmpty,
+                !(try await hasIgnoredFiles(at: worktreeURL))
             else {
                 throw ConductorWorktreeError.unableToDiscardWorktree
             }
         }
 
+        try await remove(plan, worktreeURL: worktreeURL, branchName: branchName)
+        return .removed
+    }
+
+    /// Cleans up only after the merge gate successfully copied every
+    /// Git-visible change to the main workspace. Ignored files were not part
+    /// of that patch, so their presence requires a separate, explicit
+    /// discard confirmation instead of being deleted as an Apply side
+    /// effect.
+    @concurrent
+    func removeAfterSuccessfulApply(
+        _ plan: ConductorWorkspacePlan
+    ) async throws -> ConductorWorktreeDiscardResult {
+        guard let worktreeURL = plan.worktreeURL, let branchName = plan.branchName else {
+            return .removed
+        }
+        try await verify(plan)
+        guard !(try await hasIgnoredFiles(at: worktreeURL)) else {
+            return .confirmationRequired
+        }
+
+        try await checkedRun(
+            ["reset", "--hard", plan.baseCommit], at: worktreeURL)
+        try await checkedRun(["clean", "-fd"], at: worktreeURL)
+        try await verify(plan, requiresBaseCommit: true)
+        guard
+            let cleaned = try await gitService.snapshot(at: worktreeURL),
+            cleaned.changes.isEmpty,
+            !(try await hasIgnoredFiles(at: worktreeURL))
+        else {
+            throw ConductorWorktreeError.unableToDiscardWorktree
+        }
+        try await remove(plan, worktreeURL: worktreeURL, branchName: branchName)
+        return .removed
+    }
+
+    private func remove(
+        _ plan: ConductorWorkspacePlan,
+        worktreeURL: URL,
+        branchName: String
+    ) async throws {
         do {
             try await gitService.removeWorktree(
                 path: worktreeURL.path, at: plan.repositoryRoot)
             try await checkedRun(
                 ["branch", "-D", branchName], at: plan.repositoryRoot)
-            return .removed
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -246,6 +288,19 @@ nonisolated struct ConductorWorktreeService: Sendable {
         guard output.terminationStatus == 0 else {
             throw ConductorWorktreeError.unableToDiscardWorktree
         }
+    }
+
+    private func hasIgnoredFiles(at worktreeURL: URL) async throws -> Bool {
+        let output = try await runner.run(
+            arguments: [
+                "ls-files", "--others", "--ignored", "--exclude-standard", "-z",
+            ],
+            at: worktreeURL,
+            maximumOutputBytes: 4 * 1_024 * 1_024)
+        guard output.terminationStatus == 0 else {
+            throw ConductorWorktreeError.unableToDiscardWorktree
+        }
+        return !output.standardOutput.isEmpty
     }
 
     private func rollbackNewWorktree(_ plan: ConductorWorkspacePlan) async {

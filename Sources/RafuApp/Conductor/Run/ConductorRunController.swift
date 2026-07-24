@@ -171,6 +171,10 @@ nonisolated struct ConductorRunEvidenceService: Sendable {
 final class ConductorRunController {
     private(set) var state: ConductorRunState = .idle
     private(set) var manifest: ConductorRunManifest?
+    private(set) var mergeGateFiles: [ConductorMergeGateFile] = []
+    private(set) var mergeGateError: String?
+    private(set) var hasAppliedToWorkspace = false
+    private(set) var isResolvingMergeGate = false
 
     @ObservationIgnored
     private(set) var store: ConductorRunStore?
@@ -183,6 +187,9 @@ final class ConductorRunController {
 
     @ObservationIgnored
     private let worktreeService = ConductorWorktreeService()
+
+    @ObservationIgnored
+    private let mergeGateService = ConductorMergeGateService()
 
     @ObservationIgnored
     private var activeGeneration: UUID?
@@ -251,6 +258,10 @@ final class ConductorRunController {
         activeEvidence = nil
         activeWorkspacePlan = nil
         manifest = nil
+        mergeGateFiles = []
+        mergeGateError = nil
+        hasAppliedToWorkspace = false
+        isResolvingMergeGate = false
         transition(to: .preparing)
 
         do {
@@ -394,6 +405,7 @@ final class ConductorRunController {
             guard let self, self.activeGeneration == generation else { return }
             if exists {
                 self.markAwaitingMergeGate()
+                await self.refreshMergeGateFiles()
             } else {
                 self.recordFailure(.missingHandoffArtifact)
             }
@@ -405,6 +417,7 @@ final class ConductorRunController {
     /// User files and worktrees are deliberately untouched.
     func abort() {
         guard Self.isInFlight(state) else { return }
+        guard state != .awaitingMergeGate || !isResolvingMergeGate else { return }
         operationTask?.cancel()
         operationTask = nil
         if let activeSessionID {
@@ -413,16 +426,139 @@ final class ConductorRunController {
         markAborted()
     }
 
-    /// Increment 1's minimal gate resolution. Increment 4 expands this to
-    /// apply/keep/discard; keeping never mutates or removes user work.
+    /// Leaves the attributed branch/worktree untouched for manual handling.
     func keepWorktree() async {
-        guard state == .awaitingMergeGate else { return }
-        transition(to: .completed)
-        updateStep(status: .completed, finishedAt: Date())
-        activeGeneration = nil
-        activeLauncher = nil
-        activeSessionID = nil
-        await persistCurrentManifest()
+        guard state == .awaitingMergeGate, !isResolvingMergeGate else { return }
+        isResolvingMergeGate = true
+        defer { isResolvingMergeGate = false }
+        await completeGate()
+    }
+
+    /// Applies the Git-derived run patch to an unchanged workspace and
+    /// removes the worktree through the non-force cleanup path. A rejected
+    /// patch leaves both locations untouched and the gate open.
+    func applyToWorkspace() async {
+        guard state == .awaitingMergeGate, !isResolvingMergeGate, !hasAppliedToWorkspace,
+            let activeWorkspacePlan
+        else { return }
+        isResolvingMergeGate = true
+        defer { isResolvingMergeGate = false }
+        mergeGateError = nil
+        do {
+            _ = try await mergeGateService.apply(activeWorkspacePlan)
+            hasAppliedToWorkspace = true
+            await completeGate()
+        } catch is CancellationError {
+            return
+        } catch let error as ConductorMergeGateError {
+            if error == .appliedButCleanupFailed {
+                hasAppliedToWorkspace = true
+            }
+            mergeGateError = error.errorDescription
+        } catch {
+            mergeGateError = ConductorMergeGateError.applyRejected.errorDescription
+        }
+    }
+
+    /// Discard is two-step when Git reports changes. The first call returns
+    /// `.confirmationRequired`; only an explicit confirmed retry sanitizes
+    /// that exact registered worktree before non-force removal.
+    @discardableResult
+    func discardWorktree(
+        confirmedDirty: Bool
+    ) async -> ConductorWorktreeDiscardResult? {
+        guard state == .awaitingMergeGate, !isResolvingMergeGate,
+            let activeWorkspacePlan
+        else {
+            return nil
+        }
+        isResolvingMergeGate = true
+        defer { isResolvingMergeGate = false }
+        mergeGateError = nil
+        do {
+            let result = try await worktreeService.discard(
+                activeWorkspacePlan,
+                confirmedDirty: confirmedDirty)
+            if result == .removed {
+                await completeGate()
+            }
+            return result
+        } catch is CancellationError {
+            return nil
+        } catch let error as ConductorWorktreeError {
+            mergeGateError = error.errorDescription
+            return nil
+        } catch {
+            mergeGateError = ConductorWorktreeError.unableToDiscardWorktree.errorDescription
+            return nil
+        }
+    }
+
+    func refreshMergeGateFiles() async {
+        guard state == .awaitingMergeGate, let activeWorkspacePlan,
+            let generation = activeGeneration
+        else { return }
+        do {
+            let files = try await mergeGateService.files(for: activeWorkspacePlan)
+            guard
+                state == .awaitingMergeGate,
+                activeGeneration == generation,
+                self.activeWorkspacePlan == activeWorkspacePlan
+            else { return }
+            mergeGateFiles = files
+            mergeGateError = nil
+        } catch is CancellationError {
+            return
+        } catch let error as ConductorMergeGateError {
+            guard
+                state == .awaitingMergeGate,
+                activeGeneration == generation,
+                self.activeWorkspacePlan == activeWorkspacePlan
+            else { return }
+            mergeGateError = error.errorDescription
+        } catch {
+            guard
+                state == .awaitingMergeGate,
+                activeGeneration == generation,
+                self.activeWorkspacePlan == activeWorkspacePlan
+            else { return }
+            mergeGateError = ConductorMergeGateError.patchGenerationFailed.errorDescription
+        }
+    }
+
+    func presentMergeGateDiff(
+        _ file: ConductorMergeGateFile,
+        in workspaceSession: WorkspaceSession
+    ) async {
+        guard state == .awaitingMergeGate, let activeWorkspacePlan else { return }
+        do {
+            let diff = try await mergeGateService.diff(
+                for: file,
+                plan: activeWorkspacePlan)
+            guard
+                state == .awaitingMergeGate,
+                self.activeWorkspacePlan == activeWorkspacePlan
+            else { return }
+            workspaceSession.presentConductorDiff(
+                diff,
+                file: file,
+                plan: activeWorkspacePlan)
+            mergeGateError = nil
+        } catch is CancellationError {
+            return
+        } catch let error as ConductorMergeGateError {
+            guard
+                state == .awaitingMergeGate,
+                self.activeWorkspacePlan == activeWorkspacePlan
+            else { return }
+            mergeGateError = error.errorDescription
+        } catch {
+            guard
+                state == .awaitingMergeGate,
+                self.activeWorkspacePlan == activeWorkspacePlan
+            else { return }
+            mergeGateError = ConductorMergeGateError.patchGenerationFailed.errorDescription
+        }
     }
 
     /// Loads persisted evidence for display and starts no process.
@@ -444,6 +580,15 @@ final class ConductorRunController {
         transition(to: .awaitingMergeGate)
         updateStep(status: .awaitingGate, finishedAt: Date())
         scheduleManifestSave()
+    }
+
+    private func completeGate() async {
+        transition(to: .completed)
+        updateStep(status: .completed, finishedAt: Date())
+        activeGeneration = nil
+        activeLauncher = nil
+        activeSessionID = nil
+        await persistCurrentManifest()
     }
 
     private func markAborted() {
