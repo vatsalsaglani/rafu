@@ -91,6 +91,97 @@ private enum RunRepositoryError: Error {
     case initializationFailed
 }
 
+private actor BlockingManifestSaver: ConductorRunManifestSaving {
+    struct Snapshot: Sendable {
+        let statuses: [RunStepStatus]
+        let activeWrites: Int
+        let maximumConcurrentWrites: Int
+    }
+
+    private var statuses: [RunStepStatus] = []
+    private var activeWrites = 0
+    private var maximumConcurrentWrites = 0
+    private var awaitingGateSaveStarted = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    func save(_ manifest: ConductorRunManifest, to store: ConductorRunStore) async {
+        let status = manifest.steps[0].status
+        activeWrites += 1
+        maximumConcurrentWrites = max(maximumConcurrentWrites, activeWrites)
+
+        if status == .awaitingGate {
+            awaitingGateSaveStarted = true
+            let waiters = startWaiters
+            startWaiters = []
+            for waiter in waiters {
+                waiter.resume()
+            }
+            await withCheckedContinuation { continuation in
+                releaseContinuation = continuation
+            }
+        }
+
+        statuses.append(status)
+        try? await store.save(manifest)
+        activeWrites -= 1
+    }
+
+    func waitUntilAwaitingGateSaveStarts() async {
+        guard !awaitingGateSaveStarted else { return }
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
+        }
+    }
+
+    func releaseAwaitingGateSave() {
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+
+    func snapshot() -> Snapshot {
+        Snapshot(
+            statuses: statuses,
+            activeWrites: activeWrites,
+            maximumConcurrentWrites: maximumConcurrentWrites)
+    }
+}
+
+@MainActor
+@Test("Manifest writes stay serialized in lifecycle order")
+func manifestWritesStaySerialized() async throws {
+    let root = try makeTemporaryRunRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = ConductorRunStore(workspaceRoot: root)
+    let saver = BlockingManifestSaver()
+    let writes = ConductorRunManifestWriteQueue(saver: saver)
+    let awaitingGate = runManifest(status: .awaitingGate)
+    var completed = awaitingGate
+    completed.steps[0].status = .completed
+    completed.updatedAt = Date()
+
+    let first = writes.enqueue(awaitingGate, to: store)
+    await saver.waitUntilAwaitingGateSaveStarts()
+    let second = writes.enqueue(completed, to: store)
+    await Task.yield()
+
+    let blocked = await saver.snapshot()
+    #expect(blocked.statuses.isEmpty)
+    #expect(blocked.activeWrites == 1)
+    #expect(blocked.maximumConcurrentWrites == 1)
+
+    await saver.releaseAwaitingGateSave()
+    await first.value
+    await second.value
+
+    let finished = await saver.snapshot()
+    #expect(finished.statuses == [.awaitingGate, .completed])
+    #expect(finished.activeWrites == 0)
+    #expect(finished.maximumConcurrentWrites == 1)
+    let persisted = try await store.load(runID: awaitingGate.id)
+    #expect(persisted?.steps[0].status == .completed)
+}
+
 @MainActor
 @Test("A fake read-only role reaches the merge gate and persists its evidence")
 func fakeRoleHappyPathReachesMergeGate() async throws {
@@ -212,4 +303,30 @@ func unsafeRequestsNeverLaunch() async throws {
         controller.state
             == .failed("The role's handoff artifact must be a safe relative path."))
     #expect(launcher.specification == nil)
+}
+
+private func runManifest(status: RunStepStatus) -> ConductorRunManifest {
+    let now = Date()
+    return ConductorRunManifest(
+        id: "serialized-manifest",
+        workflowName: "advisor",
+        baseCommit: "0123456789012345678901234567890123456789",
+        worktreeBranch: "",
+        createdAt: now,
+        updatedAt: now,
+        steps: [
+            ConductorRunManifest.Step(
+                agentName: "advisor",
+                binding: ConductorRunManifest.AgentBinding(
+                    provider: .claudeCode,
+                    model: "fake-fast",
+                    autonomy: .readOnly,
+                    adapterVersion: "fake"),
+                inputArtifacts: [],
+                handoffArtifact: "brief.md",
+                gateAfter: true,
+                status: status,
+                startedAt: now,
+                finishedAt: nil)
+        ])
 }

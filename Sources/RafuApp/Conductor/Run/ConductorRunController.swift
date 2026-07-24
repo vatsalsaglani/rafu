@@ -167,6 +167,58 @@ nonisolated struct ConductorRunEvidenceService: Sendable {
     }
 }
 
+/// Injectable persistence boundary for ordering tests. The production saver
+/// delegates to C0's atomic run store and deliberately keeps write failures
+/// out of Rafu logs.
+nonisolated protocol ConductorRunManifestSaving: Sendable {
+    func save(_ manifest: ConductorRunManifest, to store: ConductorRunStore) async
+}
+
+nonisolated struct ConductorRunManifestSaver: ConductorRunManifestSaving {
+    func save(_ manifest: ConductorRunManifest, to store: ConductorRunStore) async {
+        try? await store.save(manifest)
+    }
+}
+
+/// Atomic replacement guarantees each saved manifest is whole, but does not
+/// serialize overlapping saves: an older lifecycle state can otherwise finish
+/// last and replace a newer one. Cancellation cannot provide ordering because
+/// it may not stop a store write already in progress, so each successor
+/// explicitly awaits its predecessor before saving.
+@MainActor
+final class ConductorRunManifestWriteQueue {
+    private let saver: any ConductorRunManifestSaving
+    private var tail: Task<Void, Never>?
+    private var generation: UUID?
+
+    init(saver: any ConductorRunManifestSaving = ConductorRunManifestSaver()) {
+        self.saver = saver
+    }
+
+    @discardableResult
+    func enqueue(
+        _ manifest: ConductorRunManifest,
+        to store: ConductorRunStore
+    ) -> Task<Void, Never> {
+        let previousTask = tail
+        let generation = UUID()
+        self.generation = generation
+        let task = Task { [weak self, saver] in
+            await previousTask?.value
+            await saver.save(manifest, to: store)
+            guard self?.generation == generation else { return }
+            self?.tail = nil
+            self?.generation = nil
+        }
+        tail = task
+        return task
+    }
+
+    var pendingTask: Task<Void, Never>? {
+        tail
+    }
+}
+
 /// Window-scoped single-role run engine.
 ///
 /// UI-visible transitions stay on `MainActor`. Directory preparation,
@@ -209,6 +261,9 @@ final class ConductorRunController {
     private let mergeGateService = ConductorMergeGateService()
 
     @ObservationIgnored
+    private let manifestWrites: ConductorRunManifestWriteQueue
+
+    @ObservationIgnored
     private var activeGeneration: UUID?
 
     @ObservationIgnored
@@ -226,14 +281,12 @@ final class ConductorRunController {
     @ObservationIgnored
     private var operationTask: Task<Void, Never>?
 
-    @ObservationIgnored
-    private var persistenceTask: Task<Void, Never>?
-
-    @ObservationIgnored
-    private var persistenceGeneration: UUID?
-
-    init(adapters: [any ConductorCLIAdapter] = ConductorAdapterRegistry.all) {
+    init(
+        adapters: [any ConductorCLIAdapter] = ConductorAdapterRegistry.all,
+        manifestSaver: any ConductorRunManifestSaving = ConductorRunManifestSaver()
+    ) {
         self.adapters = adapters
+        manifestWrites = ConductorRunManifestWriteQueue(saver: manifestSaver)
     }
 
     func adapter(for id: ConductorCLIID) -> (any ConductorCLIAdapter)? {
@@ -681,7 +734,7 @@ final class ConductorRunController {
     func waitForPendingOperation() async {
         let operationTask = operationTask
         await operationTask?.value
-        let persistenceTask = persistenceTask
+        let persistenceTask = manifestWrites.pendingTask
         await persistenceTask?.value
     }
 
@@ -728,26 +781,17 @@ final class ConductorRunController {
         upsertRun(manifest)
     }
 
-    private func scheduleManifestSave() {
-        persistenceTask?.cancel()
+    @discardableResult
+    private func scheduleManifestSave() -> Task<Void, Never>? {
         guard let store, let manifest else {
-            persistenceTask = nil
-            persistenceGeneration = nil
-            return
+            return nil
         }
-        let generation = UUID()
-        persistenceGeneration = generation
-        persistenceTask = Task { [weak self] in
-            try? await store.save(manifest)
-            guard self?.persistenceGeneration == generation else { return }
-            self?.persistenceTask = nil
-            self?.persistenceGeneration = nil
-        }
+        return manifestWrites.enqueue(manifest, to: store)
     }
 
     private func persistCurrentManifest() async {
-        guard let store, let manifest else { return }
-        try? await store.save(manifest)
+        let persistenceTask = scheduleManifestSave()
+        await persistenceTask?.value
     }
 
     private func upsertRun(_ manifest: ConductorRunManifest) {
