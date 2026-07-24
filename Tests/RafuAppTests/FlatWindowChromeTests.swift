@@ -72,6 +72,95 @@ struct FlatWindowChromeTests {
         #expect(window.titlebarAppearsTransparent)
     }
 
+    /// The content merge relies on the WINDOW-level safe-area cancellation
+    /// (`additionalSafeAreaInsets.top = -base`), not per-view
+    /// `.ignoresSafeArea` — split-view panes re-derive the safe area on
+    /// their own schedule and drift out of sync with view-level escapes.
+    @Test("Binding cancels the titlebar's top safe area at the window level")
+    func bindCancelsTopSafeArea() {
+        let window = makeWindow()
+        let coordinator = FlatWindowChrome.Coordinator()
+        defer { coordinator.detach() }
+
+        coordinator.bind(to: window)
+
+        #expect(window.contentView != nil)
+        #expect(window.contentView?.safeAreaInsets.top == 0)
+    }
+
+    /// Tabs live in the titlebar's implicit drag region; with `isMovable`
+    /// left on, dragging a tab also dragged the whole window. Movement is
+    /// restored via explicit `WindowDragHandle` surfaces instead.
+    @Test("Binding disables implicit window dragging")
+    func bindDisablesImplicitWindowDrag() {
+        let window = makeWindow()
+        #expect(window.isMovable)
+        let coordinator = FlatWindowChrome.Coordinator()
+        defer { coordinator.detach() }
+
+        coordinator.bind(to: window)
+
+        #expect(!window.isMovable)
+    }
+
+    @Test("Binding removes the titlebar separator")
+    func bindRemovesTitlebarSeparator() {
+        let window = makeWindow()
+        window.titlebarSeparatorStyle = .automatic
+        let coordinator = FlatWindowChrome.Coordinator()
+        defer { coordinator.detach() }
+
+        coordinator.bind(to: window)
+
+        #expect(window.titlebarSeparatorStyle == .none)
+    }
+
+    @Test("hidesTrafficLights hides the standard window buttons, and only then")
+    func trafficLightVisibilityFollowsFlag() {
+        let window = makeWindow()
+        let coordinator = FlatWindowChrome.Coordinator()
+        defer { coordinator.detach() }
+
+        coordinator.hidesTrafficLights = true
+        coordinator.bind(to: window)
+        #expect(window.standardWindowButton(.closeButton)?.isHidden == true)
+        #expect(window.standardWindowButton(.zoomButton)?.isHidden == true)
+
+        coordinator.hidesTrafficLights = false
+        coordinator.bind(to: window)
+        #expect(window.standardWindowButton(.closeButton)?.isHidden == false)
+        #expect(window.standardWindowButton(.zoomButton)?.isHidden == false)
+    }
+
+    @Test("Binding reports the window's initial full-screen state")
+    func bindReportsFullScreenState() {
+        let window = makeWindow()
+        let coordinator = FlatWindowChrome.Coordinator()
+        defer { coordinator.detach() }
+        var reported: Bool?
+        coordinator.onFullScreenChange = { reported = $0 }
+
+        coordinator.bind(to: window)
+
+        #expect(reported == false)
+    }
+
+    /// `_NSTitlebarDecorationView` is the macOS 26 view that paints the
+    /// opaque band across an INACTIVE window's titlebar zone even when
+    /// `titlebarAppearsTransparent` is set; the matcher drives the scrub
+    /// that hides it. `NSTitlebarView` hosts the traffic lights and
+    /// `NSTitlebarBackgroundView` is already managed by AppKit — neither
+    /// may ever match.
+    @Test("Backdrop class matcher targets decoration/material views only")
+    func backdropClassMatcher() {
+        #expect(FlatWindowChrome.isTitlebarBackdropClassName("_NSTitlebarDecorationView"))
+        #expect(FlatWindowChrome.isTitlebarBackdropClassName("NSVisualEffectView"))
+        #expect(FlatWindowChrome.isTitlebarBackdropClassName("NSGlassContainerView"))
+        #expect(!FlatWindowChrome.isTitlebarBackdropClassName("NSTitlebarView"))
+        #expect(!FlatWindowChrome.isTitlebarBackdropClassName("NSTitlebarBackgroundView"))
+        #expect(!FlatWindowChrome.isTitlebarBackdropClassName("_NSThemeCloseWidget"))
+    }
+
     @Test("Detaching stops re-applying so a closed window is not retained")
     func detachStopsReapplying() {
         let window = makeWindow()
