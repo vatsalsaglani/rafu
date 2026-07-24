@@ -1,8 +1,22 @@
+import AppKit
 import SwiftUI
 
-/// `.runs` navigator panel (C5): active runs with per-step status and gate
-/// badges, then history from `.rafu/runs`. Mirrors
-/// `WorkspaceTerminalsPanelView`'s header/list/empty-state structure.
+private enum ConductorRunsPanelSection: String, CaseIterable, Identifiable {
+    case runs
+    case workflows
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .runs: "Runs"
+        case .workflows: "Workflows"
+        }
+    }
+}
+
+/// `.runs` navigator panel: C5 run history plus C6's file-backed workflow
+/// library in one segmented view.
 ///
 /// The outer `.frame(maxWidth/maxHeight: .infinity, alignment: .top)` and
 /// each empty state's own `.frame(maxWidth/maxHeight: .infinity)` are
@@ -12,10 +26,11 @@ import SwiftUI
 struct ConductorRunsPanelView: View {
     @Bindable var session: WorkspaceSession
     @Environment(\.rafuTheme) private var theme
+    @State private var section = ConductorRunsPanelSection.runs
+    @State private var libraryModel = ConductorWorkflowLibraryModel()
 
     var body: some View {
         @Bindable var controller = session.conductorRunController
-        @Bindable var workflow = session.conductorWorkflowController
 
         // Derived ONCE per body evaluation, mirroring
         // `WorkspaceTerminalsPanelView`'s own comment: recomputing per row
@@ -28,63 +43,56 @@ struct ConductorRunsPanelView: View {
         let history = rows.filter { !$0.isLive && !isUnresolved($0) }
 
         VStack(spacing: 0) {
-            header(count: rows.count)
-            if let error = controller.runsLoadError {
-                ContentUnavailableView {
-                    Label("Unable to Load Runs", systemImage: "exclamationmark.triangle")
-                } description: {
-                    Text(error)
-                } actions: {
-                    Button("Try Again") {
-                        Task { await controller.reloadRuns() }
-                    }
+            header
+            Picker("Ensemble Section", selection: $section) {
+                ForEach(ConductorRunsPanelSection.allCases) { item in
+                    Text(item.title).tag(item)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if rows.isEmpty {
-                ContentUnavailableView {
-                    Label("No Runs Yet", systemImage: WorkspaceNavigatorMode.runs.symbolName)
-                } description: {
-                    Text(
-                        "Ensemble runs appear here once a run has been started. Rafu never starts one on its own."
-                    )
-                } actions: {
-                    Button("New Run…", systemImage: "plus") {
-                        controller.presentNewRun()
-                    }
-                    .disabled(!canStartNewRun)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List(selection: runSelection) {
-                    if !active.isEmpty {
-                        Section("Active") {
-                            ForEach(active) { row in
-                                ConductorRunRowView(
-                                    row: row, reveal: { revealLiveTerminal(row.id) }
-                                )
-                                .tag(row.id)
-                            }
-                        }
-                    }
-                    if !history.isEmpty {
-                        Section("History") {
-                            ForEach(history) { row in
-                                ConductorRunRowView(row: row, reveal: nil)
-                                    .tag(row.id)
-                            }
-                        }
-                    }
-                }
-                .listStyle(.sidebar)
-                .scrollContentBackground(.hidden)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, RafuMetrics.space3)
+            .padding(.vertical, RafuMetrics.space2)
+
+            switch section {
+            case .runs:
+                runsContent(
+                    controller: controller,
+                    rows: rows,
+                    active: active,
+                    history: history)
+            case .workflows:
+                workflowsContent
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task(id: session.rootURL?.standardizedFileURL) {
             await controller.attachAndReload(workspaceRoot: session.rootURL)
+            await libraryModel.load(workspaceRoot: session.rootURL)
         }
         .sheet(item: $controller.newRunPresentation) { _ in
             ConductorNewRunSheet(session: session)
+        }
+        .confirmationDialog(
+            "Replace existing definition files?",
+            isPresented: pendingReplacementPresented,
+            titleVisibility: .visible
+        ) {
+            if let pending = libraryModel.pendingReplacement {
+                Button("Replace \(pending.conflicts.count) Existing File(s)", role: .destructive) {
+                    Task {
+                        await libraryModel.instantiate(
+                            templateID: pending.templateID,
+                            scope: pending.scope,
+                            replaceConfirmed: true)
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                libraryModel.clearPendingReplacement()
+            }
+        } message: {
+            Text("Rafu will replace only the listed template destinations after this confirmation.")
         }
     }
 
@@ -93,24 +101,211 @@ struct ConductorRunsPanelView: View {
             && !session.conductorWorkflowController.isInFlight
     }
 
-    private func header(count: Int) -> some View {
+    private var header: some View {
         RafuCardHeaderRow {
             HStack(spacing: 6) {
                 Image(systemName: WorkspaceNavigatorMode.runs.symbolName)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(theme.palette.textSecondary)
-                Text("Runs (\(count))")
+                Text("Ensemble")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(theme.palette.textPrimary)
             }
         } trailing: {
-            Button("New Run…", systemImage: "plus") {
-                session.conductorRunController.presentNewRun()
+            HStack(spacing: 4) {
+                if section == .workflows {
+                    Menu("New from Template", systemImage: "doc.badge.plus") {
+                        ForEach(ConductorBundledTemplateCatalog.templates) { template in
+                            Menu(template.displayName) {
+                                Button("Repository") {
+                                    instantiate(template: template, scope: .repository)
+                                }
+                                Button("User") {
+                                    instantiate(template: template, scope: .userGlobal)
+                                }
+                            }
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .help("New from Template")
+                    .disabled(libraryModel.isMutating || session.rootURL == nil)
+                }
+                Button("New Run…", systemImage: "plus") {
+                    session.conductorRunController.presentNewRun()
+                }
+                .buttonStyle(RafuIconButtonStyle(size: 24))
+                .help("New Run…")
+                .disabled(!canStartNewRun)
             }
-            .buttonStyle(RafuIconButtonStyle(size: 24))
-            .help("New Run…")
-            .disabled(!canStartNewRun)
         }
+    }
+
+    @ViewBuilder
+    private func runsContent(
+        controller: ConductorRunController,
+        rows: [ConductorRunRowModel],
+        active: [ConductorRunRowModel],
+        history: [ConductorRunRowModel]
+    ) -> some View {
+        if let error = controller.runsLoadError {
+            ContentUnavailableView {
+                Label("Unable to Load Runs", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(error)
+            } actions: {
+                Button("Try Again") {
+                    Task { await controller.reloadRuns() }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if rows.isEmpty {
+            ContentUnavailableView {
+                Label("No Runs Yet", systemImage: WorkspaceNavigatorMode.runs.symbolName)
+            } description: {
+                Text(
+                    "Ensemble runs appear here once a run has been started. Rafu never starts one on its own."
+                )
+            } actions: {
+                Button("New Run…", systemImage: "plus") {
+                    controller.presentNewRun()
+                }
+                .disabled(!canStartNewRun)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            List(selection: runSelection) {
+                if !active.isEmpty {
+                    Section("Active") {
+                        ForEach(active) { row in
+                            ConductorRunRowView(
+                                row: row, reveal: { revealLiveTerminal(row.id) }
+                            )
+                            .tag(row.id)
+                        }
+                    }
+                }
+                if !history.isEmpty {
+                    Section("History") {
+                        ForEach(history) { row in
+                            ConductorRunRowView(row: row, reveal: nil)
+                                .tag(row.id)
+                        }
+                    }
+                }
+            }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+        }
+    }
+
+    @ViewBuilder
+    private var workflowsContent: some View {
+        if libraryModel.isLoading {
+            ProgressView("Reading workflow files…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let error = libraryModel.errorMessage, libraryModel.workflows.isEmpty {
+            ContentUnavailableView {
+                Label("Unable to Load Workflows", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(error)
+            } actions: {
+                Button("Try Again") {
+                    Task { await libraryModel.load(workspaceRoot: session.rootURL) }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if libraryModel.workflows.isEmpty {
+            ContentUnavailableView {
+                Label("No Workflows Yet", systemImage: "list.bullet.rectangle")
+            } description: {
+                Text("Create an Ensemble workflow from a bundled template or add a Markdown file.")
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            VStack(spacing: 0) {
+                if let error = libraryModel.errorMessage {
+                    libraryMessage(error, systemImage: "exclamationmark.triangle", isError: true)
+                } else if let message = libraryModel.operationMessage {
+                    libraryMessage(message, systemImage: "checkmark.circle", isError: false)
+                }
+                List {
+                    ForEach(ConductorDefinitionScope.allCases, id: \.rawValue) { scope in
+                        let scoped = libraryModel.workflows.filter { $0.scope == scope }
+                        if !scoped.isEmpty {
+                            Section(scope.displayName) {
+                                ForEach(scoped) { workflow in
+                                    ConductorWorkflowLibraryRow(
+                                        workflow: workflow,
+                                        isMutating: libraryModel.isMutating,
+                                        open: { openDefinition(workflow) },
+                                        duplicate: {
+                                            Task { _ = await libraryModel.duplicate(workflow) }
+                                        },
+                                        reveal: { revealInFinder(workflow.fileURL) })
+                                }
+                            }
+                        }
+                    }
+                }
+                .listStyle(.sidebar)
+                .scrollContentBackground(.hidden)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+    }
+
+    private func libraryMessage(
+        _ message: String,
+        systemImage: String,
+        isError: Bool
+    ) -> some View {
+        Label(message, systemImage: systemImage)
+            .font(.caption)
+            .foregroundStyle(isError ? theme.palette.error : theme.palette.textSecondary)
+            .padding(.horizontal, RafuMetrics.space3)
+            .padding(.vertical, RafuMetrics.space2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var pendingReplacementPresented: Binding<Bool> {
+        Binding(
+            get: { libraryModel.pendingReplacement != nil },
+            set: { presented in
+                if !presented {
+                    libraryModel.clearPendingReplacement()
+                }
+            })
+    }
+
+    private func instantiate(
+        template: ConductorBundledTemplate,
+        scope: ConductorDefinitionScope
+    ) {
+        Task {
+            await libraryModel.instantiate(templateID: template.id, scope: scope)
+        }
+    }
+
+    private func openDefinition(_ workflow: ConductorLibraryWorkflow) {
+        let relativePath: String
+        if let root = session.rootURL?.standardizedFileURL,
+            workflow.fileURL.standardizedFileURL.path.hasPrefix(root.path + "/")
+        {
+            relativePath = String(
+                workflow.fileURL.standardizedFileURL.path.dropFirst(root.path.count + 1))
+        } else {
+            relativePath = workflow.fileURL.path
+        }
+        session.open(
+            WorkspaceFileNode(
+                url: workflow.fileURL,
+                relativePath: relativePath,
+                isDirectory: false))
+    }
+
+    private func revealInFinder(_ url: URL) {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
     private var runSelection: Binding<String?> {
@@ -201,10 +396,77 @@ private struct ConductorRunRowView: View {
     }
 }
 
+private struct ConductorWorkflowLibraryRow: View {
+    let workflow: ConductorLibraryWorkflow
+    let isMutating: Bool
+    let open: () -> Void
+    let duplicate: () -> Void
+    let reveal: () -> Void
+
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Image(
+                    systemName: workflow.isLaunchable
+                        ? "point.3.connected.trianglepath.dotted" : "exclamationmark.triangle"
+                )
+                .foregroundStyle(
+                    workflow.isLaunchable ? theme.palette.textSecondary : theme.palette.error)
+                Text(workflow.displayName)
+                    .font(.body.weight(.medium))
+                    .lineLimit(1)
+                if workflow.resolution == .overriddenByRepository {
+                    RafuChip(text: workflow.resolution.label)
+                }
+                Spacer(minLength: 4)
+                Button("Open", action: open)
+                    .buttonStyle(RafuSecondaryButtonStyle())
+                Menu("Workflow Actions", systemImage: "ellipsis") {
+                    Button("Duplicate", systemImage: "plus.square.on.square", action: duplicate)
+                        .disabled(isMutating)
+                    Button("Reveal in Finder", systemImage: "folder", action: reveal)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            }
+            Text(workflow.fileURL.lastPathComponent)
+                .font(.caption)
+                .foregroundStyle(theme.palette.textMuted)
+                .lineLimit(1)
+            ForEach(workflow.issues) { issue in
+                Label(
+                    issue.line.map { "Line \($0): \(issue.message)" } ?? issue.message,
+                    systemImage: "exclamationmark.circle"
+                )
+                .font(.caption)
+                .foregroundStyle(theme.palette.error)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 3)
+        .contextMenu {
+            Button("Open", action: open)
+            Button("Duplicate", action: duplicate)
+                .disabled(isMutating)
+            Button("Reveal in Finder", action: reveal)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(
+            "\(workflow.displayName), \(workflow.scope.displayName), \(workflow.resolution.label)")
+    }
+}
+
 private struct ConductorNewRunSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var session: WorkspaceSession
     @State private var model = ConductorNewRunModel()
+    @State private var workflowModel = ConductorWorkflowLaunchModel()
+    @State private var taskPrompt = ""
+    @State private var baseReference = "HEAD"
+    @State private var isStartingWorkflow = false
+    @State private var workflowStartError: String?
     @FocusState private var promptFocused: Bool
 
     var body: some View {
@@ -224,7 +486,7 @@ private struct ConductorNewRunSheet: View {
             }
             .pickerStyle(.segmented)
 
-            if model.isLoading {
+            if model.isLoading || (model.mode == .workflow && workflowModel.isLoading) {
                 ProgressView("Reading .rafu files…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -236,7 +498,7 @@ private struct ConductorNewRunSheet: View {
                 }
             }
 
-            if let error = model.errorMessage {
+            if let error = visibleError {
                 Label(error, systemImage: "exclamationmark.triangle")
                     .font(.callout)
                     .foregroundStyle(.red)
@@ -253,13 +515,13 @@ private struct ConductorNewRunSheet: View {
                     Task {
                         let started =
                             switch model.mode {
-                            case .singleRole: await model.start(in: session)
-                            case .workflow: await model.startWorkflow(in: session)
+                            case .singleRole: await startSingleRole()
+                            case .workflow: await startWorkflow()
                             }
                         if started { dismiss() }
                     }
                 } label: {
-                    if model.isStarting {
+                    if model.isStarting || isStartingWorkflow {
                         ProgressView()
                             .controlSize(.small)
                     } else {
@@ -267,14 +529,15 @@ private struct ConductorNewRunSheet: View {
                     }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(!model.canStart)
+                .disabled(!canStart)
             }
         }
         .padding(20)
         .frame(minWidth: 520, idealWidth: 520, minHeight: 420)
         .task(id: session.rootURL?.standardizedFileURL) {
             await model.load(workspaceRoot: session.rootURL)
-            if !model.agents.isEmpty {
+            await workflowModel.load(workspaceRoot: session.rootURL)
+            if !model.agents.isEmpty || !workflowModel.workflows.isEmpty {
                 promptFocused = true
             }
         }
@@ -297,10 +560,10 @@ private struct ConductorNewRunSheet: View {
                             .tag(Optional(agent.id))
                     }
                 }
-                TextField("Task prompt", text: $model.taskPrompt, axis: .vertical)
+                TextField("Task prompt", text: $taskPrompt, axis: .vertical)
                     .lineLimit(4...8)
                     .focused($promptFocused)
-                TextField("Base reference", text: $model.baseReference)
+                TextField("Base reference", text: $baseReference)
                     .help("Branch, tag, or commit. Defaults to the current HEAD.")
             }
             .formStyle(.grouped)
@@ -309,29 +572,50 @@ private struct ConductorNewRunSheet: View {
 
     @ViewBuilder
     private var workflowForm: some View {
-        if model.workflows.isEmpty, model.errorMessage == nil {
+        if workflowModel.workflows.isEmpty, workflowModel.errorMessage == nil {
             ContentUnavailableView {
                 Label("No Workflow Files", systemImage: "list.bullet.rectangle")
             } description: {
-                Text("Add a Markdown pipeline under .rafu/workflows/ to start a run.")
+                Text(
+                    "Add a repository or user Ensemble workflow, or create one from the Workflows library."
+                )
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             Form {
-                Picker("Workflow file", selection: $model.selectedWorkflowID) {
-                    ForEach(model.workflows) { workflow in
-                        Text("\(workflow.definition.name) — \(workflow.relativePath)")
-                            .tag(Optional(workflow.id))
+                Picker("Workflow file", selection: selectedWorkflowBinding) {
+                    ForEach(workflowModel.workflows) { workflow in
+                        Text(
+                            "\(workflow.displayName) — \(workflow.scope.displayName) — \(workflow.fileURL.lastPathComponent)"
+                        )
+                        .tag(Optional(workflow.id))
                     }
                 }
-                TextField("Task prompt", text: $model.taskPrompt, axis: .vertical)
+                TextField("Task prompt", text: $taskPrompt, axis: .vertical)
                     .lineLimit(4...8)
                     .focused($promptFocused)
-                TextField("Base reference", text: $model.baseReference)
+                TextField("Base reference", text: $baseReference)
                     .help("Branch, tag, or commit. Defaults to the current HEAD.")
-                if let workflow = model.selectedWorkflow {
-                    Section("Resolved Steps") {
-                        workflowStepPreview(for: workflow)
+                if let workflow = workflowModel.selectedWorkflow {
+                    if !workflow.issues.isEmpty {
+                        Section("Fix Before Running") {
+                            ForEach(workflow.issues) { issue in
+                                Label(
+                                    issue.line.map { "Line \($0): \(issue.message)" }
+                                        ?? issue.message,
+                                    systemImage: "exclamationmark.triangle"
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                            }
+                        }
+                    }
+                    if !workflowModel.resolvedRoles.isEmpty {
+                        Section("Steps and Model Overrides") {
+                            ForEach(workflowModel.resolvedRoles) { role in
+                                workflowStepRow(role)
+                            }
+                        }
                     }
                 }
             }
@@ -340,34 +624,107 @@ private struct ConductorNewRunSheet: View {
     }
 
     @ViewBuilder
-    private func workflowStepPreview(for workflow: ConductorWorkflowFile) -> some View {
-        switch model.resolvedWorkflowSteps {
-        case .success(let roles):
-            // `id: \.offset`, not the agent name: a workflow may legitimately
-            // repeat a role (advisor → implementor → advisor), and two rows
-            // sharing an id would silently collide in the `ForEach` (advisor
-            // D4).
-            let preview = Array(zip(workflow.definition.steps, roles).enumerated())
-            ForEach(preview, id: \.offset) { _, pair in
-                let (step, role) = pair
-                HStack(spacing: 6) {
-                    Text(step.agentName).lineLimit(1)
-                    RafuChip(text: role.provider.displayName)
-                    if step.gateAfter {
-                        RafuChip(text: "gate")
-                    }
-                    Spacer()
+    private func workflowStepRow(_ role: ConductorWorkflowLaunchRole) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text("\(role.stepIndex + 1). \(role.step.agentName)")
+                    .lineLimit(1)
+                RafuChip(text: role.definition.provider.displayName)
+                if role.step.gateAfter {
+                    RafuChip(text: "gate")
                 }
+                Spacer()
             }
-        case .failure(let error):
-            Label(
-                error.errorDescription ?? "This workflow could not be resolved.",
-                systemImage: "exclamationmark.triangle"
+            TextField(
+                "Model override",
+                text: Binding(
+                    get: { workflowModel.modelValue(for: role.stepIndex) },
+                    set: { workflowModel.setModelValue($0, for: role.stepIndex) })
             )
-            .font(.caption)
-            .foregroundStyle(.red)
-        case nil:
-            EmptyView()
+            .help(modelHelp(for: role))
+        }
+    }
+
+    private var selectedWorkflowBinding: Binding<String?> {
+        Binding(
+            get: { workflowModel.selectedWorkflowID },
+            set: { newValue in
+                guard let newValue else { return }
+                workflowModel.selectWorkflow(id: newValue)
+            })
+    }
+
+    private var canStart: Bool {
+        guard !taskPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return false
+        }
+        switch model.mode {
+        case .singleRole:
+            return !model.isLoading && !model.isStarting && model.selectedAgent != nil
+        case .workflow:
+            guard
+                !workflowModel.isLoading,
+                !isStartingWorkflow,
+                workflowModel.selectedWorkflow?.isLaunchable == true,
+                let count = workflowModel.selectedWorkflow?.definition?.steps.count
+            else { return false }
+            return workflowModel.resolvedRoles.count == count
+        }
+    }
+
+    private var visibleError: String? {
+        workflowStartError
+            ?? (model.mode == .workflow ? workflowModel.errorMessage : model.errorMessage)
+    }
+
+    private func modelHelp(for role: ConductorWorkflowLaunchRole) -> String {
+        let choices = role.modelChoices.map(\.id)
+        guard !choices.isEmpty else {
+            return
+                "Leave the file's value unchanged, clear it for the adapter default, or enter a model identifier."
+        }
+        return
+            "Known models: \(choices.joined(separator: ", ")). You may also enter another identifier."
+    }
+
+    private func startSingleRole() async -> Bool {
+        model.taskPrompt = taskPrompt
+        model.baseReference = baseReference
+        return await model.start(in: session)
+    }
+
+    private func startWorkflow() async -> Bool {
+        guard !isStartingWorkflow else { return false }
+        isStartingWorkflow = true
+        workflowStartError = nil
+        defer { isStartingWorkflow = false }
+
+        workflowModel.taskPrompt = taskPrompt
+        workflowModel.baseReference = baseReference
+        do {
+            let request = try workflowModel.makeRequest()
+            guard
+                session.conductorWorkflowController.canStartNewRun,
+                session.conductorRunController.canStartNewRun
+            else {
+                workflowStartError =
+                    "Finish or abort the active Ensemble run before starting another."
+                return false
+            }
+            let launcher = WorkspaceConductorRunLauncher(
+                workspaceSession: session,
+                runID: request.runID)
+            await session.conductorWorkflowController.start(request, launcher: launcher)
+            if case .failed(_, let reason) = session.conductorWorkflowController.state {
+                workflowStartError = reason
+                return false
+            }
+            return session.conductorWorkflowController.isInFlight
+        } catch {
+            workflowStartError =
+                (error as? LocalizedError)?.errorDescription
+                ?? "Rafu could not start the Ensemble workflow."
+            return false
         }
     }
 }
