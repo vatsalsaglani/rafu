@@ -34,6 +34,7 @@ struct NotchCompanionView: View {
                 // of growing the window.
                 ScrollView(.vertical) {
                     VStack(spacing: RafuMetrics.space2) {
+                        CompanionActiveRunsView(model: model)
                         CompanionUsageStripView(model: model)
                         CompanionEditorsListView(model: model)
                         CompanionAttentionFeedView(model: model)
@@ -60,6 +61,9 @@ struct NotchCompanionView: View {
         .onKeyPress(.escape) {
             model.escapePressed()
             return .handled
+        }
+        .onChange(of: model.activeRunItems) {
+            model.activeRunsDidChange()
         }
         .animation(
             reduceMotion ? .easeOut(duration: 0.12) : .easeOut(duration: 0.18),
@@ -136,9 +140,29 @@ struct CompanionWingsView: View {
     /// outer Spacer pushes the wings apart to whatever width the frame
     /// grants.
     private var leftWing: some View {
-        RafuBrandMarkView()
-            .frame(width: 14, height: 14)
-            .padding(.leading, RafuMetrics.space2 + 2)
+        HStack(spacing: RafuMetrics.space2) {
+            RafuBrandMarkView()
+                .frame(width: 14, height: 14)
+            if let run = model.primaryActiveRunItem {
+                HStack(spacing: RafuMetrics.space1) {
+                    if run.isGateWaiting {
+                        Circle()
+                            .fill(theme.palette.accent)
+                            .frame(width: 6, height: 6)
+                            .accessibilityHidden(true)
+                    }
+                    Text(run.roleName)
+                        .font(.system(size: 10, weight: .semibold))
+                        .lineLimit(1)
+                    Text("\(run.stepNumber)/\(run.stepCount)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .monospacedDigit()
+                        .foregroundStyle(theme.palette.textMuted)
+                }
+                .foregroundStyle(theme.palette.textPrimary)
+            }
+        }
+        .padding(.leading, RafuMetrics.space2 + 2)
     }
 
     /// The open-editor count, always visible, plus the attention dot +
@@ -168,11 +192,79 @@ struct CompanionWingsView: View {
     /// could otherwise anchor it to.
     private var summaryLabel: String {
         let count = model.editorRows.count
-        let editors = "\(count) editor\(count == 1 ? "" : "s") open"
-        guard model.attentionCount > 0 else { return "Rafu — \(editors)" }
+        var parts = ["\(count) editor\(count == 1 ? "" : "s") open"]
+        if let run = model.primaryActiveRunItem {
+            parts.append(
+                "Ensemble \(run.workflowName), \(run.stepLabel), \(run.roleName)"
+                    + (run.isGateWaiting ? ", gate waiting" : ""))
+        }
         let attention = model.attentionCount
-        return
-            "Rafu — \(editors), \(attention) terminal\(attention == 1 ? "" : "s") needing attention"
+        if attention > 0 {
+            parts.append(
+                "\(attention) terminal\(attention == 1 ? "" : "s") needing attention")
+        }
+        return "Rafu — \(parts.joined(separator: ", "))"
+    }
+}
+
+/// Active Ensemble workflows in the pinned companion. Each row is a real
+/// button with a keyboard/VoiceOver path to the owning run canvas; changing
+/// steps updates text immediately, without a transition animation.
+struct CompanionActiveRunsView: View {
+    let model: NotchCompanionModel
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        if !model.activeRunItems.isEmpty {
+            VStack(spacing: RafuMetrics.space1) {
+                ForEach(model.activeRunItems) { item in
+                    Button {
+                        model.openConductorRun(item)
+                    } label: {
+                        HStack(spacing: RafuMetrics.space2) {
+                            if item.isGateWaiting {
+                                Circle()
+                                    .fill(theme.palette.accent)
+                                    .frame(width: 7, height: 7)
+                                    .accessibilityHidden(true)
+                            }
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(item.workflowName)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(theme.palette.textPrimary)
+                                    .lineLimit(1)
+                                Text(
+                                    "\(item.stepLabel) · \(item.roleName)"
+                                        + (item.isGateWaiting ? " · Gate waiting" : "")
+                                )
+                                .font(.system(size: 10))
+                                .foregroundStyle(
+                                    item.isGateWaiting
+                                        ? theme.palette.accent : theme.palette.textMuted
+                                )
+                                .lineLimit(1)
+                            }
+                            Spacer(minLength: RafuMetrics.space2)
+                            Image(systemName: "arrow.up.forward.app")
+                                .foregroundStyle(theme.palette.textMuted)
+                                .accessibilityHidden(true)
+                        }
+                        .padding(.horizontal, RafuMetrics.space2)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(
+                        "\(item.workflowName), \(item.stepLabel), \(item.roleName)"
+                            + (item.isGateWaiting ? ", gate waiting" : "")
+                    )
+                    .accessibilityHint("Opens this Ensemble run in its workspace")
+                }
+            }
+            .padding(.horizontal, RafuMetrics.space3)
+            .padding(.top, RafuMetrics.space2)
+            .frame(maxWidth: .infinity, alignment: .top)
+        }
     }
 }
 

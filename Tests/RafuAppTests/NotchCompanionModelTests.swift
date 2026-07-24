@@ -213,6 +213,114 @@ func focusEditorNoOpAfterUnregister() {
     model.focusEditor(id)
 }
 
+// MARK: - Active Ensemble runs
+
+private func notchRunManifest(
+    id: String = "notch-run",
+    statuses: [RunStepStatus] = [.completed, .running]
+) -> ConductorRunManifest {
+    let steps = statuses.enumerated().map { index, status in
+        ConductorRunManifest.Step(
+            agentName: index == 0 ? "Advisor" : "Implementor",
+            binding: ConductorRunManifest.AgentBinding(
+                provider: index == 0 ? .claudeCode : .codex,
+                model: "",
+                autonomy: .readOnly,
+                adapterVersion: nil),
+            inputArtifacts: [],
+            handoffArtifact: "step-\(index + 1).md",
+            gateAfter: false,
+            status: status,
+            startedAt: nil,
+            finishedAt: nil)
+    }
+    return ConductorRunManifest(
+        id: id,
+        workflowName: "Review then implement",
+        baseCommit: "abc123",
+        worktreeBranch: "",
+        createdAt: .distantPast,
+        updatedAt: .distantPast,
+        steps: steps)
+}
+
+@Test("Active run item maps the current step without reading process or provider state")
+func activeRunItemMapsCurrentStep() {
+    let workspaceID = UUID()
+    let item = ConductorNotchRunItem.item(
+        manifest: notchRunManifest(),
+        state: .runningStep(index: 1),
+        workspaceID: workspaceID)
+
+    #expect(item?.workspaceID == workspaceID)
+    #expect(item?.runID == "notch-run")
+    #expect(item?.workflowName == "Review then implement")
+    #expect(item?.roleName == "Implementor")
+    #expect(item?.stepNumber == 2)
+    #expect(item?.stepCount == 2)
+    #expect(item?.isGateWaiting == false)
+    #expect(item?.stepLabel == "Step 2 of 2")
+}
+
+@Test("Active run item marks step and merge gates as waiting")
+func activeRunItemMarksGateWaiting() {
+    let manifest = notchRunManifest()
+    let workspaceID = UUID()
+
+    let stepGate = ConductorNotchRunItem.item(
+        manifest: manifest,
+        state: .awaitingGate(index: 0),
+        workspaceID: workspaceID)
+    let mergeGate = ConductorNotchRunItem.item(
+        manifest: manifest,
+        state: .awaitingMergeGate,
+        workspaceID: workspaceID)
+
+    #expect(stepGate?.roleName == "Advisor")
+    #expect(stepGate?.stepNumber == 1)
+    #expect(stepGate?.isGateWaiting == true)
+    #expect(mergeGate?.roleName == "Implementor")
+    #expect(mergeGate?.stepNumber == 2)
+    #expect(mergeGate?.isGateWaiting == true)
+}
+
+@Test("Inactive or inconsistent workflow state produces no notch run item")
+func inactiveWorkflowProducesNoRunItem() {
+    let manifest = notchRunManifest()
+    let workspaceID = UUID()
+
+    #expect(
+        ConductorNotchRunItem.item(
+            manifest: manifest,
+            state: .completed,
+            workspaceID: workspaceID) == nil)
+    #expect(
+        ConductorNotchRunItem.item(
+            manifest: manifest,
+            state: .runningStep(index: 99),
+            workspaceID: workspaceID) == nil)
+    #expect(
+        ConductorNotchRunItem.item(
+            manifest: nil,
+            state: .preparing,
+            workspaceID: workspaceID) == nil)
+}
+
+@Test("A waiting gate wins the notch strip's single active-run slot")
+func gateWaitingRunHasPrimaryPriority() {
+    let normal = ConductorNotchRunItem.item(
+        manifest: notchRunManifest(id: "normal"),
+        state: .runningStep(index: 1),
+        workspaceID: UUID())!
+    let gate = ConductorNotchRunItem.item(
+        manifest: notchRunManifest(id: "gate"),
+        state: .awaitingGate(index: 0),
+        workspaceID: UUID())!
+
+    #expect(ConductorNotchRunItem.primary(in: [normal, gate]) == gate)
+    #expect(ConductorNotchRunItem.primary(in: []) == nil)
+}
+
 // MARK: - NotchCompanionPreferenceStore
 
 @MainActor
