@@ -211,8 +211,15 @@ private struct EditorGroupView: View {
                         EditorSplitPreviewOverlay(edge: hoveredDropEdge)
                     }
                 }
+                // `.fileURL` is registered alongside the internal drag type
+                // so Finder (or any external) file drags get the same split
+                // preview and drop handling over surfaces the text view's
+                // AppKit forwarding cannot reach — terminal tabs,
+                // image/video previews, and other non-text content. Over
+                // the text editor the deeper `EditorDropForwardingScrollView`
+                // still wins, exactly as before.
                 .onDrop(
-                    of: [.rafuEditorDrag],
+                    of: [.rafuEditorDrag, .fileURL],
                     delegate: EditorDropDelegate(
                         groupID: group.id,
                         size: proxy.size,
@@ -342,11 +349,14 @@ private struct EditorGroupView: View {
     }
 }
 
-/// Tracks the pointer during a tab or sidebar-file drag and reports the
-/// nearest split edge (or `nil` for the central "open/move in place" zone)
-/// so the overlay can preview the resulting pane before the drop happens.
-/// Shared by every editor group and the empty-editor placeholder so tabs and
-/// files get identical drop behavior.
+/// Tracks the pointer during a tab, sidebar-file, or external-file drag and
+/// reports the nearest split edge (or `nil` for the central "open/move in
+/// place" zone) so the overlay can preview the resulting pane before the
+/// drop happens. Shared by every editor group and the empty-editor
+/// placeholder so tabs, tree files, and Finder files get identical drop
+/// behavior — external `.fileURL` drags matter over surfaces the text
+/// view's AppKit forwarding cannot cover (terminal tabs, image/video
+/// previews, the empty editor).
 private struct EditorDropDelegate: DropDelegate {
     let groupID: EditorGroupID
     /// `nil` for a container with no meaningful split geometry (the empty
@@ -387,7 +397,11 @@ private struct EditorDropDelegate: DropDelegate {
         isTargeted = false
         hoveredEdge = nil
 
-        guard info.itemProviders(for: [.rafuEditorDrag]).first != nil else { return false }
+        guard info.itemProviders(for: [.rafuEditorDrag]).first != nil else {
+            // External file drag (Finder or another app): open the files at
+            // the hovered edge, same as the text view's AppKit forwarding.
+            return performExternalFileDrop(info: info, edge: resolvedEdge)
+        }
 
         // Same-process fast path: the payload is already known from the
         // drag's origin, no async pasteboard round trip needed.
@@ -425,6 +439,31 @@ private struct EditorDropDelegate: DropDelegate {
         return true
     }
 
+    /// Loads every `.fileURL` provider, then opens the batch through
+    /// `handleEditorFileDrops` (which rejects directories and applies the
+    /// split edge to the first file only). Slots keep the providers' order
+    /// even though the loads complete asynchronously in any order.
+    private func performExternalFileDrop(info: DropInfo, edge: EditorSplitEdge?) -> Bool {
+        let providers = info.itemProviders(for: [.fileURL])
+        guard !providers.isEmpty else { return false }
+
+        let collector = ExternalFileDropCollector(
+            expected: providers.count,
+            session: session,
+            groupID: groupID,
+            edge: edge
+        )
+        for (index, provider) in providers.enumerated() {
+            _ = provider.loadDataRepresentation(for: .fileURL) { data, _ in
+                let path = data.flatMap { URL(dataRepresentation: $0, relativeTo: nil)?.path }
+                Task { @MainActor in
+                    collector.fulfill(index: index, path: path)
+                }
+            }
+        }
+        return true
+    }
+
     private func edge(for location: CGPoint) -> EditorSplitEdge? {
         guard let size else { return nil }
         return EditorDropGeometry.target(at: location, in: size)
@@ -437,6 +476,36 @@ private struct EditorDropDelegate: DropDelegate {
         case .file(let path):
             session.handleEditorFileDrop(path: path, on: groupID, edge: edge)
         }
+    }
+}
+
+/// Order-preserving accumulator for an external multi-file drop: each
+/// `.fileURL` provider load lands here (already hopped to the main actor),
+/// and once every slot has reported, the surviving paths open as one batch.
+@MainActor
+private final class ExternalFileDropCollector {
+    private var slots: [String??]
+    private var remaining: Int
+    private let session: WorkspaceSession
+    private let groupID: EditorGroupID
+    private let edge: EditorSplitEdge?
+
+    init(expected: Int, session: WorkspaceSession, groupID: EditorGroupID, edge: EditorSplitEdge?) {
+        slots = Array(repeating: nil, count: expected)
+        remaining = expected
+        self.session = session
+        self.groupID = groupID
+        self.edge = edge
+    }
+
+    func fulfill(index: Int, path: String?) {
+        guard slots.indices.contains(index), slots[index] == nil else { return }
+        slots[index] = .some(path)
+        remaining -= 1
+        guard remaining == 0 else { return }
+        let paths = slots.compactMap { $0 ?? nil }
+        guard !paths.isEmpty else { return }
+        session.handleEditorFileDrops(paths: paths, on: groupID, edge: edge)
     }
 }
 
@@ -781,7 +850,7 @@ private struct EmptyEditorView: View {
             }
         }
         .onDrop(
-            of: [.rafuEditorDrag],
+            of: [.rafuEditorDrag, .fileURL],
             delegate: EditorDropDelegate(
                 groupID: session.editorLayout.focusedGroupID,
                 size: nil,

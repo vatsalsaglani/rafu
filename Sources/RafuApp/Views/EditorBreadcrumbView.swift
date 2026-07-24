@@ -94,6 +94,10 @@ struct EditorBreadcrumbView: View {
         .padding(.horizontal, 10)
         .frame(height: 24)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // The breadcrumb's empty trailing run is the primary "grab the top
+        // of the window" surface now that `isMovable` is off (the tab strip
+        // itself is a scroll view, which swallows background hits).
+        .background(WindowDragHandle())
         .background(theme.palette.tabBarBackground)
         .overlay(alignment: .bottom) { Divider().overlay(theme.palette.borderSubtle) }
         .task(id: document.url) { rebuildSegments() }

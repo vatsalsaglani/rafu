@@ -6,7 +6,47 @@ struct WorkspaceWindowView: View {
     @Bindable var session: WorkspaceSession
     @Environment(\.rafuTheme) private var theme
 
+    /// Outside full screen the traffic lights stay hidden until the pointer
+    /// enters the top-left cluster (see `WindowTopLeftControlCluster`).
+    @State private var trafficLightsRevealed = false
+    @State private var isWindowFullScreen = false
+
     var body: some View {
+        ZStack(alignment: .topLeading) {
+            windowContent
+            WindowTopLeftControlCluster(
+                session: session,
+                lightsVisible: trafficLightsRevealed && !isWindowFullScreen,
+                hoverTrackingEnabled: !isWindowFullScreen,
+                onHoverChange: { trafficLightsRevealed = $0 }
+            )
+        }
+        // Content merges with the titlebar zone because `FlatWindowChrome`
+        // zeroes the top safe area at the window level
+        // (`cancelTitlebarSafeArea`). Do NOT add `.ignoresSafeArea` escapes
+        // here or on HSplitView panes — per-pane hosting views re-derive the
+        // safe area on their own schedule, and view-level escapes drift
+        // between under- and over-correction across window lifecycle events
+        // (see flat-window-chrome-titlebar-merge.md).
+        .background(
+            FlatWindowChrome(
+                titleBarColor: NSColor(theme.palette.sidebarBackground),
+                hidesTrafficLights: !trafficLightsRevealed && !isWindowFullScreen,
+                onFullScreenChange: { isFullScreen in
+                    isWindowFullScreen = isFullScreen
+                    if isFullScreen {
+                        trafficLightsRevealed = false
+                    }
+                }
+            )
+        )
+        .frame(minWidth: 720, minHeight: 480)
+        .navigationTitle(session.windowTitle)
+        .focusedSceneValue(\.workspaceSession, session)
+        .modifier(WorkspaceWindowPresentations(session: session))
+    }
+
+    private var windowContent: some View {
         VStack(spacing: 0) {
             // Issue: flat sidebar. `NavigationSplitView` on macOS 26 floats
             // the sidebar as an inset, rounded Liquid Glass card whenever the
@@ -16,10 +56,11 @@ struct WorkspaceWindowView: View {
             // pane while preserving drag-to-resize; ⌘B and the toolbar toggle
             // both drive `session.isSidebarCollapsed`.
             HStack(spacing: 0) {
-                // Mirrors `WorkspaceUtilityRail` on the right edge and holds
-                // the sidebar toggle. A vertical rail costs no vertical space,
-                // unlike the horizontal title bar it replaced.
-                WorkspaceSidebarRail(session: session)
+                // Mirrors `WorkspaceUtilityRail` on the right edge. The
+                // sidebar toggle that visually tops this rail is the
+                // `WindowTopLeftControlCluster` overlay in `body`, so it can
+                // slide clear of the traffic lights when they reveal.
+                WorkspaceSidebarRail()
                 Divider().overlay(theme.palette.borderSubtle)
                 HSplitView {
                     if !session.isSidebarCollapsed {
@@ -60,57 +101,6 @@ struct WorkspaceWindowView: View {
             Divider()
             WorkspaceStatusBar(session: session)
         }
-        .background(FlatWindowChrome(titleBarColor: NSColor(theme.palette.sidebarBackground)))
-        .frame(minWidth: 720, minHeight: 480)
-        .navigationTitle(session.windowTitle)
-        .focusedSceneValue(\.workspaceSession, session)
-        .fileImporter(
-            isPresented: $session.isOpenFolderImporterPresented,
-            allowedContentTypes: [.folder],
-            allowsMultipleSelection: false
-        ) { result in
-            switch result {
-            case .success(let urls):
-                guard let url = urls.first else {
-                    return
-                }
-                session.openLocalWorkspace(at: url)
-            case .failure(let error):
-                session.reportOpenFolderError(error)
-            }
-        }
-        .alert(session.openFolderErrorTitle, isPresented: $session.isOpenFolderErrorPresented) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(session.openFolderErrorMessage)
-        }
-        .sheet(isPresented: $session.isCommandPalettePresented) {
-            CommandPaletteView(session: session)
-        }
-        .sheet(isPresented: $session.isNavigationPeekPresented) {
-            NavigationPeekView(session: session)
-        }
-        .sheet(isPresented: $session.isQuitConfirmationPresented) {
-            EmptyWindowQuitConfirmationView()
-        }
-        .sheet(isPresented: $session.isGitHubPublishPresented) {
-            GitHubPublishSheet(session: session)
-        }
-        .sheet(isPresented: ignoreSuggestionPresentedBinding) {
-            IgnoreSuggestionSheet(session: session)
-        }
-        .sheet(item: trustPromptBinding) { request in
-            LanguageServerTrustPromptView(
-                request: request,
-                onApprove: { session.languageIntelligence.approveTrust($0) },
-                onDecline: { session.languageIntelligence.declineTrust($0) }
-            )
-        }
-        .alert("Command Line Tool", isPresented: cliMessageBinding) {
-            Button("OK", role: .cancel) { session.cliInstallMessage = nil }
-        } message: {
-            Text(session.cliInstallMessage ?? "")
-        }
     }
 
     private var editorCanvas: some View {
@@ -118,6 +108,64 @@ struct WorkspaceWindowView: View {
             session: session,
             openFolder: session.requestOpenFolder
         )
+    }
+}
+
+/// The window's importer, alert, and sheet presentations, split out so
+/// `WorkspaceWindowView.body` stays the layout story (content + top-left
+/// cluster + chrome).
+private struct WorkspaceWindowPresentations: ViewModifier {
+    @Bindable var session: WorkspaceSession
+
+    func body(content: Content) -> some View {
+        content
+            .fileImporter(
+                isPresented: $session.isOpenFolderImporterPresented,
+                allowedContentTypes: [.folder],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else {
+                        return
+                    }
+                    session.openLocalWorkspace(at: url)
+                case .failure(let error):
+                    session.reportOpenFolderError(error)
+                }
+            }
+            .alert(session.openFolderErrorTitle, isPresented: $session.isOpenFolderErrorPresented) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(session.openFolderErrorMessage)
+            }
+            .sheet(isPresented: $session.isCommandPalettePresented) {
+                CommandPaletteView(session: session)
+            }
+            .sheet(isPresented: $session.isNavigationPeekPresented) {
+                NavigationPeekView(session: session)
+            }
+            .sheet(isPresented: $session.isQuitConfirmationPresented) {
+                EmptyWindowQuitConfirmationView()
+            }
+            .sheet(isPresented: $session.isGitHubPublishPresented) {
+                GitHubPublishSheet(session: session)
+            }
+            .sheet(isPresented: ignoreSuggestionPresentedBinding) {
+                IgnoreSuggestionSheet(session: session)
+            }
+            .sheet(item: trustPromptBinding) { request in
+                LanguageServerTrustPromptView(
+                    request: request,
+                    onApprove: { session.languageIntelligence.approveTrust($0) },
+                    onDecline: { session.languageIntelligence.declineTrust($0) }
+                )
+            }
+            .alert("Command Line Tool", isPresented: cliMessageBinding) {
+                Button("OK", role: .cancel) { session.cliInstallMessage = nil }
+            } message: {
+                Text(session.cliInstallMessage ?? "")
+            }
     }
 
     private var cliMessageBinding: Binding<Bool> {

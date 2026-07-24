@@ -98,7 +98,15 @@ struct WorkspaceSidebarView: View {
             .help("New Folder")
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        // Top-heavy on purpose: centers the 24 pt icons on the same
+        // baseline as the top-left sidebar toggle (center ≈ 24 pt from the
+        // window top now that the header sits in the titlebar zone).
+        .padding(.top, 12)
+        .padding(.bottom, 7)
+        // The header's empty leading run doubles as a window-move surface
+        // (`isMovable` is off; see WindowDragHandle). The icon buttons above
+        // still win hit-testing.
+        .background(WindowDragHandle())
     }
 
     private var renameBinding: Binding<Bool> {

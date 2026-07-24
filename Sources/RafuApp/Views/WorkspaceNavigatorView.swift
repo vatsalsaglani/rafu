@@ -72,19 +72,51 @@ struct WorkspaceUtilityPanelView: View {
     }
 }
 
-/// Slim icon rail pinned to the window's LEFT edge, mirroring
-/// `WorkspaceUtilityRail` on the right. It carries the app's ONE sidebar
-/// toggle (ADR 0002), which needs a home that survives the sidebar being
-/// collapsed and full screen hiding the titlebar. A rail also costs no
-/// vertical space, unlike the horizontal title bar it replaced — and SwiftUI
-/// cannot draw into the titlebar zone at all (see `FlatWindowChrome`), so a
-/// toggle up there was never an option.
+/// Slim column pinned to the window's LEFT edge, mirroring
+/// `WorkspaceUtilityRail` on the right. The app's ONE sidebar toggle
+/// (ADR 0002) visually sits at the top of this rail, but the button itself
+/// lives in `WindowTopLeftControlCluster`, overlaid by
+/// `WorkspaceWindowView`: the window content extends into the titlebar zone
+/// (`.ignoresSafeArea(.top)` + `FlatWindowChrome`), and the toggle must
+/// slide right of the traffic lights when they reveal — a 40 pt column
+/// cannot host that travel.
 struct WorkspaceSidebarRail: View {
-    @Bindable var session: WorkspaceSession
     @Environment(\.rafuTheme) private var theme
 
     var body: some View {
-        VStack(spacing: 8) {
+        WindowDragHandle()
+            .frame(width: 40)
+            .frame(maxHeight: .infinity)
+            .background(theme.palette.sidebarBackground)
+    }
+}
+
+/// The window's top-left control cluster, overlaid in the titlebar zone.
+/// Holds the sidebar toggle and, in front of it, the space the traffic
+/// lights occupy when revealed. Outside full screen the lights stay hidden
+/// (`FlatWindowChrome.hidesTrafficLights`) until the pointer enters this
+/// cluster; the toggle then slides right to clear them (the cmux-style
+/// hover-reveal validated in the TitleBarProto spike).
+struct WindowTopLeftControlCluster: View {
+    @Bindable var session: WorkspaceSession
+    /// The traffic lights currently occupy top-left window space.
+    let lightsVisible: Bool
+    /// Hover tracking is meaningless in full screen, where the system owns
+    /// the (auto-hidden) lights.
+    let hoverTrackingEnabled: Bool
+    let onHoverChange: (Bool) -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Width of the zone the system traffic lights occupy (x ≈ 12…70).
+    private static let trafficLightSpan: CGFloat = 76
+    /// Matches the tab-strip / sidebar-header top row.
+    private static let rowHeight: CGFloat = 36
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Color.clear
+                .frame(width: lightsVisible ? Self.trafficLightSpan : 0, height: Self.rowHeight)
             Button("Toggle Sidebar", systemImage: "sidebar.left") {
                 withAnimation(.spring(duration: 0.25)) {
                     session.toggleSidebar()
@@ -97,13 +129,27 @@ struct WorkspaceSidebarRail: View {
             .accessibilityLabel("Toggle Sidebar")
             .accessibilityValue(session.isSidebarCollapsed ? "Hidden" : "Shown")
             .accessibilityAddTraits(session.isSidebarCollapsed ? [] : .isSelected)
-            Spacer()
+            .padding(.leading, lightsVisible ? 0 : 5)
         }
-        .padding(.top, 10)
-        .frame(width: 40)
-        .frame(maxHeight: .infinity)
-        .fixedSize(horizontal: true, vertical: false)
-        .background(theme.palette.sidebarBackground)
+        // Breathing room below the window's top edge; also drops the toggle
+        // onto the traffic lights' own baseline when they reveal.
+        .padding(.top, 6)
+        .frame(height: Self.rowHeight + 6, alignment: .top)
+        // The cluster is exactly as wide as its content: rail-width while
+        // the lights are hidden, lights + toggle while revealed. Keeping the
+        // collapsed zone narrow matters — a wider invisible zone would eat
+        // clicks meant for the sidebar header's leading edge.
+        .contentShape(Rectangle())
+        .onHover { inside in
+            guard hoverTrackingEnabled else { return }
+            if reduceMotion {
+                onHoverChange(inside)
+            } else {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    onHoverChange(inside)
+                }
+            }
+        }
     }
 }
 
@@ -120,10 +166,13 @@ struct WorkspaceUtilityRail: View {
             railButton(.runs)
             Spacer()
         }
-        .padding(.top, 10)
+        // Centers the first 30 pt button on the sidebar toggle's baseline
+        // (center ≈ 24 pt) now that the rail reaches the window's top edge.
+        .padding(.top, 9)
         .frame(width: 40)
         .frame(maxHeight: .infinity)
         .fixedSize(horizontal: true, vertical: false)
+        .background(WindowDragHandle())
         .background(theme.palette.sidebarBackground)
     }
 
