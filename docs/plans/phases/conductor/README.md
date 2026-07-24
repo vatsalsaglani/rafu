@@ -211,3 +211,9 @@ git worktree add ../rafu-conductor-polish   -b conductor/c7-polish
 
 Each phase document ends with its self-contained goal-mode prompt (works in
 Claude Code or Codex).
+
+Beyond C7: [`orchestration-gap-analysis.md`](orchestration-gap-analysis.md)
+compares the shipped engine against the user's real multi-CLI orchestration
+loop (dynamic planning, fan-out DAGs, coordinator-driven merges) and sketches
+the candidate C8 (coordinator-agent route: `rafu ensemble` IPC verbs + a
+published skill + a bounded-budget consent model, amending ADR 0018).
