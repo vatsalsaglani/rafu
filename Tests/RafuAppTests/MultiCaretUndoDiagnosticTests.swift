@@ -95,7 +95,11 @@ func multiCaretUndoSurvivesStaleTokenRequest() async throws {
     textView.textStorage?.delegate = forwarder
 
     // Wait for the tree-sitter actor so the async token path is live.
-    let deadline = ContinuousClock.now + .seconds(10)
+    // 60s, not 10s: under a loaded parallel `swift test` scheduler the
+    // activation can be starved well past 10s (observed as the suite grew),
+    // while a healthy run exits this loop in milliseconds — the same
+    // starvation-tolerance rationale as the probe-runner sleep hardening.
+    let deadline = ContinuousClock.now + .seconds(60)
     while !pipeline.hasLiveGrammarActorForTesting {
         guard ContinuousClock.now < deadline else {
             Issue.record("grammar actor never activated")
