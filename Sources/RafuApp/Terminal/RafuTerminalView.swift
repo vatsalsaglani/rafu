@@ -47,11 +47,10 @@ final class RafuTerminalView: LocalProcessTerminalView {
     /// Tap the byte count for activity tracking, then let SwiftTerm parse
     /// as normal.
     nonisolated override func dataReceived(slice: ArraySlice<UInt8>) {
-        let count = slice.count
         MainActor.assumeIsolated {
-            onOutputActivity?(count)
+            onOutputActivity?(slice.count)
+            super.dataReceived(slice: slice)
         }
-        super.dataReceived(slice: slice)
     }
 
     /// Parser handlers run synchronously inside `feed` on the main thread —

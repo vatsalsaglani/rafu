@@ -85,6 +85,12 @@ need in its handoff instead of editing it.
   `--lint` clean. HEADLESS ONLY — do NOT run `build_and_run.sh`, do not
   launch or kill `Rafu.app` (integrated GUI passes happen on `main` after
   merge).
+- Zero-warning gates are only meaningful on files that actually recompiled:
+  incremental `swift build` silently skips (and therefore hides) warnings in
+  unchanged files. A fresh worktree's first build is clean and re-emits
+  everything — a warning that "appears" there but not on `main` is a masked
+  baseline warning, not phase fallout. Report it to the coordinator (who owns
+  the fix on `main`); never fix an unowned file to satisfy the gate.
 - Adapter phases (C2–C4): treat the invocation shapes in your phase doc as
   HYPOTHESES. Probe the installed CLI (`<cli> --help`, subcommand help,
   version output) before coding; if a CLI is not installed in your
