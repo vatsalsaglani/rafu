@@ -2,7 +2,7 @@
 
 - **Branch:** `conductor/c2-adapters-claude-codex` (Wave A, branch after C0)
 - **Depends on:** C0 shim on `main`
-- **Status:** Planned
+- **Status:** Implemented (headless gates green; headless-only phase)
 
 ## Mission
 
