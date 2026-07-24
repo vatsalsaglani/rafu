@@ -201,7 +201,9 @@ final class WorkspaceSession {
     ///
     /// Empty in C0: runs are repo data read from `.rafu/runs/`, and Rafu
     /// reads nothing merely because a folder opened.
-    var conductorRuns: [ConductorRunManifest] = []
+    var conductorRuns: [ConductorRunManifest] {
+        conductorRunController.runs
+    }
     /// The run the `.runs` panel and (C5) the run-detail canvas are showing.
     var selectedConductorRunID: String?
 
@@ -324,8 +326,10 @@ final class WorkspaceSession {
     /// adds the editor-hosted run-detail canvas behind the same call, so no
     /// caller changes when it lands. Reading run evidence starts nothing.
     func openConductorRun(_ runID: String) {
+        installTerminalHandlersIfNeeded()
         selectedConductorRunID = runID
         navigatorMode = .runs
+        conductorRunController.revealLiveTerminal(for: runID, in: self)
     }
 
     /// Drives `WorkspaceWindowView`'s `NavigationSplitView` column
