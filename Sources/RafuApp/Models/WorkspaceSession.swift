@@ -646,8 +646,15 @@ final class WorkspaceSession {
     func raiseConductorGateAttention(runName: String, stepName: String) {
         let preference = terminalAttentionSurfaceStore.surface()
         let eventID = UUID()
-        let title = runName
-        let body = "\(stepName) is ready for review."
+        // `runName`/`stepName` come from user-authored `.rafu/agents|
+        // workflows/*.md` frontmatter, capped at 1 MiB per FILE, not per
+        // field (advisor D6) — bound both to a short UTF-8 prefix before
+        // they ever reach a HUD event or notification body, mirroring
+        // `TerminalAttentionPolicy`'s private `boundedUTF8` idiom (not
+        // visible from here, so reproduced locally rather than widening
+        // that type's access).
+        let title = Self.boundedConductorAttentionString(runName)
+        let body = "\(Self.boundedConductorAttentionString(stepName)) is ready for review."
 
         if NotchHUDPolicy.surfaces(for: preference, authorized: false).hud {
             resolvedAttentionHUD().show(
@@ -3834,6 +3841,20 @@ final class WorkspaceSession {
             (error as? LocalizedError)?.errorDescription
             ?? "Commit-message generation failed."
         return String(decoding: message.utf8.prefix(512), as: UTF8.self)
+    }
+
+    /// Same `String(decoding:as:)`-on-a-UTF-8-prefix idiom as
+    /// `boundedAIErrorMessage` above (and `TerminalAttentionPolicy`'s
+    /// private `boundedUTF8`) — truncating on a byte boundary repairs an
+    /// incomplete trailing multibyte sequence into one replacement
+    /// character rather than corrupting further bytes. 200 bytes mirrors
+    /// `TerminalAttentionPolicy.snippet`'s per-line cap: plenty for a HUD
+    /// pill or notification title, nowhere near the 1 MiB per-FILE cap that
+    /// bounds a `.rafu/agents|workflows/*.md` frontmatter field.
+    private static func boundedConductorAttentionString(
+        _ text: String, maxBytes: Int = 200
+    ) -> String {
+        String(decoding: text.utf8.prefix(maxBytes), as: UTF8.self)
     }
 
     private func synchronizeSelectionFromLayout(fallback: EditorDocument? = nil) {

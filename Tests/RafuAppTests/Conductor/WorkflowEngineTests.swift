@@ -345,6 +345,54 @@ func retryCreatesFreshAttemptDirectory() async throws {
 }
 
 @MainActor
+@Test(
+    "A materialize failure leaves `request` unset; retrying surfaces a failure instead of silently publishing .pending (D2 regression)"
+)
+func retryAfterMaterializeFailureSurfacesInsteadOfCorrupting() async throws {
+    let root = try makeWorkflowTestRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    // Pre-create the branch `materialize` will try to create: `plan()` only
+    // checks the worktree DIRECTORY, so it succeeds; `git branch <name>
+    // <startpoint>` then fails because the branch already exists — forcing
+    // a materialize failure AFTER `plan` is assigned but BEFORE `request`
+    // is (only set once `materialize` succeeds), the exact D2 window.
+    try workflowGit(["branch", "rafu/run-materialize-fail-run"], at: root)
+
+    let (_, controller) = makeWorkflowController(root: root)
+    let launcher = WorkflowFakeLauncher()
+    let runID = "materialize-fail-run"
+    let roles = [
+        workflowRole(name: "advisor", handoffArtifact: "brief.md", autonomy: .worktreeWrite)
+    ]
+    let workflow = workflowDefinition(
+        steps: [(agentName: "advisor", inputArtifacts: [], gateAfter: false)])
+
+    await controller.start(
+        ConductorWorkflowRunRequest(
+            workflow: workflow, roles: roles, taskPrompt: "Ship it.", runID: runID),
+        launcher: launcher)
+
+    guard case .failed = controller.state else {
+        Issue.record("expected a forced materialize failure to park the run .failed")
+        return
+    }
+    #expect(launcher.recorded.isEmpty)
+
+    await controller.retryFailedStep()
+    await controller.waitForPendingOperation()
+
+    guard case .failed(let index, let reason) = controller.state else {
+        Issue.record("expected retry to surface a failure, not silently no-op")
+        return
+    }
+    #expect(index == 0)
+    #expect(!reason.isEmpty)
+    #expect(controller.manifest?.steps[0].status != .pending)
+    #expect(controller.manifest?.steps[0].attempt == 1)
+    #expect(launcher.recorded.isEmpty)
+}
+
+@MainActor
 @Test("Aborting mid-step terminates the child and preserves evidence and the worktree")
 func abortMidStepPreservesEvidenceAndWorktree() async throws {
     let root = try makeWorkflowTestRoot()

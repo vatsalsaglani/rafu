@@ -8,6 +8,11 @@ nonisolated struct ConductorRunRowModel: Identifiable, Equatable, Sendable {
     let id: String
     let title: String
     let subtitle: String
+    /// The run's semantic status (precedence-derived across every step —
+    /// see `ConductorRunPresentation.overallStatus(for:)`), never gate-
+    /// overridden. Views switch on THIS, never on `statusSymbol`'s string
+    /// (advisor D8): symbols are presentation output only.
+    let status: RunStepStatus
     let statusSymbol: String
     let statusLabel: String
     let needsAttention: Bool
@@ -22,6 +27,9 @@ nonisolated struct ConductorStepRowModel: Identifiable, Equatable, Sendable {
     let agentName: String
     let providerLabel: String
     let modelLabel: String
+    /// This step's own status — the semantic field views switch on
+    /// (advisor D8), never `statusSymbol`'s string.
+    let status: RunStepStatus
     let statusSymbol: String
     let statusLabel: String
     /// `nil` before the step has started.
@@ -33,6 +41,14 @@ nonisolated struct ConductorStepRowModel: Identifiable, Equatable, Sendable {
     /// Workspace-root-relative path — what `WorkspaceSession
     /// .openFile(atRelativePath:)` expects, not a run-relative one.
     let artifactRelativePath: String
+    /// Whether the artifact this step declares can actually exist yet:
+    /// `.completed`/`.awaitingGate` are the only statuses
+    /// `ConductorStepOutcome.completed` ever reaches through — every other
+    /// status means either the step hasn't launched (a C5 step's
+    /// `evidencePath` is `nil` and `artifactRelativePath` would collapse to
+    /// a flat C1 location it never wrote) or the process never confirmed
+    /// the artifact (advisor D5: opening it would create a broken tab).
+    let canOpenArtifact: Bool
     let hasLiveTerminal: Bool
 
     var id: Int { index }
@@ -86,6 +102,36 @@ nonisolated enum ConductorRunPresentation {
         }
     }
 
+    /// The run-level status shown in the panel: a PRECEDENCE across every
+    /// step, never merely `steps.last` (advisor D3 — a 3-step run failed at
+    /// step 2 must show "failed", not "pending", which is only what step 3,
+    /// which never ran, happens to carry). Most urgent first: a failure
+    /// anywhere beats an abort anywhere beats an open step gate beats a
+    /// step still running beats a step that hasn't started yet; only when
+    /// every step is `.completed` (or the manifest has no steps at all) does
+    /// this read as `.completed`/`.pending`.
+    static func overallStatus(for manifest: ConductorRunManifest) -> RunStepStatus {
+        func first(where predicate: (RunStepStatus) -> Bool) -> RunStepStatus? {
+            manifest.steps.first { predicate($0.status) }?.status
+        }
+        if let failed = first(where: { if case .failed = $0 { true } else { false } }) {
+            return failed
+        }
+        if let aborted = first(where: { $0 == .aborted }) {
+            return aborted
+        }
+        if let awaitingGate = first(where: { $0 == .awaitingGate }) {
+            return awaitingGate
+        }
+        if let running = first(where: { $0 == .running }) {
+            return running
+        }
+        if let pending = first(where: { $0 == .pending }) {
+            return pending
+        }
+        return manifest.steps.last?.status ?? .pending
+    }
+
     /// One run row. `isLive` is true only when `liveState` is provided and
     /// currently in flight — i.e. this manifest IS the workflow controller's
     /// active run, not merely a historical one with the same last-known
@@ -94,7 +140,7 @@ nonisolated enum ConductorRunPresentation {
         for manifest: ConductorRunManifest,
         liveState: ConductorWorkflowState? = nil
     ) -> ConductorRunRowModel {
-        let overallStatus = manifest.steps.last?.status ?? .pending
+        let status = overallStatus(for: manifest)
         let completedCount = manifest.steps.count { $0.status == .completed }
         let branchDescription =
             manifest.worktreeBranch.isEmpty ? "Main workspace" : manifest.worktreeBranch
@@ -104,9 +150,10 @@ nonisolated enum ConductorRunPresentation {
             id: manifest.id,
             title: manifest.workflowName,
             subtitle: subtitle,
-            statusSymbol: manifest.gate != nil ? "pause.circle.fill" : symbol(for: overallStatus),
-            statusLabel: gateBadge(for: manifest) ?? label(for: overallStatus),
-            needsAttention: manifest.gate != nil || needsAttention(for: overallStatus),
+            status: status,
+            statusSymbol: manifest.gate != nil ? "pause.circle.fill" : symbol(for: status),
+            statusLabel: gateBadge(for: manifest) ?? label(for: status),
+            needsAttention: manifest.gate != nil || needsAttention(for: status),
             isLive: isLive,
             gateBadge: gateBadge(for: manifest))
     }
@@ -126,6 +173,7 @@ nonisolated enum ConductorRunPresentation {
                 agentName: step.agentName,
                 providerLabel: step.binding.provider.displayName,
                 modelLabel: step.binding.model.isEmpty ? "Adapter default" : step.binding.model,
+                status: step.status,
                 statusSymbol: symbol(for: step.status),
                 statusLabel: label(for: step.status),
                 durationLabel: durationLabel(
@@ -133,6 +181,7 @@ nonisolated enum ConductorRunPresentation {
                 attemptLabel: attempt > 1 ? "Attempt \(attempt)" : nil,
                 isGateReady: step.status == .awaitingGate,
                 artifactRelativePath: artifactRelativePath(runID: manifest.id, step: step),
+                canOpenArtifact: canOpenArtifact(step.status),
                 hasLiveTerminal: liveStepIndex == index)
         }
     }
@@ -162,6 +211,18 @@ nonisolated enum ConductorRunPresentation {
         let minutes = totalSeconds / 60
         let remainingSeconds = totalSeconds % 60
         return minutes > 0 ? "\(minutes)m \(remainingSeconds)s" : "\(remainingSeconds)s"
+    }
+
+    /// `ConductorStepOutcome.completed` (ADR 0018) — exit zero AND the
+    /// artifact confirmed present — is the ONLY path to `.completed` or
+    /// `.awaitingGate`; every other status means the artifact this step
+    /// declares cannot yet be trusted to exist at `artifactRelativePath`
+    /// (advisor D5).
+    private static func canOpenArtifact(_ status: RunStepStatus) -> Bool {
+        switch status {
+        case .completed, .awaitingGate: true
+        case .pending, .running, .failed, .aborted: false
+        }
     }
 
     /// `.rafu/runs/<id>/[<evidencePath>/]handoff/<handoffArtifact>`, relative

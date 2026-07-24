@@ -132,13 +132,19 @@ struct ConductorRunsPanelView: View {
     }
 
     /// History vs Active for a run this window did NOT start (or restarted
-    /// since): pending/running/awaiting-gate steps, or an open gate, keep it
-    /// in Active; a run whose last recorded step is completed/failed/aborted
-    /// with no open gate reads as History — retrying (if still possible) is
-    /// still reachable by selecting it, independent of this grouping.
+    /// since): an open gate, or a semantic status of pending/running/
+    /// awaiting-gate/failed, keeps it in Active — a failed run is exactly
+    /// as actionable (Retry) as a running one; only completed/aborted with
+    /// no open gate reads as History. Switches on the row's semantic
+    /// `status` (advisor D8), never on `statusSymbol`'s string.
     private func isUnresolved(_ row: ConductorRunRowModel) -> Bool {
-        row.gateBadge != nil || row.statusSymbol == "circle.dotted"
-            || row.statusSymbol == "circle.fill"
+        if row.gateBadge != nil { return true }
+        switch row.status {
+        case .pending, .running, .awaitingGate, .failed:
+            return true
+        case .completed, .aborted:
+            return false
+        }
     }
 
     private func revealLiveTerminal(_ runID: String) {
@@ -337,8 +343,13 @@ private struct ConductorNewRunSheet: View {
     private func workflowStepPreview(for workflow: ConductorWorkflowFile) -> some View {
         switch model.resolvedWorkflowSteps {
         case .success(let roles):
-            ForEach(Array(zip(workflow.definition.steps, roles)), id: \.0.agentName) {
-                step, role in
+            // `id: \.offset`, not the agent name: a workflow may legitimately
+            // repeat a role (advisor → implementor → advisor), and two rows
+            // sharing an id would silently collide in the `ForEach` (advisor
+            // D4).
+            let preview = Array(zip(workflow.definition.steps, roles).enumerated())
+            ForEach(preview, id: \.offset) { _, pair in
+                let (step, role) = pair
                 HStack(spacing: 6) {
                     Text(step.agentName).lineLimit(1)
                     RafuChip(text: role.provider.displayName)

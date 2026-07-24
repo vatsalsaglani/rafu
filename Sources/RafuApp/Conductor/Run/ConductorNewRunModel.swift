@@ -362,7 +362,13 @@ final class ConductorNewRunModel {
 
         let controller = session.conductorRunController
         controller.attach(workspaceRoot: workspaceRoot)
-        guard controller.canStartNewRun else {
+        // Defense in depth (advisor note A): the views already disable
+        // "New Run…" while EITHER engine is busy, but this model must not
+        // rely on that — a single-role start must refuse on its own when a
+        // C5 pipeline is in flight, not only when C1 itself is busy.
+        // `session` already carries the reference this needs; nothing is
+        // stored, so there is no retain-cycle risk.
+        guard controller.canStartNewRun, !session.conductorWorkflowController.isInFlight else {
             errorMessage = "Finish the current run before starting another."
             return false
         }
@@ -411,7 +417,9 @@ final class ConductorNewRunModel {
 
         let controller = session.conductorWorkflowController
         controller.attach(workspaceRoot: workspaceRoot)
-        guard controller.canStartNewRun else {
+        // Symmetric with `start(in:)` above (advisor note A): a workflow
+        // must not launch while C1's single-role engine is itself busy.
+        guard controller.canStartNewRun, session.conductorRunController.canStartNewRun else {
             errorMessage = "Finish the current run before starting another."
             return false
         }

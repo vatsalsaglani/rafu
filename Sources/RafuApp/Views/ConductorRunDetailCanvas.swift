@@ -21,6 +21,10 @@ struct ConductorRunDetailCanvas: View {
                     manifest: manifest,
                     isActiveRun: isActiveRun(manifest)
                 )
+                // Fresh identity per run: `RunDetailContent`'s own state
+                // (discard confirmations) must reset when the shown run
+                // changes, not linger from whichever run was showing before.
+                .id(manifest.id)
             } else {
                 ContentUnavailableView(
                     "No Run Selected",
@@ -81,7 +85,8 @@ struct ConductorRunDetailCanvas: View {
 
 /// Split out of `ConductorRunDetailCanvas.body` so the timeline's own state
 /// (discard confirmations) resets cleanly whenever the shown run changes —
-/// `.id(manifest.id)` on the caller gives this a fresh identity per run.
+/// `ConductorRunDetailCanvas.body` applies `.id(manifest.id)` to this view at
+/// its call site, giving it a fresh identity per run.
 private struct RunDetailContent: View {
     @Environment(\.rafuTheme) private var theme
     @Bindable var session: WorkspaceSession
@@ -219,6 +224,7 @@ private struct ConductorStepTimelineRow: View {
             HStack(spacing: 8) {
                 Button("Open Artifact", action: openArtifact)
                     .buttonStyle(RafuSecondaryButtonStyle())
+                    .disabled(!row.canOpenArtifact)
                 if row.hasLiveTerminal {
                     Button("Reveal Terminal", action: revealTerminal)
                         .buttonStyle(RafuSecondaryButtonStyle())
@@ -250,11 +256,13 @@ private struct ConductorStepTimelineRow: View {
     }
 
     private var statusTint: Color {
-        switch row.statusSymbol {
-        case "exclamationmark.triangle.fill": theme.palette.gitDeleted
-        case "pause.circle.fill": theme.palette.accent
-        case "checkmark.circle.fill": theme.palette.gitAdded
-        default: theme.palette.textSecondary
+        // Switches on the semantic `status` (advisor D8), never
+        // `statusSymbol`'s string — symbols stay pure presentation output.
+        switch row.status {
+        case .failed: theme.palette.gitDeleted
+        case .awaitingGate: theme.palette.accent
+        case .completed: theme.palette.gitAdded
+        case .pending, .running, .aborted: theme.palette.textSecondary
         }
     }
 }

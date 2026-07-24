@@ -309,6 +309,87 @@ func mergeGateVerbsMirrorSingleRoleSemantics() async throws {
     #expect(!FileManager.default.fileExists(atPath: discardWorktree.path))
 }
 
+@MainActor
+@Test("Two back-to-back approveGate() calls never launch a step twice (D1 regression)")
+func approveGateNeverDoubleLaunches() async throws {
+    let root = try makeWorkflowTestRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (_, controller) = makeWorkflowController(root: root)
+    let launcher = WorkflowFakeLauncher()
+    let runID = "double-approve-run"
+
+    await controller.start(gatedTwoStepRequest(runID: runID), launcher: launcher)
+    try writeHandoff(
+        root: root, runID: runID, relativePath: "steps/01-advisor-a1/handoff/brief.md")
+    launcher.finish(0, exitCode: 0)
+    await controller.waitForPendingOperation()
+    #expect(controller.state == .awaitingGate(index: 0))
+
+    // Fire two approvals back-to-back. Both start on the MainActor, so the
+    // FIRST call's synchronous prefix (mutate manifest, publish, mint a
+    // fresh generation, leave `.awaitingGate`) runs to completion before
+    // either call can hit its first `await` — the second call must then see
+    // the FSM guard (and the menu/palette predicates that key on the same
+    // `state`) already false, never racing past it into a second launch.
+    async let first: Void = controller.approveGate()
+    async let second: Void = controller.approveGate()
+    _ = await (first, second)
+    await controller.waitForPendingOperation()
+
+    #expect(launcher.recorded.count == 2)
+    #expect(controller.state == .runningStep(index: 1))
+    #expect(controller.manifest?.steps[0].status == .completed)
+}
+
+@MainActor
+@Test("An all-readOnly pipeline completes with no merge gate; the merge verbs stay unreachable")
+func allReadOnlyPipelineCompletesWithNoMergeGateAndVerbsUnreachable() async throws {
+    let root = try makeWorkflowTestRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (_, controller) = makeWorkflowController(root: root)
+    let launcher = WorkflowFakeLauncher()
+    let runID = "readonly-only-run"
+    let roles = [
+        workflowRole(name: "advisor", handoffArtifact: "brief.md", autonomy: .readOnly),
+        workflowRole(name: "implementor", handoffArtifact: "patch.md", autonomy: .readOnly),
+    ]
+    let workflow = workflowDefinition(
+        steps: [
+            (agentName: "advisor", inputArtifacts: [], gateAfter: false),
+            (agentName: "implementor", inputArtifacts: ["brief.md"], gateAfter: false),
+        ])
+    await controller.start(
+        ConductorWorkflowRunRequest(
+            workflow: workflow, roles: roles, taskPrompt: "Review.", runID: runID),
+        launcher: launcher)
+    #expect(controller.plan?.worktreeURL == nil)
+
+    try writeHandoff(
+        root: root, runID: runID, relativePath: "steps/01-advisor-a1/handoff/brief.md")
+    launcher.finish(0, exitCode: 0)
+    await controller.waitForPendingOperation()
+    try writeHandoff(
+        root: root, runID: runID, relativePath: "steps/02-implementor-a1/handoff/patch.md")
+    launcher.finish(1, exitCode: 0)
+    await controller.waitForPendingOperation()
+
+    #expect(controller.state == .completed)
+    #expect(controller.manifest?.gate == nil)
+
+    // The merge-gate verbs all guard on `state == .awaitingMergeGate`, which
+    // an all-readOnly pipeline never reaches — every one must be a no-op.
+    await controller.applyToWorkspace()
+    #expect(controller.state == .completed)
+    #expect(!controller.hasAppliedToWorkspace)
+
+    await controller.keepWorktree()
+    #expect(controller.state == .completed)
+
+    let discardResult = await controller.discardWorktree(confirmedDirty: false)
+    #expect(discardResult == nil)
+    #expect(controller.state == .completed)
+}
+
 @Test("A C1-era manifest with no gate or attempt keys decodes")
 func c1EraManifestDecodesWithoutGateOrAttemptKeys() throws {
     let json = """

@@ -406,10 +406,27 @@ final class ConductorWorkflowController {
     /// (read at launch time — the mechanism that lets a revised artifact
     /// flow forward), and launches it.
     private func launchStep(_ index: Int) async {
-        guard let generation = activeGeneration, let request, let plan,
-            let launcher = activeLauncher,
+        // A missing generation means there is no active run to attribute
+        // anything to at all (already aborted, already attached to a
+        // different workspace, or never started) — a silent return is
+        // correct here, not a bug.
+        guard let generation = activeGeneration else { return }
+        // Everything else being nil WHILE a generation is active is an
+        // internal invariant violation, not a quiet no-op (advisor D2): a
+        // materialize failure leaves `request` unset until AFTER it
+        // succeeds, so a caller that reaches `launchStep` before that
+        // (or after some other unexpected reset) must surface a failure —
+        // silently returning left `retryFailedStep()` publishing `.pending`
+        // and launching nothing, repeatably, with nothing telling the user.
+        guard let request, let plan, let launcher = activeLauncher,
             var currentManifest = manifest, currentManifest.steps.indices.contains(index)
-        else { return }
+        else {
+            recordFailure(
+                step: index,
+                reason: "Rafu could not launch step \(index + 1): the run's context is unavailable."
+            )
+            return
+        }
         let role = request.roles[index]
         let workflowStep = request.workflow.steps[index]
         let attempt = currentManifest.steps[index].attempt ?? 1
@@ -580,6 +597,19 @@ final class ConductorWorkflowController {
 
     /// Approves the step gate the run is currently parked at: marks the step
     /// complete, clears the gate, and advances.
+    ///
+    /// Both the state change AND a fresh `activeGeneration` happen
+    /// SYNCHRONOUSLY, before the first `await` (`advance`/`launchStep`'s
+    /// first suspension is `evidenceService.prepare`, off-main) — otherwise
+    /// a second `approveGate()` arriving while the first is still suspended
+    /// there would pass both this guard (`state` was still `.awaitingGate`)
+    /// and `launchStep`'s `requireCurrent` (no generation had changed),
+    /// spawning two children into the same worktree (advisor D1, mirroring
+    /// the same protection `retryFailedStep()` already has). `.preparing` is
+    /// a real, existing FSM value — reused here rather than inventing a
+    /// bespoke transitional case — and is already `isInFlight`, so the menu
+    /// and command-palette predicates (which key on `state`) also go false
+    /// immediately.
     func approveGate() async {
         guard case .awaitingGate(let index) = state, var currentManifest = manifest,
             currentManifest.steps.indices.contains(index)
@@ -589,6 +619,8 @@ final class ConductorWorkflowController {
         currentManifest.updatedAt = Date()
         manifest = currentManifest
         runsPublisher.publish(currentManifest)
+        activeGeneration = UUID()
+        state = .preparing
         await advance(after: index)
     }
 
@@ -640,18 +672,34 @@ final class ConductorWorkflowController {
     /// re-read from their producing steps' current evidence, and only that
     /// step relaunched. The prior attempt's evidence is never mutated.
     func retryFailedStep() async {
-        guard case .failed(let index, _) = state, var currentManifest = manifest,
+        guard case .failed(let index, _) = state, let currentManifest = manifest,
             currentManifest.steps.indices.contains(index)
         else { return }
-        let nextAttempt = (currentManifest.steps[index].attempt ?? 1) + 1
-        currentManifest.steps[index].attempt = nextAttempt
-        currentManifest.steps[index].status = .pending
-        currentManifest.steps[index].startedAt = nil
-        currentManifest.steps[index].finishedAt = nil
-        currentManifest.steps[index].evidencePath = nil
-        currentManifest.updatedAt = Date()
-        manifest = currentManifest
-        runsPublisher.publish(currentManifest)
+        // Validate the run's context BEFORE mutating or publishing anything
+        // (advisor D2): `request` is only assigned in `start()` AFTER
+        // `materialize` succeeds, so a materialize failure leaves it `nil`
+        // while `state` is still `.failed`. Mutating the manifest to
+        // `.pending` first and only THEN discovering `launchStep` cannot
+        // proceed left the run silently stuck: a surfaced-looking `.failed`
+        // manifest that actually read `.pending`, with nothing launched and
+        // nothing telling the user why.
+        guard request != nil, plan != nil, activeLauncher != nil else {
+            recordFailure(
+                step: index,
+                reason:
+                    "Rafu could not retry step \(index + 1): the run's context is unavailable.")
+            return
+        }
+        var updatedManifest = currentManifest
+        let nextAttempt = (updatedManifest.steps[index].attempt ?? 1) + 1
+        updatedManifest.steps[index].attempt = nextAttempt
+        updatedManifest.steps[index].status = .pending
+        updatedManifest.steps[index].startedAt = nil
+        updatedManifest.steps[index].finishedAt = nil
+        updatedManifest.steps[index].evidencePath = nil
+        updatedManifest.updatedAt = Date()
+        manifest = updatedManifest
+        runsPublisher.publish(updatedManifest)
         stepEvidence.removeValue(forKey: index)
         activeGeneration = UUID()
         await launchStep(index)

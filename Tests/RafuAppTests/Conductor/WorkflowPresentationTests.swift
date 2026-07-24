@@ -124,6 +124,73 @@ func runRowSurfacesGateBadgeAndLiveness() {
     #expect(!terminal.isLive)
 }
 
+@Test(
+    "A run row's status is precedence-derived across every step, not just the last one (D3 regression): a 3-step run failed at step 2 shows failed, never the untouched step 3's pending"
+)
+func runRowStatusUsesPrecedenceNotLastStep() {
+    let now = Date()
+    let failedMidRun = ConductorRunManifest(
+        id: "mid-fail-run",
+        workflowName: "Ship a change",
+        baseCommit: "0123456789012345678901234567890123456789",
+        worktreeBranch: "rafu/run-mid-fail-run",
+        createdAt: now,
+        updatedAt: now,
+        steps: [
+            ConductorRunManifest.Step(
+                agentName: "advisor",
+                binding: presentationBinding(),
+                inputArtifacts: [],
+                handoffArtifact: "brief.md",
+                gateAfter: false,
+                status: .completed,
+                startedAt: now,
+                finishedAt: now),
+            ConductorRunManifest.Step(
+                agentName: "implementor",
+                binding: presentationBinding(),
+                inputArtifacts: ["brief.md"],
+                handoffArtifact: "patch.md",
+                gateAfter: false,
+                status: .failed("The agent process exited with status 9."),
+                startedAt: now,
+                finishedAt: now),
+            ConductorRunManifest.Step(
+                agentName: "documentor",
+                binding: presentationBinding(),
+                inputArtifacts: ["patch.md"],
+                handoffArtifact: "docs.md",
+                gateAfter: false,
+                status: .pending,
+                startedAt: nil,
+                finishedAt: nil),
+        ])
+
+    let row = ConductorRunPresentation.runRow(for: failedMidRun)
+
+    #expect(row.status == .failed("The agent process exited with status 9."))
+    #expect(row.statusSymbol == "exclamationmark.triangle.fill")
+    #expect(row.statusLabel == "The agent process exited with status 9.")
+    #expect(row.needsAttention)
+
+    // An abort mid-run must read the same way — never the untouched later
+    // step's `.pending`.
+    var abortedMidRun = failedMidRun
+    abortedMidRun.steps[1].status = .aborted
+    let abortedRow = ConductorRunPresentation.runRow(for: abortedMidRun)
+    #expect(abortedRow.status == .aborted)
+    #expect(abortedRow.statusSymbol == "xmark.circle.fill")
+    #expect(abortedRow.needsAttention == false)
+
+    // A run still genuinely mid-flight (step 2 running, step 3 pending) must
+    // read as running, never pending.
+    var runningMidRun = failedMidRun
+    runningMidRun.steps[1].status = .running
+    let runningRow = ConductorRunPresentation.runRow(for: runningMidRun)
+    #expect(runningRow.status == .running)
+    #expect(runningRow.statusSymbol == "circle.fill")
+}
+
 // MARK: - WorkspaceSession canvas seams (19, 20)
 
 @MainActor
@@ -237,6 +304,25 @@ func gateAttentionPostsExactlyOneBoundedNotification() async throws {
     #expect(rig.hud.shown.count == 1)
     #expect(rig.hud.shown.first?.title == "Ship a change")
     #expect(rig.hud.shown.first?.snippet.contains("Implementor") == true)
+
+    // D6: runName/stepName come from user-authored frontmatter (capped at
+    // 1 MiB per FILE, not per field) — an enormous step name must still
+    // yield a bounded HUD snippet and notification body, never the raw
+    // 5000-byte string verbatim.
+    let hugeStepName = String(repeating: "x", count: 5_000)
+    session.raiseConductorGateAttention(runName: "Ship a change", stepName: hugeStepName)
+    for _ in 0..<20_000 {
+        if rig.notifier.posted.count >= 2 { break }
+        await Task.yield()
+    }
+    #expect(rig.notifier.posted.count == 2)
+    let boundedPosted = try #require(rig.notifier.posted.last)
+    #expect(boundedPosted.body.utf8.count < hugeStepName.utf8.count)
+    #expect(boundedPosted.body.utf8.count < 300)
+    #expect(rig.hud.shown.count == 2)
+    let boundedShown = try #require(rig.hud.shown.last)
+    #expect(boundedShown.snippet.utf8.count < hugeStepName.utf8.count)
+    #expect(boundedShown.snippet.utf8.count < 300)
 }
 
 @MainActor
