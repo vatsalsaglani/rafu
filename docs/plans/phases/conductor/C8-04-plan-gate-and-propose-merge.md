@@ -3,7 +3,8 @@
 - **Status:** Ready. Branch: `conductor/c8-04-plan-gate` (from `main`
   AFTER wave 2 fully merged — verify `ConductorEnsembleTokenStore` and
   `ConductorGraphModel` both exist; either missing ⇒ STOP and report).
-  Wave 3 — runs parallel with C8-05 and C8-07.
+  Wave 3 — runs parallel with C8-07. (C8-05 moved to wave 2, so the
+  skill pack and Settings are already on `main` when you branch.)
 
 ## Goal
 
@@ -54,7 +55,9 @@ ConductorWorkflowController.swift` (states, `stepDidComplete`,
 
 **Forbidden:** `RafuAppCommands.swift`, `CommandPaletteView.swift`,
 `WorkspaceWindowView.swift` (C8-07 owns them this wave); `Package.swift`;
-Settings (C8-05); `ConductorRunsPanelView.swift` (C8-07 may touch it);
+Settings and `Sources/RafuApp/Resources/EnsembleSkills/` (C8-05,
+already merged — read-only to you); `ConductorRunsPanelView.swift`
+(C8-07 may touch it);
 adapters; `EditorCanvasView.swift`.
 
 ## Design contract
@@ -224,7 +227,8 @@ stale-parse fallback); ConductorCore.swift edits are additive
 var-optional-nil only; malformed artifacts never fail a completed step.
 DO NOT touch RafuAppCommands.swift, CommandPaletteView.swift,
 WorkspaceWindowView.swift, ConductorRunsPanelView.swift, Package.swift,
-or Settings — C8-05/C8-07 own those this wave. HEADLESS ONLY.
+or Settings — C8-07 owns the first three this wave and C8-05 already
+landed the rest. HEADLESS ONLY.
 
 DEFINITION OF DONE:
 1. The full loop is provable headlessly with FakeConductorAdapter:

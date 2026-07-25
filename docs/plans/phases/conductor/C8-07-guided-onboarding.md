@@ -3,7 +3,8 @@
 - **Status:** Ready. Branch: `conductor/c8-07-onboarding` (from `main`
   AFTER wave 2 fully merged — verify `ConductorCoordinatorLauncher` and
   `ConductorGraphModel` exist; either missing ⇒ STOP and report).
-  Wave 3 — parallel with C8-04 and C8-05.
+  Wave 3 — parallel with C8-04. (C8-05 moved to wave 2, so the skill
+  pack and the Settings → Ensemble pane are already on `main`.)
 - **This kills the cold-start problem** — C8-ux problem #1, "the single
   biggest adoption risk in the whole feature."
 
@@ -50,7 +51,8 @@ pattern for the CLI picker); `swiftui-expert-skill`.
 
 **Forbidden:** engine files, `ConductorCore.swift`,
 `ConductorRunDetailCanvas.swift`, `EditorCanvasView.swift`, everything
-C8-04/C8-05 own this wave (Ensemble request service, skills, Settings,
+C8-04 owns this wave, plus what C8-05 already landed (Ensemble request
+service, skills, Settings,
 `Package.swift`), adapters, `script/`.
 
 ## Design contract
@@ -221,7 +223,7 @@ template-conflict and workflow-launch code paths, never duplicate their
 policy; @State stays private; no I/O in model init; user-visible
 strings say Ensemble. DO NOT touch engine files, ConductorCore.swift,
 EditorCanvasView.swift, ConductorRunDetailCanvas.swift, Settings,
-Package.swift, or the Ensemble request service — C8-04/C8-05 own those
+Package.swift, or the Ensemble request service — C8-04 owns those
 this wave. HEADLESS ONLY — list the required GUI checks for the
 coordinator instead of launching the app.
 

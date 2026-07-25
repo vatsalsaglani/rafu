@@ -4,10 +4,13 @@
   AFTER C8-01 and C8-02 have merged — verify in preflight that
   `Sources/RafuCore/Ensemble/EnsembleModels.swift` exists and ADR 0018
   contains the Amendment section; if either is missing, STOP and report).
-- Wave 2 — runs parallel with C8-06. You must NOT touch
+- Wave 2 — runs parallel with C8-06 **and C8-05**. You must NOT touch
   `ConductorRunsPanelView.swift`, `RafuAppCommands.swift`,
   `CommandPaletteView.swift`, or `EditorCanvasView.swift` (C8-06 owns
-  them this wave).
+  them this wave), nor `Package.swift`, the Settings files, or
+  `Sources/RafuApp/Resources/EnsembleSkills/` (C8-05 owns those).
+  You own `docs/references/ensemble-ipc-verbs.md`; C8-05 mirrors it into
+  the skill but never edits it.
 
 ## Goal
 
@@ -38,7 +41,12 @@ and `ConductorEnsembleEventCenter.swift` (C8-02's shapes);
   verbs (`EnsembleArgumentParser.swift`, `EnsembleModels.swift`,
   `EnsembleCommandRunner.swift`, `EnsembleCLIClient.swift`)
 - `Sources/RafuCore/Launcher/IPC/LauncherIPCProtocol.swift` — add kinds
-  `.ensembleRun, .ensembleAbort, .ensembleNote, .ensembleGrant` (additive)
+  `.ensembleRun, .ensembleAbort, .ensembleNote, .ensembleGrant`
+  (additive), **and bump `ensembleVerbVersion` 1 → 2.** C8-05 ships the
+  coordinator skill in this same wave documenting these verbs; the
+  version is how a skill built against the mutating surface detects an
+  app that predates it, so the bump is part of landing them, not a
+  follow-up.
 - NEW `Sources/RafuApp/Conductor/Ensemble/ConductorEnsembleGrant.swift`
 - NEW `Sources/RafuApp/Conductor/Ensemble/ConductorCoordinatorLauncher.swift`
 - NEW `Sources/RafuApp/Conductor/Ensemble/ConductorEnsembleNoteStore.swift`
