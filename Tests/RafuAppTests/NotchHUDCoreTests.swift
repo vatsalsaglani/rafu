@@ -72,6 +72,51 @@ func notchRectNilCases() {
     #expect(NotchHUDGeometry.notchRect(for: overlapping) == nil)
 }
 
+// MARK: - screen selection
+
+/// A second, notch-less display to the right of the built-in one — the
+/// shape an extended-desktop setup reports.
+private let externalDisplayMetrics = NotchScreenMetrics(
+    frame: CGRect(x: 1710, y: 0, width: 2560, height: 1440),
+    visibleFrame: CGRect(x: 1710, y: 0, width: 2560, height: 1416),
+    safeAreaTopInset: 0,
+    auxiliaryTopLeft: nil,
+    auxiliaryTopRight: nil
+)
+
+/// Regression: with a Rafu window key on an external monitor, the screen
+/// preference order starts with that monitor — but the notch surfaces must
+/// stay on the built-in display's physical housing rather than following the
+/// window and (for the companion strip, whose geometry needs a notch)
+/// disappearing entirely.
+@Test("Screen selection prefers a notched display over the active one")
+func screenSelectionPrefersNotchedDisplay() {
+    #expect(
+        NotchScreenSelection.preferred(from: [externalDisplayMetrics, realNotchMetrics])
+            == realNotchMetrics)
+    #expect(
+        NotchScreenSelection.preferred(from: [realNotchMetrics, externalDisplayMetrics])
+            == realNotchMetrics)
+}
+
+@Test("Screen selection falls back to the first candidate with no notch attached")
+func screenSelectionFallsBackToFirstCandidate() {
+    #expect(NotchScreenSelection.preferred(from: []) == nil)
+    #expect(
+        NotchScreenSelection.preferred(from: [externalDisplayMetrics]) == externalDisplayMetrics)
+
+    let secondExternal = NotchScreenMetrics(
+        frame: CGRect(x: -1920, y: 0, width: 1920, height: 1080),
+        visibleFrame: CGRect(x: -1920, y: 0, width: 1920, height: 1056),
+        safeAreaTopInset: 0,
+        auxiliaryTopLeft: nil,
+        auxiliaryTopRight: nil
+    )
+    #expect(
+        NotchScreenSelection.preferred(from: [secondExternal, externalDisplayMetrics])
+            == secondExternal)
+}
+
 // MARK: - hudFrame
 
 @Test("hudFrame is flush with the SCREEN top so the band merges with the housing")
