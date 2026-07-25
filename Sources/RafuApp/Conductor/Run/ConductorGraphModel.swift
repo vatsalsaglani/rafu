@@ -70,6 +70,23 @@ nonisolated struct ConductorGraph: Equatable, Sendable {
 /// live state. It never edits a workflow, manifest, or topology: graph
 /// authoring remains file-based (ADR 0018 / C8 D3).
 nonisolated enum ConductorGraphModel {
+    /// Structured off-main entry point for SwiftUI's `.task(id:)`. The
+    /// synchronous `build` remains the pure test seam; this wrapper opts the
+    /// bounded projection out of the GUI target's default MainActor without
+    /// creating an unstructured detached task.
+    @concurrent
+    static func project(
+        manifests: [ConductorRunManifest],
+        liveStates: [String: ConductorWorkflowState],
+        coordinators: [CoordinatorNodeInput]
+    ) async -> ConductorGraph {
+        guard !Task.isCancelled else { return .empty }
+        return build(
+            manifests: manifests,
+            liveStates: liveStates,
+            coordinators: coordinators)
+    }
+
     static func build(
         manifests: [ConductorRunManifest],
         liveStates: [String: ConductorWorkflowState],

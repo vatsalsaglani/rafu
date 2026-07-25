@@ -27,11 +27,12 @@ left to right, artifact inputs add producer-to-consumer edges, and an open
 step or merge gate appends a gate node. An unresolved artifact input degrades
 to a textual waiting state without inventing an edge.
 
-`ConductorGraphRefreshInput` snapshots observation-driven values before a
-detached pure projection. `ConductorGraphLayout` precomputes node centers and
-canvas size outside `View.body`; the edge `Canvas` only reads those points.
-This keeps a live state update from moving layout math into SwiftUI's render
-path.
+`ConductorGraphRefreshInput` snapshots observation-driven values before
+SwiftUI's structured `.task(id:)` calls an off-main `@concurrent` projection.
+The caller checks cancellation before publishing the result.
+`ConductorGraphLayout` precomputes node centers and canvas size outside
+`View.body`; the edge `Canvas` only reads those points. This keeps a live state
+update from moving layout math into SwiftUI's render path.
 
 ## State precedence and node verbs
 

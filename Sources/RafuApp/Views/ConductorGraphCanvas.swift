@@ -33,13 +33,13 @@ struct ConductorGraphCanvas: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(theme.palette.editorBackground)
         .task(id: refreshInput) {
-            graph = await Task.detached {
-                ConductorGraphModel.build(
-                    manifests: refreshInput.manifests,
-                    liveStates: Dictionary(
-                        uniqueKeysWithValues: refreshInput.liveStates.map { ($0.runID, $0.state) }),
-                    coordinators: refreshInput.coordinators)
-            }.value
+            let projected = await ConductorGraphModel.project(
+                manifests: refreshInput.manifests,
+                liveStates: Dictionary(
+                    uniqueKeysWithValues: refreshInput.liveStates.map { ($0.runID, $0.state) }),
+                coordinators: refreshInput.coordinators)
+            guard !Task.isCancelled else { return }
+            graph = projected
             if let selectedNodeID, !graph.nodes.contains(where: { $0.id == selectedNodeID }) {
                 self.selectedNodeID = nil
             }
