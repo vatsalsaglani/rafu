@@ -215,7 +215,7 @@ git worktree add ../rafu-conductor-polish   -b conductor/c7-polish
 | C8-05 | [C8-05-skill-pack-and-settings.md](C8-05-skill-pack-and-settings.md) | `conductor/c8-05-skill-pack` | Planned |
 | C8-06 | [C8-06-graph-canvas.md](C8-06-graph-canvas.md) | `conductor/c8-06-graph-canvas` | Planned |
 | C8-07 | [C8-07-guided-onboarding.md](C8-07-guided-onboarding.md) | `conductor/c8-07-onboarding` | Planned |
-| AT-01 | [AT-01-agent-terminal-sessions.md](AT-01-agent-terminal-sessions.md) | `conductor/at-01-agent-terminals` | Planned (C8 wave 1; owns the agent-icon catalog + interactive-launch probe table) |
+| AT-01 | [AT-01-agent-terminal-sessions.md](AT-01-agent-terminal-sessions.md) | `conductor/at-01-agent-terminals` | Merged 2026-07-26 (`a49adbe`; ADR 0021 + icon catalog + probe table; 1559 tests green parallel and serial. GUI section N pending) |
 | AT-02 | [AT-02-ensemble-bridge.md](AT-02-ensemble-bridge.md) | `conductor/at-02-ensemble-bridge` | Planned (after C8 wave 3 + AT-01) |
 
 Merged-main gates after C6+C7: 0 warnings, 1515 tests green parallel and
