@@ -656,9 +656,7 @@ struct CommandPaletteView: View {
             },
         ]
 
-        if session.rootURL != nil, session.conductorRunController.canStartNewRun,
-            !session.conductorWorkflowController.isInFlight
-        {
+        if session.rootURL != nil, session.canStartConductorWorkflowRun {
             commands.append(
                 .init(
                     id: "conductor.new-run",
@@ -673,7 +671,12 @@ struct CommandPaletteView: View {
             )
         }
 
-        if case .awaitingGate = session.conductorWorkflowController.state {
+        // Verbs act on the engine owning the SELECTED run (C6 concurrency),
+        // so a gate in run B is not approved by a palette entry that read
+        // run A's state.
+        let selectedWorkflow = session.selectedWorkflowController
+
+        if case .awaitingGate = selectedWorkflow?.state, let selectedWorkflow {
             commands.append(
                 .init(
                     id: "conductor.approve-gate",
@@ -682,7 +685,7 @@ struct CommandPaletteView: View {
                     keywords: ["ensemble", "workflow", "run"]
                 ) {
                     dismiss()
-                    Task { await session.conductorWorkflowController.approveGate() }
+                    Task { await selectedWorkflow.approveGate() }
                 }
             )
             commands.append(
@@ -693,12 +696,12 @@ struct CommandPaletteView: View {
                     keywords: ["ensemble", "workflow", "artifact"]
                 ) {
                     dismiss()
-                    session.conductorWorkflowController.reviseArtifact(in: session)
+                    selectedWorkflow.reviseArtifact(in: session)
                 }
             )
         }
 
-        if session.conductorWorkflowController.isInFlight {
+        if let selectedWorkflow, selectedWorkflow.isInFlight {
             commands.append(
                 .init(
                     id: "conductor.abort-run",
@@ -707,12 +710,12 @@ struct CommandPaletteView: View {
                     keywords: ["ensemble", "workflow", "stop"]
                 ) {
                     dismiss()
-                    session.conductorWorkflowController.abort()
+                    selectedWorkflow.abort()
                 }
             )
         }
 
-        if case .failed = session.conductorWorkflowController.state {
+        if case .failed = selectedWorkflow?.state, let selectedWorkflow {
             commands.append(
                 .init(
                     id: "conductor.retry-failed-step",
@@ -721,7 +724,7 @@ struct CommandPaletteView: View {
                     keywords: ["ensemble", "workflow", "retry"]
                 ) {
                     dismiss()
-                    Task { await session.conductorWorkflowController.retryFailedStep() }
+                    Task { await selectedWorkflow.retryFailedStep() }
                 }
             )
         }
