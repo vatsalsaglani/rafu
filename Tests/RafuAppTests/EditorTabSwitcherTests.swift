@@ -78,6 +78,14 @@ func editorTabSwitcherIncludesTabsAndParkedTerminals() throws {
     #expect(session.canCycleEditorTabs)
 }
 
+@Test("Switcher maps only Agent Terminal providers to vendor icons")
+func editorTabSwitcherMapsAgentTerminalIcons() {
+    #expect(EditorTabSwitcherAgentIdentity.icon(for: nil) == nil)
+    let icon = EditorTabSwitcherAgentIdentity.icon(for: .geminiCLI)
+    #expect(icon?.assetName == "agent-gemini")
+    #expect(icon?.assetIsTemplate == true)
+}
+
 @MainActor
 @Test("Ctrl-Tab previews without changing selection, then reveals a parked terminal on commit")
 func editorTabSwitcherCommitsParkedTerminal() throws {

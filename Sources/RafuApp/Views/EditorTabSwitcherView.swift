@@ -230,6 +230,7 @@ struct EditorTabSwitcherOverlay: View {
             return Presentation(
                 title: controller.displayName,
                 detail: terminalDetail(controller.status, isPresented: isPresented),
+                fileIcon: EditorTabSwitcherAgentIdentity.icon(for: controller.agentProvider),
                 symbolName: terminalSymbol(controller.status)
             )
         }
@@ -271,6 +272,12 @@ struct EditorTabSwitcherOverlay: View {
         var fileIcon: FileIconProvider.Icon?
         let symbolName: String
         var isDirty = false
+    }
+}
+
+nonisolated enum EditorTabSwitcherAgentIdentity {
+    static func icon(for provider: ConductorCLIID?) -> FileIconProvider.Icon? {
+        provider.map(ConductorCLIIcons.icon(for:))
     }
 }
 

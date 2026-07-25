@@ -184,6 +184,10 @@ test -f "$APP_RESOURCES/AppIcon/rafu-icon-seam.svg"
 test -f "$APP_RESOURCES/FileIcons/claude.svg"
 test -f "$APP_RESOURCES/FileIcons/codex.svg"
 test -f "$APP_RESOURCES/FileIcons/gemini.svg"
+test -f "$APP_RESOURCES/FileIcons/agent-claude-code.svg" && test -f "$APP_RESOURCES/FileIcons/agent-codex.svg"
+test -f "$APP_RESOURCES/FileIcons/agent-opencode.svg" && test -f "$APP_RESOURCES/FileIcons/agent-cline.svg"
+test -f "$APP_RESOURCES/FileIcons/agent-kimi.svg" && test -f "$APP_RESOURCES/FileIcons/agent-gemini.svg"
+test -f "$APP_RESOURCES/FileIcons/agent-cursor.svg"
 "$CLI_BINARY" --version >/dev/null
 
 open_app() {

@@ -84,3 +84,17 @@ func agentProcessKindIsDistinct() {
     #expect(sample.kind == .agent)
     #expect(sample.name == "advisor • Codex")
 }
+
+@Test("Agent Terminal attribution is distinct while Ensemble and shell labels stay unchanged")
+func agentTerminalProcessKindIsDistinct() {
+    #expect(
+        ProcessResourcePresentation.kindLabel(.agentTerminal)
+            == "Agent Terminal")
+    #expect(
+        ProcessResourcePresentation.kindLabel(.agent)
+            == "Ensemble Agent")
+    #expect(
+        ProcessResourcePresentation.kindLabel(.terminalShell)
+            == "Terminal")
+    #expect(ProcessResourcePresentation.symbol(.agentTerminal) == "terminal.badge")
+}

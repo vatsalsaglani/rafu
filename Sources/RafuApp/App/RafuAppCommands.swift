@@ -251,6 +251,12 @@ struct RafuAppCommands: Commands {
             }
             .keyboardShortcut("`", modifiers: [.control, .shift])
 
+            Button("New Agent Terminal…") {
+                workspaceSession?.presentAgentTerminalSheet()
+            }
+            .keyboardShortcut("a", modifiers: [.command, .shift])
+            .disabled(workspaceSession?.descriptor == nil)
+
             // Shown only when the catalog has ≥2 discovered shells
             // (terminal-manager.md T-C) — a single-shell machine has
             // nothing to choose between.

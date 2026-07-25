@@ -1,10 +1,10 @@
 # AT-01 — Agent terminal sessions: one action from discovery to a live agent
 
-- **Status:** Ready. Branch: `conductor/at-01-agent-terminals` (from
-  `main`, **starting now — C8 wave 1**, parallel with C8-01 and C8-02).
-  No C8 prerequisites: this plan OWNS the agent-icon catalog and the
-  per-CLI interactive-launch probe table; C8-06 and C8-03 consume them
-  after you merge (ownership transfer recorded in
+- **Status:** Complete (2026-07-26) on
+  `conductor/at-01-agent-terminals`. Headless gates are green; coordinator
+  GUI checks are recorded in manual-test section N. This plan owns the
+  agent-icon catalog and per-CLI interactive-launch probe table; C8-06 and
+  C8-03 consume them after merge (ownership transfer recorded in
   `AT-execution-plan.md`).
 - Serial: AT-02 depends on this plan's sheet.
 - Parallel-merge note: C8-02 also edits `ConductorCore.swift` (manifest

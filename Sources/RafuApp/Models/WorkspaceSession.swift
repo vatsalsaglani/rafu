@@ -936,6 +936,19 @@ final class WorkspaceSession {
         hideTerminalTab(tab.id)
     }
 
+    var agentTerminalSheetPresented: Bool = false
+
+    func presentAgentTerminalSheet() {
+        guard descriptor != nil else { return }
+        agentTerminalSheetPresented = true
+    }
+
+    func openAgentTerminal(spec: TerminalProcessSpec) {
+        installTerminalHandlersIfNeeded()
+        let controller = terminal.newSession(spec: spec)
+        revealTerminalSession(controller.id)
+    }
+
     /// Reveals a terminal session as a tab: selects its existing tab if it
     /// already has one anywhere in the layout (never duplicates), otherwise
     /// inserts a fresh tab for it into the focused group and selects that.

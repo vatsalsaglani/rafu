@@ -50,13 +50,17 @@ nonisolated struct ContentMetricRow: Identifiable, Sendable, Equatable {
 nonisolated enum MemoryComposition {
     /// Fixed section order so the list never reshuffles between the 2s
     /// refreshes — Rafu's own processes first, then the noisiest categories.
+    /// Every `ProcessKind` MUST appear here: `groups(from:)` iterates this
+    /// list, so a missing kind silently drops those processes from the
+    /// composition view rather than failing loudly.
     static let kindOrder: [ProcessResourceRegistry.ProcessKind] = [
-        .terminalShell, .agent, .languageServer, .git, .other,
+        .terminalShell, .agentTerminal, .agent, .languageServer, .git, .other,
     ]
 
     static func title(for kind: ProcessResourceRegistry.ProcessKind) -> String {
         switch kind {
         case .terminalShell: return "Terminals"
+        case .agentTerminal: return "Agent Terminals"
         case .agent: return "Ensemble Agents"
         case .git: return "Git"
         case .languageServer: return "Language Servers"
@@ -67,6 +71,7 @@ nonisolated enum MemoryComposition {
     static func symbol(for kind: ProcessResourceRegistry.ProcessKind) -> String {
         switch kind {
         case .terminalShell: return "terminal"
+        case .agentTerminal: return "terminal.badge"
         case .agent: return "person.crop.rectangle.stack"
         case .git: return "arrow.triangle.branch"
         case .languageServer: return "cpu"

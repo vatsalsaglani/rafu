@@ -212,6 +212,19 @@ private func sample(
         id: UUID(), name: name, kind: kind, pid: 1, residentBytes: bytes)
 }
 
+/// `groups(from:)` iterates `kindOrder`, so a kind missing from that list is
+/// dropped from the Resources view with no error — the failure mode is a
+/// process that silently does not exist. Adding a `ProcessKind` case makes
+/// the switches in `MemoryComposition` fail to compile, but nothing forces
+/// the author to extend `kindOrder`; this test is that force.
+@Test("Every process kind has a composition section so none silently vanishes")
+func compositionKindOrderCoversEveryKind() {
+    #expect(
+        Set(MemoryComposition.kindOrder)
+            == Set(ProcessResourceRegistry.ProcessKind.allCases))
+    #expect(MemoryComposition.kindOrder.count == Set(MemoryComposition.kindOrder).count)
+}
+
 @Test("Composition groups by kind in a fixed order, omitting empty categories")
 func compositionGroupsInFixedOrder() {
     let groups = MemoryComposition.groups(from: [

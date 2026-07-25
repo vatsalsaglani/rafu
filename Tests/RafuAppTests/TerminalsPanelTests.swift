@@ -78,6 +78,37 @@ func rowsMatchSessionsInCreationOrder() {
 }
 
 @MainActor
+@Test("Rows carry provider identity for Agent Terminals while plain shells stay unchanged")
+func rowsCarryAgentTerminalIdentityOnly() throws {
+    let workspace = WorkspaceSession()
+    workspace.newTerminalTab()
+    let root = URL(fileURLWithPath: "/tmp", isDirectory: true)
+    let option = AgentTerminalOption(
+        id: .codex,
+        displayName: ConductorCLIID.codex.displayName,
+        icon: ConductorCLIIcons.icon(for: .codex),
+        availability: .ready(URL(fileURLWithPath: "/usr/local/bin/codex")),
+        curatedModels: [],
+        defaultModel: nil,
+        launchVerificationNote: nil)
+    let spec = try AgentTerminalLaunchService(workspaceRoot: root).specification(
+        option: option,
+        model: nil,
+        startingDirectory: root)
+    workspace.openAgentTerminal(spec: spec)
+
+    let rows = TerminalsPanelModel.rows(
+        sessions: workspace.terminal.sessions,
+        presentedIDs: workspace.presentedTerminalSessionIDs,
+        workspaceRoot: root.path)
+
+    #expect(rows.count == 2)
+    #expect(rows[0].agentProvider == nil)
+    #expect(rows[1].agentProvider == .codex)
+    #expect(rows[1].displayName == "Codex")
+}
+
+@MainActor
 @Test("isParked is true exactly for sessions with no presented tab")
 func isParkedMatchesPresentedIDs() {
     let session = WorkspaceSession()
