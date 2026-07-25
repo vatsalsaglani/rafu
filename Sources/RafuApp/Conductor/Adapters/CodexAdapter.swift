@@ -101,6 +101,13 @@ nonisolated final class CodexAdapter: ConductorCLIAdapter, Sendable {
         }
     }
 
+    /// Test seam for the capability-matrix drift guard: Codex ships bundled
+    /// inside ChatGPT.app rather than on `PATH`, so that candidate must never
+    /// be dropped.
+    static func standardExecutableURLsForTesting(homeDirectory: URL) -> [URL] {
+        standardExecutableURLs(homeDirectory: homeDirectory)
+    }
+
     private static func standardExecutableURLs(homeDirectory: URL) -> [URL] {
         [
             URL(fileURLWithPath: "/Applications/ChatGPT.app/Contents/Resources/codex"),
