@@ -148,6 +148,15 @@ the JSONRPC out-of-order-responses test assumed frame ARRIVAL order matched
 request order across two racing `async let` child tasks; match by request
 payload, never by position.
 
+Socketpair fakes that block in `read` must not occupy the shared global
+dispatch queue while a repository-wide parallel run is creating hundreds of
+other tasks. That pattern can delay the matching client beyond its production
+timeout or starve every fake behind waiting readers. Give the tiny blocking
+peer a dedicated `Thread`, serialize that test suite, and still keep socket
+polls bounded for failure diagnostics. A focused filter may pass reliably
+while `swift test` exposes this scheduler-pressure failure, so both are
+required evidence.
+
 ## Reproduction or evidence
 
 `LauncherRequestRouterTests` uses `socketpair` transports to prove same-user,

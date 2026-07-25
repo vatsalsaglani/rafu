@@ -1,12 +1,11 @@
 import Darwin
-import Dispatch
 import Foundation
 import Synchronization
 import Testing
 
 @testable import RafuCore
 
-@Suite("Ensemble streaming client")
+@Suite("Ensemble streaming client", .serialized)
 struct EnsembleClientStreamTests {
     @Test("One-shot status preserves handshake then request connections")
     func oneShotStatus() async throws {
@@ -324,7 +323,7 @@ private func serveEnsembleOneShot(
 ) -> Task<LauncherIPCEnvelope, Error> {
     let (stream, continuation) = AsyncThrowingStream.makeStream(
         of: LauncherIPCEnvelope.self)
-    DispatchQueue.global().async {
+    Thread.detachNewThread {
         defer { Darwin.close(fileDescriptor) }
         do {
             let envelope = try readEnsembleEnvelope(from: fileDescriptor)
@@ -352,7 +351,7 @@ private func serveEnsembleSubscription(
 ) -> Task<LauncherIPCEnvelope, Error> {
     let (stream, continuation) = AsyncThrowingStream.makeStream(
         of: LauncherIPCEnvelope.self)
-    DispatchQueue.global().async {
+    Thread.detachNewThread {
         defer { Darwin.close(fileDescriptor) }
         do {
             let envelope = try readEnsembleEnvelope(from: fileDescriptor)

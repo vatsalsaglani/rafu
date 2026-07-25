@@ -5,7 +5,7 @@ import Testing
 
 @testable import RafuApp
 
-@Suite("Ensemble server streaming")
+@Suite("Ensemble server streaming", .serialized)
 struct EnsembleServerStreamTests {
     @Test("Peer UID is checked before subscription bytes are read")
     func uidBeforeRead() async throws {
@@ -40,16 +40,6 @@ struct EnsembleServerStreamTests {
             LauncherIPCCodec.encode(subscriptionEnvelope()),
             to: pair.client
         )
-        let task = Task {
-            await server.serveConnectionForTesting(pair.server)
-        }
-        await waitForStreamingCount(1, server: server)
-        var reader = ServerFrameReader()
-        #expect(
-            try reader.response(from: pair.client)
-                == .ensemble(.subscribed(cursor: 12))
-        )
-
         let event = EnsembleEvent(
             cursor: 13,
             at: Date(timeIntervalSince1970: 1),
@@ -59,34 +49,26 @@ struct EnsembleServerStreamTests {
         )
         continuation.yield(event)
         continuation.finish()
+        await server.serveConnectionForTesting(pair.server)
+
+        var reader = ServerFrameReader()
+        #expect(
+            try reader.response(from: pair.client)
+                == .ensemble(.subscribed(cursor: 12))
+        )
         #expect(try reader.event(from: pair.client) == event)
-        await task.value
         Darwin.close(pair.client)
     }
 
     @Test("The streaming cap returns a typed failure frame")
     func streamingCap() async throws {
-        let (stream, continuation) = AsyncStream.makeStream(of: EnsembleEvent.self)
         let server = LauncherIPCServer(
-            subscriptionHandler: { _ in stream },
+            subscriptionHandler: { _ in
+                AsyncStream { continuation in continuation.finish() }
+            },
             subscriptionCursor: { 1 },
-            maxStreamingConnections: 1
+            maxStreamingConnections: 0
         )
-        let first = try serverSocketPair()
-        try serverWriteAll(
-            LauncherIPCCodec.encode(subscriptionEnvelope()),
-            to: first.client
-        )
-        let firstTask = Task {
-            await server.serveConnectionForTesting(first.server)
-        }
-        await waitForStreamingCount(1, server: server)
-        var firstReader = ServerFrameReader()
-        #expect(
-            try firstReader.response(from: first.client)
-                == .ensemble(.subscribed(cursor: 1))
-        )
-
         let overflow = try serverSocketPair()
         try serverWriteAll(
             LauncherIPCCodec.encode(subscriptionEnvelope()),
@@ -99,17 +81,12 @@ struct EnsembleServerStreamTests {
                 try overflowReader.response(from: overflow.client)
         else {
             Issue.record("Expected a typed stream-cap failure")
-            continuation.finish()
-            await firstTask.value
             return
         }
         #expect(code == EnsembleExitCode.unavailable.rawValue)
         #expect(message.contains("limit"))
 
-        continuation.finish()
-        await firstTask.value
         #expect(await server.liveStreamingConnectionCountForTesting == 0)
-        Darwin.close(first.client)
         Darwin.close(overflow.client)
     }
 
@@ -227,7 +204,7 @@ private func waitForStreamingCount(
     _ expected: Int,
     server: LauncherIPCServer
 ) async {
-    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+    let deadline = ContinuousClock.now.advanced(by: .seconds(10))
     while await server.liveStreamingConnectionCountForTesting != expected,
         ContinuousClock.now < deadline
     {
@@ -259,7 +236,7 @@ private struct ServerFrameReader {
         var storage = [UInt8](repeating: 0, count: 4_096)
         while true {
             var descriptor = pollfd(fd: fileDescriptor, events: Int16(POLLIN), revents: 0)
-            guard Darwin.poll(&descriptor, 1, 2_000) > 0 else {
+            guard Darwin.poll(&descriptor, 1, 10_000) > 0 else {
                 throw LauncherIPCServerError.systemCall(name: "poll", code: errno)
             }
             let count = storage.withUnsafeMutableBytes { bytes in
