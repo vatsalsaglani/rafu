@@ -36,12 +36,12 @@
 | Working directory | `--add-dir` / cwd `RW` | `-C/--cd <DIR>` `RW` | `--dir` `RW` | `-c/--cwd` `RW` |
 | Model | `--model <alias\|full>` `RW` | `--model` `RW` | `-m provider/model` `RW` | `-m <id>` (+ `-P <provider>`) `RW` |
 | Machine-readable output | `--output-format stream-json --verbose` `RW` | `--json` (JSONL) `RW` | `--format json` `RW` | `--json` `RW` |
-| **Reasoning effort** | **`--effort low\|medium\|high\|xhigh\|max`** | **`-c model_reasoning_effort=<level>`** (config override; no dedicated flag) | — (none in `run`) | **`--thinking none\|low\|medium\|high\|xhigh`** |
+| **Reasoning effort** | **`--effort low\|medium\|high\|xhigh\|max`** | **`-c model_reasoning_effort=<level>`** (config override; no dedicated flag) | — no per-run flag; see note below | **`--thinking none\|low\|medium\|high\|xhigh`** |
 | **Continue last session** | **`-c/--continue`** | **`exec resume --last`** | **`-c/--continue`** | — |
 | **Resume by session id** | **`-r/--resume <id>`** | **`exec resume <uuid\|thread-name>`** | **`-s/--session <id>`** | **`--id <session-id>`** |
 | **Assign a session id** | **`--session-id <uuid>`** | — (Codex mints its own) | — | — |
 | **Fork on resume** | **`--fork-session`** | — | **`--fork`** | — |
-| List sessions | *unverified* | `exec resume --last` implies a recorded store | *unverified* | `history --json` |
+| List sessions | *unverified* | `exec resume --last` implies a recorded store | `export [sessionID]` (JSON), `stats` | `history --json` |
 | Model listing | — (curated) | — (curated) | `opencode models` `RW` | — (reads bundled `@cline/llms` catalog) `RW` |
 | Auth status, headless | `auth status --json` `RW` | `login status` `RW` | `auth list` `RW` | — (all status commands need a TTY) |
 
@@ -73,7 +73,14 @@ installed CLIs accept it and Rafu passes none of them:
 - Codex: no flag, but `-c model_reasoning_effort=<level>` overrides the same
   key Codex reads from `~/.codex/config.toml` (verified: that key is already
   set on this Mac).
-- OpenCode: no equivalent in `run`.
+- OpenCode: **no per-invocation mechanism at all.** Verified against its
+  published schema (`https://opencode.ai/config.json`, the `$schema` the
+  local `~/.config/opencode/opencode.jsonc` points at): `models.<id>.reasoning`
+  is a **boolean capability flag** ("this model can reason"), not a level, and
+  `models.<id>.options` is an untyped passthrough object. A user can therefore
+  put provider-specific options in *their own config file*, but there is no
+  argv Rafu could pass per run — and Rafu must not edit a user's config to
+  simulate one.
 
 `ConductorAgentDefinition` has no field for it, so there is nowhere to put it
 today. Closing this needs:
@@ -155,6 +162,20 @@ JSON events with stdin on `/dev/null` and no credentials from Rafu.
 Auth status is informational only; it is **not consulted anywhere in the
 launch path**, so `unknown` never blocks a run.
 
+## OpenCode: capability flag, not a level
+
+Worth spelling out because the naming invites a wrong assumption. OpenCode's
+per-model config keys are `attachment, cost, experimental, family, headers,
+id, interleaved, limit, modalities, name, options, provider, reasoning,
+release_date, status, temperature, tool_call, variants`.
+
+`reasoning: boolean` answers "does this model reason?", NOT "how hard". The
+only extension point is `options: {}` — schema-typed as a bare object, i.e. a
+free-form provider passthrough that lives in the user's `opencode.jsonc`.
+Nothing about it is reachable from `opencode run`'s argv, which is the only
+surface Rafu drives. So OpenCode's cell is an honest `—`, and it would stay
+`—` even after effort is wired for the other three.
+
 ## Re-verification
 
 ```bash
@@ -162,6 +183,8 @@ claude --help | grep -E '\--effort|--resume|--session-id|--permission-mode'
 "/Applications/ChatGPT.app/Contents/Resources/codex" --version
 opencode run --help          # -c/--continue, -s/--session, --fork, -m
 cline --help | grep -E '\--thinking|--id|--auto-approve|-p, --plan'
+curl -s https://opencode.ai/config.json | python3 -c \
+  'import json,sys; d=json.load(sys.stdin); print(sorted(d["$defs"]["ProviderConfig"]["properties"]["models"]["additionalProperties"]["properties"]))'
 cline history --json | head  # session ids, if resume is ever wired
 ```
 
