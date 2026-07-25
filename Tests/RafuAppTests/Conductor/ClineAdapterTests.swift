@@ -38,8 +38,10 @@ func clineRegistryAndMetadata() async {
     #expect(adapter.id == .cline)
     #expect(adapter.defaultEnabled)
     #expect(ConductorAdapterRegistry.adapter(for: .cline) is ClineAdapter)
-    #expect(!adapter.supportsModelDiscovery)
-    #expect(await adapter.discoverModels() == nil)
+    // Discovery now reads Cline's own bundled catalog. With no resolvable
+    // executable it degrades to the curated list rather than returning nil.
+    #expect(adapter.supportsModelDiscovery)
+    #expect(await adapter.discoverModels() == adapter.curatedModels())
     // Unknown, but no longer a bare shrug: Cline 3.0.46 has no
     // non-interactive sign-in check (`config`/`mcp` demand a TTY, `auth`
     // MUTATES rather than reports, and reading its 0600 provider store is
@@ -53,9 +55,8 @@ func clineRegistryAndMetadata() async {
     #expect(reason.lowercased().contains("does not block runs"))
     // Never leaks where credentials live.
     #expect(!reason.contains("providers.json"))
-    #expect(adapter.curatedModels().count == 4)
+    #expect(adapter.curatedModels().count == 6)
     #expect(adapter.curatedModels().allSatisfy { $0.source == .curated })
-    #expect(adapter.supportsModelDiscovery == ((await adapter.discoverModels()) != nil))
 }
 
 @Test("Cline 3.0.46 recorded fixtures classify both autonomy levels")
@@ -198,4 +199,65 @@ func clineUnsupportedCapabilityFailsClosed() {
         handoffDirectory: clineHandoffDirectory)
     #expect(invocation.executableURL.path == "/usr/bin/false")
     #expect(invocation.arguments.isEmpty)
+}
+
+// MARK: - Bundled-catalog model discovery (2026-07-25)
+
+/// Cline has no `models` subcommand — `cline config` accepts only
+/// `workflows|rules|skills|agents|plugins|hooks|mcp|tools` — but it ships its
+/// full catalog inside its own package, so discovery reads that.
+@Test("Cline parses its bundled catalog into discovered model choices")
+func clineParsesBundledCatalog() throws {
+    let json = """
+        [{"id":"anthropic/claude-sonnet-5","name":"Claude Sonnet 5"},
+         {"id":"moonshotai/kimi-k3","name":"Kimi K3"}]
+        """
+    let parsed = try #require(ClineAdapter.parseCatalogModels(json))
+    #expect(parsed.count == 2)
+    #expect(parsed[0].id == "anthropic/claude-sonnet-5")
+    #expect(parsed[0].displayName == "Claude Sonnet 5")
+    // Marked discovered, not curated — the picker can tell the user these
+    // came from their own installed CLI.
+    #expect(parsed.allSatisfy { $0.source == .discovered })
+}
+
+@Test("Catalog parsing drops unusable entries and duplicates instead of rendering blanks")
+func clineCatalogParsingIsDefensive() throws {
+    let messy = """
+        [{"id":"a/b","name":"A B"},
+         {"id":"a/b","name":"duplicate"},
+         {"id":"","name":"empty id"},
+         {"name":"no id at all"},
+         {"id":"c/d"}]
+        """
+    let parsed = try #require(ClineAdapter.parseCatalogModels(messy))
+    #expect(parsed.map(\.id) == ["a/b", "c/d"])
+    // A missing name falls back to the id rather than an empty row.
+    #expect(parsed[1].displayName == "c/d")
+}
+
+@Test("Malformed catalog output parses to nil so discovery falls back to curated")
+func clineCatalogParsingRejectsGarbage() {
+    #expect(ClineAdapter.parseCatalogModels("") == nil)
+    #expect(ClineAdapter.parseCatalogModels("not json") == nil)
+    #expect(ClineAdapter.parseCatalogModels("{\"providers\":{}}") == nil)
+}
+
+@Test("The catalog script takes its path as an argument, never interpolated")
+func clineCatalogScriptIsInjectionSafe() {
+    // A path containing quotes must not be able to alter the script, so the
+    // script reads argv rather than embedding the path.
+    #expect(ClineAdapter.catalogScript.contains("process.argv"))
+    #expect(!ClineAdapter.catalogScript.contains("\\("))
+}
+
+@Test("Curated Cline models are ids the installed catalog actually offers")
+func clineCuratedModelsAreRealIDs() {
+    let curated = ClineAdapter().curatedModels()
+    // Regression: the list previously shipped `anthropic/claude-sonnet-4-6`,
+    // which Cline does not offer — Rafu advertised a model that would fail.
+    #expect(!curated.contains { $0.id == "anthropic/claude-sonnet-4-6" })
+    #expect(curated.contains { $0.id == "anthropic/claude-sonnet-5" })
+    #expect(curated.allSatisfy { $0.id.contains("/") })
+    #expect(curated.allSatisfy { $0.source == .curated })
 }

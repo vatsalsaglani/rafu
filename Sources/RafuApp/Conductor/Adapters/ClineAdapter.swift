@@ -87,18 +87,32 @@ nonisolated struct ClineAdapter: ConductorCLIAdapter {
         // So this is honestly unknown — and says why.
         .unknown(
             reason:
-                "Cline's CLI has no non-interactive sign-in check, so Rafu cannot read its status. This does not block runs — sign in with `cline auth`.")
+                "Cline's CLI has no non-interactive sign-in check, so Rafu cannot read its status. This does not block runs — sign in with `cline auth`."
+        )
     }
 
+    /// Fallback only — `discoverModels()` reads Cline's own catalog when it
+    /// can. Every id here was verified present in that catalog (Cline 3.0.46,
+    /// 2026-07-25); the previous list shipped `anthropic/claude-sonnet-4-6`,
+    /// which Cline does not offer, so Rafu was advertising a model that would
+    /// have failed at launch.
     func curatedModels() -> [ConductorModelChoice] {
         [
             ConductorModelChoice(
-                id: "anthropic/claude-sonnet-4-6",
-                displayName: "Claude Sonnet 4.6 (Cline route)",
+                id: "anthropic/claude-sonnet-5",
+                displayName: "Claude Sonnet 5 (Cline route)",
                 source: .curated),
             ConductorModelChoice(
-                id: "google/gemini-2.5-pro",
-                displayName: "Gemini 2.5 Pro (Cline route)",
+                id: "anthropic/claude-opus-4.8",
+                displayName: "Claude Opus 4.8 (Cline route)",
+                source: .curated),
+            ConductorModelChoice(
+                id: "moonshotai/kimi-k3",
+                displayName: "Kimi K3 (Cline route)",
+                source: .curated),
+            ConductorModelChoice(
+                id: "google/gemini-3.5-flash",
+                displayName: "Gemini 3.5 Flash (Cline route)",
                 source: .curated),
             ConductorModelChoice(
                 id: "deepseek/deepseek-chat",
@@ -106,7 +120,7 @@ nonisolated struct ClineAdapter: ConductorCLIAdapter {
                 source: .curated),
             ConductorModelChoice(
                 id: "minimax/minimax-m2.5",
-                displayName: "MiniMax M2.5 (Cline route)",
+                displayName: "MiniMax-M2.5 (Cline route)",
                 source: .curated),
         ]
     }
@@ -129,7 +143,8 @@ nonisolated struct ClineAdapter: ConductorCLIAdapter {
             C3AdapterProcess.modelTimeout,
             Self.maximumModelOutputBytes)
         guard result.succeeded,
-            let parsed = Self.parseCatalogModels(result.standardOutput),
+            let parsed = Self.parseCatalogModels(
+                String(decoding: result.standardOutput, as: UTF8.self)),
             !parsed.isEmpty
         else {
             return curatedModels()
@@ -149,7 +164,8 @@ nonisolated struct ClineAdapter: ConductorCLIAdapter {
             .appending(path: "node", directoryHint: .notDirectory)
         // The resolved cline lives in `lib/node_modules/cline/bin/`, so also
         // try the launcher's own directory, where nvm keeps `node`.
-        let launcherSibling = executableURL
+        let launcherSibling =
+            executableURL
             .deletingLastPathComponent()
             .appending(path: "node", directoryHint: .notDirectory)
         for candidate in [launcherSibling, node]
@@ -165,8 +181,10 @@ nonisolated struct ClineAdapter: ConductorCLIAdapter {
         let packageRoot = executableURL.resolvingSymlinksInPath()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let catalog = packageRoot
-            .appending(path: "node_modules/@cline/llms/dist/models.js", directoryHint: .notDirectory)
+        let catalog =
+            packageRoot
+            .appending(
+                path: "node_modules/@cline/llms/dist/models.js", directoryHint: .notDirectory)
         guard FileManager.default.fileExists(atPath: catalog.path) else { return nil }
         return catalog
     }
