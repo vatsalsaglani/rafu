@@ -12,6 +12,7 @@ struct CommandPaletteView: View {
     @State private var fileMatches: [String] = []
     @State private var symbolScan = SymbolScanState.idle
     @State private var workspaceSymbolMatches: [WorkspaceSymbolMatch] = []
+    @State private var agentTerminalOptions: [AgentTerminalOption] = []
     @FocusState private var searchFocused: Bool
 
     private static let maximumFileRows = 100
@@ -100,6 +101,17 @@ struct CommandPaletteView: View {
             )
         ) {
             await runWorkspaceSymbolQuery(parsed: PaletteQueryParser.parse(query))
+        }
+        .task(id: session.rootURL) {
+            guard let root = session.rootURL else {
+                agentTerminalOptions = []
+                return
+            }
+            let loaded = await AgentTerminalLaunchService(
+                workspaceRoot: root
+            ).options()
+            guard !Task.isCancelled else { return }
+            agentTerminalOptions = loaded
         }
         // Reset on EVERY appearance, not once per view identity: the palette
         // sheet's content view is reused across open/close, so a `.task`
@@ -685,6 +697,35 @@ struct CommandPaletteView: View {
             )
         }
 
+        if session.rootURL != nil {
+            commands.append(
+                .init(
+                    id: "terminal.new-agent",
+                    title: "New Agent Terminal…",
+                    symbolName: "terminal.badge",
+                    keywords: ["agent", "terminal", "claude", "codex"]
+                ) {
+                    dismiss()
+                    session.presentAgentTerminalSheet()
+                }
+            )
+        }
+
+        for option in agentTerminalOptions where option.isReady {
+            commands.append(
+                .init(
+                    id: "terminal.agent.\(option.id.rawValue)",
+                    title: "Agent Terminal: \(option.displayName)",
+                    detail: option.launchVerificationNote,
+                    symbolName: "terminal",
+                    keywords: ["agent", "terminal", option.displayName]
+                ) {
+                    dismiss()
+                    launchAgentTerminal(option)
+                }
+            )
+        }
+
         // Verbs act on the engine owning the SELECTED run (C6 concurrency),
         // so a gate in run B is not approved by a palette entry that read
         // run A's state.
@@ -933,6 +974,18 @@ struct CommandPaletteView: View {
             )
         }
         return commands
+    }
+
+    private func launchAgentTerminal(_ option: AgentTerminalOption) {
+        guard let root = session.rootURL,
+            let specification = try? AgentTerminalLaunchService(
+                workspaceRoot: root
+            ).specification(
+                option: option,
+                model: option.defaultModel,
+                startingDirectory: root)
+        else { return }
+        session.openAgentTerminal(spec: specification)
     }
 }
 

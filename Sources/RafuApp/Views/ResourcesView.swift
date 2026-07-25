@@ -170,23 +170,11 @@ struct ResourcesView: View {
     }
 
     private func kindLabel(_ kind: ProcessResourceRegistry.ProcessKind) -> String {
-        switch kind {
-        case .terminalShell: return "Terminal"
-        case .agent: return "Ensemble Agent"
-        case .git: return "Git"
-        case .languageServer: return "Language Server"
-        case .other: return "Other"
-        }
+        ProcessResourcePresentation.kindLabel(kind)
     }
 
     private func symbol(for kind: ProcessResourceRegistry.ProcessKind) -> String {
-        switch kind {
-        case .terminalShell: return "terminal"
-        case .agent: return "person.crop.rectangle.stack"
-        case .git: return "arrow.triangle.branch"
-        case .languageServer: return "cpu"
-        case .other: return "gearshape"
-        }
+        ProcessResourcePresentation.symbol(kind)
     }
 
     private func languageServerRow(_ status: LanguageServerStatus) -> some View {
@@ -211,5 +199,29 @@ struct ResourcesView: View {
         }
         .accessibilityElement(children: showsRestart ? .contain : .combine)
         .accessibilityLabel("\(status.serverName), \(stateLabel)")
+    }
+}
+
+nonisolated enum ProcessResourcePresentation {
+    static func kindLabel(_ kind: ProcessResourceRegistry.ProcessKind) -> String {
+        switch kind {
+        case .terminalShell: "Terminal"
+        case .agent: "Ensemble Agent"
+        case .agentTerminal: "Agent Terminal"
+        case .git: "Git"
+        case .languageServer: "Language Server"
+        case .other: "Other"
+        }
+    }
+
+    static func symbol(_ kind: ProcessResourceRegistry.ProcessKind) -> String {
+        switch kind {
+        case .terminalShell: "terminal"
+        case .agent: "person.crop.rectangle.stack"
+        case .agentTerminal: "terminal.badge"
+        case .git: "arrow.triangle.branch"
+        case .languageServer: "cpu"
+        case .other: "gearshape"
+        }
     }
 }

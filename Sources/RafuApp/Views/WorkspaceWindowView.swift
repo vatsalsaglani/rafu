@@ -165,6 +165,9 @@ private struct WorkspaceWindowPresentations: ViewModifier {
             .sheet(isPresented: $session.isGitHubPublishPresented) {
                 GitHubPublishSheet(session: session)
             }
+            .sheet(isPresented: $session.agentTerminalSheetPresented) {
+                AgentTerminalSheet(session: session)
+            }
             .sheet(isPresented: ignoreSuggestionPresentedBinding) {
                 IgnoreSuggestionSheet(session: session)
             }

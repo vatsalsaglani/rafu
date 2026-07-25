@@ -20,6 +20,7 @@ struct WorkspaceTerminalsPanelView: View {
     /// be renaming at a time.
     @State private var renamingID: UUID?
     @State private var renameText = ""
+    @State private var agentTerminalOptions: [AgentTerminalOption] = []
 
     var body: some View {
         // Derived ONCE per body evaluation, never per-row inside a `ForEach`
@@ -46,6 +47,17 @@ struct WorkspaceTerminalsPanelView: View {
         // (few/no sessions) would float the header + list stack to the
         // vertical middle instead of pinning to the top.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .task(id: session.rootURL) {
+            guard let root = session.rootURL else {
+                agentTerminalOptions = []
+                return
+            }
+            let loaded = await AgentTerminalLaunchService(
+                workspaceRoot: root
+            ).options()
+            guard !Task.isCancelled else { return }
+            agentTerminalOptions = loaded
+        }
     }
 
     private func header(count: Int) -> some View {
@@ -59,37 +71,81 @@ struct WorkspaceTerminalsPanelView: View {
                     .foregroundStyle(theme.palette.textPrimary)
             }
         } trailing: {
-            HStack(spacing: 6) {
-                Button("New Terminal", systemImage: "plus") {
+            Menu {
+                Button("New Terminal", systemImage: "terminal") {
                     session.newTerminalTab()
                 }
-                .buttonStyle(RafuIconButtonStyle(size: 24))
-                .help("New Terminal")
 
                 // Shown only when the catalog has ≥2 discovered shells
                 // (terminal-manager.md T-C) — a single-shell machine has
                 // nothing to choose between.
                 if session.availableTerminalShells.count >= 2 {
-                    Menu {
+                    Menu("New Terminal With Shell") {
                         ForEach(session.availableTerminalShells) { shell in
                             Button("\(shell.name) — \(shell.path)") {
                                 session.newTerminalTab(shell: shell)
                             }
                         }
-                    } label: {
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(theme.palette.textSecondary)
-                            .frame(width: 20, height: 20)
-                            .contentShape(.rect)
                     }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .accessibilityLabel("New Terminal With Shell")
                 }
+
+                Divider()
+                Text("Agent Terminals")
+                ForEach(agentTerminalOptions) { option in
+                    agentTerminalMenuRow(option)
+                }
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(.rect)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("New Terminal")
+            .accessibilityLabel("New Terminal")
+        }
+    }
+
+    @ViewBuilder
+    private func agentTerminalMenuRow(_ option: AgentTerminalOption) -> some View {
+        Button {
+            launchAgentTerminal(option)
+        } label: {
+            Label {
+                Text(option.displayName)
+            } icon: {
+                FileIconView(icon: option.icon, size: 13)
             }
         }
+        .disabled(!option.isReady)
+        .help(option.availability.reason ?? "Launch \(option.displayName)")
+
+        if let reason = option.availability.reason {
+            Text(reason)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .disabled(true)
+        } else if let note = option.launchVerificationNote {
+            Text(note)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .disabled(true)
+        }
+    }
+
+    private func launchAgentTerminal(_ option: AgentTerminalOption) {
+        guard let root = session.rootURL,
+            let specification = try? AgentTerminalLaunchService(
+                workspaceRoot: root
+            ).specification(
+                option: option,
+                model: option.defaultModel,
+                startingDirectory: root)
+        else { return }
+        session.openAgentTerminal(spec: specification)
     }
 
     private var emptyState: some View {
@@ -202,6 +258,10 @@ private struct TerminalSessionRowView: View {
                                 if !focused { commitRename() }
                             }
                     } else {
+                        if let provider = row.agentProvider {
+                            FileIconView(icon: ConductorCLIIcons.icon(for: provider), size: 14)
+                                .accessibilityHidden(true)
+                        }
                         Text(row.displayName)
                             .fontWeight(.medium)
                             .lineLimit(1)

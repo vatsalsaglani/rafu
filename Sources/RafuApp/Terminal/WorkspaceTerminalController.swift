@@ -208,12 +208,12 @@ final class WorkspaceTerminalController: Identifiable {
         self.shell = shell
     }
 
-    /// Conductor seam (conductor/C0-shim.md): spawn `spec` under the PTY
-    /// instead of a login shell. `userName` is seeded from the role badge so
-    /// `displayName` reads "advisor" rather than the CLI's basename, and
-    /// `shell` is synthesized from the spec's executable purely so
-    /// `shellDisplayName` and the name fallback stay meaningful — nothing on
-    /// this path ever spawns a login shell.
+    /// Arbitrary-process seam (conductor/C0-shim.md, ADR 0021): spawn `spec`
+    /// under the PTY instead of a login shell. `userName` is seeded from the
+    /// role badge so `displayName` reads "advisor" or "Claude Code" rather
+    /// than the CLI's basename, and `shell` is synthesized from the spec's
+    /// executable purely so `shellDisplayName` and the name fallback stay
+    /// meaningful — nothing on this path ever spawns a login shell.
     init(index: Int, spec: TerminalProcessSpec) {
         self.index = index
         startingDirectory = spec.currentDirectoryPath
@@ -223,9 +223,10 @@ final class WorkspaceTerminalController: Identifiable {
         userName = spec.roleBadge
     }
 
-    /// Non-`nil` only for a Conductor session. `nil` keeps the login-shell
-    /// path exactly as it was; a stored property with a `nil` default lets
-    /// the original initializer above stay untouched.
+    /// Non-`nil` only for a spec-backed process (an Ensemble run or an Agent
+    /// Terminal). `nil` keeps the login-shell path exactly as it was; a
+    /// stored property with a `nil` default lets the original initializer
+    /// above stay untouched.
     @ObservationIgnored
     private(set) var processSpec: TerminalProcessSpec?
 
@@ -267,6 +268,10 @@ final class WorkspaceTerminalController: Identifiable {
     var isRunning: Bool { status == .running }
 
     var shellDisplayName: String { shell.basename }
+
+    /// Non-`nil` only for a tokenless interactive Agent Terminal. Ensemble
+    /// run terminals and ordinary login shells intentionally return `nil`.
+    var agentProvider: ConductorCLIID? { processSpec?.agentProvider }
 
     /// Whether this session's live view currently sits in the KEY window —
     /// part of the "not focused" test for bell attention (terminal-manager
@@ -414,14 +419,20 @@ final class WorkspaceTerminalController: Identifiable {
         let shellPid = view.process.shellPid
         if shellPid != 0 {
             let controllerID = id
-            // An Ensemble child is attributed by role and vendor; a login shell
-            // keeps its existing "Terminal N" naming. Registration stays
-            // PID-gated either way, so an idle Rafu with no run registers
-            // nothing (C7 accounting).
+            // An Ensemble child is attributed by role and vendor; an Agent
+            // Terminal carries its own distinct kind; a login shell keeps its
+            // existing "Terminal N" naming. Registration stays PID-gated in
+            // every case, so an idle Rafu registers nothing (C7 accounting).
             let attribution = processSpec?.resourceAttribution
             let registeredName = attribution ?? "Terminal \(index)"
             let registeredKind: ProcessResourceRegistry.ProcessKind =
-                attribution == nil ? .terminalShell : .agent
+                if processSpec?.agentProvider != nil {
+                    .agentTerminal
+                } else if attribution != nil {
+                    .agent
+                } else {
+                    .terminalShell
+                }
             Task {
                 await ProcessResourceRegistry.shared.register(
                     id: controllerID,

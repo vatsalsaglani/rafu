@@ -584,6 +584,9 @@ nonisolated struct TerminalProcessSpec: Equatable, Sendable {
     /// Short role label ("advisor", "implementor") shown as the session's
     /// name in the terminal tab and panel row.
     let roleBadge: String
+    /// The vendor identity for a tokenless interactive Agent Terminal.
+    /// `nil` preserves both ordinary login shells and Ensemble run terminals.
+    var agentProvider: ConductorCLIID? = nil
     /// How this child appears in the Resources surface — e.g.
     /// "implementor • Codex". `nil` for a plain login shell, which keeps its
     /// existing "Terminal N" naming (C7 accounting).
@@ -612,7 +615,8 @@ nonisolated struct TerminalProcessSpec: Equatable, Sendable {
         environment: [String: String],
         roleBadge: String,
         outputLogURL: URL? = nil,
-        resourceAttribution: String? = nil
+        resourceAttribution: String? = nil,
+        agentProvider: ConductorCLIID? = nil
     ) {
         self.executableURL = executableURL
         self.arguments = arguments
@@ -621,6 +625,7 @@ nonisolated struct TerminalProcessSpec: Equatable, Sendable {
         self.roleBadge = roleBadge
         self.outputLogURL = outputLogURL
         self.resourceAttribution = resourceAttribution
+        self.agentProvider = agentProvider
     }
 
     /// Pure mapping onto `SwiftTerm.LocalProcessTerminalView.startProcess`.

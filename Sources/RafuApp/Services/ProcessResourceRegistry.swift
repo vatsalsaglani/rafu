@@ -22,6 +22,9 @@ actor ProcessResourceRegistry {
         /// user needs to see "this is an agent burning quota", not "Terminal 3"
         /// (C7 accounting).
         case agent
+        /// A tokenless, user-owned interactive vendor CLI. Kept distinct
+        /// from `.agent`, which is reserved for an Ensemble run step.
+        case agentTerminal
         case other
     }
 

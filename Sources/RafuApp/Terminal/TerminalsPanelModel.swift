@@ -20,6 +20,9 @@ nonisolated struct TerminalSessionRow: Identifiable, Equatable, Sendable {
     /// Color TAG (terminal-manager.md T-D), or `nil` for no tag. Never the
     /// only signal for anything — always paired with `status`'s glyph/label.
     let sessionColor: TerminalSessionColor?
+    /// Vendor identity for a tokenless Agent Terminal. `nil` for login
+    /// shells and Ensemble run terminals.
+    var agentProvider: ConductorCLIID? = nil
 }
 
 /// Pure presentation helpers for `TerminalSessionRow` — symbol/label/string
@@ -139,7 +142,8 @@ nonisolated enum TerminalsPanelModel {
                 isParked: !presentedIDs.contains(controller.id),
                 needsAttention: TerminalSessionPresentation.needsAttention(controller.status),
                 hasUserName: controller.userName != nil,
-                sessionColor: controller.sessionColor
+                sessionColor: controller.sessionColor,
+                agentProvider: controller.agentProvider
             )
         }
     }
