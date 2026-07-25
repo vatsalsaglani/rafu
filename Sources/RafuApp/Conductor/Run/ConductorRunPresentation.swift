@@ -50,6 +50,10 @@ nonisolated struct ConductorStepRowModel: Identifiable, Equatable, Sendable {
     /// the artifact (advisor D5: opening it would create a broken tab).
     let canOpenArtifact: Bool
     let hasLiveTerminal: Bool
+    /// One line per metered provider ("Codex • 5-hour −3%"), empty when
+    /// metering resolved nothing for this step. Never a zero or a placeholder
+    /// — an empty array means "no data", and the view shows nothing (C7).
+    let usageLines: [String]
 
     var id: Int { index }
 }
@@ -68,6 +72,9 @@ nonisolated enum ConductorRunPresentation {
         case .completed: "checkmark.circle.fill"
         case .failed: "exclamationmark.triangle.fill"
         case .aborted: "xmark.circle.fill"
+        // Shape-distinct from every other status: an interrupted step is not
+        // a failure, it is work whose process the app outlived.
+        case .interrupted: "bolt.horizontal.circle.fill"
         }
     }
 
@@ -79,12 +86,15 @@ nonisolated enum ConductorRunPresentation {
         case .completed: "Completed"
         case .failed(let reason): reason
         case .aborted: "Aborted"
+        case .interrupted: "Interrupted — process not restored"
         }
     }
 
     static func needsAttention(for status: RunStepStatus) -> Bool {
         switch status {
-        case .awaitingGate, .failed: true
+        // An interrupted step is waiting on the user exactly like a gate or a
+        // failure: it needs Retry / Abort / Keep worktree.
+        case .awaitingGate, .failed, .interrupted: true
         case .pending, .running, .completed, .aborted: false
         }
     }
@@ -116,6 +126,11 @@ nonisolated enum ConductorRunPresentation {
         }
         if let failed = first(where: { if case .failed = $0 { true } else { false } }) {
             return failed
+        }
+        // Above `.aborted`: an interrupted run still needs a user decision
+        // (Retry / Abort / Keep worktree), while an abort is already resolved.
+        if let interrupted = first(where: { $0 == .interrupted }) {
+            return interrupted
         }
         if let aborted = first(where: { $0 == .aborted }) {
             return aborted
@@ -182,8 +197,26 @@ nonisolated enum ConductorRunPresentation {
                 isGateReady: step.status == .awaitingGate,
                 artifactRelativePath: artifactRelativePath(runID: manifest.id, step: step),
                 canOpenArtifact: canOpenArtifact(step.status),
-                hasLiveTerminal: liveStepIndex == index)
+                hasLiveTerminal: liveStepIndex == index,
+                usageLines: usageLines(for: step.usage))
         }
+    }
+
+    /// Formats one step's recorded usage. `nil` record → no lines; a provider
+    /// whose windows produced no printable text contributes nothing rather
+    /// than an empty bullet.
+    static func usageLines(for record: ConductorRunUsageRecord?) -> [String] {
+        guard let record else { return [] }
+        return record.providers.compactMap(ConductorRunUsagePresentation.line(for:))
+    }
+
+    /// Whole-run totals across every step that recorded usage, for the run
+    /// header. Empty when nothing was metered.
+    static func runUsageLines(for manifest: ConductorRunManifest) -> [String] {
+        let records = manifest.steps.compactMap(\.usage)
+        guard !records.isEmpty else { return [] }
+        return ConductorRunUsagePresentation.runTotals(from: records)
+            .compactMap(ConductorRunUsagePresentation.line(for:))
     }
 
     private static func isInFlight(_ state: ConductorWorkflowState) -> Bool {
@@ -221,7 +254,9 @@ nonisolated enum ConductorRunPresentation {
     private static func canOpenArtifact(_ status: RunStepStatus) -> Bool {
         switch status {
         case .completed, .awaitingGate: true
-        case .pending, .running, .failed, .aborted: false
+        // An interrupted step never confirmed its artifact, so opening the
+        // path would create a broken tab (same reasoning as .running).
+        case .pending, .running, .failed, .aborted, .interrupted: false
         }
     }
 

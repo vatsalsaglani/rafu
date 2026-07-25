@@ -53,7 +53,10 @@ nonisolated struct ConductorRoleLaunchService: Sendable {
             environment: invocation.environment,
             roleBadge: roleBadge,
             outputLogURL: evidence.logsDirectory.appending(
-                path: "output.log", directoryHint: .notDirectory))
+                path: "output.log", directoryHint: .notDirectory),
+            // Role plus vendor, so the Resources surface names what is actually
+            // consuming memory instead of an anonymous "Terminal N" (C7).
+            resourceAttribution: "\(role.name) • \(role.provider.displayName)")
     }
 
     static func binding(

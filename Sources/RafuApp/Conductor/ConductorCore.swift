@@ -122,6 +122,11 @@ nonisolated struct ConductorWorkflowDefinition: Equatable, Sendable {
         let inputArtifacts: [String]
         /// Pause for explicit user review after this step completes.
         let gateAfter: Bool
+        /// Whether this gate may be approved straight from a notification,
+        /// without opening the artifact first (`[gate:remote]`). Defaults to
+        /// `false`: remote approval is always opt-in, per workflow, by the
+        /// person who wrote the file (C7).
+        var safeToApproveRemotely: Bool = false
     }
 }
 
@@ -148,6 +153,10 @@ nonisolated enum RunStepStatus: Codable, Equatable, Sendable {
     case completed
     case failed(String)
     case aborted
+    /// The app relaunched while this step was `.running`: its child process
+    /// was NOT resurrected (ADR 0004/0014). Distinct from `.failed` because
+    /// nothing went wrong with the work — the process simply outlived nothing.
+    case interrupted
 
     private nonisolated enum CodingKeys: String, CodingKey {
         case state
@@ -161,6 +170,7 @@ nonisolated enum RunStepStatus: Codable, Equatable, Sendable {
         case completed
         case failed
         case aborted
+        case interrupted
     }
 
     init(from decoder: any Decoder) throws {
@@ -178,6 +188,7 @@ nonisolated enum RunStepStatus: Codable, Equatable, Sendable {
         case .completed: self = .completed
         case .failed: self = .failed(try container.decode(String.self, forKey: .message))
         case .aborted: self = .aborted
+        case .interrupted: self = .interrupted
         }
     }
 
@@ -192,6 +203,7 @@ nonisolated enum RunStepStatus: Codable, Equatable, Sendable {
             try container.encode(State.failed.rawValue, forKey: .state)
             try container.encode(message, forKey: .message)
         case .aborted: try container.encode(State.aborted.rawValue, forKey: .state)
+        case .interrupted: try container.encode(State.interrupted.rawValue, forKey: .state)
         }
     }
 }
@@ -224,6 +236,11 @@ nonisolated struct ConductorRunManifest: Codable, Equatable, Sendable {
     /// `Optional` properties omits a `nil` key entirely, so a C1-era
     /// manifest's on-disk shape is unaffected.
     var gate: Gate? = nil
+    /// Why this run looks the way it does after an app relaunch or an external
+    /// change — e.g. "the app closed while this step was running". Additive and
+    /// optional so pre-C7 manifests decode unchanged; `nil` means nothing
+    /// unusual happened (C7 recovery).
+    var recoveryNote: String? = nil
 
     /// One open gate: which kind, and which step it follows (or precedes,
     /// for the terminal `.merge` gate).
@@ -265,6 +282,16 @@ nonisolated struct ConductorRunManifest: Codable, Equatable, Sendable {
         /// Run-relative path to this step's evidence directory, e.g.
         /// `"steps/01-advisor-a1"`. `nil` for C1's flat single-role layout.
         var evidencePath: String? = nil
+        /// Snapshotted from the workflow file's `[gate:remote]` marker so a
+        /// later edit to that file cannot retroactively make an already-open
+        /// gate remotely approvable. `nil` in pre-C7 manifests ⇒ not safe.
+        var safeToApproveRemotely: Bool? = nil
+        /// What this step's attempt cost, when metering could resolve an
+        /// honest delta (ADR 0017 providers are best-effort). `nil` means "no
+        /// data", never zero — a provider without metering, a step too fast to
+        /// resolve, or an ambiguous reading all record nothing rather than a
+        /// fabricated number (C7).
+        var usage: ConductorRunUsageRecord? = nil
     }
 }
 
@@ -466,6 +493,10 @@ nonisolated struct TerminalProcessSpec: Equatable, Sendable {
     /// Short role label ("advisor", "implementor") shown as the session's
     /// name in the terminal tab and panel row.
     let roleBadge: String
+    /// How this child appears in the Resources surface — e.g.
+    /// "implementor • Codex". `nil` for a plain login shell, which keeps its
+    /// existing "Terminal N" naming (C7 accounting).
+    let resourceAttribution: String?
     /// Where `WorkspaceTerminalController` tees this run's raw PTY output
     /// for evidence (`.rafu/runs/<id>/logs/output.log`), `nil` for a plain
     /// login shell. Deliberately UNUSED by `resolvedLaunch()` below — this
@@ -489,7 +520,8 @@ nonisolated struct TerminalProcessSpec: Equatable, Sendable {
         currentDirectoryPath: String,
         environment: [String: String],
         roleBadge: String,
-        outputLogURL: URL? = nil
+        outputLogURL: URL? = nil,
+        resourceAttribution: String? = nil
     ) {
         self.executableURL = executableURL
         self.arguments = arguments
@@ -497,6 +529,7 @@ nonisolated struct TerminalProcessSpec: Equatable, Sendable {
         self.environment = environment
         self.roleBadge = roleBadge
         self.outputLogURL = outputLogURL
+        self.resourceAttribution = resourceAttribution
     }
 
     /// Pure mapping onto `SwiftTerm.LocalProcessTerminalView.startProcess`.

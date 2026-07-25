@@ -261,7 +261,7 @@ private final class GateAttentionSpyHUD: NotchHUDPresenting {
 
 /// Mirrors `TerminalAttentionTests.installAttentionRig` (a hermetic,
 /// suite-backed surface store + spy notifier/HUD + fixed theme provider) for
-/// `raiseConductorGateAttention(runName:stepName:)`.
+/// `raiseConductorGateAttention(_:)`.
 @MainActor
 private func installGateAttentionRig(
     on session: WorkspaceSession,
@@ -279,6 +279,22 @@ private func installGateAttentionRig(
     return (notifier, hud, suiteName)
 }
 
+/// Builds the typed gate event the session's attention path now takes.
+private func gateEvent(
+    runID: String = "run-1",
+    workflowName: String,
+    agentName: String,
+    safeToApproveRemotely: Bool = false
+) -> ConductorGateReadyEvent {
+    ConductorGateReadyEvent(
+        runID: runID,
+        kind: .step,
+        stepIndex: 0,
+        workflowName: workflowName,
+        agentName: agentName,
+        safeToApproveRemotely: safeToApproveRemotely)
+}
+
 @MainActor
 @Test(
     "Gate attention posts exactly one bounded notification carrying the step name, never captured output or artifact content"
@@ -288,7 +304,8 @@ func gateAttentionPostsExactlyOneBoundedNotification() async throws {
     let rig = installGateAttentionRig(on: session, surface: .both)
     defer { UserDefaults(suiteName: rig.suiteName)?.removePersistentDomain(forName: rig.suiteName) }
 
-    session.raiseConductorGateAttention(runName: "Ship a change", stepName: "Implementor")
+    session.raiseConductorGateAttention(
+        gateEvent(workflowName: "Ship a change", agentName: "Implementor"))
 
     for _ in 0..<20_000 {
         if rig.notifier.posted.count >= 1 { break }
@@ -310,7 +327,8 @@ func gateAttentionPostsExactlyOneBoundedNotification() async throws {
     // yield a bounded HUD snippet and notification body, never the raw
     // 5000-byte string verbatim.
     let hugeStepName = String(repeating: "x", count: 5_000)
-    session.raiseConductorGateAttention(runName: "Ship a change", stepName: hugeStepName)
+    session.raiseConductorGateAttention(
+        gateEvent(workflowName: "Ship a change", agentName: hugeStepName))
     for _ in 0..<20_000 {
         if rig.notifier.posted.count >= 2 { break }
         await Task.yield()
@@ -332,7 +350,8 @@ func gateAttentionSurfacesNothingWhenPreferenceOff() async throws {
     let rig = installGateAttentionRig(on: session, surface: .none)
     defer { UserDefaults(suiteName: rig.suiteName)?.removePersistentDomain(forName: rig.suiteName) }
 
-    session.raiseConductorGateAttention(runName: "Ship a change", stepName: "Implementor")
+    session.raiseConductorGateAttention(
+        gateEvent(workflowName: "Ship a change", agentName: "Implementor"))
 
     for _ in 0..<500 {
         await Task.yield()

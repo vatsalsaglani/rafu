@@ -172,6 +172,7 @@ struct ResourcesView: View {
     private func kindLabel(_ kind: ProcessResourceRegistry.ProcessKind) -> String {
         switch kind {
         case .terminalShell: return "Terminal"
+        case .agent: return "Ensemble Agent"
         case .git: return "Git"
         case .languageServer: return "Language Server"
         case .other: return "Other"
@@ -181,6 +182,7 @@ struct ResourcesView: View {
     private func symbol(for kind: ProcessResourceRegistry.ProcessKind) -> String {
         switch kind {
         case .terminalShell: return "terminal"
+        case .agent: return "person.crop.rectangle.stack"
         case .git: return "arrow.triangle.branch"
         case .languageServer: return "cpu"
         case .other: return "gearshape"

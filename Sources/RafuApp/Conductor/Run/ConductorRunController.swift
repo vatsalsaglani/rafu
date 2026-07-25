@@ -329,6 +329,11 @@ final class ConductorRunController {
     @ObservationIgnored
     private let mergeGateService = ConductorMergeGateService()
 
+    /// Relaunch janitor policy (C7). Injectable so tests can simulate a
+    /// worktree that vanished without touching the file system.
+    @ObservationIgnored
+    private let recoveryService: ConductorRunRecoveryService
+
     @ObservationIgnored
     private let roleLaunch = ConductorRoleLaunchService()
 
@@ -355,9 +360,11 @@ final class ConductorRunController {
 
     init(
         adapters: [any ConductorCLIAdapter] = ConductorAdapterRegistry.all,
-        manifestSaver: any ConductorRunManifestSaving = ConductorRunManifestSaver()
+        manifestSaver: any ConductorRunManifestSaving = ConductorRunManifestSaver(),
+        recoveryService: ConductorRunRecoveryService = ConductorRunRecoveryService()
     ) {
         self.adapters = adapters
+        self.recoveryService = recoveryService
         manifestWrites = ConductorRunManifestWriteQueue(saver: manifestSaver)
     }
 
@@ -418,12 +425,28 @@ final class ConductorRunController {
                 }
             }
             try Task.checkCancellation()
+            // Relaunch janitor (C7): a step persisted as `.running` lost its
+            // process when the previous app process ended, and a worktree that
+            // vanished externally makes the run history-only. This NEVER
+            // launches anything — it only tells the truth about what is on
+            // disk. Live processes are deliberately not resurrected
+            // (ADR 0004/0014).
+            let recovered = await Self.applyingRecovery(
+                to: loaded,
+                workspaceRoot: attachedWorkspaceRoot,
+                service: recoveryService)
+            try Task.checkCancellation()
             guard self.attachedWorkspaceRoot == attachedWorkspaceRoot else { return }
-            runs = Self.sortedRuns(loaded)
+            runs = Self.sortedRuns(recovered.manifests)
             if let manifest {
                 upsertRun(manifest)
             }
             runsLoadError = nil
+            // Persist only the manifests recovery actually changed, through the
+            // same serialized write queue every other manifest write uses.
+            for changed in recovered.changed {
+                publish(changed)
+            }
         } catch is CancellationError {
             return
         } catch let error as ConductorRunStoreError {
@@ -440,6 +463,50 @@ final class ConductorRunController {
     func attachAndReload(workspaceRoot: URL?) async {
         attach(workspaceRoot: workspaceRoot)
         await reloadRuns()
+    }
+
+    /// Rewrites persisted `.running` steps to `.interrupted` and records the
+    /// plan's note, returning both the full list (for display) and only the
+    /// manifests that actually changed (for persistence). Pure apart from the
+    /// injected off-main worktree scan.
+    private static func applyingRecovery(
+        to manifests: [ConductorRunManifest],
+        workspaceRoot: URL,
+        service: ConductorRunRecoveryService
+    ) async -> (manifests: [ConductorRunManifest], changed: [ConductorRunManifest]) {
+        let plans = await service.plans(for: manifests, workspaceRoot: workspaceRoot)
+        var updated: [ConductorRunManifest] = []
+        var changed: [ConductorRunManifest] = []
+        updated.reserveCapacity(manifests.count)
+
+        for manifest in manifests {
+            guard let plan = plans.first(where: { $0.runID == manifest.id }) else {
+                updated.append(manifest)
+                continue
+            }
+            var revised = manifest
+            switch plan.disposition {
+            case .unchanged:
+                updated.append(manifest)
+                continue
+            case .interrupted(let stepIndices):
+                for index in stepIndices where revised.steps.indices.contains(index) {
+                    revised.steps[index].status = .interrupted
+                }
+            case .historyOnly:
+                // The worktree is gone, so no gate can be resolved against it.
+                revised.gate = nil
+            }
+            revised.recoveryNote = plan.note
+            guard revised != manifest else {
+                updated.append(manifest)
+                continue
+            }
+            revised.updatedAt = Date()
+            updated.append(revised)
+            changed.append(revised)
+        }
+        return (updated, changed)
     }
 
     func presentNewRun() {

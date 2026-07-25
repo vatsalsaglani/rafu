@@ -414,12 +414,19 @@ final class WorkspaceTerminalController: Identifiable {
         let shellPid = view.process.shellPid
         if shellPid != 0 {
             let controllerID = id
-            let controllerIndex = index
+            // An Ensemble child is attributed by role and vendor; a login shell
+            // keeps its existing "Terminal N" naming. Registration stays
+            // PID-gated either way, so an idle Rafu with no run registers
+            // nothing (C7 accounting).
+            let attribution = processSpec?.resourceAttribution
+            let registeredName = attribution ?? "Terminal \(index)"
+            let registeredKind: ProcessResourceRegistry.ProcessKind =
+                attribution == nil ? .terminalShell : .agent
             Task {
                 await ProcessResourceRegistry.shared.register(
                     id: controllerID,
-                    name: "Terminal \(controllerIndex)",
-                    kind: .terminalShell,
+                    name: registeredName,
+                    kind: registeredKind,
                     pid: shellPid
                 )
             }

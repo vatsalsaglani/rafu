@@ -194,13 +194,26 @@ final class NotchCompanionModel: NSObject {
     /// from already-live observable state: no polling, provider read, or
     /// process probe is added to the companion's idle path.
     var activeRunItems: [ConductorNotchRunItem] {
-        entries.compactMap { entry in
-            guard let session = entry.session else { return nil }
-            let workflow = session.conductorWorkflowController
-            return ConductorNotchRunItem.item(
-                manifest: workflow.manifest,
-                state: workflow.state,
-                workspaceID: entry.id)
+        entries.flatMap { entry -> [ConductorNotchRunItem] in
+            guard let session = entry.session else { return [] }
+            // Every engine that can own a live run: C6's concurrent pool plus
+            // the window's singular controller. Reading only the latter would
+            // silently hide concurrent pipelines from the companion.
+            let controllers =
+                session.conductorConcurrentRuns.controllers + [session.conductorWorkflowController]
+            var seenRunIDs: Set<String> = []
+            return controllers.compactMap { controller in
+                guard
+                    let item = ConductorNotchRunItem.item(
+                        manifest: controller.manifest,
+                        state: controller.state,
+                        workspaceID: entry.id)
+                else { return nil }
+                // A run adopted by the singular controller may also still be
+                // listed by the pool; show it once.
+                guard seenRunIDs.insert(item.runID).inserted else { return nil }
+                return item
+            }
         }
     }
 

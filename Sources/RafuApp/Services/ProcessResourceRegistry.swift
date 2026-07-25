@@ -17,6 +17,11 @@ actor ProcessResourceRegistry {
         case terminalShell
         case git
         case languageServer
+        /// An external agent CLI spawned for an Ensemble run step. Distinct
+        /// from `.terminalShell` even though it runs in a terminal tab: the
+        /// user needs to see "this is an agent burning quota", not "Terminal 3"
+        /// (C7 accounting).
+        case agent
         case other
     }
 

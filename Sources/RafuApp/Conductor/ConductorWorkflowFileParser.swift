@@ -18,12 +18,21 @@ import Foundation
 /// keys are ignored; a step line that matches nothing throws with its line
 /// number.
 ///
+/// `[gate:remote]` is the opt-in variant: the same user gate, but one the
+/// author explicitly marks safe to approve from a notification without first
+/// reading the artifact in Rafu. It defaults OFF — a plain `[gate]` only ever
+/// offers "Open Run" remotely (C7).
+///
 /// `[gate]` — not `!gate`. `!` is YAML's tag indicator, and ADR 0018 commits
 /// these files to being human-readable, committable, and readable by other
 /// tooling; a leading `!` would make an otherwise YAML-shaped document parse
 /// as a tagged node in anything that does run a real YAML engine over it.
 nonisolated enum ConductorWorkflowFileParser {
     static let gateMarker = "[gate]"
+    /// Opt-in remote-approval gate. Deliberately a distinct marker rather than
+    /// a modifier on `[gate]`, so approving from a notification is never
+    /// something a workflow gains by accident.
+    static let remoteGateMarker = "[gate:remote]"
     static let artifactArrow = "<-"
 
     /// - Parameter defaultName: the file's stem, used when frontmatter has
@@ -76,7 +85,16 @@ nonisolated enum ConductorWorkflowFileParser {
         var remainder = String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)
 
         var gateAfter = false
-        if remainder.hasSuffix(gateMarker) {
+        var safeToApproveRemotely = false
+        // Checked BEFORE the plain marker: "[gate:remote]" does not end with
+        // "[gate]", but testing the plain one first would still be a
+        // maintenance trap if either literal ever changes.
+        if remainder.hasSuffix(remoteGateMarker) {
+            gateAfter = true
+            safeToApproveRemotely = true
+            remainder = String(remainder.dropLast(remoteGateMarker.count))
+                .trimmingCharacters(in: .whitespaces)
+        } else if remainder.hasSuffix(gateMarker) {
             gateAfter = true
             remainder = String(remainder.dropLast(gateMarker.count))
                 .trimmingCharacters(in: .whitespaces)
@@ -109,12 +127,16 @@ nonisolated enum ConductorWorkflowFileParser {
         // unrelated "unknown agent" failure mid-run.
         guard
             !agentName.contains(gateMarker),
+            !agentName.contains(remoteGateMarker),
             !agentName.contains(artifactArrow),
             !agentName.contains("[")
         else {
             throw ConductorParseError.malformedStep(line: line)
         }
         return ConductorWorkflowDefinition.Step(
-            agentName: agentName, inputArtifacts: inputArtifacts, gateAfter: gateAfter)
+            agentName: agentName,
+            inputArtifacts: inputArtifacts,
+            gateAfter: gateAfter,
+            safeToApproveRemotely: safeToApproveRemotely)
     }
 }

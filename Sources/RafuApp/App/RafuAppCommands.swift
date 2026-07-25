@@ -281,32 +281,32 @@ struct RafuAppCommands: Commands {
                 workspaceSession?.navigatorMode = .runs
                 workspaceSession?.conductorRunController.presentNewRun()
             }
-            .disabled(
-                workspaceSession.map {
-                    !$0.conductorRunController.canStartNewRun
-                        || $0.conductorWorkflowController.isInFlight
-                } ?? true
-            )
+            .disabled(workspaceSession?.canStartConductorWorkflowRun != true)
 
+            // Every verb below resolves the engine that owns the SELECTED run
+            // (C6: several pipelines may be in flight per window), never the
+            // window's singular controller.
             Button("Approve Gate") {
-                guard let workflow = workspaceSession?.conductorWorkflowController else { return }
+                guard let workflow = workspaceSession?.selectedWorkflowController else { return }
                 Task { await workflow.approveGate() }
             }
             .disabled(!isAwaitingWorkflowGate(workspaceSession))
 
             Button("Revise Gate Artifact") {
-                guard let session = workspaceSession else { return }
-                session.conductorWorkflowController.reviseArtifact(in: session)
+                guard let session = workspaceSession,
+                    let workflow = session.selectedWorkflowController
+                else { return }
+                workflow.reviseArtifact(in: session)
             }
             .disabled(!isAwaitingWorkflowGate(workspaceSession))
 
             Button("Abort Run") {
-                workspaceSession?.conductorWorkflowController.abort()
+                workspaceSession?.selectedWorkflowController?.abort()
             }
-            .disabled(workspaceSession?.conductorWorkflowController.isInFlight != true)
+            .disabled(workspaceSession?.selectedWorkflowController?.isInFlight != true)
 
             Button("Retry Failed Step") {
-                guard let workflow = workspaceSession?.conductorWorkflowController else { return }
+                guard let workflow = workspaceSession?.selectedWorkflowController else { return }
                 Task { await workflow.retryFailedStep() }
             }
             .disabled(!isWorkflowFailed(workspaceSession))
@@ -357,12 +357,12 @@ struct RafuAppCommands: Commands {
     }
 
     private func isAwaitingWorkflowGate(_ session: WorkspaceSession?) -> Bool {
-        guard case .awaitingGate = session?.conductorWorkflowController.state else { return false }
+        guard case .awaitingGate = session?.selectedWorkflowController?.state else { return false }
         return true
     }
 
     private func isWorkflowFailed(_ session: WorkspaceSession?) -> Bool {
-        guard case .failed = session?.conductorWorkflowController.state else { return false }
+        guard case .failed = session?.selectedWorkflowController?.state else { return false }
         return true
     }
 }

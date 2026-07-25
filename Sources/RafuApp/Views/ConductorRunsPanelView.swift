@@ -96,9 +96,10 @@ struct ConductorRunsPanelView: View {
         }
     }
 
+    /// Cap-aware, not busy-aware: C6 allows several pipelines per window, so
+    /// this only closes once `activeLimit` is reached.
     private var canStartNewRun: Bool {
-        session.conductorRunController.canStartNewRun
-            && !session.conductorWorkflowController.isInFlight
+        session.canStartConductorWorkflowRun
     }
 
     private var header: some View {
@@ -317,13 +318,15 @@ struct ConductorRunsPanelView: View {
             })
     }
 
-    /// Live state for `runID` ONLY when the workflow controller's current
-    /// manifest matches it — a historical run (or one the C1 single-role
-    /// controller drove) gets no live-state overlay, per
-    /// `ConductorRunPresentation.runRow`'s contract.
+    /// Live state for `runID` ONLY when some live engine in this window still
+    /// owns it — any of C6's concurrent controllers, or the singular one. A
+    /// historical run (or one the C1 single-role controller drove) gets no
+    /// live-state overlay, per `ConductorRunPresentation.runRow`'s contract.
     private func liveState(for runID: String) -> ConductorWorkflowState? {
-        guard session.conductorWorkflowController.manifest?.id == runID else { return nil }
-        return session.conductorWorkflowController.state
+        guard let controller = session.workflowController(forRunID: runID),
+            controller.manifest?.id == runID
+        else { return nil }
+        return controller.state
     }
 
     /// History vs Active for a run this window did NOT start (or restarted
@@ -335,7 +338,9 @@ struct ConductorRunsPanelView: View {
     private func isUnresolved(_ row: ConductorRunRowModel) -> Bool {
         if row.gateBadge != nil { return true }
         switch row.status {
-        case .pending, .running, .awaitingGate, .failed:
+        // Interrupted belongs in Active: it is exactly as actionable as a
+        // failure (Retry / Abort / Keep worktree).
+        case .pending, .running, .awaitingGate, .failed, .interrupted:
             return true
         case .completed, .aborted:
             return false
@@ -343,11 +348,11 @@ struct ConductorRunsPanelView: View {
     }
 
     private func revealLiveTerminal(_ runID: String) {
-        if session.conductorWorkflowController.manifest?.id == runID,
-            let index = ConductorRunPresentation.liveStepIndex(
-                in: session.conductorWorkflowController.state)
+        if let controller = session.workflowController(forRunID: runID),
+            controller.manifest?.id == runID,
+            let index = ConductorRunPresentation.liveStepIndex(in: controller.state)
         {
-            session.conductorWorkflowController.revealLiveTerminal(stepIndex: index, in: session)
+            controller.revealLiveTerminal(stepIndex: index, in: session)
         } else {
             session.conductorRunController.revealLiveTerminal(for: runID, in: session)
         }
@@ -703,23 +708,24 @@ private struct ConductorNewRunSheet: View {
         workflowModel.baseReference = baseReference
         do {
             let request = try workflowModel.makeRequest()
-            guard
-                session.conductorWorkflowController.canStartNewRun,
-                session.conductorRunController.canStartNewRun
-            else {
-                workflowStartError =
-                    "Finish or abort the active Ensemble run before starting another."
-                return false
-            }
+            // Free slots held by runs that already finished, so the cap counts
+            // only genuinely active pipelines.
+            session.conductorConcurrentRuns.removeFinishedRuns()
             let launcher = WorkspaceConductorRunLauncher(
                 workspaceSession: session,
                 runID: request.runID)
-            await session.conductorWorkflowController.start(request, launcher: launcher)
-            if case .failed(_, let reason) = session.conductorWorkflowController.state {
+            // C6: the concurrent coordinator owns the run for its lifetime and
+            // enforces the per-window cap, run-ID uniqueness, and distinct
+            // worktrees — it throws a typed, user-readable refusal instead of
+            // silently starting a colliding run.
+            let controller = try await session.conductorConcurrentRuns.start(
+                request,
+                launcher: launcher)
+            if case .failed(_, let reason) = controller.state {
                 workflowStartError = reason
                 return false
             }
-            return session.conductorWorkflowController.isInFlight
+            return controller.isInFlight
         } catch {
             workflowStartError =
                 (error as? LocalizedError)?.errorDescription

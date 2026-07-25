@@ -82,6 +82,45 @@ final class TerminalAttentionCenter {
         return session.terminal.sessions.first(where: { $0.id == sessionID })?.status == .bell
     }
 
+    // MARK: - Ensemble gate routes (C7)
+
+    // A gate notification arrives with no window context, exactly like a
+    // terminal reply, so it resolves through the same weak registry. Both
+    // routes are no-ops when no live window knows the run — a closed window
+    // must never resurrect anything.
+
+    /// Reveals the run's timeline in the owning window and focuses it (the
+    /// notification's Open Run action, and its default tap).
+    func openEnsembleRun(runID: String) {
+        guard let session = owningSession(ofRunID: runID) else { return }
+        session.showConductorRunDetail(runID)
+        WorkspaceWindowRegistry.shared.focus(session: session)
+    }
+
+    /// Approves the run's open STEP gate from the notification. Deliberately
+    /// refuses unless that step was marked `[gate:remote]` and the gate is
+    /// still open — the notification's action set is a UI affordance, not the
+    /// authority, so the decision is re-checked here against the manifest.
+    /// A merge gate is never approvable this way.
+    func approveEnsembleGate(runID: String) {
+        guard let session = owningSession(ofRunID: runID),
+            let controller = session.workflowController(forRunID: runID),
+            case .awaitingGate(let index) = controller.state,
+            let step = controller.manifest?.steps[index],
+            step.safeToApproveRemotely == true
+        else { return }
+        Task { await controller.approveGate() }
+    }
+
+    private func owningSession(ofRunID runID: String) -> WorkspaceSession? {
+        entries.removeAll { $0.session == nil }
+        for entry in entries {
+            guard let session = entry.session else { continue }
+            if session.conductorRuns.contains(where: { $0.id == runID }) { return session }
+        }
+        return nil
+    }
+
     private func owningSession(of sessionID: UUID) -> WorkspaceSession? {
         entries.removeAll { $0.session == nil }
         for entry in entries {

@@ -239,11 +239,79 @@ final class WorkspaceSession {
     @ObservationIgnored
     private(set) lazy var conductorWorkflowController: ConductorWorkflowController = {
         let controller = ConductorWorkflowController(runsPublisher: conductorRunController)
-        controller.onGateReady = { [weak self] runName, stepName in
-            self?.raiseConductorGateAttention(runName: runName, stepName: stepName)
+        controller.onGateReady = { [weak self] event in
+            self?.raiseConductorGateAttention(event)
         }
         return controller
     }()
+
+    /// This window's C6 bounded pool of pipeline engines — the durable owner
+    /// of every run started from the Runs panel. `conductorWorkflowController`
+    /// above remains the fallback for a run this pool no longer tracks (it
+    /// prunes completed/aborted runs) so historical selections still resolve.
+    /// Route every gate/abort/retry/reveal verb through
+    /// `workflowController(forRunID:)`, never the singular controller directly.
+    @ObservationIgnored
+    private(set) lazy var conductorConcurrentRuns: ConductorConcurrentRunCoordinator = {
+        let coordinator = ConductorConcurrentRunCoordinator(
+            runsPublisher: conductorRunController)
+        coordinator.onGateReady = { [weak self] event in
+            self?.raiseConductorGateAttention(event)
+        }
+        return coordinator
+    }()
+
+    /// Resolves the engine that owns `runID`: the concurrent pool first, then
+    /// the singular controller when its current manifest matches. Returns
+    /// `nil` for a historical run no live engine owns — callers must treat that
+    /// as "no verbs available", not as an error.
+    func workflowController(forRunID runID: String?) -> ConductorWorkflowController? {
+        guard let runID else { return nil }
+        if let owned = conductorConcurrentRuns.controller(runID: runID) { return owned }
+        return conductorWorkflowController.manifest?.id == runID
+            ? conductorWorkflowController : nil
+    }
+
+    /// The engine driving the run the UI is currently showing, if any.
+    var selectedWorkflowController: ConductorWorkflowController? {
+        workflowController(forRunID: selectedConductorRunID)
+    }
+
+    /// Adopts a persisted, interrupted run (C7 recovery) into a live engine so
+    /// its Retry Step / Abort / Keep Worktree verbs work in this app process.
+    /// Idempotent: a run already owned by an engine is returned as-is. Returns
+    /// `nil` when the run cannot be adopted — the caller then shows it as
+    /// read-only history rather than offering verbs that would do nothing.
+    @discardableResult
+    func adoptInterruptedRun(_ runID: String) -> ConductorWorkflowController? {
+        if let existing = workflowController(forRunID: runID) { return existing }
+        guard let rootURL,
+            let manifest = conductorRuns.first(where: { $0.id == runID }),
+            manifest.steps.contains(where: { $0.status == .interrupted })
+        else { return nil }
+
+        let launcher = WorkspaceConductorRunLauncher(workspaceSession: self, runID: runID)
+        // Adopted into the singular controller, not the concurrent pool: the
+        // pool's `start` is for NEW runs (it reserves a run id and materializes
+        // a worktree), while this run's worktree already exists on disk.
+        guard
+            conductorWorkflowController.restoreInterrupted(
+                manifest: manifest,
+                workspaceRoot: rootURL,
+                launcher: launcher)
+        else { return nil }
+        return conductorWorkflowController
+    }
+
+    /// Whether this window may start another pipeline. C6 deliberately allows
+    /// several at once, so this is a CAP check (`activeLimit`), not an
+    /// is-anything-running check — the pre-C6 guard was the latter and would
+    /// have silently kept the concurrency story unreachable.
+    var canStartConductorWorkflowRun: Bool {
+        conductorRunController.canStartNewRun
+            && !conductorWorkflowController.isInFlight
+            && conductorConcurrentRuns.activeCount < conductorConcurrentRuns.activeLimit
+    }
 
     let workspaceSearch = WorkspaceSearchModel()
 
@@ -643,7 +711,19 @@ final class WorkspaceSession {
     /// gate, so an unrecognized id simply drops reply routing silently —
     /// the same safe-by-construction fallback `TerminalAttentionCenter
     /// .deliverReply` already has for any unknown id.
-    func raiseConductorGateAttention(runName: String, stepName: String) {
+    /// Whether the notch companion is currently showing this run's tile, which
+    /// makes its own attention dot the signal for this gate (ADR 0016: one
+    /// attention surface at a time). Reads already-live observable state — no
+    /// polling, no extra work on the idle path.
+    private func notchCompanionShowsActiveRun(_ runID: String) -> Bool {
+        let companion = NotchCompanionModel.shared
+        guard companion.preferenceStore.isEnabled() else { return false }
+        return companion.activeRunItems.contains { $0.runID == runID }
+    }
+
+    func raiseConductorGateAttention(_ event: ConductorGateReadyEvent) {
+        let runName = event.workflowName
+        let stepName = event.agentName
         let preference = terminalAttentionSurfaceStore.surface()
         let eventID = UUID()
         // `runName`/`stepName` come from user-authored `.rafu/agents|
@@ -656,7 +736,12 @@ final class WorkspaceSession {
         let title = Self.boundedConductorAttentionString(runName)
         let body = "\(Self.boundedConductorAttentionString(stepName)) is ready for review."
 
-        if NotchHUDPolicy.surfaces(for: preference, authorized: false).hud {
+        // ADR 0016 arbitration: when the companion strip is already showing
+        // this run's progress tile, its own attention dot IS the signal — a
+        // second notch drop-down for the same gate would be two surfaces
+        // shouting the same thing.
+        let companionShowsRun = notchCompanionShowsActiveRun(event.runID)
+        if !companionShowsRun, NotchHUDPolicy.surfaces(for: preference, authorized: false).hud {
             resolvedAttentionHUD().show(
                 NotchHUDEvent(sessionID: eventID, title: title, snippet: body, color: nil),
                 theme: hudThemeProvider())
@@ -673,7 +758,15 @@ final class WorkspaceSession {
                 for: self.terminalAttentionSurfaceStore.surface(), authorized: authorized)
             guard surfaces.notification else { return }
             notifier.post(
-                TerminalAttentionNotification(sessionID: eventID, title: title, body: body))
+                TerminalAttentionNotification(
+                    sessionID: eventID,
+                    title: title,
+                    body: body,
+                    // Approve is offered ONLY for a `[gate:remote]` step gate;
+                    // every other gate offers Open Run alone.
+                    kind: .ensembleGate(
+                        runID: event.runID,
+                        allowsApprove: event.safeToApproveRemotely)))
         }
     }
 
@@ -1142,6 +1235,7 @@ final class WorkspaceSession {
     private func reloadConductorRuns(for url: URL) {
         Task { await conductorRunController.attachAndReload(workspaceRoot: url) }
         conductorWorkflowController.attach(workspaceRoot: url)
+        conductorConcurrentRuns.attach(workspaceRoot: url)
     }
 
     /// Starts (or restarts) the FSEvents watcher on the current root so

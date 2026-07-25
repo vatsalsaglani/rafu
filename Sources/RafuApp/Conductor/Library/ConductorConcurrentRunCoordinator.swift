@@ -43,6 +43,13 @@ final class ConductorConcurrentRunCoordinator {
     @ObservationIgnored
     private var attachmentGeneration = UUID()
 
+    /// Forwarded to every controller this coordinator creates, so a gate in a
+    /// concurrent run raises attention exactly like one in the window's
+    /// singular C5 controller. Wired once by `WorkspaceSession`; the
+    /// coordinator never posts anything itself.
+    @ObservationIgnored
+    var onGateReady: ((ConductorGateReadyEvent) -> Void)?
+
     init(
         runsPublisher: ConductorRunController,
         adapters: [any ConductorCLIAdapter] = ConductorAdapterRegistry.all,
@@ -93,6 +100,9 @@ final class ConductorConcurrentRunCoordinator {
         let controller = ConductorWorkflowController(
             runsPublisher: runsPublisher,
             adapters: adapters)
+        controller.onGateReady = { [weak self] event in
+            self?.onGateReady?(event)
+        }
         controller.attach(workspaceRoot: workspaceRoot)
         controllersByRunID[request.runID] = controller
 

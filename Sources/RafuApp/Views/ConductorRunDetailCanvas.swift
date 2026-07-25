@@ -43,14 +43,17 @@ struct ConductorRunDetailCanvas: View {
     /// snapshot in `session.conductorRuns` for a historical run.
     private var manifest: ConductorRunManifest? {
         guard let runID = session.conductorRunCanvasID else { return nil }
-        if session.conductorWorkflowController.manifest?.id == runID {
-            return session.conductorWorkflowController.manifest
+        if let live = session.workflowController(forRunID: runID)?.manifest, live.id == runID {
+            return live
         }
         return session.conductorRuns.first(where: { $0.id == runID })
     }
 
+    /// A run is "active" here when some live engine in this window still owns
+    /// it — that engine may be one of C6's concurrent controllers, not just
+    /// the window's singular one.
     private func isActiveRun(_ manifest: ConductorRunManifest) -> Bool {
-        session.conductorWorkflowController.manifest?.id == manifest.id
+        session.workflowController(forRunID: manifest.id)?.manifest?.id == manifest.id
     }
 
     private var tabStrip: some View {
@@ -96,10 +99,15 @@ private struct RunDetailContent: View {
     let isActiveRun: Bool
 
     var body: some View {
-        @Bindable var workflow = session.conductorWorkflowController
+        // The engine owning THIS run (C6: one of several concurrent
+        // controllers, or the window's singular one). `nil` for a historical
+        // run — every verb below is already gated on `isActiveRun`, so the
+        // optional chaining is belt-and-braces rather than the only guard.
+        let workflow = session.workflowController(forRunID: manifest.id)
         ScrollView {
             VStack(alignment: .leading, spacing: RafuMetrics.space3) {
                 headerCard
+                recoverySection
                 LazyVStack(alignment: .leading, spacing: RafuMetrics.space3) {
                     ForEach(stepRows) { row in
                         ConductorStepTimelineRow(
@@ -110,15 +118,15 @@ private struct RunDetailContent: View {
                                 session.openFile(atRelativePath: row.artifactRelativePath)
                             },
                             revealTerminal: {
-                                workflow.revealLiveTerminal(stepIndex: row.index, in: session)
+                                workflow?.revealLiveTerminal(stepIndex: row.index, in: session)
                             },
-                            approve: { Task { await workflow.approveGate() } },
-                            revise: { workflow.reviseArtifact(in: session) },
-                            retry: { Task { await workflow.retryFailedStep() } }
+                            approve: { Task { await workflow?.approveGate() } },
+                            revise: { workflow?.reviseArtifact(in: session) },
+                            retry: { Task { await workflow?.retryFailedStep() } }
                         )
                     }
                 }
-                if isActiveRun, manifest.gate?.kind == .merge {
+                if isActiveRun, manifest.gate?.kind == .merge, let workflow {
                     ConductorMergeGateSection(
                         files: workflow.mergeGateFiles,
                         error: workflow.mergeGateError,
@@ -138,6 +146,61 @@ private struct RunDetailContent: View {
             .padding(RafuMetrics.space4)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    /// C7 recovery: an interrupted run states plainly that its process was not
+    /// restored, and offers the three explicit verbs. There is deliberately no
+    /// generic "Resume" — nothing is resurrected (ADR 0004/0014).
+    @ViewBuilder
+    private var recoverySection: some View {
+        let interruptedIndex = manifest.steps.firstIndex { $0.status == .interrupted }
+        if let interruptedIndex {
+            VStack(alignment: .leading, spacing: RafuMetrics.space2) {
+                Label(
+                    manifest.recoveryNote
+                        ?? "The app closed while this step was running. Its process was not restored.",
+                    systemImage: "bolt.horizontal.circle.fill"
+                )
+                .font(.callout)
+                .foregroundStyle(theme.palette.textPrimary)
+                ConductorAdaptiveRow(spacing: 8) {
+                    Button("Retry Step") {
+                        guard let workflow = session.adoptInterruptedRun(manifest.id) else {
+                            return
+                        }
+                        Task { await workflow.retryInterruptedStep(interruptedIndex) }
+                    }
+                    .buttonStyle(RafuProminentButtonStyle())
+                    .accessibilityHint("Starts a fresh attempt for the interrupted step")
+                    Button("Abort") {
+                        session.adoptInterruptedRun(manifest.id)?.abortInterruptedRun()
+                    }
+                    .buttonStyle(RafuSecondaryButtonStyle())
+                    .accessibilityHint("Marks this run aborted; evidence and worktree are kept")
+                    if !manifest.worktreeBranch.isEmpty {
+                        Button("Keep Worktree") {
+                            session.adoptInterruptedRun(manifest.id)?.keepInterruptedWorktree()
+                        }
+                        .buttonStyle(RafuSecondaryButtonStyle())
+                        .accessibilityHint("Closes the run and leaves its branch for manual work")
+                    }
+                }
+            }
+            .padding(RafuMetrics.space3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(theme.palette.cardBackground)
+            .clipShape(
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
+            )
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Interrupted run recovery")
+        } else if let note = manifest.recoveryNote {
+            // e.g. a worktree removed outside Rafu: history-only, no verbs.
+            Label(note, systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(theme.palette.textMuted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private var headerCard: some View {
@@ -164,22 +227,32 @@ private struct RunDetailContent: View {
     }
 
     private var headerIdentity: some View {
-        ConductorAdaptiveRow(spacing: RafuMetrics.space2) {
-            Image(systemName: WorkspaceNavigatorMode.runs.symbolName)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(theme.palette.info)
-                .accessibilityHidden(true)
-            Text(manifest.workflowName)
-                .font(.body.weight(.semibold))
-                .foregroundStyle(theme.palette.textPrimary)
-                .accessibilityAddTraits(.isHeader)
-            RafuChip(
-                text: manifest.worktreeBranch.isEmpty
-                    ? "Main workspace" : manifest.worktreeBranch
-            )
-            .accessibilityLabel(
-                manifest.worktreeBranch.isEmpty
-                    ? "Main workspace" : "Worktree branch \(manifest.worktreeBranch)")
+        VStack(alignment: .leading, spacing: 3) {
+            ConductorAdaptiveRow(spacing: RafuMetrics.space2) {
+                Image(systemName: WorkspaceNavigatorMode.runs.symbolName)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(theme.palette.info)
+                    .accessibilityHidden(true)
+                Text(manifest.workflowName)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(theme.palette.textPrimary)
+                    .accessibilityAddTraits(.isHeader)
+                RafuChip(
+                    text: manifest.worktreeBranch.isEmpty
+                        ? "Main workspace" : manifest.worktreeBranch
+                )
+                .accessibilityLabel(
+                    manifest.worktreeBranch.isEmpty
+                        ? "Main workspace" : "Worktree branch \(manifest.worktreeBranch)")
+            }
+            // Whole-run totals, absent entirely when nothing was metered.
+            let runUsage = ConductorRunPresentation.runUsageLines(for: manifest)
+            if !runUsage.isEmpty {
+                Text("Run usage: \(runUsage.joined(separator: "  •  "))")
+                    .font(.caption)
+                    .foregroundStyle(theme.palette.textMuted)
+                    .accessibilityLabel("Run usage \(runUsage.joined(separator: ", "))")
+            }
         }
     }
 
@@ -187,9 +260,11 @@ private struct RunDetailContent: View {
         ConductorAdaptiveRow(spacing: RafuMetrics.space2) {
             RafuChip(text: String(manifest.baseCommit.prefix(8)), monospacedDigit: true)
                 .accessibilityLabel("Base commit \(manifest.baseCommit.prefix(8))")
-            if isActiveRun, session.conductorWorkflowController.isInFlight {
+            if isActiveRun, let workflow = session.workflowController(forRunID: manifest.id),
+                workflow.isInFlight
+            {
                 Button("Abort Run", systemImage: "xmark.circle", role: .destructive) {
-                    session.conductorWorkflowController.abort()
+                    workflow.abort()
                 }
                 .buttonStyle(RafuSecondaryButtonStyle())
                 .accessibilityHint(
@@ -199,15 +274,16 @@ private struct RunDetailContent: View {
     }
 
     private var stepRows: [ConductorStepRowModel] {
-        let liveIndex =
-            isActiveRun
-            ? ConductorRunPresentation.liveStepIndex(in: session.conductorWorkflowController.state)
-            : nil
+        var liveIndex: Int?
+        if isActiveRun, let state = session.workflowController(forRunID: manifest.id)?.state {
+            liveIndex = ConductorRunPresentation.liveStepIndex(in: state)
+        }
         return ConductorRunPresentation.stepRows(for: manifest, liveStepIndex: liveIndex)
     }
 
     private var failedStepIndex: Int? {
-        guard isActiveRun, case .failed(let index, _) = session.conductorWorkflowController.state
+        guard isActiveRun,
+            case .failed(let index, _) = session.workflowController(forRunID: manifest.id)?.state
         else { return nil }
         return index
     }
@@ -252,6 +328,19 @@ private struct ConductorStepTimelineRow: View {
                 if let attemptLabel = row.attemptLabel {
                     RafuChip(text: attemptLabel)
                 }
+            }
+            // Shown only when metering resolved an honest delta; a step with
+            // no data renders nothing rather than "0%" (C7).
+            if !row.usageLines.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(row.usageLines, id: \.self) { line in
+                        Text(line)
+                            .font(.caption)
+                            .foregroundStyle(theme.palette.textMuted)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Usage \(row.usageLines.joined(separator: ", "))")
             }
             ConductorAdaptiveRow(spacing: 8) {
                 Button("Open Artifact", action: openArtifact)
@@ -326,7 +415,7 @@ private struct ConductorStepTimelineRow: View {
         // `statusSymbol`'s string — symbols stay pure presentation output.
         switch row.status {
         case .failed: theme.palette.gitDeleted
-        case .awaitingGate: theme.palette.accent
+        case .awaitingGate, .interrupted: theme.palette.accent
         case .completed: theme.palette.gitAdded
         case .pending, .running, .aborted: theme.palette.textSecondary
         }

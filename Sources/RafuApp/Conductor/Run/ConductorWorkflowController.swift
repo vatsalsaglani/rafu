@@ -44,6 +44,29 @@ nonisolated struct ConductorWorkflowRunRequest: Sendable {
     }
 }
 
+/// A gate becoming ready. Typed rather than two loose strings so the
+/// notification layer can decide which ACTIONS to offer: `Approve` exists only
+/// when the workflow author opted that gate in (`[gate:remote]`), and never for
+/// a merge gate, which writes to the user's workspace.
+///
+/// Carries identity and names only — never artifact, prompt, or captured
+/// process output (ADR 0018).
+nonisolated struct ConductorGateReadyEvent: Equatable, Sendable {
+    nonisolated enum Kind: Equatable, Sendable {
+        case step
+        case merge
+    }
+
+    let runID: String
+    let kind: Kind
+    let stepIndex: Int
+    let workflowName: String
+    let agentName: String
+    /// `true` only for a `[gate:remote]` step gate. A merge gate is always
+    /// `false`.
+    let safeToApproveRemotely: Bool
+}
+
 /// Structural pipeline failures only — the same "never prompt, artifact, or
 /// process-output content" contract as `ConductorRunError`, with a step index
 /// attached where a failure is attributable to one step.
@@ -143,11 +166,12 @@ final class ConductorWorkflowController {
     }
 
     /// Raised the moment a gate parks the run (a step gate or the terminal
-    /// merge gate) — the Stage B attention/HUD seam. Deliberately carries
-    /// only the workflow name and the relevant agent name, never artifact or
-    /// prompt content.
+    /// merge gate) — the attention/HUD seam. Carries a typed event so the
+    /// notification layer can offer Approve only for a gate the workflow author
+    /// explicitly marked remotely approvable; it deliberately carries only
+    /// identity and names, never artifact or prompt content (C7).
     @ObservationIgnored
-    var onGateReady: ((_ workflowName: String, _ agentName: String) -> Void)?
+    var onGateReady: ((ConductorGateReadyEvent) -> Void)?
 
     @ObservationIgnored
     private(set) var store: ConductorRunStore?
@@ -202,12 +226,25 @@ final class ConductorWorkflowController {
     @ObservationIgnored
     private var resolvedAdapters: [ConductorResolvedAdapter] = []
 
+    /// Best-effort per-step metering (C7). Injectable so headless tests drive
+    /// fixture snapshots instead of the real provider registry.
+    @ObservationIgnored
+    private let usageMeter: ConductorRunUsageMeter
+
+    /// The reading taken immediately before each step launched, keyed by step
+    /// index. Dropped when the step finishes — a missing entry simply means
+    /// "no usage to record", never an error.
+    @ObservationIgnored
+    private var stepUsageStart: [Int: ConductorRunUsageSnapshot] = [:]
+
     init(
         runsPublisher: ConductorRunController,
-        adapters: [any ConductorCLIAdapter] = ConductorAdapterRegistry.all
+        adapters: [any ConductorCLIAdapter] = ConductorAdapterRegistry.all,
+        usageMeter: ConductorRunUsageMeter = ConductorRunUsageMeter()
     ) {
         self.runsPublisher = runsPublisher
         self.adapters = adapters
+        self.usageMeter = usageMeter
     }
 
     func adapter(for id: ConductorCLIID) -> (any ConductorCLIAdapter)? {
@@ -365,7 +402,10 @@ final class ConductorWorkflowController {
                     startedAt: nil,
                     finishedAt: nil,
                     attempt: 1,
-                    evidencePath: nil)
+                    evidencePath: nil,
+                    // Snapshotted now, so editing the workflow file mid-run
+                    // cannot make an already-open gate remotely approvable.
+                    safeToApproveRemotely: request.workflow.steps[index].safeToApproveRemotely)
             }
             let newManifest = ConductorRunManifest(
                 id: request.runID,
@@ -473,12 +513,19 @@ final class ConductorWorkflowController {
                 resolved: resolvedAdapters[index],
                 roleBadge: role.name)
 
+            // Metered immediately before launch so the delta brackets only
+            // this step's child. A provider that cannot be read yields no
+            // baseline, and the step simply records no usage (C7 honesty).
+            stepUsageStart[index] = await usageMeter.snapshot(at: Date())
+            try Self.requireCurrent(generation, activeGeneration)
+
             currentManifest.steps[index].status = .running
             currentManifest.steps[index].startedAt = Date()
             currentManifest.steps[index].finishedAt = nil
             currentManifest.steps[index].attempt = attempt
             currentManifest.steps[index].evidencePath = layout.stepComponents.joined(
                 separator: "/")
+            currentManifest.steps[index].usage = nil
             currentManifest.updatedAt = Date()
             manifest = currentManifest
             runsPublisher.publish(currentManifest)
@@ -526,6 +573,11 @@ final class ConductorWorkflowController {
             let exists = await evidenceService.artifactExists(at: evidence.artifactURL)
             try? Task.checkCancellation()
             guard let self, self.activeGeneration == generation else { return }
+            // Recorded for EVERY terminal outcome, success or failure: a step
+            // that failed still consumed quota, and hiding that would be the
+            // dishonest reading C7 exists to avoid.
+            await self.recordStepUsage(index)
+            guard self.activeGeneration == generation else { return }
             switch ConductorStepOutcome.of(exitCode: exitCode, artifactExists: exists) {
             case .completed:
                 await self.stepDidComplete(index)
@@ -542,6 +594,214 @@ final class ConductorWorkflowController {
             }
             self.operationTask = nil
         }
+    }
+
+    // MARK: - Recovery (C7)
+
+    /// Adopts a persisted run the relaunch janitor marked `.interrupted`, so
+    /// its verbs become reachable in this app process. Starts NOTHING and
+    /// resurrects no process (ADR 0004/0014) — it only re-establishes enough
+    /// context for Retry Step / Abort / Keep Worktree.
+    ///
+    /// The workspace plan is rebuilt from the manifest itself (base commit,
+    /// worktree branch, and the run-id-derived worktree path), so a caller
+    /// needs nothing a relaunched app does not already have on disk.
+    ///
+    /// Returns `false` when there is nothing to adopt — this controller is
+    /// already busy, or no step is interrupted — so the caller leaves the run
+    /// as read-only history rather than showing dead verbs.
+    @discardableResult
+    func restoreInterrupted(
+        manifest restored: ConductorRunManifest,
+        workspaceRoot: URL,
+        launcher: any ConductorRunProcessLaunching
+    ) -> Bool {
+        guard !isInFlight else { return false }
+        guard restored.steps.contains(where: { $0.status == .interrupted }) else { return false }
+
+        attach(workspaceRoot: workspaceRoot)
+        let root = workspaceRoot.standardizedFileURL
+        let worktreeURL: URL? =
+            restored.worktreeBranch.isEmpty
+            ? nil
+            : ConductorRunRecoveryService.worktreeURL(workspaceRoot: root, runID: restored.id)
+        manifest = restored
+        plan = ConductorWorkspacePlan(
+            repositoryRoot: root,
+            executionRoot: worktreeURL ?? root,
+            baseCommit: restored.baseCommit,
+            branchName: restored.worktreeBranch.isEmpty ? nil : restored.worktreeBranch,
+            worktreeURL: worktreeURL)
+        activeLauncher = launcher
+        activeGeneration = UUID()
+        stepEvidence = [:]
+        stepSessionIDs = [:]
+        activeSessionID = nil
+        state = .idle
+        return true
+    }
+
+    /// Relaunches an interrupted step from the evidence the previous app
+    /// process already wrote: its persisted `prompt.md` is reused verbatim
+    /// (never recomposed, never an adapter-native `--resume`), the saved
+    /// provider binding is re-probed, and a FRESH attempt directory receives
+    /// the new evidence so the interrupted attempt stays intact.
+    func retryInterruptedStep(_ index: Int) async {
+        guard !isInFlight, let currentManifest = manifest, let plan,
+            currentManifest.steps.indices.contains(index),
+            currentManifest.steps[index].status == .interrupted,
+            let store, let launcher = activeLauncher
+        else { return }
+
+        let step = currentManifest.steps[index]
+        let generation = UUID()
+        activeGeneration = generation
+        state = .preparing
+
+        do {
+            // The prompt the interrupted attempt actually used. Without it
+            // there is nothing honest to relaunch, so this fails loudly rather
+            // than inventing a prompt.
+            guard let priorEvidencePath = step.evidencePath else {
+                throw ConductorWorkflowError.unableToPersistEvidence(step: index)
+            }
+            let priorPromptURL = store.directory
+                .runDirectoryURL(for: currentManifest.id)
+                .appending(path: priorEvidencePath, directoryHint: .isDirectory)
+                .appending(path: "prompt.md", directoryHint: .notDirectory)
+            let prompt = try await Self.readPersistedPrompt(at: priorPromptURL)
+            try Self.requireCurrent(generation, activeGeneration)
+
+            guard let adapter = adapter(for: step.binding.provider) else {
+                throw ConductorWorkflowError.adapterUnavailable(step: index)
+            }
+            let resolved = try await roleLaunch.resolve(adapter)
+            try Self.requireCurrent(generation, activeGeneration)
+
+            let attempt = (step.attempt ?? 1) + 1
+            let layout = ConductorRunEvidenceLayout.step(
+                index: index, agentName: step.agentName, attempt: attempt)
+            let evidence = try await evidenceService.prepare(
+                directory: store.directory,
+                runID: currentManifest.id,
+                layout: layout,
+                handoffArtifact: step.handoffArtifact,
+                prompt: prompt)
+            try Self.requireCurrent(generation, activeGeneration)
+            stepEvidence[index] = evidence
+
+            let role = ConductorAgentDefinition(
+                name: step.agentName,
+                provider: step.binding.provider,
+                model: step.binding.model,
+                autonomy: step.binding.autonomy,
+                handoffArtifact: step.handoffArtifact,
+                promptBody: "")
+            let specification = roleLaunch.specification(
+                role: role,
+                prompt: prompt,
+                evidence: evidence,
+                plan: plan,
+                resolved: resolved,
+                roleBadge: step.agentName)
+
+            stepUsageStart[index] = await usageMeter.snapshot(at: Date())
+            try Self.requireCurrent(generation, activeGeneration)
+
+            var updated = currentManifest
+            updated.steps[index].status = .running
+            updated.steps[index].startedAt = Date()
+            updated.steps[index].finishedAt = nil
+            updated.steps[index].attempt = attempt
+            updated.steps[index].evidencePath = layout.stepComponents.joined(separator: "/")
+            updated.steps[index].usage = nil
+            updated.recoveryNote = nil
+            updated.updatedAt = Date()
+            manifest = updated
+            runsPublisher.publish(updated)
+
+            state = .runningStep(index: index)
+            let sessionID = try launcher.launch(specification: specification) {
+                [weak self] sessionID, exitCode in
+                self?.processDidExit(sessionID: sessionID, exitCode: exitCode)
+            }
+            activeSessionID = sessionID
+            stepSessionIDs[index] = sessionID
+        } catch is CancellationError {
+            guard activeGeneration == generation else { return }
+            markAborted()
+        } catch {
+            guard activeGeneration == generation else { return }
+            recordFailure(
+                step: index,
+                reason: (error as? LocalizedError)?.errorDescription
+                    ?? "Rafu could not retry step \(index + 1).")
+        }
+    }
+
+    /// Marks an adopted interrupted run aborted. Touches no evidence and no
+    /// worktree — the user's work is never deleted by a state change.
+    func abortInterruptedRun() {
+        guard var currentManifest = manifest, !isInFlight else { return }
+        for index in currentManifest.steps.indices
+        where currentManifest.steps[index].status == .interrupted {
+            currentManifest.steps[index].status = .aborted
+            currentManifest.steps[index].finishedAt = Date()
+        }
+        currentManifest.gate = nil
+        currentManifest.recoveryNote = nil
+        currentManifest.updatedAt = Date()
+        manifest = currentManifest
+        runsPublisher.publish(currentManifest)
+        state = .aborted
+    }
+
+    /// Leaves the attributed branch and worktree in place for manual handling
+    /// and closes the run out. Nothing is removed.
+    func keepInterruptedWorktree() {
+        guard var currentManifest = manifest, !isInFlight else { return }
+        for index in currentManifest.steps.indices
+        where currentManifest.steps[index].status == .interrupted {
+            currentManifest.steps[index].status = .aborted
+            currentManifest.steps[index].finishedAt = Date()
+        }
+        currentManifest.gate = nil
+        currentManifest.recoveryNote =
+            "The run worktree was kept for manual handling."
+        currentManifest.updatedAt = Date()
+        manifest = currentManifest
+        runsPublisher.publish(currentManifest)
+        state = .completed
+    }
+
+    /// Reads a persisted prompt off the main actor, bounded so a corrupted or
+    /// enormous evidence file cannot be pulled wholesale into memory.
+    @concurrent
+    private static func readPersistedPrompt(at url: URL) async throws -> String {
+        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+        guard !data.isEmpty, data.count <= 1_048_576,
+            let text = String(data: data, encoding: .utf8)
+        else {
+            throw ConductorWorkflowError.emptyTaskPrompt
+        }
+        return text
+    }
+
+    /// Resolves and persists this step's usage delta, if metering produced an
+    /// honest one. Writes nothing when there is no baseline, no resolvable
+    /// delta, or the step vanished from the manifest — never a zero.
+    private func recordStepUsage(_ index: Int) async {
+        guard let start = stepUsageStart.removeValue(forKey: index) else { return }
+        guard let steps = manifest?.steps, steps.indices.contains(index) else { return }
+        let attempt = steps[index].attempt ?? 1
+        guard let record = await usageMeter.finish(from: start, attempt: attempt, at: Date())
+        else { return }
+        guard var currentManifest = manifest, currentManifest.steps.indices.contains(index)
+        else { return }
+        currentManifest.steps[index].usage = record
+        currentManifest.updatedAt = Date()
+        manifest = currentManifest
+        runsPublisher.publish(currentManifest)
     }
 
     /// Marks the step complete; parks at a step gate when the workflow file
@@ -561,7 +821,15 @@ final class ConductorWorkflowController {
 
         if gateAfter {
             state = .awaitingGate(index: index)
-            onGateReady?(currentManifest.workflowName, currentManifest.steps[index].agentName)
+            onGateReady?(
+                ConductorGateReadyEvent(
+                    runID: currentManifest.id,
+                    kind: .step,
+                    stepIndex: index,
+                    workflowName: currentManifest.workflowName,
+                    agentName: currentManifest.steps[index].agentName,
+                    safeToApproveRemotely: currentManifest.steps[index].safeToApproveRemotely
+                        ?? false))
         } else {
             await advance(after: index)
         }
@@ -584,7 +852,16 @@ final class ConductorWorkflowController {
             manifest = currentManifest
             runsPublisher.publish(currentManifest)
             state = .awaitingMergeGate
-            onGateReady?(currentManifest.workflowName, currentManifest.steps[index].agentName)
+            // A merge gate applies a diff to the user's workspace, so it is
+            // NEVER remotely approvable regardless of any step marker.
+            onGateReady?(
+                ConductorGateReadyEvent(
+                    runID: currentManifest.id,
+                    kind: .merge,
+                    stepIndex: index,
+                    workflowName: currentManifest.workflowName,
+                    agentName: currentManifest.steps[index].agentName,
+                    safeToApproveRemotely: false))
             await refreshMergeGateFiles()
         } else {
             currentManifest.gate = nil
