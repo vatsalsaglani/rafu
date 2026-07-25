@@ -19,6 +19,26 @@ func commandPaletteFuzzyRankingIsStable() {
     #expect(ranked == [0, 1, 2])
 }
 
+@Test("Palette arrow selection wraps at both ends")
+func paletteSelectionWraps() {
+    #expect(PaletteSelection.moved(from: 0, by: 1, count: 3) == 1)
+    #expect(PaletteSelection.moved(from: 2, by: 1, count: 3) == 0)
+    #expect(PaletteSelection.moved(from: 0, by: -1, count: 3) == 2)
+    #expect(PaletteSelection.moved(from: 0, by: 1, count: 1) == 0)
+}
+
+/// Regression: the palette's row set is replaced asynchronously as the file
+/// query resolves, so a selection can outlive the list it was made against.
+/// Arrowing from a stale index must re-anchor to the last row rather than
+/// wrap modulo the new (smaller) count onto an unrelated row.
+@Test("Palette arrow selection re-anchors an out-of-bounds index")
+func paletteSelectionReanchorsStaleIndex() {
+    #expect(PaletteSelection.moved(from: 40, by: 1, count: 3) == 0)
+    #expect(PaletteSelection.moved(from: 40, by: -1, count: 3) == 1)
+    #expect(PaletteSelection.moved(from: -3, by: 1, count: 3) == 1)
+    #expect(PaletteSelection.moved(from: 5, by: 1, count: 0) == 0)
+}
+
 @Test("Palette query parser maps prefixes to modes and trims the term")
 func paletteQueryParserModes() {
     #expect(PaletteQueryParser.parse("") == .init(mode: .files, term: ""))
