@@ -26,6 +26,8 @@ capped child runs; a stray shell gets exit 77.
 (C8-02's verb reference — you append to it);
 `docs/references/conductor-pty-spawn-and-child-environment.md` (curated
 env — the token rides the overlay, never `childEnvironment`);
+`docs/references/agent-terminals.md` (AT-01's per-CLI interactive-launch
+table — reuse, extend only on gaps);
 `Sources/RafuApp/Conductor/Ensemble/ConductorEnsembleRequestService.swift`
 and `ConductorEnsembleEventCenter.swift` (C8-02's shapes);
 `swift-concurrency-pro` skill for the token store and launch path.
@@ -115,9 +117,11 @@ injectable RNG/clock for tests):
      prompt form where the adapter documents one, else launch bare and
      write the goal to the terminal input? **No — never synthesize
      input.** If the CLI has no prompt-argument form, launch bare; the
-     goal is shown in the sheet for the user to paste. Record which form
-     each of the seven CLIs supports in the reference note (probe
-     `--help`; treat shapes as hypotheses per the adapter ground rule).
+     goal is shown in the sheet for the user to paste. The per-CLI
+     interactive-launch table already exists —
+     `docs/references/agent-terminals.md` (AT-01, merged in wave 1).
+     REUSE it; probe and extend it only where the coordinator path
+     exposes a gap, keeping its verified/hypothesis markers.
      Environment = `RafuConductorEnvironment.curatedPath` PATH +
      `RAFU_ENSEMBLE_TOKEN` (+ nothing else new). cwd = workspace root
      (checkout — amendment decision 4). `roleBadge` "Coordinator",
@@ -247,15 +251,17 @@ Append `run/abort/note/grant` (+ JSON shapes, 75/77 semantics) to
 `docs/references/ensemble-ipc-verbs.md`. NEW
 `docs/references/ensemble-consent-and-token.md`: token lifecycle
 (mint→inject→validate→revoke; re-grant on relaunch), grant enforcement
-table, the coordinator interactive-launch findings per CLI (which of the
-seven accept an initial-prompt argument — probed evidence), the
-worker-env invariance proof. Intended index rows go in your report.
+table, a pointer to AT-01's per-CLI interactive-launch table in
+`agent-terminals.md` (plus any coordinator-path extensions you made to
+it), the worker-env invariance proof. Intended index rows go in your
+report.
 
 ## Handoff report
 
-Delivered behavior; changed paths; test evidence; per-CLI
-interactive-launch probe results (verified vs. hypothesis); remaining
-risks; docs; branch name; commit messages; `git rev-parse HEAD`.
+Delivered behavior; changed paths; test evidence; any extensions made
+to AT-01's per-CLI interactive-launch table (verified vs. hypothesis);
+remaining risks; docs; branch name; commit messages;
+`git rev-parse HEAD`.
 
 ---
 
@@ -285,9 +291,11 @@ startedBy/label written by the workflow engine, the notes store, and the
 run-detail Notes section. The plan file is your authoritative design
 contract, edit list, and test list — read it FIRST, then AGENTS.md, the
 conductor README ground rules, ADR 0018 WITH its Amendment,
-docs/references/ensemble-ipc-verbs.md, and
-docs/references/conductor-pty-spawn-and-child-environment.md. Use the
-swift-concurrency-pro skill for the token store and launch path.
+docs/references/ensemble-ipc-verbs.md,
+docs/references/conductor-pty-spawn-and-child-environment.md, and
+docs/references/agent-terminals.md (AT-01's per-CLI interactive-launch
+table — reuse it for the coordinator launch; extend only on gaps). Use
+the swift-concurrency-pro skill for the token store and launch path.
 
 HARD CONSTRAINTS: the token is in-memory only — never persisted, never
 logged, never in a manifest, never in captured output, never echoed in
@@ -322,7 +330,7 @@ DEFINITION OF DONE:
    after landing everything independent of them.
 
 FINAL REPORT (mandatory): delivered behavior; changed paths; test
-evidence; per-CLI interactive-launch probe results (verified vs
-hypothesis); remaining risks; docs written; branch name; every commit
-message; last commit id from `git rev-parse HEAD`.
+evidence; any extensions made to AT-01's interactive-launch table
+(verified vs hypothesis); remaining risks; docs written; branch name;
+every commit message; last commit id from `git rev-parse HEAD`.
 ```

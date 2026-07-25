@@ -267,3 +267,15 @@ seven worktree plans across four waves — `C8-01` … `C8-07`, branches
 `conductor/c8-01-consent-docs` through `conductor/c8-07-onboarding`. Each
 plan document ends with its self-contained goal-mode agent prompt; C8-01
 owns updating the stale handoff wording above.
+
+**Agent Terminals (AT) follow C8:**
+[`AT-execution-plan.md`](AT-execution-plan.md) plans the muxy-style agent
+terminal — any discovered + authed CLI one action away from an interactive
+terminal session with agent identity in the chrome — and its single honest
+Ensemble seam (capability decided at spawn: same sheet, a grant toggle
+routes through the coordinator launcher). `AT-01`
+(`conductor/at-01-agent-terminals`) **runs in C8 wave 1, starting now** —
+it owns the agent-icon catalog and the per-CLI interactive-launch probe
+table that C8-06/C8-03 consume; `AT-02`
+(`conductor/at-02-ensemble-bridge`) follows C8 wave 3 + AT-01. Plus
+ADR 0021.

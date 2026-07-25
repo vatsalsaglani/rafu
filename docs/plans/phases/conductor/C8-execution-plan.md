@@ -54,9 +54,16 @@
 
 Wave rules:
 
-- **Wave 1** runs C8-01 (docs only) and C8-02 (code) in parallel — disjoint
-  paths by construction.
-- **Wave 2** branches from `main` only after BOTH wave-1 branches merged.
+- **Wave 1** runs C8-01 (docs only), C8-02 (code), **and AT-01**
+  (`conductor/at-01-agent-terminals`, see
+  [`AT-execution-plan.md`](AT-execution-plan.md)) in parallel. AT-01
+  owns the agent-icon catalog (`ConductorCLIIcons` + four SVGs + staging
+  asserts) and the per-CLI interactive-launch probe table — C8-06 and
+  C8-03 consume both. C8-02 and AT-01 touch disjoint regions of
+  `ConductorCore.swift` and `WorkspaceSession.swift`; merge the two
+  serially.
+- **Wave 2** branches from `main` only after ALL wave-1 branches merged
+  (C8-01, C8-02, AT-01).
   C8-03 and C8-06 run in parallel; their `WorkspaceSession.swift` edits are
   anchored to different regions and each plan names its exact insertion
   points.
@@ -80,8 +87,9 @@ worktree branch only contains what `main` has committed.
 
 ```bash
 # Wave 1
-git worktree add ../rafu-c8-consent -b conductor/c8-01-consent-docs
-git worktree add ../rafu-c8-ipc     -b conductor/c8-02-ipc-streaming
+git worktree add ../rafu-c8-consent   -b conductor/c8-01-consent-docs
+git worktree add ../rafu-c8-ipc       -b conductor/c8-02-ipc-streaming
+git worktree add ../rafu-at-terminals -b conductor/at-01-agent-terminals
 # Wave 2 (after both wave-1 branches merge to main)
 git worktree add ../rafu-c8-verbs   -b conductor/c8-03-mutating-verbs
 git worktree add ../rafu-c8-canvas  -b conductor/c8-06-graph-canvas
@@ -104,12 +112,13 @@ must include the branch name, every commit message, and the last commit id
 | Shared file | Owned by | Everyone else |
 |---|---|---|
 | `Sources/RafuCore/Launcher/IPC/LauncherIPCProtocol.swift` | C8-02, then additive kinds by C8-03/C8-04 (post-merge, serial) | do not touch |
-| `Sources/RafuApp/Conductor/ConductorCore.swift` | C8-02 (`startedBy`, `label`, `mergedAt`), C8-04 (`Gate.Kind.plan`, `Step.proposals`) — additive `var … ? = nil` only | do not touch |
-| `Sources/RafuApp/Models/WorkspaceSession.swift` | C8-03 (coordinator-session seam), C8-06 (graph-canvas seam), C8-07 (sheet flag) — named anchors, additive | do not touch |
+| `Sources/RafuApp/Conductor/ConductorCore.swift` | C8-02 (`startedBy`, `label`, `mergedAt`), AT-01 (`TerminalProcessSpec.agentProvider`, wave 1 parallel — disjoint region), C8-04 (`Gate.Kind.plan`, `Step.proposals`) — additive `var … ? = nil` only | do not touch |
+| `Sources/RafuApp/Models/WorkspaceSession.swift` | AT-01 (terminal seam ~933, wave 1), C8-03 (coordinator-session seam), C8-06 (graph-canvas seam), C8-07 (sheet flag) — named anchors, additive | do not touch |
 | `Sources/RafuApp/Views/ConductorRunsPanelView.swift` | C8-06 (wave 2), then C8-07 (wave 3, post-merge) | C8-03 must NOT touch it |
 | `Sources/RafuApp/App/RafuAppCommands.swift`, `Views/CommandPaletteView.swift` | C8-06 (wave 2), C8-07 (wave 3) | C8-04 must NOT touch them |
 | `Package.swift` | C8-05 only (one `.copy` resource line) | do not touch |
-| `script/build_and_run.sh` | C8-06 only (icon staging asserts) | do not touch |
+| `script/build_and_run.sh` | AT-01 only (icon staging asserts — transferred from C8-06) | do not touch |
+| `Sources/RafuApp/Conductor/ConductorCLIIcons.swift` + `Resources/FileIcons/` | AT-01 creates; C8-06 consumes | do not touch |
 
 ## Definition of done for C8 as a whole
 

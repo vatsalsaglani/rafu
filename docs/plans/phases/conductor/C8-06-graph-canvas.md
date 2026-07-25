@@ -1,8 +1,12 @@
 # C8-06 — The interactive graph canvas, agent icons, activity feed
 
 - **Status:** Ready. Branch: `conductor/c8-06-graph-canvas` (from `main`
-  AFTER C8-02 has merged — verify `ConductorRunManifest.startedBy` exists;
-  missing ⇒ STOP and report). Wave 2 — runs parallel with C8-03.
+  AFTER wave 1 has merged — verify BOTH `ConductorRunManifest.startedBy`
+  (C8-02) AND `ConductorCLIIcons` in
+  `Sources/RafuApp/Conductor/ConductorCLIIcons.swift` (AT-01, which
+  joined wave 1 and owns the icon catalog + SVGs — see
+  `AT-execution-plan.md`); either missing ⇒ STOP and report). Wave 2 —
+  runs parallel with C8-03.
 - **This is the cockpit.** It must feel immediate, legible, and native —
   the C8-ux doc calls comprehension the make-or-break surface.
 
@@ -35,7 +39,6 @@ discipline: views switch on semantic status, never on symbol strings);
 ## Owned paths
 
 - NEW `Sources/RafuApp/Conductor/Run/ConductorGraphModel.swift`
-- NEW `Sources/RafuApp/Conductor/ConductorCLIIcons.swift`
 - NEW `Sources/RafuApp/Views/ConductorGraphCanvas.swift`
 - `Sources/RafuApp/Views/EditorCanvasView.swift` (one additive branch +
   emptiness guard)
@@ -47,10 +50,8 @@ discipline: views switch on semantic status, never on symbol strings);
   ("Show Ensemble Graph" entries)
 - `Sources/RafuApp/Conductor/Run/ConductorRunPresentation.swift` (graph
   node helpers, additive)
-- NEW `Resources/FileIcons/{opencode,cline,kimi,cursor}.svg`
-- `script/build_and_run.sh` (staging asserts for the four SVGs)
 - NEW tests `Tests/RafuAppTests/Conductor/GraphModelTests.swift`,
-  `GraphCanvasRoutingTests.swift`; extend `FileIconAssetsTests.swift`
+  `GraphCanvasRoutingTests.swift`
 - `docs/plans/phases/conductor/ensemble-manual-test-plan.md` (NEW section
   K); NEW `docs/references/ensemble-graph-canvas.md`; this plan's status
   line.
@@ -58,7 +59,10 @@ discipline: views switch on semantic status, never on symbol strings);
 **Forbidden:** `Package.swift`, `ConductorCore.swift`, engine files
 (`ConductorWorkflowController`, `ConductorRunController`), everything in
 `Sources/RafuApp/Conductor/Ensemble/` (C8-03 owns it this wave),
-`ConductorRunDetailCanvas.swift` (C8-03 adds its Notes section), Settings.
+`ConductorRunDetailCanvas.swift` (C8-03 adds its Notes section), Settings,
+`ConductorCLIIcons.swift` + `Resources/FileIcons/` + `script/` (AT-01
+owns the icon catalog, assets, and staging asserts — consume, never
+edit; a needed catalog change is a HANDOFF).
 
 ## Design contract
 
@@ -194,22 +198,16 @@ isolated (the C5 precedent — one commit).
 - `CommandPaletteView.swift`: `PaletteCommand(id: "conductor.show-graph",
   title: "Ensemble: Show Graph", keywords: ["ensemble","graph","runs"])`.
 
-### Agent icons (`ConductorCLIIcons.swift` + SVGs)
+### Agent icons — CONSUME, do not create
 
-- `claude.svg`, `codex.svg`, `gemini.svg` already exist in
-  `Resources/FileIcons/`. ADD `opencode.svg`, `cline.svg`, `kimi.svg`,
-  `cursor.svg`: **monochrome, template-style (`currentColor`), simple
-  geometric letterform badges** (rounded-rect outline + "OC", "CL",
-  "K", "▮|" cursor-caret mark). Do NOT imitate vendor logos — these are
-  honest placeholders, visually consistent, tinted like symbols
-  (`FileIconView` + `assetIsTemplate: true`).
-- `ConductorCLIIcons.icon(for id: ConductorCLIID) -> FileIconProvider.Icon`
-  mapping all seven (assetName + `assetIsTemplate: true`, symbol
-  fallback `terminal` with `.secondary` tint). Rendered in graph nodes
-  (14 pt badge), and reused by the Activity feed rows.
-- `script/build_and_run.sh`: add four `test -f
-  "$APP_RESOURCES/FileIcons/<name>.svg"` lines beside the existing
-  staging assertions (~lines 184–186).
+`ConductorCLIIcons.icon(for:)` and the seven SVG assets already exist —
+AT-01 (wave 1) owns the catalog, the four new letterform SVGs, and the
+`build_and_run.sh` staging asserts (transfer recorded in
+`AT-execution-plan.md`). This plan only RENDERS the catalog: a 14 pt
+template-tinted provider badge on every graph node (CLI name in `.help`
+and the accessibility label) and on Activity feed rows. If the catalog
+API does not fit a canvas need, that is a HANDOFF with a proposed diff,
+never an edit.
 
 ### Runs panel additions
 
@@ -236,16 +234,14 @@ isolated (the C5 precedent — one commit).
   `showConductorRunDetail` and `revealTerminalSession` clear the graph;
   close falls back to last document; second-window independence (two
   sessions, one graph visible each — state ownership).
-- `FileIconAssetsTests`: four new assets load; `ConductorCLIIcons`
-  covers all seven `ConductorCLIID` cases (exhaustive switch — compiler
-  enforced, plus a runtime allCases test).
 - Presentation: `graphNode(for:live:)` glyphs are shape-distinct and
-  labeled (extend the existing shape-distinctness test pattern).
+  labeled (extend the existing shape-distinctness test pattern). Icon
+  coverage tests live in AT-01; do not duplicate them.
 
 ## Gates
 
 `swift build` 0 warnings; `swift test` + `--no-parallel`; format
-`--fix`/`--lint`; `xmllint --noout` on the four new SVGs. HEADLESS ONLY —
+`--fix`/`--lint`. HEADLESS ONLY —
 the staged-app GUI pass (canvas eyeball, second window, keyboard
 reachability, VoiceOver spot-check) happens on `main` post-merge; list it
 in your report as pending coordinator verification.
@@ -281,17 +277,20 @@ Branch: conductor/c8-06-graph-canvas. Preflight: run `git status --short
 wrong branch + clean tree → checkout the branch if it exists, else
 `git checkout -b conductor/c8-06-graph-canvas main`, then proceed and say
 so. Dirty tree with edits you did not make → STOP. Then verify the
-prerequisite: ConductorRunManifest has a `startedBy` property
-(Sources/RafuApp/Conductor/ConductorCore.swift). Missing ⇒ STOP and
-report — C8-02 has not merged.
+prerequisites: ConductorRunManifest has a `startedBy` property
+(Sources/RafuApp/Conductor/ConductorCore.swift) AND
+Sources/RafuApp/Conductor/ConductorCLIIcons.swift exists (AT-01's icon
+catalog). Either missing ⇒ STOP and report — wave 1 has not fully
+merged.
 
 GOAL: implement docs/plans/phases/conductor/C8-06-graph-canvas.md — the
 interactive Ensemble graph canvas as a new editor-canvas mode
 (ConductorGraphModel pure layout + ConductorGraphCanvas view), the
-WorkspaceSession/EditorCanvasView routing seam, per-agent icons for all
-seven CLIs (four new template SVGs + ConductorCLIIcons mapping + staging
-asserts), the Runs panel Activity segment fed by the event center, the
-startedBy attribution chip, and the menu/palette entries. The plan file
+WorkspaceSession/EditorCanvasView routing seam, provider badges on every
+node rendered from AT-01's ConductorCLIIcons catalog (consume only —
+never edit the catalog, assets, or script), the Runs panel Activity
+segment fed by the event center, the startedBy attribution chip, and
+the menu/palette entries. The plan file
 is your authoritative design contract, edit list, and test list — read
 it FIRST, then AGENTS.md (interface rules), the conductor README ground
 rules, C8-coordinator-ux.md's canvas sections, and copy the
@@ -305,10 +304,12 @@ color alone; every node verb also has a menu/context path; layout math
 never runs in body; no decorative motion on state changes; panels pin
 top; internal symbols Conductor*, user-visible strings "Ensemble". DO
 NOT touch Package.swift, ConductorCore.swift, engine files,
-ConductorRunDetailCanvas.swift, Settings, or anything under
-Sources/RafuApp/Conductor/Ensemble/ (C8-03 owns those this wave).
-HEADLESS ONLY — never run build_and_run.sh or launch Rafu.app; list the
-required GUI checks for the coordinator instead.
+ConductorRunDetailCanvas.swift, Settings, anything under
+Sources/RafuApp/Conductor/Ensemble/ (C8-03 owns those this wave), or
+ConductorCLIIcons.swift / Resources/FileIcons/ / script/ (AT-01 owns
+the icon catalog, assets, and staging asserts — a needed catalog change
+is a HANDOFF). HEADLESS ONLY — never run build_and_run.sh or launch
+Rafu.app; list the required GUI checks for the coordinator instead.
 
 DEFINITION OF DONE:
 1. ConductorGraphModel.build is pure, deterministic, and tested:
@@ -321,9 +322,9 @@ DEFINITION OF DONE:
 3. Clicking a node performs its state's primary verb (terminal reveal /
    artifact open / evidence open / gate verbs inline) through
    workflowController(forRunID:) — wired, not decorative.
-4. All seven ConductorCLIID cases resolve an icon (exhaustive switch +
-   test); four new monochrome template SVGs pass xmllint and are
-   staged-asserted in build_and_run.sh.
+4. Every node renders its provider badge via AT-01's ConductorCLIIcons
+   with the CLI name in the accessibility label (consumption only —
+   icon coverage tests live in AT-01, not here).
 5. Activity segment + attribution chips render from real data, top-
    pinned, bounded.
 6. swift build 0 warnings; swift test AND swift test --no-parallel
