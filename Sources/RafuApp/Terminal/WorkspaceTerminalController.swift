@@ -35,6 +35,14 @@ final class WorkspaceTerminalManager {
     @ObservationIgnored
     private var parkCounter = 0
 
+    /// Names this manager's owning window for `MemoryTimeline` rows. A
+    /// closure rather than a stored string because the workspace (and so
+    /// the display name) can change under a live window; wired lazily in
+    /// `WorkspaceSession.installTerminalHandlersIfNeeded()` alongside the
+    /// other callbacks, and harmlessly empty until then.
+    @ObservationIgnored
+    var memoryTimelineSource: (@MainActor () -> String)?
+
     /// Invoked whenever any session's shell exits naturally (never on an
     /// explicit `close`/`shutdown`). `WorkspaceSession` wires this lazily —
     /// see `installTerminalHandlersIfNeeded()`.
@@ -81,6 +89,9 @@ final class WorkspaceTerminalManager {
         }
         sessions.append(session)
         selectedID = session.id
+        MemoryTimeline.shared.note(
+            .terminalOpened, detail: session.displayName,
+            source: memoryTimelineSource?() ?? "")
         return session
     }
 
@@ -106,6 +117,9 @@ final class WorkspaceTerminalManager {
         }
         sessions.append(session)
         selectedID = session.id
+        MemoryTimeline.shared.note(
+            .terminalOpened, detail: session.displayName,
+            source: memoryTimelineSource?() ?? "")
         return session
     }
 
@@ -122,8 +136,12 @@ final class WorkspaceTerminalManager {
     /// nearest remaining session.
     func close(_ id: UUID) {
         guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
+        let closedName = sessions[index].displayName
         sessions[index].shutdown()
         sessions.remove(at: index)
+        MemoryTimeline.shared.note(
+            .terminalClosed, detail: closedName,
+            source: memoryTimelineSource?() ?? "")
         if selectedID == id {
             selectedID =
                 sessions.indices.contains(index)

@@ -533,6 +533,7 @@ final class WorkspaceSession {
     private func installTerminalHandlersIfNeeded() {
         guard !didInstallTerminalHandlers else { return }
         didInstallTerminalHandlers = true
+        terminal.memoryTimelineSource = { [weak self] in self?.memoryTimelineSource ?? "" }
         terminal.sessionDidExit = { [weak self] sessionID, exitCode in
             self?.terminalSessionDidExit(sessionID, exitCode: exitCode)
         }
@@ -1070,12 +1071,23 @@ final class WorkspaceSession {
         }
         let hibernating = DocumentHibernationPolicy.hibernating(
             documents: inputs, underMemoryPressure: bypassNewestGrace)
+        // Only newly-hibernated documents are worth a timeline entry. This
+        // runs on every selection change, so filing an event unconditionally
+        // would bury real activity under a row per tab switch.
+        var newlyHibernated = 0
         for document in openDocuments {
             if hibernating.contains(document.id) {
+                if document.loadState != .hibernated { newlyHibernated += 1 }
                 document.markHibernated()
             } else {
                 document.markLoaded()
             }
+        }
+        if newlyHibernated > 0 {
+            MemoryTimeline.shared.note(
+                .documentsHibernated,
+                detail: newlyHibernated == 1 ? "1 tab" : "\(newlyHibernated) tabs",
+                source: memoryTimelineSource)
         }
     }
 
@@ -1807,6 +1819,11 @@ final class WorkspaceSession {
             fileIndexState = await fileIndex.currentState
             fileIndexGeneration += 1
             indexRebuildTask = nil
+            if case .ready(let count, _) = fileIndexState {
+                MemoryTimeline.shared.note(
+                    .fileIndexBuilt, detail: "\(count) files",
+                    source: memoryTimelineSource)
+            }
             if indexRebuildQueued {
                 indexRebuildQueued = false
                 requestFileIndexRebuild()
@@ -1899,6 +1916,9 @@ final class WorkspaceSession {
                 gitCommitMessage = mergeState.defaultMessage
             }
             reconcileGitSelection()
+            MemoryTimeline.shared.note(
+                .gitRefreshed, detail: "\(snapshot.changes.count) changes",
+                source: memoryTimelineSource)
         } catch {
             reportGitError(error)
         }
@@ -1958,10 +1978,20 @@ final class WorkspaceSession {
         registerDocument(EditorDocument(url: url))
     }
 
+    /// Which window a `MemoryTimeline` event came from. Every Rafu window
+    /// shares one process and therefore one timeline, so an event with no
+    /// source is indistinguishable from one another window just filed.
+    /// Empty before a workspace is opened — a window with nothing in it has
+    /// no name worth showing.
+    var memoryTimelineSource: String { descriptor?.displayName ?? "" }
+
     private func registerDocument(_ document: EditorDocument) -> EditorDocument {
         openDocuments.append(document)
         documentFindStates[document.id] = DocumentFindState()
         languageIntelligence.documentDidOpen(document)
+        MemoryTimeline.shared.note(
+            .documentOpened, detail: document.url.lastPathComponent,
+            source: memoryTimelineSource)
         return document
     }
 
@@ -2086,6 +2116,9 @@ final class WorkspaceSession {
         }
         documentFindStates[document.id] = nil
         languageIntelligence.documentDidClose(document)
+        MemoryTimeline.shared.note(
+            .documentClosed, detail: document.url.lastPathComponent,
+            source: memoryTimelineSource)
         synchronizeSelectionFromLayout(
             fallback: openDocuments.indices.contains(index)
                 ? openDocuments[index] : openDocuments.last
@@ -2815,6 +2848,9 @@ final class WorkspaceSession {
             )
             selectedDocumentID = nil
             selectedTreePath = rootURL.appending(path: change.path).path
+            MemoryTimeline.shared.note(
+                .diffOpened, detail: (change.path as NSString).lastPathComponent,
+                source: memoryTimelineSource)
         } catch is CancellationError {
             return
         } catch {
@@ -2861,6 +2897,9 @@ final class WorkspaceSession {
             )
             selectedDocumentID = nil
             selectedTreePath = rootURL.appending(path: change.path).path
+            MemoryTimeline.shared.note(
+                .diffOpened, detail: (change.path as NSString).lastPathComponent,
+                source: memoryTimelineSource)
         } catch is CancellationError {
             return
         } catch {
@@ -2875,6 +2914,9 @@ final class WorkspaceSession {
 
     func closeGitDiff() {
         let wasSelected = selectedDocumentID == nil
+        if gitOpenDiff != nil {
+            MemoryTimeline.shared.note(.diffClosed, source: memoryTimelineSource)
+        }
         gitOpenDiff = nil
         // A run diff opened from the run-detail canvas (C5) returns to the
         // timeline, not a document fallback — the canvas is still hosting.

@@ -59,6 +59,9 @@ final class WorkspaceSearchModel {
                 try Task.checkCancellation()
                 self?.result = result
                 self?.isSearching = false
+                MemoryTimeline.shared.note(
+                    .searchCompleted, detail: "\(result.totalMatchCount) matches",
+                    source: rootURL.lastPathComponent)
             } catch is CancellationError {
                 return
             } catch {

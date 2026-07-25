@@ -43,7 +43,7 @@ struct WorkspaceStatusBar: View {
             .accessibilityLabel("Show Resources")
             .help("Show Resources")
             .popover(isPresented: $session.isResourcesPresented) {
-                ResourcesView(coordinator: session.languageIntelligence)
+                ResourcesView(coordinator: session.languageIntelligence, session: session)
             }
 
             Text(descriptor == nil ? "Ready" : "Local editor")

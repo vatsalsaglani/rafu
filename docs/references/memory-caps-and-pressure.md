@@ -64,7 +64,8 @@ Each cap is measured independently and fails fast with a clear error (e.g., `out
 **Polling audit:**
 
 - Comprehensive grep search of the codebase for `Timer`, `DispatchSourceTimer`, `Task.sleep`-based loops, and `RunLoop` polling yielded zero standing-poll timers in the category of real background work.
-- Approved visible-only samplers: `ResourcesView.swift:54-65` and `WorkspaceStatusBar.swift:51-65` (only while the view is visible; `.task` loop exits on disappear).
+- Approved visible-only samplers: `ResourcesView.swift` and `WorkspaceStatusBar.swift` (only while the view is visible; `.task` loop exits on disappear).
+- Approved one-shot event readings (added 2026-07-26): `MemoryTimeline.note(_:detail:)` spawns a single `Task` that sleeps `settleDelay` (400 ms) and takes one `task_info` reading. One Task per user-visible action, no repetition, nothing scheduled when the app is idle — the same category as the one-shot toast reset below, not a poll. See [`memory-attribution-and-timeline.md`](memory-attribution-and-timeline.md).
 - Legit kernel-bounded work: `WorkspaceLivenessService.swift:218-225` (FSEvents 400ms trailing debounce, not a poll).
 - Short-lived subprocess wait: `GitCommandRunner.swift:75-79` (20ms while a git process is alive; only during active git operation).
 - One-shot toast reset: `AIThemeGeneratorSection.swift:81` (not a loop).

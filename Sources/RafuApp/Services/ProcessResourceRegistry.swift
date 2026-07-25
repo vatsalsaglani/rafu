@@ -13,7 +13,10 @@ actor ProcessResourceRegistry {
     /// single source of truth for every process Rafu spawns.
     static let shared = ProcessResourceRegistry()
 
-    nonisolated enum ProcessKind: Sendable {
+    /// `String`-raw-valued and `Hashable` so `MemoryComposition` can group
+    /// sampled rows by kind and give each section a stable `Identifiable` id
+    /// across the Resources popover's refreshes.
+    nonisolated enum ProcessKind: String, Sendable, Hashable, CaseIterable {
         case terminalShell
         case git
         case languageServer

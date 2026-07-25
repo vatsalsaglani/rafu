@@ -68,5 +68,10 @@ final class MemoryPressureMonitor {
         for session in sessions.allObjects {
             session.respondToMemoryPressure()
         }
+        // Filed AFTER the shed so the reading reflects what pressure
+        // response actually released — the Resources timeline's most
+        // important row, since this is the one event the user did not cause.
+        MemoryTimeline.shared.note(
+            .memoryPressure, detail: event.contains(.critical) ? "critical" : "warning")
     }
 }
