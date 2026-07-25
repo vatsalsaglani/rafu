@@ -439,7 +439,9 @@ nonisolated struct ConductorAdapterProbeSupport: Sendable {
     }
 
     private var discoverySearchPath: String {
-        Self.deduplicatedAbsolutePath(hostSearchPath, RafuConductorEnvironment.curatedPath)
+        Self.deduplicatedAbsolutePath(
+            hostSearchPath,
+            RafuConductorEnvironment.discoverySearchPath(hostSearchPath: hostSearchPath))
     }
 
     private func commandEnvironment(for executableURL: URL) -> [String: String] {
@@ -525,7 +527,7 @@ nonisolated final class ClaudeCodeAdapter: ConductorCLIAdapter, Sendable {
     func authStatus() async -> AdapterAuthStatus {
         guard let outcome = await probeSupport.authOutcome(arguments: ["auth", "status", "--json"])
         else {
-            return .unknown
+            return .unknown()
         }
         return Self.authStatus(from: outcome)
     }
@@ -575,14 +577,14 @@ nonisolated final class ClaudeCodeAdapter: ConductorCLIAdapter, Sendable {
     }
 
     static func authStatus(from outcome: ConductorProbeCommandOutcome) -> AdapterAuthStatus {
-        guard case .completed(let completion) = outcome else { return .unknown }
+        guard case .completed(let completion) = outcome else { return .unknown() }
         switch completion.terminationStatus {
         case 0:
             return .authenticated
         case 1:
             return .notAuthenticated(hint: "run `claude` in a terminal and log in")
         default:
-            return .unknown
+            return .unknown()
         }
     }
 

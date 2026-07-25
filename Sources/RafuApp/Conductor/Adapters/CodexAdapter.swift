@@ -36,7 +36,7 @@ nonisolated final class CodexAdapter: ConductorCLIAdapter, Sendable {
     @concurrent
     func authStatus() async -> AdapterAuthStatus {
         guard let outcome = await probeSupport.authOutcome(arguments: ["login", "status"]) else {
-            return .unknown
+            return .unknown()
         }
         return Self.authStatus(from: outcome)
     }
@@ -90,14 +90,14 @@ nonisolated final class CodexAdapter: ConductorCLIAdapter, Sendable {
     }
 
     static func authStatus(from outcome: ConductorProbeCommandOutcome) -> AdapterAuthStatus {
-        guard case .completed(let completion) = outcome else { return .unknown }
+        guard case .completed(let completion) = outcome else { return .unknown() }
         switch completion.terminationStatus {
         case 0:
             return .authenticated
         case 1:
             return .notAuthenticated(hint: "run `codex login` in a terminal")
         default:
-            return .unknown
+            return .unknown()
         }
     }
 

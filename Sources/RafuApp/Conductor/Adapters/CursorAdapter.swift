@@ -86,10 +86,10 @@ nonisolated struct CursorAdapter: ConductorCLIAdapter {
     }
 
     func authStatus() async -> AdapterAuthStatus {
-        guard !Task.isCancelled else { return .unknown }
+        guard !Task.isCancelled else { return .unknown() }
         guard let executableURL = cache.load() ?? Self.findExecutable(currentPath: currentPath)
         else {
-            return .unknown
+            return .unknown()
         }
         guard
             let result = await CursorProbeProcess.run(
@@ -100,7 +100,7 @@ nonisolated struct CursorAdapter: ConductorCLIAdapter {
                 outputLimit: Self.outputLimit,
                 resourceName: "Cursor CLI auth-status probe")
         else {
-            return .unknown
+            return .unknown()
         }
         return Self.classifyAuthStatus(
             exitCode: result.exitCode,
@@ -158,7 +158,7 @@ nonisolated struct CursorAdapter: ConductorCLIAdapter {
         output: String,
         timedOut: Bool = false
     ) -> AdapterAuthStatus {
-        guard !timedOut else { return .unknown }
+        guard !timedOut else { return .unknown() }
         let normalized = stripANSI(output).lowercased()
         let negativeMarkers = [
             "not logged in",
@@ -175,7 +175,7 @@ nonisolated struct CursorAdapter: ConductorCLIAdapter {
         {
             return .authenticated
         }
-        return .unknown
+        return .unknown()
     }
 
     static func helpSupportsInvocation(_ output: String) -> Bool {
@@ -189,7 +189,7 @@ nonisolated struct CursorAdapter: ConductorCLIAdapter {
         currentPath: String?,
         fileManager: FileManager = .default
     ) -> URL? {
-        let combinedPath = [currentPath, RafuConductorEnvironment.curatedPath]
+        let combinedPath = [currentPath, RafuConductorEnvironment.discoverySearchPath()]
             .compactMap(\.self)
             .joined(separator: ":")
         var visited = Set<String>()

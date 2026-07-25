@@ -2,13 +2,39 @@ import Foundation
 
 /// Cline 3.0.46 adapter. The installed CLI verifies direct positional
 /// headless prompts, a real plan mode, explicit auto-approval, cwd/model
-/// selection, and JSON output. Cline exposes neither a safe auth-status
-/// command nor a CLI model-listing command, so those answers remain honest
-/// `unknown`/`nil`.
+/// selection, and JSON output.
+///
+/// Cline exposes no auth-status command Rafu can use headlessly (see
+/// `authStatus()`), and no `models` subcommand — `cline config` accepts only
+/// `workflows|rules|skills|agents|plugins|hooks|mcp|tools`. It DOES ship its
+/// full model catalog on disk inside its own package
+/// (`@cline/llms/dist/models.js`), so `discoverModels()` reads that instead:
+/// local, offline, no credentials, and exactly matching the installed
+/// version.
 nonisolated struct ClineAdapter: ConductorCLIAdapter {
     let id = ConductorCLIID.cline
     let defaultEnabled = true
-    let supportsModelDiscovery = false
+    // Discovery reads Cline's own bundled catalog rather than a CLI command
+    // (it has none). Any failure falls back to `curatedModels()`.
+    let supportsModelDiscovery = true
+
+    /// The catalog is ~800 KB of minified JS; the JSON we ask Node to emit is
+    /// far smaller, but cap it anyway so a future format change cannot stream
+    /// unbounded output into Rafu.
+    static let maximumModelOutputBytes = 512 * 1_024
+
+    /// Prints `[{"id":…,"name":…}]` for the given provider from Cline's own
+    /// bundled catalog. The catalog path arrives as `argv[2]`, never
+    /// interpolated into this source, so a path containing quotes cannot
+    /// alter the script.
+    static let catalogScript = """
+        import * as catalog from process.argv[1];
+        const models = await catalog.getModelsForProvider(process.argv[2]);
+        const list = Array.isArray(models) ? models : Object.values(models ?? {});
+        process.stdout.write(JSON.stringify(
+            list.filter((m) => m && typeof m.id === "string")
+                .map((m) => ({ id: m.id, name: typeof m.name === "string" ? m.name : m.id }))));
+        """
 
     private let runtime: C3AdapterRuntime
     private let state: C3AdapterProbeState
@@ -51,9 +77,17 @@ nonisolated struct ClineAdapter: ConductorCLIAdapter {
     }
 
     func authStatus() async -> AdapterAuthStatus {
-        // `cline auth` configures credentials, while `cline config` may
-        // expose credential material. Neither is a safe status probe.
-        .unknown
+        // Verified against Cline 3.0.46: there is NO non-interactive
+        // sign-in check. `cline auth` performs authentication rather than
+        // reporting it; `cline config` and `cline mcp` both refuse without a
+        // TTY ("interactive mode requires a TTY"), and the only headless
+        // commands (`version`, `history --json`) say nothing about the
+        // account. Reading `~/.cline/data/settings/providers.json` would mean
+        // reading a 0600 credential store, which ADR 0018 forbids outright.
+        // So this is honestly unknown — and says why.
+        .unknown(
+            reason:
+                "Cline's CLI has no non-interactive sign-in check, so Rafu cannot read its status. This does not block runs — sign in with `cline auth`.")
     }
 
     func curatedModels() -> [ConductorModelChoice] {
@@ -77,7 +111,83 @@ nonisolated struct ClineAdapter: ConductorCLIAdapter {
         ]
     }
 
-    func discoverModels() async -> [ConductorModelChoice]? { nil }
+    /// Reads the model catalog Cline ships inside its own package. Every
+    /// failure path — CLI not found, no sibling `node`, catalog moved or
+    /// renamed by a Cline update, unparseable output — falls back to the
+    /// curated list rather than surfacing an empty or invented picker.
+    func discoverModels() async -> [ConductorModelChoice]? {
+        guard let executableURL = await resolveExecutable(),
+            let node = Self.siblingNodeURL(of: executableURL),
+            let catalog = Self.catalogURL(for: executableURL)
+        else {
+            return curatedModels()
+        }
+        let result = await runtime.run(
+            node,
+            ["--input-type=module", "-e", Self.catalogScript, catalog.path, Self.providerID],
+            C3AdapterProcess.probeEnvironment(for: executableURL),
+            C3AdapterProcess.modelTimeout,
+            Self.maximumModelOutputBytes)
+        guard result.succeeded,
+            let parsed = Self.parseCatalogModels(result.standardOutput),
+            !parsed.isEmpty
+        else {
+            return curatedModels()
+        }
+        return parsed
+    }
+
+    /// Cline's default provider (`-P, --provider <id>`, default `cline`).
+    static let providerID = "cline"
+
+    /// `node` beside the resolved `cline` — true for nvm, Homebrew, and npm
+    /// global prefixes alike, and guaranteed to be the interpreter that
+    /// actually runs this Cline (its shebang is `#!/usr/bin/env node`).
+    static func siblingNodeURL(of executableURL: URL) -> URL? {
+        let node = executableURL.resolvingSymlinksInPath()
+            .deletingLastPathComponent()
+            .appending(path: "node", directoryHint: .notDirectory)
+        // The resolved cline lives in `lib/node_modules/cline/bin/`, so also
+        // try the launcher's own directory, where nvm keeps `node`.
+        let launcherSibling = executableURL
+            .deletingLastPathComponent()
+            .appending(path: "node", directoryHint: .notDirectory)
+        for candidate in [launcherSibling, node]
+        where FileManager.default.isExecutableFile(atPath: candidate.path) {
+            return candidate
+        }
+        return nil
+    }
+
+    /// `<cline package>/node_modules/@cline/llms/dist/models.js`, derived from
+    /// the RESOLVED executable (`.../cline/bin/cline`).
+    static func catalogURL(for executableURL: URL) -> URL? {
+        let packageRoot = executableURL.resolvingSymlinksInPath()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let catalog = packageRoot
+            .appending(path: "node_modules/@cline/llms/dist/models.js", directoryHint: .notDirectory)
+        guard FileManager.default.fileExists(atPath: catalog.path) else { return nil }
+        return catalog
+    }
+
+    /// Parses the bounded JSON the catalog script prints. Entries without a
+    /// usable id are dropped rather than rendered as blanks.
+    static func parseCatalogModels(_ output: String) -> [ConductorModelChoice]? {
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = trimmed.data(using: .utf8),
+            let raw = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { return nil }
+        var seen: Set<String> = []
+        return raw.compactMap { entry in
+            guard let id = entry["id"] as? String,
+                !id.isEmpty,
+                seen.insert(id).inserted
+            else { return nil }
+            let name = (entry["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? id
+            return ConductorModelChoice(id: id, displayName: name, source: .discovered)
+        }
+    }
 
     func invocation(
         prompt: String,

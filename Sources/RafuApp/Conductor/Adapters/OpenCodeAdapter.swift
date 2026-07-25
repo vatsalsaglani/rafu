@@ -134,9 +134,11 @@ nonisolated enum C3AdapterProcess {
     @concurrent
     static func resolveExecutable(name: String, candidates: [URL]) async -> URL? {
         let fileManager = FileManager.default
-        let inheritedSearchPath =
-            ProcessInfo.processInfo.environment[RafuConductorEnvironment.path]
-            ?? RafuConductorEnvironment.curatedPath
+        // Host PATH + curated + version-manager directories. The previous
+        // `host ?? curated` PREFERRED the host value, which under launchd is
+        // the near-empty `/usr/bin:/bin:/usr/sbin:/sbin` — so a GUI-launched
+        // Rafu silently lost even the curated entries.
+        let inheritedSearchPath = RafuConductorEnvironment.discoverySearchPath()
         let result = await run(
             executableURL: URL(fileURLWithPath: "/usr/bin/which"),
             arguments: [name],
@@ -438,7 +440,7 @@ nonisolated struct OpenCodeAdapter: ConductorCLIAdapter {
     }
 
     func authStatus() async -> AdapterAuthStatus {
-        guard let executableURL = await resolveExecutable() else { return .unknown }
+        guard let executableURL = await resolveExecutable() else { return .unknown() }
         let result = await runtime.run(
             executableURL,
             ["auth", "list", "--pure"],
@@ -553,7 +555,7 @@ nonisolated struct OpenCodeAdapter: ConductorCLIAdapter {
     static func classifyAuthStatus(
         _ result: C3AdapterCommandResult
     ) -> AdapterAuthStatus {
-        guard result.succeeded else { return .unknown }
+        guard result.succeeded else { return .unknown() }
         let output = C3AdapterText.stripANSI(result.combinedText).lowercased()
 
         for line in output.split(whereSeparator: \.isNewline)
@@ -574,7 +576,7 @@ nonisolated struct OpenCodeAdapter: ConductorCLIAdapter {
             return .notAuthenticated(
                 hint: "No OpenCode credentials reported; run `opencode auth login` in a terminal.")
         }
-        return .unknown
+        return .unknown()
     }
 
     static func parseDiscoveredModels(

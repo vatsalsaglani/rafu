@@ -324,7 +324,14 @@ nonisolated struct AdapterProbe: Equatable, Sendable {
 nonisolated enum AdapterAuthStatus: Equatable, Sendable {
     case authenticated
     case notAuthenticated(hint: String)
-    case unknown
+    /// Rafu could not determine sign-in state. `reason` explains WHY when the
+    /// adapter knows — e.g. the CLI offers no non-interactive status command —
+    /// so the row can say something better than a bare shrug. `nil` means the
+    /// probe simply returned nothing conclusive.
+    ///
+    /// Unknown NEVER blocks a run: auth status is informational, and the CLI
+    /// itself remains the authority at launch time (ADR 0018 delegated auth).
+    case unknown(reason: String? = nil)
 }
 
 /// One resolved child-process launch. Argument ARRAY only — never a shell
@@ -444,6 +451,90 @@ nonisolated enum RafuConductorEnvironment {
         let localBin = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".local/bin", isDirectory: true).path
         return "/usr/local/bin:/opt/homebrew/bin:\(localBin):/usr/bin:/bin:/usr/sbin:/sbin"
+    }
+
+    /// Directories where Node/Bun version managers put globally installed
+    /// CLIs. **DISCOVERY ONLY** — this is never handed to a child process;
+    /// the child's `PATH` stays `curatedPath` plus, at most, the parent
+    /// directory of the executable an adapter actually resolved (ADR 0018's
+    /// minimal, explicit, non-inherited child environment).
+    ///
+    /// Why this exists: Rafu.app launched from Finder inherits launchd's
+    /// minimal `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`) — NOT the login
+    /// shell's. A CLI installed under nvm therefore resolves fine when you
+    /// run `which cline` in Terminal and is invisible to the running app,
+    /// which reads as a flatly wrong "Not found on this Mac".
+    ///
+    /// nvm keeps a directory per installed Node version, so those are
+    /// enumerated newest-name-first; everything else is a single fixed
+    /// directory. Nonexistent entries are dropped, so this costs one shallow
+    /// directory read on a machine that uses none of them.
+    static var versionManagerBinDirectories: [URL] {
+        let manager = FileManager.default
+        let home = manager.homeDirectoryForCurrentUser
+        var directories: [URL] = []
+
+        // nvm / nodenv / n keep one directory per installed version.
+        let versioned: [(root: String, suffix: String)] = [
+            (".nvm/versions/node", "bin"),
+            (".fnm/node-versions", "installation/bin"),
+            ("n/versions/node", "bin"),
+            (".nodenv/versions", "bin"),
+        ]
+        for entry in versioned {
+            let root = home.appendingPathComponent(entry.root, isDirectory: true)
+            guard
+                let children = try? manager.contentsOfDirectory(
+                    at: root, includingPropertiesForKeys: nil)
+            else { continue }
+            for child in children.sorted(by: { $0.lastPathComponent > $1.lastPathComponent }) {
+                directories.append(child.appendingPathComponent(entry.suffix, isDirectory: true))
+            }
+        }
+
+        // Single fixed directories.
+        for fixed in [
+            ".volta/bin",
+            ".asdf/shims",
+            ".bun/bin",
+            ".deno/bin",
+            ".config/yarn/global/node_modules/.bin",
+            ".yarn/bin",
+            ".npm-global/bin",
+        ] {
+            directories.append(home.appendingPathComponent(fixed, isDirectory: true))
+        }
+
+        return directories.filter { url in
+            var isDirectory: ObjCBool = false
+            let exists = manager.fileExists(atPath: url.path, isDirectory: &isDirectory)
+            return exists && isDirectory.boolValue
+        }
+    }
+
+    /// The search path adapters DISCOVER with: the host's own `PATH` (rich
+    /// when Rafu was launched from a shell, near-useless under launchd),
+    /// then the curated entries, then version-manager directories.
+    /// Deduplicated, absolute components only.
+    ///
+    /// Deliberately distinct from `curatedPath`: widening where Rafu will
+    /// LOOK for a CLI is not the same as widening what a child inherits, and
+    /// only the former is safe to derive from the user's environment.
+    static func discoverySearchPath(
+        hostSearchPath: String = ProcessInfo.processInfo.environment[
+            RafuConductorEnvironment.path] ?? ""
+    ) -> String {
+        var seen: Set<String> = []
+        var components: [String] = []
+        let candidates =
+            hostSearchPath.split(separator: ":").map(String.init)
+            + curatedPath.split(separator: ":").map(String.init)
+            + versionManagerBinDirectories.map(\.path)
+        for component in candidates
+        where component.hasPrefix("/") && seen.insert(component).inserted {
+            components.append(component)
+        }
+        return components.joined(separator: ":")
     }
 
     /// The minimal, explicit environment every Conductor child receives: the

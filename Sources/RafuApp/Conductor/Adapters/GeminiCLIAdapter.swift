@@ -87,7 +87,7 @@ nonisolated struct GeminiCLIAdapter: ConductorCLIAdapter {
     /// Gemini CLI has no verified, non-interactive auth-status command.
     /// Rafu deliberately does not infer authentication by opening
     /// `~/.gemini` files or reading API-key environment values.
-    func authStatus() async -> AdapterAuthStatus { .unknown }
+    func authStatus() async -> AdapterAuthStatus { .unknown() }
 
     func curatedModels() -> [ConductorModelChoice] { Self.curatedModelChoices }
 
@@ -156,7 +156,7 @@ nonisolated struct GeminiCLIAdapter: ConductorCLIAdapter {
         currentPath: String?,
         fileManager: FileManager = .default
     ) -> URL? {
-        let combinedPath = [currentPath, RafuConductorEnvironment.curatedPath]
+        let combinedPath = [currentPath, RafuConductorEnvironment.discoverySearchPath()]
             .compactMap(\.self)
             .joined(separator: ":")
         var visited = Set<String>()

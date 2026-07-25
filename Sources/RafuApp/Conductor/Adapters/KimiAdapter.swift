@@ -53,7 +53,7 @@ nonisolated struct KimiAdapter: ConductorCLIAdapter {
     func authStatus() async -> AdapterAuthStatus {
         // Current docs expose interactive `kimi login`, but no metadata-only
         // status command that is safe to classify without reading config.
-        .unknown
+        .unknown()
     }
 
     func curatedModels() -> [ConductorModelChoice] {
