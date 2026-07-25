@@ -76,6 +76,8 @@ steps:
 | A1b | Compare each row against `which <cli>` in a terminal | They must agree. A CLI that resolves in your shell but reads "Not found" in Rafu is the launchd-PATH bug (fixed 2026-07-25, see `docs/references/gui-app-path-and-cli-discovery.md`) — report it with the output of `which <cli>`. |
 | A2 | Read the footer text under the rows | It says Rafu runs your existing CLIs under your own subscriptions and never stores a sign-in token. |
 | A3 | Open a model picker on Claude Code | Model choices appear, plus a way to type a custom id. Nothing here should claim a model exists that you know does not. |
+| A4 | Open **Settings → Ensemble** | The `ensemble-with-rafu` coordinator skill card renders. Its line says **Skill 1 • Rafu 1** with no mismatch warning; a mismatch must show both a warning glyph and explanatory text. |
+| A5 | Click **Install for Claude Code**, then repeat it; finally edit one installed file and click again | Five files land under `~/.claude/skills/ensemble-with-rafu/`, and the result line names that exact path. The second install is idempotent (0 written, 0 replaced, 5 skipped). After the edit, Rafu asks before replacing anything; Cancel preserves the edit and confirmed replacement reports the replaced count. |
 
 **Watch for:** any row claiming a CLI is available that you know is not
 installed. Honesty here is the whole point — a false positive is a bug.
