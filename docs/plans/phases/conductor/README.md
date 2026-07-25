@@ -250,6 +250,11 @@ user accepted Route B on 2026-07-25;
 experience — no chat UI (the terminal tab is the conversation), a guided
 entry point that makes agent/workflow files an output rather than a
 prerequisite, a live graph canvas projected from the manifest, and
-hub-and-spoke coordination with a bounded grant. Both documents remain
+hub-and-spoke coordination with a bounded grant.
+[`C8-cli-and-skill-spec.md`](C8-cli-and-skill-spec.md) specs the concrete
+surface: the `rafu ensemble` verb set with JSON shapes and exit codes, the
+run-scoped capability token that authorizes spawning, the
+`ensemble-with-rafu` skill pack, three worked orchestration examples, and a
+build order. All three documents remain
 exploratory: no ADR amendment, branch, or owned paths yet. Three of the five
 open handoffs above are C8 prerequisites.

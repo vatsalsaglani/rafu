@@ -4,7 +4,7 @@
   `NotchCompanionModel`, `AgentUsageProvider`/`CodexUsageProvider`/
   `ClaudeUsageProvider`), and the ADR 0016 attention-surface arbitration
 - Last verified: Swift 6.2, macOS 26, 2026-07-22 (real on-notch-hardware
-  GUI verification)
+  GUI verification); rule 11 added 2026-07-26
 
 ## Rule or observed behavior
 
@@ -154,6 +154,26 @@ disclosure line) always cap at 2 windows. Emphasis (≥80% accent-semibold,
 assertion of per-row growth (matches other internal pure derivations like
 `usageFrontLine`).
 
+**11. On a multi-display setup the notch surfaces belong to the NOTCHED
+screen, not the active one.** `NotchScreenAdapter.currentMetrics()`
+originally resolved one screen as `NSApp.keyWindow?.screen ?? NSScreen.main
+?? NSScreen.screens.first`. In extended-desktop use that is the external
+monitor whenever the user is working there, which silently disabled both
+notch surfaces on the built-in display: the v1 drop-down fell back to the
+external's top-center non-notch layout, and the companion strip vanished
+outright, because `NotchCompanionGeometry.restingStripFrame` returns `nil`
+without a notch and `activateIfEnabled()` tears the panel down on `nil`.
+Symptom from the user's chair: "the notch is empty until I drag the Rafu
+window back onto the laptop." The adapter now collects candidates in
+preference order (key-window screen, `NSScreen.main`, then all screens) and
+runs them through the pure `NotchScreenSelection.preferred(from:)`, which
+returns the first candidate with a derivable notch rect and only falls back
+to `candidates.first` when NO attached screen has one (clamshell, desktop
+Mac, external-only) — preserving the follow-the-active-window behavior for
+the non-notch fallback layout. General rule: a surface that exists to
+occupy fixed physical hardware must be anchored to the display owning that
+hardware, never to whichever display currently has focus.
+
 ## Why it matters
 
 The companion is a persistent, always-on overlay near the menu bar; any
@@ -193,6 +213,7 @@ rg -n "makeKey\(\)" Sources/RafuApp
 rg -n "auxiliaryTopLeftArea|auxiliaryTopRightArea|safeAreaInsets" Sources/RafuApp/Notch
 rg -n "isReplyEngaged|isSearchEngaged|updateKeyStatus|clearKeyEngagement" Sources/RafuApp/Terminal/NotchCompanionModel.swift
 rg -n "filteredEditorRows|searchFieldThreshold" Sources/RafuApp/Terminal/NotchCompanionPolicy.swift Sources/RafuApp/Terminal/NotchCompanionModel.swift
+rg -n "NotchScreenSelection|currentMetrics" Sources/RafuApp/Terminal
 ```
 
 ## Related code, ADRs, and phases
@@ -209,6 +230,9 @@ rg -n "filteredEditorRows|searchFieldThreshold" Sources/RafuApp/Terminal/NotchCo
   (`CompanionEditorRow.branch`, `filteredEditorRows(_:query:)`)
 - `Sources/RafuApp/Views/NotchCompanionView.swift` (`CompanionSearchFieldView`
   pinned above the internal `ScrollView`)
+- `Sources/RafuApp/Terminal/NotchHUDGeometry.swift` (`NotchScreenSelection`)
+  and `Sources/RafuApp/Terminal/NotchHUDWindow.swift`
+  (`NotchScreenAdapter.currentMetrics()`) — rule 11's multi-display anchor
 - [`terminal-notch-hud.md`](../plans/phases/terminal-notch-hud.md) (stages
   NC-A…NC-E, editors-search follow-up)
 - [`0016-terminal-attention-notifications.md`](../decisions/0016-terminal-attention-notifications.md)
