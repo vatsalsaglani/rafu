@@ -5,7 +5,8 @@
   (`WorkspaceTerminalController`'s `TerminalProcessSpec` seam), and any
   phase that spawns an external agent CLI through the PTY rather than the
   login shell
-- Last verified: Swift 6.2 / macOS 26 / SwiftTerm 1.14.0 / 2026-07-24 (phase C0)
+- Last verified: Swift 6.2 / macOS 26 / SwiftTerm 1.14.0 / 2026-07-24 (phase C0);
+  finding 3 added 2026-07-26 (C8-02 integration)
 
 ## Rule or observed behavior
 
@@ -86,6 +87,54 @@ so an adapter phase can do that without editing a shared file.
 
 This problem is unique to the process-spec path. The ordinary login-shell
 terminal sources the user's profile and is unaffected.
+
+### 3. `swift test --no-parallel` can hang forever in the Claude adapter probe
+
+**Symptom.** The serial gate produces **no output at all** and never
+finishes. It looks exactly like the `.build/.lock` block described in
+AGENTS.md, so check the lock first — but when the lock is free and a
+`swiftpm-testing-helper` is alive with zero output for minutes, this is
+the other cause. The parallel gate is unaffected (1613 tests in ~39 s).
+
+**Where it hangs.** `sample <pid>` puts 100 % of samples in one chain:
+
+```
+ClaudeCodeAdapter.probe()                              ClaudeCodeAdapter.swift:523
+  ConductorAdapterProbeSupport.probe(versionArguments:)                     :332
+    ConductorAdapterProbeSupport.discoverExecutable()                       :409
+      ConductorProbeProcessRunner.run(...)                                  :169
+        -[NSConcreteTask waitUntilExit]        ← blocked, no deadline
+```
+
+**Why the existing timeout does not save it.** `ConductorProbeProcessRunner
+.run` polls `process.isRunning` against a deadline and, on timeout/cancel,
+routes through `stopAndReap` — bounded `SIGTERM` → `waitpid` → `SIGKILL`
+(the comment at `ClaudeCodeAdapter.swift:212` already records that
+`waitUntilExit()` "can itself block after a forced termination"). But that
+protection covers only the `forcedOutcome` branch. When the poll loop exits
+*normally*, the `else` at line 169 calls a bare, unbounded
+`process.waitUntilExit()`. That is the frame the sample lands in.
+
+**`PATH` isolation is NOT a workaround** — this is the part worth
+internalising, because it is the intuitive fix and it does not work.
+Restricting the run to `PATH=/usr/bin:/bin:/usr/sbin:/sbin` still hangs,
+verified directly. `ClaudeCodeAdapter.discoverySearchPath` is the host
+`PATH` **plus** `RafuConductorEnvironment.discoverySearchPath(...)`, which
+always contains `curatedPath`, which contains `~/.local/bin` — the usual
+install location for `claude`. Discovery therefore finds the real binary
+regardless of the invoking shell's `PATH`, so no `PATH` value hides it.
+Any run on a machine with Claude Code installed is exposed.
+
+**What to do when it happens.** Do not wait it out. Confirm with
+`sample <pid>`, `kill -9` the helper, clear the lock
+(`./script/await_build_lock.sh`), and take the parallel run as the gate,
+recording the serial run as blocked by this issue rather than green.
+
+**The fix, when someone owns that adapter file:** bound line 169 the same
+way the forced path is already bounded — poll `waitpid` with
+`WNOHANG` against a deadline and escalate to `stopAndReap` — so a probe
+child that never reports exit cannot stall the whole suite. Until then
+this is a known, reproducible trap, not a flake.
 
 ## Why it matters
 
