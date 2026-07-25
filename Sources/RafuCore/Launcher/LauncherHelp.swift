@@ -12,6 +12,7 @@ public enum LauncherHelp {
           rafu --goto <path:line[:column]>
           rafu --ssh <host-alias> <remote-path>
           rafu --ssh <host-alias> --goto <path:line[:column]>
+          rafu ensemble <status|artifact|await> ...
 
         OPTIONS:
           --new-window       Always request a new workspace window.
@@ -21,5 +22,8 @@ public enum LauncherHelp {
           --status           Show launcher/app IPC status (planned Phase 0).
           -h, --help         Show help information.
           -V, --version      Show the Rafu version.
+
+        ENSEMBLE:
+          Run `rafu ensemble --help` for the read-only run-observation verbs.
         """
 }

@@ -9,6 +9,58 @@ nonisolated enum LauncherIPCServerError: Error, Equatable, Sendable {
     case systemCall(name: String, code: Int32)
 }
 
+nonisolated enum LauncherIPCStreamIO {
+    static func writeEvent(
+        _ event: EnsembleEvent,
+        to fileDescriptor: Int32
+    ) throws {
+        let frame = try LauncherIPCCodec.encode(event)
+        try writeAll(frame, to: fileDescriptor)
+    }
+
+    static func configureSendTimeout(
+        timeout seconds: TimeInterval,
+        fileDescriptor: Int32
+    ) -> Bool {
+        let totalMicroseconds = max(1, Int(seconds * 1_000_000))
+        var timeout = timeval(
+            tv_sec: totalMicroseconds / 1_000_000,
+            tv_usec: Int32(totalMicroseconds % 1_000_000)
+        )
+        return Darwin.setsockopt(
+            fileDescriptor,
+            SOL_SOCKET,
+            SO_SNDTIMEO,
+            &timeout,
+            socklen_t(MemoryLayout.size(ofValue: timeout))
+        ) == 0
+    }
+
+    private static func writeAll(
+        _ frame: Data,
+        to fileDescriptor: Int32
+    ) throws {
+        try frame.withUnsafeBytes { bytes in
+            var offset = 0
+            while offset < bytes.count {
+                let count = Darwin.write(
+                    fileDescriptor,
+                    bytes.baseAddress?.advanced(by: offset),
+                    bytes.count - offset
+                )
+                if count < 0 {
+                    if errno == EINTR { continue }
+                    throw LauncherIPCServerError.systemCall(name: "write", code: errno)
+                }
+                guard count > 0 else {
+                    throw LauncherIPCServerError.systemCall(name: "write", code: EPIPE)
+                }
+                offset += count
+            }
+        }
+    }
+}
+
 /// Owns Rafu's one same-user Unix-domain listener. Blocking socket syscalls
 /// run only in detached tasks; actor state owns the listener fd, tracks each
 /// accepted fd for shutdown, and never shares mutable byte buffers.
@@ -16,6 +68,10 @@ actor LauncherIPCServer {
     typealias PeerUIDProvider = @Sendable (Int32) throws -> uid_t
     typealias RequestHandler =
         @MainActor @Sendable (LauncherIPCEnvelope) async -> LauncherIPCResponse
+    typealias SubscriptionHandler =
+        @MainActor @Sendable (LauncherIPCEnvelope) async -> AsyncStream<EnsembleEvent>?
+    typealias SubscriptionCursorProvider = @MainActor @Sendable () -> UInt64
+    typealias StreamingRegistrar = @Sendable () async -> Bool
 
     nonisolated static let shared = LauncherIPCServer()
 
@@ -37,30 +93,44 @@ actor LauncherIPCServer {
     /// Default cap on simultaneously live accepted connections, so a burst of
     /// slow/stalled peers can never grow `connections` and its detached tasks
     /// without bound.
-    static let defaultMaxConnections = 8
+    static let defaultMaxConnections = 24
+    static let defaultMaxStreamingConnections = 16
+    static let streamSendTimeout: TimeInterval = 5
 
     private let socketURL: URL
     private let peerUID: PeerUIDProvider
     private let handler: RequestHandler
+    private let subscriptionHandler: SubscriptionHandler
+    private let subscriptionCursor: SubscriptionCursorProvider
     private let connectionTimeout: TimeInterval
     private let maxConnections: Int
+    private let maxStreamingConnections: Int
     private var listenerFileDescriptor: Int32?
     private var ownsSocketPath = false
     private var acceptTask: Task<Void, Never>?
     private var connections: [UUID: Connection] = [:]
+    private var streamingConnectionIDs: Set<UUID> = []
 
     init(
         socketURL: URL = LauncherIPCSocketPath.resolve(),
         peerUID: @escaping PeerUIDProvider = LauncherIPCServer.systemPeerUID,
         handler: @escaping RequestHandler = LauncherIPCServer.defaultHandler,
+        subscriptionHandler: @escaping SubscriptionHandler =
+            LauncherIPCServer.defaultSubscriptionHandler,
+        subscriptionCursor: @escaping SubscriptionCursorProvider =
+            LauncherIPCServer.defaultSubscriptionCursor,
         connectionTimeout: TimeInterval = LauncherIPCServer.defaultConnectionTimeout,
-        maxConnections: Int = LauncherIPCServer.defaultMaxConnections
+        maxConnections: Int = LauncherIPCServer.defaultMaxConnections,
+        maxStreamingConnections: Int = LauncherIPCServer.defaultMaxStreamingConnections
     ) {
         self.socketURL = socketURL
         self.peerUID = peerUID
         self.handler = handler
+        self.subscriptionHandler = subscriptionHandler
+        self.subscriptionCursor = subscriptionCursor
         self.connectionTimeout = connectionTimeout
         self.maxConnections = maxConnections
+        self.maxStreamingConnections = maxStreamingConnections
     }
 
     /// Lifecycle-compatible fire-and-forget wrapper used by the frozen app
@@ -164,6 +234,7 @@ actor LauncherIPCServer {
             await connection.task.value
         }
         connections.removeAll()
+        streamingConnectionIDs.removeAll()
         unlinkOwnedSocket()
     }
 
@@ -174,12 +245,19 @@ actor LauncherIPCServer {
     /// exercisable from this seam.
     func serveConnectionForTesting(_ fileDescriptor: Int32) async {
         Self.configureConnection(timeout: connectionTimeout, fileDescriptor: fileDescriptor)
+        let id = UUID()
         await Self.processConnection(
             fileDescriptor,
             expectedUID: getuid(),
             peerUID: peerUID,
-            handler: handler
+            handler: handler,
+            subscriptionHandler: subscriptionHandler,
+            subscriptionCursor: subscriptionCursor,
+            registerStreaming: { [weak self] in
+                await self?.registerStreamingConnection(id) ?? false
+            }
         )
+        connectionFinished(id)
         Darwin.close(fileDescriptor)
     }
 
@@ -187,6 +265,7 @@ actor LauncherIPCServer {
     /// to deterministically await the connection-cap boundary instead of a
     /// fixed sleep.
     var liveConnectionCountForTesting: Int { connections.count }
+    var liveStreamingConnectionCountForTesting: Int { streamingConnectionIDs.count }
 
     private nonisolated func runAcceptLoop(listener: Int32) async {
         while !Task.isCancelled {
@@ -218,21 +297,41 @@ actor LauncherIPCServer {
         let expectedUID = getuid()
         let peerUID = peerUID
         let handler = handler
+        let subscriptionHandler = subscriptionHandler
+        let subscriptionCursor = subscriptionCursor
         let task = Task.detached(name: "Launcher IPC connection") { [weak self] in
+            guard let server = self else {
+                Darwin.close(fileDescriptor)
+                return
+            }
             await Self.processConnection(
                 fileDescriptor,
                 expectedUID: expectedUID,
                 peerUID: peerUID,
-                handler: handler
+                handler: handler,
+                subscriptionHandler: subscriptionHandler,
+                subscriptionCursor: subscriptionCursor,
+                registerStreaming: {
+                    await server.registerStreamingConnection(id)
+                }
             )
             Darwin.close(fileDescriptor)
-            await self?.connectionFinished(id)
+            await server.connectionFinished(id)
         }
         connections[id] = Connection(fileDescriptor: fileDescriptor, task: task)
     }
 
     private func connectionFinished(_ id: UUID) {
         connections.removeValue(forKey: id)
+        streamingConnectionIDs.remove(id)
+    }
+
+    private func registerStreamingConnection(_ id: UUID) -> Bool {
+        guard streamingConnectionIDs.count < maxStreamingConnections else {
+            return false
+        }
+        streamingConnectionIDs.insert(id)
+        return true
     }
 
     /// Peer authentication is deliberately the first operation. No call to
@@ -241,7 +340,10 @@ actor LauncherIPCServer {
         _ fileDescriptor: Int32,
         expectedUID: uid_t,
         peerUID: PeerUIDProvider,
-        handler: RequestHandler
+        handler: RequestHandler,
+        subscriptionHandler: SubscriptionHandler,
+        subscriptionCursor: SubscriptionCursorProvider,
+        registerStreaming: @escaping StreamingRegistrar
     ) async {
         do {
             guard try peerUID(fileDescriptor) == expectedUID else {
@@ -273,13 +375,65 @@ actor LauncherIPCServer {
                 return
             }
 
+            if envelope.kind.isStreaming {
+                guard await registerStreaming() else {
+                    try writeResponse(
+                        .ensemble(
+                            .failure(
+                                code: EnsembleExitCode.unavailable.rawValue,
+                                message: "Ensemble streaming connection limit reached"
+                            )),
+                        to: fileDescriptor
+                    )
+                    logger.info("Request \(kind, privacy: .public) rejected")
+                    return
+                }
+                guard let stream = await subscriptionHandler(envelope) else {
+                    try writeResponse(
+                        .ensemble(
+                            .failure(
+                                code: EnsembleExitCode.usage.rawValue,
+                                message: "invalid Ensemble subscription"
+                            )),
+                        to: fileDescriptor
+                    )
+                    logger.info("Request \(kind, privacy: .public) rejected")
+                    return
+                }
+                if !LauncherIPCStreamIO.configureSendTimeout(
+                    timeout: streamSendTimeout,
+                    fileDescriptor: fileDescriptor
+                ) {
+                    logger.error("Failed to configure streaming send timeout")
+                }
+                let cursor = await subscriptionCursor()
+                do {
+                    try writeResponse(
+                        .ensemble(.subscribed(cursor: cursor)),
+                        to: fileDescriptor
+                    )
+                    logger.info("Request \(kind, privacy: .public) accepted")
+                    for await event in stream {
+                        if Task.isCancelled { return }
+                        try LauncherIPCStreamIO.writeEvent(event, to: fileDescriptor)
+                    }
+                } catch {
+                    // Stream write failure, EPIPE, and shutdown are normal
+                    // disconnect paths. Never attempt a second response frame.
+                    return
+                }
+                return
+            }
+
             response = await handler(envelope)
             try writeResponse(response, to: fileDescriptor)
             switch response {
             case .accepted:
                 logger.info("Request \(kind, privacy: .public) accepted")
-            case .rejected:
+            case .ensemble(.failure), .rejected:
                 logger.info("Request \(kind, privacy: .public) rejected")
+            case .ensemble:
+                logger.info("Request \(kind, privacy: .public) accepted")
             }
         } catch LauncherIPCFramingError.unsupportedWireVersion {
             try? writeResponse(
@@ -454,6 +608,9 @@ actor LauncherIPCServer {
         case .handshake: "handshake"
         case .openFolder: "openFolder"
         case .goto: "goto"
+        case .ensembleStatus: "ensembleStatus"
+        case .ensembleArtifact: "ensembleArtifact"
+        case .ensembleSubscribe: "ensembleSubscribe"
         case .unknown: "unknown"
         }
     }
@@ -463,5 +620,20 @@ actor LauncherIPCServer {
         _ envelope: LauncherIPCEnvelope
     ) async -> LauncherIPCResponse {
         LauncherRequestRouter.shared.handle(envelope)
+    }
+
+    @MainActor
+    private static func defaultSubscriptionHandler(
+        _ envelope: LauncherIPCEnvelope
+    ) async -> AsyncStream<EnsembleEvent>? {
+        guard envelope.kind == .ensembleSubscribe,
+            envelope.ensemble?.verb == "await"
+        else { return nil }
+        return ConductorEnsembleEventCenter.shared.subscribe()
+    }
+
+    @MainActor
+    private static func defaultSubscriptionCursor() -> UInt64 {
+        ConductorEnsembleEventCenter.shared.cursor
     }
 }

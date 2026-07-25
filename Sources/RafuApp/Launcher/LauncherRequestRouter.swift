@@ -157,6 +157,9 @@ final class LauncherRequestRouter {
     }
 
     func handle(_ envelope: LauncherIPCEnvelope) -> LauncherIPCResponse {
+        if envelope.kind.isEnsemble {
+            return ConductorEnsembleRequestService.shared.handle(envelope)
+        }
         if envelope.kind == .handshake {
             return .accepted(
                 workspaceMatched: false,
