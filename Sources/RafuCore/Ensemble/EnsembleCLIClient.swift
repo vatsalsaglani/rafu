@@ -294,10 +294,22 @@ private struct StreamFrameReader {
             return pendingBodies.removeFirst()
         }
 
+        // A heartbeat proves liveness only when its complete RAFU frame
+        // arrives. Partial header/body bytes must not restart this deadline:
+        // otherwise a stalled or malicious peer could keep `await` alive
+        // forever by trickling one byte per interval.
+        let frameDeadline = EnsembleCLIClient.deadline(after: heartbeatTimeout)
         var storage = [UInt8](repeating: 0, count: 4_096)
         while true {
-            let remaining = try remainingSeconds(until: deadline)
-            let wait = min(heartbeatTimeout, remaining ?? heartbeatTimeout)
+            let activeDeadline = min(deadline ?? UInt64.max, frameDeadline)
+            let now = DispatchTime.now().uptimeNanoseconds
+            guard now < activeDeadline else {
+                throw timeoutError(
+                    userDeadline: deadline,
+                    frameDeadline: frameDeadline
+                )
+            }
+            let wait = TimeInterval(activeDeadline - now) / 1_000_000_000
             var descriptor = pollfd(
                 fd: fileDescriptor,
                 events: Int16(POLLIN),
@@ -311,10 +323,7 @@ private struct StreamFrameReader {
                 throw EnsembleCLIClient.systemCallError("poll")
             }
             if pollResult == 0 {
-                if let deadline, DispatchTime.now().uptimeNanoseconds >= deadline {
-                    throw EnsembleCLIClientError.timedOut
-                }
-                throw EnsembleCLIClientError.heartbeatTimeout
+                continue
             }
             let count = storage.withUnsafeMutableBytes { bytes in
                 Darwin.read(fileDescriptor, bytes.baseAddress, bytes.count)
@@ -322,10 +331,7 @@ private struct StreamFrameReader {
             if count < 0 {
                 if errno == EINTR { continue }
                 if errno == EAGAIN || errno == EWOULDBLOCK {
-                    if let deadline, DispatchTime.now().uptimeNanoseconds >= deadline {
-                        throw EnsembleCLIClientError.timedOut
-                    }
-                    throw EnsembleCLIClientError.heartbeatTimeout
+                    continue
                 }
                 throw EnsembleCLIClient.systemCallError("read")
             }
@@ -342,10 +348,13 @@ private struct StreamFrameReader {
         }
     }
 
-    private func remainingSeconds(until deadline: UInt64?) throws -> TimeInterval? {
-        guard let deadline else { return nil }
-        let now = DispatchTime.now().uptimeNanoseconds
-        guard now < deadline else { throw EnsembleCLIClientError.timedOut }
-        return TimeInterval(deadline - now) / 1_000_000_000
+    private func timeoutError(
+        userDeadline: UInt64?,
+        frameDeadline: UInt64
+    ) -> EnsembleCLIClientError {
+        if let userDeadline, userDeadline <= frameDeadline {
+            return .timedOut
+        }
+        return .heartbeatTimeout
     }
 }

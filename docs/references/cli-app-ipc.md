@@ -189,11 +189,16 @@ launching the app or sleeping.
 
 `EnsembleClientStreamTests` proves subscribe-before-snapshot ordering, queued
 event delivery without a lost wakeup, heartbeat liveness, the 45-second policy
-through an injected shortened timeout, and the separate user deadline.
+through an injected shortened timeout, incomplete frame bytes cannot refresh
+that deadline, and the separate user deadline.
 `EnsembleServerStreamTests` proves uid-before-read, acknowledgement/event frame
 boundaries, the 16-stream cap seam, and listener shutdown of a live stream.
 `EnsembleEventCenterTests` proves cursor/ring/buffer bounds and heartbeat
 generation with an injected continuation rather than a fixed sleep.
+`EnsembleEndToEndTests` uses a real temporary Unix listener to carry
+`status`, `artifact`, and subscribe-before-snapshot `await` through the CLI
+client, UID-authenticated server, request service, event center, and shutdown
+without launching the app.
 
 The staged-bundle pass (`./script/build_and_run.sh --verify`) exercised all
 nine lane checklist items without UI automation guesses. CoreGraphics window

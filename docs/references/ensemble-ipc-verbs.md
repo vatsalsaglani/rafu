@@ -297,7 +297,8 @@ meaning of existing responses.
 collision. `EnsembleFramingTests` round-trips every request, response, and
 event shape and proves additive unknown-field tolerance. Socketpair-backed
 `EnsembleClientStreamTests` proves the subscribe/ack/snapshot/event ordering,
-heartbeats, missed-heartbeat exit 69, and user-timeout exit 75.
+heartbeats, missed-heartbeat exit 69, user-timeout exit 75, and that a peer
+cannot extend liveness by trickling an incomplete frame.
 
 App tests use real `WorkspaceSession` and manifest fixtures to prove every
 state-precedence row, root routing, tree ordering, event replay, and artifact
@@ -305,6 +306,9 @@ resolution. Event-center tests prove the 512/64 bounds without fixed sleeps.
 Server tests prove uid-before-read, separate framed events, typed stream-cap
 failure, and stream shutdown. Additive manifest tests decode a pre-C8 fixture
 and round-trip all three fields.
+`EnsembleEndToEndTests` starts the real server on a temporary Unix socket and
+drives all three verbs from `EnsembleCommandRunner` through authentication,
+routing, snapshot/event delivery, response framing, and listener shutdown.
 
 ## Verification
 

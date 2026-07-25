@@ -130,6 +130,36 @@ struct EnsembleClientStreamTests {
         #expect(result.standardError.contains("missed three Ensemble heartbeats"))
     }
 
+    @Test("Partial event bytes do not reset the complete-frame heartbeat deadline")
+    func partialFrameDoesNotExtendHeartbeatDeadline() async throws {
+        let pair = try ensembleSocketPair()
+        let server = servePartialEnsembleEvent(pair.server)
+        let client = EnsembleCLIClient(
+            heartbeatTimeout: 0.1,
+            connector: { pair.client }
+        )
+
+        do {
+            try client.subscribe(
+                payload: EnsembleRequestPayload(
+                    verb: "await",
+                    workingDirectory: "/work",
+                    runIDs: ["run-a"],
+                    states: [.completed]
+                ),
+                timeout: nil,
+                onSubscribed: { _ in false },
+                onEvent: { _ in false }
+            )
+            Issue.record("Expected the incomplete event frame to miss its heartbeat deadline")
+        } catch let error as EnsembleCLIClientError {
+            #expect(error == .heartbeatTimeout)
+        }
+
+        let request = try await server.value
+        #expect(request.kind == .ensembleSubscribe)
+    }
+
     @Test("Client-side --timeout maps to temporary failure")
     func clientTimeoutIsTemporaryFailure() async throws {
         let harness = try AwaitHarness(
@@ -367,6 +397,42 @@ private func serveEnsembleSubscription(
             if holdOpenUntilPeerCloses {
                 var byte: UInt8 = 0
                 while Darwin.read(fileDescriptor, &byte, 1) > 0 {}
+            }
+            continuation.yield(envelope)
+            continuation.finish()
+        } catch {
+            continuation.finish(throwing: error)
+        }
+    }
+    return Task {
+        for try await envelope in stream {
+            return envelope
+        }
+        throw EnsembleCLIClientError.disconnected
+    }
+}
+
+private func servePartialEnsembleEvent(
+    _ fileDescriptor: Int32
+) -> Task<LauncherIPCEnvelope, Error> {
+    let (stream, continuation) = AsyncThrowingStream.makeStream(
+        of: LauncherIPCEnvelope.self)
+    Thread.detachNewThread {
+        defer { Darwin.close(fileDescriptor) }
+        do {
+            let envelope = try readEnsembleEnvelope(from: fileDescriptor)
+            try writeEnsembleFrame(
+                LauncherIPCCodec.encode(
+                    LauncherIPCResponse.ensemble(.subscribed(cursor: 1))),
+                to: fileDescriptor
+            )
+            let frame = try LauncherIPCCodec.encode(
+                stateEvent(cursor: 2, state: .completed))
+            for rawByte in frame.prefix(8) {
+                var byte = rawByte
+                let count = Darwin.write(fileDescriptor, &byte, 1)
+                if count != 1 { break }
+                usleep(20_000)
             }
             continuation.yield(envelope)
             continuation.finish()
