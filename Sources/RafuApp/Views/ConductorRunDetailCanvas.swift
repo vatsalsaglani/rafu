@@ -59,12 +59,14 @@ struct ConductorRunDetailCanvas: View {
                 Image(systemName: WorkspaceNavigatorMode.runs.symbolName)
                     .font(.system(size: 11))
                     .foregroundStyle(theme.palette.info)
+                    .accessibilityHidden(true)
                 Text(manifest.map { "Run • \($0.workflowName)" } ?? "Run")
                     .lineLimit(1)
                     .foregroundStyle(theme.palette.textPrimary)
                 Button("Close Run", systemImage: "xmark", action: session.closeConductorRunDetail)
                     .buttonStyle(RafuIconButtonStyle(size: 18, iconSize: 9))
                     .opacity(isHoveringCloseTab ? 1 : 0.75)
+                    .accessibilityHint("Closes the Ensemble run detail")
             }
             .font(.callout)
             .padding(.horizontal, 10)
@@ -139,28 +141,59 @@ private struct RunDetailContent: View {
     }
 
     private var headerCard: some View {
-        RafuCardHeaderRow {
-            HStack(spacing: 8) {
-                Image(systemName: WorkspaceNavigatorMode.runs.symbolName)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(theme.palette.info)
-                Text(manifest.workflowName)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(theme.palette.textPrimary)
-                RafuChip(
-                    text: manifest.worktreeBranch.isEmpty
-                        ? "Main workspace" : manifest.worktreeBranch
-                )
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: RafuMetrics.space3) {
+                headerIdentity
+                Spacer(minLength: RafuMetrics.space3)
+                headerActions
             }
-        } trailing: {
-            HStack(spacing: 8) {
-                RafuChip(text: String(manifest.baseCommit.prefix(8)), monospacedDigit: true)
-                if isActiveRun, session.conductorWorkflowController.isInFlight {
-                    Button("Abort Run", systemImage: "xmark.circle", role: .destructive) {
-                        session.conductorWorkflowController.abort()
-                    }
-                    .buttonStyle(RafuSecondaryButtonStyle())
+            VStack(alignment: .leading, spacing: RafuMetrics.space2) {
+                headerIdentity
+                headerActions
+            }
+        }
+        .padding(.horizontal, RafuMetrics.space3)
+        .padding(.vertical, RafuMetrics.space2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.palette.cardBackground)
+        .overlay(alignment: .bottom) {
+            Divider().overlay(theme.palette.borderSubtle)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Ensemble run summary")
+    }
+
+    private var headerIdentity: some View {
+        ConductorAdaptiveRow(spacing: RafuMetrics.space2) {
+            Image(systemName: WorkspaceNavigatorMode.runs.symbolName)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(theme.palette.info)
+                .accessibilityHidden(true)
+            Text(manifest.workflowName)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(theme.palette.textPrimary)
+                .accessibilityAddTraits(.isHeader)
+            RafuChip(
+                text: manifest.worktreeBranch.isEmpty
+                    ? "Main workspace" : manifest.worktreeBranch
+            )
+            .accessibilityLabel(
+                manifest.worktreeBranch.isEmpty
+                    ? "Main workspace" : "Worktree branch \(manifest.worktreeBranch)")
+        }
+    }
+
+    private var headerActions: some View {
+        ConductorAdaptiveRow(spacing: RafuMetrics.space2) {
+            RafuChip(text: String(manifest.baseCommit.prefix(8)), monospacedDigit: true)
+                .accessibilityLabel("Base commit \(manifest.baseCommit.prefix(8))")
+            if isActiveRun, session.conductorWorkflowController.isInFlight {
+                Button("Abort Run", systemImage: "xmark.circle", role: .destructive) {
+                    session.conductorWorkflowController.abort()
                 }
+                .buttonStyle(RafuSecondaryButtonStyle())
+                .accessibilityHint(
+                    "Stops the active process and parks this Ensemble run as aborted")
             }
         }
     }
@@ -196,48 +229,52 @@ private struct ConductorStepTimelineRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text("Step \(row.index + 1)")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(theme.palette.textMuted)
-                Text(row.agentName)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(theme.palette.textPrimary)
-                Spacer(minLength: 8)
-                Image(systemName: row.statusSymbol)
-                    .foregroundStyle(statusTint)
-                Text(row.statusLabel)
-                    .font(.caption)
-                    .foregroundStyle(theme.palette.textSecondary)
-                    .lineLimit(1)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    stepIdentity
+                    Spacer(minLength: 8)
+                    stepStatus
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    stepIdentity
+                    stepStatus
+                }
             }
-            HStack(spacing: 6) {
+            ConductorAdaptiveRow(spacing: 6) {
                 RafuChip(text: row.providerLabel, foreground: theme.palette.textSecondary)
+                    .accessibilityLabel("Provider \(row.providerLabel)")
                 RafuChip(text: row.modelLabel, foreground: theme.palette.textSecondary)
+                    .accessibilityLabel("Model \(row.modelLabel)")
                 if let durationLabel = row.durationLabel {
                     RafuChip(text: durationLabel, monospacedDigit: true)
+                        .accessibilityLabel("Duration \(durationLabel)")
                 }
                 if let attemptLabel = row.attemptLabel {
                     RafuChip(text: attemptLabel)
                 }
             }
-            HStack(spacing: 8) {
+            ConductorAdaptiveRow(spacing: 8) {
                 Button("Open Artifact", action: openArtifact)
                     .buttonStyle(RafuSecondaryButtonStyle())
                     .disabled(!row.canOpenArtifact)
+                    .accessibilityHint("Opens this step's handoff artifact")
                 if row.hasLiveTerminal {
                     Button("Reveal Terminal", action: revealTerminal)
                         .buttonStyle(RafuSecondaryButtonStyle())
+                        .accessibilityHint("Reveals this step's active terminal")
                 }
                 if isActiveRun, row.isGateReady {
                     Button("Approve", action: approve)
                         .buttonStyle(RafuProminentButtonStyle())
+                        .accessibilityHint("Approves this gate and starts the next step")
                     Button("Revise", action: revise)
                         .buttonStyle(RafuSecondaryButtonStyle())
+                        .accessibilityHint("Opens the artifact for revision")
                 }
                 if isActiveRun, isFailedStep {
                     Button("Retry Step", action: retry)
                         .buttonStyle(RafuProminentButtonStyle())
+                        .accessibilityHint("Starts a new attempt for this failed step")
                 }
             }
         }
@@ -251,8 +288,37 @@ private struct ConductorStepTimelineRow: View {
             RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
                 .strokeBorder(theme.palette.borderSubtle)
         )
-        .accessibilityElement(children: .combine)
+        // Keep the card as a labelled rotor group, but preserve every
+        // embedded Button as an individually reachable child.
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Step \(row.index + 1), \(row.agentName), \(row.statusLabel)")
+    }
+
+    private var stepIdentity: some View {
+        HStack(spacing: 8) {
+            Text("Step \(row.index + 1)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(theme.palette.textMuted)
+            Text(row.agentName)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(theme.palette.textPrimary)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    private var stepStatus: some View {
+        HStack(spacing: 6) {
+            Image(systemName: row.statusSymbol)
+                .foregroundStyle(statusTint)
+                .accessibilityHidden(true)
+            Text(row.statusLabel)
+                .font(.caption)
+                .foregroundStyle(theme.palette.textSecondary)
+                .lineLimit(2)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Status: \(row.statusLabel)")
     }
 
     private var statusTint: Color {
@@ -264,6 +330,31 @@ private struct ConductorStepTimelineRow: View {
         case .completed: theme.palette.gitAdded
         case .pending, .running, .aborted: theme.palette.textSecondary
         }
+    }
+}
+
+/// Uses a horizontal row when its contents fit and a leading-aligned column
+/// otherwise. This keeps chips and verbs reachable under enlarged text or a
+/// narrow canvas without adding scrolling to action groups.
+private struct ConductorAdaptiveRow<Content: View>: View {
+    let spacing: CGFloat
+    @ViewBuilder let content: Content
+
+    init(spacing: CGFloat, @ViewBuilder content: () -> Content) {
+        self.spacing = spacing
+        self.content = content()
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: spacing) {
+                content
+            }
+            VStack(alignment: .leading, spacing: spacing) {
+                content
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -290,6 +381,7 @@ private struct ConductorMergeGateSection: View {
             Text("Merge Gate")
                 .font(.headline)
                 .foregroundStyle(theme.palette.textPrimary)
+                .accessibilityAddTraits(.isHeader)
             Text("Review the run worktree's changes, then choose how to resolve it.")
                 .font(.caption)
                 .foregroundStyle(theme.palette.textSecondary)
@@ -323,21 +415,29 @@ private struct ConductorMergeGateSection: View {
                             .contentShape(.rect)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(
+                            "Open diff for \(file.path), "
+                                + (file.isUntracked ? "untracked file" : "modified file")
+                        )
+                        .accessibilityHint("Opens this worktree change in the editor")
                     }
                 }
             }
-            HStack(spacing: 8) {
+            ConductorAdaptiveRow(spacing: 8) {
                 Button("Apply to Workspace", action: apply)
                     .buttonStyle(RafuProminentButtonStyle())
                     .disabled(isResolving || hasApplied)
+                    .accessibilityHint("Applies the reviewed worktree changes to the workspace")
                 Button("Keep Worktree", action: keep)
                     .buttonStyle(RafuSecondaryButtonStyle())
                     .disabled(isResolving)
+                    .accessibilityHint("Leaves the run worktree and branch intact")
                 Button("Discard…", role: .destructive) {
                     isDiscardConfirmationPresented = true
                 }
                 .buttonStyle(RafuSecondaryButtonStyle())
                 .disabled(isResolving)
+                .accessibilityHint("Opens a confirmation before removing the run worktree")
             }
         }
         .padding(RafuMetrics.space4)
@@ -350,6 +450,8 @@ private struct ConductorMergeGateSection: View {
             RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
                 .strokeBorder(theme.palette.borderSubtle)
         )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Merge gate")
         .alert("Discard the Run Worktree?", isPresented: $isDiscardConfirmationPresented) {
             Button("Discard", role: .destructive) {
                 Task {

@@ -3,7 +3,7 @@
 - **Branch:** `conductor/c7-polish` (Wave C, branch after C5 merges;
   parallel with C6 — owned paths are disjoint)
 - **Depends on:** C0 + C1 + C5 on `main`
-- **Status:** Planned
+- **Status:** Owned implementation complete; coordinator integration handoffs pending
 
 ## Mission
 

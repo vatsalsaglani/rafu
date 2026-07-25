@@ -3,6 +3,66 @@ import Observation
 import RafuCore
 import SwiftUI
 
+/// The bounded, presentation-only slice of one active Ensemble workflow
+/// that the notch companion needs. It carries no prompt, artifact, process
+/// output, credential, or cost data.
+nonisolated struct ConductorNotchRunItem: Equatable, Identifiable, Sendable {
+    let workspaceID: UUID
+    let runID: String
+    let workflowName: String
+    let roleName: String
+    let stepNumber: Int
+    let stepCount: Int
+    let isGateWaiting: Bool
+
+    var id: String {
+        "\(workspaceID.uuidString.lowercased())/\(runID)"
+    }
+
+    var stepLabel: String {
+        "Step \(stepNumber) of \(stepCount)"
+    }
+
+    static func item(
+        manifest: ConductorRunManifest?,
+        state: ConductorWorkflowState,
+        workspaceID: UUID
+    ) -> Self? {
+        guard let manifest, !manifest.steps.isEmpty else { return nil }
+        let stepIndex: Int
+        let isGateWaiting: Bool
+        switch state {
+        case .preparing:
+            stepIndex = 0
+            isGateWaiting = false
+        case .runningStep(let index), .awaitingArtifact(let index):
+            stepIndex = index
+            isGateWaiting = false
+        case .awaitingGate(let index):
+            stepIndex = index
+            isGateWaiting = true
+        case .awaitingMergeGate:
+            stepIndex = manifest.steps.count - 1
+            isGateWaiting = true
+        case .idle, .completed, .failed, .aborted:
+            return nil
+        }
+        guard manifest.steps.indices.contains(stepIndex) else { return nil }
+        return Self(
+            workspaceID: workspaceID,
+            runID: manifest.id,
+            workflowName: manifest.workflowName,
+            roleName: manifest.steps[stepIndex].agentName,
+            stepNumber: stepIndex + 1,
+            stepCount: manifest.steps.count,
+            isGateWaiting: isGateWaiting)
+    }
+
+    static func primary(in items: [Self]) -> Self? {
+        items.first(where: \.isGateWaiting) ?? items.first
+    }
+}
+
 /// Persists whether the notch companion strip exists at all
 /// (terminal-notch-hud.md, "Resting": "A Settings toggle... default ON on
 /// notched displays, OFF on non-notch displays"). NC-E wires the real
@@ -130,6 +190,26 @@ final class NotchCompanionModel: NSObject {
         UsageDisplayPolicy.overflow(from: usageSnapshots, frontLine: usageFrontLine)
     }
 
+    /// Active C5 workflow runs across registered windows. This is derived
+    /// from already-live observable state: no polling, provider read, or
+    /// process probe is added to the companion's idle path.
+    var activeRunItems: [ConductorNotchRunItem] {
+        entries.compactMap { entry in
+            guard let session = entry.session else { return nil }
+            let workflow = session.conductorWorkflowController
+            return ConductorNotchRunItem.item(
+                manifest: workflow.manifest,
+                state: workflow.state,
+                workspaceID: entry.id)
+        }
+    }
+
+    /// A waiting gate wins the compact strip's single slot so the state
+    /// that needs a decision is never hidden behind another active run.
+    var primaryActiveRunItem: ConductorNotchRunItem? {
+        ConductorNotchRunItem.primary(in: activeRunItems)
+    }
+
     // MARK: - Weak session registry (mirrors `TerminalAttentionCenter`)
 
     private struct Entry {
@@ -238,6 +318,8 @@ final class NotchCompanionModel: NSObject {
     /// scanning it beats typing (a query already in progress stays visible
     /// regardless of count, see `isSearchFieldVisible`).
     private static let searchFieldThreshold = 6
+    private static let activeRunRowHeight: CGFloat = 48
+    private static let activeRunTopPadding: CGFloat = RafuMetrics.space2
 
     override init() {
         super.init()
@@ -344,7 +426,7 @@ final class NotchCompanionModel: NSObject {
     /// `CompanionWingsView`'s content gate — no glyph/count text renders
     /// behind the physical housing at notch-only width.
     var isStripExpanded: Bool {
-        hoverState != .resting || attentionCount > 0
+        hoverState != .resting || attentionCount > 0 || !activeRunItems.isEmpty
     }
 
     /// The view's ONLY write path to `searchQuery` — per-keystroke and
@@ -410,6 +492,26 @@ final class NotchCompanionModel: NSObject {
         entries.removeAll { $0.session == nil }
         guard let session = entries.first(where: { $0.id == id })?.session else { return }
         WorkspaceWindowRegistry.shared.focus(session: session)
+    }
+
+    /// Opens the selected run in its owning workspace and collapses the
+    /// companion. Reading a manifest and selecting its canvas never starts
+    /// or resumes an agent process.
+    func openConductorRun(_ item: ConductorNotchRunItem) {
+        entries.removeAll { $0.session == nil }
+        guard
+            let session = entries.first(where: { $0.id == item.workspaceID })?.session
+        else { return }
+        session.showConductorRunDetail(item.runID)
+        WorkspaceWindowRegistry.shared.focus(session: session)
+        escapePressed()
+    }
+
+    /// Called by the SwiftUI observation bridge when a nested workflow
+    /// changes step or gate state. Geometry updates are immediate: step
+    /// transitions never receive decorative frame animation.
+    func activeRunsDidChange() {
+        reposition()
     }
 
     // MARK: - Attention feed (terminal-notch-hud.md NC-C)
@@ -708,7 +810,7 @@ final class NotchCompanionModel: NSObject {
         switch hoverState {
         case .resting:
             let restingFrame =
-                attentionCount > 0
+                attentionCount > 0 || !activeRunItems.isEmpty
                 ? NotchCompanionGeometry.expandedStripFrame(for: metrics)
                 : NotchCompanionGeometry.restingStripFrame(for: metrics)
             guard let frame = restingFrame else {
@@ -759,6 +861,12 @@ final class NotchCompanionModel: NSObject {
             usageGridTerm = 0
         }
         let searchHeight: CGFloat = isSearchFieldVisible ? Self.searchFieldHeight : 0
+        let activeRunHeight: CGFloat =
+            activeRunItems.isEmpty
+            ? 0
+            : Self.activeRunTopPadding
+                + CGFloat(activeRunItems.count) * Self.activeRunRowHeight
+                + CGFloat(max(activeRunItems.count - 1, 0)) * RafuMetrics.space1
         // Sized from `visibleEditorRows` (the FILTERED list), not
         // `editorRows` — the panel shrinks/grows as a query narrows/widens
         // what is actually shown, same 0.6-of-screen `maxPeekHeight` cap
@@ -782,8 +890,8 @@ final class NotchCompanionModel: NSObject {
             let spacing = CGFloat(max(feedItems.count - 1, 0)) * RafuMetrics.space2
             feedHeight = cards + spacing + RafuMetrics.space3
         }
-        return bandInset + searchHeight + usageFrontLineTerm + usageDisclosureTerm + usageGridTerm
-            + listHeight + feedHeight
+        return bandInset + searchHeight + activeRunHeight + usageFrontLineTerm
+            + usageDisclosureTerm + usageGridTerm + listHeight + feedHeight
     }
 
     // MARK: - Hover / pin (terminal-notch-hud.md NC-A `CompanionHoverPolicy`)
