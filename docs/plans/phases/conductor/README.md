@@ -258,3 +258,12 @@ run-scoped capability token that authorizes spawning, the
 build order. All three documents remain
 exploratory: no ADR amendment, branch, or owned paths yet. Three of the five
 open handoffs above are C8 prerequisites.
+
+**C8 is now planned for execution:**
+[`C8-execution-plan.md`](C8-execution-plan.md) locks the open decisions
+(streaming `await`, strict subcommand collision, re-grant on relaunch,
+coordinator-in-checkout, interactive graph canvas) and splits the work into
+seven worktree plans across four waves — `C8-01` … `C8-07`, branches
+`conductor/c8-01-consent-docs` through `conductor/c8-07-onboarding`. Each
+plan document ends with its self-contained goal-mode agent prompt; C8-01
+owns updating the stale handoff wording above.
