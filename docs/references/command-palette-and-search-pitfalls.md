@@ -51,6 +51,33 @@ the build. Separately, the palette's file-mode query gained an explicit
 so each keystroke's `.task(id:)` cancels the previous in-flight rank instead
 of racing it.
 
+### Pitfall 4: a keyboard action that closes over `body`'s rows opens the wrong row
+
+Symptom: with ⌘P open, arrowing to a result and pressing Return opens a
+DIFFERENT file — sometimes one not even in the visible results — while
+clicking that same row works. The palette's highlight looks correct
+throughout.
+
+Cause: `body` computes `let rows = rows(for: parsed)` and the keyboard
+handlers closed over it (`.onSubmit { run(rows, at: selectedIndex) }`).
+That array is frozen at body-evaluation time, but `selectedIndex` is
+`@State` and always reads live. Because the file-mode query is
+asynchronous (`.task(id:)` → `fileMatches`), the row set is replaced under
+a stable selection, so Return evaluated `staleRows[currentIndex]` — a
+correct index into the wrong list. The rendered highlight never showed it
+because rows draw from the current array, and a row's Button invokes the
+row it renders, which is why the mouse path was immune.
+
+Fix: keyboard handlers recompute the rows at invocation time
+(`CommandPaletteView.currentRows` / `runSelection()`), so index and list
+always come from one snapshot. Arrow movement additionally re-anchors an
+out-of-bounds index through `PaletteSelection.moved(from:by:count:)`
+rather than wrapping modulo a smaller count.
+
+Rule: in a SwiftUI view, never let an action closure capture a
+body-computed collection that a `@State` index addresses. Capture neither,
+or capture both.
+
 ## Why it matters
 
 All three failure modes present identically from the user's chair —
