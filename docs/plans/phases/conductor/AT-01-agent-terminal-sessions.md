@@ -47,9 +47,12 @@ entry point you reuse; `processSpec` branch in `makeOrReuseView`);
 - NEW `Sources/RafuApp/Views/AgentTerminalSheet.swift`
 - NEW `Sources/RafuApp/Conductor/ConductorCLIIcons.swift` — the
   seven-CLI icon catalog (transferred from C8-06; C8-06 consumes it)
-- NEW `Resources/FileIcons/{opencode,cline,kimi,cursor}.svg`
-- `script/build_and_run.sh` — four icon staging asserts ONLY (beside the
-  existing `test -f` block, ~lines 184–186)
+- NEW `Resources/FileIcons/agent-{claude-code,codex,opencode,cline,kimi,gemini,cursor}.svg`
+  — vendored from lobe-icons, pinned and normalized (see Design
+  contract). The existing `claude.svg` / `codex.svg` / `gemini.svg` are
+  **read-only to you**: they serve the file tree and must not change.
+- `script/build_and_run.sh` — seven icon staging asserts ONLY (beside
+  the existing `test -f` block, ~lines 184–186)
 - `Sources/RafuApp/Conductor/ConductorCore.swift` — ONE additive field:
   `TerminalProcessSpec.agentProvider: ConductorCLIID? = nil`
   (the `TerminalProcessSpec` region ~line 577 ONLY — C8-02 edits the
@@ -140,17 +143,74 @@ default-model store for tests):
 
 ### Icon catalog (`ConductorCLIIcons.swift` — transferred from C8-06)
 
-`ConductorCLIIcons.icon(for id: ConductorCLIID) -> FileIconProvider.Icon`
-covering all seven cases exhaustively (compiler-enforced switch):
-`claude`/`codex`/`gemini` use the existing SVG assets; `opencode`,
-`cline`, `kimi`, `cursor` get NEW **monochrome, template-style
-(`currentColor`) letterform badges** (rounded-rect outline + "OC",
-"CL", "K", and a cursor-caret mark) — honest placeholders, never
-imitation vendor logos, tinted like symbols via `FileIconView` +
-`assetIsTemplate: true`. Symbol fallback (`terminal`, `.secondary`
-tint) when an asset fails to resolve, so a missing file degrades and
-never blocks a consumer. C8-06 renders this catalog on graph nodes
-later — keep the API exactly this shape.
+**Vendor the real vendor marks from lobe-icons.** The earlier draft of
+this plan called for hand-drawn letterform placeholders; that is
+superseded. `lobehub/lobe-icons` publishes a uniform, MIT-licensed set
+covering all seven of our CLIs, and using a product's own mark to label
+that product is the honest, identifying choice — a "CL" box is a worse
+answer for the user than Cline's actual logo.
+
+**Source (verified 2026-07-26):** npm `@lobehub/icons-static-svg`,
+**pin version `1.94.0`**, tarball integrity
+`sha512-Inx1TYkjLH6YeHOIHeVW9+OM/xxRnk8TmcQVKquFUDBmE3X9sUuRGt7kALrrDBNNAbrWz7Qq6fAiFj9E9Mmw9Q==`.
+Individual files are fetchable at
+`https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/<slug>.svg`.
+All eleven candidate slugs were probed and return 200.
+
+| `ConductorCLIID` | lobe slug | Vendored filename |
+|---|---|---|
+| `claudeCode` | `claude` | `agent-claude-code.svg` |
+| `codex` | `codex` | `agent-codex.svg` |
+| `openCode` | `opencode` | `agent-opencode.svg` |
+| `cline` | `cline` | `agent-cline.svg` |
+| `kimi` | `kimi` | `agent-kimi.svg` |
+| `geminiCLI` | `gemini` | `agent-gemini.svg` |
+| `cursor` | `cursor` | `agent-cursor.svg` |
+
+**Vendor all seven under the `agent-` prefix — do NOT reuse or modify
+the existing `claude.svg` / `codex.svg` / `gemini.svg`.** Those three
+serve the *file tree* (`.claude/` directories, `claude.md`), come from a
+different source, and are mutually inconsistent (`claude.svg` is
+hardcoded `#ff7043`, `gemini.svg` carries a `radialGradient`,
+`codex.svg` is stroke-based; viewBoxes 16 / 48 / 512). Touching them
+would risk a file-tree regression for zero gain, and mixing sources
+would make the graph canvas look assembled from spare parts. The
+`agent-` prefix keeps both concerns separate in one flat directory, so
+`FileIconAssets` needs no loader change. Unifying the file-tree icons
+later is a recorded follow-up, explicitly out of scope here.
+
+**Normalization (apply to each vendored file, then commit the result):**
+lobe ships `fill="currentColor"`, `viewBox="0 0 24 24"`,
+`width="1em" height="1em"`, plus a web-only
+`style="flex:none;line-height:1"` and a `<title>`. Strip the `style`
+attribute and the `<title>` (Rafu supplies its own accessibility
+labels). **Keep `fill="currentColor"` and the `viewBox`** — that is
+exactly what `assetIsTemplate: true` needs. `width/height="1em"` is
+already proven to work in this app: all three existing shipped icons use
+it. Record the byte-level SHA-256 of each committed file in the
+reference note (Rafu's checksum-everything posture, ADR 0010 Part B) so
+a future refresh is a diffable, verifiable act.
+
+**API:** `ConductorCLIIcons.icon(for id: ConductorCLIID) ->
+FileIconProvider.Icon` covering all seven cases in one exhaustive,
+compiler-enforced switch, each `assetName:` the vendored file with
+`assetIsTemplate: true`, tinted like a symbol via `FileIconView`.
+Symbol fallback (`terminal`, `.secondary` tint) when an asset fails to
+resolve, so a missing file degrades and never blocks a consumer. C8-06
+renders this catalog on graph nodes later — keep the API exactly this
+shape.
+
+**Licensing posture, to be recorded in ADR 0021 and the reference note
+(state it plainly; do not overstate it):** the package is MIT,
+"Copyright (c) 2023 LobeHub", with no trademark clause — that covers
+redistributing the files. Trademark is a separate regime from copyright
+and those marks remain their owners'; our use is *nominative*, i.e.
+showing a product's mark solely to identify that product, which is what
+every editor does when it shows a tool's logo. Keep it that way: render
+the marks unmodified apart from scaling and monochrome tinting, never
+imply endorsement or partnership, and never use them as Rafu's own
+branding. If a vendor ever objects, the symbol fallback already in the
+catalog is the honest degradation path.
 
 ### Session identity
 
@@ -239,6 +299,14 @@ func openAgentTerminal(spec: TerminalProcessSpec)
 - `TerminalsPanelTests` + `EditorTabSwitcherTests`: agent identity
   (icon mapping + display name) on rows/candidates; plain shells
   unchanged.
+- `FileIconAssetsTests`: all seven `agent-*.svg` assets resolve and load
+  as `NSImage`; `ConductorCLIIcons` covers every `ConductorCLIID` case
+  (`allCases` runtime test alongside the exhaustive switch); each
+  vendored file still contains `fill="currentColor"` and carries no
+  `<title>`/`style` residue (a normalization regression test — cheap,
+  and it catches a careless re-vendor); **the three existing file-tree
+  icons are byte-identical to their pre-change state** (the no-regression
+  proof).
 - `ProcessAttributionTests`: `.agentTerminal` renders "Agent Terminal";
   Ensemble `.agent` rendering unchanged; login shells unchanged.
 
@@ -246,7 +314,8 @@ func openAgentTerminal(spec: TerminalProcessSpec)
 
 `swift build` 0 warnings; `swift test` AND `swift test --no-parallel`
 green; `./script/format.sh --fix` then `--lint` clean; `xmllint
---noout` on the four new SVGs. HEADLESS ONLY — list the GUI checks
+--noout` on all seven vendored SVGs; `./script/verify.sh` runs an SVG
+lint step, so confirm the vendored files pass it. HEADLESS ONLY — list the GUI checks
 (panel menu, sheet keyboard-only pass, switcher icons, second window)
 for the coordinator. Remember the PTY rule: real spawn assertions only
 via `Foundation.Process` substitutes or `--no-parallel` (see
@@ -254,9 +323,15 @@ via `Foundation.Process` substitutes or `--no-parallel` (see
 
 ## Documentation deliverables
 
-ADR 0021 (above); NEW `docs/references/agent-terminals.md` (the
+ADR 0021 (above; its decision list must include the icon-provenance and
+nominative-use clause); NEW `docs/references/agent-terminals.md` (the
 env/argv contract, identity surfaces, per-CLI interactive + model-flag
-table with verified/hypothesis markers, why capture is off);
+table with verified/hypothesis markers, why capture is off); NEW
+`docs/references/agent-icon-assets.md` (provenance: package, pinned
+version `1.94.0` + tarball integrity, slug→filename table, the
+normalization steps, per-file committed SHA-256, the licensing posture,
+the `agent-` prefix rationale and the file-tree-unification follow-up,
+and the exact command sequence to refresh the set);
 `ensemble-manual-test-plan.md` section **N — Agent terminals** (N1
 one-click launch from panel, N2 ⌘⇧A sheet + model override, N3 unauthed
 CLI disabled with visible reason, N4 icon + name in tab/panel/switcher,
@@ -294,10 +369,11 @@ interactive terminal session in one action (terminals-panel menu, ⌘⇧A
 sheet with model + starting directory, palette, menu), with agent
 identity in the editor tab, terminals panel, Control-Tab switcher, and
 Resources ("Agent Terminal" kind). You also CREATE the seven-CLI icon
-catalog (ConductorCLIIcons + four new monochrome template SVGs +
-staging asserts) and the per-CLI interactive-launch probe table — both
-transferred to this plan; later C8 phases consume them. Plus ADR 0021
-recording the decision. The plan file is your authoritative design
+catalog (ConductorCLIIcons + seven real vendor marks vendored from
+lobe-icons under the `agent-` prefix, pinned and normalized per the
+plan + staging asserts) and the per-CLI interactive-launch probe table
+— both transferred to this plan; later C8 phases consume them. Plus
+ADR 0021 recording the decision. The plan file is your authoritative design
 contract, edit list, and test list — read it FIRST, then AGENTS.md, the
 conductor README ground rules, AT-execution-plan.md (the ownership
 transfers), ADR 0004/0014/0018 (and C8-01's amendment text as contract
@@ -313,9 +389,13 @@ are used only where YOUR probe table records a verified shape —
 unverified CLIs launch bare with the reason shown, never guessed flags;
 disabled agents stay visible with stated reasons (text, not tooltip- or
 color-only); sessions register as .agentTerminal rendering "Agent
-Terminal" (never "Ensemble Agent"); terminals are never restored; new
-SVGs are monochrome currentColor letterform badges, never imitation
-vendor logos; user-visible strings say "Agent Terminal", internal
+Terminal" (never "Ensemble Agent"); terminals are never restored; icons
+are the REAL vendor marks vendored from the pinned lobe-icons version in
+the plan (never hand-drawn placeholders, never re-drawn or restyled
+marks beyond scaling and monochrome tinting, never used as Rafu's own
+branding), committed under the `agent-` prefix with per-file SHA-256
+recorded, and the three existing file-tree SVGs must remain
+byte-identical; user-visible strings say "Agent Terminal", internal
 symbols use the AgentTerminal* prefix; your ConductorCore.swift edit
 stays inside the TerminalProcessSpec region and your WorkspaceSession
 edits stay at the anchored terminal seam (C8-02 edits other regions of
@@ -337,12 +417,17 @@ DEFINITION OF DONE:
    Resources, with plain shells and Ensemble runs unchanged
    (regression-tested).
 4. ConductorCLIIcons resolves all seven ConductorCLIID cases
-   (exhaustive switch + allCases test); four new SVGs pass xmllint and
-   are staged-asserted; the per-CLI interactive/model-flag probe table
-   is recorded in agent-terminals.md with verified/hypothesis markers.
-5. ADR 0021 written; agent-terminals.md reference note written;
-   manual-test-plan section N added; intended index rows in the report
-   only.
+   (exhaustive switch + allCases test); all seven vendored agent-*.svg
+   files pass xmllint, load as NSImage, keep fill="currentColor", carry
+   no <title>/style residue, and are staged-asserted; the three existing
+   file-tree icons are proven byte-identical; the per-CLI
+   interactive/model-flag probe table is recorded in agent-terminals.md
+   with verified/hypothesis markers.
+5. ADR 0021 written (including the icon-provenance and nominative-use
+   clause); agent-terminals.md and agent-icon-assets.md reference notes
+   written, the latter carrying the pinned version, per-file SHA-256,
+   and the refresh procedure; manual-test-plan section N added; intended
+   index rows in the report only.
 6. swift build 0 warnings; swift test AND swift test --no-parallel
    green; format --fix + --lint clean.
 7. Work committed locally in verified stages; never push/merge/rebase/

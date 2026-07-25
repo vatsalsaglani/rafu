@@ -200,9 +200,9 @@ isolated (the C5 precedent — one commit).
 
 ### Agent icons — CONSUME, do not create
 
-`ConductorCLIIcons.icon(for:)` and the seven SVG assets already exist —
-AT-01 (wave 1) owns the catalog, the four new letterform SVGs, and the
-`build_and_run.sh` staging asserts (transfer recorded in
+`ConductorCLIIcons.icon(for:)` and the seven `agent-*.svg` assets
+already exist — AT-01 (wave 1) owns the catalog, the vendored vendor
+marks, and the `build_and_run.sh` staging asserts (transfer recorded in
 `AT-execution-plan.md`). This plan only RENDERS the catalog: a 14 pt
 template-tinted provider badge on every graph node (CLI name in `.help`
 and the accessibility label) and on Activity feed rows. If the catalog

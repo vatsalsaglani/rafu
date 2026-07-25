@@ -53,6 +53,19 @@ UI says so plainly.
 4. Model selection: default from `ConductorDefaultModelStore`, curated
    list from the adapter where available, free-text override. Vendor
    flag shapes are HYPOTHESES until probed (adapter ground rule).
+5. **Agent icons are the real vendor marks**, vendored from
+   `@lobehub/icons-static-svg` (MIT, pinned `1.94.0`) under an `agent-`
+   filename prefix, normalized to Rafu's template-icon contract. This
+   reverses the earlier "hand-drawn letterform placeholders" draft: a
+   product's own mark identifies it better than an initials box, the set
+   is uniform (24×24, `fill="currentColor"`) where Rafu's three existing
+   file-tree icons are not, and the prefix keeps the file tree
+   untouched. Use is nominative — identify the product, never imply
+   endorsement, never restyle a mark, never adopt one as Rafu branding;
+   the catalog's symbol fallback is the degradation path. Provenance,
+   per-file SHA-256, and the refresh procedure live in
+   `docs/references/agent-icon-assets.md`; the clause is recorded in
+   ADR 0021.
 
 ## The two plans
 
@@ -65,8 +78,8 @@ UI says so plainly.
 reflected in the C8 plan docs):**
 
 1. **AT-01 owns the agent-icon catalog.** `ConductorCLIIcons.swift`, the
-   four new template SVGs (`opencode`, `cline`, `kimi`, `cursor`), and
-   the `build_and_run.sh` staging asserts move from C8-06 to AT-01.
+   seven vendored `agent-*.svg` marks, and the `build_and_run.sh`
+   staging asserts move from C8-06 to AT-01.
    C8-06 (wave 2) consumes the catalog; its preflight verifies it
    exists. Missing SVG assets degrade to symbol fallbacks inside the
    catalog, so nothing else ever blocks on artwork.
@@ -99,7 +112,7 @@ the sheet AT-01 creates.
 | `Sources/RafuApp/Models/WorkspaceSession.swift` | sheet flag + open seam anchored after `hideTerminalSession` (~933; C8-02's hook is at ~727) | no |
 | `Sources/RafuApp/Views/WorkspaceWindowView.swift` | one `.sheet` line | no |
 | `RafuAppCommands.swift` / `CommandPaletteView.swift` | agent-terminal entries (no C8 wave-1 plan touches these; C8-06/07 branch after AT-01 merges) | no |
-| NEW `Sources/RafuApp/Conductor/ConductorCLIIcons.swift` + `Resources/FileIcons/{opencode,cline,kimi,cursor}.svg` | **creates (transferred from C8-06)** | no |
+| NEW `Sources/RafuApp/Conductor/ConductorCLIIcons.swift` + `Resources/FileIcons/agent-*.svg` (seven, vendored) | **creates (transferred from C8-06)** | no |
 | `script/build_and_run.sh` | icon staging asserts (transferred from C8-06) | no |
 | `Sources/RafuApp/Views/AgentTerminalSheet.swift` | creates | extends (toggle + grant form) |
 | `Sources/RafuApp/Views/EnsembleStartSheet.swift` | no | grant-form extraction + cross-link |
