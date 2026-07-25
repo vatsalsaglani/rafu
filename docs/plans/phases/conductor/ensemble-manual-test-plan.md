@@ -72,7 +72,8 @@ steps:
 
 | # | Do this | Expect |
 |---|---|---|
-| A1 | Open **Settings → Agents** | Seven rows: Claude Code, Codex, OpenCode, Cline, Kimi CLI, Gemini CLI, Cursor CLI. Each shows an install status and a sign-in status. Claude Code and Codex should say found/authenticated; Kimi and Gemini should honestly say not found; Cursor should say found but **not** signed in. |
+| A1 | Open **Settings → Agents** | Seven rows: Claude Code, Codex, OpenCode, Cline, Kimi CLI, Gemini CLI, Cursor CLI. Each shows an install status and a sign-in status. On this Mac: Claude Code, OpenCode, **Cline** (nvm install), and Cursor CLI should all read as FOUND; Kimi and Gemini should honestly say not found. Cursor should be found but **not** signed in. |
+| A1b | Compare each row against `which <cli>` in a terminal | They must agree. A CLI that resolves in your shell but reads "Not found" in Rafu is the launchd-PATH bug (fixed 2026-07-25, see `docs/references/gui-app-path-and-cli-discovery.md`) — report it with the output of `which <cli>`. |
 | A2 | Read the footer text under the rows | It says Rafu runs your existing CLIs under your own subscriptions and never stores a sign-in token. |
 | A3 | Open a model picker on Claude Code | Model choices appear, plus a way to type a custom id. Nothing here should claim a model exists that you know does not. |
 
@@ -247,7 +248,9 @@ Everything else is polish I can chase afterwards.
 ## Known limitations (not bugs — do not report these)
 
 - **Kimi CLI and Gemini CLI are unverified** — not installed on your Mac, so
-  their adapters ship against documented shapes and say so honestly.
+  their adapters ship against documented shapes and say so honestly. (Cline
+  IS installed, under nvm; if it ever reads "not found" again that is a
+  regression of the launchd-PATH fix, not a known limitation.)
 - **Cursor CLI is logged out**, so its runs will fail at auth until you run
   `cursor-agent login`.
 - **`readOnly` is unsupported on some adapters** (Cursor, and OpenCode

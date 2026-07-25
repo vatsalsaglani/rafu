@@ -244,4 +244,12 @@ Beyond C7: [`orchestration-gap-analysis.md`](orchestration-gap-analysis.md)
 compares the shipped engine against the user's real multi-CLI orchestration
 loop (dynamic planning, fan-out DAGs, coordinator-driven merges) and sketches
 the candidate C8 (coordinator-agent route: `rafu ensemble` IPC verbs + a
-published skill + a bounded-budget consent model, amending ADR 0018).
+published skill + a bounded-budget consent model, amending ADR 0018). The
+user accepted Route B on 2026-07-25;
+[`C8-coordinator-ux.md`](C8-coordinator-ux.md) designs the resulting user
+experience — no chat UI (the terminal tab is the conversation), a guided
+entry point that makes agent/workflow files an output rather than a
+prerequisite, a live graph canvas projected from the manifest, and
+hub-and-spoke coordination with a bounded grant. Both documents remain
+exploratory: no ADR amendment, branch, or owned paths yet. Three of the five
+open handoffs above are C8 prerequisites.
