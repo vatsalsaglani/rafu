@@ -20,6 +20,10 @@ struct WorkspaceWindowView: View {
                 hoverTrackingEnabled: !isWindowFullScreen,
                 onHoverChange: { trafficLightsRevealed = $0 }
             )
+            if session.editorTabSwitcherState != nil {
+                EditorTabSwitcherOverlay(session: session)
+                    .zIndex(10)
+            }
         }
         // Content merges with the titlebar zone because `FlatWindowChrome`
         // zeroes the top safe area at the window level
@@ -39,6 +43,16 @@ struct WorkspaceWindowView: View {
                     }
                 }
             )
+        )
+        .background(
+            EditorTabSwitcherEventBridge(
+                isPresented: { session.editorTabSwitcherState != nil },
+                move: session.moveEditorTabSwitcherSelection,
+                commit: session.commitEditorTabSwitcher,
+                cancel: session.cancelEditorTabSwitcher
+            )
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
         )
         .frame(minWidth: 720, minHeight: 480)
         .navigationTitle(session.windowTitle)

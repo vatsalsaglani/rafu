@@ -87,7 +87,8 @@ nonisolated struct ClineAdapter: ConductorCLIAdapter {
         // So this is honestly unknown — and says why.
         .unknown(
             reason:
-                "Cline's CLI has no non-interactive sign-in check, so Rafu cannot read its status. This does not block runs — sign in with `cline auth`.")
+                "Cline's CLI has no non-interactive sign-in check, so Rafu cannot read its status. This does not block runs — sign in with `cline auth`."
+        )
     }
 
     func curatedModels() -> [ConductorModelChoice] {
@@ -129,7 +130,8 @@ nonisolated struct ClineAdapter: ConductorCLIAdapter {
             C3AdapterProcess.modelTimeout,
             Self.maximumModelOutputBytes)
         guard result.succeeded,
-            let parsed = Self.parseCatalogModels(result.standardOutput),
+            let parsed = Self.parseCatalogModels(
+                String(decoding: result.standardOutput, as: UTF8.self)),
             !parsed.isEmpty
         else {
             return curatedModels()
@@ -149,7 +151,8 @@ nonisolated struct ClineAdapter: ConductorCLIAdapter {
             .appending(path: "node", directoryHint: .notDirectory)
         // The resolved cline lives in `lib/node_modules/cline/bin/`, so also
         // try the launcher's own directory, where nvm keeps `node`.
-        let launcherSibling = executableURL
+        let launcherSibling =
+            executableURL
             .deletingLastPathComponent()
             .appending(path: "node", directoryHint: .notDirectory)
         for candidate in [launcherSibling, node]
@@ -165,8 +168,10 @@ nonisolated struct ClineAdapter: ConductorCLIAdapter {
         let packageRoot = executableURL.resolvingSymlinksInPath()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let catalog = packageRoot
-            .appending(path: "node_modules/@cline/llms/dist/models.js", directoryHint: .notDirectory)
+        let catalog =
+            packageRoot
+            .appending(
+                path: "node_modules/@cline/llms/dist/models.js", directoryHint: .notDirectory)
         guard FileManager.default.fileExists(atPath: catalog.path) else { return nil }
         return catalog
     }

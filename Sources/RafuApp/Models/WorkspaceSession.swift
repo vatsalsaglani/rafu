@@ -103,6 +103,9 @@ final class WorkspaceSession {
     var symbolIndexGeneration = 0
     var openDocuments: [EditorDocument] = []
     var editorLayout = EditorLayoutState()
+    /// Window-scoped, non-persisted Ctrl-Tab selection. The overlay previews
+    /// this value and commits its destination only when Control is released.
+    private(set) var editorTabSwitcherState: EditorTabSwitcherState?
     var selectedDocumentID: UUID?
     var selectedTreePath: String?
     /// The in-flight payload for the current, same-process editor drag (tab
@@ -2261,6 +2264,105 @@ final class WorkspaceSession {
 
     func deleteLine() {
         selectedDocument?.deleteLineAction?()
+    }
+
+    /// Every open editor tab plus every parked terminal session, in stable
+    /// visual order (groups, then tabs) followed by parked-terminal MRU.
+    /// Presented terminal sessions are represented by their session id and
+    /// therefore appear exactly once even though they also have an editor tab.
+    var editorTabSwitcherCandidates: [EditorTabSwitcherCandidate] {
+        var candidates: [EditorTabSwitcherCandidate] = []
+        let terminalSessionIDs = Set(terminal.sessions.map(\.id))
+
+        for groupID in editorLayout.groupIDs {
+            guard let group = editorLayout.group(id: groupID) else { continue }
+            for tab in group.tabs {
+                let destination: EditorTabSwitcherDestination
+                switch tab.resource {
+                case .terminal(let sessionID):
+                    guard terminalSessionIDs.contains(sessionID) else { continue }
+                    destination = .terminal(sessionID: sessionID)
+                case .file, .restorable:
+                    destination = .editorTab(tabID: tab.id, groupID: groupID)
+                }
+                candidates.append(EditorTabSwitcherCandidate(destination: destination))
+            }
+        }
+
+        candidates.append(
+            contentsOf: parkedTerminalSessions.map {
+                EditorTabSwitcherCandidate(destination: .terminal(sessionID: $0.id))
+            }
+        )
+        return candidates
+    }
+
+    var canCycleEditorTabs: Bool {
+        editorTabSwitcherCandidates.count > 1
+    }
+
+    /// Starts Ctrl-Tab from the focused tab, or advances an already-visible
+    /// switcher from its highlighted destination. This updates only the
+    /// overlay's ephemeral selection; `commitEditorTabSwitcher()` performs
+    /// the actual editor/terminal selection once.
+    func cycleEditorTabSwitcher(_ direction: EditorTabSwitcherDirection) {
+        let candidates = editorTabSwitcherCandidates
+        let current =
+            editorTabSwitcherState?.selectedCandidate.destination
+            ?? focusedTabSwitcherDestination
+        editorTabSwitcherState = EditorTabSwitcherState(
+            candidates: candidates,
+            current: current,
+            direction: direction
+        )
+    }
+
+    func moveEditorTabSwitcherSelection(_ direction: EditorTabSwitcherDirection) {
+        guard var state = editorTabSwitcherState else { return }
+        state.move(direction)
+        editorTabSwitcherState = state
+    }
+
+    func commitEditorTabSwitcher() {
+        guard let destination = editorTabSwitcherState?.selectedCandidate.destination else {
+            return
+        }
+        editorTabSwitcherState = nil
+        activateEditorTabSwitcherDestination(destination)
+    }
+
+    func commitEditorTabSwitcher(to destination: EditorTabSwitcherDestination) {
+        guard var state = editorTabSwitcherState else { return }
+        state.select(destination)
+        editorTabSwitcherState = state
+        commitEditorTabSwitcher()
+    }
+
+    func cancelEditorTabSwitcher() {
+        editorTabSwitcherState = nil
+    }
+
+    private var focusedTabSwitcherDestination: EditorTabSwitcherDestination? {
+        let groupID = editorLayout.focusedGroupID
+        guard let group = editorLayout.group(id: groupID),
+            let selectedTabID = group.selectedTabID,
+            let tab = group.tabs.first(where: { $0.id == selectedTabID })
+        else { return nil }
+        if case .terminal(let sessionID) = tab.resource {
+            return .terminal(sessionID: sessionID)
+        }
+        return .editorTab(tabID: tab.id, groupID: groupID)
+    }
+
+    private func activateEditorTabSwitcherDestination(
+        _ destination: EditorTabSwitcherDestination
+    ) {
+        switch destination {
+        case .editorTab(let tabID, let groupID):
+            selectEditorTab(tabID, in: groupID)
+        case .terminal(let sessionID):
+            revealTerminalSession(sessionID)
+        }
     }
 
     func selectEditorTab(_ tabID: EditorTabID, in groupID: EditorGroupID) {

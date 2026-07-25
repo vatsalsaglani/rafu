@@ -34,7 +34,8 @@ struct CursorAdapterTests {
         #expect(
             CursorAdapter.classifyAuthStatus(exitCode: 0, output: loggedIn)
                 == .authenticated)
-        #expect(CursorAdapter.classifyAuthStatus(exitCode: 1, output: "network error") == .unknown())
+        #expect(
+            CursorAdapter.classifyAuthStatus(exitCode: 1, output: "network error") == .unknown())
         #expect(
             CursorAdapter.classifyAuthStatus(
                 exitCode: 0,

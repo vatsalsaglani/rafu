@@ -32,14 +32,14 @@ private let clineWorkingDirectory = URL(fileURLWithPath: "/tmp/rafu-c3-worktree"
 private let clineRunDirectory = URL(fileURLWithPath: "/tmp/rafu-c3-run")
 private let clineHandoffDirectory = URL(fileURLWithPath: "/tmp/rafu-c3-run/step-1")
 
-@Test("Cline is registered with curated routes and honest unsupported metadata probes")
+@Test("Cline is registered with curated routes and offline model discovery")
 func clineRegistryAndMetadata() async {
     let adapter = ClineAdapter(runtime: unavailableClineRuntime())
     #expect(adapter.id == .cline)
     #expect(adapter.defaultEnabled)
     #expect(ConductorAdapterRegistry.adapter(for: .cline) is ClineAdapter)
-    #expect(!adapter.supportsModelDiscovery)
-    #expect(await adapter.discoverModels() == nil)
+    #expect(adapter.supportsModelDiscovery)
+    #expect(await adapter.discoverModels() == adapter.curatedModels())
     // Unknown, but no longer a bare shrug: Cline 3.0.46 has no
     // non-interactive sign-in check (`config`/`mcp` demand a TTY, `auth`
     // MUTATES rather than reports, and reading its 0600 provider store is

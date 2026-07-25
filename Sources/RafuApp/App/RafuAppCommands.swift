@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct RafuAppCommands: Commands {
@@ -226,6 +227,20 @@ struct RafuAppCommands: Commands {
 
             Divider()
 
+            Button("Next Tab") {
+                cycleEditorTab(.forward)
+            }
+            .keyboardShortcut(.tab, modifiers: [.control])
+            .disabled(workspaceSession?.canCycleEditorTabs != true)
+
+            Button("Previous Tab") {
+                cycleEditorTab(.backward)
+            }
+            .keyboardShortcut(.tab, modifiers: [.control, .shift])
+            .disabled(workspaceSession?.canCycleEditorTabs != true)
+
+            Divider()
+
             Button("Toggle Terminal") {
                 workspaceSession?.toggleTerminal()
             }
@@ -350,6 +365,18 @@ struct RafuAppCommands: Commands {
                 == .modified
         else { return nil }
         return openDiff.diff.hunks[0]
+    }
+
+    /// A keyboard key equivalent keeps Control held until the switcher
+    /// commits on modifier release. Choosing the same command with the mouse
+    /// has no modifier-release event, so it performs the equivalent one-step
+    /// selection immediately instead of leaving the overlay stranded.
+    private func cycleEditorTab(_ direction: EditorTabSwitcherDirection) {
+        guard let workspaceSession else { return }
+        workspaceSession.cycleEditorTabSwitcher(direction)
+        if !NSEvent.modifierFlags.contains(.control) {
+            workspaceSession.commitEditorTabSwitcher()
+        }
     }
 
     private func hasTrackedChanges(in session: WorkspaceSession) -> Bool {
