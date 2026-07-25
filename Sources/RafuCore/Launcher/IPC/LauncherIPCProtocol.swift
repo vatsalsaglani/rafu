@@ -17,6 +17,11 @@ public enum LauncherIPCProtocol {
     /// fields do not require a bump (forward-compatible decoding).
     public static let protocolVersion = 1
 
+    /// Version of the read-only `rafu ensemble` verb surface. This advances
+    /// independently of the transport schema so coordinators can detect verb
+    /// additions without treating them as a framing incompatibility.
+    public static let ensembleVerbVersion = 1
+
     /// Upper bound on one framed JSON body, enforced by both the encoder and
     /// the incremental decoder (landed in I1). Paths, line/column, and
     /// activation metadata only — this socket never carries document text
@@ -37,7 +42,23 @@ public enum LauncherIPCRequestKind: Hashable, Sendable {
     case handshake
     case openFolder
     case goto
+    case ensembleStatus
+    case ensembleArtifact
+    case ensembleSubscribe
     case unknown(String)
+
+    public var isEnsemble: Bool {
+        switch self {
+        case .ensembleStatus, .ensembleArtifact, .ensembleSubscribe:
+            true
+        case .handshake, .openFolder, .goto, .unknown:
+            false
+        }
+    }
+
+    public var isStreaming: Bool {
+        self == .ensembleSubscribe
+    }
 }
 
 extension LauncherIPCRequestKind: Codable {
@@ -47,6 +68,9 @@ extension LauncherIPCRequestKind: Codable {
         case "handshake": self = .handshake
         case "openFolder": self = .openFolder
         case "goto": self = .goto
+        case "ensembleStatus": self = .ensembleStatus
+        case "ensembleArtifact": self = .ensembleArtifact
+        case "ensembleSubscribe": self = .ensembleSubscribe
         default: self = .unknown(raw)
         }
     }
@@ -57,6 +81,9 @@ extension LauncherIPCRequestKind: Codable {
         case .handshake: try container.encode("handshake")
         case .openFolder: try container.encode("openFolder")
         case .goto: try container.encode("goto")
+        case .ensembleStatus: try container.encode("ensembleStatus")
+        case .ensembleArtifact: try container.encode("ensembleArtifact")
+        case .ensembleSubscribe: try container.encode("ensembleSubscribe")
         case .unknown(let raw): try container.encode(raw)
         }
     }
@@ -76,10 +103,14 @@ public struct LauncherIPCEnvelope: Codable, Hashable, Sendable {
     public let kind: LauncherIPCRequestKind
     /// `nil` for `handshake`; present for `openFolder`/`goto`.
     public let payload: LauncherOpenRequest?
+    /// Present only for an Ensemble request kind. Optional so older peers
+    /// continue decoding the v1 launcher envelope unchanged.
+    public let ensemble: EnsembleRequestPayload?
 
     public init(
         kind: LauncherIPCRequestKind,
         payload: LauncherOpenRequest? = nil,
+        ensemble: EnsembleRequestPayload? = nil,
         requestID: String = UUID().uuidString,
         wireVersion: Int = LauncherIPCProtocol.wireVersion,
         protocolVersion: Int = LauncherIPCProtocol.protocolVersion
@@ -89,6 +120,7 @@ public struct LauncherIPCEnvelope: Codable, Hashable, Sendable {
         self.requestID = requestID
         self.kind = kind
         self.payload = payload
+        self.ensemble = ensemble
     }
 }
 
@@ -99,6 +131,7 @@ public struct LauncherIPCEnvelope: Codable, Hashable, Sendable {
 public enum LauncherIPCResponse: Codable, Hashable, Sendable {
     case accepted(workspaceMatched: Bool, windowFocused: Bool, waitSupported: Bool)
     case rejected(reason: String)
+    case ensemble(EnsembleResponsePayload)
 }
 
 /// Resolves the deterministic, same-user socket path both the CLI and the

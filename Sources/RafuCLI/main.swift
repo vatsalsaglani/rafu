@@ -6,6 +6,11 @@ private func writeError(_ message: String) {
     FileHandle.standardError.write(Data("\(message)\n".utf8))
 }
 
+private func writeOutput(_ message: String) {
+    guard !message.isEmpty else { return }
+    FileHandle.standardOutput.write(Data("\(message)\n".utf8))
+}
+
 private func runOpen(bundleURL: URL, documentURL: URL?) throws -> Int32 {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
@@ -54,8 +59,42 @@ private func coldStartRequest(_ request: LauncherOpenRequest) -> LauncherOpenReq
     )
 }
 
+let commandArguments = Array(CommandLine.arguments.dropFirst())
+let ensembleGate = EnsembleSubcommandGate.classify(
+    firstArgument: commandArguments.first,
+    hasFilesystemEntry: commandArguments.first == "ensemble"
+        && FileManager.default.fileExists(atPath: "./ensemble")
+)
+
+switch ensembleGate {
+case .collision:
+    writeError(
+        "rafu: 'ensemble' is both a reserved subcommand and a local filesystem entry; use 'rafu ./ensemble' to open the workspace."
+    )
+    exit(EnsembleExitCode.usage.rawValue)
+case .subcommand:
+    do {
+        let invocation = try EnsembleArgumentParser().parse(Array(commandArguments.dropFirst()))
+        let result = EnsembleCommandRunner().run(
+            invocation,
+            workingDirectory: FileManager.default.currentDirectoryPath
+        )
+        writeOutput(result.standardOutput)
+        if !result.standardError.isEmpty {
+            writeError(result.standardError)
+        }
+        exit(result.exitCode.rawValue)
+    } catch {
+        writeError("rafu ensemble: \(error.localizedDescription)")
+        writeError("Run 'rafu ensemble --help' for usage.")
+        exit(EnsembleExitCode.usage.rawValue)
+    }
+case .path:
+    break
+}
+
 do {
-    let invocation = try LauncherArgumentParser().parse(Array(CommandLine.arguments.dropFirst()))
+    let invocation = try LauncherArgumentParser().parse(commandArguments)
 
     switch invocation {
     case .help:
@@ -129,6 +168,9 @@ do {
                     }
                 case .rejected(let reason):
                     writeError("rafu: Rafu.app rejected the request: \(reason)")
+                    exit(EX_UNAVAILABLE)
+                case .ensemble:
+                    writeError("rafu: Rafu.app returned an unexpected launcher response.")
                     exit(EX_UNAVAILABLE)
                 }
                 break
