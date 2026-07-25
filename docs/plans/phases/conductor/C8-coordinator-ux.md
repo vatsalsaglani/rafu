@@ -333,14 +333,14 @@ output and artifacts, survives relaunch and quit, and is plain text on disk.
 | `propose-merge <run>` | Surface a diff to the human gate | **Never applies** |
 | `note <run> <text>` | Post a line to the run timeline | Bounded length |
 
-**One implementation caveat, load-bearing:** the current IPC contract is
-one frame per connection, strictly request/response
-(`docs/references/cli-app-ipc.md`). `await` is therefore *not* free — it is
-either client-side polling over repeated `status` connections, or a new
-long-lived streaming frame kind. Polling is the honest v1: simpler, no new
-socket contract, and the latency cost is irrelevant against multi-minute
-agent steps. This should be settled before any implementation begins, not
-discovered during it.
+**One implementation caveat, load-bearing:** the current IPC contract began
+as one frame per connection, strictly request/response
+(`docs/references/cli-app-ipc.md`). `await` is therefore *not* free — it
+requires either client-side polling over repeated `status` connections or a
+new long-lived streaming frame kind. **Resolved (2026-07-26): streaming.**
+The ADR 0018 amendment adds a long-lived subscription connection with framed
+events, heartbeats, and bounded buffers while preserving one-frame
+request/response connections for one-shot verbs.
 
 ### The loop, end to end
 
@@ -436,25 +436,24 @@ in the panel — no run in Rafu is ever unattributed.
 
 ## What this needs that does not exist yet
 
-Honest dependency list. Note the first line: **most of this is blocked on
-work already identified and not yet done.**
+Honest dependency list. The prerequisite handoffs are closed; the remaining
+rows describe C8 work governed by the approved execution plan.
 
 | Need | Status |
 |---|---|
-| Concurrent runs driven from the GUI | **Open handoff #1 from C6** — hard blocker; the fan-out is the whole point |
-| Usage persisted to the manifest | **Open handoff #2 from C7** — required for a usage ceiling |
-| Recovery verbs wired | **Open handoff #3 from C7** — a long coordinator run will meet a relaunch |
+| Concurrent runs driven from the GUI | **Closed (landed `2da406e`+`5e2ac85`)** — the fan-out substrate is on `main` |
+| Usage persisted to the manifest | **Closed (landed `2da406e`+`5e2ac85`)** — usage ceilings can follow C7's honesty rule |
+| Recovery verbs wired | **Closed (landed `2da406e`+`5e2ac85`)** — interrupted runs have explicit recovery |
 | `rafu ensemble` verb surface | New — CLI + IPC request kinds |
-| `await` semantics on a one-frame socket | New — decide polling vs. streaming *first* |
+| `await` semantics on a one-frame socket | **Decided: streaming** — see the ADR 0018 amendment |
 | Plan-gate step kind | New — grammar + parse + preview + gate |
 | Graph canvas | New — largest UI piece; additive canvas mode |
 | `proposes:` in artifacts | New — small additive schema |
 | Published coordinator skill | New — ships outside the app |
 | ADR 0018 consent amendment | New — **must land before any code** |
 
-Three of the five C6/C7 handoffs are prerequisites rather than nice-to-haves.
-That is a genuine argument for landing them next regardless of whether C8 is
-ever approved.
+The three C6/C7 prerequisites are satisfied on `main`; no substrate handoff
+blocks the approved C8 execution plan.
 
 ## Open questions
 
@@ -462,15 +461,28 @@ ever approved.
    can dirty the tree) or its own read-only worktree (clean, but cannot see
    uncommitted work)? Leaning coordinator-in-repo-read-only, workers in
    worktrees — but this is unresolved and affects the trust model.
+   **Answered (2026-07-26):** The coordinator runs interactively in the
+   user's checkout, with no coordinator worktree or manifest in v1. Child
+   manifests preserve durable attribution through `startedBy`.
 2. **`await` transport** — polling vs. a streaming frame kind. Polling is
    the honest v1; confirm before implementation.
+   **Answered (2026-07-26):** Streaming. A long-lived subscription connection
+   carries framed events with heartbeats; one-shot verbs retain the
+   request/response contract. See the ADR 0018 amendment.
 3. **Does the graph canvas span runs or show one?** C6 allows concurrent
    independent runs; a coordinator makes them related. Probably one canvas
    per coordinator tree, but the manifest has no parent link today.
+   **Answered (2026-07-26):** One graph canvas per workspace groups related
+   runs into coordinator trees through the new `startedBy` manifest field.
 4. **Skill distribution** — bundled in the app and installed on demand, or
    published to a marketplace? Affects versioning against `rafu` CLI verbs.
+   **Answered (2026-07-26):** Bundle the skill pack in the app and install it
+   on demand from Settings → Ensemble.
 5. **Nested coordinators** — a child coordinator spawning its own children.
    Recommend forbidding in v1; the budget math stops being tractable.
+   **Answered (2026-07-26):** Forbidden structurally in v1. Only coordinator
+   sessions receive `RAFU_ENSEMBLE_TOKEN`; worker children never receive it
+   and may propose successors but cannot spawn them.
 
 ## Related
 

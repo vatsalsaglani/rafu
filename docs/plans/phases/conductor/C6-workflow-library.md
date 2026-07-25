@@ -2,7 +2,8 @@
 
 - **Branch:** `conductor/c6-workflow-library` (Wave C, branch after C5 merges)
 - **Depends on:** C0 + C1 + C5 on `main` (verify in branch history)
-- **Status:** Implemented headlessly; Runs/Workflows segmented sub-view chosen; concurrent window integration pending the coordinator handoff
+- **Status:** Merged `95a51f7`; Runs/Workflows segmented sub-view chosen;
+  coordinator handoff closed on `main` (`2da406e` + `5e2ac85`)
 
 ## Mission
 

@@ -208,6 +208,13 @@ git worktree add ../rafu-conductor-polish   -b conductor/c7-polish
 | C5 | [C5-pipelines.md](C5-pipelines.md) | main | Implemented on main (commits fc33a99/c5c83de/a89309a/c58eef1; coordinator-implemented after stop-and-report; 0 warnings, 1479 tests, GUI verified) |
 | C6 | [C6-workflow-library.md](C6-workflow-library.md) | `conductor/c6-workflow-library` | Merged 2026-07-25 (`95a51f7`; owned work complete — 1 integration handoff open, see below) |
 | C7 | [C7-polish.md](C7-polish.md) | `conductor/c7-polish` | Merged 2026-07-25 (`4c42b60`; owned work complete — 4 integration handoffs open, see below) |
+| C8-01 | [C8-01-consent-adr-and-doc-hygiene.md](C8-01-consent-adr-and-doc-hygiene.md) | `conductor/c8-01-consent-docs` | Planned |
+| C8-02 | [C8-02-ipc-streaming-and-readonly-verbs.md](C8-02-ipc-streaming-and-readonly-verbs.md) | `conductor/c8-02-ipc-streaming` | Planned |
+| C8-03 | [C8-03-capability-token-and-mutating-verbs.md](C8-03-capability-token-and-mutating-verbs.md) | `conductor/c8-03-mutating-verbs` | Planned |
+| C8-04 | [C8-04-plan-gate-and-propose-merge.md](C8-04-plan-gate-and-propose-merge.md) | `conductor/c8-04-plan-gate` | Planned |
+| C8-05 | [C8-05-skill-pack-and-settings.md](C8-05-skill-pack-and-settings.md) | `conductor/c8-05-skill-pack` | Planned |
+| C8-06 | [C8-06-graph-canvas.md](C8-06-graph-canvas.md) | `conductor/c8-06-graph-canvas` | Planned |
+| C8-07 | [C8-07-guided-onboarding.md](C8-07-guided-onboarding.md) | `conductor/c8-07-onboarding` | Planned |
 
 Merged-main gates after C6+C7: 0 warnings, 1515 tests green parallel and
 serial, lint clean, staged-app GUI verify passed.
@@ -255,9 +262,9 @@ hub-and-spoke coordination with a bounded grant.
 surface: the `rafu ensemble` verb set with JSON shapes and exit codes, the
 run-scoped capability token that authorizes spawning, the
 `ensemble-with-rafu` skill pack, three worked orchestration examples, and a
-build order. All three documents remain
-exploratory: no ADR amendment, branch, or owned paths yet. Three of the five
-open handoffs above are C8 prerequisites.
+build order. These documents remain the design rationale; the C6/C7
+prerequisites are satisfied, and C8 execution is governed by
+[`C8-execution-plan.md`](C8-execution-plan.md).
 
 **C8 is now planned for execution:**
 [`C8-execution-plan.md`](C8-execution-plan.md) locks the open decisions

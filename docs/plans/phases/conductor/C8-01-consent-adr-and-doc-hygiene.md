@@ -1,6 +1,7 @@
 # C8-01 — ADR 0018 consent amendment + doc hygiene
 
-- **Status:** Ready. Branch: `conductor/c8-01-consent-docs` (from `main`).
+- **Status:** Complete (2026-07-26). Branch:
+  `conductor/c8-01-consent-docs` (from `main`).
   Wave 1 — runs parallel with C8-02. **Docs only. Zero code edits.**
 - **Why first:** `C8-cli-and-skill-spec.md` Part 4 — "ADR amendment must
   precede any mutating code." C8-03 may not branch until this merges.
