@@ -179,17 +179,59 @@ would make the graph canvas look assembled from spare parts. The
 `FileIconAssets` needs no loader change. Unifying the file-tree icons
 later is a recorded follow-up, explicitly out of scope here.
 
-**Normalization (apply to each vendored file, then commit the result):**
-lobe ships `fill="currentColor"`, `viewBox="0 0 24 24"`,
-`width="1em" height="1em"`, plus a web-only
-`style="flex:none;line-height:1"` and a `<title>`. Strip the `style`
-attribute and the `<title>` (Rafu supplies its own accessibility
-labels). **Keep `fill="currentColor"` and the `viewBox`** — that is
-exactly what `assetIsTemplate: true` needs. `width/height="1em"` is
-already proven to work in this app: all three existing shipped icons use
-it. Record the byte-level SHA-256 of each committed file in the
-reference note (Rafu's checksum-everything posture, ADR 0010 Part B) so
-a future refresh is a diffable, verifiable act.
+**How the assets get here — read this before doing anything clever.**
+There is **no npm dependency, no SwiftPM dependency, no build-phase
+download, and no runtime fetch.** You fetch the seven files ONCE with
+`curl` while implementing this plan, normalize them, and **commit the
+resulting files** into `Resources/FileIcons/`. From then on they are
+ordinary static assets exactly like the three already there; the app
+never touches the network for an icon, and `Package.swift` does not
+change. The pinned version and integrity hash below exist so a human can
+later verify or refresh provenance — not because anything resolves them
+at build time.
+
+Run this once, from the repository root (verified 2026-07-26 — the
+`sed`, `xmllint`, and `shasum` steps were dry-run on `cline`):
+
+```bash
+V=1.94.0
+set -- claude:claude-code codex:codex opencode:opencode cline:cline \
+       kimi:kimi gemini:gemini cursor:cursor
+for pair in "$@"; do
+  slug="${pair%%:*}"; name="${pair##*:}"
+  curl -sfL "https://unpkg.com/@lobehub/icons-static-svg@${V}/icons/${slug}.svg" \
+    | sed -E -e 's/ style="[^"]*"//' -e 's#<title>[^<]*</title>##' \
+    > "Resources/FileIcons/agent-${name}.svg"
+done
+xmllint --noout Resources/FileIcons/agent-*.svg && echo "XML OK"
+shasum -a 256 Resources/FileIcons/agent-*.svg     # paste into the reference note
+```
+
+`curl -f` makes an HTTP error a non-zero exit rather than an HTML error
+page written into an `.svg` — do not drop that flag. Inspect one result
+before committing all seven; the normalized `cline` icon is 1.5 KB and
+starts `<svg fill="currentColor" fill-rule="evenodd" height="1em"
+viewBox="0 0 24 24" …>` with no `style` and no `<title>`.
+
+**If your environment has no network access:** do not hand-draw
+substitutes and do not skip the icons. Land every other part of this
+plan, write `ConductorCLIIcons` against the seven expected filenames
+(the symbol fallback keeps it compiling and rendering), and report the
+missing assets as a HANDOFF — the coordinator vendors them on `main`
+with the command block above. Partial delivery plus a precise handoff
+beats a clean halt.
+
+**What normalization does and why:** lobe ships `fill="currentColor"`,
+`viewBox="0 0 24 24"`, `width="1em" height="1em"`, plus a web-only
+`style="flex:none;line-height:1"` and a `<title>`. The `sed` strips the
+`style` (meaningless outside CSS layout) and the `<title>` (Rafu
+supplies its own accessibility labels, and a stray title can leak into
+VoiceOver output). **Keep `fill="currentColor"` and the `viewBox`** —
+that is exactly what `assetIsTemplate: true` needs. `width/height="1em"`
+stays: it is already proven in this app, since all three existing
+shipped icons use it. Record the byte-level SHA-256 of each committed
+file in the reference note (Rafu's checksum-everything posture,
+ADR 0010 Part B) so a future refresh is a diffable, verifiable act.
 
 **API:** `ConductorCLIIcons.icon(for id: ConductorCLIID) ->
 FileIconProvider.Icon` covering all seven cases in one exhaustive,
@@ -393,9 +435,13 @@ Terminal" (never "Ensemble Agent"); terminals are never restored; icons
 are the REAL vendor marks vendored from the pinned lobe-icons version in
 the plan (never hand-drawn placeholders, never re-drawn or restyled
 marks beyond scaling and monochrome tinting, never used as Rafu's own
-branding), committed under the `agent-` prefix with per-file SHA-256
-recorded, and the three existing file-tree SVGs must remain
-byte-identical; user-visible strings say "Agent Terminal", internal
+branding), fetched ONCE with the curl block in the plan and COMMITTED as
+static files — adding an npm dependency, a SwiftPM dependency, a build
+phase, or any runtime download for icons is out of bounds; commit them
+under the `agent-` prefix with per-file SHA-256 recorded, and the three
+existing file-tree SVGs must remain byte-identical (no network in your
+environment ⇒ HANDOFF, never hand-drawn substitutes);
+user-visible strings say "Agent Terminal", internal
 symbols use the AgentTerminal* prefix; your ConductorCore.swift edit
 stays inside the TerminalProcessSpec region and your WorkspaceSession
 edits stay at the anchored terminal seam (C8-02 edits other regions of
