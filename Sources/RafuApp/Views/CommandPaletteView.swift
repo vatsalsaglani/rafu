@@ -49,7 +49,7 @@ struct CommandPaletteView: View {
         let parsed = PaletteQueryParser.parse(query)
         let rows = rows(for: parsed)
         VStack(spacing: 0) {
-            paletteHeader(parsed: parsed, rows: rows)
+            paletteHeader(parsed: parsed)
             if let caption = fileIndexCaption(for: parsed) {
                 Text(caption)
                     .font(.caption2)
@@ -73,11 +73,11 @@ struct CommandPaletteView: View {
                 .strokeBorder(theme.palette.borderStrong.opacity(0.5))
         )
         .onKeyPress(.downArrow) {
-            moveSelection(1, count: rows.count)
+            moveSelection(1)
             return .handled
         }
         .onKeyPress(.upArrow) {
-            moveSelection(-1, count: rows.count)
+            moveSelection(-1)
             return .handled
         }
         .onChange(of: query) { _, _ in selectedIndex = 0 }
@@ -117,10 +117,7 @@ struct CommandPaletteView: View {
         }
     }
 
-    private func paletteHeader(
-        parsed: PaletteQueryParser.ParsedQuery,
-        rows: [PaletteRow]
-    ) -> some View {
+    private func paletteHeader(parsed: PaletteQueryParser.ParsedQuery) -> some View {
         HStack(spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: headerSymbolName(for: parsed.mode))
@@ -133,7 +130,7 @@ struct CommandPaletteView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 15))
                 .focused($searchFocused)
-                .onSubmit { run(rows, at: selectedIndex) }
+                .onSubmit { runSelection() }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -318,14 +315,31 @@ struct CommandPaletteView: View {
         return isSelected ? theme.palette.accent : theme.palette.textSecondary
     }
 
-    private func moveSelection(_ delta: Int, count: Int) {
-        guard count > 0 else { return }
-        selectedIndex = (selectedIndex + delta + count) % count
+    /// The rows for the query as it stands RIGHT NOW.
+    ///
+    /// Keyboard handlers must never close over the `rows` array `body`
+    /// computed: that copy is fixed at body-evaluation time, while
+    /// `selectedIndex` (being `@State`) always reads live. When the two
+    /// disagree — the file-index query is asynchronous, so the row set is
+    /// replaced under a stable selection — Return ran
+    /// `staleRows[currentIndex]` and opened a file that was not even in the
+    /// visible results, while the highlight (drawn from the current rows)
+    /// looked correct. Clicking a row never had the bug because the button
+    /// invokes the row it renders. Recomputing here keeps the index and the
+    /// list from the same snapshot.
+    private var currentRows: [PaletteRow] {
+        rows(for: PaletteQueryParser.parse(query))
     }
 
-    private func run(_ rows: [PaletteRow], at index: Int) {
-        guard rows.indices.contains(index) else { return }
-        rows[index].action()
+    private func moveSelection(_ delta: Int) {
+        selectedIndex = PaletteSelection.moved(
+            from: selectedIndex, by: delta, count: currentRows.count)
+    }
+
+    private func runSelection() {
+        let rows = currentRows
+        guard rows.indices.contains(selectedIndex) else { return }
+        rows[selectedIndex].action()
     }
 
     // MARK: - Rows per mode
@@ -951,6 +965,20 @@ private struct PaletteCommand {
 
 /// Splits a palette query into its mode prefix and search term: plain text
 /// searches files, ">" prefixes commands, "@" prefixes active-buffer symbols.
+/// Wrap-around arrow-key movement over the palette's result rows.
+nonisolated enum PaletteSelection {
+    /// Moves `index` by `delta` within `count` rows, wrapping at both ends.
+    /// An index left past the end by a shrinking result set is re-anchored
+    /// to the last row BEFORE the delta applies, so ↓ from a stale index
+    /// never silently wraps to an unrelated row. Returns 0 for an empty
+    /// result set.
+    static func moved(from index: Int, by delta: Int, count: Int) -> Int {
+        guard count > 0 else { return 0 }
+        let anchored = min(max(index, 0), count - 1)
+        return (anchored + delta % count + count) % count
+    }
+}
+
 nonisolated enum PaletteQueryParser {
     enum Mode: Equatable, Sendable {
         case files
