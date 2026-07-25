@@ -1,7 +1,8 @@
 # Ensemble pipeline engine: workflow execution, gates, and multi-role orchestration
 
 - Applies to: `Sources/RafuApp/Conductor/Run/ConductorWorkflowController.swift` (C5 pipeline engine) and related UI views (`ConductorRunsPanelView`, `ConductorRunDetailCanvas`), plus Views/WorkspaceSession seams that route run details to the canvas
-- Last verified: Swift 6.2 / macOS 26 / 2026-07-25 (phase C5)
+- Last verified: Swift 6.2 / macOS 26 / 2026-07-25 (phase C5);
+  corrected 2026-07-26 against `ConductorRunEvidenceLayout`
 
 ## Rule or observed behavior
 
@@ -25,9 +26,9 @@ A workflow's `.rafu/workflows/*.md` definition produces ONE run-level `worktreeW
 
 Step evidence lives under `.rafu/runs/<id>/steps/<NN>-<slug>-a<N>/` where:
 
-- `<NN>` is the 2-digit step index (e.g., `00`, `01`).
+- `<NN>` is the 2-digit, 1-based on-disk step number (e.g., `01`, `02`).
 - `<slug>` is the sanitized agent name (lowercase alphanumeric + hyphens only; slug sanitizer rejects uppercase and special characters; see `conductor-file-contracts.md` for exact rules).
-- `<a<N>>` is the **attempt suffix**: `-a0` for first execution, `-a1` for first retry, etc.
+- `<a<N>>` is the **attempt suffix**: `-a1` for first execution, `-a2` for first retry, etc.
 
 **Immutability rule:** retry never mutates prior evidence. The `prepare()` phase throws if an attempt directory exists, forcing each retry into a fresh attempt-numbered directory. Logs, prompts, and handoff artifacts from failed or revised steps remain intact for review.
 
