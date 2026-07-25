@@ -45,11 +45,16 @@ public enum LauncherIPCRequestKind: Hashable, Sendable {
     case ensembleStatus
     case ensembleArtifact
     case ensembleSubscribe
+    case ensembleRun
+    case ensembleAbort
+    case ensembleNote
+    case ensembleGrant
     case unknown(String)
 
     public var isEnsemble: Bool {
         switch self {
-        case .ensembleStatus, .ensembleArtifact, .ensembleSubscribe:
+        case .ensembleStatus, .ensembleArtifact, .ensembleSubscribe,
+            .ensembleRun, .ensembleAbort, .ensembleNote, .ensembleGrant:
             true
         case .handshake, .openFolder, .goto, .unknown:
             false
@@ -71,6 +76,10 @@ extension LauncherIPCRequestKind: Codable {
         case "ensembleStatus": self = .ensembleStatus
         case "ensembleArtifact": self = .ensembleArtifact
         case "ensembleSubscribe": self = .ensembleSubscribe
+        case "ensembleRun": self = .ensembleRun
+        case "ensembleAbort": self = .ensembleAbort
+        case "ensembleNote": self = .ensembleNote
+        case "ensembleGrant": self = .ensembleGrant
         default: self = .unknown(raw)
         }
     }
@@ -84,6 +93,10 @@ extension LauncherIPCRequestKind: Codable {
         case .ensembleStatus: try container.encode("ensembleStatus")
         case .ensembleArtifact: try container.encode("ensembleArtifact")
         case .ensembleSubscribe: try container.encode("ensembleSubscribe")
+        case .ensembleRun: try container.encode("ensembleRun")
+        case .ensembleAbort: try container.encode("ensembleAbort")
+        case .ensembleNote: try container.encode("ensembleNote")
+        case .ensembleGrant: try container.encode("ensembleGrant")
         case .unknown(let raw): try container.encode(raw)
         }
     }

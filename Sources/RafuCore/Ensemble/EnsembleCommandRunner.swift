@@ -2,16 +2,22 @@ import Foundation
 
 public enum EnsembleHelp {
     public static let text = """
-        OVERVIEW: Observe Ensemble runs in an open Rafu workspace.
+        OVERVIEW: Observe and coordinate Ensemble runs in an open Rafu workspace.
 
         USAGE:
+          rafu ensemble run <workflow> [--role <name>=<cli>[:<model>]] [--prompt <text>]
+            [--artifact <path>]... [--base <ref>] [--label <text>] [--json]
           rafu ensemble status [<run>...] [--tree] [--since <cursor>] [--json]
           rafu ensemble artifact <run> <step> [--json]
           rafu ensemble await <run>... --state <state> [--any] [--timeout <sec>] [--json]
+          rafu ensemble abort <run>
+          rafu ensemble note <run> <text>
+          rafu ensemble grant [--json]
           rafu ensemble help
 
-        READ-ONLY:
-          These verbs never start a run, write repository state, or merge.
+        AUTHORITY:
+          status, artifact, and await are read-only. run, abort, note, and grant
+          require the live coordinator capability injected by Rafu.
         """
 }
 
@@ -33,9 +39,16 @@ public struct EnsembleCommandResult: Equatable, Sendable {
 
 public struct EnsembleCommandRunner: Sendable {
     private let client: any EnsembleCLIClientProtocol
+    private let tokenProvider: @Sendable () -> String?
 
-    public init(client: any EnsembleCLIClientProtocol = EnsembleCLIClient()) {
+    public init(
+        client: any EnsembleCLIClientProtocol = EnsembleCLIClient(),
+        tokenProvider: @escaping @Sendable () -> String? = {
+            ProcessInfo.processInfo.environment["RAFU_ENSEMBLE_TOKEN"]
+        }
+    ) {
         self.client = client
+        self.tokenProvider = tokenProvider
     }
 
     public func run(
@@ -52,6 +65,25 @@ public struct EnsembleCommandRunner: Sendable {
                 return EnsembleCommandResult(
                     exitCode: .ok,
                     standardOutput: EnsembleHelp.text
+                )
+            case .run(
+                let workflow,
+                let roleOverrides,
+                let prompt,
+                let artifacts,
+                let baseReference,
+                let label,
+                let json
+            ):
+                return try startRun(
+                    workflow: workflow,
+                    roleOverrides: roleOverrides,
+                    prompt: prompt,
+                    artifacts: artifacts,
+                    baseReference: baseReference,
+                    label: label,
+                    json: json,
+                    workingDirectory: directory
                 )
             case .status(let runIDs, let tree, let sinceCursor, let json):
                 return try status(
@@ -77,6 +109,22 @@ public struct EnsembleCommandRunner: Sendable {
                     json: json,
                     workingDirectory: directory
                 )
+            case .abort(let runID):
+                return try mutate(
+                    verb: "abort",
+                    runID: runID,
+                    text: nil,
+                    workingDirectory: directory
+                )
+            case .note(let runID, let text):
+                return try mutate(
+                    verb: "note",
+                    runID: runID,
+                    text: text,
+                    workingDirectory: directory
+                )
+            case .grant(let json):
+                return try grant(json: json, workingDirectory: directory)
             }
         } catch let error as EnsembleCLIClientError {
             return result(for: error)
@@ -85,6 +133,50 @@ public struct EnsembleCommandRunner: Sendable {
                 exitCode: .dataError,
                 standardError: "rafu ensemble: invalid response from Rafu.app"
             )
+        }
+    }
+
+    private func startRun(
+        workflow: String,
+        roleOverrides: [EnsembleRoleOverride],
+        prompt: String?,
+        artifacts: [String],
+        baseReference: String?,
+        label: String?,
+        json: Bool,
+        workingDirectory: String
+    ) throws -> EnsembleCommandResult {
+        let absoluteArtifacts = artifacts.map { artifact in
+            let url =
+                artifact.hasPrefix("/")
+                ? URL(fileURLWithPath: artifact)
+                : URL(fileURLWithPath: workingDirectory, isDirectory: true)
+                    .appending(path: artifact)
+            return url.standardizedFileURL.path
+        }
+        let response = try client.performEnsemble(
+            EnsembleRequestPayload(
+                verb: "run",
+                workingDirectory: workingDirectory,
+                token: tokenProvider(),
+                workflow: workflow,
+                roleOverrides: roleOverrides,
+                prompt: prompt,
+                artifacts: absoluteArtifacts,
+                baseReference: baseReference,
+                label: label
+            ))
+        switch response {
+        case .runStarted(let result):
+            let output =
+                try json
+                ? encodeJSON(result)
+                : "\(result.runID) \(result.state.rawValue) \(result.worktree)"
+            return EnsembleCommandResult(exitCode: .ok, standardOutput: output)
+        case .failure(let code, let message):
+            return remoteFailure(code: code, message: message)
+        case .status, .artifact, .mutation, .grant, .subscribed:
+            throw EnsembleCLIClientError.unexpectedResponse
         }
     }
 
@@ -111,7 +203,7 @@ public struct EnsembleCommandRunner: Sendable {
             )
         case .failure(let code, let message):
             return remoteFailure(code: code, message: message)
-        case .artifact, .subscribed:
+        case .artifact, .runStarted, .mutation, .grant, .subscribed:
             throw EnsembleCLIClientError.unexpectedResponse
         }
     }
@@ -138,7 +230,65 @@ public struct EnsembleCommandRunner: Sendable {
             return EnsembleCommandResult(exitCode: .ok, standardOutput: output)
         case .failure(let code, let message):
             return remoteFailure(code: code, message: message)
-        case .status, .subscribed:
+        case .status, .runStarted, .mutation, .grant, .subscribed:
+            throw EnsembleCLIClientError.unexpectedResponse
+        }
+    }
+
+    private func mutate(
+        verb: String,
+        runID: String,
+        text: String?,
+        workingDirectory: String
+    ) throws -> EnsembleCommandResult {
+        let response = try client.performEnsemble(
+            EnsembleRequestPayload(
+                verb: verb,
+                workingDirectory: workingDirectory,
+                runIDs: [runID],
+                token: tokenProvider(),
+                text: text
+            ))
+        switch response {
+        case .mutation(let result):
+            let state = result.state.map { " \($0.rawValue)" } ?? ""
+            return EnsembleCommandResult(
+                exitCode: .ok,
+                standardOutput: "\(result.runID) \(result.verb)\(state)"
+            )
+        case .failure(let code, let message):
+            return remoteFailure(code: code, message: message)
+        case .status, .artifact, .runStarted, .grant, .subscribed:
+            throw EnsembleCLIClientError.unexpectedResponse
+        }
+    }
+
+    private func grant(
+        json: Bool,
+        workingDirectory: String
+    ) throws -> EnsembleCommandResult {
+        let response = try client.performEnsemble(
+            EnsembleRequestPayload(
+                verb: "grant",
+                workingDirectory: workingDirectory,
+                token: tokenProvider()
+            ))
+        switch response {
+        case .grant(let grant):
+            let output: String
+            if json {
+                output = try encodeJSON(grant)
+            } else {
+                output = [
+                    "active \(grant.activeChildRuns)/\(grant.maxConcurrentChildRuns)",
+                    "started \(grant.startedChildRuns)/\(grant.maxTotalChildRuns)",
+                    "providers \(grant.allowedProviders.joined(separator: ","))",
+                ].joined(separator: "\n")
+            }
+            return EnsembleCommandResult(exitCode: .ok, standardOutput: output)
+        case .failure(let code, let message):
+            return remoteFailure(code: code, message: message)
+        case .status, .artifact, .runStarted, .mutation, .subscribed:
             throw EnsembleCLIClientError.unexpectedResponse
         }
     }
@@ -195,7 +345,7 @@ public struct EnsembleCommandRunner: Sendable {
                     return false
                 case .failure(let code, let message):
                     throw EnsembleCLIClientError.failure(code: code, message: message)
-                case .artifact, .subscribed:
+                case .artifact, .runStarted, .mutation, .grant, .subscribed:
                     throw EnsembleCLIClientError.unexpectedResponse
                 }
             },

@@ -85,7 +85,29 @@ final class ConductorEnsembleRequestService {
     struct Dependencies {
         var workspaces: () -> [WorkspaceSnapshot]
         var liveState: (WorkspaceSession, String) -> ConductorWorkflowState?
+        var workflowController: (WorkspaceSession, String) -> ConductorWorkflowController? = {
+            session, runID in session.workflowController(forRunID: runID)
+        }
+        var startRun:
+            (WorkspaceSession, ConductorWorkflowRunRequest) async throws
+                -> ConductorWorkflowController = { session, request in
+                    try await session.conductorConcurrentRuns.start(
+                        request,
+                        launcher: WorkspaceConductorRunLauncher(
+                            workspaceSession: session,
+                            runID: request.runID
+                        )
+                    )
+                }
+        var definitionLibrary = ConductorDefinitionLibrary()
+        var userLibraryRoot: () -> URL = {
+            ConductorDefinitionLibrary.defaultUserLibraryRoot
+        }
+        var tokenStore: ConductorEnsembleTokenStore = .shared
         var eventCenter: ConductorEnsembleEventCenter
+        var makeRunID: () -> String = {
+            UUID().uuidString.lowercased()
+        }
     }
 
     static let shared = ConductorEnsembleRequestService()
@@ -117,6 +139,53 @@ final class ConductorEnsembleRequestService {
                 return .ensemble(.failure(code: 64, message: "invalid artifact payload"))
             }
             return .ensemble(artifact(payload: payload, workspace: workspace))
+        case .handshake, .openFolder, .goto, .ensembleSubscribe,
+            .ensembleRun, .ensembleAbort, .ensembleNote, .ensembleGrant, .unknown:
+            return .ensemble(.failure(code: 64, message: "unsupported Ensemble request"))
+        }
+    }
+
+    func handleAsync(_ envelope: LauncherIPCEnvelope) async -> LauncherIPCResponse {
+        guard envelope.kind.isEnsemble, !envelope.kind.isStreaming,
+            let payload = envelope.ensemble
+        else {
+            return .ensemble(.failure(code: 64, message: "invalid Ensemble request payload"))
+        }
+        guard let workspace = matchingWorkspace(for: payload.workingDirectory) else {
+            return .ensemble(.failure(code: 69, message: "workspace not open in Rafu"))
+        }
+
+        switch envelope.kind {
+        case .ensembleStatus:
+            guard payload.verb == "status" else {
+                return .ensemble(.failure(code: 64, message: "invalid status payload"))
+            }
+            return .ensemble(.status(status(payload: payload, workspace: workspace)))
+        case .ensembleArtifact:
+            guard payload.verb == "artifact" else {
+                return .ensemble(.failure(code: 64, message: "invalid artifact payload"))
+            }
+            return .ensemble(artifact(payload: payload, workspace: workspace))
+        case .ensembleRun:
+            guard payload.verb == "run" else {
+                return .ensemble(.failure(code: 64, message: "invalid run payload"))
+            }
+            return .ensemble(await startRun(payload: payload, workspace: workspace))
+        case .ensembleAbort:
+            guard payload.verb == "abort" else {
+                return .ensemble(.failure(code: 64, message: "invalid abort payload"))
+            }
+            return .ensemble(abort(payload: payload, workspace: workspace))
+        case .ensembleNote:
+            guard payload.verb == "note" else {
+                return .ensemble(.failure(code: 64, message: "invalid note payload"))
+            }
+            return .ensemble(await note(payload: payload, workspace: workspace))
+        case .ensembleGrant:
+            guard payload.verb == "grant" else {
+                return .ensemble(.failure(code: 64, message: "invalid grant payload"))
+            }
+            return .ensemble(grant(payload: payload, workspace: workspace))
         case .handshake, .openFolder, .goto, .ensembleSubscribe, .unknown:
             return .ensemble(.failure(code: 64, message: "unsupported Ensemble request"))
         }
@@ -203,6 +272,308 @@ final class ConductorEnsembleRequestService {
             ))
     }
 
+    private func startRun(
+        payload: EnsembleRequestPayload,
+        workspace: WorkspaceSnapshot
+    ) async -> EnsembleResponsePayload {
+        guard let token = payload.token,
+            let tokenEntry = dependencies.tokenStore.validate(token)
+        else {
+            return failure(.noToken)
+        }
+        guard
+            let workflowName = payload.workflow?.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ), !workflowName.isEmpty
+        else {
+            return .failure(code: 64, message: "run requires a workflow")
+        }
+
+        let snapshot: ConductorDefinitionLibrarySnapshot
+        do {
+            snapshot = try await dependencies.definitionLibrary.load(
+                workspaceRoot: workspace.rootURL,
+                userLibraryRoot: dependencies.userLibraryRoot()
+            )
+        } catch is CancellationError {
+            return .failure(code: 75, message: "Ensemble run preparation was cancelled")
+        } catch {
+            return .failure(code: 65, message: "Ensemble definitions could not be loaded")
+        }
+
+        guard
+            let libraryWorkflow = snapshot.workflows.first(where: {
+                $0.stem == workflowName || $0.definition?.name == workflowName
+            }),
+            libraryWorkflow.isLaunchable,
+            let workflow = libraryWorkflow.definition
+        else {
+            return .failure(code: 65, message: "Ensemble workflow not found or invalid")
+        }
+
+        var roles: [ConductorAgentDefinition]
+        do {
+            roles = try ConductorWorkflowBinder.resolve(
+                workflow: workflow,
+                agents: snapshot.agents.filter(\.isLaunchable).compactMap(\.agentFile)
+            )
+        } catch {
+            return .failure(code: 65, message: "Ensemble workflow role could not be resolved")
+        }
+
+        for override in payload.roleOverrides ?? [] {
+            guard let provider = ConductorCLIID(rawValue: override.provider) else {
+                return .failure(code: 65, message: "Ensemble provider is unknown")
+            }
+            let matchingIndices = roles.indices.filter { index in
+                roles[index].name == override.name
+                    || workflow.steps[index].agentName == override.name
+            }
+            guard !matchingIndices.isEmpty else {
+                return .failure(code: 65, message: "Ensemble workflow role is unknown")
+            }
+            for index in matchingIndices {
+                let role = roles[index]
+                roles[index] = ConductorAgentDefinition(
+                    name: role.name,
+                    provider: provider,
+                    model: override.model ?? role.model,
+                    autonomy: role.autonomy,
+                    handoffArtifact: role.handoffArtifact,
+                    promptBody: role.promptBody
+                )
+            }
+        }
+
+        let artifacts = payload.artifacts ?? []
+        guard artifacts.allSatisfy({ $0.hasPrefix("/") && !$0.utf8.contains(0) }) else {
+            return .failure(code: 64, message: "run artifacts must be absolute paths")
+        }
+        if !artifacts.isEmpty, !roles.isEmpty {
+            let role = roles[0]
+            let references = artifacts.enumerated().map { index, path in
+                "- input-\(index + 1): \(path)"
+            }.joined(separator: "\n")
+            roles[0] = ConductorAgentDefinition(
+                name: role.name,
+                provider: role.provider,
+                model: role.model,
+                autonomy: role.autonomy,
+                handoffArtifact: role.handoffArtifact,
+                promptBody:
+                    role.promptBody
+                    + "\n\nInput artifacts (read these files before you begin):\n"
+                    + references
+            )
+        }
+
+        let inFlight = inFlightRunIDs(workspace: workspace)
+        switch dependencies.tokenStore.enforce(
+            token: token,
+            providers: roles.map(\.provider),
+            inFlightRunIDs: inFlight,
+            manifests: workspace.session.conductorRuns
+        ) {
+        case .failure(let violation):
+            return failure(violation)
+        case .success:
+            break
+        }
+
+        let runID = dependencies.makeRunID()
+        guard ConductorRunStore.isValidRunID(runID),
+            dependencies.tokenStore.reserveChildRun(token: token, runID: runID)
+        else {
+            return .failure(code: 75, message: "Ensemble could not reserve a child run")
+        }
+        var didStart = false
+        defer {
+            if !didStart {
+                dependencies.tokenStore.cancelChildRunReservation(
+                    token: token,
+                    runID: runID
+                )
+            }
+        }
+
+        let prompt = payload.prompt?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = payload.baseReference?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let label = payload.label?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let taskPrompt = prompt.map { $0.isEmpty ? workflow.name : $0 } ?? workflow.name
+        let baseReference = base.map { $0.isEmpty ? "HEAD" : $0 } ?? "HEAD"
+        let request = ConductorWorkflowRunRequest(
+            workflow: workflow,
+            roles: roles,
+            taskPrompt: taskPrompt,
+            baseReference: baseReference,
+            runID: runID,
+            startedBy: tokenEntry.coordinatorID,
+            label: label?.isEmpty == false ? label : nil
+        )
+
+        let controller: ConductorWorkflowController
+        do {
+            controller = try await dependencies.startRun(workspace.session, request)
+        } catch let error as ConductorConcurrentRunError {
+            return .failure(
+                code: 75,
+                message: error.errorDescription ?? "The Ensemble run window cap was reached"
+            )
+        } catch is CancellationError {
+            return .failure(code: 75, message: "Ensemble run preparation was cancelled")
+        } catch {
+            return .failure(code: 75, message: "Ensemble could not start the child run")
+        }
+
+        guard let manifest = controller.manifest, let plan = controller.plan else {
+            return .failure(code: 65, message: "Ensemble child run preparation failed")
+        }
+        if case .failed = controller.state {
+            return .failure(code: 65, message: "Ensemble child run preparation failed")
+        }
+        if controller.state == .aborted {
+            return .failure(code: 75, message: "Ensemble child run was aborted while starting")
+        }
+
+        dependencies.tokenStore.recordChildRun(token: token, runID: runID)
+        didStart = true
+        return .runStarted(
+            EnsembleRunStartResult(
+                runID: runID,
+                workflow: workflow.name,
+                worktree: plan.executionRoot.path,
+                branch: plan.branchName ?? manifest.worktreeBranch,
+                state: ConductorEnsembleStateProjection.runState(
+                    manifest: manifest,
+                    liveState: controller.state
+                ),
+                startedBy: tokenEntry.coordinatorID
+            ))
+    }
+
+    private func abort(
+        payload: EnsembleRequestPayload,
+        workspace: WorkspaceSnapshot
+    ) -> EnsembleResponsePayload {
+        guard let entry = dependencies.tokenStore.validate(payload.token) else {
+            return failure(.noToken)
+        }
+        guard payload.runIDs.count == 1 else {
+            return .failure(code: 64, message: "abort requires one run")
+        }
+        let runID = payload.runIDs[0]
+        guard
+            let manifest = workspace.session.conductorRuns.first(where: { $0.id == runID })
+        else {
+            return .failure(code: 65, message: "Ensemble run not found")
+        }
+        guard manifest.startedBy == entry.coordinatorID else {
+            return .failure(code: 77, message: "This coordinator does not own that run")
+        }
+        guard
+            let controller = dependencies.workflowController(workspace.session, runID)
+        else {
+            return .failure(code: 65, message: "Ensemble run is not active")
+        }
+        controller.abort()
+        return .mutation(
+            EnsembleMutationResult(verb: "aborted", runID: runID, state: .aborted))
+    }
+
+    private func note(
+        payload: EnsembleRequestPayload,
+        workspace: WorkspaceSnapshot
+    ) async -> EnsembleResponsePayload {
+        guard let entry = dependencies.tokenStore.validate(payload.token) else {
+            return failure(.noToken)
+        }
+        guard payload.runIDs.count == 1, let text = payload.text, !text.isEmpty else {
+            return .failure(code: 64, message: "note requires one run and nonempty text")
+        }
+        guard text.count <= ConductorEnsembleNoteStore.maximumTextCharacters else {
+            return .failure(code: 64, message: "note text exceeds 1000 characters")
+        }
+        let runID = payload.runIDs[0]
+        guard
+            let manifest = workspace.session.conductorRuns.first(where: { $0.id == runID })
+        else {
+            return .failure(code: 65, message: "Ensemble run not found")
+        }
+        guard manifest.startedBy == entry.coordinatorID else {
+            return .failure(code: 77, message: "This coordinator does not own that run")
+        }
+
+        do {
+            _ = try await ConductorEnsembleNoteStore(
+                workspaceRoot: workspace.rootURL,
+                eventCenter: dependencies.eventCenter
+            ).append(
+                runID: runID,
+                from: entry.coordinatorID,
+                text: text
+            )
+            return .mutation(EnsembleMutationResult(verb: "noted", runID: runID))
+        } catch ConductorEnsembleNoteStoreError.textTooLong {
+            return .failure(code: 64, message: "note text exceeds 1000 characters")
+        } catch ConductorEnsembleNoteStoreError.fileFull {
+            return .failure(code: 75, message: "This run's Ensemble notes are full")
+        } catch {
+            return .failure(code: 65, message: "Ensemble note could not be persisted")
+        }
+    }
+
+    private func grant(
+        payload: EnsembleRequestPayload,
+        workspace: WorkspaceSnapshot
+    ) -> EnsembleResponsePayload {
+        let status = dependencies.tokenStore.status(
+            token: payload.token,
+            inFlightRunIDs: inFlightRunIDs(workspace: workspace),
+            manifests: workspace.session.conductorRuns
+        )
+        switch status {
+        case .failure(let violation):
+            return failure(violation)
+        case .success(let enforcement):
+            let grant = enforcement.entry.grant
+            return .grant(
+                EnsembleGrantResult(
+                    maxConcurrentChildRuns: grant.maxConcurrentChildRuns,
+                    activeChildRuns: enforcement.activeChildRuns,
+                    maxTotalChildRuns: grant.maxTotalChildRuns,
+                    startedChildRuns: enforcement.entry.startedRunIDs.count,
+                    allowedProviders: grant.allowedProviders.map(\.rawValue),
+                    deadline: grant.deadline,
+                    usageConsumedPercentPoints: enforcement.usageConsumedPercentPoints,
+                    usageCeilingPercentPoints: grant.usageCeilingPercentPoints
+                ))
+        }
+    }
+
+    private func inFlightRunIDs(workspace: WorkspaceSnapshot) -> Set<String> {
+        var runIDs = Set<String>()
+        for manifest in workspace.session.conductorRuns {
+            let state = ConductorEnsembleStateProjection.runState(
+                manifest: manifest,
+                liveState: dependencies.liveState(workspace.session, manifest.id)
+            )
+            switch state {
+            case .pending, .running, .awaitingGate, .awaitingPlanGate,
+                .awaitingMergeGate:
+                runIDs.insert(manifest.id)
+            case .completed, .failed, .aborted, .interrupted, .merged:
+                break
+            }
+        }
+        return runIDs
+    }
+
+    private func failure(
+        _ violation: ConductorEnsembleGrantViolation
+    ) -> EnsembleResponsePayload {
+        .failure(code: violation.exitCode, message: violation.reason)
+    }
+
     private func summary(
         manifest: ConductorRunManifest,
         rootURL: URL,
@@ -249,9 +620,12 @@ final class ConductorEnsembleRequestService {
 
     private func treeOrdered(_ manifests: [ConductorRunManifest]) -> [ConductorRunManifest] {
         let ids = Set(manifests.map(\.id))
-        let children = Dictionary(grouping: manifests) { manifest in
-            manifest.startedBy.flatMap { ids.contains($0) ? $0 : nil }
-        }
+        let children = Dictionary(
+            grouping: manifests.filter { manifest in
+                manifest.startedBy.map(ids.contains) == true
+            },
+            by: { $0.startedBy ?? "" }
+        )
         var result: [ConductorRunManifest] = []
         var visited = Set<String>()
 
@@ -263,8 +637,20 @@ final class ConductorEnsembleRequestService {
             }
         }
 
-        for root in children[nil] ?? [] {
+        for root in manifests where root.startedBy == nil {
             appendTree(root)
+        }
+        var externalCoordinatorIDs: [String] = []
+        for manifest in manifests {
+            guard let startedBy = manifest.startedBy, !ids.contains(startedBy),
+                !externalCoordinatorIDs.contains(startedBy)
+            else { continue }
+            externalCoordinatorIDs.append(startedBy)
+        }
+        for coordinatorID in externalCoordinatorIDs {
+            for child in manifests where child.startedBy == coordinatorID {
+                appendTree(child)
+            }
         }
         for manifest in manifests {
             appendTree(manifest)
