@@ -1,4 +1,4 @@
-# Ensemble — manual test plan (C0–C7 + the five integration handoffs)
+# Ensemble — manual test plan (C0–C8 + the five integration handoffs)
 
 - **Status:** Ready to run (2026-07-25). Everything below is headless-verified;
   this document covers only what a human must see with their own eyes.
@@ -231,6 +231,20 @@ display, mark them N/A rather than FAIL.
 
 ---
 
+## K. Graph canvas
+
+| # | Do this | Expect |
+|---|---|---|
+| K1 | In the Runs panel, click the bordered **Graph** button | An editor-hosted **Ensemble Graph** opens, pinned to the top. It shows every workspace run as a left-to-right, two-directionally scrollable read-only graph; no drag or authoring affordance appears. |
+| K2 | Start a workflow and activate its running step node with the pointer, then with Full Keyboard Access | Its real terminal is revealed as the peer editor-canvas occupant. The node is a keyboard-focusable button with a visible focus ring, provider badge, status glyph, and status text. |
+| K3 | Park a run first at a step gate and then at a merge gate | The step gate card has visible **Approve / Revise / Abort** buttons. The merge gate has **Open Diff / Apply / Discard**; Discard uses the same two-stage dirty-worktree confirmation as run detail. The context menu repeats every applicable verb. |
+| K4 | Start a run from a coordinator and inspect its row in Runs | The row includes a `via <coordinator label or id-prefix>` chip. The graph groups it under that coordinator; after the coordinator ends, the root remains and reads **Coordinator (ended)**. |
+| K5 | Open **Runs → Activity** while runs change state | Events are newest-first with relative time, a provider mark when resolvable, and one bounded label/state or note line. Heartbeats never appear; **Open Run** is the only row verb; the feed remains bounded at 200 rows. |
+| K6 | Turn on VoiceOver and traverse the graph, then use Full Keyboard Access on its controls | Nodes traverse column-major and announce kind/title, textual state, provider, and detail. Edges are not announced. Every node verb and **Show Run Detail** is independently reachable; state never relies on color alone. |
+| K7 | Open the graph in window A, then open a second workspace window | Window B's canvas selection and visibility remain independent. Opening run detail or revealing a terminal replaces the graph only in the originating window; closing the graph falls back to that window's last document. |
+
+---
+
 ## N. Agent terminals (AT-01)
 
 These checks cover interactive vendor-CLI sessions. They are deliberately
@@ -258,12 +272,14 @@ and visibly says its model flag is unverified.
 
 In priority order:
 
-1. **D7** — does your edited artifact actually flow to the next step?
-2. **E4 / E7** — does approving a gate act on the *selected* run only?
-3. **C6** — does `logs/output.log` contain the run's real output?
-4. **G5** — does retry create `-a2` and leave `-a1` intact?
-5. **F4 / F5** — is Approve absent from plain gates and merge gates?
-6. Anything that reads as a *lie*: a fake usage number, a CLI claimed
+1. **K2** — does a running graph node reveal the correct terminal by pointer and keyboard?
+2. **K3** — are all gate verbs visible, correctly routed, and repeated in the context menu?
+3. **D7** — does your edited artifact actually flow to the next step?
+4. **E4 / E7** — does approving a gate act on the *selected* run only?
+5. **C6** — does `logs/output.log` contain the run's real output?
+6. **G5** — does retry create `-a2` and leave `-a1` intact?
+7. **F4 / F5** — is Approve absent from plain gates and merge gates?
+8. Anything that reads as a *lie*: a fake usage number, a CLI claimed
    available that is not, a run that looks finished but is not.
 
 Everything else is polish I can chase afterwards.

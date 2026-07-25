@@ -1,12 +1,8 @@
 # C8-06 — The interactive graph canvas, agent icons, activity feed
 
-- **Status:** Ready. Branch: `conductor/c8-06-graph-canvas` (from `main`
-  AFTER wave 1 has merged — verify BOTH `ConductorRunManifest.startedBy`
-  (C8-02) AND `ConductorCLIIcons` in
-  `Sources/RafuApp/Conductor/ConductorCLIIcons.swift` (AT-01, which
-  joined wave 1 and owns the icon catalog + SVGs — see
-  `AT-execution-plan.md`); either missing ⇒ STOP and report). Wave 2 —
-  runs parallel with C8-03.
+- **Status:** Delivered headlessly on `conductor/c8-06-graph-canvas`;
+  section K GUI verification remains for post-merge `main`. Wave 2 runs
+  parallel with C8-03; its compatibility seam is documented in the handoff.
 - **This is the cockpit.** It must feel immediate, legible, and native —
   the C8-ux doc calls comprehension the make-or-break surface.
 
