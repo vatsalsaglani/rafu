@@ -40,7 +40,19 @@ func clineRegistryAndMetadata() async {
     #expect(ConductorAdapterRegistry.adapter(for: .cline) is ClineAdapter)
     #expect(!adapter.supportsModelDiscovery)
     #expect(await adapter.discoverModels() == nil)
-    #expect(await adapter.authStatus() == .unknown)
+    // Unknown, but no longer a bare shrug: Cline 3.0.46 has no
+    // non-interactive sign-in check (`config`/`mcp` demand a TTY, `auth`
+    // MUTATES rather than reports, and reading its 0600 provider store is
+    // forbidden), so the adapter says why and states that runs still work.
+    let clineAuth = await adapter.authStatus()
+    guard case .unknown(let reason) = clineAuth, let reason else {
+        Issue.record("Expected Cline to report unknown WITH a reason")
+        return
+    }
+    #expect(reason.contains("non-interactive"))
+    #expect(reason.lowercased().contains("does not block runs"))
+    // Never leaks where credentials live.
+    #expect(!reason.contains("providers.json"))
     #expect(adapter.curatedModels().count == 4)
     #expect(adapter.curatedModels().allSatisfy { $0.source == .curated })
     #expect(adapter.supportsModelDiscovery == ((await adapter.discoverModels()) != nil))

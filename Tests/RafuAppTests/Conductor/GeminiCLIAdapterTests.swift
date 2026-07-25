@@ -21,7 +21,7 @@ struct GeminiCLIAdapterTests {
         #expect(adapter.curatedModels().allSatisfy { $0.source == .curated })
         #expect(await adapter.discoverModels() == nil)
         // There is no verified status command and no credential-file read.
-        #expect(await adapter.authStatus() == .unknown)
+        #expect(await adapter.authStatus() == .unknown())
     }
 
     @Test("Documented autonomy modes build exact argv without a shell")

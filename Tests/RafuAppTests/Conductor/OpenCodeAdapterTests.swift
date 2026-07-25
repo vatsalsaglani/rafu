@@ -296,5 +296,5 @@ func openCodeAuthClassification() throws {
     #expect(
         OpenCodeAdapter.classifyAuthStatus(
             openCodeResult(stderr: "permission denied", completion: .exited(1)))
-            == .unknown)
+            == .unknown())
 }

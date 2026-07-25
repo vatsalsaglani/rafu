@@ -331,7 +331,7 @@ func codexAuthClassification() {
         CodexAdapter.authStatus(
             from: codexCompletion(status: 1, stdout: recordedCodexAuthenticatedTranscript))
             == .notAuthenticated(hint: "run `codex login` in a terminal"))
-    #expect(CodexAdapter.authStatus(from: codexCompletion(status: 2)) == .unknown)
-    #expect(CodexAdapter.authStatus(from: .timedOut) == .unknown)
-    #expect(CodexAdapter.authStatus(from: .cancelled) == .unknown)
+    #expect(CodexAdapter.authStatus(from: codexCompletion(status: 2)) == .unknown())
+    #expect(CodexAdapter.authStatus(from: .timedOut) == .unknown())
+    #expect(CodexAdapter.authStatus(from: .cancelled) == .unknown())
 }

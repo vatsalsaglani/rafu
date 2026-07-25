@@ -38,7 +38,7 @@ func kimiAbsentProbeAndMetadata() async {
     #expect(adapter.defaultEnabled)
     #expect(ConductorAdapterRegistry.adapter(for: .kimi) is KimiAdapter)
     #expect(await adapter.probe() == .notInstalled)
-    #expect(await adapter.authStatus() == .unknown)
+    #expect(await adapter.authStatus() == .unknown())
     #expect(!adapter.supportsModelDiscovery)
     #expect(await adapter.discoverModels() == nil)
     #expect(adapter.supportsModelDiscovery == ((await adapter.discoverModels()) != nil))

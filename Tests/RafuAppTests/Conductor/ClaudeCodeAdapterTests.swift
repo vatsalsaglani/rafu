@@ -475,7 +475,7 @@ func claudeCancelledAuthDiscoveryDoesNotCacheFallback() async {
         userName: "fixture-user",
         hostSearchPath: "")
 
-    #expect(await adapter.authStatus() == .unknown)
+    #expect(await adapter.authStatus() == .unknown())
     let invocation = adapter.invocation(
         prompt: "fail closed",
         model: "",
@@ -583,9 +583,9 @@ func claudeAuthClassification() {
         ClaudeCodeAdapter.authStatus(
             from: claudeCompletion(status: 1, stdout: recordedClaudeAuthenticatedTranscript))
             == .notAuthenticated(hint: "run `claude` in a terminal and log in"))
-    #expect(ClaudeCodeAdapter.authStatus(from: claudeCompletion(status: 2)) == .unknown)
-    #expect(ClaudeCodeAdapter.authStatus(from: .timedOut) == .unknown)
-    #expect(ClaudeCodeAdapter.authStatus(from: .cancelled) == .unknown)
+    #expect(ClaudeCodeAdapter.authStatus(from: claudeCompletion(status: 2)) == .unknown())
+    #expect(ClaudeCodeAdapter.authStatus(from: .timedOut) == .unknown())
+    #expect(ClaudeCodeAdapter.authStatus(from: .cancelled) == .unknown())
 }
 
 @Test("The real adapter probe runner enforces its timeout and reaps the child")

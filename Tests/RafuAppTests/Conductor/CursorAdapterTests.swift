@@ -34,12 +34,12 @@ struct CursorAdapterTests {
         #expect(
             CursorAdapter.classifyAuthStatus(exitCode: 0, output: loggedIn)
                 == .authenticated)
-        #expect(CursorAdapter.classifyAuthStatus(exitCode: 1, output: "network error") == .unknown)
+        #expect(CursorAdapter.classifyAuthStatus(exitCode: 1, output: "network error") == .unknown())
         #expect(
             CursorAdapter.classifyAuthStatus(
                 exitCode: 0,
                 output: loggedIn,
-                timedOut: true) == .unknown)
+                timedOut: true) == .unknown())
     }
 
     @Test("Worktree write builds verified print/json/force/model argv")
@@ -172,7 +172,7 @@ struct CursorAdapterTests {
             currentPath: "",
             timeout: .milliseconds(25),
             cachedExecutableURL: timeoutFixture.executable)
-        #expect(await timedOutAdapter.authStatus() == .unknown)
+        #expect(await timedOutAdapter.authStatus() == .unknown())
     }
 
     @Test("Cancellation cannot populate the executable cache")
