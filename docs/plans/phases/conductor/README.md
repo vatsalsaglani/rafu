@@ -212,23 +212,30 @@ git worktree add ../rafu-conductor-polish   -b conductor/c7-polish
 Merged-main gates after C6+C7: 0 warnings, 1515 tests green parallel and
 serial, lint clean, staged-app GUI verify passed.
 
-## Open coordinator integration handoffs (C6 + C7)
+## Coordinator integration handoffs (C6 + C7) — ALL CLOSED
 
 Both Wave C phases correctly stopped at files they do not own and delivered
 their owned work plus a precise proposed diff (the handoff-not-halt rule
-above, working as intended). Until these land, the shipped features are
-**engine-complete but not end-to-end**:
+above, working as intended). All five landed on `main` in
+`2da406e` + `5e2ac85` (2026-07-25), so C6/C7's features are now end-to-end
+rather than engine-complete:
 
-| # | From | Needs | Effect while open |
-|---|---|---|---|
-| 1 | C6 | `WorkspaceSession` per-window `ConductorConcurrentRunCoordinator` + `workflowController(forRunID:)`, then route `RafuAppCommands`/`CommandPaletteView`/`ConductorRunDetailCanvas`/panel launch through it | Concurrent pipelines are tested at the coordinator level but the GUI still drives C5's single controller — only one pipeline at a time in practice |
-| 2 | C7 | `ConductorRunManifest.Step.usage` + meter wiring in `ConductorWorkflowController` + canvas rendering | Usage deltas are computed and tested but never persisted or shown |
-| 3 | C7 | `RunStepStatus.interrupted` + recovery pass in `reloadRuns()` + `restore`/`retryInterruptedStep`/`abortInterruptedRun`/`keepInterruptedWorktree` | Recovery is planned honestly but a relaunched app cannot act on it |
-| 4 | C7 | `[gate:remote]` grammar + typed gate event + ADR 0016 surface arbitration + notifier Open Run / Approve categories | Gate notifications have no actions; companion tile and notch drop-down are not mutually exclusive |
-| 5 | C7 | `TerminalProcessSpec` attribution + `ProcessResourceRegistry.ProcessKind.agent` + "Ensemble Agent" label | Agent children show as "Terminal N" in Resources |
+| # | From | Landed |
+|---|---|---|
+| 1 | C6 | `WorkspaceSession.conductorConcurrentRuns` + `workflowController(forRunID:)`; menu, palette, canvas, and panel launch all route through it. The New Run guard became **cap-aware** (`canStartConductorWorkflowRun`) — the proposed `!isInFlight` guard would have kept concurrency permanently unreachable. Coordinator forwards gate events; the notch companion derives from every engine. |
+| 2 | C7 | `ConductorRunManifest.Step.usage`; snapshot before launch, record on EVERY terminal outcome (a failed step still consumed quota); per-step + run-total lines in the canvas; nothing rendered when metering resolved nothing. |
+| 3 | C7 | `RunStepStatus.interrupted` (stable envelope) + `recoveryNote`; janitor pass in `reloadRuns()` persisted through the write queue; `restoreInterrupted` rebuilds the plan from the manifest itself, and retry reuses the interrupted attempt's persisted `prompt.md` in a fresh `-aN` directory. |
+| 4 | C7 | `[gate:remote]` grammar, snapshotted per step so editing a workflow file cannot retroactively authorize an open gate; typed `ConductorGateReadyEvent` drives Open Run / Approve notification categories; the center re-checks the manifest before approving; companion tile suppresses the duplicate drop-down. |
+| 5 | C7 | `TerminalProcessSpec.resourceAttribution`; `.agent` process kind rendering as "Ensemble Agent" named `role • Vendor`; login-shell path unchanged and registration still PID-gated. |
 
-Handoffs 2–5 are independent of each other; #1 is the largest and unblocks
-the concurrency story C6 built.
+Post-integration gates: 0 warnings, **1539 tests** green parallel and serial,
+lint clean, no `@unchecked Sendable` or logging in Conductor sources.
+
+**What a human still has to verify:**
+[`ensemble-manual-test-plan.md`](ensemble-manual-test-plan.md) — the checks
+headless tests cannot make (the Revise flow actually carrying an edited
+artifact forward, notification action sets, notch hardware, VoiceOver,
+interrupted-run recovery across a real relaunch).
 
 Each phase document ends with its self-contained goal-mode prompt (works in
 Claude Code or Codex).
