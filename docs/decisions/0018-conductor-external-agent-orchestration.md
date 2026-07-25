@@ -151,3 +151,69 @@ trust split), ADR 0002/0003 (navigator + editor-hosted details);
 `Sources/RafuApp/Terminal/WorkspaceTerminalController.swift`,
 `Sources/RafuApp/Services/GitService.swift` (worktrees),
 `Sources/RafuApp/Usage/UsageProviderRegistry.swift` (registry pattern).
+
+## Amendment (2026-07-26): coordinator verbs, capability token, streaming
+
+This amendment admits an external, user-installed coordinator CLI without
+weakening the original decision that Rafu embeds no agent, holds no inference
+credentials, and leaves merge-back behind an explicit human gate.
+
+- **Coordinator model: hub-and-spoke.** The user launches the coordinator in
+  a visible terminal tab, and it may drive the Ensemble through
+  `rafu ensemble <verb>` over the ADR 0009 socket. Only the coordinator
+  spawns child runs. Children may propose successors through a `proposes:`
+  artifact block, but they never spawn. Nested coordinators are structurally
+  impossible in v1 because only coordinator sessions receive the capability
+  token.
+- **Verb surface and trust classes.** The read-only `status`, `artifact`, and
+  `await` verbs require no token. `run`, `abort`, `note`, `grant` (which reads
+  the caller's own grant), and `propose-merge` require the coordinator token.
+  `propose-merge` only queues a diff at the human gate and **never merges**;
+  it exposes this ADR's gated merge-back as an API. The CLI reuses
+  `sysexits`: 0 for success, 64 `EX_USAGE`, 65 `EX_DATAERR`, 69
+  `EX_UNAVAILABLE`, 75 `EX_TEMPFAIL` (including grant exhaustion or timeout),
+  and 77 `EX_NOPERM` (including a missing or dead token).
+- **Capability token.** Rafu mints one token per coordinator session, binds it
+  to one grant, and injects it as `RAFU_ENSEMBLE_TOKEN` through the existing
+  curated-environment overlay documented in
+  `conductor-pty-spawn-and-child-environment.md`. The token exists only in
+  memory and dies with the app. After an app relaunch, a resumed coordinator
+  must be re-granted by the user; token-free read-only verbs remain available
+  so it can re-orient. The token is a capability, not a credential: it
+  unlocks no provider and no secret. It is never logged, persisted, included
+  in captured PTY output, or written to a manifest. Worker children never
+  receive it.
+- **Grant and exhaustion.** At coordinator launch the user sets the maximum
+  concurrent child runs (default 3, min-ed with the window cap), maximum total
+  child runs, allowed CLIs/providers, an optional usage ceiling, and an
+  optional wall-clock deadline. Usage enforcement is best-effort and follows
+  C7's honesty rule when a provider reports no measurement. Exhaustion parks
+  the coordinator with exit 75 and asks the user; it never fails silently and
+  never continues silently.
+- **Streaming, not polling.** `await` and event delivery use a new long-lived
+  subscription connection on the existing socket, with one framed JSON event
+  per frame, heartbeats, and bounded buffers. One-shot verbs keep the existing
+  request/response behavior. This amends ADR 0009's v1 wording from "one frame
+  per connection" to **"one frame per connection for request/response kinds;
+  subscription kinds hold the connection and stream frames."**
+- **CLI grammar and collision handling.** `rafu ensemble` is the first
+  reserved subcommand. The collision rule is strict: if a filesystem entry
+  named `ensemble` exists in the working directory, the bare invocation is an
+  `EX_USAGE` error that names `rafu ./ensemble` as the disambiguation. The CLI
+  never guesses.
+- **Coordinator placement and attribution.** The coordinator runs
+  interactively in the user's checkout, with no coordinator worktree and no
+  coordinator manifest in v1. Durable attribution lives in each child's
+  manifest through `startedBy`. This does not weaken "Rafu creates worktrees;
+  models never do": every child still receives a Rafu-created worktree.
+- **Naming exception.** RafuApp internals continue to use the `Conductor*`
+  prefix, including `ConductorEnsemble*` for new coordinator types. RafuCore
+  types that encode the user-visible CLI namespace use the `Ensemble*` prefix.
+  This is a deliberate exception to the "new internal symbols continue the
+  `Conductor*` prefix" rule, scoped to `Sources/RafuCore/Ensemble/`; user-visible
+  strings and documentation prose continue to say Ensemble.
+
+**Revisit triggers:** mesh admission in which children may spawn; nested
+coordinators; token persistence across app relaunch; or distribution of any
+coordinator skill through a marketplace. Each requires revisiting this
+amendment.
