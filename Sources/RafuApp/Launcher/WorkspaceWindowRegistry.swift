@@ -2,6 +2,18 @@ import AppKit
 import Observation
 import RafuCore
 
+/// One live workspace scene: its root, its session, and the ordering metadata
+/// a caller needs to choose deterministically among several open windows.
+/// Deliberately free of any feature's own vocabulary — consumers map it into
+/// their own shape, the way `LauncherRequestRouter.Dependencies.live` does.
+struct WorkspaceSessionSnapshot {
+    let windowID: UUID
+    let rootURL: URL
+    let session: WorkspaceSession
+    let isKeyWindow: Bool
+    let registrationOrder: Int
+}
+
 /// MainActor registry for the live SwiftUI workspace scenes. Session/window
 /// references are weak; stable IDs and registration order make pure routing
 /// deterministic while `WindowAccessor` refreshes each entry as state changes.
@@ -16,6 +28,11 @@ final class WorkspaceWindowRegistry {
         let rootURL: () -> URL?
         let goto: (String, SourceLocation) -> Void
         weak var window: NSWindow?
+        /// Weak for the same reason the closures capture weakly: the registry
+        /// must never keep a closed scene alive. Callers that need the session
+        /// itself go through `sessionSnapshots()`, which drops dead entries
+        /// rather than surfacing them as holes.
+        weak var session: WorkspaceSession?
     }
 
     private struct PendingGoto {
@@ -61,7 +78,8 @@ final class WorkspaceWindowRegistry {
             goto: { [weak session] relativePath, location in
                 session?.openFile(atRelativePath: relativePath, selecting: location)
             },
-            window: window
+            window: window,
+            session: session
         )
         applyPendingGotoIfReady(to: key)
     }
@@ -102,18 +120,46 @@ final class WorkspaceWindowRegistry {
         entries[ObjectIdentifier(session)]?.window?.performClose(nil)
     }
 
-    func snapshots() -> [OpenWorkspaceRoot] {
+    /// The one reuse order: key window first, then registration order. Both
+    /// projections below share it so CLI routing and Ensemble workspace
+    /// resolution can never disagree about which window a request means.
+    private func orderedEntries() -> [Entry] {
         pruneDeadEntries()
-        return entries.values
-            .sorted { lhs, rhs in
-                let lhsIsKey = lhs.window?.isKeyWindow == true
-                let rhsIsKey = rhs.window?.isKeyWindow == true
-                if lhsIsKey != rhsIsKey { return lhsIsKey }
-                return lhs.registrationOrder < rhs.registrationOrder
+        return entries.values.sorted { lhs, rhs in
+            let lhsIsKey = lhs.window?.isKeyWindow == true
+            let rhsIsKey = rhs.window?.isKeyWindow == true
+            if lhsIsKey != rhsIsKey { return lhsIsKey }
+            return lhs.registrationOrder < rhs.registrationOrder
+        }
+    }
+
+    func snapshots() -> [OpenWorkspaceRoot] {
+        orderedEntries().map { entry in
+            OpenWorkspaceRoot(windowID: entry.windowID, rootURL: entry.rootURL())
+        }
+    }
+
+    /// Live sessions in `snapshots()` order, for callers that must reach the
+    /// `WorkspaceSession` itself rather than just its root — currently the
+    /// Ensemble request service resolving which open workspace a `rafu
+    /// ensemble` invocation belongs to.
+    ///
+    /// An entry whose session or root has gone is dropped: a caller resolving
+    /// a workspace wants the windows it can actually act on, and a nil hole
+    /// would only be re-filtered downstream.
+    func sessionSnapshots() -> [WorkspaceSessionSnapshot] {
+        orderedEntries().compactMap { entry in
+            guard let session = entry.session, let rootURL = entry.rootURL() else {
+                return nil
             }
-            .map { entry in
-                OpenWorkspaceRoot(windowID: entry.windowID, rootURL: entry.rootURL())
-            }
+            return WorkspaceSessionSnapshot(
+                windowID: entry.windowID,
+                rootURL: rootURL,
+                session: session,
+                isKeyWindow: entry.window?.isKeyWindow == true,
+                registrationOrder: entry.registrationOrder
+            )
+        }
     }
 
     @discardableResult

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import RafuCore
 import Testing
 
 @testable import RafuApp
@@ -136,4 +137,70 @@ func liveWorkspaceWindowCountTracksRegisteredSessions() {
 
     WorkspaceWindowRegistry.shared.deregister(session: sessionB)
     #expect(WorkspaceWindowRegistry.shared.liveWorkspaceWindowCount() == 1)
+}
+
+// MARK: - Session projection (C8-02 Ensemble workspace resolution)
+
+/// `sessionSnapshots()` is what lets `rafu ensemble status` find the window a
+/// request belongs to. While it returned nothing, every production invocation
+/// resolved no workspace and exited 69 even with a workspace open, so this
+/// asserts the projection carries the session and preserves the reuse order
+/// `snapshots()` already guarantees.
+@MainActor
+@Test("Session snapshots carry live sessions in key-window-then-registration order")
+func sessionSnapshotsPreserveReuseOrder() {
+    let first = WorkspaceSession()
+    first.descriptor = WorkspaceDescriptor(
+        displayName: "first", location: .local(LocalWorkspaceReference(path: "/tmp/first")))
+    let second = WorkspaceSession()
+    second.descriptor = WorkspaceDescriptor(
+        displayName: "second", location: .local(LocalWorkspaceReference(path: "/tmp/second")))
+    let firstWindow = makeTestWindow()
+    let secondWindow = makeTestWindow()
+    defer {
+        WorkspaceWindowRegistry.shared.deregister(session: first)
+        WorkspaceWindowRegistry.shared.deregister(session: second)
+    }
+
+    WorkspaceWindowRegistry.shared.register(
+        session: first, window: firstWindow, rootURL: { nil })
+    WorkspaceWindowRegistry.shared.register(
+        session: second, window: secondWindow, rootURL: { nil })
+
+    let snapshots = WorkspaceWindowRegistry.shared.sessionSnapshots()
+    #expect(snapshots.count == 2)
+    #expect(snapshots.map(\.rootURL.path) == ["/tmp/first", "/tmp/second"])
+    #expect(snapshots.first?.session === first)
+    #expect(snapshots.last?.session === second)
+    #expect(snapshots.map(\.registrationOrder) == snapshots.map(\.registrationOrder).sorted())
+    // Same windows, same order as the routing projection.
+    #expect(
+        WorkspaceWindowRegistry.shared.snapshots().map(\.windowID)
+            == snapshots.map(\.windowID))
+}
+
+/// A session with no root cannot be acted on, so it is dropped rather than
+/// surfaced as a hole a caller would have to re-filter.
+@MainActor
+@Test("A registered session without a workspace root is omitted from session snapshots")
+func sessionSnapshotsOmitRootlessSessions() {
+    let rooted = WorkspaceSession()
+    rooted.descriptor = WorkspaceDescriptor(
+        displayName: "rooted", location: .local(LocalWorkspaceReference(path: "/tmp/rooted")))
+    let rootless = WorkspaceSession()
+    let rootedWindow = makeTestWindow()
+    let rootlessWindow = makeTestWindow()
+    defer {
+        WorkspaceWindowRegistry.shared.deregister(session: rooted)
+        WorkspaceWindowRegistry.shared.deregister(session: rootless)
+    }
+
+    WorkspaceWindowRegistry.shared.register(
+        session: rooted, window: rootedWindow, rootURL: { nil })
+    WorkspaceWindowRegistry.shared.register(
+        session: rootless, window: rootlessWindow, rootURL: { nil })
+
+    let snapshots = WorkspaceWindowRegistry.shared.sessionSnapshots()
+    #expect(snapshots.count == 1)
+    #expect(snapshots.first?.session === rooted)
 }

@@ -28,6 +28,7 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`editor-working-set-and-hibernation.md`](editor-working-set-and-hibernation.md) | Understanding document hibernation, bounded working set (visible ∪ dirty ∪ newest-8), tab/split data-loss fixes, `pendingDirtyText` exception, undo cap, and known limitations |
 | [`memory-caps-and-pressure.md`](memory-caps-and-pressure.md) | App-level memory-pressure monitoring, document hibernation + filename-index shedding on warnings, resource caps (Git/AI/search buffers), polling-audit findings, and cap values table |
 | [`memory-attribution-and-timeline.md`](memory-attribution-and-timeline.md) | Changing the Resources popover, adding a memory-timeline event, or being asked to "break the memory number down" — what macOS can and cannot report per subsystem |
+| [`ensemble-ipc-verbs.md`](ensemble-ipc-verbs.md) | Changing `rafu ensemble` verbs, DTOs, run-state projection, streaming events, heartbeat/deadline behavior, or exit codes |
 | [`agent-terminals.md`](agent-terminals.md) | Changing interactive Agent Terminal discovery, auth gating, argv/environment, per-CLI model flags, session identity, or lifecycle |
 | [`agent-icon-assets.md`](agent-icon-assets.md) | Refreshing or reviewing the pinned Agent Terminal icon catalog — provenance, checksums, normalization, licensing posture, or fallbacks |
 | [`ai-provider-rest-contracts.md`](ai-provider-rest-contracts.md) | Changing provider endpoints, streaming, Keychain secrets, connection tests, or commit generation |

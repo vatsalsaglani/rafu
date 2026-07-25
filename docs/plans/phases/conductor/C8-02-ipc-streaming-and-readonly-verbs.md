@@ -1,9 +1,12 @@
 # C8-02 — `rafu ensemble` grammar, streaming IPC, read-only verbs
 
-- **Status:** Implemented on `conductor/c8-02-ipc-streaming`; live
-  workspace-session resolution requires the shared-registry handoff recorded
-  in the phase-agent report.
-  Wave 1 — runs parallel with C8-01 (docs-only; no path overlap).
+- **Status:** Complete and merged 2026-07-26 (`b6c5da8`). The shared-registry
+  handoff the phase agent correctly refused to take is closed on `main`:
+  `WorkspaceWindowRegistry.Entry` now carries a weak `session`, and
+  `sessionSnapshots()` projects live sessions in the same key-window-then-
+  registration order `snapshots()` uses, so production `status`/`artifact`
+  resolve an open workspace instead of exiting 69.
+  Wave 1 — ran parallel with C8-01 (docs-only; no path overlap).
 - **Trust note:** this plan ships ZERO mutating capability. `status`,
   `artifact`, `await` observe; nothing spawns, writes, or merges. That is
   why it may land before the ADR amendment merges.

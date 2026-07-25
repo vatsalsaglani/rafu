@@ -315,10 +315,16 @@ final class ConductorEnsembleRequestService {
 extension ConductorEnsembleRequestService.Dependencies {
     fileprivate static var live: Self {
         Self(
-            // C8-02 needs the registry to expose weak session snapshots
-            // alongside its existing root/window metadata. That shared-file
-            // seam is intentionally left to the coordinator handoff.
-            workspaces: { [] },
+            workspaces: {
+                WorkspaceWindowRegistry.shared.sessionSnapshots().map {
+                    ConductorEnsembleRequestService.WorkspaceSnapshot(
+                        rootURL: $0.rootURL,
+                        session: $0.session,
+                        isKeyWindow: $0.isKeyWindow,
+                        registrationOrder: $0.registrationOrder
+                    )
+                }
+            },
             liveState: { session, runID in
                 session.workflowController(forRunID: runID)?.state
             },
