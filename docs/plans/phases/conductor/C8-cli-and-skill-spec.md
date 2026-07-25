@@ -28,11 +28,11 @@ rafu --status | --version | --help          # unchanged
 rafu ensemble <verb> [args] [--json]        # NEW: subcommand namespace
 ```
 
-Rule: the first argument is a subcommand **only** if it matches a reserved
-word and no filesystem entry of that name exists in the working directory.
-A directory literally named `ensemble` must still open as a workspace —
-that is the existing contract and it wins. When both could apply, `rafu
-./ensemble` disambiguates and the CLI says so rather than guessing.
+**Resolved (2026-07-26): strict collision handling.** `ensemble` is the first
+reserved subcommand, but an existing filesystem entry of that name makes the
+bare invocation an `EX_USAGE` error. The diagnostic names `rafu ./ensemble`
+as the path-disambiguated form; the CLI never guesses between the subcommand
+and the filesystem entry.
 
 Per `launcher-cli.md`, the whole invocation is parsed and validated **before**
 any socket or side effect. That holds for the new verbs unchanged.
@@ -116,6 +116,12 @@ $ rafu ensemble run implement --role implementor=codex:gpt-5.6 \
 }
 ```
 
+**Correction (2026-07-26):** The JSON above is illustrative. Today's shipped
+engine creates a worktree at
+`<parentOfRepo>/.rafu-worktrees/<repo>-<runID>` on branch
+`rafu/run-<id>`; the shown in-repo path and `ensemble/…` branch are not the
+current file contract.
+
 `startedBy` is never omitted. Every coordinator-started run is attributed in
 the panel and canvas — the "no silent runs" rule from the gap analysis.
 
@@ -146,7 +152,7 @@ $ rafu ensemble status --tree --json
 
 `usage` is present only when the provider actually reported (C7's honesty
 rule — never a fabricated number). `cursor` feeds `--since` for cheap
-incremental polling.
+incremental status snapshots.
 
 #### `rafu ensemble await`
 
@@ -158,12 +164,15 @@ Exits 0 when the condition holds, 75 on timeout. `--any` returns on the
 first run to satisfy it — that is what enables staggered fan-in, where the
 coordinator starts reviewing branch A while B and C are still building.
 
-**Implementation caveat, unresolved and load-bearing:** the IPC contract is
-one frame per connection, strictly request/response (`cli-app-ipc.md`).
-`await` is therefore either client-side polling over repeated `status`
-connections, or a new long-lived streaming frame kind. **Polling is the
-honest v1** — no new socket contract, and sub-second latency is irrelevant
-against multi-minute agent steps. Settle this before implementation.
+**Implementation caveat, load-bearing:** the IPC contract began as one frame
+per connection, strictly request/response (`cli-app-ipc.md`). `await`
+therefore requires either client-side polling over repeated `status`
+connections or a new long-lived streaming frame kind; polling would avoid a
+new socket contract, and sub-second latency is irrelevant against multi-minute
+agent steps. **Resolved (2026-07-26): streaming** — see the ADR 0018 amendment.
+`await` and event delivery use a long-lived subscription connection with
+framed events, heartbeats, and bounded buffers; one-shot verbs retain the
+one-frame request/response contract.
 
 #### `rafu ensemble propose-merge`
 
@@ -381,7 +390,9 @@ unbounded loop safe to run on the user's own subscription.
 
 ## Part 4 — Build order
 
-Sequenced so each step is independently useful and testable.
+The original dependency sequence below explains why each stage is independently
+useful and testable. The C6/C7 prerequisite stage is complete; the approved
+execution mapping is authoritative for parallel wave order.
 
 ```mermaid
 flowchart LR
@@ -397,21 +408,23 @@ flowchart LR
     SK --> CV[Graph canvas]
 ```
 
-| Stage | Why here | Ships something usable? |
-|---|---|---|
-| C6/C7 handoffs | Hard prerequisites — no fan-out, no budget, no recovery without them | Yes, independently |
-| Read-only verbs | Zero new trust surface; a coordinator can already observe | Yes — scriptable status |
-| ADR amendment | **Must precede any mutating code**, not follow it | Decision only |
-| Token + env | The consent model in one place before anything uses it | No, enabling |
-| Mutating verbs | Now safe to add | Yes — real orchestration |
-| Plan gate | Turns the two-run workaround into one run | Yes — guided onboarding |
-| `propose-merge` | Completes the loop | Yes — full cycle |
-| Skill pack | Ships outside the app; iterate freely after | Yes |
-| Graph canvas | Largest UI piece, and pure comprehension — everything works without it | Yes — the cockpit |
+| Stage | Execution plan | Why here | Ships something usable? |
+|---|---|---|---|
+| C6/C7 handoffs | **Complete** (`2da406e` + `5e2ac85`) | Hard prerequisites — no fan-out, no budget, no recovery without them | Yes, independently |
+| Read-only verbs + streaming | C8-02 | Zero new trust surface; a coordinator can already observe | Yes — scriptable status |
+| ADR amendment | C8-01 | **Must precede any mutating code**, not follow it | Decision only |
+| Token + env | C8-03 | The consent model in one place before anything uses it | No, enabling |
+| Mutating verbs | C8-03 | Now safe to add | Yes — real orchestration |
+| Plan gate | C8-04 | Turns the two-run workaround into one run | Yes — guided onboarding |
+| `propose-merge` | C8-04 | Completes the loop | Yes — full cycle |
+| Skill pack | C8-05 | Ships outside the app; iterate freely after | Yes |
+| Graph canvas | C8-06 | Largest UI piece, and pure comprehension — everything works without it | Yes — the cockpit |
+| Guided onboarding | C8-07 | Builds the entry sheet after the coordinator and canvas seams exist | Yes — the cold-start path |
 
-The canvas is last on purpose. It is what makes the feature *feel* right,
-but nothing depends on it, and shipping it before the verbs would mean a
-beautiful view of something that cannot yet run.
+The original rationale placed the canvas last because orchestration can work
+without it. The approved execution plan moves C8-06 into wave 2 so C8-04 and
+C8-07 can reuse its graph model; that dependency order supersedes the linear
+diagram for implementation.
 
 ## Open questions carried forward
 
@@ -425,11 +438,15 @@ Unchanged from `C8-coordinator-ux.md`, plus two new ones from this spec:
 5. Nested coordinators — recommend forbidding in v1.
 6. **New:** subcommand vs. path collision — is refusing to guess and
    requiring `rafu ./ensemble` the right call, or too strict?
-   1. Answer: we can be strict here.
+   **Answered (2026-07-26):** Be strict. An existing `ensemble` filesystem
+   entry makes the bare invocation fail with `EX_USAGE` and a diagnostic
+   naming `rafu ./ensemble`.
 7. **New:** token lifetime across app relaunch. C7 marks interrupted runs;
    does a resumed coordinator get its old token, a fresh one, or must the
    user re-grant? Re-granting is safest and probably right.
-   1. Answwer: re-granting should be safe. Or we can give one more CLI command to check status wherever possible.
+   **Answered (2026-07-26):** The token dies with the app and the user must
+   re-grant a resumed coordinator. Token-free `status`, `artifact`, and
+   `await` remain available so it can re-orient before requesting consent.
 
 ## Related
 
