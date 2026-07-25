@@ -43,6 +43,30 @@ The Codex Run action lives in [`.codex/environments/environment.toml`](.codex/en
 
 See [`docs/references/build-and-run.md`](docs/references/build-and-run.md) for the supported modes and troubleshooting contract.
 
+### Build lock: check it before you conclude "the build hung"
+
+SwiftPM serializes on `.build/.lock`. A second `swift build`/`swift test` does not fail fast on a busy `.build` — it blocks on `flock` with **no output at all**, so it looks exactly like a slow compile. Multiple agent sessions on one checkout hit this constantly, and a build killed mid-flight leaves the lock file behind with no live holder, after which every later invocation waits forever on nothing.
+
+**Never sit on a silent `swift build`/`swift test` for ten minutes.** Before diagnosing a hang, and before any long run, clear the lock:
+
+```bash
+./script/await_build_lock.sh    # 0 = free (or stale lock cleared), 1 = a real build is running
+```
+
+`script/build.sh` and `script/test.sh` already call it, so prefer those over bare `swift build`/`swift test`.
+
+The rule it implements — apply it by hand if you invoke SwiftPM directly:
+
+1. No `.build/.lock` → proceed.
+2. Lock present: ask whether it is **held** or merely **present**. `lsof -t .build/.lock` lists live `flock` holders; the file's contents are the owning pid.
+3. Holder alive → a real build is running. Wait ~3 minutes and re-check, up to 4 attempts. Do not kill it and do not delete the lock.
+4. No `lsof` holder **and** the recorded pid is dead → the lock is stale. Remove it and proceed.
+5. Still held after every attempt → stop and say so. Do not force it.
+
+Only remove the lock when *both* signals say nobody owns it. `lsof` alone can miss a process mid-startup; a recycled pid can make a dead owner look alive.
+
+A silent SwiftPM invocation is a lock question until proven otherwise. A genuinely slow build still prints progress.
+
 ## Architecture invariants
 
 - Use SwiftUI for scenes, window composition, toolbars, commands, settings, sheets, and observable UI metadata.

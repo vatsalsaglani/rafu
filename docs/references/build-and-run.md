@@ -41,12 +41,44 @@ The script must:
 ## Other canonical commands
 
 ```bash
-swift build
-swift test
+script/build.sh          # swift build, behind the lock guard
+script/test.sh           # swift test, behind the lock guard
 swift run rafu --help
 ```
 
 The Codex environment action must invoke the same script and must not duplicate the staging logic.
+
+## The `.build/.lock` hang (verified 2026-07-26)
+
+SwiftPM takes an exclusive `flock` on `.build/.lock` for the whole build. A
+second `swift build`/`swift test` on the same checkout does not fail fast —
+it blocks with **no output whatsoever**, which is indistinguishable from a
+slow compile. With several agent sessions or a Codex worktree sharing one
+checkout this is the single most common "the build is hung" report, and it
+has cost multi-minute waits before anyone checks. A build killed mid-flight
+(or a crashed session) additionally leaves the file behind with no live
+holder, after which every later invocation blocks on nothing, forever.
+
+`script/await_build_lock.sh` encodes the diagnosis, and `script/build.sh` /
+`script/test.sh` call it first:
+
+- **Held vs. present are different states.** The file existing proves
+  nothing. `lsof -t .build/.lock` lists processes holding it right now; that
+  is the authoritative signal.
+- **The file's contents are the owning pid**, written by SwiftPM. Verified on
+  this checkout: `.build/.lock` contained `82636` for a long-dead process.
+- **Remove only when BOTH say nobody**: no `lsof` holder AND `kill -0
+  <recorded pid>` fails. `lsof` alone can miss a process mid-startup; a
+  recycled pid can make a dead owner look alive. Deleting a lock that a live
+  build holds corrupts nothing on its own but lets two builds write `.build`
+  concurrently, which does.
+- **Wait, don't kill.** Default `RAFU_LOCK_ATTEMPTS=4` × `RAFU_LOCK_WAIT=180`
+  — roughly nine minutes of patience for a genuinely long build — then exit 1
+  and report rather than forcing it.
+
+Evidence: with a Python process holding an `flock`, the script reported the
+holder pid and exited 1 across both attempts with the lock file intact; with
+a stale file (no holder, dead pid) it removed the file and exited 0.
 
 ## CI and resource validation
 
