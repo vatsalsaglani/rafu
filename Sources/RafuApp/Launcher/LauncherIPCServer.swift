@@ -9,6 +9,58 @@ nonisolated enum LauncherIPCServerError: Error, Equatable, Sendable {
     case systemCall(name: String, code: Int32)
 }
 
+nonisolated enum LauncherIPCStreamIO {
+    static func writeEvent(
+        _ event: EnsembleEvent,
+        to fileDescriptor: Int32
+    ) throws {
+        let frame = try LauncherIPCCodec.encode(event)
+        try writeAll(frame, to: fileDescriptor)
+    }
+
+    static func configureSendTimeout(
+        timeout seconds: TimeInterval,
+        fileDescriptor: Int32
+    ) -> Bool {
+        let totalMicroseconds = max(1, Int(seconds * 1_000_000))
+        var timeout = timeval(
+            tv_sec: totalMicroseconds / 1_000_000,
+            tv_usec: Int32(totalMicroseconds % 1_000_000)
+        )
+        return Darwin.setsockopt(
+            fileDescriptor,
+            SOL_SOCKET,
+            SO_SNDTIMEO,
+            &timeout,
+            socklen_t(MemoryLayout.size(ofValue: timeout))
+        ) == 0
+    }
+
+    private static func writeAll(
+        _ frame: Data,
+        to fileDescriptor: Int32
+    ) throws {
+        try frame.withUnsafeBytes { bytes in
+            var offset = 0
+            while offset < bytes.count {
+                let count = Darwin.write(
+                    fileDescriptor,
+                    bytes.baseAddress?.advanced(by: offset),
+                    bytes.count - offset
+                )
+                if count < 0 {
+                    if errno == EINTR { continue }
+                    throw LauncherIPCServerError.systemCall(name: "write", code: errno)
+                }
+                guard count > 0 else {
+                    throw LauncherIPCServerError.systemCall(name: "write", code: EPIPE)
+                }
+                offset += count
+            }
+        }
+    }
+}
+
 /// Owns Rafu's one same-user Unix-domain listener. Blocking socket syscalls
 /// run only in detached tasks; actor state owns the listener fd, tracks each
 /// accepted fd for shutdown, and never shares mutable byte buffers.
@@ -348,10 +400,12 @@ actor LauncherIPCServer {
                     logger.info("Request \(kind, privacy: .public) rejected")
                     return
                 }
-                configureSendTimeout(
+                if !LauncherIPCStreamIO.configureSendTimeout(
                     timeout: streamSendTimeout,
                     fileDescriptor: fileDescriptor
-                )
+                ) {
+                    logger.error("Failed to configure streaming send timeout")
+                }
                 let cursor = await subscriptionCursor()
                 do {
                     try writeResponse(
@@ -361,7 +415,7 @@ actor LauncherIPCServer {
                     logger.info("Request \(kind, privacy: .public) accepted")
                     for await event in stream {
                         if Task.isCancelled { return }
-                        try writeEvent(event, to: fileDescriptor)
+                        try LauncherIPCStreamIO.writeEvent(event, to: fileDescriptor)
                     }
                 } catch {
                     // Stream write failure, EPIPE, and shutdown are normal
@@ -427,38 +481,6 @@ actor LauncherIPCServer {
         to fileDescriptor: Int32
     ) throws {
         let frame = try LauncherIPCCodec.encode(response)
-        try frame.withUnsafeBytes { bytes in
-            var offset = 0
-            while offset < bytes.count {
-                let count = Darwin.write(
-                    fileDescriptor,
-                    bytes.baseAddress?.advanced(by: offset),
-                    bytes.count - offset
-                )
-                if count < 0 {
-                    if errno == EINTR { continue }
-                    throw systemCallError("write")
-                }
-                guard count > 0 else {
-                    throw LauncherIPCServerError.systemCall(name: "write", code: EPIPE)
-                }
-                offset += count
-            }
-        }
-    }
-
-    private nonisolated static func writeEvent(
-        _ event: EnsembleEvent,
-        to fileDescriptor: Int32
-    ) throws {
-        let frame = try LauncherIPCCodec.encode(event)
-        try writeAll(frame, to: fileDescriptor)
-    }
-
-    private nonisolated static func writeAll(
-        _ frame: Data,
-        to fileDescriptor: Int32
-    ) throws {
         try frame.withUnsafeBytes { bytes in
             var offset = 0
             while offset < bytes.count {
@@ -565,27 +587,6 @@ actor LauncherIPCServer {
         guard noSigPipeResult == 0, receiveResult == 0, sendResult == 0 else {
             logger.error("Failed to configure accepted connection socket options")
             return
-        }
-    }
-
-    private nonisolated static func configureSendTimeout(
-        timeout seconds: TimeInterval,
-        fileDescriptor: Int32
-    ) {
-        let totalMicroseconds = max(1, Int(seconds * 1_000_000))
-        var timeout = timeval(
-            tv_sec: totalMicroseconds / 1_000_000,
-            tv_usec: Int32(totalMicroseconds % 1_000_000)
-        )
-        let result = Darwin.setsockopt(
-            fileDescriptor,
-            SOL_SOCKET,
-            SO_SNDTIMEO,
-            &timeout,
-            socklen_t(MemoryLayout.size(ofValue: timeout))
-        )
-        if result != 0 {
-            logger.error("Failed to configure streaming send timeout")
         }
     }
 

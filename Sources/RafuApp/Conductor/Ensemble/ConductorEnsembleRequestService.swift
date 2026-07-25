@@ -1,60 +1,12 @@
 import Foundation
 import RafuCore
 
-@MainActor
-final class ConductorEnsembleRequestService {
-    struct WorkspaceSnapshot {
-        let rootURL: URL
-        let session: WorkspaceSession
-        let isKeyWindow: Bool
-        let registrationOrder: Int
-    }
-
-    struct Dependencies {
-        var workspaces: () -> [WorkspaceSnapshot]
-        var liveState: (WorkspaceSession, String) -> ConductorWorkflowState?
-        var eventCenter: ConductorEnsembleEventCenter
-    }
-
-    static let shared = ConductorEnsembleRequestService()
-
-    private let dependencies: Dependencies
-
-    init(dependencies: Dependencies = .live) {
-        self.dependencies = dependencies
-    }
-
-    func handle(_ envelope: LauncherIPCEnvelope) -> LauncherIPCResponse {
-        guard envelope.kind.isEnsemble, !envelope.kind.isStreaming,
-            let payload = envelope.ensemble
-        else {
-            return .ensemble(.failure(code: 64, message: "invalid Ensemble request payload"))
-        }
-        guard let workspace = matchingWorkspace(for: payload.workingDirectory) else {
-            return .ensemble(.failure(code: 69, message: "workspace not open in Rafu"))
-        }
-
-        switch envelope.kind {
-        case .ensembleStatus:
-            guard payload.verb == "status" else {
-                return .ensemble(.failure(code: 64, message: "invalid status payload"))
-            }
-            return .ensemble(.status(status(payload: payload, workspace: workspace)))
-        case .ensembleArtifact:
-            guard payload.verb == "artifact" else {
-                return .ensemble(.failure(code: 64, message: "invalid artifact payload"))
-            }
-            return .ensemble(artifact(payload: payload, workspace: workspace))
-        case .handshake, .openFolder, .goto, .ensembleSubscribe, .unknown:
-            return .ensemble(.failure(code: 64, message: "unsupported Ensemble request"))
-        }
-    }
-
+nonisolated enum ConductorEnsembleStateProjection {
     /// The one state projection shared by snapshots and pushed run-change
     /// events. Precedence is deliberate and stable:
     /// merged > interrupted > failed > aborted > awaiting* > running >
     /// pending > completed.
-    nonisolated static func runState(
+    static func runState(
         manifest: ConductorRunManifest,
         liveState: ConductorWorkflowState?
     ) -> EnsembleRunState {
@@ -108,7 +60,7 @@ final class ConductorEnsembleRequestService {
         return .completed
     }
 
-    nonisolated static func stepState(_ status: RunStepStatus) -> String {
+    static func stepState(_ status: RunStepStatus) -> String {
         switch status {
         case .pending: "pending"
         case .running: "running"
@@ -117,6 +69,56 @@ final class ConductorEnsembleRequestService {
         case .failed: "failed"
         case .aborted: "aborted"
         case .interrupted: "interrupted"
+        }
+    }
+}
+
+@MainActor
+final class ConductorEnsembleRequestService {
+    struct WorkspaceSnapshot {
+        let rootURL: URL
+        let session: WorkspaceSession
+        let isKeyWindow: Bool
+        let registrationOrder: Int
+    }
+
+    struct Dependencies {
+        var workspaces: () -> [WorkspaceSnapshot]
+        var liveState: (WorkspaceSession, String) -> ConductorWorkflowState?
+        var eventCenter: ConductorEnsembleEventCenter
+    }
+
+    static let shared = ConductorEnsembleRequestService()
+
+    private let dependencies: Dependencies
+
+    init(dependencies: Dependencies = .live) {
+        self.dependencies = dependencies
+    }
+
+    func handle(_ envelope: LauncherIPCEnvelope) -> LauncherIPCResponse {
+        guard envelope.kind.isEnsemble, !envelope.kind.isStreaming,
+            let payload = envelope.ensemble
+        else {
+            return .ensemble(.failure(code: 64, message: "invalid Ensemble request payload"))
+        }
+        guard let workspace = matchingWorkspace(for: payload.workingDirectory) else {
+            return .ensemble(.failure(code: 69, message: "workspace not open in Rafu"))
+        }
+
+        switch envelope.kind {
+        case .ensembleStatus:
+            guard payload.verb == "status" else {
+                return .ensemble(.failure(code: 64, message: "invalid status payload"))
+            }
+            return .ensemble(.status(status(payload: payload, workspace: workspace)))
+        case .ensembleArtifact:
+            guard payload.verb == "artifact" else {
+                return .ensemble(.failure(code: 64, message: "invalid artifact payload"))
+            }
+            return .ensemble(artifact(payload: payload, workspace: workspace))
+        case .handshake, .openFolder, .goto, .ensembleSubscribe, .unknown:
+            return .ensemble(.failure(code: 64, message: "unsupported Ensemble request"))
         }
     }
 
@@ -210,7 +212,10 @@ final class ConductorEnsembleRequestService {
             runID: manifest.id,
             workflowName: manifest.workflowName,
             label: manifest.label,
-            state: Self.runState(manifest: manifest, liveState: liveState),
+            state: ConductorEnsembleStateProjection.runState(
+                manifest: manifest,
+                liveState: liveState
+            ),
             startedBy: manifest.startedBy,
             gate: manifest.gate.map {
                 EnsembleGateSummary(
@@ -224,7 +229,7 @@ final class ConductorEnsembleRequestService {
                     agentName: step.agentName,
                     provider: step.binding.provider.rawValue,
                     model: step.binding.model,
-                    state: Self.stepState(step.status),
+                    state: ConductorEnsembleStateProjection.stepState(step.status),
                     attempt: step.attempt ?? 1,
                     evidencePath: evidencePath(
                         manifest: manifest,

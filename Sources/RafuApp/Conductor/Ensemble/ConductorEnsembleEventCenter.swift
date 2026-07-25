@@ -77,7 +77,7 @@ final class ConductorEnsembleEventCenter {
                 at: manifest.updatedAt,
                 runID: manifest.id,
                 kind: manifest.mergedAt == nil ? "state" : "merged",
-                state: ConductorEnsembleRequestService.runState(
+                state: ConductorEnsembleStateProjection.runState(
                     manifest: manifest,
                     liveState: nil
                 ),

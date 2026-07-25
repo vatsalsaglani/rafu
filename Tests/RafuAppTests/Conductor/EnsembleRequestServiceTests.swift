@@ -171,7 +171,7 @@ struct EnsembleRequestServiceTests {
         var value = manifest(id: "run", statuses: [.interrupted])
         value.mergedAt = Date()
         #expect(
-            ConductorEnsembleRequestService.runState(
+            ConductorEnsembleStateProjection.runState(
                 manifest: value,
                 liveState: .failed(
                     step: 0, reason: "failure")) == .merged
@@ -182,7 +182,7 @@ struct EnsembleRequestServiceTests {
     func interruptedPrecedence() {
         let value = manifest(id: "run", statuses: [.interrupted, .failed("failure")])
         #expect(
-            ConductorEnsembleRequestService.runState(manifest: value, liveState: nil)
+            ConductorEnsembleStateProjection.runState(manifest: value, liveState: nil)
                 == .interrupted
         )
     }
@@ -191,7 +191,7 @@ struct EnsembleRequestServiceTests {
     func failedPrecedence() {
         let value = manifest(id: "run", statuses: [.failed("failure"), .aborted])
         #expect(
-            ConductorEnsembleRequestService.runState(manifest: value, liveState: nil)
+            ConductorEnsembleStateProjection.runState(manifest: value, liveState: nil)
                 == .failed
         )
     }
@@ -201,7 +201,7 @@ struct EnsembleRequestServiceTests {
         var value = manifest(id: "run", statuses: [.aborted, .awaitingGate])
         value.gate = .init(kind: .step, stepIndex: 1)
         #expect(
-            ConductorEnsembleRequestService.runState(manifest: value, liveState: nil)
+            ConductorEnsembleStateProjection.runState(manifest: value, liveState: nil)
                 == .aborted
         )
     }
@@ -211,12 +211,12 @@ struct EnsembleRequestServiceTests {
         var value = manifest(id: "run")
         value.gate = .init(kind: .merge, stepIndex: 0)
         #expect(
-            ConductorEnsembleRequestService.runState(manifest: value, liveState: nil)
+            ConductorEnsembleStateProjection.runState(manifest: value, liveState: nil)
                 == .awaitingMergeGate
         )
         value.gate = .init(kind: .step, stepIndex: 0)
         #expect(
-            ConductorEnsembleRequestService.runState(manifest: value, liveState: nil)
+            ConductorEnsembleStateProjection.runState(manifest: value, liveState: nil)
                 == .awaitingGate
         )
     }
@@ -225,7 +225,7 @@ struct EnsembleRequestServiceTests {
     func runningPrecedence() {
         let value = manifest(id: "run", statuses: [.running, .pending])
         #expect(
-            ConductorEnsembleRequestService.runState(manifest: value, liveState: nil)
+            ConductorEnsembleStateProjection.runState(manifest: value, liveState: nil)
                 == .running
         )
     }
@@ -234,7 +234,7 @@ struct EnsembleRequestServiceTests {
     func pendingPrecedence() {
         let value = manifest(id: "run", statuses: [.completed, .pending])
         #expect(
-            ConductorEnsembleRequestService.runState(manifest: value, liveState: nil)
+            ConductorEnsembleStateProjection.runState(manifest: value, liveState: nil)
                 == .pending
         )
     }
@@ -243,7 +243,7 @@ struct EnsembleRequestServiceTests {
     func completedState() {
         let value = manifest(id: "run", statuses: [.completed])
         #expect(
-            ConductorEnsembleRequestService.runState(manifest: value, liveState: .completed)
+            ConductorEnsembleStateProjection.runState(manifest: value, liveState: .completed)
                 == .completed
         )
     }
