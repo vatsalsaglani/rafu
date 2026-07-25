@@ -295,14 +295,6 @@ struct ResourcesView: View {
                 : "\(row.label), \(row.value), \(row.note)")
     }
 
-    private func kindLabel(_ kind: ProcessResourceRegistry.ProcessKind) -> String {
-        ProcessResourcePresentation.kindLabel(kind)
-    }
-
-    private func symbol(for kind: ProcessResourceRegistry.ProcessKind) -> String {
-        ProcessResourcePresentation.symbol(kind)
-    }
-
     private func languageServerRow(_ status: LanguageServerStatus) -> some View {
         let stateLabel = LanguageServerStatusPresentation.stateLabel(status.phase)
         let showsRestart = LanguageServerStatusPresentation.showsRestart(status.phase)
@@ -490,29 +482,5 @@ enum WorkspaceContentAdapter {
         }
         metrics.hasOpenDiff = session.gitOpenDiff != nil
         return metrics
-    }
-}
-
-nonisolated enum ProcessResourcePresentation {
-    static func kindLabel(_ kind: ProcessResourceRegistry.ProcessKind) -> String {
-        switch kind {
-        case .terminalShell: "Terminal"
-        case .agent: "Ensemble Agent"
-        case .agentTerminal: "Agent Terminal"
-        case .git: "Git"
-        case .languageServer: "Language Server"
-        case .other: "Other"
-        }
-    }
-
-    static func symbol(_ kind: ProcessResourceRegistry.ProcessKind) -> String {
-        switch kind {
-        case .terminalShell: "terminal"
-        case .agent: "person.crop.rectangle.stack"
-        case .agentTerminal: "terminal.badge"
-        case .git: "arrow.triangle.branch"
-        case .languageServer: "cpu"
-        case .other: "gearshape"
-        }
     }
 }

@@ -225,6 +225,36 @@ func compositionKindOrderCoversEveryKind() {
     #expect(MemoryComposition.kindOrder.count == Set(MemoryComposition.kindOrder).count)
 }
 
+/// `groups(from:)` builds its output by walking `kindOrder`, so a kind left
+/// out of that array does not fail to compile — it silently vanishes from the
+/// Resources panel. AT-01's `.agentTerminal` was exactly this shape of near
+/// miss, so pin every case rather than trusting review to catch the next one.
+@Test("Every ProcessKind is ordered, titled, and given an icon")
+func processKindsAreFullyPresented() {
+    for kind in ProcessResourceRegistry.ProcessKind.allCases {
+        #expect(
+            MemoryComposition.kindOrder.contains(kind),
+            "ProcessKind.\(kind.rawValue) is missing from kindOrder and would be dropped")
+        #expect(!ProcessResourcePresentation.sectionTitle(kind).isEmpty)
+        #expect(!ProcessResourcePresentation.kindLabel(kind).isEmpty)
+        #expect(!ProcessResourcePresentation.symbol(kind).isEmpty)
+    }
+    // No duplicates: a kind listed twice would render two sections holding
+    // the same rows.
+    #expect(Set(MemoryComposition.kindOrder).count == MemoryComposition.kindOrder.count)
+}
+
+/// The section title is plural and the row label singular; a section reading
+/// "Terminal" over four rows is the regression this guards.
+@Test("Section titles and row labels stay distinct where the plural differs")
+func processKindTitlesAreDistinctFromRowLabels() {
+    #expect(ProcessResourcePresentation.kindLabel(.terminalShell) == "Terminal")
+    #expect(ProcessResourcePresentation.sectionTitle(.terminalShell) == "Terminals")
+    #expect(ProcessResourcePresentation.sectionTitle(.agentTerminal) == "Agent Terminals")
+    #expect(MemoryComposition.title(for: .agentTerminal) == "Agent Terminals")
+    #expect(MemoryComposition.symbol(for: .agentTerminal) == "terminal.badge")
+}
+
 @Test("Composition groups by kind in a fixed order, omitting empty categories")
 func compositionGroupsInFixedOrder() {
     let groups = MemoryComposition.groups(from: [

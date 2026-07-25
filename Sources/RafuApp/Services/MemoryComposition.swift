@@ -47,6 +47,52 @@ nonisolated struct ContentMetricRow: Identifiable, Sendable, Equatable {
     let note: String
 }
 
+/// The ONE place a `ProcessKind` becomes user-visible text or an icon.
+///
+/// AT-01 and the Resources composition work independently grew a mapping for
+/// this — a singular per-row label in the view and a plural section title in
+/// `MemoryComposition` — which meant a new kind had to be handled in two
+/// files or it would render half-labelled. Both now live here, beside
+/// `MemoryComposition.kindOrder`, so adding a `ProcessKind` fails to compile
+/// in exactly one file (the switches are exhaustive) and is caught by
+/// `processKindsAreFullyPresented` if it is left out of the order.
+nonisolated enum ProcessResourcePresentation {
+    /// Singular, for a row describing ONE process ("Terminal", "Git").
+    static func kindLabel(_ kind: ProcessResourceRegistry.ProcessKind) -> String {
+        switch kind {
+        case .terminalShell: "Terminal"
+        case .agent: "Ensemble Agent"
+        case .agentTerminal: "Agent Terminal"
+        case .git: "Git"
+        case .languageServer: "Language Server"
+        case .other: "Other"
+        }
+    }
+
+    /// Plural, for a section heading over all processes of a kind.
+    static func sectionTitle(_ kind: ProcessResourceRegistry.ProcessKind) -> String {
+        switch kind {
+        case .terminalShell: "Terminals"
+        case .agent: "Ensemble Agents"
+        case .agentTerminal: "Agent Terminals"
+        case .git: "Git"
+        case .languageServer: "Language Servers"
+        case .other: "Other"
+        }
+    }
+
+    static func symbol(_ kind: ProcessResourceRegistry.ProcessKind) -> String {
+        switch kind {
+        case .terminalShell: "terminal"
+        case .agent: "person.crop.rectangle.stack"
+        case .agentTerminal: "terminal.badge"
+        case .git: "arrow.triangle.branch"
+        case .languageServer: "cpu"
+        case .other: "gearshape"
+        }
+    }
+}
+
 nonisolated enum MemoryComposition {
     /// Fixed section order so the list never reshuffles between the 2s
     /// refreshes — Rafu's own processes first, then the noisiest categories.
@@ -58,25 +104,11 @@ nonisolated enum MemoryComposition {
     ]
 
     static func title(for kind: ProcessResourceRegistry.ProcessKind) -> String {
-        switch kind {
-        case .terminalShell: return "Terminals"
-        case .agentTerminal: return "Agent Terminals"
-        case .agent: return "Ensemble Agents"
-        case .git: return "Git"
-        case .languageServer: return "Language Servers"
-        case .other: return "Other"
-        }
+        ProcessResourcePresentation.sectionTitle(kind)
     }
 
     static func symbol(for kind: ProcessResourceRegistry.ProcessKind) -> String {
-        switch kind {
-        case .terminalShell: return "terminal"
-        case .agentTerminal: return "terminal.badge"
-        case .agent: return "person.crop.rectangle.stack"
-        case .git: return "arrow.triangle.branch"
-        case .languageServer: return "cpu"
-        case .other: return "gearshape"
-        }
+        ProcessResourcePresentation.symbol(kind)
     }
 
     /// Folds sampled process rows into ordered, non-empty groups. Rows are
