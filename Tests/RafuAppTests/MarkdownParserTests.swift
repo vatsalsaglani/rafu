@@ -20,15 +20,13 @@ func parsesMarkdownAndMermaid() {
 
     #expect(blocks.count == 3)
     guard case .mermaid(let result) = blocks.last?.content,
-        case .flow(let flow) = result
+        case .diagram(let diagram) = result
     else {
-        Issue.record("Expected a Mermaid flow block")
+        Issue.record("Expected a Mermaid diagram block")
         return
     }
-    #expect(flow.edges.count == 2)
-    #expect(flow.edges.first?.label == "opens")
-    #expect(flow.nodes["Plan"] == "Plan")
-    #expect(flow.nodes["Commit"] == "Commit")
+    #expect(diagram.kind == .flowchart)
+    #expect(diagram.raw.contains("Plan[Plan]"))
 }
 
 @Test("Markdown blocks retain distinct stable identities for repeated content")
@@ -63,12 +61,12 @@ func richPreviewSegmentation() {
     }
     #expect(table.contains("| Name | Value |"))
     guard case .mermaid(let result) = segments[1].content,
-        case .flow(let flow) = result
+        case .diagram(let diagram) = result
     else {
-        Issue.record("Expected native Mermaid flow segment")
+        Issue.record("Expected native Mermaid diagram segment")
         return
     }
-    #expect(flow.edges.count == 1)
+    #expect(diagram.kind == .flowchart)
 }
 
 @Test("Markdown parser recognizes Mermaid sequence diagrams")
@@ -84,11 +82,11 @@ func parsesSequenceDiagram() {
         """
     )
     guard case .mermaid(let result) = blocks.first?.content,
-        case .sequence(let seq) = result
+        case .diagram(let diagram) = result
     else {
-        Issue.record("Expected a Mermaid sequence block")
+        Issue.record("Expected a Mermaid diagram block")
         return
     }
-    #expect(seq.participants == ["User", "Rafu"])
-    #expect(seq.messages.first?.label == "Save file")
+    #expect(diagram.kind == .sequenceDiagram)
+    #expect(diagram.raw.contains("Save file"))
 }
