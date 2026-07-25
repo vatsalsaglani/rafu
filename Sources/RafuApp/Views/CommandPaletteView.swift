@@ -700,6 +700,17 @@ struct CommandPaletteView: View {
         if session.rootURL != nil {
             commands.append(
                 .init(
+                    id: "conductor.show-graph",
+                    title: "Ensemble: Show Graph",
+                    symbolName: "point.3.connected.trianglepath.dotted",
+                    keywords: ["ensemble", "graph", "runs"]
+                ) {
+                    dismiss()
+                    session.showConductorGraph()
+                }
+            )
+            commands.append(
+                .init(
                     id: "terminal.new-agent",
                     title: "New Agent Terminal…",
                     symbolName: "terminal.badge",

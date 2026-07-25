@@ -298,6 +298,11 @@ struct RafuAppCommands: Commands {
             }
             .disabled(workspaceSession?.rootURL == nil)
 
+            Button("Show Ensemble Graph") {
+                workspaceSession?.showConductorGraph()
+            }
+            .disabled(workspaceSession?.rootURL == nil)
+
             Button("New Ensemble Run…") {
                 workspaceSession?.navigatorMode = .runs
                 workspaceSession?.conductorRunController.presentNewRun()
