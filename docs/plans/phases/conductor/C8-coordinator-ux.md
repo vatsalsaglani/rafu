@@ -450,7 +450,7 @@ rows describe C8 work governed by the approved execution plan.
 | Graph canvas | New — largest UI piece; additive canvas mode |
 | `proposes:` in artifacts | New — small additive schema |
 | Published coordinator skill | New — ships outside the app |
-| ADR 0018 consent amendment | New — **must land before any code** |
+| ADR 0018 consent amendment | **Landed 2026-07-26** (C8-01) — mutating code is now unblocked |
 
 The three C6/C7 prerequisites are satisfied on `main`; no substrate handoff
 blocks the approved C8 execution plan.
