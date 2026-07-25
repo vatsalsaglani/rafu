@@ -16,13 +16,18 @@ enum NotchScreenAdapter {
         )
     }
 
-    /// Screen choice (N-1): the screen containing the key window, else
-    /// `NSScreen.main`, else the first screen. Recomputed by the controller
+    /// Screen choice (N-1): a NOTCHED screen if one is attached, otherwise
+    /// the screen containing the key window, else `NSScreen.main`, else the
+    /// first screen — see `NotchScreenSelection.preferred(from:)` for why
+    /// the notch outranks the active window. Recomputed by the controller
     /// on every show and on `NSApplication.didChangeScreenParametersNotification`
     /// (dock/undock, resolution change).
     static func currentMetrics() -> NotchScreenMetrics? {
-        let screen = NSApp.keyWindow?.screen ?? NSScreen.main ?? NSScreen.screens.first
-        return screen.map(metrics(for:))
+        var candidates: [NSScreen] = []
+        if let keyScreen = NSApp?.keyWindow?.screen { candidates.append(keyScreen) }
+        if let main = NSScreen.main { candidates.append(main) }
+        candidates.append(contentsOf: NSScreen.screens)
+        return NotchScreenSelection.preferred(from: candidates.map(metrics(for:)))
     }
 }
 

@@ -100,6 +100,31 @@ nonisolated enum NotchHUDGeometry {
     }
 }
 
+/// Which display the notch surfaces belong on when more than one is
+/// attached. Pure so the rule is testable without `NSScreen` (the adapter
+/// in `NotchHUDWindow.swift` supplies the candidates).
+nonisolated enum NotchScreenSelection {
+    /// Picks the screen the HUD and companion strip should occupy, given
+    /// `candidates` in the caller's preference order (the screen the user
+    /// is working on first, then every attached screen).
+    ///
+    /// A screen with a REAL notch ALWAYS wins, even when it is not the one
+    /// the key window sits on. These surfaces exist to fill the physical
+    /// housing; following the active window onto an external display moved
+    /// them to that display's non-notch fallback position — and for the
+    /// companion strip, whose geometry returns `nil` without a notch,
+    /// removed them entirely. Working in a Rafu window on an external
+    /// monitor therefore made the laptop's notch go blank until the window
+    /// was dragged back, which is the opposite of an "always-on companion".
+    ///
+    /// With no notched screen attached (clamshell, desktop Mac, external
+    /// only) the first candidate wins, preserving the original
+    /// follow-the-key-window behavior for the non-notch fallback layout.
+    static func preferred(from candidates: [NotchScreenMetrics]) -> NotchScreenMetrics? {
+        candidates.first { NotchHUDGeometry.notchRect(for: $0) != nil } ?? candidates.first
+    }
+}
+
 extension NotchHUDGeometry {
     /// Top padding the HUD content needs so it lays out BELOW the physical
     /// notch housing: the safe-area band height on a notched screen, 0 on
