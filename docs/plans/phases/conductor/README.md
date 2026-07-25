@@ -206,8 +206,29 @@ git worktree add ../rafu-conductor-polish   -b conductor/c7-polish
 | C3 | [C3-adapters-opencode-cline-kimi.md](C3-adapters-opencode-cline-kimi.md) | `conductor/c3-adapters-opencode-cline-kimi` | Merged 2026-07-24 (`b2ed160`; OpenCode + Cline verified, Kimi unverified/absent) |
 | C4 | [C4-adapters-gemini-cursor.md](C4-adapters-gemini-cursor.md) | `conductor/c4-adapters-gemini-cursor` | Merged 2026-07-24 (`4fa45cb`; Cursor verified logged-out, Gemini unverified/absent) |
 | C5 | [C5-pipelines.md](C5-pipelines.md) | main | Implemented on main (commits fc33a99/c5c83de/a89309a/c58eef1; coordinator-implemented after stop-and-report; 0 warnings, 1479 tests, GUI verified) |
-| C6 | [C6-workflow-library.md](C6-workflow-library.md) | `conductor/c6-workflow-library` | Planned |
-| C7 | [C7-polish.md](C7-polish.md) | `conductor/c7-polish` | Planned |
+| C6 | [C6-workflow-library.md](C6-workflow-library.md) | `conductor/c6-workflow-library` | Merged 2026-07-25 (`95a51f7`; owned work complete — 1 integration handoff open, see below) |
+| C7 | [C7-polish.md](C7-polish.md) | `conductor/c7-polish` | Merged 2026-07-25 (`4c42b60`; owned work complete — 4 integration handoffs open, see below) |
+
+Merged-main gates after C6+C7: 0 warnings, 1515 tests green parallel and
+serial, lint clean, staged-app GUI verify passed.
+
+## Open coordinator integration handoffs (C6 + C7)
+
+Both Wave C phases correctly stopped at files they do not own and delivered
+their owned work plus a precise proposed diff (the handoff-not-halt rule
+above, working as intended). Until these land, the shipped features are
+**engine-complete but not end-to-end**:
+
+| # | From | Needs | Effect while open |
+|---|---|---|---|
+| 1 | C6 | `WorkspaceSession` per-window `ConductorConcurrentRunCoordinator` + `workflowController(forRunID:)`, then route `RafuAppCommands`/`CommandPaletteView`/`ConductorRunDetailCanvas`/panel launch through it | Concurrent pipelines are tested at the coordinator level but the GUI still drives C5's single controller — only one pipeline at a time in practice |
+| 2 | C7 | `ConductorRunManifest.Step.usage` + meter wiring in `ConductorWorkflowController` + canvas rendering | Usage deltas are computed and tested but never persisted or shown |
+| 3 | C7 | `RunStepStatus.interrupted` + recovery pass in `reloadRuns()` + `restore`/`retryInterruptedStep`/`abortInterruptedRun`/`keepInterruptedWorktree` | Recovery is planned honestly but a relaunched app cannot act on it |
+| 4 | C7 | `[gate:remote]` grammar + typed gate event + ADR 0016 surface arbitration + notifier Open Run / Approve categories | Gate notifications have no actions; companion tile and notch drop-down are not mutually exclusive |
+| 5 | C7 | `TerminalProcessSpec` attribution + `ProcessResourceRegistry.ProcessKind.agent` + "Ensemble Agent" label | Agent children show as "Terminal N" in Resources |
+
+Handoffs 2–5 are independent of each other; #1 is the largest and unblocks
+the concurrency story C6 built.
 
 Each phase document ends with its self-contained goal-mode prompt (works in
 Claude Code or Codex).
