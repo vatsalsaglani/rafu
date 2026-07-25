@@ -2,6 +2,14 @@
 
 ## Status
 
+**M1–M6 superseded by [ADR 0020](../../decisions/0020-mermaid-rendering-via-beautiful-mermaid.md)
+(2026-07-25).** ADR 0020 replaces the hand-written parser, layout engine, and
+Canvas painters this lane delivered with `beautiful-mermaid-swift`. The
+honest-fallback contract, Rafu-owned classification and user-facing strings,
+and the render badge all survive (badge text changed; see the ADR). This
+document is kept as the historical record of M1–M6's design and is not
+re-executed.
+
 Planned (2026-07-17). One of six post-audit lanes defined in
 [`post-audit-worktree-fanout.md`](post-audit-worktree-fanout.md). Runs in a
 **dedicated git worktree**. Each increment is one advisor → implementor →

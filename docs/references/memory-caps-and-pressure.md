@@ -38,6 +38,9 @@ These limits are coordinator-verified real values. They protect against runaway 
 | Large-file guard: max unguarded bytes | 2 MB | DocumentGuardPolicy.swift:23 | Syntax parsing guard threshold |
 | Large-file guard: max line length | 10,000 UTF-16 units | DocumentGuardPolicy.swift:29 | Long-line parsing guard threshold |
 | Undo levels | 200 | CodeEditorView.swift (`undoLevelCap=200`) | Bounded undo stack per document |
+| Mermaid raster pixels per diagram (unmeasured proposal) | 4 M px (~16 MB) | MermaidRenderService.swift:89 | Back off scale toward 1.0 if raster would exceed cap; ADR 0020 |
+| Mermaid diagram point area (unmeasured proposal) | 4 M pt² (~2000×2000 pt) | MermaidRenderService.swift:92 | Refuse render entirely with "too large" fallback; ADR 0020 |
+| Mermaid layout cache entries (unmeasured proposal) | 24 LRU | MermaidRenderService.swift:94 | Bounded `PositionedGraph` retention; theme-independent layout cached; ADR 0020 |
 
 ## Why it matters
 

@@ -1,402 +1,177 @@
-# Mermaid native preview — honest detection and fallback
+# Mermaid native preview — `beautiful-mermaid-swift` rendering
 
-- **Applies to:** Mermaid diagram parsing, classification, and rendering in
-  `MarkdownModels.swift` and `MarkdownPreviewView.swift` (which also owns the
-  in-file `MarkdownPreviewSegmentParser`)
-- **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-17
+- **Applies to:** Mermaid diagram parsing, classification, normalization, rasterization, and native rendering in `MarkdownModels.swift`, `MermaidRenderService.swift`, `MermaidTheme.swift`, and `MermaidDiagramView.swift`
+- **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1, `beautiful-mermaid-swift` 1.0.4, `elk-swift` 1.0.2 on 2026-07-25
 
 ## Rule or observed behavior
 
-### Classification contract (M1)
+### Classifier contract and supported types
 
-The `MermaidParseResult` enum replaces the old binary flow/sequence detection.
-A first-token classifier examines the first non-blank, non-comment,
-non-frontmatter line:
+The `MarkdownParser.parseMermaid(_:)` classifier examines the first non-blank, non-YAML-frontmatter, non-`%%` comment line and maps it to one of six **BeautifulMermaid-supported diagram types** or to unsupported/malformed:
 
-1. **Frontmatter and comment skipping:** skip leading blank lines, YAML
-   frontmatter blocks (`---`…`---`), and Markdown comment lines (`%%`…) to find
-   the classifying header. This applies to classification only; body parsing
-   still assumes line 0 is the header (M2/M5 fix this).
+**Six supported types:**
+- `flowchart` or `graph` (both spellings, case-insensitive) → `MermaidParseResult.diagram(MermaidDiagram)` with `kind: .flowchart`
+- `stateDiagram` or `stateDiagram-v2` → `kind: .stateDiagram`
+- `sequenceDiagram` → `kind: .sequenceDiagram`
+- `classDiagram` → `kind: .classDiagram`
+- `erDiagram` → `kind: .erDiagram`
+- `xychart` or `xychart-beta` → `kind: .xyChart`
 
-2. **Supported types:**
-   - `flowchart` or `graph` (both spellings, case-insensitive) → `MermaidParseResult.flow(MermaidFlow)`
-   - `sequenceDiagram` (case-insensitive) → `MermaidParseResult.sequence(MermaidSequence)`
+**23 known-unsupported types** (Mermaid v10):
+→ `MermaidParseResult.unsupported(type:raw:)`
+- `gantt`, `pie`, `journey`, `gitGraph`, `mindmap`, `timeline`, `quadrantChart`, `requirement`, `requirementDiagram`, `C4Context`, `C4Container`, `C4Component`, `C4Dynamic`, `C4Deployment`, `sankey`, `sankey-beta`, `block`, `block-beta`, `packet`, `packet-beta`, `kanban`, `architecture`, `architecture-beta`
 
-3. **Unsupported known types** (case-insensitive, 29 types from Mermaid v10 docs):
-   → `MermaidParseResult.unsupported(type:raw:)`
-   - `classDiagram`, `stateDiagram`, `stateDiagram-v2`, `erDiagram`, `gantt`,
-     `pie`, `journey`, `gitGraph`, `mindmap`, `timeline`, `quadrantChart`,
-     `requirement`, `C4Context`, `C4Container`, `C4Component`, `C4Dynamic`,
-     `C4Deployment`, `sankey`, `xychart`, `block`, `packet`, `kanban`,
-     `architecture`
+**Malformed or unknown:**
+→ `MermaidParseResult.malformed(type:raw:reason:)`
+- Empty header, unknown type name, or parse error.
 
-4. **Malformed or unknown:**
-   → `MermaidParseResult.malformed(type:raw:reason:)`
-   - Empty header, unknown type name, or parse error.
+The classifier uses the same `headerIndex` helper as the normalizer below, reusing the blank/frontmatter/`%%`-skipping logic.
 
-### Result-shape model (M1 landed option a)
+### Normalization and upstream header regressions
 
-- `MermaidFlow` and `MermaidSequence` are nonisolated `Sendable` value types
-  holding the parsed structure.
-- Every `Edge` (in flow) and `Message` (in sequence) carries a durable
-  `UUID` identity assigned at parse time — never derived from content,
-  offsets, or hashes. Repeated rows must use this identity as `ForEach` key.
+Upstream (`beautiful-mermaid-swift` 1.0.4) has two stricter parsing requirements that Rafu compensates for via `normalizeMermaid(_:)` before passing the source to `MermaidRenderService`:
 
-### Fallback and honesty (M1)
+1. **Bare `flowchart` or `graph` header:** `_parseFlowchart` requires an explicit direction token (TD/LR/BT/RL). A bare `flowchart` or `graph` header (or with a trailing `;`) throws. Rafu normalizes by appending a default `TD` direction: `flowchart` → `flowchart TD`, `graph` → `graph TD`.
 
-- Unsupported and malformed diagrams render as a monospaced code block (the
-  raw source) plus a notice line. The notice text is "diagram type not
-  supported in native preview" (colored `theme.ui.warning ?? theme.ui.textSecondary`).
-  Malformed appends the parse reason.
-- **"Simplified native preview" badge** appears on every native flow or sequence
-  render, making clear that layout is native and bounded, not mermaid.js
-  parity.
+2. **YAML frontmatter:** `_parseMermaidEntry` does not skip YAML frontmatter (`---`…`---`). A diagram with frontmatter throws. Rafu normalizes by dropping all lines before the first significant header line (blank/frontmatter/comment-skipped).
 
-### Known M1 limitation: header-line parsing
+Both rewrites preserve `MermaidDiagram.raw` (shown verbatim in the honest fallback); only `source` (the normalized version handed to the parser) changes. A critical test trap: a normalizer draft that only inspected `lines.first` (not using `headerIndex`) still threw on `"\n%% hi\nflowchart\n A --> B"` — hence the `%%`-before-bare-header test in `MermaidParserTests`.
 
-The M1 classifier correctly identifies the diagram type even with frontmatter/comments.
-However, the body parsers (`parseFlow`, `parseSequence`) still have their original
-implementation, which assumes the header is at line 0. A diagram with YAML
-frontmatter classifies correctly but its body parse treats the first line of
-source (line 0 of the raw input) as the header.
+### The macOS flip bug in `beautiful-mermaid-swift` 1.0.4
 
-This is **not a regression** — it matches prior behavior. M2/M5 rewrite the body
-parsers and will handle frontmatter/comment-skipping in the body parse too.
+**Problem:** `MermaidImageRenderer.renderImage(from:)` in the package is broken on macOS. Its UIKit branch uses `UIGraphicsImageRenderer` (origin already top-left), but its AppKit branch builds a raw bottom-left-origin `CGContext` and never flips the CTM. Every macOS raster emerges vertically mirrored (upside-down text, TB graphs running bottom-to-top).
 
-### Flow model contract and parsing (M2)
+**Why it matters:** The package's own `MermaidView.draw` flips correctly — only the image path forgot.
 
-**Model shape:** `MermaidFlow` now carries:
-- `Direction` enum: TD (default), LR, BT, RL; extracted from the header line or 
-  defaulted if omitted.
-- `nodesByID: [UUID: Node]` replacing flat `nodes: [String: String]`. Each `Node` 
-  holds a durable UUID, text label, and `NodeShape`: rectangle (`[]`), round (`()`), 
-  diamond (`{}`), circle (`(())`), subroutine (`[[]]`), parallelogram (`[/ /]`), 
-  flag (`>]`).
-- `Edge` with `EdgeLine` (solid/dotted/thick) and `EdgeHead` (none/arrow/circle/cross) 
-  on start and end; bidirectional edges as start + end arrows. `Edge.label` preserved 
-  for M4 compat.
-- `subgraphsByID: [UUID: Subgraph]` tree; each `Subgraph` carries ID, label, child 
-  node/edge UUIDs, durable identity.
+**Rafu's fix:** `MermaidRenderService.raster(for:theme:scale:)` bypasses the broken `MermaidImageRenderer` entirely. It calls `MermaidParser.parse` → `GraphLayout.layout` → `DiagramRenderer.render` directly, owns the offscreen `CGContext` itself, and applies the fix before rendering:
+```swift
+context.translateBy(x: 0, y: bounds.height)
+context.scaleBy(x: 1, y: -1)
+context.translateBy(x: -bounds.minX, y: -bounds.minY)
+```
+This flip sequence compensates for the bottom-left-origin coordinate system. A canary test `flipPlacesContentInUpperHalf` verifies the fix by checking that the widest-label node appears in the upper half of the raster; it fails loudly if upstream ever fixes the bug (at which point the workaround must be revisited).
 
-**Tokenizing rule:** `parseFlow` is now **bracket/quote-depth-aware**: in-bracket 
-or in-quoted strings, characters like `-->`, `&`, `|` do not split tokens. Example: 
-`A[x --> y] --> B` is one node (text `x --> y`) plus one edge. Double-before-single 
-delimiter heuristic detects shapes (`--` before `-`, `---` before `--`, etc.).
+### `PreparedDiagram` is not `Sendable`
 
-**Connector parsing table:**
+**The constraint:** `BeautifulMermaid.PreparedDiagram` is a `public struct` holding a `(CGContext, CGRect) -> Void` closure. It is **not** `Sendable`. Under Swift 6 language mode with strict concurrency, handing one across an actor boundary is a hard compile error, not a warning:
+```
+error: non-Sendable type 'PreparedDiagram?' of nonisolated property 'value' 
+cannot be sent to main actor-isolated context
+```
 
-| Spelling | EdgeLine | EdgeHead start | EdgeHead end |
-|----------|----------|----------------|--------------|
-| `-->` | solid | none | arrow |
-| `--->` | solid | none | arrow |
-| `--` | solid | none | none |
-| `-.-` or `-...-` | dotted | none | none |
-| `-.->` or `-...->` | dotted | none | arrow |
-| `===` | thick | none | none |
-| `===>` | thick | none | arrow |
-| `--o` | solid | none | circle |
-| `--x` | solid | none | cross |
-| `<-->` | solid | arrow | arrow |
-| `o--o` | solid | circle | circle |
-| `x--x` | solid | cross | cross |
+**Consequence:** Prepare and render must occur in the same isolation domain. `MermaidRenderService` is an actor; it never constructs or stores a `PreparedDiagram`. Instead, it calls the lower-level `MermaidParser.parse` → `GraphLayout.layout` → `DiagramRenderer.render` path directly, holding only the `PositionedGraph` (verified `Sendable` upstream) internally, and returning only a `CGImage` and `Raster` value type (both `Sendable`) to callers.
 
-**Label precedence:** `|piped label|` wins over inline solid `-- label --`. Both are parsed; 
-if both appear on one edge, the pipe label is used. Dotted (`-. label .-`) and thick 
-(`== label ==`) inline mid-labels are tokenized but not extracted into labels (known 
-limitation).
+### The `NSGraphicsContext` hijack hazard
 
-**Chained-edge expansion:** `A --> B --> C` expands to two edges (`A → B` and `B → C`), 
-each assigned a fresh UUID (not derived from content). Cross-product `&` expansion 
-(`{A,B} & {X,Y}` shorthand) similarly assigns fresh UUIDs to each product edge.
+**The trap:** `LabelRenderer.render` (in the package, line 117–125) sets `NSGraphicsContext.current` only when it is nil. If it is already set — exactly the case when drawing inside `NSView.draw(_:)` — the package draws text through *that* ambient context with *its* flippedness, ignoring the `CGContext` passed to it. This is invisible until text appears in the wrong place or with wrong orientation.
 
-**Frontmatter and nested scopes:** YAML frontmatter (`---...---`) and comment lines 
-(`%%...`) are now skipped during parsing (M1 limitation fixed). Nested `subgraph`/`end` 
-blocks establish scope; membership is tracked by child UUIDs.
+**Why it matters:** Future maintainers might optimize by "drawing straight into the view's `NSGraphicsContext`" — this forbids that change. Rafu must rasterise **only into its own offscreen bitmap context** (via `CGContext(data:width:height:...)` with nil data), where `NSGraphicsContext.current` is nil.
 
-**Two known limitations:**
-1. Per-subgraph `direction` lines (e.g. `subgraph x LR ... end`) are recognized but 
-   direction is not modeled per scope — all edges use root direction.
-2. Dotted and thick inline mid-labels (`-. label .-`, `== label ==`) are not extracted 
-   into `Edge.label`.
+**Verification:** `MermaidRenderService` is never called from inside a view's `.draw` method; it runs on its own actor and produces a raster that the view then displays as a `CGImage`. The rendering path never intersects a live view's `NSGraphicsContext`.
 
-### Swift Testing and enum comparison (M2 nuance)
+### Cache and theme independence
 
-In Swift Testing (and Swift generally), when an optional enum type is unwrapped and 
-compared against a bare `.none`, the comparison resolves to `Optional.none` (nil), 
-**not** the specific enum's `.none` case (if it has one).
+`MermaidRenderService` holds an LRU cache keyed by **normalised source alone** (`diagram.source` string). The cached entry stores a `PositionedGraph` (the result of layout, which is expensive ELK work).
 
-**Why it matters:** If `EdgeHead` defines a `.none` case and a test unwraps 
-`edgeHead?` then asserts `XCTAssertEqual(edgeHead, .none)`, the comparison silently 
-matches `Optional.none` instead of `EdgeHead.none`, masking type confusion or 
-incomplete unwrapping.
+**Layout is theme-independent:** A spike compared all 13 fixtures laid out with both bundled themes (Indigo and Khadi); the resulting `PositionedGraph` geometry was identical. Therefore, a theme switch or appearance toggle can re-rasterise the diagram (different colors) without re-laying-out (expensive). `DiagramTheme` is `@unchecked Sendable` upstream; Rafu never shares one across actors. Instead, callers pass a `Sendable` `MermaidThemeSpec` (hex color strings), and `MermaidRenderService` constructs the actual `DiagramTheme` inside the actor, once per render call.
 
-**Workaround:** Always fully qualify the enum case (`EdgeHead.none`) or unwrap the 
-optional explicitly before comparison.
+**LRU cap:** 24 entries, evicting the least-recently-used on overflow. A "large-but-legal" diagram (60-node flowchart) still rasterises at reduced scale if needed (see "Raster caps" below).
 
-**Evidence:** Hit during M2 edge-head fixture tests; subsequent assertions using 
-`EdgeHead.none` passed cleanly after qualification.
+### Error text is never user-visible
+
+`BeautifulMermaid._ParserEntryError` is `private` and not `LocalizedError`. Its error descriptions are unusable:
+- `String(describing:)` yields `invalidHeader("gantt")` — device-specific.
+- `localizedDescription` yields `The operation couldn't be completed. (BeautifulMermaid.(unknown context at $100963d74)._ParserEntryError error 0.)` — unreadable.
+
+**Rule:** `MermaidRenderService.reason(for:)` maps every `Failure` enum case to a Rafu-authored, user-facing reason from a fixed, tested set (e.g., "this diagram could not be parsed"). Upstream error text never reaches any user-visible string. The mapping is a nonisolated, pure function and is directly unit-testable.
+
+### Improvements over the deleted hand-written engine
+
+- Orthogonal ELK routing with no edge crossings and correct subgraph containment.
+- Four new diagram types now supported (stateDiagram, classDiagram, erDiagram, xyChart).
+- `<br/>` honoured as a line break in labels.
+- `style` and `classDef` directives silently ignored instead of drawn as phantom nodes.
+- Subgraph label quotes stripped correctly.
+- Dotted and thick inline mid-labels now extracted (closes a known M2 limitation).
+
+### Accepted regressions and honest fallback
+
+These are the documented trade-offs and the reason the "Native Mermaid preview" badge remains on every render:
+
+- **`--o`, `--x`, `o--o`, `x--x` edges silently dropped.** These are absent from the upstream arrow regex. The *entire statement* is swallowed, so the target node never appears. This sits uneasily against the honesty contract. Accepted for this landing; follow-up is to normalise these spellings to `-->` or `<-->` (bracket-aware rewriting).
+- **`A[/label/]` (parallelogram) renders as a rectangle with literal `/label/`.** Upstream's spelling is `A[/label\]`.
+- **No per-diagram parsed model.** Unlike the deleted hand-written engine, there is no `MermaidFlow`/`MermaidSequence` with durable edge/message `UUID` identity. `MermaidParseResult` is a routing enum only; detailed model lives inside the actor and is never exposed.
+- **Visual fidelity depends on an upstream package.** If `beautiful-mermaid-swift` bugs, so does Rafu's rendering. The two-file confinement boundary (imports only in `MermaidTheme.swift` and `MermaidRenderService.swift`) makes replacement or forking tractable.
+- **Cosmetic issues:** Sequence `par`/`alt` labels can overlap the nearest lifeline; `Note over` boxes can overlap an enclosing block edge; long edge labels drift from their edge in dense flowcharts. These are not data loss; diagrams remain legible.
+
+**Unsupported and malformed diagrams never render as a blank box or silent mis-render.** They render as the raw source code in a monospaced block plus a visible notice: "diagram type not supported in native preview" or "diagram type not supported in native preview — [reason]" (e.g., "too large to render natively").
+
+### Raster caps and scaling
+
+Rasterisation adds memory cost (a 1258×1414 pt diagram at 2× is ~28 MB). Three caps, recorded in [`memory-caps-and-pressure.md`](memory-caps-and-pressure.md):
+
+| Cap | Value | Behaviour on breach |
+|---|---|---|
+| Raster pixels per diagram | 4 M px (~16 MB) | back off `scale` toward 1.0 |
+| Diagram point area | 4 M pt² (~2000×2000 pt) | honest fallback, "too large to render natively" |
+| Layout cache entries | 24, LRU | bounded `PositionedGraph` retention |
+
+**Important caveat:** These are proposals verified against the current test suite and a manual pass of the app GUI, not a measured Release idle-memory pass. Revisit against a real Release idle pass in a later phase.
 
 ## Why it matters
 
-Dishonest type detection silently produces broken diagrams, confusing users about
-Rafu's capability and making it impossible to distinguish a limitation from a bug.
-The honest fallback (code block + notice) makes the feature's bounds explicit and
-unambiguous. The "Simplified native preview" badge prevents users from expecting
-mermaid.js layout quality (parity) when they get a bounded native 2D layout.
+A non-native diagram renderer (hand-written with bounded capability) either silently produces wrong output (dishonest, breaks user trust) or honestly falls back to something legible (source code). The honest fallback makes Rafu's feature bounds explicit and unambiguous. The "Native Mermaid preview" badge prevents users from expecting mermaid.js layout parity when they get a bounded native one. The confinement boundary — imports `BeautifulMermaid` only in two files — makes future package replacement, forking, or upstream fix adoption tractable.
 
-## Evidence and verification
+## Reproduction and evidence
 
-**Classifier tests** (`Tests/RafuAppTests/MermaidParserTests.swift`):
-- Each of the 29 known-unsupported types classifies to `.unsupported`.
-- Malformed headers (empty, unknown, parse error) classify to `.malformed`.
-- Legacy header spellings (`graph LR`, `flowchart TD`, bare `flowchart`) still
-  route to `.flow`.
-- YAML frontmatter and comment lines are skipped; the classifying header is
-  found.
-- Case-insensitive matching for type names.
+**Classifier and normalizer tests** (`Tests/RafuAppTests/MermaidParserTests.swift`):
+- Each of the six supported types classifies to `.diagram` with the correct `MermaidDiagramKind`.
+- Each of the 23 known-unsupported types classifies to `.unsupported`.
+- Empty, unknown, and unparseable headers classify to `.malformed`.
+- A bare `flowchart` or `graph` header is normalised to add ` TD`.
+- YAML frontmatter is dropped from the normalised source but retained in `raw`.
+- A `%%` comment line before a bare header still normalises correctly (the trap).
+- Case-insensitive type matching.
 
-**Fallback rendering:**
-- A flowchart with no parseable edges renders the unsupported code fallback,
-  not a blank box.
-- A malformed header renders the fallback with the parse reason included.
+**Rasterisation tests** (`Tests/RafuAppTests/MermaidRenderServiceTests.swift`):
+- Every supported kind rasterises to a positive point size.
+- Unsupported sources throw `.notRenderable`, never a partial raster.
+- Layout is theme-independent: the same source yields identical point sizes across themes (Indigo/Khadi spike result).
+- An oversized diagram is refused before rasterisation (`.tooLarge`).
+- A large-but-legal diagram backs its effective scale off, never below 1.0.
+- The failure-to-reason mapping never leaks upstream error text (no "parsererror", no "BeautifulMermaid", no "nserror").
+- The macOS flip fix places the widest-label node in the upper half of the raster (canary for upstream fix).
 
 **Verification commands:**
 ```bash
-swift build                    # No new dependency, no build errors
-swift test                     # 510 tests pass (all existing + new fixtures)
-./script/format.sh --lint      # No format warnings
-./script/build_and_run.sh --verify   # Badge visible on native renders
+swift build                           # 0 warnings
+swift test                            # 1518 tests pass in 62 suites
+swift test --filter Mermaid           # 16 tests pass
+./script/format.sh --lint             # clean
+./script/build_and_run.sh --verify    # exit 0, app process confirmed live
 ```
+
+**Package.resolved state:**
+- `beautiful-mermaid-swift` pinned to 1.0.4 (exact).
+- `elk-swift` 1.0.2 pinned by `Package.resolved` (transitive; NOT declared in `Package.swift` per the elk-swift note there).
+- `import BeautifulMermaid` appears in exactly two files (`MermaidTheme.swift`, `MermaidRenderService.swift`); verified with `grep -rn "^import BeautifulMermaid"`.
 
 ## Related code, ADRs, and phases
 
 - **Code:**
-  - `Sources/RafuApp/Markdown/MarkdownModels.swift` — `MermaidParseResult` enum,
-    `parseMermaid`, `firstHeaderLine` helper, `parseFlow`/`parseSequence`
-    (bodies unchanged in M1)
-  - `Sources/RafuApp/Markdown/MarkdownPreviewView.swift` — routing for result cases,
-    `MermaidUnsupportedView`, badge rendering, and the in-file
-    `MarkdownPreviewSegmentParser` segment parsing
+  - `Sources/RafuApp/Markdown/MarkdownModels.swift` — `MermaidDiagram`, `MermaidParseResult`, `normalizeMermaid(_:)`, classifier (`parseMermaid`)
+  - `Sources/RafuApp/Markdown/MermaidRenderService.swift` — off-main actor, parse/layout/render pipeline, cache, `Raster` and `Failure` enums, `reason(for:)` mapping
+  - `Sources/RafuApp/Markdown/MermaidTheme.swift` — `MermaidThemeSpec` bridge, `RafuMermaidTheme.diagramTheme(_:)` factory
+  - `Sources/RafuApp/Markdown/MermaidDiagramView.swift` — routing (`MermaidDiagramView`), raster view, unsupported fallback, badge
 
 - **Tests:**
-  - `Tests/RafuAppTests/MermaidParserTests.swift` — classifier and fallback fixtures
-  - `Tests/RafuAppTests/MarkdownParserTests.swift` — existing smoke tests (updated for result shape)
+  - `Tests/RafuAppTests/MermaidParserTests.swift` — classifier and normalizer fixtures
+  - `Tests/RafuAppTests/MermaidRenderServiceTests.swift` — rasterisation, scaling, theme independence, error mapping, macOS flip canary
 
-- **ADR:** [`0008-mermaid-native-preview.md`](../decisions/0008-mermaid-native-preview.md)
+- **ADR:** [`0020-mermaid-rendering-via-beautiful-mermaid.md`](../decisions/0020-mermaid-rendering-via-beautiful-mermaid.md) — decision record with full context, alternatives, and compensating work
 
-- **Phase:** [`docs/plans/phases/mermaid-preview-honesty.md`](../plans/phases/mermaid-preview-honesty.md)
-  (M1 complete; M2–M6 add flow layout and sequence lifelines; M7 finalizes)
+- **Dependencies:** [`editor-dependencies.md`](editor-dependencies.md)
 
-### Layout engine (M3)
+- **Memory:** [`memory-caps-and-pressure.md`](memory-caps-and-pressure.md)
 
-**Purity rule:** `MermaidLayout.swift` imports only Foundation and CoreGraphics.
-CoreGraphics is a system framework with no SwiftUI dependency, and its types
-(CGRect, CGPoint, CGSize) are already `Sendable`. This purity rule ensures domain
-layout code is reusable and testable away from UI, and M4's SwiftUI Canvas consumes
-`MermaidFlowLayout`/`MermaidSequenceLayout` with zero conversion overhead.
-
-**Algorithm summary:** Flow layout is rank-based (longest-path DAG + iterative-DFS
-back-edge detection). Cycles are broken for ranking; back edges are marked
-`isFeedback` and kept for routing. Self-loops are excluded from ranking adjacency
-(preventing infinite loop) and routed as a right-side bulge. Isolated and
-multi-component nodes default to rank 0. In-rank ordering uses barycenter-lite
-heuristics with first-seen tiebreak. Coordinates are assigned direction-aware
-(TD/BT/LR/RL). Subgraph bounds are computed bottom-up (children recursed first,
-parent unions child frames + member rects, respecting the fact that the parser
-lists each node only in its innermost subgraph; parents are emitted pre-order).
-Edge routing uses generic rect-boundary intersection toward the opposite node center.
-
-**Determinism rule:** Node ordering is never derived from raw Dictionary iteration.
-Seed order for in-rank barycenter is first-appearance order across edges, then
-remaining node IDs sorted lexicographically. This ensures identical layout output
-for identical input across runs and platforms.
-
-**Caching and lifecycle:** Layout is a pure, one-shot function (`layout(_:)` → 
-`MermaidFlowLayout` or `MermaidSequenceLayout`) that M4 caches at the segment level.
-It is never computed per-frame inside a SwiftUI Canvas closure; recomputation happens
-only when the parsed model changes. This preserves the typing-path frame budget and
-decouples layout cost from rendering frequency.
-
-**Testing policy:** `MermaidLayoutTests.swift` asserts topology and frame invariants
-(ranks, ordering determinism/contiguity, subgraph containment + nesting, node
-no-overlap, cyclic-terminates-with-feedback, self-loop routing, direction-axis
-correctness, empty graph, disconnected components, sequence ordering/identity).
-**No pixel snapshots** — visual quality is asserted at M4/M6 render time via
-`--verify`, not at layout time.
-
-**Known limitation (intentional):** Sibling subgraph boxes are not guaranteed
-disjoint; only "member node frame ⊆ own subgraph frame" and "child frame ⊆ parent
-frame" hold. `canvasSize` is intentionally unbounded to support dense and wide
-diagrams without forced scaling.
-
-### Flow renderer (M4)
-
-**Canvas layout computation pattern:** A `Canvas`-based diagram must compute
-its layout **outside `body` and outside the `Canvas` draw closure**. The pattern
-used in `MermaidFlowCanvas` is a child view holding `@State private var layout: MermaidFlowLayout?`,
-populated via `.task(id: flow.raw)`. The diagram's stable `raw` string (not
-`Equatable` itself on `MermaidFlow`) is the cache key. This ensures the pure
-one-shot layout computation runs once per unique diagram source and never
-per-frame or per-view-init.
-
-**Why it matters:** Ties to AGENTS invariant: layout is computed outside body,
-never per-frame in a Canvas closure. An init-computed `let` would recompute
-on every SwiftUI view re-initialization even with stable input. A `.task`-driven
-`@State` decouples layout cost from render frequency and satisfies the
-typing-path frame budget.
-
-**Accessibility and motion:** The `Canvas` is opaque to VoiceOver, so it
-carries an explicit accessibility label (e.g., node/edge counts). The render
-is static (no animation), trivially satisfying Reduce Motion.
-
-### Sequence model contract (M5)
-
-**Events-stream design:** `MermaidSequence.events` is an ordered `[Event]` stream where
-each `Event` is tagged (`.message`, `.note`, `.blockStart`, `.blockDivider`, `.blockEnd`,
-`.activate`, `.deactivate`). Block frames must span the contiguous range of their nested
-content in this stream — a multi-line `alt` block's start, its dividers, and its end are
-adjacent in sequence order. This ordered stream walked with a block-id stack is the natural
-input to M6 geometry (lifelines, block boxes, time-ordering). `messages: [String]` is
-**derived** from the events stream in document order (including block-nested messages),
-preserving a single source of truth for order and identity.
-
-**Activation semantics:** Activations are modeled as separate `.activate(from:UUID)` and
-`.deactivate(to:UUID)` events. When a message carries a `+` suffix, `message.activatesTarget`
-is `True`, and a corresponding `.activate(to:)` event is added to the stream. When a message
-carries a `-` suffix, `message.deactivatesSource` is `True`, and a corresponding
-`.deactivate(from:)` event is added. Semantics: `+` activates the receiver; `-` deactivates
-the sender. Durable `UUID` on each message ensures unique identity for repeated/similar messages.
-
-**Participant identity and aliases:** In `participant X as Y` or `actor X as Y`, the LEFT token
-`X` is the canonical identity and appears in `participants: [String]` and all message `from`/`to`
-fields. The RIGHT token `Y` (alias) is stored in `participantDisplay: [String: String]`
-where `participantDisplay[X] == Y`. M6 rendering uses `participantDisplay` for the human-readable
-name while using `X` (the identity) for lifeline layout and event routing. This matches Mermaid
-semantics and is a reusable rule for any diagram type with named participants. `participantKinds:
-[String: ParticipantKind]` (participant vs actor) is keyed by the same identity `X`.
-
-**Block balancing and nesting:** `alt`/`opt`/`loop`/`par` blocks establish nested scope via
-a block-id stack during parsing. The parser emits `.blockStart(Block)`, then child events,
-then `.blockDivider(Block, kind)` for each `else`/`and` divider, then `.blockEnd(UUID)`.
-If an `end` is missing, the parser synthesizes a `.blockEnd` before EOF or when closing the
-next scope. Stray `end` lines (closing a non-open block) are ignored. This ensures well-formed
-block nesting in the event stream, required for M6 geometry.
-
-**M3 layout compatibility:** `participants` (identity list, document order) and `messages`
-(flat derived list, document order including nested) are kept populated so the M3 helper
-`MermaidLayoutEngine.layout(_ sequence:)` and its tests remain byte-compatible. No changes
-to `MermaidLayout.swift` or `MermaidLayoutTests.swift` are needed for M5.
-
-**Known M5 limitation:** Non-`>` message arrows (`-x`, `--x`, `-)`) are not yet modeled;
-these parse as notes or edge cases and are ignored. Only solid (`-->`), dotted (`-.->`,
-`-..->`, `-.-`), and identity arrows are supported. Full arrow support deferred.
-
-### Sequence renderer and geometry (M6)
-
-**Event stream geometry coupling:** `MermaidSequenceLayout.layout(_ sequence:)` walks
-`sequence.events` (the ordered `[Event]` stream from M5) rather than the flat
-`messages` list. Block frame y-range, activation nesting, and note placement are
-derived from the event stream's ordering. This couples geometry to the M5 parser's
-decisions about where `.activate`/`.deactivate` synthetic events sit relative to
-their triggering `.message`. A future change to M5's event ordering will change
-geometry directly — the layout engine has no independent ordering logic.
-
-**Actor glyph determinism:** Actors are rendered using a deterministic hand-drawn
-stick-figure `Path` (traced in `textSecondary` color), not `Image(systemName:)`.
-This choice avoids SF-Symbol-in-`Canvas` rendering uncertainty (alignment, scaling,
-antialiasing variance across runs). Actors are distinguished by glyph + label;
-color is never used alone to distinguish participant kind (no-color-alone invariant).
-
-**Shared layout engine instance:** `MermaidSequenceCanvas` holds a single `@State`
-cache of `MermaidLayoutEngine.layout(_ sequence:)` result, keyed by `sequence.raw`.
-Both the `.task` (which computes and caches the layout) and the render closure (which
-reads `metrics` for activation-bar x-offsets and self-loop geometry) share this
-instance. The drawn geometry can never drift from the metrics because there is
-exactly one engine instance and one layout compute per unique diagram source.
-
-**Additive extension rule:** `MermaidSequenceLayout` was extended additively
-(new fields added to existing types; old initializers not called). This preserved
-byte-compatibility with M3 test fixtures: they only read the model, never call
-initializers, and their empty-event fixtures yield empty activations/blocks/notes
-arrays without needing new initialization code.
-
-**Canvas layout pattern (M6 reaffirms M4 rule):** Layout is computed **outside
-`body` and outside the `Canvas` draw closure**, cached at the segment level via
-`.task(id: seq.raw)`, and never recomputed per-frame or on SwiftUI re-initialization.
-This satisfies the typing-path frame budget (AGENTS invariant).
-
-**Fixture policy (M6 reaffirms M3 rule):** `MermaidLayoutTests.swift` asserts
-topology and frame invariants only — activation ordering, block containment,
-note placement, arrow fidelity. **No pixel snapshots** — visual quality is asserted
-at render time via `./script/build_and_run.sh --verify`, not at layout time.
-
-### Supported-subset contract (M1–M6 closed)
-
-The native Mermaid preview renders a **bounded supported subset**, making its
-bounds explicit and testable:
-
-- **Flowchart/Graph:** Both `flowchart` and `graph` syntaxes; all seven node
-  shapes; edge line styles (solid/dotted/thick) and heads (arrow/circle/cross,
-  bidirectional); inline and piped labels; chained-edge expansion; nested
-  subgraph nesting/containment; `TD`/`LR`/`BT`/`RL` direction; frontmatter/
-  comment skipping; real 2D rank-based layout; direction-aware coordinates;
-  edge routing with back-edge detection for cycles.
-- **Sequence Diagram:** Participants and actors; time-ordered messages with
-  styled arrows (solid/dotted) and activations; `+`/`-` activation semantics
-  on messages; `alt`/`opt`/`loop`/`par` control-flow blocks with `else`/`and`
-  dividers; notes (`over`/`leftOf`/`rightOf`); participant aliases; real 2D
-  lifeline geometry with activation bars, block frames, and time-ordered event
-  stream.
-
-Everything outside this subset — `classDiagram`, `pie`, `gantt`, `stateDiagram`,
-`erDiagram`, `gitGraph`, `mindmap`, `timeline`, and 21 others — renders as the
-**source code block plus a "diagram type not supported in native preview" notice**,
-never a web view, never a blank box, never a broken diagram. Malformed Mermaid
-(empty header, parse error) likewise falls back, with the parse reason appended
-to the notice.
-
-Every native flow or sequence render carries a **"Simplified native preview"
-badge**, communicating that layout is native and bounded, not mermaid.js parity.
-
-### Known limitations (M1–M6)
-
-1. **Per-subgraph direction:** Recognized in parse but not modeled per scope —
-   all edges within subgraphs use the root-level direction (M2 limitation).
-2. **Dotted/thick inline mid-labels:** `A-. label .--> B` and `A== label ==> B`
-   tokenized correctly but the label is not extracted; only solid `-- label --`
-   inline and `|piped|` labels captured (M2 limitation).
-3. **Non-`>` sequence arrows:** `-x`, `--x`, `-)`, and non-arrow endings still
-   ignored; only `>` arrows (`-->`, dotted/dashed) and identity modeled (M5
-   limitation).
-4. **Sibling subgraph overlap:** Sibling subgraph boxes not guaranteed disjoint;
-   only "member node frame ⊆ own subgraph frame" and "child frame ⊆ parent
-   frame" hold (M3 design choice, not a defect).
-5. **Unbounded canvas:** `canvasSize` intentionally unbounded to support dense/
-   wide diagrams; horizontal scroll for diagrams exceeding viewport (M3 design
-   choice).
-6. **Note over undeclared participant:** Renders at left margin without crash
-   (M6 known condition).
-7. **Layout parity:** Layout quality is "good for common diagrams," not
-   mermaid.js parity. Tests assert topology/frame invariants only, not pixels.
-   The badge and ADR 0008 say so explicitly.
-
-### Fixture policy (M1–M6)
-
-`MermaidLayoutTests.swift` and `MermaidParserTests.swift` assert **topology
-and frame invariants only**:
-
-- **Parser fixtures:** Classifier routes (supported/unsupported/malformed);
-  header detection with frontmatter/comments; node/edge/subgraph structure
-  (order-independent where determinism allows); durable `UUID` identity on
-  repeated rows; nested block balancing; participant aliasing; message
-  activation semantics.
-- **Layout fixtures:** Rank assignment and determinism; in-rank ordering
-  contiguity; subgraph containment/nesting; node no-overlap; cyclic-terminates-
-  with-feedback; self-loop routing; direction-axis correctness; empty graph;
-  disconnected components; sequence lifeline ordering; activation depth/nesting;
-  block frame containment; note placement; edge routing bounds.
-
-**No pixel snapshots.** Visual rendering quality is asserted at segment/render
-time via `./script/build_and_run.sh --verify` (process-level app launch + deep
-GUI inspection), not at layout-unit time. This preserves test determinism and
-decouples rendering quality from test brittleness.
+- **Phase:** [`docs/plans/phases/mermaid-preview-honesty.md`](../plans/phases/mermaid-preview-honesty.md) (M1–M6 superseded by ADR 0020; preserved as historical record)

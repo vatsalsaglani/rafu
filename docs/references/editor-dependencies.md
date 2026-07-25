@@ -25,6 +25,16 @@ services so they can be replaced without changing workspace state.
   shell spawns lazily on first panel open, scrollback stays at the bounded
   500-line default, and its delegate callbacks arrive on the main thread
   (bridged with `MainActor.assumeIsolated`).
+- `beautiful-mermaid-swift` 1.0.4 (MIT) renders six diagram types natively
+  (flowchart, stateDiagram, sequenceDiagram, classDiagram, erDiagram, xyChart)
+  via `lukilabs/elk-swift` (ELK layout port). Confined to two files
+  (`MermaidTheme.swift`, `MermaidRenderService.swift`) per ADR 0020; no
+  package types appear in `MarkdownModels.swift`, `MermaidDiagramView.swift`,
+  or test signatures. The package does not declare strict concurrency checking,
+  compiles in Swift 5 mode, so reliant targets must handle isolation boundaries
+  explicitly. `elk-swift` 1.0.2 is a transitive dependency pinned by
+  `Package.resolved`; it is NOT declared in `Package.swift` (see Package.swift
+  comment for the rationale).
 
 Inspect a dependency's tag, manifest, license, deployment target, and transitive
 packages before changing its pin. Never expose third-party model types through

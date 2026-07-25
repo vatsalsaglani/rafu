@@ -1,7 +1,14 @@
 # ADR 0008: Bounded native Mermaid preview with honest fallback
 
-- **Status:** Proposed
+- **Status:** Superseded by [ADR 0020](0020-mermaid-rendering-via-beautiful-mermaid.md) (2026-07-25)
 - **Date:** 2026-07-17
+
+> **Superseded.** ADR 0020 replaces the hand-written parser, layout engine, and
+> Canvas painters with `beautiful-mermaid-swift`, reversing this ADR's
+> "no new package dependency" clause. The honest-fallback contract,
+> Rafu-owned classification and user-facing strings, the no-JS/no-WKWebView
+> stance, and the render badge all survive unchanged. This document is kept as
+> the historical record — do not edit its decision.
 
 ## Context
 
