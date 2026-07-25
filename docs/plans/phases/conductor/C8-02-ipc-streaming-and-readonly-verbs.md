@@ -1,6 +1,8 @@
 # C8-02 — `rafu ensemble` grammar, streaming IPC, read-only verbs
 
-- **Status:** Ready. Branch: `conductor/c8-02-ipc-streaming` (from `main`).
+- **Status:** Implemented on `conductor/c8-02-ipc-streaming`; live
+  workspace-session resolution requires the shared-registry handoff recorded
+  in the phase-agent report.
   Wave 1 — runs parallel with C8-01 (docs-only; no path overlap).
 - **Trust note:** this plan ships ZERO mutating capability. `status`,
   `artifact`, `await` observe; nothing spawns, writes, or merges. That is

@@ -2,7 +2,7 @@
 
 - **Applies to:** Rafu's local launcher Unix-domain socket, framing, peer
   authentication, listener/client fd ownership, request routing, and fallback
-- **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-18
+- **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-26
 
 ## Rule or observed behavior
 
@@ -59,6 +59,46 @@ Each synchronous exchange has one fd owner, closes exactly once, suppresses
 `SIGPIPE`, and uses bounded send/receive timeouts. Errors contain only syscall
 names/codes or the app's typed rejection; raw frame bytes are never retained in
 diagnostics.
+
+### Streaming subscriptions
+
+`ensembleStatus` and `ensembleArtifact` preserve the established request/reply
+shape: handshake on one connection, then exactly one request frame and one
+response frame on a second connection. Only `ensembleSubscribe` changes a
+connection into a stream. Its frame sequence is:
+
+1. the client writes one `LauncherIPCEnvelope(kind: ensembleSubscribe)`;
+2. the app writes one `LauncherIPCResponse.ensemble(.subscribed(cursor:))`
+   acknowledgement;
+3. the app writes zero or more independent RAFU frames whose JSON bodies are
+   `EnsembleEvent` values; and
+4. either peer closes the connection. There is no terminal response frame.
+
+The same peer-authentication and rejection ladder applies: `getpeereid` must
+match `getuid` before the first read, then wire version, protocol version, and
+request kind are checked in that order. A stream does not weaken or duplicate
+the one-frame-per-connection contract for nonstreaming request kinds.
+
+The event center assigns one process-local monotonic cursor, retains the newest
+512 events, and gives each subscriber an independent
+`AsyncStream.bufferingNewest(64)` buffer. While at least one subscriber exists,
+it publishes a content-free heartbeat event every 15 seconds. The CLI treats
+45 seconds without a complete frame—three missed heartbeat intervals—as app
+unavailability (exit 69). A user `--timeout` is a separate monotonic client
+deadline and exits 75 when it wins.
+
+The server permits at most 24 live accepted connections, of which no more than
+16 may be streams. A seventeenth stream receives a typed exit-69 failure frame
+and closes. Stream fds use a five-second `SO_SNDTIMEO`; a slow or abandoned
+reader is disconnected rather than retaining an unbounded queue. Events and
+snapshots are re-derivable, so clients reconnect and use `status --since
+<cursor>` instead of relying on delivery durability.
+
+Shutdown cancels every tracked connection task and calls `shutdown` on its fd
+before awaiting the task. This unblocks a stream waiting for its next event or
+blocked in a socket operation; the detached connection task remains the one
+owner that closes the fd. Stream cancellation, `EPIPE`, and send timeout end
+the connection without attempting a second response.
 
 Only `ENOENT` and `ECONNREFUSED` at connect trigger `/usr/bin/open -a
 <bundle>` as a starter, with no document argument. Reconnect uses a bounded
@@ -138,6 +178,14 @@ handshake ordering, request kind/payload, typed rejection short-circuiting,
 listener-unavailable classification, and the bounded retry schedule without
 launching the app or sleeping.
 
+`EnsembleClientStreamTests` proves subscribe-before-snapshot ordering, queued
+event delivery without a lost wakeup, heartbeat liveness, the 45-second policy
+through an injected shortened timeout, and the separate user deadline.
+`EnsembleServerStreamTests` proves uid-before-read, acknowledgement/event frame
+boundaries, the 16-stream cap seam, and listener shutdown of a live stream.
+`EnsembleEventCenterTests` proves cursor/ring/buffer bounds and heartbeat
+generation with an injected continuation rather than a fixed sleep.
+
 The staged-bundle pass (`./script/build_and_run.sh --verify`) exercised all
 nine lane checklist items without UI automation guesses. CoreGraphics window
 titles/counts proved cold open, nonmatching reuse, exact-root focus, no
@@ -153,7 +201,9 @@ only handshake/openFolder request kinds and accepted outcomes.
 ```bash
 swift build
 swift test --filter LauncherIPC
+swift test --filter Ensemble
 swift test
+swift test --no-parallel
 ./script/format.sh --fix
 ./script/format.sh --lint
 ```
@@ -162,14 +212,19 @@ swift test
 
 - `Sources/RafuCore/Launcher/IPC/LauncherIPCCodec.swift`
 - `Sources/RafuCore/Launcher/IPC/LauncherIPCClient.swift`
+- `Sources/RafuCore/Ensemble/EnsembleCLIClient.swift`
 - `Sources/RafuCLI/main.swift`
 - `Sources/RafuApp/Launcher/LauncherIPCServer.swift`
 - `Sources/RafuApp/Launcher/LauncherRequestRouter.swift`
+- `Sources/RafuApp/Conductor/Ensemble/ConductorEnsembleEventCenter.swift`
 - `Sources/RafuApp/Launcher/WindowAccessor.swift`
 - `Sources/RafuApp/Launcher/WorkspaceWindowRegistry.swift`
 - `Sources/RafuApp/Models/WorkspaceSession.swift`
 - `Tests/RafuCoreTests/LauncherIPCFramingTests.swift`
 - `Tests/RafuCoreTests/LauncherIPCClientTests.swift`
+- `Tests/RafuCoreTests/EnsembleClientStreamTests.swift`
+- `Tests/RafuAppTests/Conductor/EnsembleEventCenterTests.swift`
+- `Tests/RafuAppTests/Conductor/EnsembleServerStreamTests.swift`
 - `Tests/RafuAppTests/LauncherRequestRouterTests.swift`
 - `Tests/RafuAppTests/WorkspaceGotoLocationTests.swift`
 - `docs/plans/phases/cli-app-ipc.md`
