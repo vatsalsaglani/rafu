@@ -56,6 +56,10 @@ and explicit AI-assisted commit drafting.
     disclosure rather than a permanent wall of file rows.
 21. An optional low-frequency status item reports honest process resident memory,
     not fictional per-window memory.
+22. `Control-Tab` presents a window-scoped switcher spanning open editor tabs
+    and terminal sessions (including parked sessions without duplicating shown
+    terminals); `Control-Shift-Tab` reverses, Left/Right browse, Control release
+    or Return commits, and Escape cancels without changing selection.
 
 ## Architecture locks
 

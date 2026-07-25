@@ -32,7 +32,7 @@ private let clineWorkingDirectory = URL(fileURLWithPath: "/tmp/rafu-c3-worktree"
 private let clineRunDirectory = URL(fileURLWithPath: "/tmp/rafu-c3-run")
 private let clineHandoffDirectory = URL(fileURLWithPath: "/tmp/rafu-c3-run/step-1")
 
-@Test("Cline is registered with curated routes and honest unsupported metadata probes")
+@Test("Cline is registered with curated routes and offline model discovery")
 func clineRegistryAndMetadata() async {
     let adapter = ClineAdapter(runtime: unavailableClineRuntime())
     #expect(adapter.id == .cline)
