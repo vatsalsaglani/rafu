@@ -77,6 +77,17 @@ let package = Package(
             url: "https://github.com/camdencheek/tree-sitter-dockerfile",
             exact: "0.2.0"
         ),
+        // Mermaid diagram layout and rendering (ADR 0020). MIT.
+        .package(
+            url: "https://github.com/lukilabs/beautiful-mermaid-swift",
+            exact: "1.0.4"
+        ),
+        // NOTE: elk-swift (the ELK layout port) is a transitive dependency of
+        // beautiful-mermaid-swift and is deliberately NOT declared here.
+        // Declaring it produces "dependency 'elk-swift' is not used by any
+        // target", because no Rafu target imports its product directly.
+        // Its exact version is pinned by the checked-in Package.resolved, which
+        // only moves on an explicit `swift package update`. See ADR 0020.
     ],
     targets: [
         .target(name: "RafuCore"),
@@ -104,6 +115,7 @@ let package = Package(
                 .product(name: "TreeSitterBash", package: "tree-sitter-bash"),
                 .product(name: "TreeSitterMarkdown", package: "tree-sitter-markdown"),
                 .product(name: "TreeSitterDockerfile", package: "tree-sitter-dockerfile"),
+                .product(name: "BeautifulMermaid", package: "beautiful-mermaid-swift"),
             ],
             resources: [
                 // Vendored tree-sitter `highlights.scm` queries (lane-1

@@ -1,6 +1,24 @@
 {
-  "originHash" : "24ac816e57691343b88bdc93c01224c666bf4d0711075953577c81ba5a27b311",
+  "originHash" : "ae2e794c3eaeae965da46b248d14a9eb4008d23be1c5041f5dc0abd5c68b65f8",
   "pins" : [
+    {
+      "identity" : "beautiful-mermaid-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/lukilabs/beautiful-mermaid-swift",
+      "state" : {
+        "revision" : "6a23a29e91af8f5b3e9fc09945332ca193bd69ec",
+        "version" : "1.0.4"
+      }
+    },
+    {
+      "identity" : "elk-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/lukilabs/elk-swift",
+      "state" : {
+        "revision" : "32f8042e3509a4819f00ff9cd46e829ec2b26da0",
+        "version" : "1.0.2"
+      }
+    },
     {
       "identity" : "neon",
       "kind" : "remoteSourceControl",
