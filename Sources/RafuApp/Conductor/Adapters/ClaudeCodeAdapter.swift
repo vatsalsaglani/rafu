@@ -166,7 +166,24 @@ nonisolated struct ConductorProbeProcessRunner: ConductorProbeCommandRunning {
         if forcedOutcome != nil {
             Self.stopAndReap(process)
         } else {
-            process.waitUntilExit()
+            // NEVER `process.waitUntilExit()` here. It takes no deadline, and
+            // it has been observed blocking forever in exactly this frame —
+            // one probe stalling the entire `swift test --no-parallel` run
+            // with no output (see
+            // `conductor-pty-spawn-and-child-environment.md`, finding 3).
+            //
+            // The poll loop above already observed the child stop, so a
+            // bounded settle is enough; if it is somehow still alive, fall
+            // through to the same bounded TERM/KILL path the forced branch
+            // uses and report the timeout honestly rather than blocking.
+            let settleDeadline = clock.now.advanced(by: .seconds(1))
+            while process.isRunning, clock.now < settleDeadline {
+                usleep(10_000)
+            }
+            if process.isRunning {
+                Self.stopAndReap(process)
+                forcedOutcome = .timedOut
+            }
         }
         await registry.unregister(id: resourceID)
 
@@ -223,7 +240,10 @@ nonisolated struct ConductorProbeProcessRunner: ConductorProbeCommandRunning {
         _ = reap(processIdentifier, before: killDeadline)
     }
 
-    private static func reap(_ processIdentifier: pid_t, before deadline: ContinuousClock.Instant)
+    /// Bounded `waitpid(WNOHANG)` reap. Shared with the other adapters that
+    /// terminate probe children, so there is exactly one implementation of
+    /// "collect this child without ever blocking indefinitely".
+    static func reap(_ processIdentifier: pid_t, before deadline: ContinuousClock.Instant)
         -> Bool
     {
         while ContinuousClock.now < deadline {

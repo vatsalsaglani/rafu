@@ -125,16 +125,33 @@ install location for `claude`. Discovery therefore finds the real binary
 regardless of the invoking shell's `PATH`, so no `PATH` value hides it.
 Any run on a machine with Claude Code installed is exposed.
 
-**What to do when it happens.** Do not wait it out. Confirm with
-`sample <pid>`, `kill -9` the helper, clear the lock
-(`./script/await_build_lock.sh`), and take the parallel run as the gate,
-recording the serial run as blocked by this issue rather than green.
+**Fixed 2026-07-26.** `ConductorProbeProcessRunner.run` no longer calls
+`waitUntilExit()` at all. The normally-exiting branch now does a bounded
+settle on `process.isRunning` and, if the child is somehow still alive,
+falls through to the same bounded `stopAndReap` (TERM → `waitpid` → KILL)
+the forced branch uses and reports `.timedOut` honestly. `reap` became
+shared so `OpenCodeAdapter.stop(_:)` — which had the same unbounded call
+straight after a `SIGKILL`, the exact case the code comment warned about —
+uses one bounded implementation too.
 
-**The fix, when someone owns that adapter file:** bound line 169 the same
-way the forced path is already bounded — poll `waitpid` with
-`WNOHANG` against a deadline and escalate to `stopAndReap` — so a probe
-child that never reports exit cannot stall the whole suite. Until then
-this is a known, reproducible trap, not a flake.
+**The rule this leaves behind:** `Process.waitUntilExit()` is banned in the
+Ensemble tree. It takes no deadline, so any call is a potential
+indefinite stall of whatever thread reaches it. Reap through the bounded
+`ConductorProbeProcessRunner.reap(_:before:)` instead. Guard:
+
+```bash
+# `| grep -v //` so the comments explaining the ban do not match themselves:
+rg -n "waitUntilExit" Sources/RafuApp/Conductor | grep -v "//"   # expect 0 hits
+```
+
+`ConductorProbeCompletion.terminationStatus` is still Foundation's, and
+`conductorProbeRunnerCompletesZeroExit` / `…ReportsNonzeroExit` pin that
+removing the wait did not cost the child's real exit status.
+
+**If a serial run still hangs.** Do not wait it out. Confirm with
+`sample <pid>` — the frame naming the blocking call is the answer — then
+`kill -9` the helper, clear the lock (`./script/await_build_lock.sh`), and
+report the blocking frame rather than retrying.
 
 ## Why it matters
 
@@ -168,6 +185,10 @@ swift test --no-parallel
 
 # No shell interpolation anywhere in the Ensemble tree (argv arrays only):
 rg -n "/bin/sh|bash -c|NSTask" Sources/RafuApp/Conductor   # expect 0 hits
+
+# No unbounded child waits (finding 3) — reap via the bounded helper.
+# `| grep -v //` so the comments explaining the ban do not match themselves:
+rg -n "waitUntilExit" Sources/RafuApp/Conductor | grep -v "//"   # expect 0 hits
 ```
 
 ## Related code, ADRs, and phases

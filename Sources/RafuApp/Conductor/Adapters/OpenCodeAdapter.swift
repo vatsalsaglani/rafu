@@ -346,7 +346,12 @@ nonisolated enum C3AdapterProcess {
         if process.isRunning {
             Darwin.kill(process.processIdentifier, SIGKILL)
         }
-        process.waitUntilExit()
+        // Bounded reap rather than `process.waitUntilExit()`, which takes no
+        // deadline and is documented to block after a forced termination —
+        // the same trap that hung the serial suite through the Claude probe
+        // (`conductor-pty-spawn-and-child-environment.md`, finding 3).
+        _ = ConductorProbeProcessRunner.reap(
+            process.processIdentifier, before: clock.now.advanced(by: .seconds(1)))
     }
 
     private static func fileByteCount(

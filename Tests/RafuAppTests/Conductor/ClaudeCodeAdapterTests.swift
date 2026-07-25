@@ -588,6 +588,46 @@ func claudeAuthClassification() {
     #expect(ClaudeCodeAdapter.authStatus(from: .cancelled) == .unknown())
 }
 
+/// The normally-exiting path used to end in a bare `process.waitUntilExit()`,
+/// which takes no deadline and was observed blocking forever — one probe
+/// stalling the whole `--no-parallel` suite with no output
+/// (`conductor-pty-spawn-and-child-environment.md`, finding 3). That call is
+/// gone; these two assert the replacement still reports the child's real exit
+/// status, which is the thing a bounded wait could plausibly break.
+@Test("A probe child that exits cleanly completes with its zero status")
+func conductorProbeRunnerCompletesZeroExit() async {
+    let runner = ConductorProbeProcessRunner(
+        timeout: .seconds(5), maximumOutputBytes: 1_024)
+    let outcome = await runner.run(
+        executableURL: URL(fileURLWithPath: "/usr/bin/true"),
+        arguments: [],
+        environment: ["PATH": "/usr/bin:/bin"],
+        outputPolicy: .discard)
+
+    guard case .completed(let completion) = outcome else {
+        Issue.record("Expected a completed probe, got \(outcome)")
+        return
+    }
+    #expect(completion.terminationStatus == 0)
+}
+
+@Test("A probe child that exits nonzero reports that status, not success")
+func conductorProbeRunnerReportsNonzeroExit() async {
+    let runner = ConductorProbeProcessRunner(
+        timeout: .seconds(5), maximumOutputBytes: 1_024)
+    let outcome = await runner.run(
+        executableURL: URL(fileURLWithPath: "/usr/bin/false"),
+        arguments: [],
+        environment: ["PATH": "/usr/bin:/bin"],
+        outputPolicy: .discard)
+
+    guard case .completed(let completion) = outcome else {
+        Issue.record("Expected a completed probe, got \(outcome)")
+        return
+    }
+    #expect(completion.terminationStatus != 0)
+}
+
 @Test("The real adapter probe runner enforces its timeout and reaps the child")
 func conductorProbeRunnerTimesOut() async {
     let runner = ConductorProbeProcessRunner(
