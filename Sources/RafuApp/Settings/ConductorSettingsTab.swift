@@ -151,13 +151,18 @@ final class ConductorSettingsModel {
     /// the hint is the adapter's instruction to the user (e.g. "run `codex
     /// login` in a terminal"), and Rafu never rewrites or supplements it.
     func authStatusText(for id: ConductorCLIID) -> String {
-        switch authByID[id] ?? .unknown {
+        switch authByID[id] ?? .unknown() {
         case .authenticated:
             "Signed in to this CLI. Rafu holds no token for it."
         case .notAuthenticated(let hint):
             hint
-        case .unknown:
-            "Sign-in status unknown. Rafu checks only whether the CLI reports a session."
+        case .unknown(let reason):
+            // A CLI that cannot report sign-in headlessly says so plainly,
+            // rather than leaving a bare shrug that reads like a failure.
+            // Either way this never blocks a run — the CLI itself is the
+            // authority at launch (ADR 0018 delegated auth).
+            reason
+                ?? "Sign-in status unknown — Rafu could not read it from this CLI. This does not block runs."
         }
     }
 
