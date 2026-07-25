@@ -523,6 +523,7 @@ final class ConductorRunController {
     @discardableResult
     func publish(_ manifest: ConductorRunManifest) -> Task<Void, Never>? {
         upsertRun(manifest)
+        ConductorEnsembleEventCenter.shared.runChanged(manifest: manifest)
         guard let store else { return nil }
         return manifestWrites.enqueue(manifest, to: store)
     }
@@ -647,6 +648,7 @@ final class ConductorRunController {
             try await store.save(newManifest)
             try Self.requireCurrent(generation, activeGeneration)
             upsertRun(newManifest)
+            ConductorEnsembleEventCenter.shared.runChanged(manifest: newManifest)
 
             do {
                 try await worktreeService.materialize(workspacePlan)
@@ -670,6 +672,7 @@ final class ConductorRunController {
             try await store.save(newManifest)
             try Self.requireCurrent(generation, activeGeneration)
             upsertRun(newManifest)
+            ConductorEnsembleEventCenter.shared.runChanged(manifest: newManifest)
 
             transition(to: .running)
             let sessionID = try launcher.launch(

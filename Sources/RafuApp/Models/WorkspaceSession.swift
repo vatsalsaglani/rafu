@@ -725,6 +725,7 @@ final class WorkspaceSession {
     }
 
     func raiseConductorGateAttention(_ event: ConductorGateReadyEvent) {
+        ConductorEnsembleEventCenter.shared.gateReady(event: event)
         let runName = event.workflowName
         let stepName = event.agentName
         let preference = terminalAttentionSurfaceStore.surface()

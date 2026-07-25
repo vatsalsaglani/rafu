@@ -224,6 +224,13 @@ nonisolated struct ConductorRunManifest: Codable, Equatable, Sendable {
     let createdAt: Date
     var updatedAt: Date
     var steps: [Step]
+    /// Coordinator run that started this run. Additive and optional so
+    /// manifests written before the Ensemble CLI decode unchanged.
+    var startedBy: String? = nil
+    /// Human-readable graph label supplied by a future mutating verb.
+    var label: String? = nil
+    /// Set only after a later human-approved merge completes.
+    var mergedAt: Date? = nil
     /// The gate currently parking this run, `nil` when none is open (C5:
     /// `ConductorWorkflowController` sets this alongside the parked step's
     /// `.awaitingGate` status; C1 single-role runs never set it — their
