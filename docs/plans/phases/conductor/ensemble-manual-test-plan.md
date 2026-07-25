@@ -231,6 +231,29 @@ display, mark them N/A rather than FAIL.
 
 ---
 
+## N. Agent terminals (AT-01)
+
+These checks cover interactive vendor-CLI sessions. They are deliberately
+separate from Ensemble runs: no run row, worktree, handoff, transcript, or
+capability token should appear.
+
+| # | Do this | Expect |
+|---|---|---|
+| N1 | Open the Terminals panel, click **+**, then choose any ready row under **Agent Terminals** | The CLI opens immediately in a revealed terminal tab at the workspace root, using its saved default model. Missing and unauthenticated CLIs remain listed. |
+| N2 | Press **⌘⇧A** without using the pointer; select an agent, type a custom model, choose a nested folder, and press Return on **Launch** | Every control is keyboard-reachable. The session starts in that folder with the model override only for a verified CLI. Choosing a folder outside the workspace produces a visible error and does not launch. |
+| N3 | Inspect a missing or signed-out CLI in both the panel menu and sheet | The row is disabled and a textual install/sign-in reason is visible; the reason is not tooltip-only and availability is not communicated by color alone. |
+| N4 | Launch an Agent Terminal and compare its editor tab, Terminals panel row, and Control-Tab switcher candidate | The editor tab shows the CLI name; the panel and switcher show its vendor mark beside that same name. A plain terminal keeps its generic terminal identity. |
+| N5 | While the Agent Terminal is running, open **Resources** | Its process kind reads **Agent Terminal** and its name identifies the CLI. It never reads **Ensemble Agent**; a real Ensemble run still does. |
+| N6 | Exit the vendor CLI normally, then park, reveal, and close its session | Status, attention, parking, reveal, and close behave exactly like a shell terminal. Relaunching Rafu does not restore the session, and no output transcript or Ensemble run evidence appears. |
+| N7 | Open a second workspace window and launch a different Agent Terminal there | Each window owns only its own session, selection, and panel row. Closing one window tears down its child without disturbing the other. |
+
+**Probe honesty:** on the AT-01 verification machine, Claude Code, Codex,
+OpenCode, Cline, Gemini CLI, and Cursor CLI had locally verified interactive
+shapes. Kimi was not installed, so Rafu launches it bare if later discovered
+and visibly says its model flag is unverified.
+
+---
+
 ## What I most want to hear about
 
 In priority order:
