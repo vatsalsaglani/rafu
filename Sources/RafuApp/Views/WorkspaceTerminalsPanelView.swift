@@ -221,15 +221,22 @@ private struct AgentProbeIdentity: Equatable {
     let token: Int
 }
 
-/// The inline agent launcher (UX-03): one row per provider with its real
-/// vendor mark, an honest pending state, and unavailable rows that stay
-/// visible and say why in text.
+/// The inline agent launcher (UX2-03): a compact grid of ICON-ONLY cards, one
+/// per provider, with an honest pending state and unavailable providers that
+/// stay visible and say why.
 ///
-/// This replaced an agent section inside the `+` `Menu`. It is not a styling
-/// preference: menu content is bridged to `NSMenuItem`, which draws its image
-/// at the image's own size, and the vendored SVGs are authored `width="1em"`
-/// so `NSImage` reports 1×1 pt. SwiftUI's `.resizable().frame(_:)` — which is
-/// what makes `FileIconView` correct everywhere else — has no effect there.
+/// The section replaced an agent list inside the `+` `Menu`, then a stack of
+/// full-width name+status rows. The menu exclusion is not a styling preference:
+/// menu content is bridged to `NSMenuItem`, which draws its image at the
+/// image's own size, and the vendored SVGs are authored `width="1em"` so
+/// `NSImage` reports 1×1 pt. SwiftUI's `.resizable().frame(_:)` — which is what
+/// makes `FileIconView` correct everywhere else — has no effect there. The grid
+/// is an ordinary SwiftUI surface, so the marks render at their asked size.
+///
+/// Dropping the visible names is legitimate ONLY because every card carries the
+/// name in both `.help()` and `.accessibilityLabel` (AGENTS: an icon is never
+/// the only carrier of meaning), and the section header still states the ready
+/// count out of the full roster so nothing is silently hidden.
 private struct AgentLauncherSectionView: View {
     let rows: [AgentLauncherRow]
     let isProbing: Bool
@@ -238,13 +245,13 @@ private struct AgentLauncherSectionView: View {
 
     @Environment(\.rafuTheme) private var theme
 
-    /// Bounded so the launcher cannot crowd out the session list it sits
-    /// above; the provider roster is fixed at seven, so this always has
-    /// content to scroll and never leaves a gap. Roughly six rows: enough that
-    /// unavailable providers (which sort last, being registry-ordered) are one
-    /// short scroll away rather than invisible, and the header's "n of 7 ready"
-    /// states the full total either way.
-    private static let maxListHeight: CGFloat = 240
+    /// Reflows to the panel's width (~250–400 pt in practice): four columns at
+    /// the narrow end, all seven on one line when the panel is wide. `.adaptive`
+    /// stretches the surviving columns, so cards stay flush to both edges
+    /// instead of leaving a ragged trailing gap.
+    private static let columns = [
+        GridItem(.adaptive(minimum: 40, maximum: 60), spacing: 6, alignment: .center)
+    ]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -280,76 +287,86 @@ private struct AgentLauncherSectionView: View {
                 .accessibilityLabel("Check installed agent CLIs again")
             }
 
-            ScrollView(.vertical) {
-                VStack(spacing: 2) {
-                    ForEach(rows) { row in
-                        AgentLauncherRowView(row: row, launch: { launch(row) })
-                    }
+            // No ScrollView: seven cards reflow into at most three short rows
+            // even in the narrowest panel, and a ScrollView would greedily
+            // claim vertical space the session list needs.
+            LazyVGrid(columns: Self.columns, alignment: .leading, spacing: 6) {
+                ForEach(rows) { row in
+                    AgentLauncherCardView(row: row, launch: { launch(row) })
                 }
-                .padding(.horizontal, RafuMetrics.space2)
-                .padding(.vertical, RafuMetrics.space2)
             }
-            .frame(maxHeight: Self.maxListHeight)
+            .padding(.horizontal, RafuMetrics.space2)
+            .padding(.vertical, RafuMetrics.space2)
         }
     }
 }
 
-/// One provider row. A click launches; under Full Keyboard Access the row is a
-/// focusable button, so Tab reaches it and Return activates it — which is why
-/// UX-03 mints no per-agent global chord (⌘⇧ n/f/g/l/k/p/e/a are all taken,
-/// and ⌘⇧A already opens the Agent Terminal sheet).
-private struct AgentLauncherRowView: View {
+/// One provider card: the vendor mark alone, no visible name. A click
+/// launches; under Full Keyboard Access the card is a focusable button, so Tab
+/// reaches it and Return/Space activates it — which is why UX-03 mints no
+/// per-agent global chord (⌘⇧ n/f/g/l/k/p/e/a are all taken, and ⌘⇧A already
+/// opens the Agent Terminal sheet).
+///
+/// The name and state live in `row.tooltip` (pointer) and
+/// `row.accessibilityLabel` (VoiceOver). Both are mandatory: without them the
+/// mark would be the only carrier of meaning, which AGENTS forbids.
+private struct AgentLauncherCardView: View {
     let row: AgentLauncherRow
     let launch: () -> Void
 
     @Environment(\.rafuTheme) private var theme
+    @State private var isHovering = false
+
+    /// Square enough to read as a chip, small enough that four fit across the
+    /// narrowest panel.
+    private static let side: CGFloat = 40
 
     var body: some View {
         Button(action: launch) {
-            HStack(spacing: RafuMetrics.space2) {
-                // The mark renders here because a normal SwiftUI view honors
-                // `FileIconView`'s resizable frame; the same view inside a
-                // `Menu` could not.
-                FileIconView(icon: row.icon, size: 16)
-                    .frame(width: 20, height: 20)
-                    .opacity(row.isLaunchable ? 1 : 0.5)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(row.displayName)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(
-                            row.isLaunchable ? theme.palette.textPrimary : theme.palette.textMuted
-                        )
-                        .lineLimit(1)
-                    // The state is ALWAYS text — dimming is a second signal,
-                    // never the only one (AGENTS: no meaning by color alone).
-                    Text(row.statusText)
-                        .font(.caption2)
-                        .foregroundStyle(theme.palette.textMuted)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, RafuMetrics.space2)
-            .padding(.vertical, 5)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
-                    .fill(theme.palette.cardBackground)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
-                    .strokeBorder(theme.palette.borderSubtle.opacity(0.5), lineWidth: 1)
-            )
-            .contentShape(.rect)
+            // The mark renders here because a normal SwiftUI view honors
+            // `FileIconView`'s resizable frame; the same view inside a `Menu`
+            // could not.
+            FileIconView(icon: row.icon, size: 20)
+                .frame(width: 22, height: 22)
+                .opacity(row.isLaunchable ? 1 : 0.4)
+                .accessibilityHidden(true)
+                .frame(maxWidth: .infinity)
+                .frame(height: Self.side)
+                .background(
+                    RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
+                        .fill(background)
+                )
+                .overlay(border)
+                .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .disabled(!row.isLaunchable)
-        .help(row.isLaunchable ? "Launch \(row.displayName)" : row.statusText)
-        .accessibilityElement(children: .combine)
+        .onHover { isHovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovering)
+        .help(row.tooltip)
         .accessibilityLabel(row.accessibilityLabel)
+    }
+
+    private var background: Color {
+        guard row.isLaunchable else { return theme.palette.cardBackground.opacity(0.5) }
+        return isHovering ? theme.palette.hover : theme.palette.cardBackground
+    }
+
+    /// An unavailable card is dimmed AND dashed. The dash is a SHAPE
+    /// difference, so the disabled state survives grayscale, Increase
+    /// Contrast, and colour-blind vision — dimming alone would be meaning by
+    /// tone, and the reason itself is always in the tooltip and the
+    /// accessibility label.
+    @ViewBuilder
+    private var border: some View {
+        let shape = RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
+        if row.isLaunchable {
+            shape.strokeBorder(theme.palette.borderSubtle.opacity(0.5), lineWidth: 1)
+        } else {
+            shape.strokeBorder(
+                theme.palette.borderSubtle,
+                style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+        }
     }
 }
 

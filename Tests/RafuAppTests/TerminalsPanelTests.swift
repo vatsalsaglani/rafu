@@ -267,6 +267,50 @@ func agentLauncherResolvedRowsCarryReasons() throws {
         AgentLauncherModel.headerTitle(rows: rows, isProbing: false) == "Agents (2 of 4 ready)")
 }
 
+@Test("Icon-only cards carry the provider name in the tooltip in every state")
+func agentLauncherTooltipsAlwaysNameTheProvider() throws {
+    // UX2-03 removed the visible name from the launcher card, so the tooltip
+    // and the accessibility label are the ONLY carriers of the provider's
+    // identity for pointer and VoiceOver users respectively. Neither may ever
+    // reduce to a bare state string.
+    for row in AgentLauncherModel.probingRows() {
+        #expect(row.tooltip.contains(row.displayName))
+        #expect(row.tooltip.contains("checking"))
+        #expect(row.accessibilityLabel.contains(row.displayName))
+    }
+
+    let options = [
+        agentOption(.claudeCode, availability: .ready(URL(fileURLWithPath: "/usr/bin/claude"))),
+        agentOption(.codex, availability: .notInstalled),
+        agentOption(
+            .geminiCLI, availability: .notAuthenticated("Not logged in — run `gemini` once.")),
+        agentOption(
+            .kimi, availability: .ready(URL(fileURLWithPath: "/usr/bin/kimi")),
+            note: "Launch shape unverified."),
+    ]
+    let rows = AgentLauncherModel.rows(options: options)
+    for row in rows {
+        #expect(row.tooltip.contains(row.displayName))
+        #expect(row.accessibilityLabel.contains(row.displayName))
+    }
+
+    let ready = try #require(rows.first { $0.id == .claudeCode })
+    #expect(ready.tooltip == "Launch Claude Code")
+
+    // An unavailable card is dimmed and dashed on screen, but the REASON is
+    // never left to that styling — it rides along in the tooltip.
+    let missing = try #require(rows.first { $0.id == .codex })
+    #expect(missing.tooltip.hasPrefix("Codex — "))
+    #expect(missing.tooltip.contains(AgentTerminalAvailability.notInstalled.reason ?? ""))
+
+    let unauthenticated = try #require(rows.first { $0.id == .geminiCLI })
+    #expect(unauthenticated.tooltip.contains("Not logged in"))
+
+    // AT-01's verification caveat survives the layout change too.
+    let caveated = try #require(rows.first { $0.id == .kimi })
+    #expect(caveated.tooltip == "Launch Kimi CLI — Launch shape unverified.")
+}
+
 @Test("Only a ready row yields a launchable option; pending and unavailable rows cannot launch")
 func agentLauncherGatesUnavailableRows() throws {
     let options = [

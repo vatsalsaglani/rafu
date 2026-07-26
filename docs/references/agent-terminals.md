@@ -138,24 +138,40 @@ direction (no popups for a primary action).
 The Terminals panel's `+` menu now carries shell choices only. Agents launch
 from an inline **Agents** section between the panel header and the session list:
 
-- One row per provider from `AgentTerminalLaunchService.options()`, in
+- One card per provider from `AgentTerminalLaunchService.options()`, in
   `ConductorAdapterRegistry.all` order. No second discovery authority.
-- Row anatomy: vendor mark at 16 pt, display name, and a second line that always
-  states the state **in text** — `Ready`, the AT-01 verification caveat when the
-  CLI has one, or the `AgentTerminalAvailability.reason` when it does not.
-  Unavailable rows stay visible, are disabled, and are dimmed *in addition to*
-  the text, never instead of it.
 - `AgentLauncherModel.launchableOption(for:in:)` is the only path to a spawn. It
-  re-checks the option's availability, so neither a pending row nor a stale
-  ready row can reach the launch service.
-- The VoiceOver label is name + state + reason
-  (`AgentLauncherRow.accessibilityLabel`).
-- Rows are plain buttons, so Full Keyboard Access reaches them by Tab and
+  re-checks the option's availability, so neither a pending card nor a stale
+  ready card can reach the launch service.
+- Cards are plain buttons, so Full Keyboard Access reaches them by Tab and
   activates by Return/Space. UX-03 mints **no** per-agent global chord: ⌘⇧ is
   already taken by n/f/g/l/k/p/e/a, and ⌘⇧A opens the Agent Terminal sheet.
-- The list is capped at 240 pt and scrolls. The roster is fixed at seven, so
-  some scrolling is unavoidable in a narrow panel; the header's
-  "*n* of 7 ready" count states the total so nothing is silently hidden.
+
+### The launcher is an icon-only grid (UX2-03)
+
+The original anatomy — full-width rows with mark, name, and a status line, in a
+240 pt scroller — read as heavy for what is a seven-item launcher. It is now a
+`LazyVGrid` of icon-only cards directly under the panel header:
+
+- `GridItem(.adaptive(minimum: 40, maximum: 60))`, 6 pt gutters, 40 pt-tall
+  cards with the vendor mark at 20 pt. The grid reflows with the panel: four
+  columns at ~250 pt, all seven on one line at ~400 pt. No `ScrollView` — seven
+  cards are at most three short rows, and a scroller would greedily claim
+  vertical space the session list needs.
+- **No visible name.** That is only legitimate because every card carries the
+  name in *both* `.help()` (`AgentLauncherRow.tooltip`) and
+  `.accessibilityLabel` (`AgentLauncherRow.accessibilityLabel`). Both strings
+  contain the display name in **every** state, and
+  `TerminalsPanelTests.agentLauncherTooltipsAlwaysNameTheProvider` asserts it —
+  an icon must never be the only carrier of meaning (AGENTS).
+- Unavailable providers stay visible and disabled. Their treatment is dimming
+  **plus a dashed border** — a shape difference, so it survives grayscale,
+  Increase Contrast, and colour-blind vision — and the
+  `AgentTerminalAvailability.reason` rides in the tooltip and the accessibility
+  label. Dimming is never the sole signal, and nothing is silently hidden: the
+  header still reads "*n* of 7 ready".
+- Hover raises the card to `palette.hover` over 120 ms. Theme tokens only; no
+  system accent.
 
 ### The probe needs a visible pending state, not an empty list
 
@@ -166,8 +182,10 @@ reads as "no agents installed" — a lie while the answer is unknown. So:
 - The panel holds `[AgentTerminalOption]?`; `nil` means *probing*, `[]` means
   *resolved and empty*. These must never look the same.
 - While probing, `AgentLauncherModel.probingRows()` renders every known provider
-  with `Checking…`, and the header reads `Agents (checking…)` with a spinner —
-  the ready count is withheld until it is true.
+  as a disabled, dashed card whose tooltip reads
+  "*Name* — checking whether it is installed…", and the header reads
+  `Agents (checking…)` with a spinner — the ready count is withheld until it is
+  true. The grid is never empty and never fills in silently.
 - The probe runs once per `.task(id:)` identity (workspace root + an explicit
   refresh token), never per render. The section's refresh control bumps that
   token; it is the only way to re-probe.
@@ -188,10 +206,14 @@ The Codex mark differs between the file tree and agent surfaces. That is
 Pointing agent surfaces at the file-tree asset would couple provider identity to
 file-name decoration and break the uniformity of the seven-mark set; pointing the
 file tree at the agent assets would rewrite byte-pinned decoration for no
-product gain. All seven agent marks were checked at 16 pt in the panel and are
-legible and recognisable, so no asset needed correcting. If one ever does, refresh
-it from the pinned lobe source per [agent icon assets](agent-icon-assets.md) —
-do not cross-wire the catalogs.
+product gain.
+
+One asset did need correcting: dogfooding showed the lobe `codex` mark was not
+recognisable as Codex, which matters more now that the launcher is icon-only.
+UX2-03 refreshed `agent-codex.svg` from the same pinned 1.94.0 catalog using the
+`openai` slug — the fix went through the documented refresh path, *not* by
+pointing the agent catalog at the file tree's `codex.svg`. Do the same for any
+future mark; see [agent icon assets](agent-icon-assets.md).
 
 ## Why it matters
 
