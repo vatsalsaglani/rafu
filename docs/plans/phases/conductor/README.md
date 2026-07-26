@@ -88,6 +88,10 @@ need in its handoff instead of editing it.
 - You are on a dedicated worktree branch. Commit your work ON THIS BRANCH in
   verified stages. Never push, never merge, never checkout `main`, never
   rebase.
+- Agents build, launch, inspect, and stop only **Rafu Lightning**. Never run
+  `pkill` or `pgrep` against a bare `Rafu` process; that is the user's release
+  editor. Release builds belong to CI except when a phase explicitly requires
+  non-launching package validation.
 - Gates per stage: `./script/build.sh` 0 warnings; `./script/test.sh`
   (**parallel**) green; `./script/format.sh --fix` then `--lint` clean.
   Run the **serial** suite (`./script/test.sh --no-parallel`) ONCE, at the

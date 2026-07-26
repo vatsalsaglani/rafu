@@ -1,6 +1,7 @@
 import CryptoKit
 import Darwin
 import Foundation
+import RafuCore
 
 /// How `ServerInstaller`/`NodeRuntimeManager` fetch one asset. Injected so
 /// tests never touch the network — production uses
@@ -47,8 +48,11 @@ nonisolated struct InstallLayout: Sendable {
     }
 
     static var defaultBaseDirectory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appending(path: "Rafu", directoryHint: .isDirectory)
+        defaultBaseDirectory(identity: .current)
+    }
+
+    static func defaultBaseDirectory(identity: RafuAppIdentity) -> URL {
+        identity.applicationSupportRoot()
     }
 
     var serversRoot: URL {

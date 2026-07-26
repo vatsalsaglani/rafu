@@ -1,4 +1,5 @@
 import Foundation
+import RafuCore
 
 /// The on-disk shape of `<AppSupportBase>/Rafu/language-server-trust.json`:
 /// which server ids a user has explicitly approved running, per workspace.
@@ -25,8 +26,11 @@ nonisolated struct WorkspaceTrustStore: Sendable {
     }
 
     static var defaultBaseDirectory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appending(path: "Rafu", directoryHint: .isDirectory)
+        defaultBaseDirectory(identity: .current)
+    }
+
+    static func defaultBaseDirectory(identity: RafuAppIdentity) -> URL {
+        identity.applicationSupportRoot()
     }
 
     private var fileURL: URL {

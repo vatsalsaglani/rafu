@@ -172,15 +172,17 @@ public enum LauncherIPCSocketPath {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
     }
 
-    /// `<baseDirectory>/Rafu/ipc/v1.sock`. The `v1` path segment is the
-    /// protocol's on-disk namespace, not `LauncherIPCProtocol.wireVersion`
-    /// re-encoded — a future incompatible wire format gets a new segment
-    /// (`v2`) so old and new app builds never fight over one socket file.
+    /// `<baseDirectory>/<identity>/ipc/v1.sock`. The `v1` path segment is
+    /// the protocol's on-disk namespace, not
+    /// `LauncherIPCProtocol.wireVersion` re-encoded — a future incompatible
+    /// wire format gets a new segment (`v2`) so old and new app builds never
+    /// fight over one socket file.
     public static func resolve(
-        baseDirectory: URL = LauncherIPCSocketPath.defaultBaseDirectory
+        baseDirectory: URL = LauncherIPCSocketPath.defaultBaseDirectory,
+        identity: RafuAppIdentity = .current
     ) -> URL {
-        baseDirectory
-            .appending(path: "Rafu", directoryHint: .isDirectory)
+        identity
+            .applicationSupportRoot(baseDirectory: baseDirectory)
             .appending(path: "ipc", directoryHint: .isDirectory)
             .appending(path: "v1.sock", directoryHint: .notDirectory)
     }

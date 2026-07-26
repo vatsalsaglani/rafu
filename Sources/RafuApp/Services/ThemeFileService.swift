@@ -1,4 +1,5 @@
 import Foundation
+import RafuCore
 
 nonisolated struct UserThemeDescriptor: Identifiable, Hashable, Sendable {
     let id: String
@@ -9,8 +10,12 @@ nonisolated struct UserThemeDescriptor: Identifiable, Hashable, Sendable {
 
 nonisolated struct ThemeFileService: Sendable {
     static var themesDirectory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appending(path: "Rafu/Themes", directoryHint: .isDirectory)
+        themesDirectory(identity: .current)
+    }
+
+    static func themesDirectory(identity: RafuAppIdentity) -> URL {
+        identity.applicationSupportRoot()
+            .appending(path: "Themes", directoryHint: .isDirectory)
     }
 
     @concurrent

@@ -99,6 +99,7 @@ jobs:
 
       - name: Package app bundle
         env:
+          RAFU_APP_NAME: Rafu
           RAFU_VERSION: ${{ steps.version.outputs.version }}
         run: |
           ./script/build_and_run.sh --package

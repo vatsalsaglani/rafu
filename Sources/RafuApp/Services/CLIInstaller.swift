@@ -1,4 +1,5 @@
 import Foundation
+import RafuCore
 
 nonisolated struct CLIInstallResult: Sendable {
     let installedURL: URL
@@ -12,14 +13,18 @@ nonisolated struct CLIInstaller: Sendable {
     /// Where the `rafu` symlink is created. Defaults to `~/.local/bin`;
     /// injectable so tests never touch the real home directory.
     let binDirectory: URL
+    /// Determines whether the destination is `rafu` or `rafu-lightning`.
+    let identity: RafuAppIdentity
 
     init(
         source: URL = Bundle.main.bundleURL.appending(path: "Contents/SharedSupport/bin/rafu"),
         binDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
-            .appending(path: ".local/bin", directoryHint: .isDirectory)
+            .appending(path: ".local/bin", directoryHint: .isDirectory),
+        identity: RafuAppIdentity = .current
     ) {
         self.source = source
         self.binDirectory = binDirectory
+        self.identity = identity
     }
 
     /// Installs `rafu` as a **symlink** into `binDirectory` pointing at the
@@ -36,7 +41,7 @@ nonisolated struct CLIInstaller: Sendable {
         }
 
         try fileManager.createDirectory(at: binDirectory, withIntermediateDirectories: true)
-        let destination = binDirectory.appending(path: "rafu")
+        let destination = binDirectory.appending(path: identity.cliName)
 
         // Replace only something we plausibly own: a symlink from a previous
         // install (detected without following it, so a dangling link left by a

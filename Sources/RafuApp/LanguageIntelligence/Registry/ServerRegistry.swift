@@ -1,4 +1,5 @@
 import Foundation
+import RafuCore
 
 /// How a `ServerDescriptor` is obtained and run. `.localDiscovery` never
 /// downloads anything — it only looks for an already-installed toolchain
@@ -118,8 +119,11 @@ nonisolated struct UserEntryStore: Sendable {
     }
 
     static var defaultBaseDirectory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appending(path: "Rafu", directoryHint: .isDirectory)
+        defaultBaseDirectory(identity: .current)
+    }
+
+    static func defaultBaseDirectory(identity: RafuAppIdentity) -> URL {
+        identity.applicationSupportRoot()
     }
 
     private var fileURL: URL {

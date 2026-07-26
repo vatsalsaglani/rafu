@@ -93,7 +93,7 @@ struct RafuAppCommands: Commands {
             .disabled(workspaceSession?.selectedDocument == nil)
         }
 
-        CommandMenu("Rafu") {
+        CommandMenu(RafuApplication.displayName) {
             Button("Command Palette…") {
                 workspaceSession?.showCommandPalette(seed: ">")
             }

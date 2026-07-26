@@ -36,12 +36,21 @@ An active phase brief cannot silently supersede an ADR. When non-user sources di
 - Build everything: `swift build`
 - Run all tests: `swift test`
 - Exercise the CLI: `swift run rafu --help`
-- Build and launch the GUI app bundle: `./script/build_and_run.sh`
-- Build, launch, and verify the GUI process: `./script/build_and_run.sh --verify`
+- Build and launch the local Rafu Lightning app bundle: `./script/build_and_run.sh`
+- Build, launch, and verify the Rafu Lightning process:
+  `./script/build_and_run.sh --verify`
 
 The Codex Run action lives in [`.codex/environments/environment.toml`](.codex/environments/environment.toml) and must call the same build-and-run script. Do not launch the SwiftUI product as a raw SwiftPM executable for normal GUI verification; stage and open a real `.app` bundle.
 
 See [`docs/references/build-and-run.md`](docs/references/build-and-run.md) for the supported modes and troubleshooting contract.
+
+### App variant safety
+
+Agents build, launch, inspect, and stop only **Rafu Lightning**. Never run
+`pkill` or `pgrep` against a bare process named `Rafu`; that is the user's
+release editor. Release builds are a CI action, not a normal local workflow.
+The only exception is a phase contract that explicitly requires non-launching
+release-package validation.
 
 ### Build lock: check it before you conclude "the build hung"
 

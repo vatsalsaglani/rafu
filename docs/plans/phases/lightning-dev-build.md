@@ -1,6 +1,6 @@
 # LT-01 — Rafu Lightning: a dev build that cannot kill your editor
 
-- **Status:** Ready. Branch: `dev/lightning-variant` (from `main`).
+- **Status:** Complete. Branch: `dev/lightning-variant` (from `main`).
   Runs in parallel with C8-04 and C8-07 (wave 3). Not an Ensemble phase —
   it changes how every phase from here on is built, launched, and verified.
 - **Why now:** dogfooding Rafu while agents build Rafu is unsafe today.
