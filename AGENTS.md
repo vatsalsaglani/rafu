@@ -47,6 +47,8 @@ See [`docs/references/build-and-run.md`](docs/references/build-and-run.md) for t
 
 SwiftPM serializes on `.build/.lock`. A second `swift build`/`swift test` does not fail fast on a busy `.build` — it blocks on `flock` with **no output at all**, so it looks exactly like a slow compile. Multiple agent sessions on one checkout hit this constantly, and a build killed mid-flight leaves the lock file behind with no live holder, after which every later invocation waits forever on nothing.
 
+**Run one SwiftPM invocation at a time.** Backgrounding a long suite is fine — blocking a session on it is not — but a backgrounded run still owns the checkout, and starting a second against it strands both and leaves a stale lock behind. If you background one, treat the checkout as busy until it reports.
+
 **Never sit on a silent `swift build`/`swift test` for ten minutes.** Before diagnosing a hang, and before any long run, clear the lock:
 
 ```bash

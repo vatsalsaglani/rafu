@@ -227,7 +227,7 @@ git worktree add ../rafu-conductor-polish   -b conductor/c7-polish
 | C8-04 | [C8-04-plan-gate-and-propose-merge.md](C8-04-plan-gate-and-propose-merge.md) | `conductor/c8-04-plan-gate` | Planned |
 | C8-05 | [C8-05-skill-pack-and-settings.md](C8-05-skill-pack-and-settings.md) | `conductor/c8-05-skill-pack` | Merged 2026-07-26 (`08f1967`; skill pack + installer + Settings; verb version reconciled to 2) |
 | C8-06 | [C8-06-graph-canvas.md](C8-06-graph-canvas.md) | `conductor/c8-06-graph-canvas` | Merged 2026-07-26 (`a1b50a5`; graph canvas + Activity feed. GUI section K pending) |
-| C8-07 | [C8-07-guided-onboarding.md](C8-07-guided-onboarding.md) | `conductor/c8-07-onboarding` | Planned |
+| C8-07 | [C8-07-guided-onboarding.md](C8-07-guided-onboarding.md) | `conductor/c8-07-onboarding` | Merged 2026-07-26 (`4aeff88`; three-door New Ensemble sheet, ⌘⇧E. GUI section M pending) |
 | AT-01 | [AT-01-agent-terminal-sessions.md](AT-01-agent-terminal-sessions.md) | `conductor/at-01-agent-terminals` | Merged 2026-07-26 (`a49adbe`; ADR 0021 + icon catalog + probe table; 1559 tests green parallel and serial. GUI section N pending) |
 | AT-02 | [AT-02-ensemble-bridge.md](AT-02-ensemble-bridge.md) | `conductor/at-02-ensemble-bridge` | Planned (after C8 wave 3 + AT-01) |
 
