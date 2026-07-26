@@ -47,9 +47,11 @@ Both creation canvases:
 - close on Esc through `onExitCommand`, with no sheet `.cancelAction`;
 - fall back to the last open document exactly like
   `closeConductorRunDetail()`;
-- are window-scoped because every window owns its own `WorkspaceSession`;
-- constrain form content to a centered 600 pt maximum width, so a wide editor
-  does not stretch the former 480 pt sheet layout into an unreadable form.
+- are window-scoped because every window owns its own `WorkspaceSession`.
+
+**UX2-02 supersedes UX-01's centered 600 pt measure for New Ensemble only.**
+The New Run canvas (`ConductorNewRunCanvas`) still clamps to 600 pt; the New
+Ensemble canvas is now full editor width. See "The New Ensemble layout" below.
 
 The general surface rule established here is: **configuration surfaces are
 editor tabs; modals are reserved for destructive confirmations.** The
@@ -62,6 +64,106 @@ label, while the same actions remain available from the Rafu menu and command
 palette. New Ensemble's four entry paths all call the same
 `WorkspaceSession.showEnsembleStart()` seam; New Run's panel, menu, and palette
 paths call `showEnsembleNewRun()`.
+
+## The New Ensemble layout (UX2-02)
+
+One full-width canvas, five stacked bands: tab strip, header, door content,
+footer bar. The header carries the title, the **name field**, and the door
+picker; the footer carries the inline error, Close, and the primary verb.
+
+Door 1's content is **two columns, no centered measure**:
+
+| Column | Width | Contents |
+|---|---|---|
+| Left rail | 3/12 of the canvas, clamped to 280…420 pt | Coordinator icon grid + model field, budget grant (steppers, deadline), allowed-CLI icon grid |
+| Right pane | the remainder | `EnsembleGoalPane` — the live-Markdown goal surface |
+
+The fraction is the layout; the clamp is the safety rail.
+`EnsembleStartCanvas.controlsWidth(inTotal:)` is `nonisolated static` and pure
+precisely so the split is unit-testable without a window
+(`guidedColumnSplit`). Below ~1120 pt the floor wins and the goal pane simply
+takes less; above ~1680 pt the cap wins so the rail never eats a wide display.
+
+Doors 2 and 3 are single full-width columns (Door 3's `Form` keeps a 720 pt
+reading measure — a grouped form stretched to 2000 pt is unreadable, and this
+is a form, not a writing surface).
+
+### The goal is ONE pane, not an editor/preview split
+
+`EnsembleGoalPane` is a plain-text Markdown editor while focused and the
+rendered document when not; click, the header's pencil/eye action, or the
+VoiceOver "Edit goal" action puts the caret back, and clicking away renders.
+Two properties make this shape the right one rather than a nicety:
+
+1. **The goal stays plain `String`.** It is pasted verbatim into a CLI prompt
+   (see "The paste-fallback rule is universal" below), so a rich-text or
+   attributed editor here would be a correctness bug. The renderer is
+   read-only and never writes back; `goalStaysPlainTextThroughTheMarkdownPane`
+   pins that the launcher receives the typed Markdown byte for byte, with only
+   outer whitespace trimmed.
+2. **Zero Markdown work on the typing path.** Because only one face is on
+   screen at a time, there is no parse, no debounce, and no per-keystroke
+   re-render. `MarkdownPreviewView`'s `.split` mode needs a 200 ms trailing
+   debounce for exactly the reason this pane does not: there, both halves are
+   live at once.
+
+**Focus nuance worth reusing.** Setting `@FocusState` in the same update that
+inserts the `TextEditor` is silently dropped — the target view does not exist
+yet. `EnsembleGoalPane` hops once (`.task(id: isEditing)` → `await
+Task.yield()` → `isEditorFocused = true`) rather than sleeping. The
+click-away transition is guarded on the **true→false edge**
+(`onChange(of:) { wasFocused, isFocused in ... }`); an unguarded `!isFocused`
+check cancels the edit on the editor's own unfocused first frame.
+
+Markdown presentation is shared, not copied: `RafuMarkdownStyling`
+(`Sources/RafuApp/Markdown/RafuMarkdownStyling.swift`) holds the theme text
+colors, table treatment, code-block card, and Tree-sitter highlighter, and
+both `MarkdownPreviewView` and this pane apply it via `.rafuMarkdownStyling()`.
+Per-document concerns (`baseURL`, `imageBaseURL`, the local-file image
+provider) stay at the preview's call site — the goal pane has no document and
+therefore no directory to resolve relative images against.
+
+### Both CLI pickers are icon grids
+
+`EnsembleCLIIconGrid` + `EnsembleCLIIconCard` replace the old row list and the
+old column of toggles. Same component, two modes: `.selected` (coordinator,
+single-select) and `.allowed` (grant, multi-select). Icons come from
+`ConductorCLIIcons.icon(for:)` — the shared seven-provider catalog, consumed
+here, never re-derived.
+
+Selection is stated **three ways** so it never depends on color: a filled
+`checkmark.circle.fill` badge, a 2 pt border (vs. 1 pt hairline), and a
+semibold label. An unavailable CLI stays **visible and disabled** with an
+`exclamationmark.circle.fill` badge, and its reason — which the old row list
+showed inline and a grid cell has no room for — is preserved in BOTH `help`
+(pointer) and `accessibilityLabel` (VoiceOver). The reason is bounded in the
+layout, never dropped; a disabled card with no stated reason would be the
+regression to watch for.
+
+### Naming an Ensemble
+
+The header's name field flows into the **existing** label seams, not a new
+parallel field:
+
+| Door | Seam | Already rendered by |
+|---|---|---|
+| 1 (guided) | `ConductorCoordinatorSession.label`, via `ConductorCoordinatorLauncher.start(..., label:)` | `ConductorGraphCanvas` (coordinator node title), `ConductorRunsPanelView.startedByLabel` |
+| 3 (expert) | `ConductorWorkflowRunRequest.label` → `ConductorRunManifest.label` | `ConductorGraphModel` (run node title), `ConductorRunsPanelView` |
+
+`ConductorCoordinatorSession.label` is additive (`var` with a `nil` default,
+so the synthesized memberwise init accepts every existing call site) and
+`displayTitle` falls back to `goal` — pre-UX2-02 behaviour for any coordinator
+without a name.
+
+Blank means "use the suggestion", and the placeholder **shows** the
+suggestion, so there is no such thing as an unnamed Ensemble and no hidden
+default. `EnsembleStartModel.deriveName(from:)` takes the first line with
+words, strips Markdown structure (`#`, `-`, `*`, `+`, `>`, `1.`) and inline
+emphasis, and bounds it to 60 characters on a word boundary; with no such
+line it falls back to `"Ensemble <timestamp>"`. The timestamp string is
+memoized (`cachedTimestampName`) because `suggestedName(for:)` is called from
+`body` on every goal keystroke and date formatting is the only non-trivial
+work in it.
 
 ## Door 1: CLI gating reuses the Agent Terminal picker's own policy
 
@@ -121,7 +223,7 @@ Settings, never a hidden default:
 |---|---|---|
 | `maxConcurrentChildRuns` | 3, clamped to `session.conductorConcurrentRuns.activeLimit` | Stepper, captioned "Capped at N per window" |
 | `maxTotalChildRuns` | 12 | Stepper |
-| `allowedProviders` | Every CLI that probed ready (ADR 0018: a coordinator cannot reach a vendor the user did not authorize) | Per-CLI toggle row, seeded once per probe |
+| `allowedProviders` | Every CLI that probed ready (ADR 0018: a coordinator cannot reach a vendor the user did not authorize) | Multi-select icon grid (`EnsembleCLIIconCard`, `.allowed` mode), seeded once per probe |
 | `deadline` | None | Picker: 1 hour / 4 hours / 8 hours / no deadline |
 | `usageCeilingPercentPoints` | `nil` (out of v1 UI) | Not exposed — see Follow-ups |
 
@@ -269,6 +371,15 @@ rg -n 'keyboardShortcut\("e"' Sources/RafuApp/App/RafuAppCommands.swift
 rg -n '\.keyboardShortcut\(' -o Sources/RafuApp/App/RafuAppCommands.swift | sort | uniq -c
 ```
 
+UX2-02 adds `guidedColumnSplit` (the 3/12 fraction and both clamps),
+`goalStaysPlainTextThroughTheMarkdownPane` (the launcher receives the typed
+Markdown byte for byte), `ensembleNameDerivation` (structure stripping,
+bounding, the memoized timestamp fallback, typed-name precedence),
+`cliPickersAreIconGrids`, and `goalPaneIsSinglePane`. It also rewrites
+`canvasCloseAndWidthContract`'s New Ensemble half: that canvas is now asserted
+to NOT carry `.frame(maxWidth: 600` and to carry the two-column split instead.
+The New Run canvas's half of that test is unchanged.
+
 `EnsembleStartCanvasTests` covers the CLI gating matrix, grant defaults/
 clamping/deadline mapping, the guided door's goal-required guard, a
 spy-verified launch success (registers a coordinator session, then Done
@@ -292,6 +403,10 @@ Agent Terminal, AT-01). ⌘⇧E was free and is now New Ensemble.
 ## Related code, ADRs, and phases
 
 - `Sources/RafuApp/Views/EnsembleStartCanvas.swift`
+- `Sources/RafuApp/Views/EnsembleGoalPane.swift`
+- `Sources/RafuApp/Views/EnsembleCLIIconGrid.swift`
+- `Sources/RafuApp/Markdown/RafuMarkdownStyling.swift`
+- `Sources/RafuApp/Conductor/ConductorCLIIcons.swift`
 - `Sources/RafuApp/Models/WorkspaceSession.swift` (`ensembleStartCanvasVisible`,
   `ensembleNewRunCanvasVisible`, `showEnsembleStart()`,
   `showEnsembleNewRun()`)
