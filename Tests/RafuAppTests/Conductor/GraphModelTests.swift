@@ -223,6 +223,100 @@ struct GraphModelTests {
         #expect(presentations.allSatisfy { !$0.label.isEmpty })
     }
 
+    // MARK: - Model display (M02)
+
+    @Test("Every graph node states its model beside its CLI, in both lengths")
+    func nodesCarryModelLabels() throws {
+        var run = manifest(
+            id: "models",
+            startedBy: "co",
+            steps: [step(agent: "advisor", artifact: "brief.md", status: .completed)])
+        run.gate = ConductorRunManifest.Gate(kind: .step, stepIndex: 0)
+
+        let graph = ConductorGraphModel.build(
+            manifests: [run],
+            liveStates: [:],
+            coordinators: [
+                CoordinatorNodeInput(
+                    id: "co",
+                    title: "Coordinator",
+                    provider: .codex,
+                    terminalSessionID: nil,
+                    startedAt: Date(timeIntervalSince1970: 1),
+                    endedAt: nil,
+                    model: "gpt-5.6-sol")
+            ])
+
+        let coordinator = try #require(graph.nodes.first { $0.id == "co" })
+        #expect(coordinator.modelLabel == "GPT-5.6 Sol")
+        #expect(coordinator.modelDetailLabel == "Codex — GPT-5.6 Sol")
+
+        let runNode = try #require(graph.nodes.first { $0.id == "run-models" })
+        #expect(runNode.modelLabel == "gpt-5")
+        #expect(runNode.modelDetailLabel == "Codex — gpt-5")
+
+        let stepNode = try #require(graph.nodes.first { $0.id == "run-models/step-1" })
+        #expect(stepNode.modelLabel == "gpt-5")
+        #expect(stepNode.modelDetailLabel == "Codex — gpt-5")
+        // The CLI is the provider badge and the model is its own chip, so the
+        // detail line no longer repeats either.
+        #expect(stepNode.detail == "→ brief.md")
+
+        let gateNode = try #require(graph.nodes.first { $0.id == "run-models/gate" })
+        #expect(gateNode.modelLabel == "gpt-5")
+    }
+
+    @Test("An unset model never becomes the adapter's first curated entry")
+    func unsetModelIsNeverGuessed() throws {
+        var unsetStep = step(agent: "advisor", artifact: "brief.md", status: .pending)
+        unsetStep = ConductorRunManifest.Step(
+            agentName: unsetStep.agentName,
+            binding: ConductorRunManifest.AgentBinding(
+                provider: .codex, model: "  ", autonomy: .readOnly, adapterVersion: "test"),
+            inputArtifacts: [],
+            handoffArtifact: unsetStep.handoffArtifact,
+            gateAfter: false,
+            status: .pending,
+            startedAt: nil,
+            finishedAt: nil)
+
+        let graph = ConductorGraphModel.build(
+            manifests: [manifest(id: "unset", steps: [unsetStep])],
+            liveStates: [:],
+            coordinators: [
+                CoordinatorNodeInput(
+                    id: "co-unset",
+                    title: "Coordinator",
+                    provider: .codex,
+                    terminalSessionID: nil,
+                    startedAt: Date(timeIntervalSince1970: 1),
+                    endedAt: nil,
+                    model: nil)
+            ])
+
+        let curated = try #require(ConductorAdapterRegistry.adapter(for: .codex))
+            .curatedModels().first
+        let stepNode = try #require(graph.nodes.first { $0.id == "run-unset/step-1" })
+        let coordinator = try #require(graph.nodes.first { $0.id == "co-unset" })
+
+        #expect(stepNode.modelLabel == ConductorRunPresentation.unsetModelLabel)
+        #expect(coordinator.modelLabel == ConductorRunPresentation.unsetModelLabel)
+        #expect(stepNode.modelLabel != curated?.displayName)
+        #expect(stepNode.modelLabel != curated?.id)
+    }
+
+    @Test("A synthesized ended coordinator claims no model at all")
+    func synthesizedCoordinatorHasNoModel() throws {
+        let graph = ConductorGraphModel.build(
+            manifests: [manifest(id: "child", startedBy: "co-gone")],
+            liveStates: [:],
+            coordinators: [])
+
+        let root = try #require(graph.nodes.first { $0.id == "co-gone" })
+        #expect(root.modelLabel == nil)
+        #expect(root.modelDetailLabel == nil)
+    }
+
     private func coordinator(id: String, at: TimeInterval) -> CoordinatorNodeInput {
         CoordinatorNodeInput(
             id: id,

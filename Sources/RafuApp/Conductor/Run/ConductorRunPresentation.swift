@@ -19,6 +19,28 @@ nonisolated struct ConductorRunRowModel: Identifiable, Equatable, Sendable {
     let isLive: Bool
     /// `nil` when no gate is currently open for this run.
     let gateBadge: String?
+    /// Chip-sized "which CLI, which model" for this run — `nil` only when the
+    /// manifest has no steps at all. See `ConductorAgentSummary`.
+    let agentLabel: String?
+    /// The same identity, never abbreviated, for `help` and the accessibility
+    /// label. `agentLabel` may be truncated on screen; this must not be the
+    /// only place a distinguishing model name appears.
+    let agentDetailLabel: String?
+}
+
+/// "Which CLI, and which model" for a whole run or a whole ensemble, in two
+/// lengths: a chip-sized `label` and an `detailedLabel` that never abbreviates.
+///
+/// A run may bind several CLIs and several models across its steps, so the
+/// short form collapses to counts rather than picking one arbitrarily — the
+/// same refusal-to-guess that `ConductorModelResolution` applies to an unset
+/// model. The long form always enumerates every distinct pair, which is why
+/// every surface that truncates `label` also exposes `detailedLabel`.
+nonisolated struct ConductorAgentSummary: Equatable, Sendable {
+    /// e.g. "Codex · GPT-5 Codex", or "2 CLIs · 2 models".
+    let label: String
+    /// e.g. "Codex — GPT-5 Codex, Claude Code — CLI default".
+    let detailedLabel: String
 }
 
 /// One step row for `ConductorRunDetailCanvas`'s timeline (C5).
@@ -26,7 +48,17 @@ nonisolated struct ConductorStepRowModel: Identifiable, Equatable, Sendable {
     let index: Int
     let agentName: String
     let providerLabel: String
+    /// Short model name for a chip — a catalog `displayName` when Rafu knows
+    /// the id, the raw id when it does not, and
+    /// `ConductorRunPresentation.unsetModelLabel` when the step passed no
+    /// `--model` flag at all.
     let modelLabel: String
+    /// `modelLabel` plus where the choice came from, for `help` and the
+    /// accessibility label. Never truncated on screen.
+    let modelDetailLabel: String
+    /// `false` when Rafu is deferring to the CLI rather than naming a model.
+    /// Views use this to avoid dressing a deferral up as a specific choice.
+    let namesAModel: Bool
     /// This step's own status — the semantic field views switch on
     /// (advisor D8), never `statusSymbol`'s string.
     let status: RunStepStatus
@@ -86,6 +118,132 @@ nonisolated struct ConductorGraphNodePresentation: Equatable, Sendable {
 /// `TerminalSessionPresentation.symbol(_:)`'s established four-symbol
 /// pattern one-for-one with `RunStepStatus`'s six cases.
 nonisolated enum ConductorRunPresentation {
+    /// The ONE wording Rafu uses when no model is set anywhere. Every surface
+    /// this type feeds — run detail, the Runs panel, the graph — passes it to
+    /// `ConductorModelResolution.resolve(unsetLabel:)` so the vocabulary
+    /// cannot drift again ("Adapter default" here vs. "Provider default" in
+    /// the creation canvas was exactly that drift).
+    ///
+    /// "CLI default" and not "Adapter default" because the *CLI* is what
+    /// decides: no `--model` flag is passed, and the CLI applies its own
+    /// configured default, which Rafu cannot read. "Adapter" named the wrong
+    /// party — Rafu's adapter is precisely the thing that is NOT choosing.
+    static let unsetModelLabel = "CLI default"
+
+    /// Display names for `provider`'s shipped models. `curatedModels()` is
+    /// contractually pure and synchronous (see `ConductorCLIAdapter`), so this
+    /// is safe on the main actor and inside the graph's `@concurrent`
+    /// projection alike, and it never probes a CLI.
+    ///
+    /// Used ONLY to make a known id friendlier. An id absent from the catalog
+    /// still resolves — it simply displays as itself.
+    static func modelCatalog(for provider: ConductorCLIID?) -> [ConductorModelChoice] {
+        guard let provider else { return [] }
+        return ConductorAdapterRegistry.adapter(for: provider)?.curatedModels() ?? []
+    }
+
+    /// What a recorded binding's model resolves to for display.
+    ///
+    /// `AgentBinding.model` is a SNAPSHOT of what the role resolved to when
+    /// the run started, so no ensemble or Settings default is layered on top
+    /// here: doing so would relabel a finished run with today's preference and
+    /// claim knowledge of a past invocation Rafu does not have. An empty
+    /// snapshot means the step passed no `--model` flag, which is exactly
+    /// `.cliDecides`.
+    static func modelResolution(
+        for binding: ConductorRunManifest.AgentBinding
+    ) -> ConductorModelResolution {
+        ConductorModelResolution.resolve(
+            explicit: binding.model,
+            ensembleDefault: nil,
+            settingsDefault: nil,
+            catalog: modelCatalog(for: binding.provider),
+            unsetLabel: unsetModelLabel)
+    }
+
+    /// What a coordinator's chosen model resolves to for display. Same
+    /// honesty rule: a coordinator launched without a model gets
+    /// `unsetModelLabel`, never the first curated entry.
+    static func modelResolution(
+        forModel model: String?,
+        provider: ConductorCLIID?
+    ) -> ConductorModelResolution {
+        ConductorModelResolution.resolve(
+            explicit: model,
+            ensembleDefault: nil,
+            settingsDefault: nil,
+            catalog: modelCatalog(for: provider),
+            unsetLabel: unsetModelLabel)
+    }
+
+    /// The CLI/model identity of a whole run. `nil` for a manifest with no
+    /// steps — there is nothing to name.
+    static func agentSummary(for manifest: ConductorRunManifest) -> ConductorAgentSummary? {
+        agentSummary(for: manifest.steps.map(\.binding))
+    }
+
+    /// One CLI and one model when every binding agrees; counts otherwise.
+    /// Collapsing to "2 CLIs · 2 models" rather than showing the first pair
+    /// keeps the short form from implying a run used only what it happens to
+    /// start with — `detailedLabel` always carries the full breakdown.
+    static func agentSummary(
+        for bindings: [ConductorRunManifest.AgentBinding]
+    ) -> ConductorAgentSummary? {
+        guard let pairs = agentPairs(for: bindings) else { return nil }
+        let label: String
+        if pairs.providers.count == 1, pairs.models.count == 1 {
+            label = "\(pairs.providers[0]) · \(pairs.models[0])"
+        } else if pairs.providers.count == 1 {
+            label = "\(pairs.providers[0]) · \(pairs.models.count) models"
+        } else {
+            label =
+                "\(pairs.providers.count) CLIs · "
+                + "\(pairs.models.count) model\(pairs.models.count == 1 ? "" : "s")"
+        }
+        return ConductorAgentSummary(label: label, detailedLabel: pairs.detailedLabel)
+    }
+
+    /// The MODEL half of `agentSummary`, for a surface that already shows the
+    /// CLI on its own (the graph node's provider badge). `detailedLabel` still
+    /// names both, because that is the value `help`/VoiceOver must carry.
+    static func modelSummary(
+        for bindings: [ConductorRunManifest.AgentBinding]
+    ) -> ConductorAgentSummary? {
+        guard let pairs = agentPairs(for: bindings) else { return nil }
+        return ConductorAgentSummary(
+            label: pairs.models.count == 1 ? pairs.models[0] : "\(pairs.models.count) models",
+            detailedLabel: pairs.detailedLabel)
+    }
+
+    /// Distinct CLI/model pairs in first-seen order, plus the untruncated
+    /// enumeration every short form falls back on.
+    private static func agentPairs(
+        for bindings: [ConductorRunManifest.AgentBinding]
+    ) -> (providers: [String], models: [String], detailedLabel: String)? {
+        guard !bindings.isEmpty else { return nil }
+        var pairs: [(provider: String, model: String, detail: String)] = []
+        for binding in bindings {
+            let provider = binding.provider.displayName
+            let resolution = modelResolution(for: binding)
+            guard
+                !pairs.contains(where: {
+                    $0.provider == provider && $0.model == resolution.label
+                })
+            else { continue }
+            pairs.append((provider, resolution.label, resolution.detailedLabel))
+        }
+        var providers: [String] = []
+        var models: [String] = []
+        for pair in pairs {
+            if !providers.contains(pair.provider) { providers.append(pair.provider) }
+            if !models.contains(pair.model) { models.append(pair.model) }
+        }
+        return (
+            providers, models,
+            pairs.map { "\($0.provider) — \($0.detail)" }.joined(separator: ", ")
+        )
+    }
+
     static func symbol(for status: RunStepStatus) -> String {
         switch status {
         case .pending: "circle.dotted"
@@ -275,6 +433,7 @@ nonisolated enum ConductorRunPresentation {
             manifest.worktreeBranch.isEmpty ? "Main workspace" : manifest.worktreeBranch
         let subtitle = "\(completedCount)/\(manifest.steps.count) steps · \(branchDescription)"
         let isLive = liveState.map(isInFlight) ?? false
+        let agents = agentSummary(for: manifest)
         return ConductorRunRowModel(
             id: manifest.id,
             title: manifest.workflowName,
@@ -284,7 +443,9 @@ nonisolated enum ConductorRunPresentation {
             statusLabel: gateBadge(for: manifest) ?? label(for: status),
             needsAttention: manifest.gate != nil || needsAttention(for: status),
             isLive: isLive,
-            gateBadge: gateBadge(for: manifest))
+            gateBadge: gateBadge(for: manifest),
+            agentLabel: agents?.label,
+            agentDetailLabel: agents?.detailedLabel)
     }
 
     /// Every step row for `manifest`'s timeline. `liveStepIndex` should come
@@ -297,11 +458,14 @@ nonisolated enum ConductorRunPresentation {
     ) -> [ConductorStepRowModel] {
         manifest.steps.enumerated().map { index, step in
             let attempt = step.attempt ?? 1
+            let model = modelResolution(for: step.binding)
             return ConductorStepRowModel(
                 index: index,
                 agentName: step.agentName,
                 providerLabel: step.binding.provider.displayName,
-                modelLabel: step.binding.model.isEmpty ? "Adapter default" : step.binding.model,
+                modelLabel: model.label,
+                modelDetailLabel: model.detailedLabel,
+                namesAModel: model.namesAModel,
                 status: step.status,
                 statusSymbol: symbol(for: step.status),
                 statusLabel: label(for: step.status),
