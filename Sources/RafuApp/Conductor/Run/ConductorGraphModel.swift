@@ -18,6 +18,12 @@ nonisolated struct ConductorGraphNode: Identifiable, Equatable, Sendable {
         case run
         case step
         case gate
+        /// One entry from a completed step's `Step.proposals` (C8-04) — an
+        /// advisory suggestion the step's artifact declared, not a run the
+        /// coordinator has admitted. No verbs in v1: admission is the
+        /// coordinator's own `run` decision. Dismissed-vs-admitted
+        /// bookkeeping is a recorded follow-up, not built here.
+        case proposedGhost
     }
 
     let id: String
@@ -210,6 +216,32 @@ nonisolated enum ConductorGraphModel {
                 }
                 producerByArtifact[step.handoffArtifact, default: stepNodeID] = stepNodeID
                 priorStepNodeID = stepNodeID
+
+                // Ghost nodes from this step's declared `proposes:` list
+                // (C8-04) — advisory only, never a run the coordinator has
+                // admitted. `Step.proposals` is already capped at 16 by the
+                // controller that parsed it; `prefix(16)` here is belt-and-
+                // braces against a future producer of this field forgetting
+                // that cap.
+                for (proposalIndex, proposal) in (step.proposals ?? []).prefix(16).enumerated() {
+                    let ghostColumn = runColumn + index + 2
+                    let ghostNodeID = "\(stepNodeID)/proposal-\(proposalIndex + 1)"
+                    nodes.append(
+                        ConductorGraphNode(
+                            id: ghostNodeID,
+                            kind: .proposedGhost,
+                            title: "Proposed",
+                            runID: manifest.id,
+                            stepIndex: index,
+                            provider: step.binding.provider,
+                            status: nil,
+                            runState: .pending,
+                            detail: bounded(proposal, fallback: "Proposal"),
+                            column: ghostColumn,
+                            row: nextRow(in: ghostColumn)
+                        ))
+                    appendEdge(from: stepNodeID, to: ghostNodeID)
+                }
             }
 
             if let gate = manifest.gate {
@@ -217,6 +249,12 @@ nonisolated enum ConductorGraphModel {
                 let gateColumn = runColumn + manifest.steps.count + 1
                 let gateState: EnsembleGraphState =
                     gate.kind == .merge ? .mergeGate : .awaitingGate
+                let gateTitle: String =
+                    switch gate.kind {
+                    case .merge: "Merge gate"
+                    case .plan: "Plan gate"
+                    case .step: "Step gate"
+                    }
                 let provider =
                     manifest.steps.indices.contains(gate.stepIndex)
                     ? manifest.steps[gate.stepIndex].binding.provider
@@ -225,7 +263,7 @@ nonisolated enum ConductorGraphModel {
                     ConductorGraphNode(
                         id: gateNodeID,
                         kind: .gate,
-                        title: gate.kind == .merge ? "Merge gate" : "Step gate",
+                        title: gateTitle,
                         runID: manifest.id,
                         stepIndex: gate.stepIndex,
                         provider: provider,
@@ -234,7 +272,9 @@ nonisolated enum ConductorGraphModel {
                         runState: gateState,
                         detail: gate.kind == .merge
                             ? "Review worktree changes"
-                            : "Review step \(gate.stepIndex + 1)'s artifact",
+                            : gate.kind == .plan
+                                ? "Review the proposed plan"
+                                : "Review step \(gate.stepIndex + 1)'s artifact",
                         column: gateColumn,
                         row: nextRow(in: gateColumn)
                     ))
