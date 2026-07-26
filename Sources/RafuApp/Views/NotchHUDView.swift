@@ -1,3 +1,4 @@
+import RafuCore
 import SwiftUI
 
 /// The notch HUD's content (terminal-notch-hud.md N-4): a compact pill
@@ -14,6 +15,9 @@ struct NotchHUDView: View {
     @FocusState private var replyFocused: Bool
 
     private var theme: RafuTheme { controller.theme }
+    private var hudAccent: Color {
+        Color(rafuHex: RafuBuildInformation.identity.seamColorHex)
+    }
 
     var body: some View {
         Group {
@@ -110,7 +114,7 @@ struct NotchHUDView: View {
         HStack(spacing: RafuMetrics.space2) {
             Image(systemName: TerminalSessionPresentation.symbol(.bell))
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(theme.palette.accent)
+                .foregroundStyle(hudAccent)
             Text(event.title)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(theme.palette.textPrimary)
@@ -180,7 +184,7 @@ struct NotchHUDView: View {
         HStack(spacing: RafuMetrics.space2) {
             Image(systemName: TerminalSessionPresentation.symbol(.bell))
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(theme.palette.accent)
+                .foregroundStyle(hudAccent)
             // Clicking the session name reveals its tab and dismisses
             // (product decision 5).
             Button {

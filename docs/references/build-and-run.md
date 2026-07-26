@@ -1,20 +1,28 @@
 # Build and run contract
 
 - **Applies to:** local app/CLI builds, launch verification, and Codex Run
-- **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-12
+- **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-26
 
 ## One GUI entrypoint
 
-Use `./script/build_and_run.sh` as the single kill, build, stage, and launch path for the GUI. A SwiftUI SwiftPM executable launched raw is not equivalent to a foreground macOS app: it lacks the bundle metadata and launch behavior used by normal application execution.
+Use `./script/build_and_run.sh` as the single stop, build, stage, and launch
+path for the GUI. Local invocations produce **Rafu Lightning** by default; its
+process name is `RafuLightning`, so the sanctioned script cannot stop a
+release `Rafu` the user is editing in. A SwiftUI SwiftPM executable launched
+raw is not equivalent to a foreground macOS app: it lacks the bundle metadata
+and launch behavior used by normal application execution.
 
 The script must:
 
-1. Stop a previously running `Rafu` process.
+1. Stop only the selected variant's process. The local default is
+   `RafuLightning`; package and stage modes stop nothing.
 2. Build the `RafuApp` and `rafu` products.
-3. Stage `dist/Rafu.app` with `Contents/MacOS`, `Contents/Resources`, and `Contents/SharedSupport/bin`.
-4. Copy and rename the GUI executable to `Contents/MacOS/Rafu`.
+3. Stage `dist/Rafu Lightning.app` locally, with `Contents/MacOS`,
+   `Contents/Resources`, and `Contents/SharedSupport/bin`.
+4. Copy and rename the GUI executable to `Contents/MacOS/RafuLightning`.
 5. Copy the CLI to `Contents/SharedSupport/bin/rafu`.
-6. Render the vector seam mark into a complete `.icns` iconset and copy it to
+6. Render the vector seam mark with the variant token (silver for Lightning,
+   gold for release) into a complete `.icns` iconset and copy it to
    `Contents/Resources/Rafu.icns`.
 7. Generate local `Info.plist` metadata, including `CFBundleIconFile=Rafu.icns`
    and a `UTExportedTypeDeclarations` entry for the private editor drag UTI
@@ -28,9 +36,10 @@ The script must:
 ## Supported modes
 
 ```bash
-./script/build_and_run.sh             # build and launch
-./script/build_and_run.sh --stage     # validate an ephemeral bundle without stopping or launching Rafu
-./script/build_and_run.sh --verify    # launch and confirm the Rafu process exists
+./script/build_and_run.sh             # build and launch Rafu Lightning
+./script/build_and_run.sh --stage     # validate an ephemeral Lightning bundle; stop/launch nothing
+./script/build_and_run.sh --package   # keep dist/Rafu Lightning.app; stop/launch nothing
+./script/build_and_run.sh --verify    # launch and confirm RafuLightning exists
 ./script/build_and_run.sh --debug     # build and launch executable under lldb
 ./script/build_and_run.sh --logs      # launch, then stream process logs
 ./script/build_and_run.sh --telemetry # launch, then stream Rafu-subsystem logs
@@ -96,9 +105,11 @@ theme-JSON check.
 
 1. Classify the failure as compiler, linker, package graph, staging script, bundle metadata, or runtime launch.
 2. Run the narrowest direct build that exposes it: `swift build --product RafuApp` or `swift build --product rafu`.
-3. Inspect `dist/Rafu.app/Contents/Info.plist`, `Contents/Resources/Rafu.icns`, and
-   executable permissions for staging failures. Rebuild and relaunch the bundle
-   before treating a previously cached Dock icon as current evidence.
+3. Inspect `dist/Rafu Lightning.app/Contents/Info.plist`,
+   `Contents/Resources/Rafu.icns`, and executable permissions for local
+   staging failures. A release-package check instead uses `dist/Rafu.app`.
+   Rebuild and relaunch the bundle before treating a previously cached Dock
+   icon as current evidence.
 4. Use `--logs` or `--telemetry` for startup/runtime behavior and `--debug` for a symbolized crash.
 5. Do not add an ad hoc second run script.
 
@@ -110,12 +121,17 @@ theme-JSON check.
 - [GitHub Actions runner images](https://github.com/actions/runner-images)
 - [GitHub checkout action](https://github.com/actions/checkout)
 
-The staged `dist/Rafu.app` is a local development artifact. SwiftPM's executable signature is not a sealed, Developer ID-signed application bundle, so it must never be uploaded as a release. Phase 5 owns nested-code signing, resource sealing, hardened runtime, notarization, and Gatekeeper validation.
+The staged app bundle—Lightning locally or Rafu in release-package mode—is
+not a sealed, Developer ID-signed application. It must never be uploaded
+outside the existing unsigned-release workflow. Phase 5 owns nested-code
+signing, resource sealing, hardened runtime, notarization, and Gatekeeper
+validation.
 
 ## Packaging and releases
 
-- `./script/build_and_run.sh --package` stages `dist/Rafu.app` without
-  launching or deleting it — the mode CI uses to produce release artifacts.
+- `./script/build_and_run.sh --package` stages
+  `dist/Rafu Lightning.app` without stopping, launching, or deleting it.
+  Release CI sets `RAFU_APP_NAME=Rafu`, which instead stages `dist/Rafu.app`.
 - `RAFU_VERSION=<semver>` overrides the Info.plist bundle version at staging
   time; the release workflow also stamps the same version into
   `Sources/RafuCore/BuildInformation.swift` before building.
@@ -129,3 +145,7 @@ The staged `dist/Rafu.app` is a local development artifact. SwiftPM's executable
 - The generated Info.plist declares `CFBundleDocumentTypes` for
   `public.folder` so `open -a Rafu <folder>` (the CLI's mechanism) routes as
   a document-open event.
+
+See [`app-variants-and-state-isolation.md`](app-variants-and-state-isolation.md)
+for bundle/process/state identity, CLI pairing, and the intentionally empty
+Lightning state.

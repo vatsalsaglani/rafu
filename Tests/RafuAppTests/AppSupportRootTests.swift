@@ -62,11 +62,16 @@ struct AppSupportRootTests {
             )
         )
         var violations: [String] = []
+        let forbiddenConstructions = [
+            #"appending(path: "Rafu"#,
+            #"appendingPathComponent("Rafu"#,
+            #"Application Support/Rafu"#,
+        ]
 
         for case let file as URL in enumerator
         where file.pathExtension == "swift" && file.path != identityFile {
             let source = try String(contentsOf: file, encoding: .utf8)
-            if source.contains(#"appending(path: "Rafu"#) {
+            if forbiddenConstructions.contains(where: source.contains) {
                 violations.append(file.path.replacingOccurrences(of: root.path + "/", with: ""))
             }
         }

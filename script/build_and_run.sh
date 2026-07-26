@@ -2,18 +2,34 @@
 set -euo pipefail
 
 MODE="${1:-run}"
-APP_NAME="Rafu"
+APP_NAME="${RAFU_APP_NAME:-Rafu Lightning}"
+APP_EXECUTABLE="${APP_NAME// /}"
 GUI_PRODUCT="RafuApp"
 CLI_PRODUCT="rafu"
-BUNDLE_ID="dev.vatsalsaglani.rafu"
 MIN_SYSTEM_VERSION="15.0"
 # Overridable so the release workflow can stamp the branch-derived version
 # into the bundle without editing this script.
 VERSION="${RAFU_VERSION:-0.1.0}"
 
+case "$APP_NAME" in
+  "Rafu Lightning")
+    BUNDLE_ID="dev.vatsalsaglani.rafu.lightning"
+    SEAM_COLOR="#C0C6CE"
+    ;;
+  "Rafu")
+    BUNDLE_ID="dev.vatsalsaglani.rafu"
+    SEAM_COLOR="#E3A857"
+    ;;
+  *)
+    echo "RAFU_APP_NAME must be either 'Rafu Lightning' or 'Rafu'." >&2
+    exit 2
+    ;;
+esac
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
 STAGE_ONLY=false
+STOPS_EXISTING_APP=false
 
 if [[ $# -gt 1 ]]; then
   echo "usage: $0 [run|--stage|--package|--debug|--logs|--telemetry|--verify]" >&2
@@ -24,7 +40,10 @@ case "$MODE" in
   --stage|stage)
     STAGE_ONLY=true
     ;;
-  run|--package|package|--debug|debug|--logs|logs|--telemetry|telemetry|--verify|verify)
+  --package|package)
+    ;;
+  run|--debug|debug|--logs|logs|--telemetry|telemetry|--verify|verify)
+    STOPS_EXISTING_APP=true
     ;;
   *)
     echo "usage: $0 [run|--stage|--package|--debug|--logs|--telemetry|--verify]" >&2
@@ -33,7 +52,7 @@ case "$MODE" in
 esac
 
 if [[ "$STAGE_ONLY" == true ]]; then
-  APP_BUNDLE="$DIST_DIR/.Rafu-stage.app"
+  APP_BUNDLE="$DIST_DIR/.$APP_EXECUTABLE-stage.app"
 else
   APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 fi
@@ -42,15 +61,15 @@ APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_SHARED_BIN="$APP_CONTENTS/SharedSupport/bin"
-APP_BINARY="$APP_MACOS/$APP_NAME"
+APP_BINARY="$APP_MACOS/$APP_EXECUTABLE"
 CLI_BINARY="$APP_SHARED_BIN/$CLI_PRODUCT"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 APP_ICON_NAME="Rafu.icns"
 APP_ICON="$APP_RESOURCES/$APP_ICON_NAME"
 
 cd "$ROOT_DIR"
-if [[ "$STAGE_ONLY" == false ]]; then
-  pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+if [[ "$STOPS_EXISTING_APP" == true ]]; then
+  pkill -x "$APP_EXECUTABLE" >/dev/null 2>&1 || true
 fi
 
 swift build --product "$GUI_PRODUCT"
@@ -84,7 +103,7 @@ if [[ -d "$BUILD_BIN_DIR/$RESOURCE_BUNDLE_NAME" ]]; then
   cp -R "$BUILD_BIN_DIR/$RESOURCE_BUNDLE_NAME" "$APP_BUNDLE/$RESOURCE_BUNDLE_NAME"
 fi
 
-"$ROOT_DIR/script/generate_app_icon.sh" "$APP_ICON"
+"$ROOT_DIR/script/generate_app_icon.sh" "$APP_ICON" "$SEAM_COLOR"
 
 cat >"$INFO_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -92,7 +111,7 @@ cat >"$INFO_PLIST" <<PLIST
 <plist version="1.0">
 <dict>
   <key>CFBundleExecutable</key>
-  <string>$APP_NAME</string>
+  <string>$APP_EXECUTABLE</string>
   <key>CFBundleIdentifier</key>
   <string>$BUNDLE_ID</string>
   <key>CFBundleName</key>
@@ -199,7 +218,7 @@ case "$MODE" in
     rm -rf "$APP_BUNDLE"
     ;;
   --package|package)
-    # CI packaging: stage dist/Rafu.app, verify, never launch, keep the bundle.
+    # Packaging stages and verifies without stopping or launching either app.
     echo "Packaged $APP_BUNDLE (version $VERSION)"
     ;;
   run)
@@ -210,21 +229,22 @@ case "$MODE" in
     ;;
   --logs|logs)
     open_app
-    /usr/bin/log stream --info --style compact --predicate "process == \"$APP_NAME\""
+    /usr/bin/log stream --info --style compact --predicate "process == \"$APP_EXECUTABLE\""
     ;;
   --telemetry|telemetry)
     open_app
-    /usr/bin/log stream --info --style compact --predicate "subsystem == \"$BUNDLE_ID\""
+    /usr/bin/log stream --info --style compact --predicate \
+      'subsystem BEGINSWITH "dev.vatsalsaglani.rafu"'
     ;;
   --verify|verify)
     open_app
     for _ in {1..30}; do
-      if pgrep -x "$APP_NAME" >/dev/null; then
+      if pgrep -x "$APP_EXECUTABLE" >/dev/null; then
         exit 0
       fi
       sleep 0.1
     done
-    echo "$APP_NAME did not remain running after launch." >&2
+    echo "$APP_EXECUTABLE did not remain running after launch." >&2
     exit 1
     ;;
 esac

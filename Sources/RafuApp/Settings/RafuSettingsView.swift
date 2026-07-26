@@ -19,7 +19,8 @@ struct RafuSettingsView: View {
                             RafuBrandMarkView().frame(width: 58, height: 58)
                             VStack(alignment: .leading, spacing: 3) {
                                 HStack(alignment: .firstTextBaseline) {
-                                    Text("Rafu").font(.title2.weight(.semibold))
+                                    Text(RafuBuildInformation.appName)
+                                        .font(.title2.weight(.semibold))
                                     Text("રફૂ").font(.title3).foregroundStyle(.secondary)
                                 }
                                 Text("Focused repository mending, native to macOS.")
@@ -27,7 +28,10 @@ struct RafuSettingsView: View {
                             }
                         }
                         LabeledContent("Version", value: RafuBuildInformation.version)
-                        LabeledContent("Command Line Tool", value: "Bundled as rafu")
+                        LabeledContent(
+                            "Command Line Tool",
+                            value: "Bundled as \(RafuBuildInformation.cliName)"
+                        )
                         Toggle("Show process memory in status bar", isOn: $showsProcessMemory)
                         Picker("Terminal attention", selection: $terminalAttentionSurface) {
                             ForEach(TerminalAttentionSurface.allCases, id: \.rawValue) { surface in

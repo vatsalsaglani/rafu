@@ -3,10 +3,12 @@ import SwiftUI
 
 @main
 struct RafuApplication: App {
+    static let displayName = RafuBuildInformation.appName
+
     @NSApplicationDelegateAdaptor(RafuAppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup("Rafu", id: "workspace") {
+        WindowGroup(Self.displayName, id: "workspace") {
             WorkspaceSceneRoot()
         }
         .defaultSize(width: 1_100, height: 720)
