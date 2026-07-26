@@ -1,9 +1,7 @@
 # C8-03 — Capability token, grant, coordinator launch, mutating verbs
 
-- **Status:** Ready. Branch: `conductor/c8-03-mutating-verbs` (from `main`
-  AFTER C8-01 and C8-02 have merged — verify in preflight that
-  `Sources/RafuCore/Ensemble/EnsembleModels.swift` exists and ADR 0018
-  contains the Amendment section; if either is missing, STOP and report).
+- **Status:** Implemented and headlessly verified on
+  `conductor/c8-03-mutating-verbs` (2026-07-26).
 - Wave 2 — runs parallel with C8-06. You must NOT touch
   `ConductorRunsPanelView.swift`, `RafuAppCommands.swift`,
   `CommandPaletteView.swift`, or `EditorCanvasView.swift` (C8-06 owns
