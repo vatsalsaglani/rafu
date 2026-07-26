@@ -82,6 +82,18 @@ func vendoredAgentMarksHaveOnePointIntrinsicSizeInMenus() throws {
     #expect(symbolSize.width > 8 && symbolSize.height > 8)
 }
 
+/// UX2-03: the Codex card shows the **OpenAI** mark, not lobe-icons' `codex`
+/// slug, because users did not recognise the latter as Codex. The doc's refresh
+/// loop still maps `codex → agent-codex.svg`, so a naive re-run would silently
+/// revert this product decision — this pin turns that into a failing test.
+/// See `docs/references/agent-icon-assets.md`.
+@Test("The Codex agent mark is the pinned OpenAI mark")
+func codexAgentMarkIsTheOpenAIMark() throws {
+    let data = try Data(contentsOf: fileIconURL(named: "agent-codex"))
+    let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    #expect(hash == "a4b3229f45f5c7e3b31bf972a4dd5c488518e34c920ae1d0650dcf90d0e8f047")
+}
+
 @Test("Existing file-tree vendor icons remain byte-identical")
 func existingFileTreeVendorIconsRemainByteIdentical() throws {
     let expectedSHA256 = [

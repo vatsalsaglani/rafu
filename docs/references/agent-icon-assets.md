@@ -25,12 +25,29 @@ source file came from
 | `ConductorCLIID` | Source slug | Vendored filename | Committed SHA-256 |
 |---|---|---|---|
 | `claudeCode` | `claude` | `agent-claude-code.svg` | `0ac9f74817666e66ca23a6e30b9738374f442ac589917f95dd98d51763ec213b` |
-| `codex` | `codex` | `agent-codex.svg` | `cd3e7994c885868cb6fbccc685d5faf666e24e07d59bd5e9a940fb71e9570b76` |
+| `codex` | `openai` (**not** `codex`) | `agent-codex.svg` | `a4b3229f45f5c7e3b31bf972a4dd5c488518e34c920ae1d0650dcf90d0e8f047` |
 | `openCode` | `opencode` | `agent-opencode.svg` | `ebfb6fa62d13adadcb7b870a13cff01952b9ab9c3f4c40ce1ea7e7adda0cb7c0` |
 | `cline` | `cline` | `agent-cline.svg` | `c5773fd2d3f5302c0237df15e1c38a7cd7dcddbbe0b1550eed964356686743e6` |
 | `kimi` | `kimi` | `agent-kimi.svg` | `ec134c64f7e70b931128c85ccc05afee1bd2cd0549b2fad2c97cc6ae24c8db70` |
 | `geminiCLI` | `gemini` | `agent-gemini.svg` | `7bcfe61adbb20478548f27949a4294f006cd97b1a23e207ae62793ecc38b5d80` |
 | `cursor` | `cursor` | `agent-cursor.svg` | `6fa750417439491bb76ef6a781f479e17d513311bf2c1f6f5d9e0d091f3ca18a` |
+
+### Codex uses the OpenAI mark (UX2-03)
+
+`agent-codex.svg` is the `openai` slug, not the `codex` slug it started as. The
+lobe `codex` mark — an abstract glyph — was not recognisable as Codex during
+dogfooding, and the launcher grid is icon-only, so the mark is the whole visual
+identity there. The OpenAI mark is the sign users actually associate with the
+Codex CLI, comes from the same pinned 1.94.0 catalog, and needed the same
+normalization (drop `style`, drop `<title>`; `fill="currentColor"` and
+`viewBox="0 0 24 24"` preserved).
+
+Its previous hash was
+`cd3e7994c885868cb6fbccc685d5faf666e24e07d59bd5e9a940fb71e9570b76`. The refresh
+loop below still lists `codex agent-codex`, which would silently revert this —
+`FileIconAssetsTests.codexAgentMarkIsTheOpenAIMark` pins the new hash so a naive
+re-run fails a test instead of shipping the wrong mark. **When refreshing, use
+the `openai` slug for `agent-codex.svg`.**
 
 The three read-only file-tree assets had these hashes before and after AT-01:
 
@@ -65,7 +82,7 @@ base_url="https://unpkg.com/@lobehub/icons-static-svg@${version}/icons"
 
 for mapping in \
   "claude agent-claude-code" \
-  "codex agent-codex" \
+  "openai agent-codex" \
   "opencode agent-opencode" \
   "cline agent-cline" \
   "kimi agent-kimi" \
