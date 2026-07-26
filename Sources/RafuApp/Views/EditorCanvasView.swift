@@ -65,6 +65,8 @@ struct EditorCanvasView: View {
             EnsembleStartCanvas(session: session)
         case .ensembleNewRun:
             ConductorNewRunCanvas(session: session)
+        case .settings:
+            SettingsCanvas(session: session)
         case .editor:
             EditorLayoutTreeView(node: session.editorLayout.root, session: session)
         }

@@ -482,6 +482,7 @@ final class WorkspaceSession {
         conductorGraphVisible = false
         ensembleStartCanvasVisible = false
         ensembleNewRunCanvasVisible = false
+        settingsVisible = false
         selectedDocumentID = nil
         selectedTreePath = nil
     }
@@ -506,6 +507,7 @@ final class WorkspaceSession {
         conductorRunCanvasID = nil
         ensembleStartCanvasVisible = false
         ensembleNewRunCanvasVisible = false
+        settingsVisible = false
         selectedDocumentID = nil
         selectedTreePath = nil
         navigatorMode = .runs
@@ -527,6 +529,38 @@ final class WorkspaceSession {
     var ensembleNewRunCanvasVisible = false
     @ObservationIgnored private var ensembleStartLaunchInProgress = false
 
+    /// Hosts Settings as a window-scoped, non-restorable editor canvas.
+    /// The native Settings scene remains the no-window fallback for ⌘,;
+    /// focused workspace windows route here instead.
+    var settingsVisible = false
+
+    func showSettings() {
+        closeBlame()
+        if gitOpenDiff != nil {
+            closeGitDiff()
+        }
+        settingsVisible = true
+        conductorRunCanvasID = nil
+        conductorGraphVisible = false
+        // UX-01 landed the creation canvases in parallel with this one, so
+        // neither branch cleared the other's flags. Settings is their peer:
+        // without these two lines the resolver's ordering silently becomes
+        // load-bearing (editor-canvas-routing.md, "Exclusivity lives in the
+        // mutators").
+        ensembleStartCanvasVisible = false
+        ensembleNewRunCanvasVisible = false
+        selectedDocumentID = nil
+        selectedTreePath = nil
+    }
+
+    func closeSettings() {
+        guard settingsVisible else { return }
+        settingsVisible = false
+        if selectedDocumentID == nil, let fallback = openDocuments.last {
+            select(fallback)
+        }
+    }
+
     /// C8-07's four "New Ensemble…" entry points share this guarded seam.
     func showEnsembleStart() {
         guard descriptor != nil else { return }
@@ -534,6 +568,7 @@ final class WorkspaceSession {
         ensembleNewRunCanvasVisible = false
         conductorGraphVisible = false
         conductorRunCanvasID = nil
+        settingsVisible = false
         selectedDocumentID = nil
         selectedTreePath = nil
         navigatorMode = .runs
@@ -565,6 +600,7 @@ final class WorkspaceSession {
         ensembleStartCanvasVisible = false
         conductorGraphVisible = false
         conductorRunCanvasID = nil
+        settingsVisible = false
         selectedDocumentID = nil
         selectedTreePath = nil
         navigatorMode = .runs
@@ -1110,6 +1146,7 @@ final class WorkspaceSession {
             ensembleStartCanvasVisible = false
         }
         ensembleNewRunCanvasVisible = false
+        settingsVisible = false
         // Revealing (unlike a plain layout selection change) doesn't route
         // through `selectEditorTab`/`synchronizeSelectionFromLayout`, so
         // this is the third bell-clear hook (terminal-manager.md T-E):

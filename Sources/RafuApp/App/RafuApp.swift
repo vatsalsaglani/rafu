@@ -21,5 +21,6 @@ struct RafuApplication: App {
         Settings {
             RafuSettingsView()
         }
+        .defaultSize(width: 760, height: 620)
     }
 }

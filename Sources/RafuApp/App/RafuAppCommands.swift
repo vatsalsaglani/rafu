@@ -2,10 +2,21 @@ import AppKit
 import SwiftUI
 
 struct RafuAppCommands: Commands {
+    @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
     @FocusedValue(\.workspaceSession) private var workspaceSession
 
     var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") {
+                SettingsCommandRouter.open(
+                    workspaceSession: workspaceSession,
+                    openFallback: openSettings.callAsFunction
+                )
+            }
+            .keyboardShortcut(",", modifiers: .command)
+        }
+
         CommandGroup(replacing: .newItem) {
             // Issue #6: ⌘N opens a blank untitled document (⌘S saves it
             // anywhere via a save panel), matching VS Code's File > New File

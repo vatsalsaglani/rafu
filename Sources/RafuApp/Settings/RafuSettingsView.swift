@@ -99,7 +99,8 @@ struct RafuSettingsView: View {
         .environment(\.rafuTheme, activeTheme)
         .preferredColorScheme(preferredColorScheme)
         .scenePadding()
-        .frame(width: 760, height: 620)
+        .frame(maxWidth: 820, maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var activeTheme: RafuTheme {
