@@ -286,9 +286,12 @@ workflow file.
 | M6 | Switch to **Existing Workflow**, and with three Ensemble runs already active in this window, try to start a fourth from here | The **Start Run** button is disabled with the SAME "already has 3 active Ensemble runs" wording the Runs panel's New Run sheet shows — not a different message. |
 | M7 | Close the sheet with **Esc**; reopen it and complete the entire guided door using ONLY the keyboard (Tab/Space/Return, no mouse) | Esc cancels without starting anything. Every control — the door picker, CLI rows, goal field, grant steppers/toggles, deadline picker, and Start/Cancel — is reachable and operable by keyboard alone. |
 
-**Watch for:** M2's reasons must match Settings → Agents exactly — this
-sheet reuses that exact probe, so any mismatch is a real regression, not a
-wording choice. M4 is the single most important check in this section: if
+**Watch for:** in M2, what must match Settings → Agents is the READY/DISABLED
+verdict for each CLI (both surfaces read the same probe, so a CLI enabled in
+one and disabled in the other is a real regression) and the signed-out hint
+text. The not-installed wording and the `.unknown` case are deliberately
+different per surface, as M2 spells out — do not report those as mismatches.
+M4 is the single most important check in this section: if
 the sheet dismisses before showing the copyable goal, the user has no way to
 tell the coordinator what to do.
 

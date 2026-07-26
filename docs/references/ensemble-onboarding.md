@@ -44,7 +44,25 @@ identically to the Agent Terminal sheet's rows, so the two pickers can never
 silently drift apart.
 
 A CLI is enabled only when `isReady` (installed AND authenticated-or-unknown,
-matching the adapter contract's "unknown never blocks a run" rule). A
+matching the adapter contract's "unknown never blocks a run" rule).
+`AgentTerminalLaunchService.options()` maps BOTH `.authenticated` and
+`.unknown` to `.ready`, which is byte-identical to the launch-time re-check
+inside `ConductorCoordinatorLauncher` — the same two-case mapping written
+once per side, deliberately, so the sheet cannot enable a CLI the launcher
+would then refuse (or vice versa). `.unknown` being launchable is intentional
+policy for delegated-auth CLIs, not a gap.
+
+**The policy is shared; the strings are not.** Because each surface names its
+own action, the disabled-reason copy is intentionally NOT equal across
+surfaces, and a diff of the strings is not evidence of drift:
+
+- Only the **not-authenticated** hint is verbatim-shared (it is the adapter's
+  own vendor text).
+- **Not-installed** wording is per-surface by design.
+- **`.unknown`** shows an explicit explanation in Settings → Agents but no
+  reason at all in this sheet, because here it is simply ready.
+
+A
 disabled row always carries a stated reason (glyph + text via
 `Label(_:systemImage:)`, never color alone) and the same text appears in its
 `accessibilityLabel`:
@@ -85,18 +103,26 @@ clock (`Date.init` by default, a fixed closure in tests).
 
 ## The paste-fallback rule is universal, not conditional
 
-`ConductorCoordinatorLauncher.start` passes only
-`AgentTerminalLaunchShape.arguments(model:)` to the spawned terminal — that
-shape (`Sources/RafuApp/Terminal/AgentTerminalLaunchService.swift`) appends
-only an optional model flag; **no currently supported CLI has an
-initial-prompt argument form** (verified in `EnsembleCoordinatorLaunchTests`:
-`!spec.arguments.contains(coordinator.goal)`, for every adapter). Rafu never
+**No agent CLI Rafu supports accepts an initial-prompt argument.** This is
+the single highest-value fact in this note. `AgentTerminalLaunchShape`
+(`Sources/RafuApp/Terminal/AgentTerminalLaunchService.swift`) is the only
+place argv for an interactive agent CLI is composed, and
+`arguments(model:)` returns exactly `interactiveArguments` plus an optional
+`[modelFlag, model]` pair — nothing else. `AgentTerminalLaunchShape.forCLI(_:)`
+defines no prompt form for **any** of the seven CLIs (Claude Code, Codex,
+OpenCode, Cline, Kimi, Gemini CLI, Cursor CLI). `ConductorCoordinatorLauncher.start`
+passes that shape's argv straight through, so the goal text provably never
+reaches the child process: `EnsembleCoordinatorLaunchTests` asserts
+`!spec.arguments.contains(coordinator.goal)`. Rafu never
 synthesizes terminal input, so the copyable-goal confirmation row
 (`EnsembleStartSheet.launchConfirmation`) is shown **after every successful
 guided launch**, unconditionally — it is not gated on a per-CLI capability
 check, because none currently exists to gate on. If a future CLI gains a
 verified prompt argument, the seam to extend is
-`AgentTerminalLaunchShape.forCLI(_:)`/`.arguments(model:)`, not this sheet.
+`AgentTerminalLaunchShape.forCLI(_:)`/`.arguments(model:)`, not this sheet —
+and only at that point does a per-CLI capability check become meaningful.
+Do not add a "does this CLI take a prompt?" branch to the sheet while the
+answer is uniformly no; it would be dead code that reads as a live policy.
 
 ### Dismiss timing (a deliberate two-phase flow)
 
@@ -130,6 +156,34 @@ Workflows tab themselves to see it listed there. Follow-up: expose a
 navigation state onto the session) so a future caller — Door 2 among
 others — can request a specific panel tab, not just panel visibility.
 
+## Two defect classes caught in review (patterns, not one-offs)
+
+Both were found by read-only review of this sheet, and both generalise to any
+future Rafu form that prefills per-provider defaults or gathers consent.
+
+**1. A per-provider default prefilled with `if field.isEmpty` leaks one
+vendor's value across a provider switch.** The model-identifier field was
+initially seeded only when empty, so switching the coordinator CLI left the
+previous vendor's model string in place and would have launched CLI B with
+CLI A's model. The correct pattern is the **unconditional reset** already used
+by `AgentTerminalSheet.select(_:)`: on provider change, overwrite the field
+from the newly selected provider's default, empty or not. Fixed here by
+routing all provider changes through `EnsembleStartModel.selectProvider(_:)`
+rather than binding the picker straight to the stored property. Rule: an
+`isEmpty` guard is correct for "don't clobber what the user typed" only when
+the default does not depend on another control's value; as soon as it does,
+the guard becomes a cross-contamination bug.
+
+**2. A consent control that can reach the empty set produces a coordinator
+that silently refuses every child run.** The grant's "Allowed CLIs" toggles
+could all be switched off, yielding `allowedProviders == []`. Nothing in the
+UI objected, the coordinator launched normally, and then every child run was
+rejected with **exit 77** by `ConductorEnsembleGrant`'s authorization check —
+a failure visible only inside the coordinator CLI's own output, where Rafu
+shows the user nothing. Rule: any consent surface whose selection can become
+empty needs a non-empty guard on its primary action, because "authorized for
+nothing" is indistinguishable from a broken product from the user's seat.
+
 ## Door 3: expert reuse
 
 Door 3 embeds `ConductorWorkflowLaunchModel` exactly as
@@ -158,6 +212,11 @@ rather than writing a second copy of that message.
   Ensemble surface to persist personal defaults is future work, not required
   for the guided door to be usable today.
 - **Door 2 → Workflows tab.** See "Door 2" above.
+- **Door 2 re-derives the instantiated file path** instead of reading it back
+  from the reloaded library after `instantiate(...)` returns. Correct against
+  today's template layout, but it encodes that layout in a second place: if a
+  template's file arrangement changes, this door would open a blank editor tab
+  with no error. Prefer having the library report the paths it actually wrote.
 
 ## Verification
 
