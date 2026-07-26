@@ -1,10 +1,9 @@
 # C8-07 — "New Ensemble…" (⌘⇧E): three doors, guided cold start
 
-- **Status:** Ready. Branch: `conductor/c8-07-onboarding` (from `main`
-  AFTER wave 2 fully merged — verify `ConductorCoordinatorLauncher` and
-  `ConductorGraphModel` exist; either missing ⇒ STOP and report).
-  Wave 3 — parallel with C8-04. (C8-05 moved to wave 2, so the skill
-  pack and the Settings → Ensemble pane are already on `main`.)
+- **Status:** Delivered headlessly on `conductor/c8-07-onboarding`; the
+  sheet-eyeball, keyboard-only, VoiceOver, and second-window GUI passes
+  (manual-test-plan section M) remain for post-merge `main`. Wave 3 —
+  parallel with C8-04.
 - **This kills the cold-start problem** — C8-ux problem #1, "the single
   biggest adoption risk in the whole feature."
 
