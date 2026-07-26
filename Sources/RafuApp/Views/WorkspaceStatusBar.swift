@@ -48,6 +48,16 @@ struct WorkspaceStatusBar: View {
 
             Text(descriptor == nil ? "Ready" : "Local editor")
                 .foregroundStyle(theme.palette.textMuted)
+
+            Button {
+                session.showSettings()
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(theme.palette.textMuted)
+            .accessibilityLabel("Open Settings")
+            .help("Open Settings")
         }
         .font(.caption)
         .foregroundStyle(theme.palette.textSecondary)

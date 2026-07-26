@@ -480,6 +480,7 @@ final class WorkspaceSession {
         navigatorMode = .runs
         conductorRunCanvasID = runID
         conductorGraphVisible = false
+        settingsVisible = false
         selectedDocumentID = nil
         selectedTreePath = nil
     }
@@ -502,6 +503,7 @@ final class WorkspaceSession {
     func showConductorGraph() {
         conductorGraphVisible = true
         conductorRunCanvasID = nil
+        settingsVisible = false
         selectedDocumentID = nil
         selectedTreePath = nil
         navigatorMode = .runs
@@ -510,6 +512,31 @@ final class WorkspaceSession {
     func closeConductorGraph() {
         guard conductorGraphVisible else { return }
         conductorGraphVisible = false
+        if selectedDocumentID == nil, let fallback = openDocuments.last {
+            select(fallback)
+        }
+    }
+
+    /// Hosts Settings as a window-scoped, non-restorable editor canvas.
+    /// The native Settings scene remains the no-window fallback for ⌘,;
+    /// focused workspace windows route here instead.
+    var settingsVisible = false
+
+    func showSettings() {
+        closeBlame()
+        if gitOpenDiff != nil {
+            closeGitDiff()
+        }
+        settingsVisible = true
+        conductorRunCanvasID = nil
+        conductorGraphVisible = false
+        selectedDocumentID = nil
+        selectedTreePath = nil
+    }
+
+    func closeSettings() {
+        guard settingsVisible else { return }
+        settingsVisible = false
         if selectedDocumentID == nil, let fallback = openDocuments.last {
             select(fallback)
         }
@@ -1053,6 +1080,7 @@ final class WorkspaceSession {
         // is untouched, only the canvas visibility clears.
         conductorRunCanvasID = nil
         conductorGraphVisible = false
+        settingsVisible = false
         // Revealing (unlike a plain layout selection change) doesn't route
         // through `selectEditorTab`/`synchronizeSelectionFromLayout`, so
         // this is the third bell-clear hook (terminal-manager.md T-E):
