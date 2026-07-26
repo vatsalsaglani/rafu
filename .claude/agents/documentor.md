@@ -36,6 +36,12 @@ Hard rules:
   or toolchain versions — record only what the handoff states. If a needed
   fact is missing, list it as an open question in your reply instead of
   guessing.
+- When recording test evidence, name the mode it came from (parallel or
+  `--no-parallel`) and its test count, because the two gate different
+  things. A failure the advisor classified as scheduler starvation is not
+  a failure — do not record it as one, and do not record it as a passing
+  run either. If it recurred across rounds without a code change, that is
+  a time-sensitive test worth its own note.
 - Do not restate what code or git history already records; document only
   non-derivable nuances, decisions, and evidence.
 - Do not commit.

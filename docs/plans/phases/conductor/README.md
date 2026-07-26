@@ -88,11 +88,18 @@ need in its handoff instead of editing it.
 - You are on a dedicated worktree branch. Commit your work ON THIS BRANCH in
   verified stages. Never push, never merge, never checkout `main`, never
   rebase.
-- Gates per stage: `swift build` 0 warnings; `swift test` AND
-  `swift test --no-parallel` green; `./script/format.sh --fix` then
-  `--lint` clean. HEADLESS ONLY — do NOT run `build_and_run.sh`, do not
-  launch or kill `Rafu.app` (integrated GUI passes happen on `main` after
-  merge).
+- Gates per stage: `./script/build.sh` 0 warnings; `./script/test.sh`
+  (**parallel**) green; `./script/format.sh --fix` then `--lint` clean.
+  Run the **serial** suite (`./script/test.sh --no-parallel`) ONCE, at the
+  end, before your final report — not on every stage. Serial is what CI
+  runs, so it must be green before you hand off; it is also ~2.5× slower
+  and, when several worktrees build at once, mostly measures machine load.
+  Order matters on the final stage: format, then build, then the parallel
+  run, then commit — nothing may modify a file after that run. See
+  AGENTS.md "Which test mode, and who runs it" and its isolation-based
+  triage table, and never "fix" a starvation flake.
+  HEADLESS ONLY — do NOT run `build_and_run.sh`, do not launch or kill
+  `Rafu.app` (integrated GUI passes happen on `main` after merge).
 - When your phase is finished — gates green, everything committed — delete
   your worktree's build cache (`rm -rf .build`) as the LAST step. One is
   2-5 GB and a fan-out of them fills the disk, after which the next agent's

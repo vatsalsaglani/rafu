@@ -144,6 +144,43 @@ Any change to process execution, IPC, remote paths, file writes, credentials, Gi
 - Concurrency changes require the `swift-concurrency-pro` review path. Performance claims require Instruments/signpost evidence, not intuition.
 - Treat warnings as work to resolve or document; do not suppress them broadly.
 
+### Which test mode, and who runs it
+
+Parallel and serial catch **different** bugs, so neither is redundant — but running both on every stage is waste, and under a multi-worktree fan-out it is also the main source of confusing failures.
+
+- **Parallel** (`./script/test.sh`, ~40 s) is the only mode where concurrency bugs appear. The documented forkpty hang "fails deterministically (3 of 3) under plain `swift test`" and passes serially — serial would never have found it.
+- **Serial** (`./script/test.sh --no-parallel`, ~107 s) is what **CI runs** (`RAFU_TEST_FLAGS: --no-parallel`). It is therefore the release gate, and it is the only mode that catches order dependence between tests.
+
+Division of labour:
+
+| Who | Runs |
+|---|---|
+| Implementor, while iterating | parallel |
+| Implementor, final sequence | `format --fix` → `format --lint` → `build` → **parallel** → commit |
+| Advisor, verification | **serial**; also parallel when the change touched concurrency |
+| Coordinator, after merging to `main` | both, uncontended |
+
+**The implementor's final ordering is load-bearing.** Nothing may modify a file after the parallel run — not a formatter, not a doc tweak. If anything does, that parallel result describes a tree that no longer exists and must be re-run. This is the whole reason the advisor may skip parallel.
+
+### Triage a failing test by isolation, not by mode
+
+A test that fails in parallel and passes serially is the ambiguous case, not a diagnosis. **Re-run the single test alone** — that is the discriminator:
+
+```bash
+swift test --filter "<exact test name>"
+```
+
+| Alone | Serial | Verdict |
+|---|---|---|
+| fails | fails | Real bug. Fix it. |
+| passes | passes | Scheduler starvation under load. Note it; change nothing. |
+| passes | **fails** | Order dependence. **Must** be fixed — CI runs serial. |
+| fails | passes | Genuine concurrency bug; the class only parallel catches. |
+
+Never "fix" row two, and never edit a test you do not own to make a gate green. A failure in an integration-owned test file is a STOP-AND-REPORT to the coordinator, not a fix-it-yourself. If the same test flakes across rounds with no code change between them, that is a time-sensitive test worth documenting — not a bug to grind on.
+
+Bound the advisor↔implementor loop at **two verification rounds**; a third means escalate to the coordinator rather than ping-pong.
+
 ## Standing learning and documentation rule
 
 **A task is not complete if implementation reveals a reusable platform, SDK, toolchain, lifecycle, concurrency, security, performance, packaging, or testing nuance and that nuance is not documented in the same change.**

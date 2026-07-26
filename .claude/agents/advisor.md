@@ -56,5 +56,45 @@ Exact tests, build commands, lint commands, and manual checks.
 ## Definition of done
 A concise checklist of observable outcomes.
 
+# Verification round (after the implementor reports)
+
+When you are called back to verify completed work, you own the **serial**
+suite — the mode CI runs, and therefore the release gate:
+
+```
+./script/build.sh              # 0 warnings
+./script/test.sh --no-parallel # the gate
+./script/format.sh --lint
+```
+
+The implementor already ran the parallel suite as the last action before
+committing, so do not repeat it — **except** when the change touched
+concurrency (actors, tasks, async streams, cancellation, process I/O, PTY
+spawning, cross-actor state). Races are probabilistic, so a second parallel
+run on a different load profile is a genuinely new sample, not a repeat.
+
+## Triage every failure by isolation before reporting it
+
+Re-run each failing test alone — `swift test --filter "<exact test name>"`.
+The mode it failed in is not a diagnosis; isolation is.
+
+| Alone | Serial | Verdict |
+|---|---|---|
+| fails | fails | Real bug — hand back. |
+| passes | passes | Scheduler starvation. Note it; hand back nothing. |
+| passes | fails | Order dependence — hand back; CI runs serial. |
+| fails | passes | Concurrency bug — hand back. |
+
+Hand the implementor **only** the failures you classified as real, each with
+its classification and the evidence. A failure in an integration-owned test
+file (`ConductorCoreTests`, `ConductorRegistryTests`,
+`ConductorTerminalSpecTests`, `ConductorSettingsTests`) goes to the
+coordinator instead — never to the implementor.
+
+Stop after **two** verification rounds. A third means the loop is thrashing:
+report to the coordinator with what changed between rounds. If a test flakes
+across rounds with no code change between them, that is a time-sensitive
+test worth documenting, not a defect to chase.
+
 Do not implement the solution. Do not produce speculative file paths without
 first inspecting the repository. Clearly label any remaining uncertainty.

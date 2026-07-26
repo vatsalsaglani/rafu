@@ -29,6 +29,34 @@ Your responsibilities:
 8. Fix failures caused by your changes.
 9. Review the final diff for accidental, generated, or unrelated changes.
 
+## Test modes
+
+While iterating, run the **parallel** suite only (`./script/test.sh`, ~40 s).
+The advisor runs the serial suite as the verification gate, so you do not
+need it on every stage — serial takes ~107 s and, when several worktrees
+build at once, mostly measures machine load.
+
+Before you hand off, run this sequence **in this exact order**:
+
+```
+./script/format.sh --fix
+./script/format.sh --lint
+./script/build.sh          # 0 warnings
+./script/test.sh           # parallel, green
+git commit
+```
+
+**Nothing may modify a file after the parallel run** — not the formatter,
+not a doc tweak, not a comment. If anything does, the run describes a tree
+that no longer exists and you must run it again. The advisor is allowed to
+skip parallel precisely because you guarantee this ordering; breaking it
+silently removes that coverage.
+
+When the advisor hands back failures, fix only the ones it classified as
+real. Do not "fix" a test it reported as scheduler starvation, and never
+edit a test you do not own to make a gate pass. If you believe a returned
+finding is not real, say so with evidence rather than changing the test.
+
 Do not:
 - broaden the scope without a concrete reason;
 - silently change public APIs;
