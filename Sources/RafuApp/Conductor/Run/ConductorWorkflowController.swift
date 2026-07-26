@@ -284,7 +284,8 @@ final class ConductorWorkflowController {
     /// its single override/artifact-appendix resolver against the SAME
     /// captured payload (advisor A2).
     @ObservationIgnored
-    var planGateReparse: (@MainActor (ConductorWorkflowRunRequest) async -> ConductorPlanGateReparseOutcome)?
+    var planGateReparse:
+        (@MainActor (ConductorWorkflowRunRequest) async -> ConductorPlanGateReparseOutcome)?
 
     /// The file-backed library used ONLY by the built-in plan-gate re-parse
     /// path. Defaults to the real on-disk library/user root exactly like
@@ -1182,6 +1183,19 @@ final class ConductorWorkflowController {
     /// contract — submits a NEW `run --plan-gate` after revising files.
     func declinePlanGate(note: String) {
         guard case .awaitingPlanGate = state, var currentManifest = manifest else { return }
+        // Every step is marked `.aborted`, not left `.pending`: a declined
+        // plan gate means none of them will ever run, and
+        // `ConductorEnsembleStateProjection.runState` can ONLY derive
+        // `.aborted` for a manifest-only event from a step actually carrying
+        // that status — `runChanged(manifest:)` has no live-state parameter
+        // to fall back on. Leaving every step `.pending` (as `markAborted`
+        // does for an in-progress step's SIBLINGS) would make this decline
+        // invisible to `status`/events and project as `.pending` forever,
+        // breaking the exact round-trip the coordinator depends on.
+        for index in currentManifest.steps.indices {
+            currentManifest.steps[index].status = .aborted
+            currentManifest.steps[index].finishedAt = Date()
+        }
         currentManifest.gate = nil
         currentManifest.recoveryNote = String(note.prefix(1_000))
         currentManifest.updatedAt = Date()

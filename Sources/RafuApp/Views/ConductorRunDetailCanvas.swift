@@ -536,9 +536,11 @@ private struct ConductorPlanGateSection: View {
                 .font(.headline)
                 .foregroundStyle(theme.palette.textPrimary)
                 .accessibilityAddTraits(.isHeader)
-            Text("Nothing has run yet. Review the pipeline below, edit a file if needed, then approve.")
-                .font(.caption)
-                .foregroundStyle(theme.palette.textSecondary)
+            Text(
+                "Nothing has run yet. Review the pipeline below, edit a file if needed, then approve."
+            )
+            .font(.caption)
+            .foregroundStyle(theme.palette.textSecondary)
             if let issue {
                 Label(issue, systemImage: "exclamationmark.triangle")
                     .font(.callout)
