@@ -415,7 +415,7 @@ struct ConductorRunsPanelView: View {
         if let coordinator = session.conductorCoordinatorSessions.first(where: {
             $0.id == startedBy
         }) {
-            let label = coordinator.goal.trimmingCharacters(in: .whitespacesAndNewlines)
+            let label = coordinator.displayTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             if !label.isEmpty {
                 return String(label.prefix(28))
             }

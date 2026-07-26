@@ -68,6 +68,7 @@ final class EnsembleStartModel {
             _ model: String?,
             _ goal: String,
             _ grant: ConductorEnsembleGrant,
+            _ name: String,
             _ session: WorkspaceSession
         ) async throws -> ConductorCoordinatorSession
 
@@ -77,6 +78,11 @@ final class EnsembleStartModel {
     var selectedProvider: ConductorCLIID?
     var model = ""
     var goal = ""
+
+    /// The user-typed Ensemble name. Empty means "use the suggestion" — the
+    /// field's placeholder shows exactly what will be used, so a blank field
+    /// is never an unnamed run.
+    var name = ""
 
     var maxConcurrent = 3
     var maxTotal = 12
@@ -102,14 +108,20 @@ final class EnsembleStartModel {
     private let clock: Clock
     @ObservationIgnored
     private let launch: Launch
+    /// The timestamp fallback name, formatted at most once per canvas.
+    /// `suggestedName(for:)` runs from `body` while the user types the goal,
+    /// and date formatting is the only non-trivial work in it.
+    @ObservationIgnored
+    private var cachedTimestampName: String?
 
     init(
         adapters: [any ConductorCLIAdapter] = ConductorAdapterRegistry.all,
         defaultModelStore: ConductorDefaultModelStore = ConductorDefaultModelStore(),
         clock: @escaping Clock = Date.init,
-        launch: @escaping Launch = { provider, model, goal, grant, session in
+        launch: @escaping Launch = { provider, model, goal, grant, name, session in
             try await ConductorCoordinatorLauncher().start(
-                provider: provider, model: model, goal: goal, grant: grant, in: session)
+                provider: provider, model: model, goal: goal, grant: grant, label: name,
+                in: session)
         }
     ) {
         self.adapters = adapters
@@ -178,6 +190,73 @@ final class EnsembleStartModel {
         }
     }
 
+    // MARK: - Naming
+
+    /// The name Rafu uses when the name field is left blank: the first
+    /// meaningful line of `source` (the goal for Door 1, the task prompt for
+    /// Door 3) with Markdown list/heading/quote markers stripped, or a
+    /// timestamped fallback when there is no such line yet.
+    ///
+    /// Pure apart from memoizing the timestamp string, so it is safe to call
+    /// from `body` on every keystroke and testable without a view.
+    func suggestedName(for source: String) -> String {
+        if let derived = Self.deriveName(from: source) { return derived }
+        if let cachedTimestampName { return cachedTimestampName }
+        let formatted = clock().formatted(date: .abbreviated, time: .shortened)
+        let fallback = "Ensemble \(formatted)"
+        cachedTimestampName = fallback
+        return fallback
+    }
+
+    /// What actually reaches the coordinator session / run manifest: the
+    /// user's typed name when they gave one, otherwise the suggestion the
+    /// placeholder already showed them.
+    func effectiveName(for source: String) -> String {
+        let typed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return typed.isEmpty ? suggestedName(for: source) : typed
+    }
+
+    /// The first line of `source` that carries words, with leading Markdown
+    /// structure (`#`, `-`, `*`, `>`, `1.`) and inline emphasis characters
+    /// removed, bounded to 60 characters on a word boundary. `nil` when the
+    /// text has no such line.
+    nonisolated static func deriveName(from source: String) -> String? {
+        for rawLine in source.split(separator: "\n", omittingEmptySubsequences: false) {
+            var line = rawLine.trimmingCharacters(in: .whitespaces)
+            while let first = line.first, "#>-*+".contains(first) {
+                line = String(line.dropFirst()).trimmingCharacters(in: .whitespaces)
+            }
+            if let dot = line.firstIndex(of: "."),
+                line[line.startIndex..<dot].allSatisfy(\.isNumber),
+                line.startIndex != dot
+            {
+                line = String(line[line.index(after: dot)...])
+                    .trimmingCharacters(in: .whitespaces)
+            }
+            line = line.replacingOccurrences(of: "`", with: "")
+                .replacingOccurrences(of: "_", with: " ")
+                .replacingOccurrences(of: "*", with: "")
+                .trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty else { continue }
+            return bounded(line, limit: 60)
+        }
+        return nil
+    }
+
+    private nonisolated static func bounded(_ text: String, limit: Int) -> String {
+        guard text.count > limit else { return text }
+        let clipped = text.prefix(limit)
+        if let lastSpace = clipped.lastIndex(of: " "),
+            clipped.distance(
+                from: clipped.startIndex, to: lastSpace) > limit / 2
+        {
+            return String(clipped[clipped.startIndex..<lastSpace]) + "…"
+        }
+        return String(clipped) + "…"
+    }
+
+    // MARK: - Grant and launch
+
     /// An empty `allowedProviders` set would still let the coordinator
     /// launch, but `ConductorEnsembleTokenStore.enforce` refuses EVERY
     /// child run with `.providerNotAllowed` (exit 77) — the coordinator
@@ -212,6 +291,10 @@ final class EnsembleStartModel {
     /// canvas, so the copyable goal is never a toast the user might miss. On
     /// failure nothing is registered and `errorMessage` is set; the canvas
     /// stays open with the form untouched.
+    ///
+    /// The goal handed over is the user's text with only outer whitespace
+    /// trimmed: the live-Markdown pane renders `goal`, it never rewrites it,
+    /// because this string is pasted verbatim into a CLI prompt.
     @discardableResult
     func start(in session: WorkspaceSession) async -> Bool {
         guard let selectedProvider, isEnabled(selectedProvider) else { return false }
@@ -224,6 +307,7 @@ final class EnsembleStartModel {
 
         let grant = makeGrant(windowCap: session.conductorConcurrentRuns.activeLimit)
         let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ensembleName = effectiveName(for: goal)
         session.beginEnsembleStartLaunch()
         defer { session.endEnsembleStartLaunch() }
         do {
@@ -232,6 +316,7 @@ final class EnsembleStartModel {
                 trimmedModel.isEmpty ? nil : trimmedModel,
                 trimmedGoal,
                 grant,
+                ensembleName,
                 session)
             postLaunchGoalToPaste = trimmedGoal
             return true
@@ -252,8 +337,10 @@ final class EnsembleStartModel {
 
 /// "New Ensemble…" (⌘⇧E / Rafu menu / palette / Runs-panel button): the one
 /// cold-start canvas a user needs, ever. UX-01 re-hosts C8-07's unchanged
-/// three-door workflow at a readable editor width and gives it tab close/Esc
-/// semantics instead of modal dismissal.
+/// three-door workflow as an editor tab with close/Esc semantics; UX2-02
+/// re-lays it out at full editor width as a two-column workbench — controls
+/// left, a live-Markdown goal surface right — instead of one narrow centered
+/// column of stacked form sections.
 struct EnsembleStartCanvas: View {
     @Environment(\.rafuTheme) private var theme
     @Bindable var session: WorkspaceSession
@@ -270,50 +357,19 @@ struct EnsembleStartCanvas: View {
     @State private var isStartingExpertWorkflow = false
     @State private var expertWorkflowStartError: String?
 
+    @FocusState private var isNameFieldFocused: Bool
+    @FocusState private var isModelFieldFocused: Bool
+
     var body: some View {
         VStack(spacing: 0) {
             tabStrip
             Divider().overlay(theme.palette.borderSubtle)
-            VStack(alignment: .leading, spacing: 16) {
-                RafuSheetHeader(
-                    icon: "circle.hexagongrid",
-                    title: "New Ensemble",
-                    subtitle:
-                        "Describe a goal, start from a template, or launch an existing workflow."
-                )
-
-                RafuSegmentedPicker(items: EnsembleDoor.allCases, selection: $model.door) {
-                    $0.title
-                }
-
-                Group {
-                    if isShowingLaunchConfirmation {
-                        launchConfirmation
-                    } else {
-                        switch model.door {
-                        case .guided:
-                            guidedDoor
-                        case .template:
-                            templateDoor
-                        case .expert:
-                            expertDoor
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                if let doorErrorMessage {
-                    Label(doorErrorMessage, systemImage: "exclamationmark.triangle")
-                        .font(.callout)
-                        .foregroundStyle(theme.palette.error)
-                        .accessibilityLabel("Cannot start: \(doorErrorMessage)")
-                }
-
-                footer
-            }
-            .padding(RafuMetrics.sheetPadding)
-            .frame(maxWidth: 600, maxHeight: .infinity, alignment: .topLeading)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            header
+            Divider().overlay(theme.palette.borderSubtle)
+            doorContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            Divider().overlay(theme.palette.borderSubtle)
+            footer
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(theme.palette.editorBackground)
@@ -375,23 +431,110 @@ struct EnsembleStartCanvas: View {
         .background(theme.palette.tabBarBackground)
     }
 
+    // MARK: - Header (title, name, doors)
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: RafuMetrics.space3) {
+            HStack(alignment: .top, spacing: RafuMetrics.space4) {
+                RafuSheetHeader(
+                    icon: "circle.hexagongrid",
+                    title: "New Ensemble",
+                    subtitle:
+                        "Describe a goal, start from a template, or launch an existing workflow."
+                )
+                Spacer(minLength: RafuMetrics.space4)
+                nameField
+            }
+            RafuSegmentedPicker(items: EnsembleDoor.allCases, selection: $model.door) {
+                $0.title
+            }
+        }
+        .padding(.horizontal, RafuMetrics.sheetPadding)
+        .padding(.vertical, RafuMetrics.space4)
+    }
+
+    /// The name that flows into `ConductorCoordinatorSession.label` (Door 1)
+    /// and `ConductorWorkflowRunRequest.label` (Door 3). Left blank, the
+    /// placeholder's suggestion is what actually gets used — so the user can
+    /// always read the name they are about to create.
+    private var nameField: some View {
+        VStack(alignment: .leading, spacing: RafuMetrics.space1) {
+            Text("Name")
+                .font(.caption)
+                .foregroundStyle(theme.palette.textSecondary)
+            TextField(model.suggestedName(for: nameSourceText), text: $model.name)
+                .textFieldStyle(.plain)
+                .font(.callout)
+                .foregroundStyle(theme.palette.textPrimary)
+                .focused($isNameFieldFocused)
+                .rafuField(isFocused: isNameFieldFocused)
+                .frame(width: 260)
+                .accessibilityLabel("Ensemble name")
+                .help(
+                    "Names this Ensemble in the graph and the Runs panel. Blank uses \(model.suggestedName(for: nameSourceText))."
+                )
+        }
+    }
+
+    /// Door 1 names itself after the goal; Door 3 after its task prompt.
+    /// Door 2 writes files rather than starting a run, so it has no source —
+    /// the timestamp fallback applies.
+    private var nameSourceText: String {
+        switch model.door {
+        case .guided: model.goal
+        case .template: ""
+        case .expert: expertTaskPrompt
+        }
+    }
+
+    // MARK: - Door content
+
+    @ViewBuilder
+    private var doorContent: some View {
+        if isShowingLaunchConfirmation {
+            launchConfirmation
+                .padding(RafuMetrics.sheetPadding)
+        } else {
+            switch model.door {
+            case .guided:
+                guidedDoor
+            case .template:
+                templateDoor
+                    .padding(RafuMetrics.sheetPadding)
+            case .expert:
+                expertDoor
+                    .padding(RafuMetrics.sheetPadding)
+            }
+        }
+    }
+
     // MARK: - Footer
 
     private var footer: some View {
-        HStack {
+        HStack(spacing: RafuMetrics.space3) {
+            if let doorErrorMessage {
+                Label(doorErrorMessage, systemImage: "exclamationmark.triangle")
+                    .font(.callout)
+                    .foregroundStyle(theme.palette.error)
+                    .lineLimit(2)
+                    .accessibilityLabel("Cannot start: \(doorErrorMessage)")
+            }
+            Spacer(minLength: RafuMetrics.space3)
+            if isBusy {
+                ProgressView().controlSize(.small)
+            }
             if !isShowingLaunchConfirmation {
                 Button("Close", action: session.closeEnsembleStart)
                     .buttonStyle(RafuSecondaryButtonStyle())
-            }
-            Spacer()
-            if isBusy {
-                ProgressView().controlSize(.small)
             }
             Button(primaryTitle) { primaryAction() }
                 .buttonStyle(RafuProminentButtonStyle())
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canStartPrimary)
         }
+        .padding(.horizontal, RafuMetrics.sheetPadding)
+        .padding(.vertical, RafuMetrics.space3)
+        .background(theme.palette.tabBarBackground)
     }
 
     private var isBusy: Bool {
@@ -452,88 +595,141 @@ struct EnsembleStartCanvas: View {
         return nil
     }
 
-    // MARK: - Door 1: guided
+    // MARK: - Door 1: guided (two columns)
 
     private var windowCap: Int {
         session.conductorConcurrentRuns.activeLimit
     }
 
+    /// Full editor width, split 3/12 controls to 9/12 goal. No centered
+    /// measure: the goal is a writing surface and wants the room, while the
+    /// grant controls are compact and want a fixed, scannable rail.
     private var guidedDoor: some View {
-        Form {
-            Section("Coordinator") {
-                if model.cliOptions.isEmpty {
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
-                        Text("Checking installed CLIs…")
-                            .foregroundStyle(theme.palette.textSecondary)
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(model.cliOptions) { option in
-                            EnsembleCLIPickerRow(
-                                option: option,
-                                isSelected: model.selectedProvider == option.id,
-                                reason: model.disableReason(option.id),
-                                select: { selectProvider(option) }
-                            )
-                        }
-                    }
-                }
-                TextField("Model (optional)", text: $model.model)
-                    .disabled(model.selectedProvider == nil)
-            }
-
-            Section("Goal") {
-                ZStack(alignment: .topLeading) {
-                    if model.goal.isEmpty {
-                        Text("What should the ensemble accomplish? Plain language.")
-                            .foregroundStyle(theme.palette.textMuted)
-                            .padding(.top, 8)
-                            .padding(.leading, 5)
-                            .allowsHitTesting(false)
-                    }
-                    TextEditor(text: $model.goal)
-                        .frame(minHeight: 60)
-                        .scrollContentBackground(.hidden)
-                }
-            }
-
-            Section {
-                Stepper(
-                    "Max concurrent child runs: \(model.maxConcurrent)",
-                    value: $model.maxConcurrent,
-                    in: 1...max(1, min(3, windowCap))
-                )
-                Text("Capped at \(windowCap) per window.")
-                    .font(.caption)
-                    .foregroundStyle(theme.palette.textMuted)
-                Stepper(
-                    "Max total child runs: \(model.maxTotal)",
-                    value: $model.maxTotal,
-                    in: 1...50
-                )
-                ForEach(model.cliOptions) { option in
-                    Toggle(option.displayName, isOn: allowedBinding(option.id))
-                        .disabled(!option.isReady)
-                }
-                Picker("Deadline", selection: $model.deadlineChoice) {
-                    ForEach(EnsembleGrantDeadline.allCases) { choice in
-                        Text(choice.title).tag(choice)
-                    }
-                }
-            } header: {
-                Text("Budget grant")
-            } footer: {
-                // The consent model (C8-coordinator-ux.md): the grant is
-                // always visible here, never buried in Settings. Usage
-                // ceiling is deliberately absent from v1 UI — the grant type
-                // supports it, but no per-provider usage editor exists yet.
-                Text(
-                    "The coordinator can start at most this many child runs and reach only the CLIs you allow."
-                )
+        GeometryReader { proxy in
+            HStack(alignment: .top, spacing: 0) {
+                guidedControlsColumn
+                    .frame(width: Self.controlsWidth(inTotal: proxy.size.width))
+                    .frame(maxHeight: .infinity, alignment: .top)
+                Divider().overlay(theme.palette.borderSubtle)
+                EnsembleGoalPane(text: $model.goal)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
         }
-        .formStyle(.grouped)
+    }
+
+    /// 3/12 of the canvas, floored at 280 pt and capped at 420 pt. The
+    /// fraction is the layout; the clamp keeps the icon grids usable in a
+    /// narrow window and stops the rail eating a 2000 pt display.
+    nonisolated static func controlsWidth(inTotal totalWidth: CGFloat) -> CGFloat {
+        let proportional = totalWidth * 3 / 12
+        return min(max(proportional, 280), 420)
+    }
+
+    private var guidedControlsColumn: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: RafuMetrics.space5) {
+                coordinatorSection
+                budgetSection
+                allowedCLISection
+            }
+            .padding(RafuMetrics.space4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var coordinatorSection: some View {
+        EnsembleControlSection(title: "Coordinator", systemImage: "person.badge.shield.checkmark") {
+            if model.cliOptions.isEmpty {
+                HStack(spacing: RafuMetrics.space2) {
+                    ProgressView().controlSize(.small)
+                    Text("Checking installed CLIs…")
+                        .font(.callout)
+                        .foregroundStyle(theme.palette.textSecondary)
+                }
+            } else {
+                EnsembleCLIIconGrid(options: model.cliOptions) { option in
+                    EnsembleCLIIconCard(
+                        option: option,
+                        selection: model.selectedProvider == option.id ? .selected : .unselected,
+                        reason: model.disableReason(option.id),
+                        actionDescription: "Use as the coordinator",
+                        activate: { selectProvider(option) }
+                    )
+                }
+                VStack(alignment: .leading, spacing: RafuMetrics.space1) {
+                    Text("Model (optional)")
+                        .font(.caption)
+                        .foregroundStyle(theme.palette.textSecondary)
+                    TextField("Provider default", text: $model.model)
+                        .textFieldStyle(.plain)
+                        .font(.callout)
+                        .foregroundStyle(theme.palette.textPrimary)
+                        .focused($isModelFieldFocused)
+                        .rafuField(isFocused: isModelFieldFocused)
+                        .disabled(model.selectedProvider == nil)
+                        .accessibilityLabel("Coordinator model")
+                }
+            }
+        }
+    }
+
+    private var budgetSection: some View {
+        // The consent model (C8-coordinator-ux.md): the grant is always
+        // visible here, never buried in Settings. Usage ceiling is
+        // deliberately absent from v1 UI — the grant type supports it, but no
+        // per-provider usage editor exists yet.
+        EnsembleControlSection(
+            title: "Budget grant", systemImage: "gauge.with.dots.needle.33percent"
+        ) {
+            Stepper(
+                "Max concurrent child runs: \(model.maxConcurrent)",
+                value: $model.maxConcurrent,
+                in: 1...max(1, min(3, windowCap))
+            )
+            .font(.callout)
+            Text("Capped at \(windowCap) per window.")
+                .font(.caption)
+                .foregroundStyle(theme.palette.textMuted)
+            Stepper(
+                "Max total child runs: \(model.maxTotal)",
+                value: $model.maxTotal,
+                in: 1...50
+            )
+            .font(.callout)
+            Picker("Deadline", selection: $model.deadlineChoice) {
+                ForEach(EnsembleGrantDeadline.allCases) { choice in
+                    Text(choice.title).tag(choice)
+                }
+            }
+            .font(.callout)
+            Text(
+                "The coordinator can start at most this many child runs and reach only the CLIs you allow."
+            )
+            .font(.caption)
+            .foregroundStyle(theme.palette.textMuted)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var allowedCLISection: some View {
+        EnsembleControlSection(title: "Allowed CLIs", systemImage: "checklist") {
+            if model.cliOptions.isEmpty {
+                Text("No CLIs probed yet.")
+                    .font(.callout)
+                    .foregroundStyle(theme.palette.textSecondary)
+            } else {
+                EnsembleCLIIconGrid(options: model.cliOptions) { option in
+                    EnsembleCLIIconCard(
+                        option: option,
+                        selection: model.allowedProviders.contains(option.id)
+                            ? .allowed : .unselected,
+                        reason: model.disableReason(option.id),
+                        actionDescription: "Allow the coordinator to reach this CLI",
+                        activate: { toggleAllowed(option) }
+                    )
+                }
+            }
+        }
     }
 
     private func selectProvider(_ option: AgentTerminalOption) {
@@ -541,20 +737,17 @@ struct EnsembleStartCanvas: View {
         model.selectProvider(option.id)
     }
 
-    private func allowedBinding(_ id: ConductorCLIID) -> Binding<Bool> {
-        Binding(
-            get: { model.allowedProviders.contains(id) },
-            set: { isOn in
-                if isOn {
-                    model.allowedProviders.insert(id)
-                } else {
-                    model.allowedProviders.remove(id)
-                }
-            })
+    private func toggleAllowed(_ option: AgentTerminalOption) {
+        guard option.isReady else { return }
+        if model.allowedProviders.contains(option.id) {
+            model.allowedProviders.remove(option.id)
+        } else {
+            model.allowedProviders.insert(option.id)
+        }
     }
 
     private var launchConfirmation: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: RafuMetrics.space3) {
             Label("Coordinator Launched", systemImage: "checkmark.circle.fill")
                 .font(.headline)
                 .foregroundStyle(theme.palette.textPrimary)
@@ -564,18 +757,20 @@ struct EnsembleStartCanvas: View {
             .font(.callout)
             .foregroundStyle(theme.palette.textSecondary)
             if let goal = model.postLaunchGoalToPaste {
-                HStack(alignment: .top, spacing: 8) {
-                    Text(goal)
-                        .font(.callout)
-                        .textSelection(.enabled)
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            RoundedRectangle(
-                                cornerRadius: RafuMetrics.radiusControl, style: .continuous
-                            )
-                            .fill(theme.palette.appBackground.opacity(0.6))
+                HStack(alignment: .top, spacing: RafuMetrics.space2) {
+                    ScrollView {
+                        Text(goal)
+                            .font(.callout)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                    }
+                    .background(
+                        RoundedRectangle(
+                            cornerRadius: RafuMetrics.radiusControl, style: .continuous
                         )
+                        .fill(theme.palette.appBackground.opacity(0.6))
+                    )
                     Button {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(goal, forType: .string)
@@ -588,14 +783,20 @@ struct EnsembleStartCanvas: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: 720, maxHeight: .infinity, alignment: .topLeading)
     }
 
     // MARK: - Door 2: template
 
     private var templateDoor: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: RafuMetrics.space3) {
+            LazyVGrid(
+                columns: [
+                    GridItem(.adaptive(minimum: 260, maximum: 420), spacing: RafuMetrics.space2)
+                ],
+                alignment: .leading,
+                spacing: RafuMetrics.space2
+            ) {
                 ForEach(ConductorBundledTemplateCatalog.templates) { template in
                     EnsembleTemplateRow(
                         template: template,
@@ -665,7 +866,7 @@ struct EnsembleStartCanvas: View {
     // MARK: - Door 3: expert
 
     private var expertDoor: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: RafuMetrics.space3) {
             if workflowLaunchModel.isLoading {
                 ProgressView("Reading .rafu files…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -708,6 +909,7 @@ struct EnsembleStartCanvas: View {
                     }
                 }
                 .formStyle(.grouped)
+                .frame(maxWidth: 720)
             }
             if !session.canStartConductorWorkflowRun {
                 Label(capReasonText, systemImage: "exclamationmark.triangle")
@@ -720,6 +922,7 @@ struct EnsembleStartCanvas: View {
                     .foregroundStyle(theme.palette.error)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var selectedWorkflowBinding: Binding<String?> {
@@ -762,10 +965,15 @@ struct EnsembleStartCanvas: View {
         expertWorkflowStartError = nil
         workflowLaunchModel.taskPrompt = expertTaskPrompt
         workflowLaunchModel.baseReference = expertBaseReference
+        let ensembleName = model.effectiveName(for: expertTaskPrompt)
         Task {
             defer { isStartingExpertWorkflow = false }
             do {
-                let request = try workflowLaunchModel.makeRequest()
+                // `label` is the existing manifest-level name seam
+                // (`ConductorRunManifest.label`), already rendered by the
+                // graph and the Runs panel — not a parallel field.
+                var request = try workflowLaunchModel.makeRequest()
+                request.label = ensembleName
                 // Free slots held by runs that already finished, so the cap
                 // counts only genuinely active pipelines (mirrors the panel's
                 // own New Run canvas).
@@ -791,58 +999,26 @@ struct EnsembleStartCanvas: View {
     }
 }
 
-/// A single selectable CLI row: icon, name, and — when disabled — a stated
-/// reason (glyph + text, never color alone). Visual structure mirrors
-/// `AgentTerminalSheet`'s own picker row.
-private struct EnsembleCLIPickerRow: View {
-    let option: AgentTerminalOption
-    let isSelected: Bool
-    let reason: String?
-    let select: () -> Void
+/// A titled block in the guided door's left rail: glyph + title + hairline,
+/// then a leading-aligned content stack. Keeps the rail's three sections
+/// reading as one rhythm without a `Form`, whose grouped style forces the
+/// inset-list look this layout deliberately drops.
+private struct EnsembleControlSection<Content: View>: View {
+    let title: String
+    let systemImage: String
+    @ViewBuilder let content: Content
 
     @Environment(\.rafuTheme) private var theme
 
     var body: some View {
-        Button(action: select) {
-            HStack(spacing: 10) {
-                FileIconView(icon: option.icon, size: 18)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(option.displayName)
-                        .fontWeight(.medium)
-                        .foregroundStyle(theme.palette.textPrimary)
-                    if let reason {
-                        Label(reason, systemImage: "exclamationmark.circle")
-                            .font(.caption2)
-                            .foregroundStyle(theme.palette.textMuted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                Spacer(minLength: 8)
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .foregroundStyle(theme.palette.accent)
-                        .accessibilityLabel("Selected")
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(
-                RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
-                    .fill(isSelected ? theme.palette.selection : theme.palette.cardBackground)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
-                    .strokeBorder(
-                        isSelected ? theme.palette.accent : theme.palette.borderSubtle)
-            }
-            .contentShape(.rect)
+        VStack(alignment: .leading, spacing: RafuMetrics.space2) {
+            Label(title, systemImage: systemImage)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(theme.palette.textSecondary)
+                .textCase(.uppercase)
+            content
         }
-        .buttonStyle(.plain)
-        .disabled(!option.isReady)
-        .help(reason ?? "Use \(option.displayName) as the coordinator")
-        .accessibilityLabel(reason.map { "\(option.displayName), \($0)" } ?? option.displayName)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -865,6 +1041,7 @@ private struct EnsembleTemplateRow: View {
                     Text(template.summary)
                         .font(.caption)
                         .foregroundStyle(theme.palette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 8)
                 if isSelected {
@@ -873,6 +1050,7 @@ private struct EnsembleTemplateRow: View {
                         .accessibilityLabel("Selected")
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .background(

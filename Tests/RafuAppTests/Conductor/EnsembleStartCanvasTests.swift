@@ -235,7 +235,7 @@ struct EnsembleStartCanvasTests {
         let model = EnsembleStartModel(
             adapters: [readyFixture(.codex)],
             clock: { now },
-            launch: { provider, launchModel, goal, grant, session in
+            launch: { provider, launchModel, goal, grant, name, session in
                 try await ConductorCoordinatorLauncher(
                     adapters: [readyFixture(.codex)],
                     tokenStore: tokenStore,
@@ -243,7 +243,8 @@ struct EnsembleStartCanvasTests {
                     clock: { now },
                     makeCoordinatorID: { "co-test0001" }
                 ).start(
-                    provider: provider, model: launchModel, goal: goal, grant: grant, in: session)
+                    provider: provider, model: launchModel, goal: goal, grant: grant, label: name,
+                    in: session)
             })
         await model.probeCLIs(workspaceRoot: root)
         model.goal = "Coordinate the release"
@@ -251,6 +252,11 @@ struct EnsembleStartCanvasTests {
         let started = await model.start(in: session)
         #expect(started)
         #expect(session.conductorCoordinatorSessions.map(\.id) == ["co-test0001"])
+        // The name flows through to the coordinator session, defaulted from
+        // the goal's first line because the name field was left blank.
+        #expect(session.conductorCoordinatorSessions.first?.label == "Coordinate the release")
+        #expect(
+            session.conductorCoordinatorSessions.first?.displayTitle == "Coordinate the release")
         #expect(model.postLaunchGoalToPaste == "Coordinate the release")
         // The canvas stays open on the copyable-goal confirmation until Done.
         #expect(session.ensembleStartCanvasVisible)
@@ -273,7 +279,7 @@ struct EnsembleStartCanvasTests {
 
         let model = EnsembleStartModel(
             adapters: [readyFixture(.codex)],
-            launch: { _, _, _, _, _ in
+            launch: { _, _, _, _, _, _ in
                 throw ConductorCoordinatorLaunchError.notAuthenticated(
                     .codex, "run `codex login` in a terminal")
             })
@@ -486,7 +492,11 @@ struct EnsembleStartCanvasTests {
         )
     }
 
-    @Test("Creation canvases expose close and Esc at a readable width")
+    /// UX2-02 moved the New Ensemble canvas off the centered 600 pt measure
+    /// onto a full-width two-column layout, so its half of this contract now
+    /// asserts the ABSENCE of the clamp plus the presence of the split. The
+    /// New Run canvas is untouched and keeps the original assertion.
+    @Test("Creation canvases expose close and Esc; New Ensemble is full width")
     func canvasCloseAndWidthContract() throws {
         let root = try repositoryRoot()
         let startCanvas = try source(
@@ -495,7 +505,9 @@ struct EnsembleStartCanvasTests {
             "Sources/RafuApp/Views/ConductorRunsPanelView.swift", root: root)
 
         #expect(startCanvas.contains(".onExitCommand(perform: session.closeEnsembleStart)"))
-        #expect(startCanvas.contains(".frame(maxWidth: 600"))
+        #expect(!startCanvas.contains(".frame(maxWidth: 600"))
+        #expect(startCanvas.contains("controlsWidth(inTotal:"))
+        #expect(startCanvas.contains("EnsembleGoalPane(text: $model.goal)"))
         #expect(startCanvas.contains(".accessibilityLabel(\"Close New Ensemble\")"))
         #expect(startCanvas.contains(".help(\"Close New Ensemble\")"))
 
@@ -503,6 +515,123 @@ struct EnsembleStartCanvasTests {
         #expect(runCanvas.contains(".frame(maxWidth: 600"))
         #expect(runCanvas.contains(".accessibilityLabel(\"Close New Ensemble Run\")"))
         #expect(runCanvas.contains(".help(\"Close New Ensemble Run\")"))
+    }
+
+    @Test("The guided door splits 3/12 to 9/12, clamped so neither column collapses")
+    func guidedColumnSplit() throws {
+        // The fraction is the layout.
+        #expect(EnsembleStartCanvas.controlsWidth(inTotal: 1200) == 300)
+        #expect(EnsembleStartCanvas.controlsWidth(inTotal: 1600) == 400)
+        // Floored: a narrow window still shows a usable icon grid.
+        #expect(EnsembleStartCanvas.controlsWidth(inTotal: 800) == 280)
+        // Capped: the rail never eats a very wide display.
+        #expect(EnsembleStartCanvas.controlsWidth(inTotal: 4000) == 420)
+    }
+
+    @Test("The goal is handed to the launcher as plain text, byte for byte")
+    func goalStaysPlainTextThroughTheMarkdownPane() async throws {
+        let root = try makeEnsembleTestRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = WorkspaceSession()
+        session.openLocalWorkspace(at: root)
+
+        let markdownGoal = "# Ship 1.2\n\n- [ ] cut the branch\n- [ ] `swift test`\n"
+        var observedGoal: String?
+        let model = EnsembleStartModel(
+            adapters: [readyFixture(.codex)],
+            launch: { provider, launchModel, goal, grant, name, session in
+                observedGoal = goal
+                throw ConductorCoordinatorLaunchError.providerUnavailable(provider)
+            })
+        await model.probeCLIs(workspaceRoot: root)
+        model.goal = markdownGoal
+
+        _ = await model.start(in: session)
+
+        // Only outer whitespace is trimmed — every Markdown character the
+        // user typed survives, because this string is pasted into a CLI
+        // prompt verbatim.
+        #expect(observedGoal == markdownGoal.trimmingCharacters(in: .whitespacesAndNewlines))
+        #expect(observedGoal?.contains("# Ship 1.2") == true)
+        #expect(observedGoal?.contains("- [ ] `swift test`") == true)
+        // The pane never rewrites the model's own text either.
+        #expect(model.goal == markdownGoal)
+    }
+
+    @Test("The Ensemble name derives from the first meaningful line, or a timestamp")
+    func ensembleNameDerivation() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let model = EnsembleStartModel(adapters: [], clock: { now })
+
+        // Markdown structure is stripped, not shown to the user as a name.
+        #expect(EnsembleStartModel.deriveName(from: "# Ship the release") == "Ship the release")
+        #expect(EnsembleStartModel.deriveName(from: "- migrate the store") == "migrate the store")
+        #expect(
+            EnsembleStartModel.deriveName(from: "1. audit the adapters") == "audit the adapters")
+        #expect(EnsembleStartModel.deriveName(from: "**bold** plan") == "bold plan")
+        // Leading blank / structure-only lines are skipped.
+        #expect(EnsembleStartModel.deriveName(from: "\n\n   \nreal goal") == "real goal")
+        // Nothing to derive from.
+        #expect(EnsembleStartModel.deriveName(from: "   \n\n") == nil)
+        // Long first lines are bounded rather than dropped.
+        let long = String(repeating: "word ", count: 40)
+        let bounded = try #require(EnsembleStartModel.deriveName(from: long))
+        #expect(bounded.count <= 61)
+        #expect(bounded.hasSuffix("…"))
+
+        // The timestamp fallback is used only when there is no first line,
+        // and is stable across calls (formatted once per canvas).
+        let fallback = model.suggestedName(for: "")
+        #expect(fallback.hasPrefix("Ensemble "))
+        #expect(model.suggestedName(for: "") == fallback)
+
+        // A typed name always wins over the suggestion.
+        #expect(model.effectiveName(for: "# Ship the release") == "Ship the release")
+        model.name = "  Release train  "
+        #expect(model.effectiveName(for: "# Ship the release") == "Release train")
+        model.name = "   "
+        #expect(model.effectiveName(for: "# Ship the release") == "Ship the release")
+    }
+
+    @Test("Both CLI pickers are icon grids sourced from ConductorCLIIcons")
+    func cliPickersAreIconGrids() throws {
+        let root = try repositoryRoot()
+        let startCanvas = try source(
+            "Sources/RafuApp/Views/EnsembleStartCanvas.swift", root: root)
+        let grid = try source("Sources/RafuApp/Views/EnsembleCLIIconGrid.swift", root: root)
+
+        // Two grids: coordinator (single-select) and allowed CLIs
+        // (multi-select), not a row list and not a column of switches.
+        #expect(startCanvas.components(separatedBy: "EnsembleCLIIconGrid(options:").count - 1 == 2)
+        #expect(!startCanvas.contains("Toggle(option.displayName"))
+        #expect(!startCanvas.contains("EnsembleCLIPickerRow"))
+        #expect(grid.contains("ConductorCLIIcons.icon(for: option.id)"))
+        #expect(grid.contains("LazyVGrid"))
+        // Selection and unavailability are never color-only.
+        #expect(grid.contains("checkmark.circle.fill"))
+        #expect(grid.contains("exclamationmark.circle.fill"))
+        #expect(grid.contains(".accessibilityLabel(accessibilityText)"))
+        #expect(grid.contains(".help(helpText)"))
+    }
+
+    @Test("The goal pane is one live-Markdown surface, not an editor/preview split")
+    func goalPaneIsSinglePane() throws {
+        let root = try repositoryRoot()
+        let pane = try source("Sources/RafuApp/Views/EnsembleGoalPane.swift", root: root)
+
+        #expect(pane.contains("TextEditor(text: $text)"))
+        #expect(pane.contains("Markdown(text)"))
+        #expect(pane.contains(".rafuMarkdownStyling()"))
+        // One of the two, chosen by focus — never both at once.
+        #expect(pane.contains("if showsEditor {"))
+        #expect(!pane.contains("HSplitView"))
+        #expect(!pane.contains("NavigationSplitView"))
+        // Keyboard and VoiceOver paths back into edit mode.
+        #expect(pane.contains(".accessibilityAction(named: \"Edit goal\", beginEditing)"))
+        // The header action is one button that flips label with the mode, so
+        // both directions must be named for VoiceOver.
+        #expect(pane.contains("\"Edit goal as Markdown\""))
+        #expect(pane.contains("\"Preview rendered goal\""))
     }
 
     @Test("Runs header icons have labels, tooltips, and menu/palette equivalents")
