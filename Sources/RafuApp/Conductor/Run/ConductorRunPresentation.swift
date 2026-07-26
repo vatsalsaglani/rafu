@@ -58,6 +58,28 @@ nonisolated struct ConductorStepRowModel: Identifiable, Equatable, Sendable {
     var id: Int { index }
 }
 
+/// Semantic graph state. Views switch on this value, never on a symbol
+/// string, so glyph, label, and attention policy stay centralized.
+nonisolated enum EnsembleGraphState: Equatable, Sendable {
+    case pending
+    case running
+    case blocked
+    case awaitingGate
+    case completed
+    case interrupted
+    case failed
+    case aborted
+    case mergeGate
+    case ended
+}
+
+nonisolated struct ConductorGraphNodePresentation: Equatable, Sendable {
+    let state: EnsembleGraphState
+    let symbol: String
+    let label: String
+    let needsAttention: Bool
+}
+
 /// Derives `ConductorRunRowModel`/`ConductorStepRowModel` from a persisted
 /// `ConductorRunManifest`. Every status pairs a SHAPE-distinct SF Symbol with
 /// a text label (AGENTS: never color alone), mirroring
@@ -147,6 +169,89 @@ nonisolated enum ConductorRunPresentation {
         return manifest.steps.last?.status ?? .pending
     }
 
+    /// Run-level graph presentation begins with `overallStatus(for:)`'s
+    /// established precedence. Ephemeral workflow state may then refine an
+    /// actively owned run to blocked/running, while a durable gate remains
+    /// authoritative even after its live controller has ended.
+    static func graphNode(
+        for manifest: ConductorRunManifest,
+        live: ConductorWorkflowState?
+    ) -> ConductorGraphNodePresentation {
+        if let gate = manifest.gate {
+            return graphNode(for: gate.kind == .merge ? .mergeGate : .awaitingGate)
+        }
+        if let live {
+            let state: EnsembleGraphState =
+                switch live {
+                case .idle:
+                    graphState(for: overallStatus(for: manifest))
+                case .preparing:
+                    .pending
+                case .runningStep:
+                    .running
+                case .awaitingArtifact:
+                    .blocked
+                case .awaitingGate:
+                    .awaitingGate
+                case .awaitingMergeGate:
+                    .mergeGate
+                case .completed:
+                    .completed
+                case .failed:
+                    .failed
+                case .aborted:
+                    .aborted
+                }
+            return graphNode(for: state)
+        }
+        return graphNode(for: graphState(for: overallStatus(for: manifest)))
+    }
+
+    static func graphNode(
+        for status: RunStepStatus,
+        blocked: Bool = false
+    ) -> ConductorGraphNodePresentation {
+        graphNode(for: blocked ? .blocked : graphState(for: status))
+    }
+
+    static func graphNode(
+        for state: EnsembleGraphState
+    ) -> ConductorGraphNodePresentation {
+        let symbol: String
+        let label: String
+        let needsAttention: Bool
+        switch state {
+        case .pending:
+            (symbol, label, needsAttention) = ("circle.dotted", "Pending", false)
+        case .running:
+            (symbol, label, needsAttention) = ("circle.fill", "Running", false)
+        case .blocked:
+            (symbol, label, needsAttention) = ("pause.circle.fill", "Waiting", false)
+        case .awaitingGate:
+            (symbol, label, needsAttention) =
+                ("bolt.horizontal.circle.fill", "Awaiting gate", true)
+        case .completed:
+            (symbol, label, needsAttention) = ("checkmark.circle.fill", "Completed", false)
+        case .interrupted:
+            (symbol, label, needsAttention) =
+                ("exclamationmark.triangle.fill", "Interrupted", true)
+        case .failed:
+            (symbol, label, needsAttention) = ("xmark.circle.fill", "Failed", true)
+        case .aborted:
+            (symbol, label, needsAttention) = ("slash.circle.fill", "Aborted", false)
+        case .mergeGate:
+            (symbol, label, needsAttention) =
+                ("bolt.horizontal.circle.fill", "Merge gate", true)
+        case .ended:
+            (symbol, label, needsAttention) = ("stop.circle", "Ended", false)
+        }
+        return ConductorGraphNodePresentation(
+            state: state,
+            symbol: symbol,
+            label: label,
+            needsAttention: needsAttention)
+    }
+
     /// One run row. `isLive` is true only when `liveState` is provided and
     /// currently in flight — i.e. this manifest IS the workflow controller's
     /// active run, not merely a historical one with the same last-known
@@ -225,6 +330,18 @@ nonisolated enum ConductorRunPresentation {
             true
         case .idle, .completed, .failed, .aborted:
             false
+        }
+    }
+
+    private static func graphState(for status: RunStepStatus) -> EnsembleGraphState {
+        switch status {
+        case .pending: .pending
+        case .running: .running
+        case .awaitingGate: .awaitingGate
+        case .completed: .completed
+        case .failed: .failed
+        case .aborted: .aborted
+        case .interrupted: .interrupted
         }
     }
 

@@ -479,6 +479,7 @@ final class WorkspaceSession {
         selectedConductorRunID = runID
         navigatorMode = .runs
         conductorRunCanvasID = runID
+        conductorGraphVisible = false
         selectedDocumentID = nil
         selectedTreePath = nil
     }
@@ -488,6 +489,27 @@ final class WorkspaceSession {
     func closeConductorRunDetail() {
         guard conductorRunCanvasID != nil else { return }
         conductorRunCanvasID = nil
+        if selectedDocumentID == nil, let fallback = openDocuments.last {
+            select(fallback)
+        }
+    }
+
+    /// Hosts the workspace-wide Ensemble projection in the editor canvas.
+    /// Graph, run detail, and terminal are peer occupants: opening one clears
+    /// the other canvas route without changing the Runs panel selection.
+    var conductorGraphVisible = false
+
+    func showConductorGraph() {
+        conductorGraphVisible = true
+        conductorRunCanvasID = nil
+        selectedDocumentID = nil
+        selectedTreePath = nil
+        navigatorMode = .runs
+    }
+
+    func closeConductorGraph() {
+        guard conductorGraphVisible else { return }
+        conductorGraphVisible = false
         if selectedDocumentID == nil, let fallback = openDocuments.last {
             select(fallback)
         }
@@ -1020,6 +1042,7 @@ final class WorkspaceSession {
         // behind it (C5) — the panel selection (`selectedConductorRunID`)
         // is untouched, only the canvas visibility clears.
         conductorRunCanvasID = nil
+        conductorGraphVisible = false
         // Revealing (unlike a plain layout selection change) doesn't route
         // through `selectEditorTab`/`synchronizeSelectionFromLayout`, so
         // this is the third bell-clear hook (terminal-manager.md T-E):

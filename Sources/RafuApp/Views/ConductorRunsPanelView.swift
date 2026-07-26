@@ -1,9 +1,11 @@
 import AppKit
+import RafuCore
 import SwiftUI
 
 private enum ConductorRunsPanelSection: String, CaseIterable, Identifiable {
     case runs
     case workflows
+    case activity
 
     var id: String { rawValue }
 
@@ -11,6 +13,7 @@ private enum ConductorRunsPanelSection: String, CaseIterable, Identifiable {
         switch self {
         case .runs: "Runs"
         case .workflows: "Workflows"
+        case .activity: "Activity"
         }
     }
 }
@@ -28,6 +31,7 @@ struct ConductorRunsPanelView: View {
     @Environment(\.rafuTheme) private var theme
     @State private var section = ConductorRunsPanelSection.runs
     @State private var libraryModel = ConductorWorkflowLibraryModel()
+    @State private var activityEvents: [EnsembleEvent] = []
 
     var body: some View {
         @Bindable var controller = session.conductorRunController
@@ -39,6 +43,10 @@ struct ConductorRunsPanelView: View {
             ConductorRunPresentation.runRow(
                 for: manifest, liveState: liveState(for: manifest.id))
         }
+        let attributionByRunID = Dictionary(
+            uniqueKeysWithValues: session.conductorRuns.compactMap { manifest in
+                startedByLabel(for: manifest).map { (manifest.id, $0) }
+            })
         let active = rows.filter(\.isLive) + rows.filter { !$0.isLive && isUnresolved($0) }
         let history = rows.filter { !$0.isLive && !isUnresolved($0) }
 
@@ -60,7 +68,10 @@ struct ConductorRunsPanelView: View {
                     controller: controller,
                     rows: rows,
                     active: active,
-                    history: history)
+                    history: history,
+                    attributionByRunID: attributionByRunID)
+            case .activity:
+                activityContent
             case .workflows:
                 workflowsContent
             }
@@ -69,6 +80,9 @@ struct ConductorRunsPanelView: View {
         .task(id: session.rootURL?.standardizedFileURL) {
             await controller.attachAndReload(workspaceRoot: session.rootURL)
             await libraryModel.load(workspaceRoot: session.rootURL)
+        }
+        .task(id: activitySubscriptionID) {
+            await observeActivity()
         }
         .sheet(item: $controller.newRunPresentation) { _ in
             ConductorNewRunSheet(session: session)
@@ -114,6 +128,12 @@ struct ConductorRunsPanelView: View {
             }
         } trailing: {
             HStack(spacing: 4) {
+                Button("Graph", systemImage: "point.3.connected.trianglepath.dotted") {
+                    session.showConductorGraph()
+                }
+                .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+                .help("Show Ensemble Graph")
+                .disabled(session.rootURL == nil)
                 if section == .workflows {
                     Menu("New from Template", systemImage: "doc.badge.plus") {
                         ForEach(ConductorBundledTemplateCatalog.templates) { template in
@@ -147,7 +167,8 @@ struct ConductorRunsPanelView: View {
         controller: ConductorRunController,
         rows: [ConductorRunRowModel],
         active: [ConductorRunRowModel],
-        history: [ConductorRunRowModel]
+        history: [ConductorRunRowModel],
+        attributionByRunID: [String: String]
     ) -> some View {
         if let error = controller.runsLoadError {
             ContentUnavailableView {
@@ -180,7 +201,9 @@ struct ConductorRunsPanelView: View {
                     Section("Active") {
                         ForEach(active) { row in
                             ConductorRunRowView(
-                                row: row, reveal: { revealLiveTerminal(row.id) }
+                                row: row,
+                                attribution: attributionByRunID[row.id],
+                                reveal: { revealLiveTerminal(row.id) }
                             )
                             .tag(row.id)
                         }
@@ -189,11 +212,42 @@ struct ConductorRunsPanelView: View {
                 if !history.isEmpty {
                     Section("History") {
                         ForEach(history) { row in
-                            ConductorRunRowView(row: row, reveal: nil)
-                                .tag(row.id)
+                            ConductorRunRowView(
+                                row: row,
+                                attribution: attributionByRunID[row.id],
+                                reveal: nil
+                            )
+                            .tag(row.id)
                         }
                     }
                 }
+            }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+        }
+    }
+
+    @ViewBuilder
+    private var activityContent: some View {
+        let manifestsByID = Dictionary(
+            uniqueKeysWithValues: session.conductorRuns.map { ($0.id, $0) })
+        if activityEvents.isEmpty {
+            ContentUnavailableView {
+                Label("No Run Activity", systemImage: "waveform.path.ecg")
+            } description: {
+                Text("Bounded Ensemble lifecycle events appear here while this workspace is open.")
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            List(activityEvents, id: \.cursor) { event in
+                let manifest = manifestsByID[event.runID]
+                ConductorActivityRow(
+                    event: event,
+                    manifest: manifest,
+                    provider: provider(for: event, manifest: manifest),
+                    openRun: manifest.map { manifest in
+                        { session.showConductorRunDetail(manifest.id) }
+                    })
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
@@ -309,6 +363,61 @@ struct ConductorRunsPanelView: View {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
+    private func observeActivity() async {
+        guard session.rootURL != nil else {
+            activityEvents = []
+            return
+        }
+        let center = ConductorEnsembleEventCenter.shared
+        let knownRunIDs = Set(session.conductorRuns.map(\.id))
+        activityEvents = Array(
+            center.eventsSince(0)
+                .filter { $0.kind != "heartbeat" && knownRunIDs.contains($0.runID) }
+                .suffix(200)
+                .reversed())
+        let stream = center.subscribe()
+        for await event in stream {
+            guard !Task.isCancelled else { return }
+            guard event.kind != "heartbeat",
+                session.conductorRuns.contains(where: { $0.id == event.runID })
+            else { continue }
+            activityEvents.insert(event, at: 0)
+            if activityEvents.count > 200 {
+                activityEvents.removeLast(activityEvents.count - 200)
+            }
+        }
+    }
+
+    private var activitySubscriptionID: ConductorActivitySubscriptionID {
+        ConductorActivitySubscriptionID(
+            rootURL: session.rootURL?.standardizedFileURL,
+            runIDs: session.conductorRuns.map(\.id).sorted())
+    }
+
+    private func provider(
+        for event: EnsembleEvent,
+        manifest: ConductorRunManifest?
+    ) -> ConductorCLIID? {
+        guard let manifest else { return nil }
+        if let index = event.stepIndex, manifest.steps.indices.contains(index) {
+            return manifest.steps[index].binding.provider
+        }
+        return manifest.steps.first?.binding.provider
+    }
+
+    private func startedByLabel(for manifest: ConductorRunManifest) -> String? {
+        guard let startedBy = manifest.startedBy else { return nil }
+        if let coordinator = session.conductorCoordinatorSessions.first(where: {
+            $0.id == startedBy
+        }) {
+            let label = coordinator.goal.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !label.isEmpty {
+                return String(label.prefix(28))
+            }
+        }
+        return String(startedBy.prefix(12))
+    }
+
     private var runSelection: Binding<String?> {
         Binding(
             get: { session.selectedConductorRunID },
@@ -359,8 +468,14 @@ struct ConductorRunsPanelView: View {
     }
 }
 
+private struct ConductorActivitySubscriptionID: Equatable {
+    let rootURL: URL?
+    let runIDs: [String]
+}
+
 private struct ConductorRunRowView: View {
     let row: ConductorRunRowModel
+    let attribution: String?
     /// `nil` when this run has no live terminal to reveal.
     let reveal: (() -> Void)?
 
@@ -383,6 +498,10 @@ private struct ConductorRunRowView: View {
                     if let gateBadge = row.gateBadge {
                         RafuChip(text: gateBadge, foreground: theme.palette.accent)
                     }
+                    if let attribution {
+                        RafuChip(text: "via \(attribution)")
+                            .accessibilityLabel("Started by \(attribution)")
+                    }
                 }
                 Text("\(row.subtitle) · \(row.statusLabel)")
                     .font(.caption)
@@ -397,7 +516,86 @@ private struct ConductorRunRowView: View {
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(row.title), \(row.statusLabel)")
+        .accessibilityLabel(
+            "\(row.title), \(row.statusLabel)\(attribution.map { ", started by \($0)" } ?? "")")
+    }
+}
+
+private struct ConductorActivityRow: View {
+    let event: EnsembleEvent
+    let manifest: ConductorRunManifest?
+    let provider: ConductorCLIID?
+    let openRun: (() -> Void)?
+
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                if let provider {
+                    FileIconView(icon: ConductorCLIIcons.icon(for: provider), size: 14)
+                        .help(provider.displayName)
+                        .accessibilityLabel("Provider \(provider.displayName)")
+                    Text(provider.displayName)
+                        .font(.caption2)
+                        .foregroundStyle(theme.palette.textSecondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                Text(event.at, style: .relative)
+                    .font(.caption2)
+                    .foregroundStyle(theme.palette.textMuted)
+            }
+            Text(summary)
+                .font(.caption)
+                .foregroundStyle(theme.palette.textPrimary)
+                .lineLimit(2)
+            if let openRun {
+                Button("Open Run", action: openRun)
+                    .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+            }
+        }
+        .padding(.vertical, 3)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(summary)
+    }
+
+    private var summary: String {
+        let identity =
+            event.label?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            ?? manifest?.label?.nilIfEmpty
+            ?? manifest?.workflowName.nilIfEmpty
+            ?? String(event.runID.prefix(12))
+        if let note = event.note?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
+            return "\(identity): \(String(note.prefix(120)))"
+        }
+        if let state = event.state {
+            return "\(identity) → \(state.activityLabel)"
+        }
+        return "\(identity) · \(String(event.kind.prefix(48)))"
+    }
+}
+
+extension String {
+    fileprivate var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
+}
+
+extension EnsembleRunState {
+    fileprivate var activityLabel: String {
+        switch self {
+        case .pending: "Pending"
+        case .running: "Running"
+        case .awaitingGate: "Awaiting gate"
+        case .awaitingPlanGate: "Awaiting plan gate"
+        case .awaitingMergeGate: "Awaiting merge gate"
+        case .completed: "Completed"
+        case .failed: "Failed"
+        case .aborted: "Aborted"
+        case .interrupted: "Interrupted"
+        case .merged: "Merged"
+        }
     }
 }
 
