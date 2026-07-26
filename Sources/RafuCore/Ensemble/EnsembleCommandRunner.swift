@@ -6,18 +6,30 @@ public enum EnsembleHelp {
 
         USAGE:
           rafu ensemble run <workflow> [--role <name>=<cli>[:<model>]] [--prompt <text>]
-            [--artifact <path>]... [--base <ref>] [--label <text>] [--json]
+            [--artifact <path>]... [--base <ref>] [--label <text>] [--plan-gate] [--json]
           rafu ensemble status [<run>...] [--tree] [--since <cursor>] [--json]
           rafu ensemble artifact <run> <step> [--json]
           rafu ensemble await <run>... --state <state> [--any] [--timeout <sec>] [--json]
           rafu ensemble abort <run>
           rafu ensemble note <run> <text>
           rafu ensemble grant [--json]
+          rafu ensemble propose-merge <run>... [--message <text>] [--json]
           rafu ensemble help
 
         AUTHORITY:
-          status, artifact, and await are read-only. run, abort, note, and grant
-          require the live coordinator capability injected by Rafu.
+          status, artifact, and await are read-only. run, abort, note, grant, and
+          propose-merge require the live coordinator capability injected by Rafu.
+
+        PLAN GATE:
+          `run --plan-gate` parks a fully-validated run at a human plan gate
+          before anything spawns. Nothing runs until the human approves it in
+          Rafu (which re-reads the workflow/agent files at approval time) or
+          declines it with a note.
+
+        PROPOSE-MERGE:
+          Re-raises the human merge gate for a run this coordinator started and
+          posts an optional note. It never applies, commits, or merges anything
+          — applying stays the human's verb in Rafu.
         """
 }
 
@@ -73,6 +85,7 @@ public struct EnsembleCommandRunner: Sendable {
                 let artifacts,
                 let baseReference,
                 let label,
+                let planGate,
                 let json
             ):
                 return try startRun(
@@ -82,6 +95,7 @@ public struct EnsembleCommandRunner: Sendable {
                     artifacts: artifacts,
                     baseReference: baseReference,
                     label: label,
+                    planGate: planGate,
                     json: json,
                     workingDirectory: directory
                 )
@@ -125,6 +139,13 @@ public struct EnsembleCommandRunner: Sendable {
                 )
             case .grant(let json):
                 return try grant(json: json, workingDirectory: directory)
+            case .proposeMerge(let runIDs, let message, let json):
+                return try proposeMerge(
+                    runIDs: runIDs,
+                    message: message,
+                    json: json,
+                    workingDirectory: directory
+                )
             }
         } catch let error as EnsembleCLIClientError {
             return result(for: error)
@@ -143,6 +164,7 @@ public struct EnsembleCommandRunner: Sendable {
         artifacts: [String],
         baseReference: String?,
         label: String?,
+        planGate: Bool,
         json: Bool,
         workingDirectory: String
     ) throws -> EnsembleCommandResult {
@@ -164,7 +186,8 @@ public struct EnsembleCommandRunner: Sendable {
                 prompt: prompt,
                 artifacts: absoluteArtifacts,
                 baseReference: baseReference,
-                label: label
+                label: label,
+                planGate: planGate
             ))
         switch response {
         case .runStarted(let result):
@@ -175,7 +198,7 @@ public struct EnsembleCommandRunner: Sendable {
             return EnsembleCommandResult(exitCode: .ok, standardOutput: output)
         case .failure(let code, let message):
             return remoteFailure(code: code, message: message)
-        case .status, .artifact, .mutation, .grant, .subscribed:
+        case .status, .artifact, .mutation, .grant, .proposeMerge, .subscribed:
             throw EnsembleCLIClientError.unexpectedResponse
         }
     }
@@ -203,7 +226,7 @@ public struct EnsembleCommandRunner: Sendable {
             )
         case .failure(let code, let message):
             return remoteFailure(code: code, message: message)
-        case .artifact, .runStarted, .mutation, .grant, .subscribed:
+        case .artifact, .runStarted, .mutation, .grant, .proposeMerge, .subscribed:
             throw EnsembleCLIClientError.unexpectedResponse
         }
     }
@@ -230,7 +253,7 @@ public struct EnsembleCommandRunner: Sendable {
             return EnsembleCommandResult(exitCode: .ok, standardOutput: output)
         case .failure(let code, let message):
             return remoteFailure(code: code, message: message)
-        case .status, .runStarted, .mutation, .grant, .subscribed:
+        case .status, .runStarted, .mutation, .grant, .proposeMerge, .subscribed:
             throw EnsembleCLIClientError.unexpectedResponse
         }
     }
@@ -258,7 +281,7 @@ public struct EnsembleCommandRunner: Sendable {
             )
         case .failure(let code, let message):
             return remoteFailure(code: code, message: message)
-        case .status, .artifact, .runStarted, .grant, .subscribed:
+        case .status, .artifact, .runStarted, .grant, .proposeMerge, .subscribed:
             throw EnsembleCLIClientError.unexpectedResponse
         }
     }
@@ -288,7 +311,37 @@ public struct EnsembleCommandRunner: Sendable {
             return EnsembleCommandResult(exitCode: .ok, standardOutput: output)
         case .failure(let code, let message):
             return remoteFailure(code: code, message: message)
-        case .status, .artifact, .runStarted, .mutation, .subscribed:
+        case .status, .artifact, .runStarted, .mutation, .proposeMerge, .subscribed:
+            throw EnsembleCLIClientError.unexpectedResponse
+        }
+    }
+
+    private func proposeMerge(
+        runIDs: [String],
+        message: String?,
+        json: Bool,
+        workingDirectory: String
+    ) throws -> EnsembleCommandResult {
+        let response = try client.performEnsemble(
+            EnsembleRequestPayload(
+                verb: "propose-merge",
+                workingDirectory: workingDirectory,
+                runIDs: runIDs,
+                token: tokenProvider(),
+                text: message
+            ))
+        switch response {
+        case .proposeMerge(let result):
+            let output =
+                try json
+                ? encodeJSON(result)
+                : result.accepted
+                    .map { "\($0) proposed \(result.state)" }
+                    .joined(separator: "\n")
+            return EnsembleCommandResult(exitCode: .ok, standardOutput: output)
+        case .failure(let code, let message):
+            return remoteFailure(code: code, message: message)
+        case .status, .artifact, .runStarted, .mutation, .grant, .subscribed:
             throw EnsembleCLIClientError.unexpectedResponse
         }
     }
@@ -345,7 +398,7 @@ public struct EnsembleCommandRunner: Sendable {
                     return false
                 case .failure(let code, let message):
                     throw EnsembleCLIClientError.failure(code: code, message: message)
-                case .artifact, .runStarted, .mutation, .grant, .subscribed:
+                case .artifact, .runStarted, .mutation, .grant, .proposeMerge, .subscribed:
                     throw EnsembleCLIClientError.unexpectedResponse
                 }
             },

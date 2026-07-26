@@ -615,6 +615,7 @@ actor LauncherIPCServer {
         case .ensembleAbort: "ensembleAbort"
         case .ensembleNote: "ensembleNote"
         case .ensembleGrant: "ensembleGrant"
+        case .ensembleProposeMerge: "ensembleProposeMerge"
         case .unknown: "unknown"
         }
     }

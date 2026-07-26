@@ -43,6 +43,7 @@ public enum EnsembleInvocation: Hashable, Sendable {
         artifacts: [String],
         baseReference: String?,
         label: String?,
+        planGate: Bool,
         json: Bool
     )
     case status(runIDs: [String], tree: Bool, sinceCursor: UInt64?, json: Bool)
@@ -57,6 +58,9 @@ public enum EnsembleInvocation: Hashable, Sendable {
     case abort(runID: String)
     case note(runID: String, text: String)
     case grant(json: Bool)
+    /// Token-scoped: re-raises the human merge gate for every named run.
+    /// Never applies, commits, or merges anything (C8-04).
+    case proposeMerge(runIDs: [String], message: String?, json: Bool)
     case help
 }
 
@@ -102,6 +106,8 @@ public struct EnsembleArgumentParser: Sendable {
             return try parseNote(remainder)
         case "grant":
             return try parseGrant(remainder)
+        case "propose-merge":
+            return try parseProposeMerge(remainder)
         default:
             throw EnsembleArgumentError.unknownVerb(verb)
         }
@@ -114,6 +120,7 @@ public struct EnsembleArgumentParser: Sendable {
         var artifacts: [String] = []
         var baseReference: String?
         var label: String?
+        var planGate = false
         var json = false
         var index = 0
 
@@ -140,6 +147,9 @@ public struct EnsembleArgumentParser: Sendable {
                     throw EnsembleArgumentError.duplicateOption(argument)
                 }
                 label = try value(after: argument, in: arguments, index: &index)
+            case "--plan-gate":
+                guard !planGate else { throw EnsembleArgumentError.duplicateOption(argument) }
+                planGate = true
             case "--json":
                 guard !json else { throw EnsembleArgumentError.duplicateOption(argument) }
                 json = true
@@ -169,6 +179,7 @@ public struct EnsembleArgumentParser: Sendable {
             artifacts: artifacts,
             baseReference: baseReference,
             label: label,
+            planGate: planGate,
             json: json
         )
     }
@@ -318,6 +329,43 @@ public struct EnsembleArgumentParser: Sendable {
             )
         }
         return .note(runID: runID, text: text)
+    }
+
+    private func parseProposeMerge(_ arguments: [String]) throws -> EnsembleInvocation {
+        var runIDs: [String] = []
+        var message: String?
+        var json = false
+        var index = 0
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            switch argument {
+            case "--message":
+                guard message == nil else {
+                    throw EnsembleArgumentError.duplicateOption(argument)
+                }
+                let raw = try value(after: argument, in: arguments, index: &index)
+                guard raw.count <= 1_000 else {
+                    throw EnsembleArgumentError.valueTooLong(
+                        option: argument, maximumCharacters: 1_000)
+                }
+                message = raw
+            case "--json":
+                guard !json else { throw EnsembleArgumentError.duplicateOption(argument) }
+                json = true
+            default:
+                if argument.hasPrefix("-") {
+                    throw EnsembleArgumentError.unknownOption(argument)
+                }
+                runIDs.append(argument)
+            }
+            index += 1
+        }
+
+        guard !runIDs.isEmpty else {
+            throw EnsembleArgumentError.missingArgument("<run>")
+        }
+        return .proposeMerge(runIDs: runIDs, message: message, json: json)
     }
 
     private func parseGrant(_ arguments: [String]) throws -> EnsembleInvocation {

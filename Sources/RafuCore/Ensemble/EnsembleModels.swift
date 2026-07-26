@@ -253,6 +253,10 @@ public struct EnsembleRequestPayload: Codable, Hashable, Sendable {
     public let baseReference: String?
     public let label: String?
     public let text: String?
+    /// `run --plan-gate`: park a fully-validated run at a human plan gate
+    /// before anything spawns (C8-04). `nil`/`false` is the C1–C7 behavior
+    /// unchanged.
+    public let planGate: Bool?
 
     public init(
         verb: String,
@@ -270,7 +274,8 @@ public struct EnsembleRequestPayload: Codable, Hashable, Sendable {
         artifacts: [String]? = nil,
         baseReference: String? = nil,
         label: String? = nil,
-        text: String? = nil
+        text: String? = nil,
+        planGate: Bool? = nil
     ) {
         self.verb = verb
         self.workingDirectory = workingDirectory
@@ -288,6 +293,22 @@ public struct EnsembleRequestPayload: Codable, Hashable, Sendable {
         self.baseReference = baseReference
         self.label = label
         self.text = text
+        self.planGate = planGate
+    }
+}
+
+/// `propose-merge`'s success payload. `state` is a LITERAL "awaiting_human"
+/// string, matching the shipped coordinator skill text verbatim
+/// (`ensemble-with-rafu/references/verbs.md`) — it is a verb acknowledgement,
+/// never a member of `EnsembleRunState`: the run's real projected state stays
+/// `.awaitingMergeGate` (C8-04, advisor A4).
+public struct EnsembleProposeMergeResult: Codable, Hashable, Sendable {
+    public let accepted: [String]
+    public let state: String
+
+    public init(accepted: [String], state: String = "awaiting_human") {
+        self.accepted = accepted
+        self.state = state
     }
 }
 
@@ -297,6 +318,7 @@ public enum EnsembleResponsePayload: Hashable, Sendable {
     case runStarted(EnsembleRunStartResult)
     case mutation(EnsembleMutationResult)
     case grant(EnsembleGrantResult)
+    case proposeMerge(EnsembleProposeMergeResult)
     case subscribed(cursor: UInt64)
     case failure(code: Int32, message: String)
 }
@@ -309,6 +331,7 @@ extension EnsembleResponsePayload: Codable {
         case runStarted
         case mutation
         case grant
+        case proposeMerge
         case cursor
         case code
         case message
@@ -320,6 +343,7 @@ extension EnsembleResponsePayload: Codable {
         case runStarted
         case mutation
         case grant
+        case proposeMerge
         case subscribed
         case failure
     }
@@ -339,6 +363,9 @@ extension EnsembleResponsePayload: Codable {
                 try container.decode(EnsembleMutationResult.self, forKey: .mutation))
         case .grant:
             self = .grant(try container.decode(EnsembleGrantResult.self, forKey: .grant))
+        case .proposeMerge:
+            self = .proposeMerge(
+                try container.decode(EnsembleProposeMergeResult.self, forKey: .proposeMerge))
         case .subscribed:
             self = .subscribed(cursor: try container.decode(UInt64.self, forKey: .cursor))
         case .failure:
@@ -367,6 +394,9 @@ extension EnsembleResponsePayload: Codable {
         case .grant(let value):
             try container.encode(Result.grant, forKey: .result)
             try container.encode(value, forKey: .grant)
+        case .proposeMerge(let value):
+            try container.encode(Result.proposeMerge, forKey: .result)
+            try container.encode(value, forKey: .proposeMerge)
         case .subscribed(let cursor):
             try container.encode(Result.subscribed, forKey: .result)
             try container.encode(cursor, forKey: .cursor)
