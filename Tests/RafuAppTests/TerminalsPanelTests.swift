@@ -487,3 +487,86 @@ func attentionCountCountsHandBuiltRows() {
     ]
     #expect(TerminalsPanelModel.attentionCount(rows) == 2)
 }
+
+// MARK: - Identity in the icon slot
+
+/// The panel row's icon well and the editor tab both showed a generic
+/// terminal glyph, so five agent terminals were distinguishable only by a
+/// name that middle-truncates at 20 characters. The well now carries the
+/// vendor mark instead.
+///
+/// The risk this pins is not the icon — it is the STATUS the icon displaced.
+/// Status used to live in that well as a shape-distinct glyph; it now leads
+/// the caption line as a word. If a later edit drops that segment, status
+/// loses its carrier entirely and nothing else fails, because no rendered
+/// assertion can see a caption's composition. Hence a source contract.
+@Suite("Terminal identity glyphs")
+struct TerminalIdentityGlyphTests {
+    @Test("The panel row wears the vendor mark and keeps status as caption text")
+    func panelRowShowsIdentityAndKeepsStatusText() throws {
+        let panel = try Self.source("Sources/RafuApp/Views/WorkspaceTerminalsPanelView.swift")
+
+        // Identity in the well, terminal glyph only as the login-shell fallback.
+        #expect(panel.contains("if let provider = row.agentProvider {"))
+        #expect(
+            panel.contains("FileIconView(icon: ConductorCLIIcons.icon(for: provider), size: 15)"))
+        #expect(panel.contains(#"Image(systemName: "terminal")"#))
+        // Status survives as a WORD in the caption — the carrier that replaced
+        // the glyph. Losing this line is the regression worth failing on.
+        #expect(
+            panel.contains(
+                #"\(TerminalSessionPresentation.label(row.status)) · \(row.shellName)"#))
+        // The old status glyph must not come back to the well: two competing
+        // signals in one slot is what this change removed.
+        #expect(
+            !panel.contains("Image(systemName: TerminalSessionPresentation.symbol(row.status))"))
+        // And the mark must not ALSO sit beside the name — one row, one mark.
+        #expect(!panel.contains("ConductorCLIIcons.icon(for: provider), size: 14"))
+    }
+
+    @Test("The editor terminal tab wears the vendor mark, falling back to the shell glyph")
+    func editorTabShowsVendorMark() throws {
+        let canvas = try Self.source("Sources/RafuApp/Views/EditorCanvasView.swift")
+
+        #expect(canvas.contains("if let provider = controller.agentProvider {"))
+        #expect(
+            canvas.contains("FileIconView(icon: ConductorCLIIcons.icon(for: provider), size: 12)"))
+        // The glyph stays for login shells rather than being deleted outright.
+        #expect(canvas.contains(#"Image(systemName: "terminal")"#))
+    }
+
+    /// The mark is legitimate only because it is never alone: `agentProvider`
+    /// is derived from the launch spec, and the row's accessibility text still
+    /// names the session and its status independently of any icon.
+    @MainActor
+    @Test("A login shell has no provider, so the fallback path is real")
+    func loginShellHasNoProvider() throws {
+        let session = WorkspaceSession()
+        session.newTerminalTab()
+        let rows = TerminalsPanelModel.rows(
+            sessions: session.terminal.sessions,
+            presentedIDs: session.presentedTerminalSessionIDs,
+            workspaceRoot: session.rootURL?.path
+        )
+        let row = try #require(rows.first)
+        #expect(row.agentProvider == nil)
+        #expect(!TerminalSessionPresentation.label(row.status).isEmpty)
+    }
+
+    private static func source(_ path: String, file: StaticString = #filePath) throws -> String {
+        var directory = URL(fileURLWithPath: "\(file)").deletingLastPathComponent()
+        while directory.path != "/" {
+            if FileManager.default.fileExists(
+                atPath: directory.appending(path: "Package.swift").path)
+            {
+                return try String(contentsOf: directory.appending(path: path), encoding: .utf8)
+            }
+            directory = directory.deletingLastPathComponent()
+        }
+        throw TerminalIdentityGlyphError.repositoryRootNotFound
+    }
+
+    private enum TerminalIdentityGlyphError: Error {
+        case repositoryRootNotFound
+    }
+}

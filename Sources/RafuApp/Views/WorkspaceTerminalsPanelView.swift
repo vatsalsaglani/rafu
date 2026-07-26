@@ -402,18 +402,31 @@ private struct TerminalSessionRowView: View {
 
     var body: some View {
         HStack(spacing: RafuMetrics.space3) {
-            // Status glyph in a quiet icon well. The session's chosen color
-            // lives on the CARD BORDER (below), not a dot — never the only
-            // signal: the glyph + name/status text always carry meaning.
-            Image(systemName: TerminalSessionPresentation.symbol(row.status))
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(statusTint)
-                .frame(width: 26, height: 26)
-                .background(
-                    RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
-                        .fill(theme.palette.chipBackground)
-                )
-                .accessibilityLabel(TerminalSessionPresentation.label(row.status))
+            // IDENTITY well: the agent's vendor mark, or the terminal glyph
+            // for a login shell. This slot used to hold the status glyph,
+            // which put every session behind the same dot and pushed identity
+            // into a second, smaller icon beside the name.
+            //
+            // Status did not simply move — it changed carrier. It is now the
+            // first segment of the caption line below, as a WORD, which is a
+            // stronger signal than the glyph it replaces and satisfies AGENTS'
+            // rule against state by color alone without needing a badge the
+            // size of a few pixels. The exited chip beside the name stays.
+            Group {
+                if let provider = row.agentProvider {
+                    FileIconView(icon: ConductorCLIIcons.icon(for: provider), size: 15)
+                } else {
+                    Image(systemName: "terminal")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(statusTint)
+                }
+            }
+            .frame(width: 26, height: 26)
+            .background(
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
+                    .fill(theme.palette.chipBackground)
+            )
+            .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     if isRenaming {
@@ -429,10 +442,9 @@ private struct TerminalSessionRowView: View {
                                 if !focused { commitRename() }
                             }
                     } else {
-                        if let provider = row.agentProvider {
-                            FileIconView(icon: ConductorCLIIcons.icon(for: provider), size: 14)
-                                .accessibilityHidden(true)
-                        }
+                        // No vendor mark here any more — it moved to the well,
+                        // and two copies of the same mark on one row read as a
+                        // mistake.
                         Text(row.displayName)
                             .fontWeight(.medium)
                             .lineLimit(1)
@@ -455,11 +467,16 @@ private struct TerminalSessionRowView: View {
                     }
                     Spacer(minLength: 0)
                 }
-                Text("\(row.shellName) · \(row.directoryLabel)")
-                    .font(.caption2)
-                    .foregroundStyle(theme.palette.textMuted)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                // Status leads the caption because the well no longer carries
+                // it. Text, not tint: legible under grayscale, Increase
+                // Contrast, and VoiceOver alike.
+                Text(
+                    "\(TerminalSessionPresentation.label(row.status)) · \(row.shellName) · \(row.directoryLabel)"
+                )
+                .font(.caption2)
+                .foregroundStyle(theme.palette.textMuted)
+                .lineLimit(1)
+                .truncationMode(.middle)
             }
             Spacer(minLength: 4)
             Menu {

@@ -1930,9 +1930,22 @@ private struct EditorTerminalTabItem: View {
                 session.selectEditorTab(tabID, in: groupID)
             } label: {
                 HStack(spacing: 7) {
-                    Image(systemName: "terminal")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(theme.palette.accent)
+                    // An agent terminal shows its VENDOR mark; the generic
+                    // terminal glyph is the fallback for a login shell. Five
+                    // agent tabs all wearing the same glyph made the strip
+                    // unreadable at a glance — the name was the only thing
+                    // telling them apart, and it truncates at 20 characters.
+                    // The mark is never the sole carrier: the label sits
+                    // beside it, so this is identity at a glance, not meaning
+                    // by icon.
+                    if let provider = controller.agentProvider {
+                        FileIconView(icon: ConductorCLIIcons.icon(for: provider), size: 12)
+                            .accessibilityHidden(true)
+                    } else {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(theme.palette.accent)
+                    }
                     Text(TerminalSessionPresentation.tabLabel(controller.displayName))
                         .lineLimit(1)
                         .truncationMode(.middle)
