@@ -682,6 +682,20 @@ struct CommandPaletteView: View {
             },
         ]
 
+        if session.rootURL != nil {
+            commands.append(
+                .init(
+                    id: "conductor.new-ensemble",
+                    title: "New Ensemble…",
+                    symbolName: "circle.hexagongrid",
+                    keywords: ["ensemble", "coordinator", "goal", "new"]
+                ) {
+                    dismiss()
+                    session.presentEnsembleStartSheet()
+                }
+            )
+        }
+
         if session.rootURL != nil, session.canStartConductorWorkflowRun {
             commands.append(
                 .init(

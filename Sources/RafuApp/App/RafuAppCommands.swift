@@ -303,6 +303,15 @@ struct RafuAppCommands: Commands {
             }
             .disabled(workspaceSession?.rootURL == nil)
 
+            // C8-07: unlike the group above, ⌘⇧E is safe app-wide — it is a
+            // Command-modified shortcut, not a Control-only one a terminal's
+            // responder chain would otherwise swallow first.
+            Button("New Ensemble…") {
+                workspaceSession?.presentEnsembleStartSheet()
+            }
+            .keyboardShortcut("e", modifiers: [.command, .shift])
+            .disabled(workspaceSession?.descriptor == nil)
+
             Button("New Ensemble Run…") {
                 workspaceSession?.navigatorMode = .runs
                 workspaceSession?.conductorRunController.presentNewRun()
