@@ -269,6 +269,14 @@ private struct RunDetailContent: View {
                 .accessibilityLabel(
                     manifest.worktreeBranch.isEmpty
                         ? "Main workspace" : "Worktree branch \(manifest.worktreeBranch)")
+                // Which CLI and which model this run is actually on — stated
+                // in the header, not only per step, so the choice stays
+                // visible after launch.
+                if let agents = ConductorRunPresentation.agentSummary(for: manifest) {
+                    RafuChip(text: agents.label)
+                        .help(agents.detailedLabel)
+                        .accessibilityLabel("Agents \(agents.detailedLabel)")
+                }
             }
             // Whole-run totals, absent entirely when nothing was metered.
             let runUsage = ConductorRunPresentation.runUsageLines(for: manifest)
@@ -385,7 +393,8 @@ private struct ConductorStepTimelineRow: View {
                 RafuChip(text: row.providerLabel, foreground: theme.palette.textSecondary)
                     .accessibilityLabel("Provider \(row.providerLabel)")
                 RafuChip(text: row.modelLabel, foreground: theme.palette.textSecondary)
-                    .accessibilityLabel("Model \(row.modelLabel)")
+                    .help(row.modelDetailLabel)
+                    .accessibilityLabel("Model \(row.modelDetailLabel)")
                 if let durationLabel = row.durationLabel {
                     RafuChip(text: durationLabel, monospacedDigit: true)
                         .accessibilityLabel("Duration \(durationLabel)")
@@ -549,14 +558,21 @@ private struct ConductorPlanGateSection: View {
             }
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(Array(manifest.steps.enumerated()), id: \.offset) { index, step in
+                    // The plan gate is the last point before anything spawns,
+                    // so it must state the model as well as the CLI — that is
+                    // what the user is approving.
+                    let model = ConductorRunPresentation.modelResolution(for: step.binding)
                     HStack(spacing: 6) {
                         Text("\(index + 1).")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(theme.palette.textMuted)
                         Text(step.agentName)
                             .foregroundStyle(theme.palette.textPrimary)
-                        Text("• \(step.binding.provider.displayName)")
+                        Text("• \(step.binding.provider.displayName) · \(model.label)")
                             .foregroundStyle(theme.palette.textSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .help("\(step.binding.provider.displayName) — \(model.detailedLabel)")
                         if step.gateAfter {
                             RafuChip(text: "Gate")
                         }
@@ -565,7 +581,8 @@ private struct ConductorPlanGateSection: View {
                     .font(.callout)
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel(
-                        "Step \(index + 1), \(step.agentName), \(step.binding.provider.displayName)"
+                        "Step \(index + 1), \(step.agentName), "
+                            + "\(step.binding.provider.displayName) — \(model.detailedLabel)"
                             + (step.gateAfter ? ", gates after" : ""))
                 }
             }

@@ -92,6 +92,14 @@ struct ConductorGraphCanvas: View {
             Text("Ensemble Graph")
                 .lineLimit(1)
                 .foregroundStyle(theme.palette.textPrimary)
+            // The launched Ensemble's own identity: which CLI is coordinating
+            // and on which model. Setup states this once; without it here the
+            // choice disappears the moment the run starts.
+            if let identity = coordinatorIdentity {
+                RafuChip(text: identity.label)
+                    .help(identity.detailedLabel)
+                    .accessibilityLabel("Coordinator \(identity.detailedLabel)")
+            }
             Button("Close Graph", systemImage: "xmark", action: session.closeConductorGraph)
                 .buttonStyle(RafuIconButtonStyle(size: 18, iconSize: 9))
                 .accessibilityHint("Closes the Ensemble graph")
@@ -101,6 +109,31 @@ struct ConductorGraphCanvas: View {
         .padding(.horizontal, 10)
         .frame(height: RafuMetrics.tabBarHeight)
         .background(theme.palette.tabBarBackground)
+    }
+
+    /// CLI + model of the coordinator(s) still live in this window. `nil` when
+    /// none is — a graph of purely historical runs has no ensemble identity to
+    /// state, and inventing one from an ended session would be a guess.
+    private var coordinatorIdentity: ConductorAgentSummary? {
+        let live = session.conductorCoordinatorSessions.filter { $0.endedAt == nil }
+        guard !live.isEmpty else { return nil }
+        let detailed =
+            live
+            .map { coordinator in
+                let model = ConductorRunPresentation.modelResolution(
+                    forModel: coordinator.model, provider: coordinator.provider)
+                return "\(coordinator.provider.displayName) — \(model.detailedLabel)"
+            }
+            .joined(separator: ", ")
+        guard live.count == 1, let only = live.first else {
+            return ConductorAgentSummary(
+                label: "\(live.count) coordinators", detailedLabel: detailed)
+        }
+        let model = ConductorRunPresentation.modelResolution(
+            forModel: only.model, provider: only.provider)
+        return ConductorAgentSummary(
+            label: "\(only.provider.displayName) · \(model.label)",
+            detailedLabel: detailed)
     }
 
     private var graphContent: some View {
@@ -178,7 +211,8 @@ struct ConductorGraphCanvas: View {
                 provider: $0.provider,
                 terminalSessionID: $0.terminalSessionID,
                 startedAt: $0.startedAt,
-                endedAt: $0.endedAt)
+                endedAt: $0.endedAt,
+                model: $0.model)
         }
         return ConductorGraphRefreshInput(
             manifests: manifests,
@@ -356,6 +390,7 @@ private struct ConductorGraphNodeCard: View {
                         .foregroundStyle(theme.palette.textPrimary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
+                    modelChip
                     Text(node.detail)
                         .font(.caption)
                         .foregroundStyle(theme.palette.textMuted)
@@ -408,6 +443,37 @@ private struct ConductorGraphNodeCard: View {
         ConductorRunPresentation.graphNode(for: node.runState)
     }
 
+    /// The model this node runs on, beside — never instead of — the CLI in
+    /// `ProviderBadge`, so two runs of one CLI are distinguishable at a glance.
+    ///
+    /// A graph node is 292pt wide, so a long model id cannot be allowed to
+    /// widen the card: the chip truncates deliberately. `.middle` and not
+    /// `.tail` because model ids commonly share a long prefix and differ at the
+    /// end ("claude-sonnet-4-5" vs "claude-sonnet-4-5-thinking") — tail
+    /// truncation would collapse exactly the distinguishing part. The
+    /// untruncated value is always in `help` and in the card's accessibility
+    /// label, so truncation never hides the only thing separating two nodes.
+    @ViewBuilder
+    private var modelChip: some View {
+        if let modelLabel = node.modelLabel {
+            HStack(spacing: 4) {
+                Image(systemName: "cpu")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(theme.palette.textMuted)
+                    .accessibilityHidden(true)
+                Text(modelLabel)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(theme.palette.chipBackground))
+            .help(node.modelDetailLabel ?? modelLabel)
+        }
+    }
+
     private var statusLabel: some View {
         Label(presentation.label, systemImage: presentation.symbol)
             .font(.caption)
@@ -442,10 +508,14 @@ private struct ConductorGraphNodeCard: View {
         }
     }
 
+    /// `modelDetailLabel` already names the CLI *and* the untruncated model,
+    /// so it replaces the bare provider segment rather than being appended to
+    /// it. This is the guarantee that the on-screen chip's truncation never
+    /// costs VoiceOver the distinguishing value.
     private var accessibilityLabel: String {
-        let provider = node.provider?.displayName ?? "Unknown provider"
+        let identity = node.modelDetailLabel ?? node.provider?.displayName ?? "Unknown provider"
         return
-            "\(kindLabel), \(node.title), \(presentation.label), \(provider), \(node.detail)"
+            "\(kindLabel), \(node.title), \(presentation.label), \(identity), \(node.detail)"
     }
 
     private var primaryHint: String {

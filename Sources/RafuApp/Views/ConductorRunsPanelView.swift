@@ -508,10 +508,18 @@ private struct ConductorRunRowView: View {
                             .accessibilityLabel("Started by \(attribution)")
                     }
                 }
-                Text("\(row.subtitle) · \(row.statusLabel)")
-                    .font(.caption)
-                    .foregroundStyle(theme.palette.textMuted)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    // Leading, so a narrow navigator truncates the counts and
+                    // branch before it truncates which CLI and model ran.
+                    if let agentLabel = row.agentLabel {
+                        RafuChip(text: agentLabel)
+                            .help(row.agentDetailLabel ?? agentLabel)
+                    }
+                    Text("\(row.subtitle) · \(row.statusLabel)")
+                        .font(.caption)
+                        .foregroundStyle(theme.palette.textMuted)
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 4)
             if let reveal {
@@ -521,8 +529,12 @@ private struct ConductorRunRowView: View {
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
+        // The chip above may truncate; this label carries every distinct
+        // CLI/model pair in full.
         .accessibilityLabel(
-            "\(row.title), \(row.statusLabel)\(attribution.map { ", started by \($0)" } ?? "")")
+            "\(row.title), \(row.statusLabel)"
+                + (row.agentDetailLabel.map { ", \($0)" } ?? "")
+                + (attribution.map { ", started by \($0)" } ?? ""))
     }
 }
 
