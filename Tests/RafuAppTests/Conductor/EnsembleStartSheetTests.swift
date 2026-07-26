@@ -168,6 +168,54 @@ struct EnsembleStartSheetTests {
         #expect(model.canStartGuided)
     }
 
+    @Test("Door 1's primary action requires a non-empty allowed-CLI set")
+    func guidedPrimaryRequiresAllowedProvider() async throws {
+        let root = try makeEnsembleTestRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = EnsembleStartModel(adapters: [readyFixture(.claudeCode)])
+        await model.probeCLIs(workspaceRoot: root)
+        model.goal = "Ship the release"
+
+        #expect(model.canStartGuided)
+
+        model.allowedProviders.removeAll()
+        #expect(!model.canStartGuided)
+
+        model.allowedProviders.insert(.claudeCode)
+        #expect(model.canStartGuided)
+    }
+
+    @Test("Switching the selected provider resets the model field to ITS default")
+    func selectProviderResetsModelAcrossVendors() async throws {
+        let root = try makeEnsembleTestRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = "EnsembleStartSheetTests.\(UUID().uuidString)"
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+        let defaultModelStore = ConductorDefaultModelStore(suiteName: suite)
+        defaultModelStore.setDefaultModel("claude-model", for: .claudeCode)
+        defaultModelStore.setDefaultModel("codex-model", for: .codex)
+
+        let model = EnsembleStartModel(
+            adapters: [readyFixture(.claudeCode), readyFixture(.codex)],
+            defaultModelStore: defaultModelStore)
+        await model.probeCLIs(workspaceRoot: root)
+
+        // Auto-selected to the first ready provider with its own default.
+        #expect(model.selectedProvider == .claudeCode)
+        #expect(model.model == "claude-model")
+
+        // Simulate the user hand-editing the model field before switching.
+        model.model = "hand-typed-claude-override"
+
+        model.selectProvider(.codex)
+        #expect(model.selectedProvider == .codex)
+        #expect(model.model == "codex-model")
+        #expect(model.model != "hand-typed-claude-override")
+
+        model.selectProvider(.claudeCode)
+        #expect(model.model == "claude-model")
+    }
+
     @Test("A successful launch registers the coordinator; Done routes to the graph")
     func launchSuccessRegistersAndRoutes() async throws {
         let root = try makeEnsembleTestRoot()

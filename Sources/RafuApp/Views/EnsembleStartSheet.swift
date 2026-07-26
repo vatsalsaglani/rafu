@@ -138,17 +138,28 @@ final class EnsembleStartModel {
             allowedProviders = Set(readyIDs)
         }
         if let selectedProvider, isEnabled(selectedProvider) {
-            // Keep the user's (or a prior probe's) choice.
+            // Keep the user's (or a prior probe's) choice — the provider
+            // did not change, so its model field is left untouched.
+        } else if let firstReady = readyIDs.first {
+            selectProvider(firstReady)
         } else {
-            selectedProvider = readyIDs.first
-        }
-        if let selectedProvider, model.isEmpty {
-            model = cliOptions.first(where: { $0.id == selectedProvider })?.defaultModel ?? ""
+            selectedProvider = nil
         }
     }
 
     func isEnabled(_ id: ConductorCLIID) -> Bool {
         cliOptions.first { $0.id == id }?.isReady ?? false
+    }
+
+    /// Selects `id` as the coordinator provider and resets the model field
+    /// to ITS default — never leaves a previously selected CLI's model
+    /// string in place for a different vendor (matches
+    /// `AgentTerminalSheet.select(_:)`'s own unconditional reset). Without
+    /// this, switching CLIs after typing/prefilling a model launches one
+    /// vendor's model string on another vendor's CLI.
+    func selectProvider(_ id: ConductorCLIID) {
+        selectedProvider = id
+        model = cliOptions.first(where: { $0.id == id })?.defaultModel ?? ""
     }
 
     /// `nil` only for a ready CLI. The not-authenticated case reproduces the
@@ -167,8 +178,15 @@ final class EnsembleStartModel {
         }
     }
 
+    /// An empty `allowedProviders` set would still let the coordinator
+    /// launch, but `ConductorEnsembleTokenStore.enforce` refuses EVERY
+    /// child run with `.providerNotAllowed` (exit 77) — the coordinator
+    /// would look healthy on the graph while every run silently dies inside
+    /// the CLI's own output. The grant is the consent surface, so this is
+    /// required here, not just left to the runtime enforcement.
     var canStartGuided: Bool {
         guard let selectedProvider, isEnabled(selectedProvider) else { return false }
+        guard !allowedProviders.isEmpty else { return false }
         return !goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -388,7 +406,15 @@ struct EnsembleStartSheet: View {
 
     private var doorErrorMessage: String? {
         guard model.door == .guided, !isShowingLaunchConfirmation else { return nil }
-        return model.errorMessage
+        if let errorMessage = model.errorMessage { return errorMessage }
+        // Surfaced near the Start button (text, not color alone) the moment
+        // the grant's allowed set is empty — an empty set would silently
+        // refuse every child run at the enforcement layer instead.
+        if model.allowedProviders.isEmpty {
+            return
+                "Allow at least one CLI in the budget grant so the coordinator can start a child run."
+        }
+        return nil
     }
 
     // MARK: - Door 1: guided
@@ -477,10 +503,7 @@ struct EnsembleStartSheet: View {
 
     private func selectProvider(_ option: AgentTerminalOption) {
         guard option.isReady else { return }
-        model.selectedProvider = option.id
-        if model.model.isEmpty {
-            model.model = option.defaultModel ?? ""
-        }
+        model.selectProvider(option.id)
     }
 
     private func allowedBinding(_ id: ConductorCLIID) -> Binding<Bool> {
