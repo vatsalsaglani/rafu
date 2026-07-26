@@ -174,7 +174,7 @@ struct ConductorGraphCanvas: View {
         let coordinators = session.conductorCoordinatorSessions.map {
             CoordinatorNodeInput(
                 id: $0.id,
-                title: $0.goal,
+                title: $0.displayTitle,
                 provider: $0.provider,
                 terminalSessionID: $0.terminalSessionID,
                 startedAt: $0.startedAt,

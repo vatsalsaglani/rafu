@@ -9,6 +9,23 @@ nonisolated struct ConductorCoordinatorSession: Identifiable, Sendable {
     let terminalSessionID: UUID?
     let startedAt: Date
     var endedAt: Date?
+    /// Short human-readable name for this Ensemble, supplied by the New
+    /// Ensemble canvas's name field. Additive with a default so every
+    /// existing construction site — and the synthesized memberwise init —
+    /// keeps compiling; `nil` falls back to `goal` wherever a coordinator is
+    /// titled. It is the coordinator-side twin of
+    /// `ConductorRunManifest.label`/`ConductorWorkflowRunRequest.label`, not
+    /// a parallel naming mechanism.
+    var label: String? = nil
+
+    /// What to show the user for this coordinator: its name when it has one,
+    /// otherwise the goal text the graph has always shown.
+    var displayTitle: String {
+        guard let label, !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return goal
+        }
+        return label
+    }
 }
 
 nonisolated enum ConductorCoordinatorLaunchError: Error, Equatable, LocalizedError, Sendable {
@@ -67,6 +84,7 @@ struct ConductorCoordinatorLauncher {
         model: String?,
         goal: String,
         grant: ConductorEnsembleGrant,
+        label: String? = nil,
         in session: WorkspaceSession
     ) async throws -> ConductorCoordinatorSession {
         guard let workspaceRoot = session.rootURL else {
@@ -109,6 +127,7 @@ struct ConductorCoordinatorLauncher {
 
         let terminalController = session.terminal.newSession(spec: processSpec)
         let trimmedModel = model?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedLabel = label?.trimmingCharacters(in: .whitespacesAndNewlines)
         let coordinatorSession = ConductorCoordinatorSession(
             id: coordinatorID,
             provider: provider,
@@ -116,7 +135,8 @@ struct ConductorCoordinatorLauncher {
             goal: goal,
             terminalSessionID: terminalController.id,
             startedAt: clock(),
-            endedAt: nil
+            endedAt: nil,
+            label: trimmedLabel?.isEmpty == false ? trimmedLabel : nil
         )
         session.registerCoordinatorSession(coordinatorSession) {
             tokenStore.revoke(coordinatorID: coordinatorID)
