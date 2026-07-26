@@ -10,6 +10,11 @@ nonisolated struct CoordinatorNodeInput: Equatable, Sendable {
     let terminalSessionID: UUID?
     let startedAt: Date
     let endedAt: Date?
+    /// The coordinator's chosen model, `nil`/empty when none was set and the
+    /// CLI decides. Declared `var` with a default so the synthesized
+    /// memberwise init stays additive — a `let` with a default value is
+    /// EXCLUDED from that init (see `ConductorRunManifest.gate`'s note).
+    var model: String? = nil
 }
 
 nonisolated struct ConductorGraphNode: Identifiable, Equatable, Sendable {
@@ -37,6 +42,17 @@ nonisolated struct ConductorGraphNode: Identifiable, Equatable, Sendable {
     let detail: String
     let column: Int
     let row: Int
+    /// Chip-sized model name for this node, so two nodes running the same CLI
+    /// are distinguishable at a glance. `nil` only when the node has no model
+    /// concept at all — a synthesized coordinator whose provider is unknown,
+    /// or a run with no steps.
+    ///
+    /// The node card truncates this; `modelDetailLabel` is what its `help` and
+    /// accessibility label carry, so the model is never the only distinguishing
+    /// value AND only present in truncated form.
+    var modelLabel: String? = nil
+    /// The untruncated form, naming the source of the choice.
+    var modelDetailLabel: String? = nil
 }
 
 nonisolated struct ConductorGraphEdge: Equatable, Sendable {
@@ -112,6 +128,9 @@ nonisolated enum ConductorGraphModel {
 
         for coordinator in orderedCoordinators {
             let isEnded = coordinator.endedAt != nil
+            let model = ConductorRunPresentation.modelResolution(
+                forModel: coordinator.model,
+                provider: coordinator.provider)
             nodes.append(
                 ConductorGraphNode(
                     id: coordinator.id,
@@ -126,7 +145,10 @@ nonisolated enum ConductorGraphModel {
                     runState: isEnded ? .ended : .running,
                     detail: "\(coordinator.provider.displayName) • \(isEnded ? "ended" : "live")",
                     column: 0,
-                    row: nextRow(in: 0)
+                    row: nextRow(in: 0),
+                    modelLabel: model.label,
+                    modelDetailLabel:
+                        "\(coordinator.provider.displayName) — \(model.detailedLabel)"
                 ))
         }
 
@@ -154,6 +176,8 @@ nonisolated enum ConductorGraphModel {
                 for: manifest,
                 live: liveStates[manifest.id])
             let runProvider = manifest.steps.first?.binding.provider
+            let runModels = ConductorRunPresentation.modelSummary(
+                for: manifest.steps.map(\.binding))
             nodes.append(
                 ConductorGraphNode(
                     id: runNodeID,
@@ -167,7 +191,9 @@ nonisolated enum ConductorGraphModel {
                     detail:
                         "\(manifest.steps.count) step\(manifest.steps.count == 1 ? "" : "s") • \(branchLabel(manifest))",
                     column: runColumn,
-                    row: nextRow(in: runColumn)
+                    row: nextRow(in: runColumn),
+                    modelLabel: runModels?.label,
+                    modelDetailLabel: runModels?.detailedLabel
                 ))
             if let startedBy = manifest.startedBy {
                 appendEdge(from: startedBy, to: runNodeID)
@@ -190,6 +216,9 @@ nonisolated enum ConductorGraphModel {
                 let stepPresentation = ConductorRunPresentation.graphNode(
                     for: step.status,
                     blocked: isBlocked)
+                let stepModel = ConductorRunPresentation.modelResolution(for: step.binding)
+                let stepModelDetail =
+                    "\(step.binding.provider.displayName) — \(stepModel.detailedLabel)"
                 nodes.append(
                     ConductorGraphNode(
                         id: stepNodeID,
@@ -205,7 +234,9 @@ nonisolated enum ConductorGraphModel {
                             index: index,
                             unresolvedInputs: unresolvedInputs),
                         column: runColumn + index + 1,
-                        row: nextRow(in: runColumn + index + 1)
+                        row: nextRow(in: runColumn + index + 1),
+                        modelLabel: stepModel.label,
+                        modelDetailLabel: stepModelDetail
                     ))
 
                 appendEdge(from: priorStepNodeID ?? runNodeID, to: stepNodeID)
@@ -238,7 +269,9 @@ nonisolated enum ConductorGraphModel {
                             runState: .pending,
                             detail: bounded(proposal, fallback: "Proposal"),
                             column: ghostColumn,
-                            row: nextRow(in: ghostColumn)
+                            row: nextRow(in: ghostColumn),
+                            modelLabel: stepModel.label,
+                            modelDetailLabel: stepModelDetail
                         ))
                     appendEdge(from: stepNodeID, to: ghostNodeID)
                 }
@@ -255,10 +288,12 @@ nonisolated enum ConductorGraphModel {
                     case .plan: "Plan gate"
                     case .step: "Step gate"
                     }
-                let provider =
+                let gateBinding =
                     manifest.steps.indices.contains(gate.stepIndex)
-                    ? manifest.steps[gate.stepIndex].binding.provider
-                    : manifest.steps.last?.binding.provider
+                    ? manifest.steps[gate.stepIndex].binding
+                    : manifest.steps.last?.binding
+                let provider = gateBinding?.provider
+                let gateModel = gateBinding.map(ConductorRunPresentation.modelResolution(for:))
                 nodes.append(
                     ConductorGraphNode(
                         id: gateNodeID,
@@ -276,7 +311,12 @@ nonisolated enum ConductorGraphModel {
                                 ? "Review the proposed plan"
                                 : "Review step \(gate.stepIndex + 1)'s artifact",
                         column: gateColumn,
-                        row: nextRow(in: gateColumn)
+                        row: nextRow(in: gateColumn),
+                        modelLabel: gateModel?.label,
+                        modelDetailLabel: gateBinding.map {
+                            "\($0.provider.displayName) — "
+                                + (gateModel?.detailedLabel ?? "")
+                        }
                     ))
                 let sourceID =
                     manifest.steps.indices.contains(gate.stepIndex)
@@ -334,9 +374,10 @@ nonisolated enum ConductorGraphModel {
         if case .failed(let reason) = step.status {
             return bounded(reason, fallback: "Step \(index + 1) failed")
         }
-        let model = step.binding.model.isEmpty ? "adapter default" : step.binding.model
-        return
-            "\(step.binding.provider.displayName) • \(bounded(model, fallback: "adapter default"))"
+        // The CLI is the node's provider badge and the model is its own chip,
+        // so this line no longer repeats either. It names what the step will
+        // actually produce, which nothing else on the card says.
+        return "→ \(bounded(step.handoffArtifact, fallback: "handoff artifact"))"
     }
 
     private static func branchLabel(_ manifest: ConductorRunManifest) -> String {

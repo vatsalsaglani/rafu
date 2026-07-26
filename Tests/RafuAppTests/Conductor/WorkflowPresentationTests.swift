@@ -80,7 +80,8 @@ func stepRowsReportDurationAndAttemptLabels() {
             == ".rafu/runs/presentation-run/steps/01-advisor-a1/handoff/brief.md")
 
     #expect(rows[1].attemptLabel == "Attempt 2")
-    #expect(rows[1].modelLabel == "Adapter default")
+    #expect(rows[1].modelLabel == ConductorRunPresentation.unsetModelLabel)
+    #expect(rows[1].namesAModel == false)
     #expect(rows[1].statusLabel == "boom")
 
     #expect(rows[2].durationLabel == nil)
@@ -122,6 +123,145 @@ func runRowSurfacesGateBadgeAndLiveness() {
 
     let terminal = ConductorRunPresentation.runRow(for: manifest, liveState: .completed)
     #expect(!terminal.isLive)
+}
+
+// MARK: - Model display (M02)
+
+private func modelManifest(
+    id: String = "model-run",
+    bindings: [ConductorRunManifest.AgentBinding]
+) -> ConductorRunManifest {
+    let now = Date(timeIntervalSince1970: 1)
+    return ConductorRunManifest(
+        id: id,
+        workflowName: "Ship a change",
+        baseCommit: "0123456789012345678901234567890123456789",
+        worktreeBranch: "rafu/run-\(id)",
+        createdAt: now,
+        updatedAt: now,
+        steps: bindings.enumerated().map { index, binding in
+            ConductorRunManifest.Step(
+                agentName: "step-\(index)",
+                binding: binding,
+                inputArtifacts: [],
+                handoffArtifact: "out-\(index).md",
+                gateAfter: false,
+                status: .pending,
+                startedAt: nil,
+                finishedAt: nil)
+        })
+}
+
+@Test(
+    "One wording wins: an unset model reads as the shared unset label, not a guessed catalog entry")
+func unsetModelUsesOneHonestWording() throws {
+    let adapter = try #require(ConductorAdapterRegistry.adapter(for: .codex))
+    let curated = try #require(adapter.curatedModels().first)
+
+    // Whitespace-only is the same "not set" as empty — the resolver trims.
+    for raw in ["", "   "] {
+        let resolution = ConductorRunPresentation.modelResolution(
+            for: ConductorRunManifest.AgentBinding(
+                provider: .codex, model: raw, autonomy: .readOnly, adapterVersion: nil))
+        #expect(resolution.label == ConductorRunPresentation.unsetModelLabel)
+        #expect(resolution.namesAModel == false)
+        #expect(resolution.modelID == nil)
+        #expect(resolution.label != curated.displayName)
+        #expect(resolution.label != curated.id)
+    }
+
+    // A coordinator with no model gets the same wording, from the same source.
+    #expect(
+        ConductorRunPresentation.modelResolution(forModel: nil, provider: .codex).label
+            == ConductorRunPresentation.unsetModelLabel)
+    #expect(
+        ConductorRunPresentation.modelResolution(forModel: nil, provider: nil).label
+            == ConductorRunPresentation.unsetModelLabel)
+}
+
+@Test("A known model id displays under its catalog name; an unknown one displays as itself")
+func knownAndUnknownModelIDsResolve() {
+    let known = ConductorRunPresentation.modelResolution(
+        for: ConductorRunManifest.AgentBinding(
+            provider: .codex, model: "gpt-5.6-terra", autonomy: .readOnly, adapterVersion: nil))
+    #expect(known.label == "GPT-5.6 Terra")
+    #expect(known.namesAModel)
+
+    let unknown = ConductorRunPresentation.modelResolution(
+        for: ConductorRunManifest.AgentBinding(
+            provider: .codex, model: "some-private-build", autonomy: .readOnly,
+            adapterVersion: nil))
+    #expect(unknown.label == "some-private-build")
+    #expect(unknown.namesAModel)
+}
+
+@Test(
+    "A run row names one CLI and model when the steps agree, and collapses to counts when they do not"
+)
+func runRowAgentSummaryCollapsesHonestly() throws {
+    let uniform = ConductorRunPresentation.runRow(
+        for: modelManifest(
+            id: "uniform",
+            bindings: [
+                ConductorRunManifest.AgentBinding(
+                    provider: .codex, model: "gpt-5.6", autonomy: .readOnly, adapterVersion: nil),
+                ConductorRunManifest.AgentBinding(
+                    provider: .codex, model: "gpt-5.6", autonomy: .readOnly, adapterVersion: nil),
+            ]))
+    #expect(uniform.agentLabel == "Codex · GPT-5.6")
+    #expect(uniform.agentDetailLabel == "Codex — GPT-5.6")
+
+    let sameCLI = ConductorRunPresentation.runRow(
+        for: modelManifest(
+            id: "same-cli",
+            bindings: [
+                ConductorRunManifest.AgentBinding(
+                    provider: .codex, model: "gpt-5.6", autonomy: .readOnly, adapterVersion: nil),
+                ConductorRunManifest.AgentBinding(
+                    provider: .codex, model: "", autonomy: .readOnly, adapterVersion: nil),
+            ]))
+    #expect(sameCLI.agentLabel == "Codex · 2 models")
+    // The short form abbreviates; the long form never does.
+    let sameCLIDetail = try #require(sameCLI.agentDetailLabel)
+    #expect(sameCLIDetail.contains("GPT-5.6"))
+    #expect(sameCLIDetail.contains(ConductorRunPresentation.unsetModelLabel))
+
+    let mixed = ConductorRunPresentation.runRow(
+        for: modelManifest(
+            id: "mixed",
+            bindings: [
+                ConductorRunManifest.AgentBinding(
+                    provider: .codex, model: "gpt-5.6", autonomy: .readOnly, adapterVersion: nil),
+                ConductorRunManifest.AgentBinding(
+                    provider: .claudeCode, model: "private-a", autonomy: .readOnly,
+                    adapterVersion: nil),
+            ]))
+    #expect(mixed.agentLabel == "2 CLIs · 2 models")
+    #expect(mixed.agentDetailLabel == "Codex — GPT-5.6, Claude Code — private-a")
+
+    // Nothing to name when there are no steps.
+    #expect(ConductorRunPresentation.runRow(for: modelManifest(bindings: [])).agentLabel == nil)
+}
+
+@Test("Step rows carry a detailed model label that names where the choice came from")
+func stepRowsCarryDetailedModelLabels() {
+    let rows = ConductorRunPresentation.stepRows(
+        for: modelManifest(
+            bindings: [
+                ConductorRunManifest.AgentBinding(
+                    provider: .codex, model: "gpt-5.6-luna", autonomy: .readOnly,
+                    adapterVersion: nil),
+                ConductorRunManifest.AgentBinding(
+                    provider: .codex, model: "", autonomy: .readOnly, adapterVersion: nil),
+            ]))
+
+    #expect(rows[0].modelLabel == "GPT-5.6 Luna")
+    #expect(rows[0].modelDetailLabel == "GPT-5.6 Luna")
+    #expect(rows[0].namesAModel)
+
+    #expect(rows[1].modelLabel == ConductorRunPresentation.unsetModelLabel)
+    #expect(rows[1].modelDetailLabel == ConductorRunPresentation.unsetModelLabel)
+    #expect(rows[1].namesAModel == false)
 }
 
 @Test(
