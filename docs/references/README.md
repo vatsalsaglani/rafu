@@ -29,6 +29,9 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`memory-caps-and-pressure.md`](memory-caps-and-pressure.md) | App-level memory-pressure monitoring, document hibernation + filename-index shedding on warnings, resource caps (Git/AI/search buffers), polling-audit findings, and cap values table |
 | [`memory-attribution-and-timeline.md`](memory-attribution-and-timeline.md) | Changing the Resources popover, adding a memory-timeline event, or being asked to "break the memory number down" — what macOS can and cannot report per subsystem |
 | [`ensemble-ipc-verbs.md`](ensemble-ipc-verbs.md) | Changing `rafu ensemble` verbs, DTOs, run-state projection, streaming events, heartbeat/deadline behavior, or exit codes |
+| [`ensemble-consent-and-token.md`](ensemble-consent-and-token.md) | Changing the coordinator capability token lifecycle, grant enforcement, environment isolation, or revocation |
+| [`ensemble-graph-canvas.md`](ensemble-graph-canvas.md) | Changing the Ensemble graph projection, node verbs, Activity feed, provider badges, or coordinator attribution |
+| [`ensemble-skill-pack.md`](ensemble-skill-pack.md) | Updating the bundled coordinator skill, installer destinations, or the verb-version drift guard |
 | [`agent-terminals.md`](agent-terminals.md) | Changing interactive Agent Terminal discovery, auth gating, argv/environment, per-CLI model flags, session identity, or lifecycle |
 | [`agent-icon-assets.md`](agent-icon-assets.md) | Refreshing or reviewing the pinned Agent Terminal icon catalog — provenance, checksums, normalization, licensing posture, or fallbacks |
 | [`ai-provider-rest-contracts.md`](ai-provider-rest-contracts.md) | Changing provider endpoints, streaming, Keychain secrets, connection tests, or commit generation |
