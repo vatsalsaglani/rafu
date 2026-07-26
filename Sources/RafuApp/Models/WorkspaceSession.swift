@@ -480,6 +480,8 @@ final class WorkspaceSession {
         navigatorMode = .runs
         conductorRunCanvasID = runID
         conductorGraphVisible = false
+        ensembleStartCanvasVisible = false
+        ensembleNewRunCanvasVisible = false
         selectedDocumentID = nil
         selectedTreePath = nil
     }
@@ -502,6 +504,8 @@ final class WorkspaceSession {
     func showConductorGraph() {
         conductorGraphVisible = true
         conductorRunCanvasID = nil
+        ensembleStartCanvasVisible = false
+        ensembleNewRunCanvasVisible = false
         selectedDocumentID = nil
         selectedTreePath = nil
         navigatorMode = .runs
@@ -515,14 +519,63 @@ final class WorkspaceSession {
         }
     }
 
-    /// C8-07 "New Ensemble…" sheet-flag seam. Guards on an open workspace so
-    /// ⌘⇧E, the menu item, the palette command, and the Runs-panel button all
-    /// no-op identically before a workspace is open.
-    var ensembleStartSheetPresented: Bool = false
+    /// Editor-hosted Ensemble creation canvases (UX-01). These are peers of
+    /// graph and run detail: every activator clears the other canvas modes,
+    /// and closing falls back to the last open document exactly like
+    /// `closeConductorRunDetail()`.
+    var ensembleStartCanvasVisible = false
+    var ensembleNewRunCanvasVisible = false
+    @ObservationIgnored private var ensembleStartLaunchInProgress = false
 
-    func presentEnsembleStartSheet() {
+    /// C8-07's four "New Ensemble…" entry points share this guarded seam.
+    func showEnsembleStart() {
         guard descriptor != nil else { return }
-        ensembleStartSheetPresented = true
+        ensembleStartCanvasVisible = true
+        ensembleNewRunCanvasVisible = false
+        conductorGraphVisible = false
+        conductorRunCanvasID = nil
+        selectedDocumentID = nil
+        selectedTreePath = nil
+        navigatorMode = .runs
+    }
+
+    func closeEnsembleStart() {
+        guard ensembleStartCanvasVisible else { return }
+        ensembleStartCanvasVisible = false
+        if selectedDocumentID == nil, let fallback = openDocuments.last {
+            select(fallback)
+        }
+    }
+
+    /// Coordinator launch reveals its terminal as part of starting Door 1.
+    /// Keep the copyable-goal confirmation canvas in front during that
+    /// internal reveal; an ordinary user-requested terminal reveal still
+    /// replaces the canvas.
+    func beginEnsembleStartLaunch() {
+        ensembleStartLaunchInProgress = true
+    }
+
+    func endEnsembleStartLaunch() {
+        ensembleStartLaunchInProgress = false
+    }
+
+    func showEnsembleNewRun() {
+        guard descriptor != nil, canStartConductorWorkflowRun else { return }
+        ensembleNewRunCanvasVisible = true
+        ensembleStartCanvasVisible = false
+        conductorGraphVisible = false
+        conductorRunCanvasID = nil
+        selectedDocumentID = nil
+        selectedTreePath = nil
+        navigatorMode = .runs
+    }
+
+    func closeEnsembleNewRun() {
+        guard ensembleNewRunCanvasVisible else { return }
+        ensembleNewRunCanvasVisible = false
+        if selectedDocumentID == nil, let fallback = openDocuments.last {
+            select(fallback)
+        }
     }
 
     /// Drives `WorkspaceWindowView`'s `NavigationSplitView` column
@@ -1053,6 +1106,10 @@ final class WorkspaceSession {
         // is untouched, only the canvas visibility clears.
         conductorRunCanvasID = nil
         conductorGraphVisible = false
+        if !ensembleStartLaunchInProgress {
+            ensembleStartCanvasVisible = false
+        }
+        ensembleNewRunCanvasVisible = false
         // Revealing (unlike a plain layout selection change) doesn't route
         // through `selectEditorTab`/`synchronizeSelectionFromLayout`, so
         // this is the third bell-clear hook (terminal-manager.md T-E):

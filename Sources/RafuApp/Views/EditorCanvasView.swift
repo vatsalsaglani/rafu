@@ -61,6 +61,10 @@ struct EditorCanvasView: View {
             ConductorGraphCanvas(session: session)
         case .runDetail:
             ConductorRunDetailCanvas(session: session)
+        case .ensembleStart:
+            EnsembleStartCanvas(session: session)
+        case .ensembleNewRun:
+            ConductorNewRunCanvas(session: session)
         case .editor:
             EditorLayoutTreeView(node: session.editorLayout.root, session: session)
         }

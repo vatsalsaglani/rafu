@@ -691,7 +691,7 @@ struct CommandPaletteView: View {
                     keywords: ["ensemble", "coordinator", "goal", "new"]
                 ) {
                     dismiss()
-                    session.presentEnsembleStartSheet()
+                    session.showEnsembleStart()
                 }
             )
         }
@@ -705,8 +705,7 @@ struct CommandPaletteView: View {
                     keywords: ["ensemble", "agent", "role", "task", "workflow"]
                 ) {
                     dismiss()
-                    session.navigatorMode = .runs
-                    session.conductorRunController.presentNewRun()
+                    session.showEnsembleNewRun()
                 }
             )
         }
