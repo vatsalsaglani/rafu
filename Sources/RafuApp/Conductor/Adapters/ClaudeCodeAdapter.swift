@@ -552,6 +552,20 @@ nonisolated final class ClaudeCodeAdapter: ConductorCLIAdapter, Sendable {
         return Self.authStatus(from: outcome)
     }
 
+    /// Re-verified 2026-07-27 against Claude Code 2.1.220 and left unchanged.
+    /// These four are exactly the CLI's own generally-available family
+    /// aliases, and they match its internal alias→label map
+    /// (`{fable: "Fable", sonnet: "Sonnet", opus: "Opus", haiku: "Haiku"}`).
+    ///
+    /// The CLI's alias array additionally contains `mythos`, which is
+    /// deliberately NOT listed: the installed build documents it as restricted
+    /// to Project Glasswing participants, so offering it to every user would
+    /// be a picker entry that fails for almost all of them.
+    ///
+    /// Aliases rather than dated ids is the right shape here. `--model`
+    /// documents both, and an alias tracks the latest model per release, which
+    /// is what a user who picked "Opus" means. A specific dated id is still
+    /// reachable — the picker keeps hand-typed values as `.custom`.
     func curatedModels() -> [ConductorModelChoice] {
         [
             ConductorModelChoice(id: "fable", displayName: "Fable", source: .curated),
@@ -561,6 +575,10 @@ nonisolated final class ClaudeCodeAdapter: ConductorCLIAdapter, Sendable {
         ]
     }
 
+    /// Claude Code 2.1.220 has no model-listing verb: no `--list-models` flag
+    /// and no listing subcommand (`agents`, `auth`, `doctor`, `mcp`, `plugin`,
+    /// `project`, …). Curated stays the only list. (Re-check with
+    /// `claude --help | grep -i model`.)
     func discoverModels() async -> [ConductorModelChoice]? { nil }
 
     func invocation(

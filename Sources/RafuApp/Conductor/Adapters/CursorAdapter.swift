@@ -8,20 +8,52 @@ import Synchronization
 nonisolated struct CursorAdapter: ConductorCLIAdapter {
     let id = ConductorCLIID.cursor
     let defaultEnabled = true
-    let supportsModelDiscovery = false
+    /// Cursor 2026.07.23 answers `cursor-agent models` headlessly, on stdin
+    /// `/dev/null`, under Rafu's minimal probe environment, in a stable
+    /// `<id> - <display name>` table. See `discoverModels()`.
+    let supportsModelDiscovery = true
 
     static let supportedAutonomies: Set<ConductorAutonomy> = [.worktreeWrite]
     static let readOnlyUnsupportedReason =
         "Cursor CLI has no verified read-only or plan mode; read-only runs fail closed."
 
+    /// Fallback only — `discoverModels()` returns the account's live catalog
+    /// (190 rows on 2026-07-27). Every id here was read verbatim from that
+    /// probed catalog, which matters because the previous curated list
+    /// (`gpt-5`, `sonnet-4`, `sonnet-4-thinking`) came from old help-text
+    /// examples and `--model gpt-5` FAILED before the agent even started.
+    ///
+    /// `auto` is first deliberately. Cursor's catalog is not an entitlement
+    /// list: the same account that can list a named model may still be
+    /// refused it and told to use Auto, and `--model auto` was the only value
+    /// verified end to end. It is therefore the honest safe default to show
+    /// first, not merely the alphabetically convenient one.
     static let curatedModelChoices = [
-        ConductorModelChoice(id: "gpt-5", displayName: "GPT-5", source: .curated),
-        ConductorModelChoice(id: "sonnet-4", displayName: "Sonnet 4", source: .curated),
+        ConductorModelChoice(id: "auto", displayName: "Auto", source: .curated),
+        ConductorModelChoice(id: "composer-2.5", displayName: "Composer 2.5", source: .curated),
         ConductorModelChoice(
-            id: "sonnet-4-thinking", displayName: "Sonnet 4 Thinking", source: .curated),
+            id: "cursor-grok-4.5-high", displayName: "Cursor Grok 4.5", source: .curated),
+        ConductorModelChoice(
+            id: "claude-opus-5-thinking-high",
+            displayName: "Opus 5 1M Thinking",
+            source: .curated),
+        ConductorModelChoice(
+            id: "gpt-5.6-sol-high", displayName: "GPT-5.6 Sol 1M High", source: .curated),
+        ConductorModelChoice(
+            id: "claude-4.5-sonnet-thinking", displayName: "Sonnet 4.5 Thinking",
+            source: .curated),
     ]
 
     static let notAuthenticatedHint = "run `cursor-agent login` in a terminal"
+
+    /// Verified 2026-07-27: the full 190-row catalog is ~8.8 KB. The cap is
+    /// deliberately far above that so a format change cannot stream unbounded
+    /// output into the app, and far below anything that could matter for
+    /// memory.
+    static let maximumModelOutputBytes = 256 * 1_024
+    static let maximumModelRows = 2_048
+    static let maximumModelIDBytes = 512
+    static let maximumModelDisplayNameBytes = 256
 
     private static let outputLimit = 32 * 1_024
     private static let credentialEnvironmentKeys = ["CURSOR_API_KEY"]
@@ -29,14 +61,20 @@ nonisolated struct CursorAdapter: ConductorCLIAdapter {
     private let cache: CursorExecutableCache
     private let currentPath: String?
     private let timeout: Duration
+    private let modelTimeout: Duration
 
     init(
         currentPath: String? = Self.currentProcessPath(),
         timeout: Duration = .seconds(3),
+        // Listing 190 models is slower than `--version`, and it is an
+        // explicit user action rather than anything on the typing or launch
+        // path, so it gets its own longer — but still bounded — budget.
+        modelTimeout: Duration = .seconds(10),
         cachedExecutableURL: URL? = nil
     ) {
         self.currentPath = currentPath
         self.timeout = timeout
+        self.modelTimeout = modelTimeout
         cache = CursorExecutableCache(initialURL: cachedExecutableURL)
     }
 
@@ -110,7 +148,92 @@ nonisolated struct CursorAdapter: ConductorCLIAdapter {
 
     func curatedModels() -> [ConductorModelChoice] { Self.curatedModelChoices }
 
-    func discoverModels() async -> [ConductorModelChoice]? { nil }
+    /// Runs Cursor's own `models` listing.
+    ///
+    /// Mirrors `OpenCodeAdapter.discoverModels()`: bounded output, bounded
+    /// timeout, stdin on `/dev/null`, and the curated list as the fallback for
+    /// every failure — a discovery that could not run must never present as an
+    /// empty catalog. Rafu forwards no credential; Cursor reads its own
+    /// delegated login (ADR 0018), which is exactly how `status` already works.
+    func discoverModels() async -> [ConductorModelChoice]? {
+        guard let executableURL = cache.load() ?? Self.findExecutable(currentPath: currentPath)
+        else {
+            return curatedModels()
+        }
+        guard
+            let result = await CursorProbeProcess.run(
+                executableURL: executableURL,
+                arguments: ["models"],
+                environment: Self.probeEnvironment(for: executableURL),
+                timeout: modelTimeout,
+                outputLimit: Self.maximumModelOutputBytes,
+                resourceName: "Cursor CLI model listing"),
+            result.succeeded,
+            let parsed = Self.parseDiscoveredModels(result.output)
+        else {
+            return curatedModels()
+        }
+        return parsed
+    }
+
+    /// Parses Cursor's `models` table.
+    ///
+    /// Verified shape (cursor-agent 2026.07.23-e383d2b, 194 lines):
+    ///
+    /// ```text
+    /// Available models
+    ///
+    /// auto - Auto (current, default)
+    /// gpt-5.3-codex-low - Codex 5.3 Low
+    /// …
+    ///
+    /// Tip: use --model <id> (or /model <id> in interactive mode) to switch. …
+    /// ```
+    ///
+    /// So: a header, a blank line, one `<id> - <display name>` row per model,
+    /// and a trailing tip. Rather than hardcode "skip line 1 and the last
+    /// line" — which a wording change would silently break — this keeps only
+    /// lines that parse as a row with a plausible model id and drops
+    /// everything else. The header and tip fall out for free, and so will any
+    /// future prose Cursor adds.
+    ///
+    /// Returns `nil` when nothing parsed, which the caller reads as "this did
+    /// not work" and answers with the curated list.
+    static func parseDiscoveredModels(_ output: String) -> [ConductorModelChoice]? {
+        guard !output.isEmpty, output.utf8.count <= maximumModelOutputBytes else { return nil }
+
+        let lines = stripANSI(output).split(separator: "\n", omittingEmptySubsequences: true)
+        guard !lines.isEmpty, lines.count <= maximumModelRows else { return nil }
+
+        let allowedPunctuation = CharacterSet(charactersIn: "-._/@:+")
+        var seen = Set<String>()
+        var choices: [ConductorModelChoice] = []
+        choices.reserveCapacity(lines.count)
+
+        for rawLine in lines {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let separator = line.range(of: " - ") else { continue }
+            let id = String(line[line.startIndex..<separator.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let displayName = String(line[separator.upperBound...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty,
+                !displayName.isEmpty,
+                id.utf8.count <= maximumModelIDBytes,
+                displayName.utf8.count <= maximumModelDisplayNameBytes,
+                id.unicodeScalars.allSatisfy({
+                    $0.isASCII
+                        && (CharacterSet.alphanumerics.contains($0)
+                            || allowedPunctuation.contains($0))
+                }),
+                seen.insert(id).inserted
+            else { continue }
+            choices.append(
+                ConductorModelChoice(id: id, displayName: displayName, source: .discovered))
+        }
+
+        return choices.isEmpty ? nil : choices
+    }
 
     func invocation(
         prompt: String,
@@ -125,16 +248,22 @@ nonisolated struct CursorAdapter: ConductorCLIAdapter {
                 runDirectory: runDirectory, handoffDirectory: handoffDirectory)
         }
 
-        let resolvedModel = model.isEmpty ? Self.curatedModelChoices[0].id : model
+        // An unset model means "let the CLI decide" — pass no `--model` at
+        // all — matching every other adapter and `ConductorModelResolution
+        // .cliDecides`. This previously substituted `curatedModelChoices[0]`,
+        // which is the exact guess that resolver's doc comment forbids: it
+        // silently ran a model the account may not be entitled to, and the
+        // then-first curated choice (`gpt-5`) was verified on 2026-07-27 to
+        // fail before the agent even started.
+        var arguments = ["-p", "--output-format", "json", "--force"]
+        let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedModel.isEmpty {
+            arguments += ["--model", trimmedModel]
+        }
+        arguments.append(prompt)
         return AdapterInvocation(
             executableURL: executableURL,
-            arguments: [
-                "-p",
-                "--output-format", "json",
-                "--force",
-                "--model", resolvedModel,
-                prompt,
-            ],
+            arguments: arguments,
             environment: Self.invocationEnvironment(
                 executableURL: executableURL,
                 runDirectory: runDirectory,

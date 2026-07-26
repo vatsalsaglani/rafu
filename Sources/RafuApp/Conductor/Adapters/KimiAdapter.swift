@@ -73,6 +73,12 @@ nonisolated struct KimiAdapter: ConductorCLIAdapter {
         ]
     }
 
+    /// Left off, and the curated list above left untouched, because neither
+    /// can be verified: the Kimi CLI is not installed on any machine this has
+    /// been probed from, so whether it has a listing verb is genuinely
+    /// unknown rather than known-absent. The repository's ground rule is to
+    /// record that as unverified with the command to run, never to guess.
+    /// (Run `kimi --help | grep -i model` once it is installed.)
     func discoverModels() async -> [ConductorModelChoice]? { nil }
 
     func invocation(

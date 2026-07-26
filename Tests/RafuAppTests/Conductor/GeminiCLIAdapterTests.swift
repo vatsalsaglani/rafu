@@ -13,11 +13,20 @@ struct GeminiCLIAdapterTests {
         #expect(ConductorAdapterRegistry.adapter(for: .geminiCLI) is GeminiCLIAdapter)
         #expect(adapter.defaultEnabled)
         #expect(!adapter.supportsModelDiscovery)
+        // The user-facing set from Gemini CLI 0.52.0's own model registry.
+        // Internal `*-base` and `-customtools` entries are excluded.
         #expect(
             adapter.curatedModels().map(\.id) == [
+                "gemini-3.5-flash",
+                "gemini-3.1-pro-preview",
+                "gemini-3.1-flash-lite",
+                "gemini-3-pro-preview",
+                "gemini-3-flash-preview",
                 "gemini-2.5-pro",
                 "gemini-2.5-flash",
             ])
+        #expect(!adapter.curatedModels().contains { $0.id.hasSuffix("-base") })
+        #expect(!adapter.curatedModels().contains { $0.id.hasSuffix("-customtools") })
         #expect(adapter.curatedModels().allSatisfy { $0.source == .curated })
         #expect(await adapter.discoverModels() == nil)
         // There is no verified status command and no credential-file read.
@@ -38,13 +47,17 @@ struct GeminiCLIAdapterTests {
             runDirectory: URL(fileURLWithPath: "/tmp/run"),
             handoffDirectory: URL(fileURLWithPath: "/tmp/run/step"))
         #expect(readOnly.executableURL == executable)
+        // An empty model passes NO `-m` flag: the CLI applies its own
+        // configured default, which is what `.cliDecides` means. This
+        // previously substituted `curatedModels()[0]`, so reordering the
+        // curated list would silently have changed which model ran.
         #expect(
             readOnly.arguments == [
                 "-p", hostilePrompt,
-                "-m", "gemini-2.5-pro",
                 "--output-format", "json",
                 "--approval-mode", "default",
             ])
+        #expect(!readOnly.arguments.contains("-m"))
         #expect(readOnly.arguments[1] == hostilePrompt)
 
         let write = adapter.invocation(
