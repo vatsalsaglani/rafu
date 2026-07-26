@@ -1,10 +1,10 @@
 # C8-04 — Plan gate, propose-merge, merged state, proposals
 
-- **Status:** Ready. Branch: `conductor/c8-04-plan-gate` (from `main`
-  AFTER wave 2 fully merged — verify `ConductorEnsembleTokenStore` and
-  `ConductorGraphModel` both exist; either missing ⇒ STOP and report).
-  Wave 3 — runs parallel with C8-07. (C8-05 moved to wave 2, so the
-  skill pack and Settings are already on `main` when you branch.)
+- **Status:** Implemented and headlessly verified on
+  `conductor/c8-04-plan-gate` (2026-07-26); not yet merged to `main`.
+  Wave 3 — ran parallel with C8-07; no forbidden file was touched. The
+  prerequisites `ConductorEnsembleTokenStore` and `ConductorGraphModel`
+  were both already present on branch, as expected.
 
 ## Goal
 

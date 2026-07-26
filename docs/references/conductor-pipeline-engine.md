@@ -2,7 +2,8 @@
 
 - Applies to: `Sources/RafuApp/Conductor/Run/ConductorWorkflowController.swift` (C5 pipeline engine) and related UI views (`ConductorRunsPanelView`, `ConductorRunDetailCanvas`), plus Views/WorkspaceSession seams that route run details to the canvas
 - Last verified: Swift 6.2 / macOS 26 / 2026-07-25 (phase C5);
-  corrected 2026-07-26 against `ConductorRunEvidenceLayout`
+  corrected 2026-07-26 against `ConductorRunEvidenceLayout`;
+  extended 2026-07-26 (C8-04) with the plan-gate FSM
 
 ## Rule or observed behavior
 
@@ -88,6 +89,100 @@ failed > aborted > awaitingGate > running > pending > completed
 This precedence (failed highest, completed lowest) ensures the user's immediate attention goes to broken runs, then awaiting-gate, then in-progress work. **This is NOT chronological order.**
 
 A step with status `failed` always floats to the top of the active runs section, even if newer runs are still pending. A gate-awaiting run displays higher than a completing run that started earlier.
+
+### Plan-gate FSM (C8-04)
+
+`run --plan-gate` adds one more parked state, `awaitingPlanGate`, ahead of
+every step. It is in-flight (`isInFlight` returns `true`) but has no "current
+step" the way `.runningStep`/`.awaitingGate` do — `activeStepIndex(in:)`'s
+`default: nil` arm covers it.
+
+| Verb | From | To | Notes |
+|---|---|---|---|
+| `start(_:launcher:)` with `planGateRequested` | `.idle`/terminal | `.awaitingPlanGate` | Publishes the manifest with `gate: .plan` and every step `.pending`, fires `onGateReady(kind: .plan, safeToApproveRemotely: false)`, and RETURNS before `worktreeService.materialize` or any `launcher.launch` call |
+| `approvePlanGate()` (re-parse succeeds) | `.awaitingPlanGate` | `.preparing` → `.runningStep(0)` | Rebuilds the manifest from the FRESH parse, materializes, launches step 0 |
+| `approvePlanGate()` (re-parse fails) | `.awaitingPlanGate` | `.awaitingPlanGate` | `planGateIssue` is set to the failure text; the park is otherwise untouched |
+| `declinePlanGate(note:)` | `.awaitingPlanGate` | `.aborted` | `recoveryNote` bounded to 1000 characters; every step is marked `.aborted`, even though nothing ran |
+| `abort()` | `.awaitingPlanGate` | `.aborted` | Same generic abort path every other in-flight state uses |
+| `approveGate()` | `.awaitingPlanGate` | forwards to `approvePlanGate()` | One user-facing "Approve" verb; no separate menu/command entry needed |
+
+**What has actually run behind a plan gate (advisor A1).** "Nothing spawns"
+does not mean nothing executed: the SAME validation a normal `start()` runs
+(`prepare(_:generation:store:)`, shared by both paths) still runs read-only
+`git` probes (`GitService.snapshot`, `worktreeService.plan(...)` — which only
+COMPUTES the intended worktree path and confirms it does not already exist,
+never creates it) and each step's adapter-version probe (e.g. `<cli>
+--version`) before parking. What genuinely does NOT happen: `worktreeService
+.materialize(_:)` (no worktree directory, no branch), and `launcher.launch(
+_:onExit:)` (no agent process, no evidence directory). A zero-spawn test
+asserts BOTH `launcher.recorded.isEmpty` and that `controller.plan?
+.worktreeURL` does not exist on disk.
+
+**The approve-time re-parse rule (advisor A2/A3).** `approvePlanGate()` never
+trusts the parked `ConductorWorkflowRunRequest`'s `workflow`/`roles` as truth
+— it re-loads and re-parses `.rafu/workflows`/`.rafu/agents` at THE MOMENT OF
+APPROVAL (D2: files are the source of truth, and the human may have hand-
+edited them while the run sat parked). Two re-parse paths share one contract
+(`ConductorPlanGateReparseOutcome`):
+
+- **Built-in** (`builtInPlanGateReparse(for:)`) — used whenever `controller
+  .planGateReparse` is `nil`: every UI-started run and most unit tests.
+  Re-locates the workflow by NAME (stem-or-declared-name, mirroring
+  `ConductorEnsembleRequestService.startRun`'s own lookup) and rebuilds roles
+  via `ConductorWorkflowBinder`. It does not reapply `--role`/`--artifact`
+  overrides — it has no originating payload to read them from.
+- **Installed** — `ConductorEnsembleRequestService.startRun` installs a
+  closure on every controller it creates, right after `dependencies
+  .startRun` returns, that calls the SAME `resolveRunDefinitions(payload:
+  workspace:)` method `startRun` itself used, against the SAME captured
+  `payload`/`workspace`. This is the one and only implementation of "apply
+  `--role` overrides and the `--artifact` input-reference appendix" — a
+  second, drifting implementation at approve time would silently drop a
+  coordinator's overrides on every plan-gated run, which is a correctness
+  bug, not an acceptable simplification.
+
+A re-parse `.failure(String)` NEVER falls back to the stale parked parse: the
+run stays `.awaitingPlanGate`, and `planGateIssue` carries the exact reason
+(a missing/invalid workflow file, an unknown agent, a malformed provider) so
+the UI can show it next to Approve Plan.
+
+**Manifest rebuild, not mutation (advisor A3).** `ConductorRunManifest
+.workflowName`/`baseCommit`/`worktreeBranch` are `let` — a hand-edit at the
+gate may add a step, remove one, or flip a role's autonomy (changing
+`anyWorktreeWrite` and therefore the whole `ConductorWorkspacePlan`), so
+`approvePlanGate()` on success constructs a BRAND NEW `ConductorRunManifest`
+value: same `id`/`createdAt`/`startedBy`/`label`, but `workflowName`/
+`baseCommit`/`worktreeBranch`/`steps` all come from the fresh
+`prepare(_:generation:store:)` result. Same run id ⇒ same on-disk file, one
+write — never two manifests for one run.
+
+**Decline must mark every step `.aborted`, not leave them `.pending`.** This
+corrects the phase's original design brief, which specified leaving every
+step `.pending` on decline (mirroring `markAborted()`'s handling of a
+sibling step). That does not work: `ConductorEnsembleEventCenter
+.runChanged(manifest:)` — the seam every `publish(_:)` call routes through —
+derives `EnsembleRunState` from `ConductorEnsembleStateProjection.runState`
+with `liveState: nil`; it has no parameter carrying the controller's actual
+in-memory FSM state at publish time. That projection can ONLY read
+`.aborted` from a manifest that has no open gate and NO steps still
+`.pending` if at least one step's OWN `status` is `.aborted` — a manifest
+with an untouched `.pending` step (and no gate) projects as `.pending`
+forever. Since a plan gate has no "active step" to mark the way an
+in-progress abort does (`activeStepIndex(in: .awaitingPlanGate)` is `nil`),
+`declinePlanGate(note:)` marks EVERY step `.aborted` instead — accurate,
+since none of them will ever run — so the decline is actually observable via
+`status`/events rather than looking identical to a plan gate that was simply
+never approved yet.
+
+**A5: `appliedButCleanupFailed` still stamps `mergedAt`.** Both controllers'
+`applyToWorkspace()` treat a successful `mergeGateService.apply` followed by
+a cosmetic worktree-cleanup failure the same as a clean success for the
+purpose of `mergedAt`: the Git-visible merge-back into the user's workspace
+already happened, so `mergedAt` is stamped and the run completes either way.
+Not stamping would hang a coordinator's `await --state merged` forever on a
+cleanup failure that has nothing to do with whether the merge itself
+succeeded. `mergeGateError` is still surfaced separately so the human sees
+the cleanup problem.
 
 ## Why it matters
 

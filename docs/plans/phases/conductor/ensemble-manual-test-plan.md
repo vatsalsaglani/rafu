@@ -247,6 +247,27 @@ display, mark them N/A rather than FAIL.
 
 ---
 
+## L. Plan gate and merge loop (C8-04)
+
+These checks need a coordinator terminal with the Ensemble skill installed
+(Settings → Ensemble) and a workspace with at least one `.rafu/workflows/*.md`
++ `.rafu/agents/*.md` pair, one role marked `autonomy: worktreeWrite`. You can
+drive the CLI verbs directly instead of through a full coordinator session if
+that is faster: `rafu ensemble run <workflow> --plan-gate`,
+`rafu ensemble propose-merge <run> --message "…"`, and
+`rafu ensemble await <run> --state merged`.
+
+| # | Do this | Expect |
+|---|---|---|
+| L1 | Run `rafu ensemble run <workflow> --plan-gate`, then immediately check Activity Monitor / `ps` for the agent CLI and inspect the workspace for a new worktree | The command returns `<run> awaitingPlanGate <path>` immediately. No agent process appears anywhere, and the printed worktree path does NOT exist on disk yet. Opening the run in Rafu shows a **Plan Gate** section with the parsed step list and every file as an openable tab — nothing else in the run detail suggests anything ran. |
+| L2 | Open one of the plan gate's listed files, edit it (e.g. change a step's agent or add a step to the workflow file), save, then click **Approve Plan** | Rafu re-reads the file you just saved: the step timeline reflects your edit (a changed step count or agent name), then step 1 launches for real — a live terminal appears. If you instead break the file's frontmatter before approving, Approve fails, the run stays parked, and a visible issue banner explains why — nothing launches. |
+| L3 | Start another `--plan-gate` run, then click **Request Changes…**, type a note, and send it | The run aborts immediately (no step ever ran) and the note is visible via `rafu ensemble status <run> --json` or the run's Notes section. Nothing in the worktree list changed — no worktree was ever created. |
+| L4 | Let a `worktreeWrite` run reach its merge gate, then from the coordinator terminal run `rafu ensemble propose-merge <run> --message "Please review"` | The command exits 0 and prints `<run> proposed awaiting_human`. In Rafu, the merge gate's Open Diff / Apply / Discard buttons are still there (nothing pre-applied), and your note appears next to the gate. Try it again on a run that is NOT at its merge gate (e.g. still running) — it fails with a message naming the run's actual state, and nothing about that run changes. |
+| L5 | With a coordinator running `rafu ensemble await <run> --state merged` in a visible terminal, click **Apply to Workspace** on that run's merge gate | The diff lands in your checkout (no new commit), the worktree and branch are removed, and the `await` command in the coordinator's terminal returns immediately with `<run> merged` — you should not have to wait past one poll interval. |
+| L6 | Give an agent's handoff artifact a `proposes:` frontmatter list (a few short lines) before it completes, then open the **Graph** canvas for that run | Once the step completes, one dashed-bordered "Proposed" node appears per list entry, edged from that step, with no action buttons. Add more than 16 entries to the artifact — the graph still shows at most 16 nodes, the last one reading "… (truncated)". |
+
+---
+
 ## N. Agent terminals (AT-01)
 
 These checks cover interactive vendor-CLI sessions. They are deliberately
