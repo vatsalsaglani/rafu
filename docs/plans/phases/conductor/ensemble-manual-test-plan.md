@@ -95,9 +95,10 @@ steps:
 ---
 ```
 
-> **Note:** `claudeCode` and `codex` are the two adapters verified against your
-> installed CLIs. If a run fails immediately with "agent adapter is
-> unavailable", check **Settings → Agents** first (test A1).
+> **Note:** Claude Code, Codex, OpenCode, Cline, and Cursor have
+> runtime-verified adapter surfaces on this Mac. Gemini is installed but its
+> Ensemble adapter runtime remains unverified. If a run fails immediately with
+> "agent adapter is unavailable", check **Settings → Agents** first (test A1).
 
 ---
 
@@ -105,7 +106,7 @@ steps:
 
 | # | Do this | Expect |
 |---|---|---|
-| A1 | Open **Settings → Agents** | Seven rows: Claude Code, Codex, OpenCode, Cline, Kimi CLI, Gemini CLI, Cursor CLI. Each shows an install status and a sign-in status. On this Mac: Claude Code, OpenCode, **Cline** (nvm install), and Cursor CLI should all read as FOUND; Kimi and Gemini should honestly say not found. Cursor should be found but **not** signed in. |
+| A1 | Open **Settings → Agents** | Seven rows: Claude Code, Codex, OpenCode, Cline, Kimi CLI, Gemini CLI, Cursor CLI. Each shows an install status and a sign-in status. On this Mac: Claude Code, Codex, OpenCode, **Cline** (nvm install), **Gemini** (nvm install), and Cursor CLI should read as FOUND; only Kimi should read not found. Cursor should read signed in. Gemini's sign-in status may remain unknown until its adapter runtime is separately verified. |
 | A1b | Compare each row against `which <cli>` in a terminal | They must agree. A CLI that resolves in your shell but reads "Not found" in Rafu is the launchd-PATH bug (fixed 2026-07-25, see `docs/references/gui-app-path-and-cli-discovery.md`) — report it with the output of `which <cli>`. |
 | A2 | Read the footer text under the rows | It says Rafu runs your existing CLIs under your own subscriptions and never stores a sign-in token. |
 | A3 | Open a model picker on Claude Code | Model choices appear, plus a way to type a custom id. Nothing here should claim a model exists that you know does not. |
@@ -393,15 +394,20 @@ Everything else is polish I can chase afterwards.
 
 ## Known limitations (not bugs — do not report these)
 
-- **Kimi CLI and Gemini CLI are unverified** — not installed on your Mac, so
-  their adapters ship against documented shapes and say so honestly. (Cline
-  IS installed, under nvm; if it ever reads "not found" again that is a
-  regression of the launchd-PATH fix, not a known limitation.)
-- **Cursor CLI is logged out**, so its runs will fail at auth until you run
-  `cursor-agent login`.
-- **`readOnly` is unsupported on some adapters** (Cursor, and OpenCode
-  depending on version) — those roles fail closed rather than silently
-  running with write access.
+- **Kimi CLI remains absent and Gemini's Ensemble adapter runtime remains
+  unverified.** Gemini 0.52.0 is now installed under nvm, but only discovery
+  and version were confirmed during the Cursor-focused 2026-07-27 pass.
+  Cline is also installed under nvm; if either installed CLI reads "not found,"
+  that is a regression of the launchd-PATH fix, not a known limitation.
+- **Cursor CLI is authenticated on this Mac as of 2026-07-27**, but Rafu's
+  adapter has drifted from Cursor 2026.07.23. The CLI now supports plan mode
+  and model listing; Rafu still fails `readOnly` closed and still defaults an
+  empty model to the now-invalid `gpt-5`. A Cursor write role using the
+  account-supported `auto` model was verified in a scratch repository. See
+  [`conductor-cli-capability-matrix.md`](../../../references/conductor-cli-capability-matrix.md).
+- **`readOnly` may remain unsupported by an adapter even after its vendor adds
+  a plan mode.** Until that mapping is re-probed and implemented, the role
+  fails closed rather than silently running with write access.
 - **An unsaved editor buffer is not what the agent reads.** In the Revise
   flow you must SAVE the artifact before approving.
 - **No adapter-native `--resume`.** Retry always starts a fresh attempt.
