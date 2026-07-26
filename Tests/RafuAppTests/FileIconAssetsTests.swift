@@ -53,6 +53,35 @@ func agentCLIIconsResolveExhaustively() throws {
     }
 }
 
+/// UX-03 evidence pin for the NSMenu rendering limitation. The vendored marks
+/// are authored `width="1em" height="1em"`, so `NSImage` reports a 1×1-pt
+/// intrinsic size. SwiftUI views fix that with `.resizable().frame(_:)` (which
+/// is why `FileIconView` is correct in the sheet and the new inline launcher),
+/// but SwiftUI `Menu` content is bridged to `NSMenuItem`, which draws its image
+/// at the image's OWN size and honors no SwiftUI layout — hence the "tiny dot".
+/// An SF Symbol image carries a real size, which is why `Label(_:systemImage:)`
+/// survived in the same menu.
+@MainActor
+@Test("Vendored agent marks have a 1x1 pt intrinsic size that NSMenuItem does not correct")
+func vendoredAgentMarksHaveOnePointIntrinsicSizeInMenus() throws {
+    for id in ConductorCLIID.allCases {
+        let assetName = try #require(ConductorCLIIcons.icon(for: id).assetName)
+        let image = try #require(FileIconAssets.image(named: assetName))
+        #expect(image.size == NSSize(width: 1, height: 1))
+
+        let item = NSMenuItem(title: id.displayName, action: nil, keyEquivalent: "")
+        item.image = image
+        #expect(item.image?.size == NSSize(width: 1, height: 1))
+    }
+
+    let symbol = try #require(
+        NSImage(systemSymbolName: "terminal", accessibilityDescription: nil))
+    let symbolItem = NSMenuItem(title: "Terminal", action: nil, keyEquivalent: "")
+    symbolItem.image = symbol
+    let symbolSize = try #require(symbolItem.image?.size)
+    #expect(symbolSize.width > 8 && symbolSize.height > 8)
+}
+
 @Test("Existing file-tree vendor icons remain byte-identical")
 func existingFileTreeVendorIconsRemainByteIdentical() throws {
     let expectedSHA256 = [

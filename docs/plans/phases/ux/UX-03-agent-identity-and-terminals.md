@@ -1,6 +1,12 @@
 # UX-03 — Agent identity everywhere, and an inline agent launcher
 
-- **Status:** Ready. Branch: `ux/03-agent-identity` (from `main`).
+- **Status:** Delivered (2026-07-26). Branch: `ux/03-agent-identity` (from
+  `main`). The `+` menu carries shell choices only; agents launch from an inline
+  Agents section with real vendor marks, a pending state, and disabled rows that
+  state their reason in text. The NSMenu rendering limitation, the launcher
+  contract, the loading-state rule, and the catalog-divergence decision are
+  recorded in `docs/references/agent-terminals.md`. No per-agent global chord was
+  minted (⌘⇧ n/f/g/l/k/p/e/a are in use; ⌘⇧A already opens the sheet).
   Wave 1 — parallel with UX-00. Fully disjoint from it: UX-00 owns canvas
   routing and control styles, this plan owns the terminals panel and the
   icon catalog.

@@ -115,6 +115,121 @@ nonisolated enum TerminalSessionPresentation {
     }
 }
 
+/// One provider row in the terminals panel's inline agent launcher (UX-03).
+/// `probing` is a first-class state, not an absence: `AgentTerminalLaunchService
+/// .options()` spawns real CLIs, so an empty list during the probe would read
+/// as "no agents installed" — a lie while the answer is still unknown.
+nonisolated enum AgentLauncherRowState: Equatable, Sendable {
+    case probing
+    case ready
+    /// The textual reason from `AgentTerminalAvailability.reason`, carried
+    /// verbatim: AT-01's honesty rule is that an unavailable CLI stays visible
+    /// and says why, in text, never by dimming or color alone.
+    case unavailable(String)
+}
+
+/// Pure presentation data for one launcher row — no SwiftUI, so the state
+/// machine and its strings are headless-testable.
+nonisolated struct AgentLauncherRow: Identifiable, Equatable, Sendable {
+    let id: ConductorCLIID
+    let displayName: String
+    let icon: FileIconProvider.Icon
+    let state: AgentLauncherRowState
+    /// AT-01's verified-argv caveat (only Kimi carries one today). Shown as
+    /// text on a ready row rather than suppressed.
+    let verificationNote: String?
+
+    var isLaunchable: Bool {
+        state == .ready
+    }
+
+    /// The row's single secondary line. A ready row prefers its verification
+    /// caveat over the bare "Ready" — the caveat is the more informative truth.
+    var statusText: String {
+        switch state {
+        case .probing: "Checking…"
+        case .ready: verificationNote ?? "Ready"
+        case .unavailable(let reason): reason
+        }
+    }
+
+    /// Name + state + reason in one string, per the UX-03 accessibility
+    /// contract. VoiceOver must never have to infer state from styling.
+    var accessibilityLabel: String {
+        var parts = [displayName]
+        switch state {
+        case .probing:
+            parts.append("checking whether it is installed")
+        case .ready:
+            parts.append("ready")
+            if let verificationNote { parts.append(verificationNote) }
+        case .unavailable(let reason):
+            parts.append("unavailable")
+            parts.append(reason)
+        }
+        return parts.joined(separator: ", ")
+    }
+}
+
+/// Derives the inline agent launcher's rows. Deliberately separate from the
+/// `Menu` this replaced: SwiftUI menu items are bridged to `NSMenuItem`, which
+/// draws its image at the image's OWN size, so a vendored 1×1-pt `1em` SVG
+/// rendered as a tiny dot there (see `docs/references/agent-terminals.md`).
+nonisolated enum AgentLauncherModel {
+    /// Rows to show while the probe runs: every known provider, in registry
+    /// order, in the pending state. Never empty.
+    static func probingRows(ids: [ConductorCLIID] = ConductorCLIID.allCases) -> [AgentLauncherRow] {
+        ids.map { id in
+            AgentLauncherRow(
+                id: id,
+                displayName: id.displayName,
+                icon: ConductorCLIIcons.icon(for: id),
+                state: .probing,
+                verificationNote: nil)
+        }
+    }
+
+    /// Rows for a resolved probe. Availability, display name, and icon all
+    /// come from the launch service's option — this adds no second discovery
+    /// authority.
+    static func rows(options: [AgentTerminalOption]) -> [AgentLauncherRow] {
+        options.map { option in
+            AgentLauncherRow(
+                id: option.id,
+                displayName: option.displayName,
+                icon: option.icon,
+                state: option.isReady
+                    ? .ready
+                    : .unavailable(option.availability.reason ?? "Unavailable."),
+                verificationNote: option.launchVerificationNote)
+        }
+    }
+
+    static func readyCount(_ rows: [AgentLauncherRow]) -> Int {
+        rows.count { $0.isLaunchable }
+    }
+
+    /// Section header text. The count appears only once the probe resolved;
+    /// claiming "0 ready" mid-probe would be the same lie as an empty list.
+    static func headerTitle(rows: [AgentLauncherRow], isProbing: Bool) -> String {
+        isProbing ? "Agents (checking…)" : "Agents (\(readyCount(rows)) of \(rows.count) ready)"
+    }
+
+    /// The launch gate. Returns the option to launch, or `nil` when the row is
+    /// not launchable — so an unavailable row cannot reach the launch service
+    /// even if a click somehow arrives.
+    static func launchableOption(
+        for row: AgentLauncherRow,
+        in options: [AgentTerminalOption]
+    ) -> AgentTerminalOption? {
+        guard row.isLaunchable else { return nil }
+        guard let option = options.first(where: { $0.id == row.id }), option.isReady else {
+            return nil
+        }
+        return option
+    }
+}
+
 /// Derives the terminals panel's rows and rail-badge count from live model
 /// state (`WorkspaceTerminalManager`'s sessions plus the editor layout's
 /// presented `.terminal` tabs). No new state store — the panel and rail

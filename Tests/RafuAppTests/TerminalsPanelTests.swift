@@ -186,6 +186,159 @@ func exitedSessionStillProducesRow() throws {
     #expect(TerminalSessionPresentation.label(row.status) == "Exited (1)")
 }
 
+// MARK: - B2: inline agent launcher (UX-03)
+
+private func agentOption(
+    _ id: ConductorCLIID,
+    availability: AgentTerminalAvailability,
+    note: String? = nil
+) -> AgentTerminalOption {
+    AgentTerminalOption(
+        id: id,
+        displayName: id.displayName,
+        icon: ConductorCLIIcons.icon(for: id),
+        availability: availability,
+        curatedModels: [],
+        defaultModel: nil,
+        launchVerificationNote: note)
+}
+
+@Test("The launcher's pending state is one row per provider, never an empty list")
+func agentLauncherProbingRowsCoverEveryProvider() {
+    let rows = AgentLauncherModel.probingRows()
+
+    #expect(!rows.isEmpty)
+    #expect(rows.count == ConductorCLIID.allCases.count)
+    #expect(rows.map(\.id) == ConductorCLIID.allCases)
+    for row in rows {
+        #expect(row.state == .probing)
+        #expect(row.statusText == "Checking…")
+        #expect(!row.isLaunchable)
+        #expect(row.accessibilityLabel.contains(row.displayName))
+        #expect(row.accessibilityLabel.contains("checking"))
+    }
+    // The count is withheld until the probe resolves: "0 of 7 ready" mid-probe
+    // would be the same lie as an empty list.
+    #expect(AgentLauncherModel.headerTitle(rows: rows, isProbing: true) == "Agents (checking…)")
+}
+
+@Test("Resolved rows carry name, state, and the availability reason as text")
+func agentLauncherResolvedRowsCarryReasons() throws {
+    let options = [
+        agentOption(.claudeCode, availability: .ready(URL(fileURLWithPath: "/usr/bin/claude"))),
+        agentOption(.codex, availability: .notInstalled),
+        agentOption(
+            .geminiCLI, availability: .notAuthenticated("Not logged in — run `gemini` once.")),
+        agentOption(
+            .kimi, availability: .ready(URL(fileURLWithPath: "/usr/bin/kimi")),
+            note: "Launch shape unverified."),
+    ]
+
+    let rows = AgentLauncherModel.rows(options: options)
+
+    #expect(rows.map(\.id) == [.claudeCode, .codex, .geminiCLI, .kimi])
+
+    let ready = try #require(rows.first { $0.id == .claudeCode })
+    #expect(ready.state == .ready)
+    #expect(ready.isLaunchable)
+    #expect(ready.statusText == "Ready")
+    #expect(ready.accessibilityLabel == "Claude Code, ready")
+
+    let missing = try #require(rows.first { $0.id == .codex })
+    #expect(!missing.isLaunchable)
+    #expect(missing.statusText == AgentTerminalAvailability.notInstalled.reason)
+    #expect(missing.accessibilityLabel.hasPrefix("Codex, unavailable, "))
+    #expect(missing.accessibilityLabel.contains("Not installed"))
+
+    let unauthenticated = try #require(rows.first { $0.id == .geminiCLI })
+    #expect(!unauthenticated.isLaunchable)
+    #expect(unauthenticated.statusText == "Not logged in — run `gemini` once.")
+    #expect(unauthenticated.accessibilityLabel.contains("Not logged in"))
+
+    // A ready CLI with an unverified launch shape shows the caveat instead of
+    // a bare "Ready" — AT-01's note is never suppressed by the new layout.
+    let caveated = try #require(rows.first { $0.id == .kimi })
+    #expect(caveated.isLaunchable)
+    #expect(caveated.statusText == "Launch shape unverified.")
+    #expect(caveated.accessibilityLabel == "Kimi CLI, ready, Launch shape unverified.")
+
+    #expect(AgentLauncherModel.readyCount(rows) == 2)
+    #expect(
+        AgentLauncherModel.headerTitle(rows: rows, isProbing: false) == "Agents (2 of 4 ready)")
+}
+
+@Test("Only a ready row yields a launchable option; pending and unavailable rows cannot launch")
+func agentLauncherGatesUnavailableRows() throws {
+    let options = [
+        agentOption(.codex, availability: .ready(URL(fileURLWithPath: "/usr/local/bin/codex"))),
+        agentOption(.cline, availability: .notInstalled),
+    ]
+    let rows = AgentLauncherModel.rows(options: options)
+    let readyRow = try #require(rows.first { $0.id == .codex })
+    let unavailableRow = try #require(rows.first { $0.id == .cline })
+
+    #expect(AgentLauncherModel.launchableOption(for: readyRow, in: options)?.id == .codex)
+    #expect(AgentLauncherModel.launchableOption(for: unavailableRow, in: options) == nil)
+
+    // A pending row is not launchable either: the answer is still unknown.
+    let pendingRow = try #require(AgentLauncherModel.probingRows().first { $0.id == .codex })
+    #expect(AgentLauncherModel.launchableOption(for: pendingRow, in: options) == nil)
+
+    // Nor can a stale ready row launch against a roster that has since gone
+    // unavailable — the gate re-checks the option, not just the row.
+    let staleOptions = [agentOption(.codex, availability: .notInstalled)]
+    #expect(AgentLauncherModel.launchableOption(for: readyRow, in: staleOptions) == nil)
+}
+
+@MainActor
+@Test("Launching a ready launcher row opens exactly one Agent Terminal for that provider")
+func agentLauncherLaunchesOneSessionForThatProvider() throws {
+    let workspace = WorkspaceSession()
+    let root = URL(fileURLWithPath: "/tmp", isDirectory: true)
+    let options = [
+        agentOption(.codex, availability: .ready(URL(fileURLWithPath: "/usr/local/bin/codex"))),
+        agentOption(.cline, availability: .notInstalled),
+    ]
+    let rows = AgentLauncherModel.rows(options: options)
+    let service = AgentTerminalLaunchService(workspaceRoot: root)
+
+    let readyRow = try #require(rows.first { $0.id == .codex })
+    let option = try #require(AgentLauncherModel.launchableOption(for: readyRow, in: options))
+    let spec = try service.specification(
+        option: option, model: option.defaultModel, startingDirectory: root)
+    workspace.openAgentTerminal(spec: spec)
+
+    #expect(workspace.terminal.sessions.count == 1)
+    #expect(workspace.terminal.sessions.first?.agentProvider == .codex)
+
+    // The disabled row's gate returns nil, so no second session can appear.
+    let unavailableRow = try #require(rows.first { $0.id == .cline })
+    #expect(AgentLauncherModel.launchableOption(for: unavailableRow, in: options) == nil)
+    #expect(workspace.terminal.sessions.count == 1)
+}
+
+@MainActor
+@Test("Agent identity stays wired to the shared catalog in panel rows and the Ctrl-Tab switcher")
+func agentIdentityMatchesSharedCatalogAcrossSurfaces() throws {
+    for id in ConductorCLIID.allCases {
+        let expected = ConductorCLIIcons.icon(for: id)
+        // Launcher rows, session rows, and the switcher must all resolve the
+        // SAME catalog entry — no surface may grow its own mapping.
+        let launcherRow = try #require(AgentLauncherModel.probingRows().first { $0.id == id })
+        #expect(launcherRow.icon == expected)
+        #expect(EditorTabSwitcherAgentIdentity.icon(for: id) == expected)
+        #expect(expected.assetName?.hasPrefix("agent-") == true)
+    }
+    // A login shell has no provider and therefore no mark in either surface.
+    #expect(EditorTabSwitcherAgentIdentity.icon(for: nil) == nil)
+
+    let row = TerminalSessionRow(
+        id: UUID(), displayName: "zsh", shellName: "zsh", directoryLabel: ".",
+        status: .running, isParked: false, needsAttention: false, hasUserName: false,
+        sessionColor: nil)
+    #expect(row.agentProvider == nil)
+}
+
 // MARK: - C: reveal
 
 @MainActor

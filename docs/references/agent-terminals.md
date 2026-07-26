@@ -88,6 +88,111 @@ ephemeral and never restored after relaunch. No output capture is added:
 capturing an interactive conversation would turn user terminal activity into
 silent durable evidence and would falsely imply Ensemble run semantics.
 
+## Vendor marks cannot render inside a SwiftUI `Menu` (UX-03)
+
+**Rule: never put a vendored-asset icon in SwiftUI menu content on macOS. Use
+`Label(_:systemImage:)` there, and put vendor identity in a normal view.**
+
+SwiftUI bridges `Menu` content to AppKit's `NSMenu`/`NSMenuItem`. An
+`NSMenuItem` draws `item.image` at the **image's own size** and honors no
+SwiftUI layout modifiers, so `FileIconView`'s `.resizable().frame(width:height:)`
+— the thing that makes the mark correct everywhere else — has no effect. Every
+vendored `Resources/FileIcons/agent-*.svg` is authored `width="1em"
+height="1em"`, which `NSImage` resolves to a **1×1 pt** intrinsic size. The
+result was that all seven agent rows in the Terminals panel `+` menu drew as
+tiny dots, while the same `FileIconView(icon:size: 18)` in the New Agent
+Terminal sheet drew correctly.
+
+This is **not** a catalog or asset defect. The assets are correct per the
+normalization rule in [agent icon assets](agent-icon-assets.md) (upstream
+`width`/`height` are preserved deliberately), and the catalog resolves the right
+file for every `ConductorCLIID`. The container was the defect.
+
+Measured evidence (macOS 26.5.2, Apple Swift 6.3.3, 2026-07-26):
+
+```swift
+// Every vendored agent mark:
+NSImage(contentsOf: .../agent-codex.svg)!.size        // (1.0, 1.0)
+
+// NSMenuItem does not correct it:
+let item = NSMenuItem(title: "Codex", action: nil, keyEquivalent: "")
+item.image = NSImage(contentsOf: .../agent-codex.svg)!
+item.image!.size                                     // (1.0, 1.0)
+
+// Which is why an SF Symbol survives in the same menu:
+item.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: nil)!
+item.image!.size                                     // (18.0, 14.0)
+```
+
+`FileIconAssetsTests.vendoredAgentMarksHaveOnePointIntrinsicSizeInMenus` pins
+all three measurements, so the next attempt to put a mark in a menu fails a test
+instead of shipping dots.
+
+A workaround exists — stamping `image.size = NSSize(width: 16, height: 16)`
+before handing the `NSImage` to AppKit — and is deliberately **not** used: UX-03
+moved agent identity out of the menu entirely, which is also the product
+direction (no popups for a primary action).
+
+## Inline agent launcher contract (UX-03)
+
+The Terminals panel's `+` menu now carries shell choices only. Agents launch
+from an inline **Agents** section between the panel header and the session list:
+
+- One row per provider from `AgentTerminalLaunchService.options()`, in
+  `ConductorAdapterRegistry.all` order. No second discovery authority.
+- Row anatomy: vendor mark at 16 pt, display name, and a second line that always
+  states the state **in text** — `Ready`, the AT-01 verification caveat when the
+  CLI has one, or the `AgentTerminalAvailability.reason` when it does not.
+  Unavailable rows stay visible, are disabled, and are dimmed *in addition to*
+  the text, never instead of it.
+- `AgentLauncherModel.launchableOption(for:in:)` is the only path to a spawn. It
+  re-checks the option's availability, so neither a pending row nor a stale
+  ready row can reach the launch service.
+- The VoiceOver label is name + state + reason
+  (`AgentLauncherRow.accessibilityLabel`).
+- Rows are plain buttons, so Full Keyboard Access reaches them by Tab and
+  activates by Return/Space. UX-03 mints **no** per-agent global chord: ⌘⇧ is
+  already taken by n/f/g/l/k/p/e/a, and ⌘⇧A opens the Agent Terminal sheet.
+- The list is capped at 240 pt and scrolls. The roster is fixed at seven, so
+  some scrolling is unavoidable in a narrow panel; the header's
+  "*n* of 7 ready" count states the total so nothing is silently hidden.
+
+### The probe needs a visible pending state, not an empty list
+
+`options()` spawns one real CLI per provider to resolve installation and auth,
+which is visibly slow on a cold run. Rendering an empty list during that window
+reads as "no agents installed" — a lie while the answer is unknown. So:
+
+- The panel holds `[AgentTerminalOption]?`; `nil` means *probing*, `[]` means
+  *resolved and empty*. These must never look the same.
+- While probing, `AgentLauncherModel.probingRows()` renders every known provider
+  with `Checking…`, and the header reads `Agents (checking…)` with a spinner —
+  the ready count is withheld until it is true.
+- The probe runs once per `.task(id:)` identity (workspace root + an explicit
+  refresh token), never per render. The section's refresh control bumps that
+  token; it is the only way to re-probe.
+
+## The file-tree and agent icon catalogs stay separate (decision)
+
+The Codex mark differs between the file tree and agent surfaces. That is
+**intended**, and UX-03 keeps it:
+
+- `Resources/FileIcons/codex.svg`, `claude.svg`, `gemini.svg` decorate
+  **directories and files** (`.codex/`, `CLAUDE.md`, …) via
+  `FileIconProvider`'s tables. They predate AT-01, come from a different source,
+  and are byte-pinned by `FileIconAssetsTests`.
+- `Resources/FileIcons/agent-*.svg` identify **providers** via
+  `ConductorCLIIcons`, and come as a uniform seven-mark set from the pinned
+  lobe catalog.
+
+Pointing agent surfaces at the file-tree asset would couple provider identity to
+file-name decoration and break the uniformity of the seven-mark set; pointing the
+file tree at the agent assets would rewrite byte-pinned decoration for no
+product gain. All seven agent marks were checked at 16 pt in the panel and are
+legible and recognisable, so no asset needed correcting. If one ever does, refresh
+it from the pinned lobe source per [agent icon assets](agent-icon-assets.md) —
+do not cross-wire the catalogs.
+
 ## Why it matters
 
 The one-action launch is useful only if it does not quietly become an
@@ -101,8 +206,14 @@ Ensemble agent.
 ```bash
 swift test --filter AgentTerminal
 swift test --filter 'TerminalsPanel|EditorTabSwitcher|ProcessAttribution'
+swift test --filter FileIconAssets
 swift test --no-parallel
 ```
+
+`TerminalsPanelTests`' UX-03 group proves the pending-state roster, the reason
+text on unavailable rows, the accessibility labels, the launch gate, and that a
+ready row opens exactly one provider-carrying session.
+`FileIconAssetsTests` pins the NSMenu measurements above.
 
 The focused tests prove the gating matrix, PATH-only environment, absence of
 Ensemble keys and output capture, adapter-directory prepend rule, verified-only
@@ -116,5 +227,6 @@ resource labels.
 - [ADR 0018](../decisions/0018-conductor-external-agent-orchestration.md)
 - [ADR 0021](../decisions/0021-agent-terminals.md)
 - [AT-01 phase](../plans/phases/conductor/AT-01-agent-terminal-sessions.md)
+- [UX-03 phase](../plans/phases/ux/UX-03-agent-identity-and-terminals.md)
 - [PTY spawn and child environment](conductor-pty-spawn-and-child-environment.md)
 - [Agent icon assets](agent-icon-assets.md)
