@@ -9,33 +9,7 @@ struct EditorCanvasView: View {
 
     var body: some View {
         ZStack {
-            if session.descriptor == nil {
-                WorkspaceWelcomeView(session: session, openFolder: openFolder)
-            } else if !session.hasAnyEditorTabs && session.gitOpenDiff == nil
-                && session.gitOpenBlame == nil && session.conductorRunCanvasID == nil
-                && !session.conductorGraphVisible
-            {
-                EmptyEditorView(
-                    workspaceName: session.descriptor?.displayName ?? "Workspace",
-                    session: session
-                )
-            } else if let blame = session.gitOpenBlame,
-                let document = session.selectedDocument
-            {
-                GitStandaloneBlameCanvas(
-                    blame: blame,
-                    fileName: document.displayName,
-                    close: session.closeBlame
-                )
-            } else if let openDiff = session.gitOpenDiff, session.selectedDocumentID == nil {
-                GitStandaloneDiffCanvas(openDiff: openDiff, session: session)
-            } else if session.conductorGraphVisible, session.selectedDocumentID == nil {
-                ConductorGraphCanvas(session: session)
-            } else if session.conductorRunCanvasID != nil, session.selectedDocumentID == nil {
-                ConductorRunDetailCanvas(session: session)
-            } else {
-                EditorLayoutTreeView(node: session.editorLayout.root, session: session)
-            }
+            canvas(for: EditorCanvasRoute.resolve(EditorCanvasRoute.Inputs(session: session)))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.palette.editorBackground)
@@ -55,6 +29,40 @@ struct EditorCanvasView: View {
             Button("Cancel", role: .cancel) { session.pendingCloseDocument = nil }
         } message: {
             Text("\(session.pendingCloseDocument?.displayName ?? "This file") has unsaved changes.")
+        }
+    }
+
+    /// One branch per canvas mode. Which mode is current is decided by
+    /// `EditorCanvasRoute.resolve`, never here — the `if let` unwraps below
+    /// only re-obtain values the route has already proven present.
+    @ViewBuilder
+    private func canvas(for route: EditorCanvasRoute) -> some View {
+        switch route {
+        case .welcome:
+            WorkspaceWelcomeView(session: session, openFolder: openFolder)
+        case .empty:
+            EmptyEditorView(
+                workspaceName: session.descriptor?.displayName ?? "Workspace",
+                session: session
+            )
+        case .blame:
+            if let blame = session.gitOpenBlame, let document = session.selectedDocument {
+                GitStandaloneBlameCanvas(
+                    blame: blame,
+                    fileName: document.displayName,
+                    close: session.closeBlame
+                )
+            }
+        case .standaloneDiff:
+            if let openDiff = session.gitOpenDiff {
+                GitStandaloneDiffCanvas(openDiff: openDiff, session: session)
+            }
+        case .graph:
+            ConductorGraphCanvas(session: session)
+        case .runDetail:
+            ConductorRunDetailCanvas(session: session)
+        case .editor:
+            EditorLayoutTreeView(node: session.editorLayout.root, session: session)
         }
     }
 
