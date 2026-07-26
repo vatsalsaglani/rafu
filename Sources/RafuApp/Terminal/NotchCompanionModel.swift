@@ -44,7 +44,10 @@ nonisolated struct ConductorNotchRunItem: Equatable, Identifiable, Sendable {
         case .awaitingMergeGate:
             stepIndex = manifest.steps.count - 1
             isGateWaiting = true
-        case .idle, .completed, .failed, .aborted:
+        case .idle, .awaitingPlanGate, .completed, .failed, .aborted:
+            // A parked plan gate has no "current step" — step 0 has not
+            // launched — so the companion tile simply has nothing to show
+            // yet, same as before any run started.
             return nil
         }
         guard manifest.steps.indices.contains(stepIndex) else { return nil }

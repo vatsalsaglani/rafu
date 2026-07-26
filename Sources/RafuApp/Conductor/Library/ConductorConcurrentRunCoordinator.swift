@@ -128,7 +128,7 @@ final class ConductorConcurrentRunCoordinator {
             case .completed, .aborted:
                 false
             case .idle, .preparing, .runningStep, .awaitingArtifact, .awaitingGate,
-                .awaitingMergeGate, .failed:
+                .awaitingPlanGate, .awaitingMergeGate, .failed:
                 true
             }
         }
