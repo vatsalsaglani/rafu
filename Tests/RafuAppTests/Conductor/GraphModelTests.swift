@@ -150,6 +150,68 @@ struct GraphModelTests {
         #expect(graph.edges == [ConductorGraphEdge(from: "run-unknown-input", to: node.id)])
     }
 
+    @Test("A plan gate node renders the \"Plan gate\" title and reuses the awaitingGate state")
+    func planGateNodeRendersPlanGateTitle() throws {
+        var run = manifest(
+            id: "planned",
+            steps: [step(agent: "advisor", artifact: "brief.md", status: .pending)])
+        run.gate = ConductorRunManifest.Gate(kind: .plan, stepIndex: 0)
+
+        let graph = ConductorGraphModel.build(
+            manifests: [run],
+            liveStates: ["planned": .awaitingPlanGate],
+            coordinators: [])
+
+        let gate = try #require(graph.nodes.first(where: { $0.id == "run-planned/gate" }))
+        #expect(gate.kind == .gate)
+        #expect(gate.title == "Plan gate")
+        // No new `EnsembleGraphState` case for the plan gate — it reuses
+        // `.awaitingGate` exactly like a step gate (C1 hard limit).
+        #expect(gate.runState == .awaitingGate)
+    }
+
+    @Test("Each proposal renders a dashed ghost node edged from its producing step")
+    func proposalsRenderGhostNodes() throws {
+        var completedStep = step(agent: "advisor", artifact: "brief.md", status: .completed)
+        completedStep.proposals = ["Add a retry policy", "Document the new flag"]
+        let run = manifest(id: "proposed", steps: [completedStep])
+
+        let graph = ConductorGraphModel.build(
+            manifests: [run], liveStates: [:], coordinators: [])
+
+        let ghosts = graph.nodes.filter { $0.kind == .proposedGhost }
+        #expect(ghosts.count == 2)
+        #expect(ghosts.map(\.title) == ["Proposed", "Proposed"])
+        #expect(ghosts.map(\.detail) == ["Add a retry policy", "Document the new flag"])
+        #expect(ghosts.allSatisfy { $0.runState == .pending })
+        for ghost in ghosts {
+            #expect(
+                graph.edges.contains(
+                    ConductorGraphEdge(from: "run-proposed/step-1", to: ghost.id)))
+        }
+    }
+
+    @Test("Over-cap proposals never emit more than 16 ghost nodes")
+    func proposalsCapAtSixteenGhostNodes() throws {
+        // Deliberately 20, ABOVE the cap. The parser normally caps at 16
+        // before this point, so feeding an already-capped 16 would leave
+        // `ConductorGraphModel`'s own `prefix(16)` — the belt-and-braces this
+        // test exists to pin — never exercised. A hand-edited or
+        // future-version manifest can carry more.
+        var completedStep = step(agent: "advisor", artifact: "brief.md", status: .completed)
+        completedStep.proposals = (1...20).map { "Proposal \($0)" }
+        #expect(completedStep.proposals?.count == 20)
+        let run = manifest(id: "capped", steps: [completedStep])
+
+        let graph = ConductorGraphModel.build(
+            manifests: [run], liveStates: [:], coordinators: [])
+
+        let ghosts = graph.nodes.filter { $0.kind == .proposedGhost }
+        #expect(ghosts.count == 16)
+        #expect(ghosts.first?.detail == "Proposal 1")
+        #expect(ghosts.last?.detail == "Proposal 16")
+    }
+
     @Test("Graph step states keep shape-distinct glyphs and non-empty labels")
     func graphGlyphsAreShapeDistinctAndLabeled() {
         let statuses: [RunStepStatus] = [

@@ -13,6 +13,15 @@ nonisolated enum ConductorWorkflowState: Equatable, Sendable {
     case runningStep(index: Int)
     case awaitingArtifact(index: Int)
     case awaitingGate(index: Int)
+    /// Parked at the human plan gate (C8-04): a fully-validated
+    /// `run --plan-gate` request with every step still `.pending` and NO
+    /// AGENT spawned — no worktree, no agent process, no evidence directory.
+    /// Validation itself is not free: reaching this state has already run
+    /// read-only git queries and each step's adapter-version probe
+    /// (`<cli> --version`), which is what makes the parked plan trustworthy.
+    /// In-flight (counts against grant concurrency) but has no "current step
+    /// index" the way `.runningStep`/`.awaitingGate` do.
+    case awaitingPlanGate
     case awaitingMergeGate
     case completed
     case failed(step: Int, reason: String)
@@ -30,6 +39,14 @@ nonisolated struct ConductorWorkflowRunRequest: Sendable {
     let runID: String
     var startedBy: String? = nil
     var label: String? = nil
+    /// `run --plan-gate` (C8-04): park at a human plan gate instead of
+    /// materializing a worktree and launching step 0.
+    var planGateRequested: Bool = false
+    /// Workspace-relative paths for the plan gate's "files as tabs" UI — the
+    /// workflow file plus each matched agent file. Best-effort and
+    /// presentation-only; empty when the caller does not supply real paths
+    /// (e.g. a UI-started run, or a unit test).
+    var planGateFiles: [String] = []
 
     init(
         workflow: ConductorWorkflowDefinition,
@@ -38,7 +55,9 @@ nonisolated struct ConductorWorkflowRunRequest: Sendable {
         baseReference: String = "HEAD",
         runID: String = UUID().uuidString.lowercased(),
         startedBy: String? = nil,
-        label: String? = nil
+        label: String? = nil,
+        planGateRequested: Bool = false,
+        planGateFiles: [String] = []
     ) {
         self.workflow = workflow
         self.roles = roles
@@ -47,6 +66,8 @@ nonisolated struct ConductorWorkflowRunRequest: Sendable {
         self.runID = runID
         self.startedBy = startedBy
         self.label = label
+        self.planGateRequested = planGateRequested
+        self.planGateFiles = planGateFiles
     }
 }
 
@@ -61,6 +82,9 @@ nonisolated struct ConductorGateReadyEvent: Equatable, Sendable {
     nonisolated enum Kind: Equatable, Sendable {
         case step
         case merge
+        /// A parked plan gate (C8-04). Like `.merge`, NEVER remotely
+        /// approvable regardless of any workflow marker.
+        case plan
     }
 
     let runID: String
@@ -135,6 +159,15 @@ nonisolated enum ConductorWorkflowError: Error, Equatable, LocalizedError, Senda
     }
 }
 
+/// The result of re-loading and re-parsing `.rafu/workflows`/`.rafu/agents`
+/// at plan-gate approval time (D2: files are truth; the human may have
+/// hand-edited at the gate). `.failure` NEVER falls back to the stale parked
+/// parse — the park is kept and the issue surfaced instead (C8-04).
+nonisolated enum ConductorPlanGateReparseOutcome: Sendable {
+    case success(workflow: ConductorWorkflowDefinition, roles: [ConductorAgentDefinition])
+    case failure(String)
+}
+
 /// Composes C1's single-role primitives (`ConductorRunEvidenceService`,
 /// `ConductorWorktreeService`, `ConductorMergeGateService`,
 /// `ConductorRoleLaunchService`) into a sequential, gated, multi-role
@@ -159,6 +192,13 @@ final class ConductorWorkflowController {
     private(set) var mergeGateError: String?
     private(set) var hasAppliedToWorkspace = false
     private(set) var isResolvingMergeGate = false
+    /// Non-nil only while parked `.awaitingPlanGate` AND the last
+    /// `approvePlanGate()` attempt's re-parse failed — the exact text is the
+    /// re-parse error, never a stale-parse fallback (C8-04).
+    private(set) var planGateIssue: String?
+    /// Workspace-relative file paths for the plan gate's UI, copied from the
+    /// parked request at park time. Empty once the gate clears.
+    private(set) var planGateFiles: [String] = []
 
     var canStartNewRun: Bool {
         !Self.isInFlight(state)
@@ -232,6 +272,35 @@ final class ConductorWorkflowController {
     @ObservationIgnored
     private var resolvedAdapters: [ConductorResolvedAdapter] = []
 
+    /// The request a plan gate parked, held SEPARATELY from `request`
+    /// (deliberately not assigned there) so `request != nil` keeps meaning
+    /// exactly what `retryFailedStep()`/`launchStep()` already assert it
+    /// means: "this run has materialized a plan and may launch a step" — a
+    /// plan gate has done neither yet.
+    @ObservationIgnored
+    private var parkedPlanGateRequest: ConductorWorkflowRunRequest?
+
+    /// Re-loads and re-parses the workflow/agent files at plan-gate approval
+    /// time. `nil` (every existing call site, and most unit tests) falls back
+    /// to the built-in library re-parse in `builtInPlanGateReparse(for:)`;
+    /// `ConductorEnsembleRequestService.startRun` installs one that reruns
+    /// its single override/artifact-appendix resolver against the SAME
+    /// captured payload (advisor A2).
+    @ObservationIgnored
+    var planGateReparse:
+        (@MainActor (ConductorWorkflowRunRequest) async -> ConductorPlanGateReparseOutcome)?
+
+    /// The file-backed library used ONLY by the built-in plan-gate re-parse
+    /// path. Defaults to the real on-disk library/user root exactly like
+    /// `ConductorEnsembleRequestService.Dependencies` does, so every existing
+    /// call site keeps compiling; tests MUST inject both an empty temp user
+    /// root and a scoped enable store (advisor R5).
+    @ObservationIgnored
+    private let definitionLibrary: ConductorDefinitionLibrary
+
+    @ObservationIgnored
+    private let userLibraryRoot: () -> URL
+
     /// Best-effort per-step metering (C7). Injectable so headless tests drive
     /// fixture snapshots instead of the real provider registry.
     @ObservationIgnored
@@ -246,11 +315,17 @@ final class ConductorWorkflowController {
     init(
         runsPublisher: ConductorRunController,
         adapters: [any ConductorCLIAdapter] = ConductorAdapterRegistry.all,
-        usageMeter: ConductorRunUsageMeter = ConductorRunUsageMeter()
+        usageMeter: ConductorRunUsageMeter = ConductorRunUsageMeter(),
+        definitionLibrary: ConductorDefinitionLibrary = ConductorDefinitionLibrary(),
+        userLibraryRoot: @escaping () -> URL = {
+            ConductorDefinitionLibrary.defaultUserLibraryRoot
+        }
     ) {
         self.runsPublisher = runsPublisher
         self.adapters = adapters
         self.usageMeter = usageMeter
+        self.definitionLibrary = definitionLibrary
+        self.userLibraryRoot = userLibraryRoot
     }
 
     func adapter(for id: ConductorCLIID) -> (any ConductorCLIAdapter)? {
@@ -275,6 +350,9 @@ final class ConductorWorkflowController {
         manifest = nil
         plan = nil
         request = nil
+        parkedPlanGateRequest = nil
+        planGateIssue = nil
+        planGateFiles = []
         resolvedAdapters = []
         stepEvidence = [:]
         stepSessionIDs = [:]
@@ -304,10 +382,107 @@ final class ConductorWorkflowController {
     }
 
     /// Validates the whole request, resolves every step's adapter up front,
-    /// publishes manifest v0 with every step `.pending`, materializes the
-    /// one shared worktree plan, then launches step 0. Nothing spawns until
-    /// every step's provider, handoff artifact, and input-artifact reference
-    /// has been checked.
+    /// and computes (but does not yet materialize) the one shared worktree
+    /// plan. Nothing spawns until every step's provider, handoff artifact,
+    /// and input-artifact reference has been checked. Shared verbatim by
+    /// `start(_:launcher:)` and `approvePlanGate()` (advisor A2/A3): a
+    /// plan-gate approval must run the identical validation a fresh start
+    /// would, against whatever the human just hand-edited.
+    private func prepare(
+        _ request: ConductorWorkflowRunRequest,
+        generation: UUID,
+        store: ConductorRunStore
+    ) async throws -> (
+        resolved: [ConductorResolvedAdapter],
+        plan: ConductorWorkspacePlan,
+        steps: [ConductorRunManifest.Step]
+    ) {
+        let task = request.taskPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !task.isEmpty else { throw ConductorWorkflowError.emptyTaskPrompt }
+        guard ConductorRunStore.isValidRunID(request.runID) else {
+            throw ConductorWorkflowError.invalidRunID
+        }
+        guard request.roles.count == request.workflow.steps.count else {
+            throw ConductorWorkflowError.roleCountMismatch
+        }
+
+        var stepAdapters: [any ConductorCLIAdapter] = []
+        stepAdapters.reserveCapacity(request.roles.count)
+        for (index, role) in request.roles.enumerated() {
+            guard let stepAdapter = adapter(for: role.provider) else {
+                throw ConductorWorkflowError.adapterUnavailable(step: index)
+            }
+            guard Self.isSafeRelativePath(role.handoffArtifact) else {
+                throw ConductorWorkflowError.invalidHandoffArtifact(step: index)
+            }
+            stepAdapters.append(stepAdapter)
+        }
+        for (index, workflowStep) in request.workflow.steps.enumerated() {
+            for artifact in workflowStep.inputArtifacts {
+                guard
+                    request.roles[..<index].contains(where: {
+                        $0.handoffArtifact == artifact
+                    })
+                else {
+                    throw ConductorWorkflowError.unresolvedInputArtifact(
+                        step: index, artifact: artifact)
+                }
+            }
+        }
+
+        try Task.checkCancellation()
+        _ = try await store.directory.seed()
+        try Self.requireCurrent(generation, activeGeneration)
+
+        let anyWorktreeWrite = request.roles.contains { $0.autonomy == .worktreeWrite }
+        let workspacePlan: ConductorWorkspacePlan
+        do {
+            workspacePlan = try await worktreeService.plan(
+                workspaceRoot: store.directory.workspaceRoot,
+                runID: request.runID,
+                autonomy: anyWorktreeWrite ? .worktreeWrite : .readOnly,
+                baseReference: request.baseReference)
+        } catch let error as ConductorWorktreeError {
+            throw ConductorWorkflowError.worktreeFailure(error)
+        }
+        try Self.requireCurrent(generation, activeGeneration)
+
+        var resolved: [ConductorResolvedAdapter] = []
+        resolved.reserveCapacity(stepAdapters.count)
+        for (index, stepAdapter) in stepAdapters.enumerated() {
+            do {
+                resolved.append(try await roleLaunch.resolve(stepAdapter))
+            } catch {
+                throw ConductorWorkflowError.adapterUnavailable(step: index)
+            }
+            try Self.requireCurrent(generation, activeGeneration)
+        }
+
+        let steps = request.roles.enumerated().map { index, role in
+            ConductorRunManifest.Step(
+                agentName: role.name,
+                binding: ConductorRoleLaunchService.binding(
+                    role: role, resolved: resolved[index]),
+                inputArtifacts: request.workflow.steps[index].inputArtifacts,
+                handoffArtifact: role.handoffArtifact,
+                gateAfter: request.workflow.steps[index].gateAfter,
+                status: .pending,
+                startedAt: nil,
+                finishedAt: nil,
+                attempt: 1,
+                evidencePath: nil,
+                // Snapshotted now, so editing the workflow file mid-run
+                // cannot make an already-open gate remotely approvable.
+                safeToApproveRemotely: request.workflow.steps[index].safeToApproveRemotely)
+        }
+
+        return (resolved, workspacePlan, steps)
+    }
+
+    /// Validates the whole request (`prepare`), publishes manifest v0 with
+    /// every step `.pending`, then either parks at the human plan gate
+    /// (`request.planGateRequested`) or materializes the one shared worktree
+    /// plan and launches step 0.
     func start(
         _ request: ConductorWorkflowRunRequest,
         launcher: any ConductorRunProcessLaunching
@@ -323,6 +498,9 @@ final class ConductorWorkflowController {
         manifest = nil
         plan = nil
         self.request = nil
+        parkedPlanGateRequest = nil
+        planGateIssue = nil
+        planGateFiles = []
         resolvedAdapters = []
         mergeGateFiles = []
         mergeGateError = nil
@@ -331,104 +509,52 @@ final class ConductorWorkflowController {
         state = .preparing
 
         do {
-            let task = request.taskPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !task.isEmpty else { throw ConductorWorkflowError.emptyTaskPrompt }
-            guard ConductorRunStore.isValidRunID(request.runID) else {
-                throw ConductorWorkflowError.invalidRunID
-            }
             guard let store else { throw ConductorWorkflowError.workspaceNotAttached }
-            guard request.roles.count == request.workflow.steps.count else {
-                throw ConductorWorkflowError.roleCountMismatch
-            }
-
-            var stepAdapters: [any ConductorCLIAdapter] = []
-            stepAdapters.reserveCapacity(request.roles.count)
-            for (index, role) in request.roles.enumerated() {
-                guard let stepAdapter = adapter(for: role.provider) else {
-                    throw ConductorWorkflowError.adapterUnavailable(step: index)
-                }
-                guard Self.isSafeRelativePath(role.handoffArtifact) else {
-                    throw ConductorWorkflowError.invalidHandoffArtifact(step: index)
-                }
-                stepAdapters.append(stepAdapter)
-            }
-            for (index, workflowStep) in request.workflow.steps.enumerated() {
-                for artifact in workflowStep.inputArtifacts {
-                    guard
-                        request.roles[..<index].contains(where: {
-                            $0.handoffArtifact == artifact
-                        })
-                    else {
-                        throw ConductorWorkflowError.unresolvedInputArtifact(
-                            step: index, artifact: artifact)
-                    }
-                }
-            }
-
-            try Task.checkCancellation()
-            _ = try await store.directory.seed()
-            try Self.requireCurrent(generation, activeGeneration)
-
-            let anyWorktreeWrite = request.roles.contains { $0.autonomy == .worktreeWrite }
-            let workspacePlan: ConductorWorkspacePlan
-            do {
-                workspacePlan = try await worktreeService.plan(
-                    workspaceRoot: store.directory.workspaceRoot,
-                    runID: request.runID,
-                    autonomy: anyWorktreeWrite ? .worktreeWrite : .readOnly,
-                    baseReference: request.baseReference)
-            } catch let error as ConductorWorktreeError {
-                throw ConductorWorkflowError.worktreeFailure(error)
-            }
-            try Self.requireCurrent(generation, activeGeneration)
-            plan = workspacePlan
-
-            var resolved: [ConductorResolvedAdapter] = []
-            resolved.reserveCapacity(stepAdapters.count)
-            for (index, stepAdapter) in stepAdapters.enumerated() {
-                do {
-                    resolved.append(try await roleLaunch.resolve(stepAdapter))
-                } catch {
-                    throw ConductorWorkflowError.adapterUnavailable(step: index)
-                }
-                try Self.requireCurrent(generation, activeGeneration)
-            }
-            resolvedAdapters = resolved
+            let prepared = try await prepare(request, generation: generation, store: store)
+            resolvedAdapters = prepared.resolved
+            plan = prepared.plan
 
             let now = Date()
-            let steps = request.roles.enumerated().map { index, role in
-                ConductorRunManifest.Step(
-                    agentName: role.name,
-                    binding: ConductorRoleLaunchService.binding(
-                        role: role, resolved: resolved[index]),
-                    inputArtifacts: request.workflow.steps[index].inputArtifacts,
-                    handoffArtifact: role.handoffArtifact,
-                    gateAfter: request.workflow.steps[index].gateAfter,
-                    status: .pending,
-                    startedAt: nil,
-                    finishedAt: nil,
-                    attempt: 1,
-                    evidencePath: nil,
-                    // Snapshotted now, so editing the workflow file mid-run
-                    // cannot make an already-open gate remotely approvable.
-                    safeToApproveRemotely: request.workflow.steps[index].safeToApproveRemotely)
-            }
             let newManifest = ConductorRunManifest(
                 id: request.runID,
                 workflowName: request.workflow.name,
-                baseCommit: workspacePlan.baseCommit,
-                worktreeBranch: workspacePlan.branchName ?? "",
+                baseCommit: prepared.plan.baseCommit,
+                worktreeBranch: prepared.plan.branchName ?? "",
                 createdAt: now,
                 updatedAt: now,
-                steps: steps,
+                steps: prepared.steps,
                 startedBy: request.startedBy,
-                label: request.label)
+                label: request.label,
+                gate: request.planGateRequested
+                    ? ConductorRunManifest.Gate(kind: .plan, stepIndex: 0) : nil)
             manifest = newManifest
             runsPublisher.publish(newManifest)
             try Self.requireCurrent(generation, activeGeneration)
 
+            if request.planGateRequested {
+                // No AGENT spawns behind a plan gate (advisor A1): `prepare`
+                // above ran read-only git queries and each step's
+                // adapter-version probe, but no worktree, no agent process,
+                // and no evidence directory exists yet. Park and return
+                // BEFORE materialize/launch.
+                planGateFiles = request.planGateFiles
+                parkedPlanGateRequest = request
+                state = .awaitingPlanGate
+                onGateReady?(
+                    ConductorGateReadyEvent(
+                        runID: newManifest.id,
+                        kind: .plan,
+                        stepIndex: 0,
+                        workflowName: newManifest.workflowName,
+                        agentName: newManifest.steps.first?.agentName ?? "",
+                        // A plan gate is never remotely approvable, exactly
+                        // like the terminal merge gate.
+                        safeToApproveRemotely: false))
+                return
+            }
+
             do {
-                try await worktreeService.materialize(workspacePlan)
+                try await worktreeService.materialize(prepared.plan)
             } catch let error as ConductorWorktreeError {
                 throw ConductorWorkflowError.worktreeFailure(error)
             }
@@ -795,6 +921,20 @@ final class ConductorWorkflowController {
         return text
     }
 
+    /// Reads a step's completed handoff artifact (bounded 1 MiB, same cap as
+    /// `readPersistedPrompt`) and extracts its `proposes:` frontmatter list,
+    /// if any (`ConductorStepProposalsParser`). NEVER throws: a malformed,
+    /// oversize, binary, or unreadable artifact still completes the step —
+    /// proposals are advisory only (C8-04).
+    @concurrent
+    private static func readProposals(at url: URL) async -> [String]? {
+        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
+            !data.isEmpty, data.count <= 1_048_576,
+            let text = String(data: data, encoding: .utf8)
+        else { return nil }
+        return ConductorStepProposalsParser.parse(text)
+    }
+
     /// Resolves and persists this step's usage delta, if metering produced an
     /// honest one. Writes nothing when there is no baseline, no resolvable
     /// delta, or the step vanished from the manifest — never a zero.
@@ -817,12 +957,22 @@ final class ConductorWorkflowController {
     private func stepDidComplete(_ index: Int) async {
         guard var currentManifest = manifest, currentManifest.steps.indices.contains(index)
         else { return }
+        let generation = activeGeneration
         let gateAfter = currentManifest.steps[index].gateAfter
         currentManifest.steps[index].finishedAt = Date()
         currentManifest.steps[index].status = gateAfter ? .awaitingGate : .completed
         currentManifest.updatedAt = Date()
         if gateAfter {
             currentManifest.gate = ConductorRunManifest.Gate(kind: .step, stepIndex: index)
+        }
+        if let artifactURL = stepEvidence[index]?.artifactURL {
+            let proposals = await Self.readProposals(at: artifactURL)
+            // Re-checked after the off-main read: an abort/reset arriving
+            // during it must not resurrect a manifest write for a run that
+            // is no longer this generation's (same discipline as every other
+            // `requireCurrent` gap in this controller).
+            guard activeGeneration == generation else { return }
+            currentManifest.steps[index].proposals = proposals
         }
         manifest = currentManifest
         runsPublisher.publish(currentManifest)
@@ -880,6 +1030,190 @@ final class ConductorWorkflowController {
         }
     }
 
+    /// Approves the run currently parked at the plan gate. Re-loads and
+    /// re-parses the workflow/agent files at THIS moment (`planGateReparse`
+    /// when installed, otherwise `builtInPlanGateReparse(for:)`) — D2: files
+    /// are truth, and the human may have hand-edited them at the gate — then
+    /// rebuilds the manifest from the FRESH roles (advisor A3: a hand-edit
+    /// may add a step or flip a role's autonomy, changing the whole
+    /// `ConductorWorkspacePlan`) before materializing and launching step 0.
+    /// A re-parse failure NEVER falls back to the stale parked parse: it
+    /// keeps the park and surfaces `planGateIssue`.
+    ///
+    /// The state change AND a fresh `activeGeneration` happen SYNCHRONOUSLY,
+    /// before the first `await` — the same reentrancy rule `approveGate()`
+    /// documents below, so a second Approve arriving mid-reparse cannot pass
+    /// this guard and launch a second child.
+    func approvePlanGate() async {
+        guard case .awaitingPlanGate = state, let parkedRequest = parkedPlanGateRequest else {
+            return
+        }
+        let generation = UUID()
+        activeGeneration = generation
+        state = .preparing
+        planGateIssue = nil
+
+        let outcome: ConductorPlanGateReparseOutcome =
+            if let planGateReparse {
+                await planGateReparse(parkedRequest)
+            } else {
+                await builtInPlanGateReparse(for: parkedRequest)
+            }
+        guard activeGeneration == generation else { return }
+
+        let resolvedWorkflow: ConductorWorkflowDefinition
+        let resolvedRoles: [ConductorAgentDefinition]
+        switch outcome {
+        case .success(let workflow, let roles):
+            resolvedWorkflow = workflow
+            resolvedRoles = roles
+        case .failure(let issue):
+            state = .awaitingPlanGate
+            planGateIssue = issue
+            return
+        }
+
+        let refreshedRequest = ConductorWorkflowRunRequest(
+            workflow: resolvedWorkflow,
+            roles: resolvedRoles,
+            taskPrompt: parkedRequest.taskPrompt,
+            baseReference: parkedRequest.baseReference,
+            runID: parkedRequest.runID,
+            startedBy: parkedRequest.startedBy,
+            label: parkedRequest.label,
+            planGateRequested: false,
+            planGateFiles: parkedRequest.planGateFiles)
+
+        do {
+            guard let store else { throw ConductorWorkflowError.workspaceNotAttached }
+            let prepared = try await prepare(refreshedRequest, generation: generation, store: store)
+            try Self.requireCurrent(generation, activeGeneration)
+            resolvedAdapters = prepared.resolved
+            plan = prepared.plan
+
+            guard let currentManifest = manifest else {
+                throw ConductorWorkflowError.workspaceNotAttached
+            }
+            // A3: REBUILD the manifest value — `workflowName`/`baseCommit`/
+            // `worktreeBranch` are `let`, and a hand-edit may have changed
+            // any of them (a new step, a flipped autonomy, a different base).
+            // Same `id`/`createdAt`/`startedBy`/`label` ⇒ same run file, one
+            // write.
+            let rebuiltManifest = ConductorRunManifest(
+                id: currentManifest.id,
+                workflowName: resolvedWorkflow.name,
+                baseCommit: prepared.plan.baseCommit,
+                worktreeBranch: prepared.plan.branchName ?? "",
+                createdAt: currentManifest.createdAt,
+                updatedAt: Date(),
+                steps: prepared.steps,
+                startedBy: currentManifest.startedBy,
+                label: currentManifest.label)
+            manifest = rebuiltManifest
+            runsPublisher.publish(rebuiltManifest)
+            try Self.requireCurrent(generation, activeGeneration)
+
+            do {
+                try await worktreeService.materialize(prepared.plan)
+            } catch let error as ConductorWorktreeError {
+                throw ConductorWorkflowError.worktreeFailure(error)
+            }
+            try Self.requireCurrent(generation, activeGeneration)
+
+            parkedPlanGateRequest = nil
+            planGateFiles = []
+            self.request = refreshedRequest
+            await launchStep(0)
+        } catch is CancellationError {
+            guard activeGeneration == generation else { return }
+            markAborted()
+        } catch let error as ConductorWorkflowError {
+            guard activeGeneration == generation else { return }
+            recordFailure(
+                step: error.stepIndex ?? 0, reason: error.errorDescription ?? "The run failed.")
+        } catch {
+            guard activeGeneration == generation else { return }
+            recordFailure(step: 0, reason: "Rafu could not persist the run evidence.")
+        }
+    }
+
+    /// The built-in plan-gate re-parse used when no `planGateReparse` closure
+    /// is installed (every existing call site: UI-started runs, unit tests).
+    /// Re-locates the workflow by NAME — mirroring
+    /// `ConductorEnsembleRequestService.startRun`'s own stem-or-name lookup —
+    /// and rebuilds roles via `ConductorWorkflowBinder`. It does not reapply
+    /// `--role`/`--artifact` semantics: this path has no originating payload
+    /// to read those from (that is exactly why the Ensemble request service
+    /// installs its own closure — advisor A2).
+    private func builtInPlanGateReparse(
+        for request: ConductorWorkflowRunRequest
+    ) async -> ConductorPlanGateReparseOutcome {
+        guard let store else {
+            return .failure("Open a local workspace before approving a plan gate.")
+        }
+        let snapshot: ConductorDefinitionLibrarySnapshot
+        do {
+            snapshot = try await definitionLibrary.load(
+                workspaceRoot: store.directory.workspaceRoot,
+                userLibraryRoot: userLibraryRoot())
+        } catch is CancellationError {
+            return .failure("Ensemble run preparation was cancelled.")
+        } catch {
+            return .failure("Ensemble definitions could not be re-read.")
+        }
+        guard
+            let libraryWorkflow = snapshot.workflows.first(where: {
+                $0.stem == request.workflow.name || $0.definition?.name == request.workflow.name
+            }),
+            libraryWorkflow.isLaunchable,
+            let workflow = libraryWorkflow.definition
+        else {
+            return .failure("The workflow file could not be re-read, or is now invalid.")
+        }
+        do {
+            let roles = try ConductorWorkflowBinder.resolve(
+                workflow: workflow,
+                agents: snapshot.agents.filter(\.isLaunchable).compactMap(\.agentFile))
+            return .success(workflow: workflow, roles: roles)
+        } catch {
+            return .failure(
+                "A workflow step's agent file could not be re-read, or is now invalid.")
+        }
+    }
+
+    /// "Request Changes" from the plan gate: nothing ever launched, so
+    /// declining leaves every step `.pending` and simply records why. The
+    /// coordinator reads the note via `status`/events and — per the design
+    /// contract — submits a NEW `run --plan-gate` after revising files.
+    func declinePlanGate(note: String) {
+        guard case .awaitingPlanGate = state, var currentManifest = manifest else { return }
+        // Every step is marked `.aborted`, not left `.pending`: a declined
+        // plan gate means none of them will ever run, and
+        // `ConductorEnsembleStateProjection.runState` can ONLY derive
+        // `.aborted` for a manifest-only event from a step actually carrying
+        // that status — `runChanged(manifest:)` has no live-state parameter
+        // to fall back on. Leaving every step `.pending` (as `markAborted`
+        // does for an in-progress step's SIBLINGS) would make this decline
+        // invisible to `status`/events and project as `.pending` forever,
+        // breaking the exact round-trip the coordinator depends on.
+        for index in currentManifest.steps.indices {
+            currentManifest.steps[index].status = .aborted
+            currentManifest.steps[index].finishedAt = Date()
+        }
+        currentManifest.gate = nil
+        currentManifest.recoveryNote = String(note.prefix(1_000))
+        currentManifest.updatedAt = Date()
+        manifest = currentManifest
+        runsPublisher.publish(currentManifest)
+        state = .aborted
+        parkedPlanGateRequest = nil
+        planGateFiles = []
+        planGateIssue = nil
+        activeGeneration = nil
+        activeLauncher = nil
+        activeSessionID = nil
+    }
+
     /// Approves the step gate the run is currently parked at: marks the step
     /// complete, clears the gate, and advances.
     ///
@@ -896,6 +1230,13 @@ final class ConductorWorkflowController {
     /// and command-palette predicates (which key on `state`) also go false
     /// immediately.
     func approveGate() async {
+        // The single user-facing "Approve" verb also covers the plan gate:
+        // a plan gate parks the whole run, not one step, so it forwards
+        // rather than duplicating a second entry point.
+        if case .awaitingPlanGate = state {
+            await approvePlanGate()
+            return
+        }
         guard case .awaitingGate(let index) = state, var currentManifest = manifest,
             currentManifest.steps.indices.contains(index)
         else { return }
@@ -1011,12 +1352,24 @@ final class ConductorWorkflowController {
         do {
             _ = try await mergeGateService.apply(plan)
             hasAppliedToWorkspace = true
+            // Stamped BEFORE `completeMergeGate()` reads `self.manifest`, so
+            // the ONE publish it performs already carries `mergedAt` — the
+            // event center derives `kind: "merged"` / `state: .merged` from
+            // exactly this field, which is what completes a coordinator's
+            // `await --state merged`.
+            manifest?.mergedAt = Date()
             await completeMergeGate()
         } catch is CancellationError {
             return
         } catch let error as ConductorMergeGateError {
             if error == .appliedButCleanupFailed {
+                // The merge-back already happened; only the cosmetic
+                // worktree cleanup failed. Stamping (and completing) here
+                // too is deliberate (advisor A5) — NOT stamping would hang a
+                // coordinator's `await --state merged` forever on that.
                 hasAppliedToWorkspace = true
+                manifest?.mergedAt = Date()
+                await completeMergeGate()
             }
             mergeGateError = error.errorDescription
         } catch {
@@ -1125,7 +1478,21 @@ final class ConductorWorkflowController {
         let previousState = state
         state = .aborted
         if var currentManifest = manifest {
-            if let index = Self.activeStepIndex(in: previousState),
+            if previousState == .awaitingPlanGate {
+                // Same observability rule as `declinePlanGate`: nothing ran,
+                // so there is no active step for `activeStepIndex` to stamp,
+                // and `runChanged(manifest:)` derives state from step status
+                // alone. Leaving every step `.pending` would publish an abort
+                // no coordinator could ever see — `await <run> --state
+                // aborted` would block until timeout while the run sat
+                // projecting `.pending` forever. Reachable whenever the human
+                // clicks "Abort Run" on a parked plan gate instead of
+                // "Request Changes".
+                for index in currentManifest.steps.indices {
+                    currentManifest.steps[index].status = .aborted
+                    currentManifest.steps[index].finishedAt = Date()
+                }
+            } else if let index = Self.activeStepIndex(in: previousState),
                 currentManifest.steps.indices.contains(index)
             {
                 currentManifest.steps[index].status = .aborted
@@ -1190,7 +1557,8 @@ final class ConductorWorkflowController {
 
     private static func isInFlight(_ state: ConductorWorkflowState) -> Bool {
         switch state {
-        case .preparing, .runningStep, .awaitingArtifact, .awaitingGate, .awaitingMergeGate:
+        case .preparing, .runningStep, .awaitingArtifact, .awaitingGate, .awaitingPlanGate,
+            .awaitingMergeGate:
             true
         case .idle, .completed, .failed, .aborted:
             false

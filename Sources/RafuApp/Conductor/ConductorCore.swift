@@ -255,6 +255,12 @@ nonisolated struct ConductorRunManifest: Codable, Equatable, Sendable {
         nonisolated enum Kind: String, Codable, Sendable {
             case step
             case merge
+            /// Parks a fully-validated run before anything spawns (C8-04:
+            /// `run --plan-gate`) — files as tabs, a parsed-step preview,
+            /// Approve/Request Changes. Never remotely approvable, exactly
+            /// like `.merge` (`ConductorGateReadyEvent.Kind.plan` mirrors this
+            /// same rule at the notification layer).
+            case plan
         }
         let kind: Kind
         let stepIndex: Int
@@ -299,6 +305,15 @@ nonisolated struct ConductorRunManifest: Codable, Equatable, Sendable {
         /// resolve, or an ambiguous reading all record nothing rather than a
         /// fabricated number (C7).
         var usage: ConductorRunUsageRecord? = nil
+        /// Trimmed, non-empty entries parsed from this step's completed
+        /// artifact's `proposes:` frontmatter list (C8-04), capped at 16
+        /// (the 16th becoming "… (truncated)" when the artifact declared
+        /// more) and each bounded to 200 characters. `nil` when the artifact
+        /// declared no `proposes:` list, a scalar one, or could not be read —
+        /// parsing this is advisory and NEVER fails an otherwise-completed
+        /// step. `var` with a default keeps this additive for the same
+        /// reason documented on `gate` above.
+        var proposals: [String]? = nil
     }
 }
 

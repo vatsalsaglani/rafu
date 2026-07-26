@@ -129,7 +129,8 @@ nonisolated enum ConductorRunPresentation {
         switch state {
         case .runningStep(let index), .awaitingArtifact(let index), .awaitingGate(let index):
             index
-        case .idle, .preparing, .awaitingMergeGate, .completed, .failed, .aborted:
+        case .idle, .preparing, .awaitingPlanGate, .awaitingMergeGate, .completed, .failed,
+            .aborted:
             nil
         }
     }
@@ -192,6 +193,14 @@ nonisolated enum ConductorRunPresentation {
                 case .awaitingArtifact:
                     .blocked
                 case .awaitingGate:
+                    .awaitingGate
+                case .awaitingPlanGate:
+                    // Reuses the merge gate's `EnsembleGraphState` case
+                    // rather than adding a new one (C8-04's ghost/plan-gate
+                    // chrome must stay within the shipped, exhaustively
+                    // switched-over state set) — the manifest's own
+                    // `gate?.kind == .plan` branch above is what actually
+                    // renders "Plan gate" for a parked run.
                     .awaitingGate
                 case .awaitingMergeGate:
                     .mergeGate
@@ -326,7 +335,8 @@ nonisolated enum ConductorRunPresentation {
 
     private static func isInFlight(_ state: ConductorWorkflowState) -> Bool {
         switch state {
-        case .preparing, .runningStep, .awaitingArtifact, .awaitingGate, .awaitingMergeGate:
+        case .preparing, .runningStep, .awaitingArtifact, .awaitingGate, .awaitingPlanGate,
+            .awaitingMergeGate:
             true
         case .idle, .completed, .failed, .aborted:
             false
@@ -350,6 +360,7 @@ nonisolated enum ConductorRunPresentation {
         return switch gate.kind {
         case .step: "Gate: step \(gate.stepIndex + 1)"
         case .merge: "Merge gate"
+        case .plan: "Plan gate"
         }
     }
 

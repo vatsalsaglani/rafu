@@ -429,7 +429,12 @@ final class ConductorNewRunModel {
         await controller.start(request, launcher: launcher)
 
         switch controller.state {
-        case .runningStep, .awaitingArtifact, .awaitingGate, .awaitingMergeGate, .completed:
+        case .runningStep, .awaitingArtifact, .awaitingGate, .awaitingPlanGate,
+            .awaitingMergeGate, .completed:
+            // This sheet never sets `planGateRequested`, so `.awaitingPlanGate`
+            // is unreachable in practice today — included for exhaustiveness
+            // and so a future plan-gate entry point here reads as success,
+            // not failure, exactly like every other in-flight/parked state.
             return true
         case .failed(_, let reason):
             errorMessage = reason

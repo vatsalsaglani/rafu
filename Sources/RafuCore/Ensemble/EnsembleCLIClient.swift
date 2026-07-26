@@ -91,6 +91,7 @@ public struct EnsembleCLIClient: EnsembleCLIClientProtocol, Sendable {
         case "abort": kind = .ensembleAbort
         case "note": kind = .ensembleNote
         case "grant": kind = .ensembleGrant
+        case "propose-merge": kind = .ensembleProposeMerge
         default: throw EnsembleCLIClientError.unexpectedResponse
         }
         let response = try exchange(

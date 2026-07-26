@@ -88,7 +88,11 @@ final class ConductorEnsembleEventCenter {
 
     func gateReady(event: ConductorGateReadyEvent) {
         let state: EnsembleRunState =
-            event.kind == .merge ? .awaitingMergeGate : .awaitingGate
+            switch event.kind {
+            case .merge: .awaitingMergeGate
+            case .plan: .awaitingPlanGate
+            case .step: .awaitingGate
+            }
         publish(
             EnsembleEvent(
                 cursor: 0,

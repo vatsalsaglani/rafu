@@ -390,7 +390,14 @@ private struct ConductorGraphNodeCard: View {
                         ? theme.palette.focusRing
                         : isSelected
                             ? theme.palette.borderStrong : theme.palette.borderSubtle,
-                    lineWidth: isFocused ? 2 : 1)
+                    style: StrokeStyle(
+                        lineWidth: isFocused ? 2 : 1,
+                        // A proposed ghost node (C8-04) is advisory, not an
+                        // admitted run — a dashed border distinguishes it
+                        // from every solid-bordered kind without adding a
+                        // color-only signal (AGENTS: never color alone).
+                        dash: node.kind == .proposedGhost ? [5, 4] : [])
+                )
         )
         .contextMenu {
             contextMenuItems
@@ -430,6 +437,7 @@ private struct ConductorGraphNodeCard: View {
         case .coordinator: "Coordinator"
         case .run: "Run"
         case .gate: "Gate"
+        case .proposedGhost: "Proposed"
         default: "Step"
         }
     }

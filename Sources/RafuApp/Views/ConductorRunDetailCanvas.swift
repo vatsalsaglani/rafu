@@ -109,6 +109,16 @@ private struct RunDetailContent: View {
             VStack(alignment: .leading, spacing: RafuMetrics.space3) {
                 headerCard
                 recoverySection
+                if isActiveRun, manifest.gate?.kind == .plan, let workflow {
+                    ConductorPlanGateSection(
+                        manifest: manifest,
+                        files: workflow.planGateFiles,
+                        issue: workflow.planGateIssue,
+                        openFile: { path in session.openFile(atRelativePath: path) },
+                        approve: { Task { await workflow.approveGate() } },
+                        decline: { note in workflow.declinePlanGate(note: note) }
+                    )
+                }
                 LazyVStack(alignment: .leading, spacing: RafuMetrics.space3) {
                     ForEach(stepRows) { row in
                         ConductorStepTimelineRow(
@@ -499,6 +509,127 @@ private struct ConductorAdaptiveRow<Content: View>: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// The human plan gate (C8-04): the parsed pipeline as it will run, the
+/// workflow/agent files as openable tabs, and the two verbs that either
+/// launch step 0 or abort the run with a note for the coordinator. Files as
+/// tabs means a hand-edit before Approve is an ordinary Rafu edit — the
+/// re-parse at approval time (`approveGate()` → `approvePlanGate()`) is what
+/// makes that edit count.
+private struct ConductorPlanGateSection: View {
+    @Environment(\.rafuTheme) private var theme
+    let manifest: ConductorRunManifest
+    let files: [String]
+    let issue: String?
+    let openFile: (String) -> Void
+    let approve: () -> Void
+    let decline: (String) -> Void
+
+    @State private var isDeclinePresented = false
+    @State private var declineNote = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Plan Gate")
+                .font(.headline)
+                .foregroundStyle(theme.palette.textPrimary)
+                .accessibilityAddTraits(.isHeader)
+            Text(
+                "Nothing has run yet. Review the pipeline below, edit a file if needed, then approve."
+            )
+            .font(.caption)
+            .foregroundStyle(theme.palette.textSecondary)
+            if let issue {
+                Label(issue, systemImage: "exclamationmark.triangle")
+                    .font(.callout)
+                    .foregroundStyle(theme.palette.gitDeleted)
+                    .accessibilityLabel("Approval failed: \(issue)")
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(manifest.steps.enumerated()), id: \.offset) { index, step in
+                    HStack(spacing: 6) {
+                        Text("\(index + 1).")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(theme.palette.textMuted)
+                        Text(step.agentName)
+                            .foregroundStyle(theme.palette.textPrimary)
+                        Text("• \(step.binding.provider.displayName)")
+                            .foregroundStyle(theme.palette.textSecondary)
+                        if step.gateAfter {
+                            RafuChip(text: "Gate")
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .font(.callout)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(
+                        "Step \(index + 1), \(step.agentName), \(step.binding.provider.displayName)"
+                            + (step.gateAfter ? ", gates after" : ""))
+                }
+            }
+            if !files.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(files, id: \.self) { path in
+                        Button {
+                            openFile(path)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "doc.text")
+                                    .foregroundStyle(theme.palette.info)
+                                Text(path)
+                                    .foregroundStyle(theme.palette.textPrimary)
+                                Spacer(minLength: 0)
+                            }
+                            .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Open \(path)")
+                        .accessibilityHint("Opens this file in the editor")
+                    }
+                }
+            }
+            ConductorAdaptiveRow(spacing: 8) {
+                Button("Approve Plan", action: approve)
+                    .buttonStyle(RafuProminentButtonStyle())
+                    .accessibilityHint(
+                        "Re-reads the files above and starts step 1 of this run")
+                Button("Request Changes…") {
+                    declineNote = ""
+                    isDeclinePresented = true
+                }
+                .buttonStyle(RafuSecondaryButtonStyle())
+                .accessibilityHint("Aborts this run with a note for the coordinator")
+            }
+        }
+        .padding(RafuMetrics.space4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
+                .fill(theme.palette.cardBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
+                .strokeBorder(theme.palette.borderSubtle)
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Plan gate")
+        .alert("Request Changes", isPresented: $isDeclinePresented) {
+            TextField("What needs to change?", text: $declineNote, axis: .vertical)
+                .lineLimit(3...6)
+            Button("Send", role: .destructive) {
+                decline(declineNote)
+                declineNote = ""
+            }
+            Button("Cancel", role: .cancel) {
+                declineNote = ""
+            }
+        } message: {
+            Text(
+                "This aborts the run without starting anything. The coordinator reads your note and submits a revised plan."
+            )
+        }
     }
 }
 

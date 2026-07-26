@@ -29,6 +29,12 @@ nonisolated struct ConductorRunRecoveryPlan: Equatable, Sendable {
         /// The run remains readable evidence, but its externally removed
         /// worktree can no longer participate in merge/retry actions.
         case historyOnly
+        /// The app closed while the run was still parked at its plan gate, so
+        /// nothing was ever started: no worktree, no agent process, no
+        /// evidence. There is no live controller to approve or decline it
+        /// after a restart, so it is abandoned truthfully rather than left as
+        /// a zombie no human verb and no coordinator verb can reach.
+        case abandonedAtPlanGate
     }
 
     let runID: String
@@ -76,6 +82,20 @@ nonisolated struct ConductorRunRecoveryService: Sendable {
         for manifest: ConductorRunManifest,
         worktreeExists: Bool
     ) -> ConductorRunRecoveryPlan {
+        // Checked BEFORE the worktree probe: a plan-gated run parks before
+        // materialization, so a `worktreeWrite` role leaves a non-empty
+        // `worktreeBranch` with nothing on disk. That would otherwise fall
+        // into `.historyOnly` and claim "the worktree was removed outside
+        // Rafu", which is false — it was never created.
+        if manifest.gate?.kind == .plan {
+            return ConductorRunRecoveryPlan(
+                runID: manifest.id,
+                disposition: .abandonedAtPlanGate,
+                note:
+                    "Rafu closed while this run was waiting at its plan gate. Nothing had started, so the run was abandoned. Submit it again to run it.",
+                verbs: [])
+        }
+
         if !manifest.worktreeBranch.isEmpty, !worktreeExists {
             return ConductorRunRecoveryPlan(
                 runID: manifest.id,

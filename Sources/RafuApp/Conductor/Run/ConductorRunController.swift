@@ -496,6 +496,17 @@ final class ConductorRunController {
             case .historyOnly:
                 // The worktree is gone, so no gate can be resolved against it.
                 revised.gate = nil
+            case .abandonedAtPlanGate:
+                // Every step is stamped `.aborted`, not left `.pending`, for
+                // the same reason `declinePlanGate` does it: the projection
+                // derives a manifest-only run state from step status alone, so
+                // a `.pending` step would leave an awaiting coordinator
+                // blocked on a run that can never move again.
+                revised.gate = nil
+                for index in revised.steps.indices {
+                    revised.steps[index].status = .aborted
+                    revised.steps[index].finishedAt = Date()
+                }
             }
             revised.recoveryNote = plan.note
             guard revised != manifest else {
@@ -758,12 +769,28 @@ final class ConductorRunController {
         do {
             _ = try await mergeGateService.apply(activeWorkspacePlan)
             hasAppliedToWorkspace = true
+            // `completeGate()` mutates and persists the manifest through
+            // `scheduleManifestSave()` directly, NOT through `publish(_:)` —
+            // the one seam that calls `ConductorEnsembleEventCenter.shared
+            // .runChanged`. Stamp `mergedAt` first (so completeGate's own
+            // copy-mutate-store cycle carries it), then explicitly `publish`
+            // once more so the `merged` event actually streams — this is
+            // what completes a coordinator's `await --state merged`.
+            manifest?.mergedAt = Date()
             await completeGate()
+            if let manifest { await publish(manifest)?.value }
         } catch is CancellationError {
             return
         } catch let error as ConductorMergeGateError {
             if error == .appliedButCleanupFailed {
+                // The merge-back already happened; only the cosmetic
+                // worktree cleanup failed. Stamping (and completing) here
+                // too is deliberate (advisor A5) — NOT stamping would hang a
+                // coordinator's `await --state merged` forever on that.
                 hasAppliedToWorkspace = true
+                manifest?.mergedAt = Date()
+                await completeGate()
+                if let manifest { await publish(manifest)?.value }
             }
             mergeGateError = error.errorDescription
         } catch {

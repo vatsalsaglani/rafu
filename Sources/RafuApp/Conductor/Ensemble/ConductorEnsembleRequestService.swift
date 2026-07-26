@@ -4,8 +4,8 @@ import RafuCore
 nonisolated enum ConductorEnsembleStateProjection {
     /// The one state projection shared by snapshots and pushed run-change
     /// events. Precedence is deliberate and stable:
-    /// merged > interrupted > failed > aborted > awaiting* > running >
-    /// pending > completed.
+    /// merged > interrupted > failed > aborted > awaitingPlanGate >
+    /// awaitingMergeGate > awaitingGate > running > pending > completed.
     static func runState(
         manifest: ConductorRunManifest,
         liveState: ConductorWorkflowState?
@@ -27,6 +27,12 @@ nonisolated enum ConductorEnsembleStateProjection {
         {
             return .aborted
         }
+        // A parked plan gate takes priority over every other open-gate/running
+        // reading: nothing has spawned yet, so it can never simultaneously be
+        // "running" or "awaiting" a step/merge gate (C8-04).
+        if manifest.gate?.kind == .plan || liveState == .awaitingPlanGate {
+            return .awaitingPlanGate
+        }
         if manifest.gate?.kind == .merge || liveState == .awaitingMergeGate {
             return .awaitingMergeGate
         }
@@ -44,7 +50,8 @@ nonisolated enum ConductorEnsembleStateProjection {
                 switch liveState {
                 case .preparing, .runningStep, .awaitingArtifact:
                     return true
-                case .idle, .awaitingGate, .awaitingMergeGate, .completed, .failed, .aborted, nil:
+                case .idle, .awaitingGate, .awaitingPlanGate, .awaitingMergeGate, .completed,
+                    .failed, .aborted, nil:
                     return false
                 }
             }()
@@ -140,7 +147,8 @@ final class ConductorEnsembleRequestService {
             }
             return .ensemble(artifact(payload: payload, workspace: workspace))
         case .handshake, .openFolder, .goto, .ensembleSubscribe,
-            .ensembleRun, .ensembleAbort, .ensembleNote, .ensembleGrant, .unknown:
+            .ensembleRun, .ensembleAbort, .ensembleNote, .ensembleGrant,
+            .ensembleProposeMerge, .unknown:
             return .ensemble(.failure(code: 64, message: "unsupported Ensemble request"))
         }
     }
@@ -186,6 +194,11 @@ final class ConductorEnsembleRequestService {
                 return .ensemble(.failure(code: 64, message: "invalid grant payload"))
             }
             return .ensemble(grant(payload: payload, workspace: workspace))
+        case .ensembleProposeMerge:
+            guard payload.verb == "propose-merge" else {
+                return .ensemble(.failure(code: 64, message: "invalid propose-merge payload"))
+            }
+            return .ensemble(await proposeMerge(payload: payload, workspace: workspace))
         case .handshake, .openFolder, .goto, .ensembleSubscribe, .unknown:
             return .ensemble(.failure(code: 64, message: "unsupported Ensemble request"))
         }
@@ -272,21 +285,35 @@ final class ConductorEnsembleRequestService {
             ))
     }
 
-    private func startRun(
+    /// `resolveRunDefinitions`'s outcome. A bespoke enum rather than
+    /// `Result<_, EnsembleResponsePayload>`: the standard library constrains
+    /// `Result`'s `Failure` to `Swift.Error`, and `EnsembleResponsePayload`
+    /// deliberately does NOT conform to it — it is a wire DTO, not a thrown
+    /// error type, and widening its conformance surface for this one
+    /// internal seam is not worth doing.
+    private enum RunDefinitionsResolution {
+        case success((workflow: ConductorWorkflowDefinition, roles: [ConductorAgentDefinition]))
+        case failure(EnsembleResponsePayload)
+    }
+
+    /// Loads the definition library, resolves `payload.workflow`'s steps
+    /// against it, and applies `--role` overrides and the `--artifact`
+    /// input-reference appendix — the ONE implementation of "what a payload's
+    /// workflow/roles resolve to". Shared by `startRun` and the
+    /// `planGateReparse` closure `startRun` installs on every controller it
+    /// creates (advisor A2): re-parsing at plan-gate approval time must apply
+    /// the SAME override/appendix semantics the original request used, never
+    /// a second, drifting implementation.
+    private func resolveRunDefinitions(
         payload: EnsembleRequestPayload,
         workspace: WorkspaceSnapshot
-    ) async -> EnsembleResponsePayload {
-        guard let token = payload.token,
-            let tokenEntry = dependencies.tokenStore.validate(token)
-        else {
-            return failure(.noToken)
-        }
+    ) async -> RunDefinitionsResolution {
         guard
             let workflowName = payload.workflow?.trimmingCharacters(
                 in: .whitespacesAndNewlines
             ), !workflowName.isEmpty
         else {
-            return .failure(code: 64, message: "run requires a workflow")
+            return .failure(.failure(code: 64, message: "run requires a workflow"))
         }
 
         let snapshot: ConductorDefinitionLibrarySnapshot
@@ -296,9 +323,9 @@ final class ConductorEnsembleRequestService {
                 userLibraryRoot: dependencies.userLibraryRoot()
             )
         } catch is CancellationError {
-            return .failure(code: 75, message: "Ensemble run preparation was cancelled")
+            return .failure(.failure(code: 75, message: "Ensemble run preparation was cancelled"))
         } catch {
-            return .failure(code: 65, message: "Ensemble definitions could not be loaded")
+            return .failure(.failure(code: 65, message: "Ensemble definitions could not be loaded"))
         }
 
         guard
@@ -308,7 +335,7 @@ final class ConductorEnsembleRequestService {
             libraryWorkflow.isLaunchable,
             let workflow = libraryWorkflow.definition
         else {
-            return .failure(code: 65, message: "Ensemble workflow not found or invalid")
+            return .failure(.failure(code: 65, message: "Ensemble workflow not found or invalid"))
         }
 
         var roles: [ConductorAgentDefinition]
@@ -318,19 +345,20 @@ final class ConductorEnsembleRequestService {
                 agents: snapshot.agents.filter(\.isLaunchable).compactMap(\.agentFile)
             )
         } catch {
-            return .failure(code: 65, message: "Ensemble workflow role could not be resolved")
+            return .failure(
+                .failure(code: 65, message: "Ensemble workflow role could not be resolved"))
         }
 
         for override in payload.roleOverrides ?? [] {
             guard let provider = ConductorCLIID(rawValue: override.provider) else {
-                return .failure(code: 65, message: "Ensemble provider is unknown")
+                return .failure(.failure(code: 65, message: "Ensemble provider is unknown"))
             }
             let matchingIndices = roles.indices.filter { index in
                 roles[index].name == override.name
                     || workflow.steps[index].agentName == override.name
             }
             guard !matchingIndices.isEmpty else {
-                return .failure(code: 65, message: "Ensemble workflow role is unknown")
+                return .failure(.failure(code: 65, message: "Ensemble workflow role is unknown"))
             }
             for index in matchingIndices {
                 let role = roles[index]
@@ -347,7 +375,7 @@ final class ConductorEnsembleRequestService {
 
         let artifacts = payload.artifacts ?? []
         guard artifacts.allSatisfy({ $0.hasPrefix("/") && !$0.utf8.contains(0) }) else {
-            return .failure(code: 64, message: "run artifacts must be absolute paths")
+            return .failure(.failure(code: 64, message: "run artifacts must be absolute paths"))
         }
         if !artifacts.isEmpty, !roles.isEmpty {
             let role = roles[0]
@@ -365,6 +393,87 @@ final class ConductorEnsembleRequestService {
                     + "\n\nInput artifacts (read these files before you begin):\n"
                     + references
             )
+        }
+
+        return .success((workflow, roles))
+    }
+
+    /// Workspace-relative paths for the plan gate's "files as tabs" UI: the
+    /// workflow file plus each step's matched agent file, in step order,
+    /// deduplicated. Best-effort — a step whose agent could not be matched by
+    /// name or stem simply contributes no row rather than failing the run.
+    private func planGateFilePaths(
+        workflow: ConductorWorkflowDefinition,
+        libraryWorkflowFileURL: URL,
+        agents: [ConductorLibraryAgent],
+        rootURL: URL
+    ) -> [String] {
+        var seen: Set<String> = []
+        var paths: [String] = []
+        func append(_ url: URL) {
+            let relative = Self.relativeWorkspacePath(of: url, root: rootURL)
+            guard seen.insert(relative).inserted else { return }
+            paths.append(relative)
+        }
+        append(libraryWorkflowFileURL)
+        for step in workflow.steps {
+            guard
+                let agentFile = agents.first(where: {
+                    $0.definition?.name == step.agentName
+                        || $0.stem == step.agentName
+                })
+            else { continue }
+            append(agentFile.fileURL)
+        }
+        return paths
+    }
+
+    private static func relativeWorkspacePath(of url: URL, root: URL) -> String {
+        let rootPath = root.standardizedFileURL.path
+        let path = url.standardizedFileURL.path
+        guard path.hasPrefix(rootPath) else { return path }
+        return String(path.dropFirst(rootPath.count))
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    private func startRun(
+        payload: EnsembleRequestPayload,
+        workspace: WorkspaceSnapshot
+    ) async -> EnsembleResponsePayload {
+        guard let token = payload.token,
+            let tokenEntry = dependencies.tokenStore.validate(token)
+        else {
+            return failure(.noToken)
+        }
+
+        let workflow: ConductorWorkflowDefinition
+        let roles: [ConductorAgentDefinition]
+        switch await resolveRunDefinitions(payload: payload, workspace: workspace) {
+        case .failure(let response):
+            return response
+        case .success(let resolved):
+            workflow = resolved.workflow
+            roles = resolved.roles
+        }
+
+        var planGateFiles: [String] = []
+        if payload.planGate == true {
+            let snapshot = try? await dependencies.definitionLibrary.load(
+                workspaceRoot: workspace.rootURL,
+                userLibraryRoot: dependencies.userLibraryRoot()
+            )
+            if let snapshot,
+                let libraryWorkflow = snapshot.workflows.first(where: {
+                    $0.definition?.name == workflow.name
+                })
+            {
+                planGateFiles = planGateFilePaths(
+                    workflow: workflow,
+                    libraryWorkflowFileURL: libraryWorkflow.fileURL,
+                    agents: snapshot.agents,
+                    rootURL: workspace.rootURL
+                )
+            }
         }
 
         let inFlight = inFlightRunIDs(workspace: workspace)
@@ -408,7 +517,9 @@ final class ConductorEnsembleRequestService {
             baseReference: baseReference,
             runID: runID,
             startedBy: tokenEntry.coordinatorID,
-            label: label?.isEmpty == false ? label : nil
+            label: label?.isEmpty == false ? label : nil,
+            planGateRequested: payload.planGate == true,
+            planGateFiles: planGateFiles
         )
 
         let controller: ConductorWorkflowController
@@ -423,6 +534,42 @@ final class ConductorEnsembleRequestService {
             return .failure(code: 75, message: "Ensemble run preparation was cancelled")
         } catch {
             return .failure(code: 75, message: "Ensemble could not start the child run")
+        }
+
+        // Installed unconditionally (harmless when the run never parks): the
+        // approve-time re-parse must apply the SAME `--role`/`--artifact`
+        // semantics this request just used (advisor A2), so it re-runs the
+        // one shared resolver against the SAME captured payload/workspace
+        // rather than reconstructing overrides from the parked manifest.
+        // `session` is captured WEAKLY and the snapshot rebuilt inside. The
+        // session transitively owns this closure — session →
+        // `conductorConcurrentRuns` → `controllersByRunID` → controller →
+        // `planGateReparse` — so capturing `workspace` (which holds a strong
+        // `session`) would retain the whole workspace, its terminal sessions,
+        // and its text storages for the app's lifetime, since the only pruner
+        // is a manual UI action. `onGateReady` uses `[weak self]` for exactly
+        // this reason; this follows that discipline.
+        let workspaceRootURL = workspace.rootURL
+        let workspaceIsKeyWindow = workspace.isKeyWindow
+        let workspaceRegistrationOrder = workspace.registrationOrder
+        controller.planGateReparse = { [weak self, weak session = workspace.session] _ in
+            guard let self, let session else {
+                return .failure("Ensemble definitions could not be re-read.")
+            }
+            let workspace = WorkspaceSnapshot(
+                rootURL: workspaceRootURL,
+                session: session,
+                isKeyWindow: workspaceIsKeyWindow,
+                registrationOrder: workspaceRegistrationOrder)
+            switch await self.resolveRunDefinitions(payload: payload, workspace: workspace) {
+            case .success(let resolved):
+                return .success(workflow: resolved.workflow, roles: resolved.roles)
+            case .failure(let response):
+                if case .failure(_, let message) = response {
+                    return .failure(message)
+                }
+                return .failure("Ensemble definitions could not be re-read.")
+            }
         }
 
         guard let manifest = controller.manifest, let plan = controller.plan else {
@@ -520,6 +667,81 @@ final class ConductorEnsembleRequestService {
         } catch {
             return .failure(code: 65, message: "Ensemble note could not be persisted")
         }
+    }
+
+    /// Token-scoped: re-raises the human merge gate for every named run this
+    /// coordinator started, optionally attaching a note. NEVER applies,
+    /// commits, or merges anything — applying stays the user's
+    /// `applyToWorkspace()` verb in the UI. Validates EVERY named run before
+    /// mutating or raising attention for ANY of them (all-or-nothing).
+    private func proposeMerge(
+        payload: EnsembleRequestPayload,
+        workspace: WorkspaceSnapshot
+    ) async -> EnsembleResponsePayload {
+        guard let entry = dependencies.tokenStore.validate(payload.token) else {
+            return failure(.noToken)
+        }
+        guard !payload.runIDs.isEmpty else {
+            return .failure(code: 64, message: "propose-merge requires at least one run")
+        }
+        if let text = payload.text,
+            text.count > ConductorEnsembleNoteStore.maximumTextCharacters
+        {
+            return .failure(code: 64, message: "note text exceeds 1000 characters")
+        }
+
+        var manifests: [ConductorRunManifest] = []
+        for runID in payload.runIDs {
+            guard
+                let manifest = workspace.session.conductorRuns.first(where: { $0.id == runID })
+            else {
+                return .failure(code: 65, message: "Ensemble run not found")
+            }
+            guard manifest.startedBy == entry.coordinatorID else {
+                return .failure(code: 77, message: "This coordinator does not own that run")
+            }
+            let state = ConductorEnsembleStateProjection.runState(
+                manifest: manifest,
+                liveState: dependencies.liveState(workspace.session, runID)
+            )
+            guard state == .awaitingMergeGate else {
+                return .failure(
+                    code: 65,
+                    message: "\(runID) is \(state.rawValue), not awaiting a merge gate"
+                )
+            }
+            manifests.append(manifest)
+        }
+
+        let text = payload.text?.trimmingCharacters(in: .whitespacesAndNewlines)
+        for manifest in manifests {
+            if let text, !text.isEmpty {
+                _ = try? await ConductorEnsembleNoteStore(
+                    workspaceRoot: workspace.rootURL,
+                    eventCenter: dependencies.eventCenter
+                ).append(runID: manifest.id, from: entry.coordinatorID, text: text)
+            }
+            let stepIndex = manifest.gate?.stepIndex ?? max(0, manifest.steps.count - 1)
+            let agentName =
+                manifest.steps.indices.contains(stepIndex)
+                ? manifest.steps[stepIndex].agentName
+                : (manifest.steps.last?.agentName ?? manifest.workflowName)
+            // Reuses the exact same seam a live pipeline gate raises through
+            // (publishes the gate event + applies ADR 0016 HUD/notification
+            // arbitration) — no separate policy to keep in sync.
+            workspace.session.raiseConductorGateAttention(
+                ConductorGateReadyEvent(
+                    runID: manifest.id,
+                    kind: .merge,
+                    stepIndex: stepIndex,
+                    workflowName: manifest.workflowName,
+                    agentName: agentName,
+                    safeToApproveRemotely: false
+                ))
+        }
+
+        return .proposeMerge(
+            EnsembleProposeMergeResult(accepted: payload.runIDs, state: "awaiting_human"))
     }
 
     private func grant(

@@ -69,6 +69,20 @@ Only remove the lock when *both* signals say nobody owns it. `lsof` alone can mi
 
 A silent SwiftPM invocation is a lock question until proven otherwise. A genuinely slow build still prints progress.
 
+### Never poll — no `until`/`while` wait loops
+
+**Do not write a shell loop that waits for something to finish.** No `while kill -0 <pid>; do sleep …; done`, no `until [ -f … ]; do sleep …; done`, no `sleep 300 && check`. This is a standing rule, not a preference.
+
+Run long work as a single backgrounded command and let the harness's completion notification wake you. A wait loop does not make the work finish sooner — it blocks a slot, hides the real exit status behind the loop's, and stacks up when several agents do it at once. `script/await_build_lock.sh` is the *only* sanctioned wait, because it is bounded, it distinguishes a held lock from a stale one, and it gives up loudly instead of spinning.
+
+The correct shapes:
+
+- Long build/test → one background invocation of `script/build.sh` / `script/test.sh`; do something else, or end the turn and wait to be notified.
+- Lock contention → **serialize by not starting**. If another SwiftPM process holds `.build/.lock`, do not queue a second run behind a loop; wait for the notification from the run that is already going, or start yours after it reports.
+- Something genuinely external and untracked (CI, a deploy) → one scheduled wake-up sized to how fast that state actually changes, never a tight poll.
+
+A wait loop that times out reports the *loop's* failure, not the work's. That is how a lock-starved run gets misread as a failing test suite — the log says "exit 1" while zero tests ever ran.
+
 ### Worktree build cache: delete it when you finish
 
 One `.build` is 2–5 GB. Phase worktrees accumulate silently: this repository reached **20 build directories totalling 48 GB with 13 GB of disk left**, which is one fan-out away from the next agent's build dying on ENOSPC. SwiftPM does not fail cleanly when the disk fills — you get corrupt module caches and "cannot find type in scope" errors that read like source bugs, so the agent that hits it wastes its run debugging your code instead of the disk.

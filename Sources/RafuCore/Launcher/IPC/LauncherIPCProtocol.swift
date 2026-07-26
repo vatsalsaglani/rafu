@@ -53,12 +53,17 @@ public enum LauncherIPCRequestKind: Hashable, Sendable {
     case ensembleAbort
     case ensembleNote
     case ensembleGrant
+    /// Token-scoped: re-raises the human merge gate for one or more runs
+    /// this coordinator started. Never applies, commits, or merges anything
+    /// (C8-04).
+    case ensembleProposeMerge
     case unknown(String)
 
     public var isEnsemble: Bool {
         switch self {
         case .ensembleStatus, .ensembleArtifact, .ensembleSubscribe,
-            .ensembleRun, .ensembleAbort, .ensembleNote, .ensembleGrant:
+            .ensembleRun, .ensembleAbort, .ensembleNote, .ensembleGrant,
+            .ensembleProposeMerge:
             true
         case .handshake, .openFolder, .goto, .unknown:
             false
@@ -84,6 +89,7 @@ extension LauncherIPCRequestKind: Codable {
         case "ensembleAbort": self = .ensembleAbort
         case "ensembleNote": self = .ensembleNote
         case "ensembleGrant": self = .ensembleGrant
+        case "ensembleProposeMerge": self = .ensembleProposeMerge
         default: self = .unknown(raw)
         }
     }
@@ -101,6 +107,7 @@ extension LauncherIPCRequestKind: Codable {
         case .ensembleAbort: try container.encode("ensembleAbort")
         case .ensembleNote: try container.encode("ensembleNote")
         case .ensembleGrant: try container.encode("ensembleGrant")
+        case .ensembleProposeMerge: try container.encode("ensembleProposeMerge")
         case .unknown(let raw): try container.encode(raw)
         }
     }
