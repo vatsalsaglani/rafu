@@ -117,6 +117,14 @@ func localTokenStrategyCountsAreContextIndependent() {
     #expect(!GeminiCLIProvider.descriptor.defaultEnabled)
     #expect(!CopilotProvider.descriptor.defaultEnabled)
     #expect(!KimiProvider.descriptor.defaultEnabled)
+
+    // Gemini CLI and Kimi read their vendor's own local session at fetch
+    // time; Copilot has no obtainable signal at all, so it must offer no
+    // Connect affordance rather than a button that always fails.
+    #expect(GeminiCLIProvider.descriptor.authPattern == .localSessionPiggyback)
+    #expect(KimiProvider.descriptor.authPattern == .localSessionPiggyback)
+    #expect(CopilotProvider.descriptor.authPattern == .unavailable)
+    #expect(CopilotProvider.descriptor.authPattern.connectAffordance == .none)
 }
 
 @Test("W5 descriptors carry the exact credential and network disclosures")

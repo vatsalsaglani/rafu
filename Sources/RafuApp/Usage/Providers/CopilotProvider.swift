@@ -25,7 +25,11 @@ nonisolated enum CopilotProvider {
     static let descriptor = UsageProviderDescriptor(
         id: .copilot,
         displayName: "GitHub Copilot",
-        authPattern: .piggybackNetwork,
+        // `.unavailable`, not `.piggybackNetwork`: there is no credential for
+        // Connect to load and no local session for it to verify, so Settings
+        // must state the limitation instead of offering a button that can
+        // only ever fail.
+        authPattern: .unavailable,
         disclosure:
             "Unavailable: no discoverable local Copilot CLI or gh token is exposed for reading; usage requires a manually or device-flow supplied token.",
         defaultEnabled: false,

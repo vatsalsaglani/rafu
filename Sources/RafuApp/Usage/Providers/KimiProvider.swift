@@ -229,7 +229,7 @@ nonisolated enum KimiProvider {
     static let descriptor = UsageProviderDescriptor(
         id: .kimi,
         displayName: "Kimi",
-        authPattern: .piggybackNetwork,
+        authPattern: .localSessionPiggyback,
         disclosure:
             "Reads ~/.kimi-code/credentials/kimi-code.json and optional ~/.kimi-code/device_id; sends only the access token to api.kimi.com/coding/v1/usages to fetch usage numbers.",
         defaultEnabled: false,

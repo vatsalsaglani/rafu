@@ -173,9 +173,10 @@ func cursorDescriptorContract() {
     #expect(CursorProvider.descriptor.makeStrategies(probe).count == 1)
     #expect(CursorProvider.descriptor.makeStrategies(populated).count == 1)
     #expect(CursorProvider.descriptor.defaultEnabled == false)
-    if case .piggybackNetwork = CursorProvider.descriptor.authPattern {
-        // Expected.
-    } else {
-        Issue.record("Cursor must remain a piggyback-network provider")
-    }
+    // Cursor's credential lives in Cursor.app's own state.vscdb and never
+    // crosses into Rafu, so it must NOT claim `.piggybackNetwork` — that
+    // pattern's Connect looks for a Rafu-readable credential file and can
+    // only ever fail here.
+    #expect(CursorProvider.descriptor.authPattern == .localSessionPiggyback)
+    #expect(CursorProvider.descriptor.authPattern.connectAffordance == .localSession)
 }

@@ -380,3 +380,148 @@ func settingsModelFailedTransition() async {
     #expect(model.connectionState(for: .claude) == .failed(.credentialAccessDenied))
     #expect(model.isEnabled(.claude))
 }
+
+// MARK: - Connect affordance honesty
+
+/// The original defect: Cursor's descriptor claimed `.piggybackNetwork`,
+/// whose Connect path resolves a Rafu-readable credential file, but
+/// `UsageOAuthConnector.credentialFileURL` has an entry only for Claude and
+/// Codex. Every other `.piggybackNetwork` provider therefore rendered a
+/// Connect button that could only ever return `.unsupportedProvider`. This
+/// test fails the moment a provider claims that pattern without a credential
+/// source to back it, so the class of bug cannot come back silently.
+@Test("Every externalCredential provider has a credential source Connect can actually read")
+func externalCredentialProvidersHaveACredentialSource() {
+    for descriptor in UsageProviderRegistry.all
+    where descriptor.authPattern.connectAffordance == .externalCredential {
+        #expect(
+            UsageOAuthConnector.credentialFileURL(for: descriptor.id, environment: [:]) != nil,
+            "\(descriptor.id.rawValue) offers Connect but has no readable credential file")
+    }
+}
+
+@Test("The roster's connect affordances match each provider's real credential story")
+func rosterConnectAffordances() {
+    let expected: [UsageProviderID: UsageConnectAffordance] = [
+        .claude: .externalCredential, .codex: .externalCredential,
+        .cursor: .localSession, .antigravity: .localSession,
+        .geminiCLI: .localSession, .kimi: .localSession,
+    ]
+    for descriptor in UsageProviderRegistry.all {
+        #expect(
+            descriptor.authPattern.connectAffordance == (expected[descriptor.id] ?? .none),
+            "\(descriptor.id.rawValue) has an unexpected connect affordance")
+    }
+}
+
+@Test("A provider with no connect affordance never reaches the credential loader")
+func connectorRejectsUnconnectableProvider() async {
+    let suite = isolatedSuiteName()
+    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    let consent = UsageNetworkConsentStore(suiteName: suite)
+    let connector = UsageOAuthConnector(
+        credentialLoader: { _, _ in
+            Issue.record("An unconnectable provider must not reach the credential loader")
+            return .failed(.credentialsUnavailable)
+        },
+        credentialStore: UsageCredentialStore(servicePrefix: "test.connect.\(UUID().uuidString)"),
+        consentStore: consent)
+
+    let outcome = await connector.connect(.copilot, affordance: .none)
+
+    #expect(outcome == .failed(.unsupportedProvider))
+    #expect(!consent.hasConsent(for: .copilot))
+}
+
+@Test(
+    "A local-session Connect records consent only when the vendor session is present",
+    arguments: [true, false])
+func connectorLocalSessionOutcome(sessionPresent: Bool) async {
+    let suite = isolatedSuiteName()
+    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    let consent = UsageNetworkConsentStore(suiteName: suite)
+    let connector = UsageOAuthConnector(
+        credentialLoader: { _, _ in
+            Issue.record("A local-session Connect must not load a Rafu credential")
+            return .failed(.credentialsUnavailable)
+        },
+        credentialStore: UsageCredentialStore(servicePrefix: "test.connect.\(UUID().uuidString)"),
+        consentStore: consent,
+        localSessionProbe: { id, _ in
+            #expect(id == .cursor)
+            return sessionPresent
+        })
+
+    let outcome = await connector.connect(.cursor, affordance: .localSession)
+
+    #expect(outcome == (sessionPresent ? .connected : .failed(.credentialsUnavailable)))
+    #expect(consent.hasConsent(for: .cursor) == sessionPresent)
+}
+
+@Test("The local-session probe context can neither reach the network nor read unbounded files")
+func localSessionProbeContextIsOffline() async {
+    let context = UsageOAuthConnector.localSessionProbeContext(
+        now: Date(timeIntervalSince1970: 1_800_000_000))
+
+    #expect(context.credential(.cursor) == nil)
+    #expect(context.cookieHeader(.cursor) == nil)
+    await #expect(throws: (any Error).self) {
+        try await context.http.send(
+            URLRequest(url: URL(string: "https://cursor.com/api/usage-summary")!),
+            provider: .cursor)
+    }
+}
+
+@MainActor
+@Test("UsageSettingsModel routes Cursor's Connect through its local-session affordance")
+func settingsModelCursorConnectUsesLocalSession() async {
+    let suite = isolatedSuiteName()
+    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    let connector = UsageOAuthConnector(
+        credentialLoader: { _, _ in
+            Issue.record("Cursor's Connect must not look for a Rafu-readable credential file")
+            return .failed(.credentialsUnavailable)
+        },
+        credentialStore: UsageCredentialStore(servicePrefix: "test.settings.\(UUID().uuidString)"),
+        consentStore: UsageNetworkConsentStore(suiteName: suite),
+        localSessionProbe: { _, _ in true })
+    let model = UsageSettingsModel(
+        descriptors: [CursorProvider.descriptor],
+        enableStore: UsageEnableStore(suiteName: suite),
+        oauthConnector: connector)
+
+    #expect(model.connectAffordance(for: .cursor) == .localSession)
+    await model.connect(.cursor)
+
+    #expect(model.connectionState(for: .cursor) == .connected)
+}
+
+@MainActor
+@Test("An unavailable provider is never handed to the connector at all")
+func settingsModelUnavailableProviderCannotConnect() async {
+    let suite = isolatedSuiteName()
+    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    let connector = UsageOAuthConnector(
+        credentialLoader: { _, _ in
+            Issue.record("An unavailable provider must not reach the connector's loader")
+            return .failed(.credentialsUnavailable)
+        },
+        credentialStore: UsageCredentialStore(servicePrefix: "test.settings.\(UUID().uuidString)"),
+        consentStore: UsageNetworkConsentStore(suiteName: suite),
+        localSessionProbe: { _, _ in
+            Issue.record("An unavailable provider must not be probed")
+            return true
+        })
+    let model = UsageSettingsModel(
+        descriptors: [CopilotProvider.descriptor],
+        enableStore: UsageEnableStore(suiteName: suite),
+        oauthConnector: connector)
+
+    #expect(model.connectAffordance(for: .copilot) == .none)
+    await model.connect(.copilot)
+
+    #expect(model.connectionState(for: .copilot) == .failed(.unsupportedProvider))
+    // An unconnectable provider must never occupy a notch strip slot.
+    model.setEnabled(true, for: .copilot)
+    #expect(model.stripOrderedEnabledRows().isEmpty)
+}

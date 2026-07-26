@@ -427,20 +427,27 @@ nonisolated struct UsageOAuthConnector: Sendable {
     typealias ClaudeKeychainReader = @Sendable () -> UsageClaudeKeychainReadResult
     typealias CredentialLoader =
         @Sendable (UsageProviderID, Date) async -> UsageOAuthCredentialLoadResult
+    /// Reports whether the vendor app's OWN signed-in session exists on this
+    /// Mac. Local and network-free by contract — it must never return a
+    /// credential value to the connector, only a yes/no.
+    typealias LocalSessionProbe = @Sendable (UsageProviderID, Date) async -> Bool
 
     private let credentialStore: UsageCredentialStore
     private let consentStore: UsageNetworkConsentStore
     private let credentialLoader: CredentialLoader
+    private let localSessionProbe: LocalSessionProbe
 
     init(
         credentialFileReader: @escaping CredentialFileReader = Self.productionCredentialFile,
         claudeKeychainReader: @escaping ClaudeKeychainReader = Self
             .productionClaudeKeychainCredential,
+        localSessionProbe: @escaping LocalSessionProbe = Self.productionLocalSession,
         credentialStore: UsageCredentialStore = .shared,
         consentStore: UsageNetworkConsentStore = UsageNetworkConsentStore()
     ) {
         self.credentialStore = credentialStore
         self.consentStore = consentStore
+        self.localSessionProbe = localSessionProbe
         credentialLoader = { id, now in
             Self.loadCredential(
                 for: id, now: now, credentialFileReader: credentialFileReader,
@@ -451,24 +458,41 @@ nonisolated struct UsageOAuthConnector: Sendable {
     init(
         credentialLoader: @escaping CredentialLoader,
         credentialStore: UsageCredentialStore,
-        consentStore: UsageNetworkConsentStore
+        consentStore: UsageNetworkConsentStore,
+        localSessionProbe: @escaping LocalSessionProbe = { _, _ in false }
     ) {
         self.credentialStore = credentialStore
         self.consentStore = consentStore
         self.credentialLoader = credentialLoader
+        self.localSessionProbe = localSessionProbe
     }
 
     func hasConsent(for id: UsageProviderID) -> Bool {
         consentStore.hasConsent(for: id)
     }
 
+    /// `affordance` comes from the provider's `UsageAuthPattern`, so a
+    /// provider with no connection path fails with `.unsupportedProvider`
+    /// explicitly rather than falling into a credential lookup that has no
+    /// entry for it. Settings never renders a button for `.none`.
     @concurrent
     func connect(
-        _ id: UsageProviderID, now: Date = Date()
+        _ id: UsageProviderID,
+        affordance: UsageConnectAffordance = .externalCredential,
+        now: Date = Date()
     ) async -> UsageOAuthConnectionOutcome {
         consentStore.setConsent(false, for: id)
         await credentialStore.removeTransientExternalCredential(for: id)
         guard !Task.isCancelled else { return .failed(.cancelled) }
+
+        switch affordance {
+        case .none:
+            return .failed(.unsupportedProvider)
+        case .localSession:
+            return await connectLocalSession(id, now: now)
+        case .externalCredential:
+            break
+        }
 
         let result = await credentialLoader(id, now)
         guard !Task.isCancelled else { return .failed(.cancelled) }
@@ -499,6 +523,54 @@ nonisolated struct UsageOAuthConnector: Sendable {
         await credentialStore.removeTransientExternalCredential(for: id)
     }
 
+    /// No credential ever enters Rafu here: the probe answers only "is there
+    /// a signed-in session?", and a `true` answer records network consent.
+    private func connectLocalSession(
+        _ id: UsageProviderID, now: Date
+    ) async -> UsageOAuthConnectionOutcome {
+        guard await localSessionProbe(id, now) else {
+            return .failed(.credentialsUnavailable)
+        }
+        guard !Task.isCancelled else { return .failed(.cancelled) }
+        consentStore.setConsent(true, for: id)
+        return .connected
+    }
+
+    /// Asks the provider's OWN strategies whether they are available, using a
+    /// context whose HTTP client can only throw (`UsageHTTPClient.noop`) and
+    /// whose file reader is bounded. Reusing the strategies means Connect and
+    /// the refresh pipeline can never disagree about whether a session exists,
+    /// and Rafu never learns a path it was not already entitled to read.
+    static func productionLocalSession(
+        for id: UsageProviderID, now: Date
+    ) async -> Bool {
+        guard let descriptor = UsageProviderRegistry.descriptor(for: id),
+            descriptor.authPattern.connectAffordance == .localSession
+        else { return false }
+
+        let context = localSessionProbeContext(now: now)
+        for strategy in descriptor.makeStrategies(context) {
+            if await strategy.isAvailable(context) { return true }
+        }
+        return false
+    }
+
+    /// Deliberately NOT `UsageRegistryReader.productionContext` — that one
+    /// carries a live `UsageHTTPClient` and an unbounded file read. Connect
+    /// must be provably network-free and bounded.
+    static func localSessionProbeContext(now: Date) -> UsageFetchContext {
+        UsageFetchContext(
+            now: now,
+            readFile: { path in
+                let url = FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent(path)
+                return boundedContents(of: url)
+            },
+            http: .noop,
+            credential: { _ in nil },
+            cookieHeader: { _ in nil })
+    }
+
     static func productionCredentialFile(for id: UsageProviderID) -> String? {
         guard
             let url = credentialFileURL(
@@ -507,6 +579,12 @@ nonisolated struct UsageOAuthConnector: Sendable {
         return boundedContents(of: url)
     }
 
+    /// ONLY Claude Code and Codex have a documented, user-visible credential
+    /// file Rafu is entitled to read. `nil` for everything else is the
+    /// correct answer, not a gap to be filled by guessing a plausible path
+    /// (ADR 0018: Rafu holds no inference credentials). A provider that
+    /// returns `nil` here must not be given `.piggybackNetwork` — that is the
+    /// exact mismatch that made Cursor's Connect button always fail.
     static func credentialFileURL(
         for id: UsageProviderID, environment: [String: String]
     ) -> URL? {
