@@ -48,10 +48,17 @@ func skillVerbReferenceCoversParserCases() throws {
         catalog.manifest.first(where: { $0.relativePath == "references/verbs.md" }))
     let text = try #require(String(data: catalog.data(for: verbsFile), encoding: .utf8))
     let parser = EnsembleArgumentParser()
+    // Every verb the shipped parser accepts. C8-03 added the mutating four
+    // while this plan ran in parallel; the exhaustive switch below is what
+    // forces this list to be extended rather than silently drifting.
     let invocations = try [
         parser.parse(["status", "--json"]),
         parser.parse(["artifact", "run-a", "0", "--json"]),
         parser.parse(["await", "run-a", "--state", "completed", "--json"]),
+        parser.parse(["run", "implement", "--json"]),
+        parser.parse(["abort", "run-a"]),
+        parser.parse(["note", "run-a", "a bounded note"]),
+        parser.parse(["grant", "--json"]),
         parser.parse(["help"]),
     ]
 
@@ -64,6 +71,14 @@ func skillVerbReferenceCoversParserCases() throws {
                 "artifact"
             case .await:
                 "await"
+            case .run:
+                "run"
+            case .abort:
+                "abort"
+            case .note:
+                "note"
+            case .grant:
+                "grant"
             case .help:
                 "help"
             }

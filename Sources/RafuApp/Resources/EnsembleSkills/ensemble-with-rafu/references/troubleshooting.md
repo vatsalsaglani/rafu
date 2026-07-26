@@ -52,6 +52,6 @@ workspace to evade the check.
 
 ## Version mismatch
 
-This skill targets verb version 1. If `status --json` reports another
+This skill targets verb version 2. If `status --json` reports another
 `verbVersion`, trust the installed CLI, read its help, and stop using stale
 grammar from this skill until the skill pack is updated.

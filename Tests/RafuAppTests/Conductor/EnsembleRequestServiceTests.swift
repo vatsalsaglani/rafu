@@ -27,7 +27,10 @@ struct EnsembleRequestServiceTests {
         #expect(result.runs.count == 1)
         #expect(result.runs[0].runID == "live")
         #expect(result.runs[0].state == .awaitingMergeGate)
-        #expect(result.verbVersion == 1)
+        // Against the constant, not a literal: the point is that status
+        // reports whatever surface this build actually ships, so a future
+        // verb-version bump should not need an edit here.
+        #expect(result.verbVersion == LauncherIPCProtocol.ensembleVerbVersion)
     }
 
     @Test("Deepest containing workspace wins, then key-window order breaks ties")

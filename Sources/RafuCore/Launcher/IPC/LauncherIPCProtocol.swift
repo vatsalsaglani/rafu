@@ -20,7 +20,11 @@ public enum LauncherIPCProtocol {
     /// Version of the read-only `rafu ensemble` verb surface. This advances
     /// independently of the transport schema so coordinators can detect verb
     /// additions without treating them as a framing incompatibility.
-    public static let ensembleVerbVersion = 1
+    /// 2 since the mutating verbs (`run`, `abort`, `note`, `grant`) landed.
+    /// A coordinator skill built against the mutating surface compares its
+    /// `targetsVerbVersion` with this to detect an app that predates it,
+    /// rather than discovering the gap as an unexplained exit 64.
+    public static let ensembleVerbVersion = 2
 
     /// Upper bound on one framed JSON body, enforced by both the encoder and
     /// the incremental decoder (landed in I1). Paths, line/column, and

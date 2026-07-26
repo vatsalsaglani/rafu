@@ -1,7 +1,7 @@
 ---
 name: ensemble-with-rafu
 description: Orchestrate parallel agent runs in Rafu via rafu ensemble — worktrees, gates, budgets
-targetsVerbVersion: 1
+targetsVerbVersion: 2
 ---
 
 # Ensemble with Rafu

@@ -1,9 +1,9 @@
 # `rafu ensemble` verbs
 
-Targets `rafu ensemble` verb version 1. If `rafu ensemble status --json`
+Targets `rafu ensemble` verb version 2. If `rafu ensemble status --json`
 reports a different `verbVersion`, trust the CLI and re-read its `--help`.
 
-The read-only grammar and JSON below mirror Rafu's verb-version-1 IPC
+The read-only grammar and JSON below mirror Rafu's verb-version-2 IPC
 reference. The mutating surface mirrors ADR 0018's coordinator-token amendment
 and the C8 CLI specification. Never invent a flag that those contracts do not
 state.
