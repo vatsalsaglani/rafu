@@ -26,12 +26,11 @@ import Testing
 ///   guarantees no window, HUD or scene can install a theme while leaving
 ///   the stock controls system-blue.
 ///
-/// Deliberately **not** banned yet: `Color.accentColor`. Its one remaining
-/// use — `WorkspaceTerminalsPanelView`'s seed value for the custom
-/// terminal-tab `ColorPicker` — is a user-editable data value rather than
-/// chrome, and that file is owned by a parallel workstream; adding the
-/// needle here would fail the suite for a change this branch cannot make.
-/// Recorded so the next sweep picks it up rather than rediscovering it.
+/// `accentColor` is banned too, as of the UI-01/UI-03 integration. Its last
+/// use seeded the custom terminal-tab `ColorPicker`, which reads as a data
+/// value rather than chrome — but the swatch the picker opens on is the one
+/// piece of Rafu the user sees before choosing, so a system-blue seed is the
+/// same leak by another route. It now falls back to the theme accent.
 @Suite("Themed control styles")
 struct ThemedControlStyleScanTests {
     @Test("No system-accent control styles remain under Sources/RafuApp")
@@ -43,6 +42,7 @@ struct ThemedControlStyleScanTests {
             ".borderedProminent",
             "TabView",
             #"environment(\.rafuTheme"#,
+            "accentColor",
         ]
 
         var offenders: [String] = []

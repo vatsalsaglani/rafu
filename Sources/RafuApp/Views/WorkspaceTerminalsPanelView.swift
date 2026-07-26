@@ -392,7 +392,13 @@ private struct TerminalSessionRowView: View {
     @Environment(\.rafuTheme) private var theme
     @FocusState private var isRenameFieldFocused: Bool
     @State private var isColorPickerPresented = false
-    @State private var customColor = Color.accentColor
+    /// Seeded lazily from the active theme rather than eagerly from the system
+    /// accent: the swatch the picker opens on is the one piece of Rafu chrome
+    /// the user sees before they choose, so a system-blue seed there is the
+    /// same leak `View.rafuTheme(_:)` closed everywhere else.
+    /// `@State` cannot read `@Environment` in its initializer, so nil means
+    /// "not chosen yet" and the binding falls back to the theme accent.
+    @State private var customColor: Color?
 
     var body: some View {
         HStack(spacing: RafuMetrics.space3) {
@@ -547,14 +553,20 @@ private struct TerminalSessionRowView: View {
                     .accessibilityLabel(preset.displayName)
                 }
             }
-            ColorPicker("Custom", selection: $customColor, supportsOpacity: false)
-                .font(.caption)
-                .onChange(of: customColor) { _, picked in
-                    guard let hex = picked.rafuHexString,
-                        let custom = TerminalSessionColor.custom(fromHex: hex)
-                    else { return }
-                    setColor(custom)
-                }
+            ColorPicker(
+                "Custom",
+                selection: Binding(
+                    get: { customColor ?? theme.palette.accent },
+                    set: { customColor = $0 }),
+                supportsOpacity: false
+            )
+            .font(.caption)
+            .onChange(of: customColor) { _, picked in
+                guard let picked, let hex = picked.rafuHexString,
+                    let custom = TerminalSessionColor.custom(fromHex: hex)
+                else { return }
+                setColor(custom)
+            }
             Divider().overlay(theme.palette.borderSubtle)
             Button("No Color") {
                 setColor(nil)
