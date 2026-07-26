@@ -127,7 +127,7 @@ struct AIProviderSettingsSection: View {
             Spacer()
             Button("Test Connection") { model.beginTest() }
             Button("Save") { model.beginSave() }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(RafuProminentButtonStyle())
         }
     }
 

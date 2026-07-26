@@ -29,11 +29,13 @@ struct GitHubPublishSheet: View {
 
             Form {
                 TextField("Repository name", text: $name)
-                Picker("Visibility", selection: $visibility) {
-                    Text("Private").tag(GitHubRepositoryVisibility.private)
-                    Text("Public").tag(GitHubRepositoryVisibility.public)
+                LabeledContent("Visibility") {
+                    RafuSegmentedPicker(
+                        items: [GitHubRepositoryVisibility.private, .public],
+                        selection: $visibility,
+                        fillsWidth: true
+                    ) { $0 == .private ? "Private" : "Public" }
                 }
-                .pickerStyle(.segmented)
             }
             .formStyle(.grouped)
             .disabled(session.isPublishingToGitHub)

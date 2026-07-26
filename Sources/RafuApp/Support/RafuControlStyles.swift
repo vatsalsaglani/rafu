@@ -153,10 +153,30 @@ struct RafuSecondaryButtonStyle: ButtonStyle {
 }
 
 /// Theme-tinted segmented control replacing the system blue segmented picker.
+///
+/// `fillsWidth` exists for the call sites that replaced a system segmented
+/// picker inside a `Form` row or a full-width
+/// panel header, where AppKit's segmented control stretched to the available
+/// width and split it evenly between segments. Left at `false` the control
+/// hugs its labels, which is what the inline (toolbar/header) call sites
+/// want.
 struct RafuSegmentedPicker<Item: Hashable>: View {
     let items: [Item]
     @Binding var selection: Item
+    var fillsWidth: Bool = false
     let title: (Item) -> String
+
+    init(
+        items: [Item],
+        selection: Binding<Item>,
+        fillsWidth: Bool = false,
+        title: @escaping (Item) -> String
+    ) {
+        self.items = items
+        self._selection = selection
+        self.fillsWidth = fillsWidth
+        self.title = title
+    }
 
     @Environment(\.rafuTheme) private var theme
     @Namespace private var segmentNamespace
@@ -165,6 +185,7 @@ struct RafuSegmentedPicker<Item: Hashable>: View {
         HStack(spacing: 2) {
             ForEach(items, id: \.self) { item in
                 segment(for: item)
+                    .frame(maxWidth: fillsWidth ? .infinity : nil)
             }
         }
         .padding(2)
@@ -190,6 +211,7 @@ struct RafuSegmentedPicker<Item: Hashable>: View {
                 )
                 .padding(.horizontal, 12)
                 .padding(.vertical, 3.5)
+                .frame(maxWidth: fillsWidth ? .infinity : nil)
                 .background {
                     if isSelected {
                         RoundedRectangle(cornerRadius: 5.5, style: .continuous)
