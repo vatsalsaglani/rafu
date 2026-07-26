@@ -1,5 +1,28 @@
 import SwiftUI
 
+extension View {
+    /// Installs `theme` at a scene/window root as **both** the `rafuTheme`
+    /// environment value and SwiftUI's `tint`.
+    ///
+    /// Rafu hand-themes the controls it draws itself, but the stock controls
+    /// it still uses — `Toggle`'s switch, determinate `ProgressView`,
+    /// `Slider`, `Stepper`, `ColorPicker`, text selection — are painted by
+    /// SwiftUI with the *system* accent unless a tint is in scope. Setting
+    /// the tint once per theme root is the only fix that scales: the
+    /// alternative is remembering `.tint(theme.palette.accent)` at every one
+    /// of the dozens of call sites, which is exactly the erosion that let
+    /// blue switches survive the first sweep.
+    ///
+    /// This is the sole sanctioned way to put a theme into the environment.
+    /// `ThemedControlStyleScanTests` fails on any other write of the
+    /// `rafuTheme` environment key, because such a root would theme the
+    /// custom chrome while leaving the stock controls system-blue.
+    func rafuTheme(_ theme: RafuTheme) -> some View {
+        environment(\.rafuTheme, theme)  // themed-control-scan:allow
+            .tint(theme.palette.accent)
+    }
+}
+
 /// Icon button used across chrome (sidebar headers, panels, tab bars).
 /// Quiet at rest, visible wash on hover, accent when active.
 struct RafuIconButtonStyle: ButtonStyle {

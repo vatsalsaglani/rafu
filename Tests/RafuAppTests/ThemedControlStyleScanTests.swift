@@ -1,19 +1,49 @@
 import Foundation
 import Testing
 
+@testable import RafuApp
+
 /// Rafu ships its own `RafuSegmentedPicker` and `RafuProminentButtonStyle`,
 /// so AppKit's segmented picker and bordered-prominent button — both painted
 /// with the *system* accent, not the active theme's — are defects wherever
 /// they appear in Rafu's own chrome. A rendered-view assertion cannot see a
 /// style modifier, so the honest guard is a source scan: it is the one that
 /// keeps the fix from eroding as new views land.
+///
+/// Two later leaks widened the list, both found by dogfooding rather than by
+/// the original scan, because neither is a control *style*:
+///
+/// - `TabView` — its macOS bar paints the selected tab with the system
+///   accent and ignores `.tint`, exactly as `Picker(.segmented)` does.
+///   Settings now draws `SettingsPaneStrip` instead.
+/// - Stock SwiftUI controls Rafu does not hand-draw (`Toggle`'s switch,
+///   determinate `ProgressView`, `Slider`, `Stepper`, `ColorPicker`, text
+///   selection). Scanning for `Toggle(` is hopeless — dozens of legitimate
+///   call sites, and correctness is not a property of the line the control
+///   is written on. What *is* scannable is the single place that decides
+///   their color: a theme root. `View.rafuTheme(_:)` sets `\.rafuTheme` and
+///   `.tint` together, so banning every other `.environment(\.rafuTheme, …)`
+///   guarantees no window, HUD or scene can install a theme while leaving
+///   the stock controls system-blue.
+///
+/// Deliberately **not** banned yet: `Color.accentColor`. Its one remaining
+/// use — `WorkspaceTerminalsPanelView`'s seed value for the custom
+/// terminal-tab `ColorPicker` — is a user-editable data value rather than
+/// chrome, and that file is owned by a parallel workstream; adding the
+/// needle here would fail the suite for a change this branch cannot make.
+/// Recorded so the next sweep picks it up rather than rediscovering it.
 @Suite("Themed control styles")
 struct ThemedControlStyleScanTests {
     @Test("No system-accent control styles remain under Sources/RafuApp")
     func noSystemAccentControlStyles() throws {
         let root = try Self.repositoryRoot().appending(
             path: "Sources/RafuApp", directoryHint: .isDirectory)
-        let banned = ["pickerStyle(.segmented)", ".borderedProminent"]
+        let banned = [
+            "pickerStyle(.segmented)",
+            ".borderedProminent",
+            "TabView",
+            #"environment(\.rafuTheme"#,
+        ]
 
         var offenders: [String] = []
         for file in try Self.swiftFiles(under: root) {
@@ -34,10 +64,31 @@ struct ThemedControlStyleScanTests {
         #expect(
             offenders.isEmpty,
             """
-            Use RafuSegmentedPicker / RafuProminentButtonStyle instead of the \
-            system-accent styles: \(offenders.joined(separator: ", "))
+            Use RafuSegmentedPicker / RafuProminentButtonStyle / \
+            SettingsPaneStrip, and install themes with View.rafuTheme(_:) so \
+            stock controls inherit the theme tint: \
+            \(offenders.joined(separator: ", "))
             """
         )
+    }
+
+    /// The pane bar is hand-drawn now, so "all seven panes are reachable" is
+    /// no longer guaranteed by seven `Tab` literals the compiler sees. This
+    /// is the behavioral half of the guard the scan cannot express.
+    @Test("Settings still exposes all seven panes, each labelled and glyphed")
+    func settingsPanesAreComplete() {
+        #expect(
+            SettingsPane.allCases == [
+                .general, .appearance, .ai, .languageServers, .usage, .agents, .ensemble,
+            ])
+        #expect(
+            SettingsPane.allCases.map(\.title) == [
+                "General", "Appearance", "AI", "Language Servers", "Usage", "Agents", "Ensemble",
+            ])
+        // An empty glyph name renders a blank pill: legible only by label,
+        // and invisible in the bar's icon-over-label anatomy.
+        #expect(SettingsPane.allCases.allSatisfy { !$0.systemImage.isEmpty })
+        #expect(Set(SettingsPane.allCases.map(\.systemImage)).count == SettingsPane.allCases.count)
     }
 
     /// Walks up from this test's own location to the directory holding

@@ -17,7 +17,7 @@ struct WorkspaceSceneRoot: View {
 
     var body: some View {
         WorkspaceWindowView(session: session)
-            .environment(\.rafuTheme, theme)
+            .rafuTheme(theme)
             .preferredColorScheme(preferredColorScheme)
             .background(
                 WindowAccessor { window in

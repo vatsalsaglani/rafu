@@ -53,7 +53,7 @@ struct NotchHUDView: View {
             reduceMotion ? .easeOut(duration: 0.12) : .easeOut(duration: 0.18),
             value: controller.state
         )
-        .environment(\.rafuTheme, theme)
+        .rafuTheme(theme)
     }
 
     private var height: CGFloat {

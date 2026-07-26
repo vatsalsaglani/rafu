@@ -1,7 +1,7 @@
 # UI design language — flat, modern, layered
 
 - **Applies to:** themes, palette tokens, RafuMetrics spacing/radius, shared components, button styles, toolbar configuration, and surface-level chrome across all Rafu windows
-- **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-18
+- **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-18; theme-tint and pane-strip rules re-verified on 2026-07-26 (UX2-01)
 
 ## Rules and observed behavior
 
@@ -25,6 +25,26 @@
   - `RafuField`: filled form input (radius `radiusField`, background `fieldBackground`). **Critical:** Custom filled fields lose the `.roundedBorder` system focus ring on `@FocusState`. Apply `.focusRing(.outer)` when `isFocused` to preserve Full Keyboard Access and Reduce Contrast visibility. This is a macOS AppKit interop requirement — empty or translucent fields get the system ring automatically, but opaque custom-filled fields must render it explicitly.
   - `RafuSheetHeader`: icon/title + subtitle, matching system sheet scale and alignment.
 
+- **Theme roots must set `tint`, not just `\.rafuTheme`.** Rafu hand-draws
+  most of its chrome, but it still uses stock SwiftUI controls whose accent
+  it does not paint: `Toggle`'s switch, determinate `ProgressView`, `Slider`,
+  `Stepper`, `ColorPicker`, text selection. Those render in the *system*
+  accent — blue — unless a tint is in scope, which is why blue switches
+  survived the first accent sweep in Settings → General. `View.rafuTheme(_:)`
+  (`Sources/RafuApp/Support/RafuControlStyles.swift`) installs the theme and
+  `.tint(theme.palette.accent)` together and is the **only** sanctioned way
+  to write the `rafuTheme` environment key; `ThemedControlStyleScanTests`
+  fails on any other write. Fixing this per call site does not scale — the
+  sweep is one line per scene root (workspace window, Settings, notch
+  companion, notch HUD).
+
+- **`.tint` does not reach AppKit-backed control chrome.** `Picker(.segmented)`
+  was the first casualty (hence `RafuSegmentedPicker`); `TabView`'s macOS bar
+  is the second, and Settings now draws `SettingsPaneStrip` instead (see
+  [`settings-surface.md`](settings-surface.md)). Rule of thumb: if the
+  control is a SwiftUI-drawn control, `.tint` themes it; if it is
+  AppKit segmented-control chrome, it must be replaced.
+
 - **Custom ButtonStyle and sheet keyboard shortcuts:** SwiftUI's `ButtonStyle` modifier does **not** confer window default/cancel semantics that `.defaultAction`/`.cancelAction` keyboard shortcuts require. Sheets must apply `.keyboardShortcut(.defaultAction)` to the prominent button and `.keyboardShortcut(.cancelAction)` to the secondary/cancel button **independently** of any button style. This ensures sheets respond to Return/Escape correctly.
 
 - **Unified titlebar (superseded):** the original `.toolbarBackground(.hidden, for: .windowToolbar)` treatment predates dropping the `NSToolbar` entirely. The current recipe — `FlatWindowChrome` + `.ignoresSafeArea(.top)` content merge, the `_NSTitlebarDecorationView` scrub, and traffic-light hover-reveal — is documented in [`flat-window-chrome-titlebar-merge.md`](flat-window-chrome-titlebar-merge.md).
@@ -42,7 +62,7 @@
   - Terminal header: card header row; body untouched (SwiftTerm).
   - Welcome screen: hero glyph + two card groups (Recent Workspaces, Shortcuts).
   - Markdown code blocks: `cardBackground` rounded-12 card (header row with language chip + copy action, body on card surface).
-  - Settings: native macOS Settings forms (standard controls only; control accent + field tinting via existing tokens, no custom cards).
+  - Settings: native macOS grouped `Form`s at the host's full width (no readable-measure clamp), under a `tabBarBackground` pane strip whose selected pill is `accentSoft` + `accent` glyph/label. Standard controls only, tinted by the theme root; no custom cards.
 
 - **Motion defaults** (per apple-design skill):
   - Hover/press feedback: ≤120ms ease-out (house style).
@@ -89,6 +109,9 @@ Screenshot visually across Indigo + Khadi + one AI theme, both windows. Verify:
 ## Related code, ADRs, and phases
 
 - `Sources/RafuApp/Support/RafuMetrics.swift` (spacing/radius constants)
+- `Sources/RafuApp/Support/RafuControlStyles.swift` (`View.rafuTheme(_:)` — theme + tint at scene roots)
+- `Sources/RafuApp/Settings/SettingsPaneStrip.swift` (themed replacement for the macOS tab-view bar)
+- `Tests/RafuAppTests/ThemedControlStyleScanTests.swift` (system-accent source scan)
 - `Sources/RafuApp/DesignSystem/` (RafuChip, RafuField, RafuCardHeaderRow, RafuSheetHeader)
 - `Sources/RafuApp/Theme/RafuThemePalette.swift` (four optional `ui` keys + fallbacks)
 - `Sources/RafuApp/App/RafuApp.swift` (titlebar `.toolbarBackground(.hidden)`)

@@ -4,7 +4,7 @@
   Settings canvas, the status-bar affordance, the native Settings scene, and
   Settings restoration/layout changes.
 - **Last verified:** Swift 6.2 language mode (Swift 6.3.3, Xcode 26.6),
-  macOS 26.5.2, on 2026-07-26 (UX-02).
+  macOS 26.5.2, on 2026-07-26 (UX-02; pane strip and full-width canvas, UX2-01).
 
 ## Rule or observed behavior
 
@@ -30,16 +30,44 @@ Settings surface.
 
 ## Seven-pane layout
 
-The existing native `TabView` remains intact with General, Appearance, AI,
-Language Servers, Usage, Agents, and Ensemble panes. Retaining the system tab
-container preserves its keyboard and accessibility behavior and leaves each
-pane's `.task`-driven loading and no-I/O-at-init contract unchanged.
+The panes are General, Appearance, AI, Language Servers, Usage, Agents, and
+Ensemble, enumerated by `SettingsPane` and drawn by `SettingsPaneStrip`
+(`Sources/RafuApp/Settings/SettingsPaneStrip.swift`).
+
+UX-02 kept SwiftUI's native `TabView`; UX2-01 replaced it, because its macOS
+bar paints the selected tab with `NSColor.controlAccentColor` and ignores
+`.tint` — the same AppKit segmented-control chrome that forced
+`RafuSegmentedPicker` to exist. Under Indigo or Khadi the selected pane was a
+system-blue rectangle in an otherwise fully themed window.
+
+The replacement keeps the bar's anatomy (centered row, glyph over label, one
+selected pill); only the pill's fill moves to the theme's `accentSoft` wash,
+matching `RafuIconButtonStyle`'s active-nav treatment. Every pane is a real
+`Button`, so Full Keyboard Access reaches all seven and VoiceOver reports
+`.isSelected`.
+
+**Pane lifetime is load-bearing.** `RafuSettingsView` tracks a `visitedPanes`
+set and renders visited panes in a `ZStack`, hiding the inactive ones with
+`.opacity(0)` plus `.disabled(true)` and `.accessibilityHidden(true)`. This
+reproduces what the tab view did — contents built lazily on first visit, then
+retained — so each pane's `.task`-driven load still runs once per Settings
+session. A plain `switch` would re-run every load on each revisit (visible
+re-spinning in Usage, Language Servers and Agents); an eager `ForEach` over
+all seven would fire every pane's I/O the moment Settings opens, breaking the
+no-I/O-at-init contract. `.disabled` is not cosmetic: `.opacity(0)` alone
+leaves a hidden pane's controls focusable under Full Keyboard Access.
+
+`SettingsPane` is `nonisolated` on its primary declaration. The GUI target
+defaults to `MainActor` isolation, under which a test cannot even form a key
+path to `\.title`.
 
 The former `760 × 620` frame was a window-sizing decision and no longer lives
-inside `RafuSettingsView`. The reusable content instead has an 820-point
-maximum readable width, is centered by an outer infinite-width frame, and is
-top-aligned at any canvas size. The native fallback scene owns its own
-`760 × 620` default window size.
+inside `RafuSettingsView`. UX-02's 820-point centered measure is also gone
+(UX2-01, from dogfooding): a Settings canvas hosted in a wide editor window
+looked like a narrow column floating in empty space. The content now fills
+the host's width and is top-aligned at any canvas size; readability comes
+from the grouped `Form`'s own insets rather than an outer clamp. The native
+fallback scene owns its own `760 × 620` default window size.
 
 ## Why the native Settings scene remains
 
@@ -85,8 +113,12 @@ the command goes directly to the native Settings scene.
   2026-07-26. With the phase worktree open, ⌘, presented Settings inside the
   existing `rafu` editor window; the status-bar button also reopened it. The
   accessibility tree exposed all seven tabs and the status button as “Open
-  Settings”, and the rendered content remained centered rather than
-  stretching across the canvas.
+  Settings”. Under UX2-01 the content now fills the canvas width instead of
+  sitting in a centered 820-point column.
+- `./script/test.sh --filter "ThemedControlStyleScanTests"` covers both
+  halves of the guard: the source scan (no `TabView`, no unsanctioned
+  `rafuTheme` environment write) and a behavioral check that all seven panes
+  are present with unique glyphs and the expected labels.
 - After the user requested no further UI-control automation, the no-window
   branch was verified through the nil-focused-session command test and source
   audit rather than another automated macOS UI action.
@@ -112,6 +144,9 @@ opens with all seven panes.
 - `Sources/RafuApp/App/RafuAppCommands.swift`
 - `Sources/RafuApp/Settings/RafuSettingsView.swift`
 - `Sources/RafuApp/Settings/SettingsCanvas.swift`
+- `Sources/RafuApp/Settings/SettingsPaneStrip.swift`
+- `Tests/RafuAppTests/ThemedControlStyleScanTests.swift`
+- [`ui-design-language.md`](ui-design-language.md) (theme tint at scene roots)
 - `Sources/RafuApp/Settings/SettingsCommandRouter.swift`
 - `Sources/RafuApp/Editor/EditorCanvasRoute.swift`
 - `Sources/RafuApp/Models/WorkspaceSession.swift`
