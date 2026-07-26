@@ -228,7 +228,13 @@ struct PlanGateTests {
     func planGateIsNeverRemotelyApprovable() async throws {
         let root = try makeWorkflowTestRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let session = WorkspaceSession()
+        // The fake adapter is what makes this test hermetic: it reaches for
+        // `session.conductorWorkflowController` (rather than
+        // `makePlanGateController`) because it needs the session's gate
+        // attention rig, and the session's engines resolve the REAL adapter
+        // registry unless one is injected here.
+        let session = WorkspaceSession(
+            conductorAdapters: [FakeConductorAdapter(id: .claudeCode)])
         // installGateAttentionRig (mirrors WorkflowPresentationTests') keeps
         // `raiseConductorGateAttention`'s FULL path — including the
         // notification leg — reachable and headless-safe: `.both` matches

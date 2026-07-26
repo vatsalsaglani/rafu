@@ -507,7 +507,7 @@ struct EnsembleStartCanvasTests {
     func door3GuardMirrorsCap() async throws {
         let root = try makeWorkflowTestRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let session = WorkspaceSession()
+        let session = WorkspaceSession(conductorAdapters: [FakeConductorAdapter(id: .claudeCode)])
         session.conductorRunController.attach(workspaceRoot: root)
         session.conductorConcurrentRuns.attach(workspaceRoot: root)
 

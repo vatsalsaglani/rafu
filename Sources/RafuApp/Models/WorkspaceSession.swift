@@ -231,8 +231,22 @@ final class WorkspaceSession {
     /// (seven pure value types) and holds `.idle` state. Nothing runs, and
     /// no `.rafu/` path is touched, until C1's explicit user-initiated run
     /// (ADR 0018).
+    /// The adapter registry every conductor engine in this window resolves
+    /// against. Defaults to the real one; tests inject `FakeConductorAdapter`
+    /// so orchestration behaviour stays verifiable on a machine with no
+    /// vendor CLI installed — a CI runner has none, and a test that reaches
+    /// the real registry there fails with "agent adapter is unavailable"
+    /// while passing on any developer Mac that happens to have Claude Code.
     @ObservationIgnored
-    let conductorRunController = ConductorRunController()
+    private let conductorAdapters: [any ConductorCLIAdapter]
+
+    @ObservationIgnored
+    let conductorRunController: ConductorRunController
+
+    init(conductorAdapters: [any ConductorCLIAdapter] = ConductorAdapterRegistry.all) {
+        self.conductorAdapters = conductorAdapters
+        self.conductorRunController = ConductorRunController(adapters: conductorAdapters)
+    }
 
     /// This window's C5 pipeline engine — a PEER of `conductorRunController`,
     /// publishing every manifest write through it (`ConductorRunController
@@ -241,7 +255,9 @@ final class WorkspaceSession {
     /// call site.
     @ObservationIgnored
     private(set) lazy var conductorWorkflowController: ConductorWorkflowController = {
-        let controller = ConductorWorkflowController(runsPublisher: conductorRunController)
+        let controller = ConductorWorkflowController(
+            runsPublisher: conductorRunController,
+            adapters: conductorAdapters)
         controller.onGateReady = { [weak self] event in
             self?.raiseConductorGateAttention(event)
         }
@@ -257,7 +273,8 @@ final class WorkspaceSession {
     @ObservationIgnored
     private(set) lazy var conductorConcurrentRuns: ConductorConcurrentRunCoordinator = {
         let coordinator = ConductorConcurrentRunCoordinator(
-            runsPublisher: conductorRunController)
+            runsPublisher: conductorRunController,
+            adapters: conductorAdapters)
         coordinator.onGateReady = { [weak self] event in
             self?.raiseConductorGateAttention(event)
         }
