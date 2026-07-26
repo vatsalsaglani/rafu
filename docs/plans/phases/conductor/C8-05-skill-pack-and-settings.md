@@ -1,6 +1,6 @@
 # C8-05 — The `ensemble-with-rafu` skill pack, installer, Settings pane
 
-- **Status:** Ready. Branch: `conductor/c8-05-skill-pack` (from `main`
+- **Status:** Implemented; headless verification complete. Branch: `conductor/c8-05-skill-pack` (from `main`
   after **wave 1** merged — verify `Sources/RafuCore/Ensemble/` and
   `docs/references/ensemble-ipc-verbs.md` exist; missing ⇒ STOP and
   report). **Wave 2** — parallel with C8-03 and C8-06.

@@ -129,6 +129,7 @@ let package = Package(
                 // Markdown files into a user-chosen repository or global
                 // scope; definitions are never edited in the bundle.
                 .copy("Resources/EnsembleTemplates"),
+                .copy("Resources/EnsembleSkills"),
             ],
             swiftSettings: [
                 .defaultIsolation(MainActor.self)

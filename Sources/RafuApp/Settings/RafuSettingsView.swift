@@ -84,6 +84,13 @@ struct RafuSettingsView: View {
                 }
                 .formStyle(.grouped)
             }
+
+            Tab("Ensemble", systemImage: "circle.hexagongrid") {
+                Form {
+                    EnsembleSettingsSection()
+                }
+                .formStyle(.grouped)
+            }
         }
         .environment(\.rafuTheme, activeTheme)
         .preferredColorScheme(preferredColorScheme)
