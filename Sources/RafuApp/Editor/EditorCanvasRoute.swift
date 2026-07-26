@@ -86,7 +86,7 @@ nonisolated enum EditorCanvasRoute: Equatable {
             return .blame
         }
 
-        // 4-6. The tabless canvases. Each yields to a selected document id,
+        // 4-7. The tabless canvases. Each yields to a selected document id,
         //      so opening a file always returns the canvas to the editor.
         if inputs.hasGitOpenDiff, !inputs.hasSelectedDocumentID {
             return .standaloneDiff

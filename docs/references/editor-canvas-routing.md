@@ -2,8 +2,10 @@
 
 - **Applies to:** `EditorCanvasView` and every canvas mode it can show
   (welcome, empty, blame, standalone diff, Ensemble graph, Ensemble run
-  detail, editor layout tree); any phase adding a new full-canvas surface.
-- **Last verified:** Swift 6.2, macOS 26.x, on 2026-07-26 (UX-00).
+  detail, Settings, editor layout tree); any phase adding a new full-canvas
+  surface.
+- **Last verified:** Swift 6.2 language mode (Swift 6.3.3, Xcode 26.6),
+  macOS 26.5.2, on 2026-07-26 (UX-02).
 
 ## Rule
 
@@ -28,13 +30,14 @@ chain it replaced; it is behaviour, not taste.
 
 | # | Route | Fires when | Why |
 |---|---|---|---|
-| 1 | `.welcome` | `descriptor == nil` | No workspace at all — nothing else can render. |
-| 2 | `.empty` | `!hasAnyEditorTabs && gitOpenDiff == nil && gitOpenBlame == nil && conductorRunCanvasID == nil && !conductorGraphVisible` | A workspace with no tab *and* no tabless canvas open. All five conditions are load-bearing; each one alone takes the route out of `.empty`. |
+| 1 | `.welcome` | `descriptor == nil && !settingsVisible` | No workspace at all. A welcome window with Settings open is the deliberate exception; when no window exists, the command routes to the native Settings scene before this resolver is involved. |
+| 2 | `.empty` | `!hasAnyEditorTabs && gitOpenDiff == nil && gitOpenBlame == nil && conductorRunCanvasID == nil && !conductorGraphVisible && !settingsVisible` | A workspace with no tab *and* no tabless canvas open. All six predicates are load-bearing; each one alone takes the route out of `.empty`. |
 | 3 | `.blame` | `gitOpenBlame != nil && selectedDocument != nil` | Blame outranks every other canvas, and is the only one that survives a selected document — it *is* about that document, and titles itself with its name. |
 | 4 | `.standaloneDiff` | `gitOpenDiff != nil && selectedDocumentID == nil` | A tabless canvas: opening any file dismisses it. |
 | 5 | `.graph` | `conductorGraphVisible && selectedDocumentID == nil` | Same rule. Checked **before** run detail. |
 | 6 | `.runDetail` | `conductorRunCanvasID != nil && selectedDocumentID == nil` | Same rule. |
-| 7 | `.editor` | otherwise | The layout tree. |
+| 7 | `.settings` | `settingsVisible && selectedDocumentID == nil` | Same tabless-canvas rule. Unlike `.welcome`, it may render in a workspace-less window so the status-bar control and focused-window ⌘, route never no-op. |
+| 8 | `.editor` | otherwise | The layout tree. |
 
 Two subtleties worth keeping in mind before "simplifying" anything here:
 
@@ -47,6 +50,11 @@ Two subtleties worth keeping in mind before "simplifying" anything here:
   document *matching* that id, so a selected id with no matching open
   document (a terminal tab, a closed document) behaves differently from a
   selected file. `Inputs` carries both as separate fields for that reason.
+- **No descriptor does not always mean welcome.** A live welcome window owns
+  a `WorkspaceSession`, so its status-bar Settings button and focused-window
+  ⌘, command can set `settingsVisible` and resolve `.settings`. With every
+  window closed there is no session or resolver; `SettingsCommandRouter`
+  invokes the registered native Settings scene instead.
 
 ## How to add a canvas mode
 
@@ -68,14 +76,16 @@ are ever active at once**, because each activator clears the others:
 
 | Activator | Sets | Clears |
 |---|---|---|
-| `showConductorRunDetail` | `conductorRunCanvasID` | `conductorGraphVisible` |
-| `showConductorGraph` | `conductorGraphVisible` | `conductorRunCanvasID` |
-| `revealTerminalSession` | — | both |
+| `showConductorRunDetail` | `conductorRunCanvasID` | `conductorGraphVisible`, `settingsVisible` |
+| `showConductorGraph` | `conductorGraphVisible` | `conductorRunCanvasID`, `settingsVisible` |
+| `showSettings` | `settingsVisible` | `conductorRunCanvasID`, `conductorGraphVisible`, open Git diff/blame canvases |
+| `revealTerminalSession` | — | `conductorRunCanvasID`, `conductorGraphVisible`, `settingsVisible` |
 
 The consequence is worth stating, because it was already misread once: the
-precedence between graph and run detail is **unreachable**, so the fact that
-the resolver puts graph first is a defensive statement of intent rather than
-observable behaviour. `graphBeatsRunDetail` pins it so a future change is
+precedence among graph, run detail, and Settings is **unreachable through
+their activators**, so their resolver ordering is a defensive statement of
+intent rather than observable behaviour. `graphBeatsRunDetail` and the
+Settings mutual-exclusion tests pin the intent so a future change is
 deliberate.
 
 A new canvas mode that sets its own flag **without clearing the others**
@@ -111,11 +121,16 @@ form.
 
 - `swift test --filter "Editor canvas route"` — 17 cases covering each route,
   the emptiness guard's exact condition set, and every precedence pair.
+- `./script/test.sh --filter "RafuAppTests.SettingsCanvasTests"` — seven
+  cases covering the Settings route, selected-document precedence,
+  peer-canvas exclusivity, both command destinations, per-window state, and
+  restoration omission.
 - `swift test --filter "Themed control styles"` — the source scan.
 - GUI: `./script/build_and_run.sh --verify`, then visit each canvas
   (no workspace → welcome; open a workspace and close all tabs → empty;
   Source Control → blame and diff; Ensemble panel → graph and run detail;
-  open a file → editor) and confirm no control renders in system blue.
+  Settings menu/status button → Settings; open a file → editor) and confirm
+  no control renders in system blue.
 
 ## Verification
 
@@ -129,9 +144,13 @@ form.
 
 - `Sources/RafuApp/Editor/EditorCanvasRoute.swift`
 - `Sources/RafuApp/Views/EditorCanvasView.swift`
+- `Sources/RafuApp/Settings/SettingsCanvas.swift`
 - `Sources/RafuApp/Support/RafuControlStyles.swift`
 - `Tests/RafuAppTests/EditorCanvasRouteTests.swift`,
+  `Tests/RafuAppTests/SettingsCanvasTests.swift`,
   `Tests/RafuAppTests/ThemedControlStyleScanTests.swift`
 - [`ui-design-language.md`](ui-design-language.md) (token and component rules)
-- `docs/plans/phases/ux/UX-00-canvas-route-and-theme.md` (this work);
+- [`settings-surface.md`](settings-surface.md) (command fallback, layout, and
+  restoration contract)
+- `docs/plans/phases/ux/UX-00-canvas-route-and-theme.md` (route extraction);
   UX-01 and UX-02 each add a case to the route.

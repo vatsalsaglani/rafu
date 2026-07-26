@@ -1,8 +1,7 @@
 # UX-02 — Settings as an editor tab
 
-- **Status:** Ready. Branch: `ux/02-settings-tab` (from `main` AFTER UX-00
-  merges — verify `Sources/RafuApp/Editor/EditorCanvasRoute.swift` exists;
-  missing ⇒ STOP and report). Wave 2 — parallel with UX-01.
+- **Status:** Implemented and verified on `ux/02-settings-tab` (2026-07-26).
+  Branched from `main` after UX-00; Wave 2 — parallel with UX-01.
 
 ## Goal
 
