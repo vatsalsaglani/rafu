@@ -1,7 +1,12 @@
 # UX-00 — One editor-canvas route, and theme-correct controls
 
-- **Status:** Ready. Branch: `ux/00-canvas-route-and-theme` (from `main`).
-  Wave 1 — parallel with UX-03 (fully disjoint). **Blocks UX-01 and UX-02.**
+- **Status:** Complete (2026-07-26). Branch: `ux/00-canvas-route-and-theme`
+  (from `main`). Route landed as `EditorCanvasRoute`; theme sweep covered two
+  sites beyond the table (`LanguageIntelligence/Catalog/UserServerEntryForm`,
+  `AI/AIProviderSettingsSection`) to satisfy the zero-under-`Sources/RafuApp`
+  guard. `RafuSegmentedPicker` gained `fillsWidth:`. Reference:
+  [`editor-canvas-routing.md`](../../../references/editor-canvas-routing.md).
+  Wave 1 — parallel with UX-03 (fully disjoint). **Unblocks UX-01 and UX-02.**
 - Deliberately small. Its whole job is to make the next two plans additive
   instead of contended, and to stop the system accent leaking into themed UI.
 
