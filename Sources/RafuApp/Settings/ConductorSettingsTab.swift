@@ -183,25 +183,20 @@ final class ConductorSettingsModel {
     }
 
     /// Every model this adapter can offer right now: curated first, then
-    /// anything a refresh discovered, deduplicated by id.
+    /// anything a refresh discovered, deduplicated by id. The merge rule
+    /// itself lives in `ConductorModelCatalog` because the New Ensemble
+    /// canvas needs the same list for its own pickers.
     func availableModels(for id: ConductorCLIID) -> [ConductorModelChoice] {
-        let curated = rows.first { $0.id == id }?.curatedModels ?? []
-        var seen = Set(curated.map(\.id))
-        var result = curated
-        for choice in discoveredModelsByID[id] ?? [] where seen.insert(choice.id).inserted {
-            result.append(choice)
-        }
-        return result
+        ConductorModelCatalog.merge(
+            curated: rows.first { $0.id == id }?.curatedModels ?? [],
+            discovered: discoveredModelsByID[id] ?? [])
     }
 
     /// Resolves the persisted string against what the adapter offers. A
     /// value the adapter never listed is honestly reported as `.custom` —
     /// Rafu makes no claim that a hand-typed model exists.
     func resolvedModelChoice(for id: ConductorCLIID) -> ConductorModelChoice? {
-        let value = defaultModel(for: id)
-        guard !value.isEmpty else { return nil }
-        if let known = availableModels(for: id).first(where: { $0.id == value }) { return known }
-        return ConductorModelChoice(id: value, displayName: value, source: .custom)
+        ConductorModelCatalog.choice(for: defaultModel(for: id), in: availableModels(for: id))
     }
 
     func modelRefreshState(for id: ConductorCLIID) -> RefreshState {

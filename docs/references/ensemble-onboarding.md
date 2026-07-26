@@ -5,16 +5,21 @@
 The `EnsembleStartCanvas` opened by ⌘⇧E, the Rafu menu, the command palette,
 and the Runs panel's header button
 (`Sources/RafuApp/Views/EnsembleStartCanvas.swift`): its three doors, the
-guided (Door 1) CLI gating and budget-grant defaults, the template (Door 2)
-instantiation reuse, and the expert (Door 3) workflow-launch reuse. It does
-not change `ConductorCoordinatorLauncher`, `ConductorEnsembleGrant`,
-`ConductorWorkflowLibraryModel`, `ConductorWorkflowLaunchModel`,
-`ConductorConcurrentRunCoordinator`, or the Ensemble request service — this
-canvas is a caller of all of them, never a second implementation.
+guided (Door 1) CLI gating, budget-grant defaults, and per-CLI model choice,
+the template (Door 2) instantiation reuse, and the expert (Door 3)
+workflow-launch reuse. It does not change `ConductorEnsembleGrant`,
+`ConductorWorkflowLibraryModel`, `ConductorWorkflowLaunchModel`, or
+`ConductorConcurrentRunCoordinator` — this canvas is a caller of all of them,
+never a second implementation.
+
+M01 additionally covers the model-carrying seams the canvas feeds:
+`ConductorCoordinatorLauncher`'s `providerModelDefaults` parameter and
+`ConductorEnsembleRequestService`'s child-run model resolution. The grant
+itself is deliberately untouched — see "Which model, on which CLI" below.
 
 ## Last verified
 
-- 2026-07-26
+- 2026-07-27
 - Apple Swift 6.3.3 (`swiftlang-6.3.3.1.3`)
 - macOS 26.5.2 (25F84), arm64
 
@@ -25,7 +30,7 @@ One canvas, one `EnsembleDoor` segmented picker, guided preselected
 
 | Door | Purpose | Reused code path |
 |---|---|---|
-| **Describe a Goal** (default) | Plain-language goal + CLI + budget grant → a live coordinator terminal | `ConductorCoordinatorLauncher.start(provider:model:goal:grant:in:)` |
+| **Describe a Goal** (default) | Plain-language goal + CLI + budget grant → a live coordinator terminal | `ConductorCoordinatorLauncher.start(provider:model:goal:grant:label:providerModelDefaults:in:)` |
 | **From a Template** | Copies one bundled agent/workflow file set into `.rafu/` | `ConductorWorkflowLibraryModel.instantiate(templateID:scope:replaceConfirmed:)` + its `pendingReplacement` confirmation dialog, lifted into this canvas unchanged |
 | **Existing Workflow** (expert) | Launches an already-authored workflow | `ConductorWorkflowLaunchModel` + `session.conductorConcurrentRuns.start(_:launcher:)`, exactly as `ConductorRunsPanelView`'s `ConductorNewRunCanvas` already does |
 
@@ -75,7 +80,7 @@ Door 1's content is **two columns, no centered measure**:
 
 | Column | Width | Contents |
 |---|---|---|
-| Left rail | 3/12 of the canvas, clamped to 280…420 pt | Coordinator icon grid + model field, budget grant (steppers, deadline), allowed-CLI icon grid |
+| Left rail | 3/12 of the canvas, clamped to 280…420 pt | Coordinator icon grid + model picker, budget grant (steppers, deadline), allowed-CLI icon grid + one model picker per allowed CLI |
 | Right pane | the remainder | `EnsembleGoalPane` — the live-Markdown goal surface |
 
 The fraction is the layout; the clamp is the safety rail.
@@ -139,6 +144,68 @@ showed inline and a grid cell has no room for — is preserved in BOTH `help`
 (pointer) and `accessibilityLabel` (VoiceOver). The reason is bounded in the
 layout, never dropped; a disabled card with no stated reason would be the
 regression to watch for.
+
+### Which model, on which CLI (M01)
+
+The canvas showed *which CLI* but never *which model*: the coordinator had a
+free-text field labelled "Provider default", and the allowed-CLI grid had no
+model at all. Three things changed, and one deliberately did not.
+
+**1. Every card names its model.** `EnsembleCLIIconCard` gained an optional
+`detail`/`detailHelp` pair, rendered as one truncated line under the CLI name
+and restated in full in both `help` and `accessibilityLabel` — the same
+bounded-never-dropped discipline `reason` already used. The coordinator's card
+shows `ConductorModelResolution.label`; each allowed card shows its own.
+
+**2. The model field is a picker that still accepts anything.**
+`EnsembleModelField` (coordinator + one per allowed CLI) lists "CLI default",
+the catalog, and a "Custom…" item that reveals a text field. A custom value
+already set is listed back as a selectable row — a picker that dropped a
+hand-typed id would lose the user's choice on the next selection. This is
+required, not a nicety: `ConductorModelResolution` deliberately accepts an
+unknown id.
+
+**3. Per-CLI models are carried ALONGSIDE the grant, never inside it.**
+`ConductorEnsembleGrant.allowedProviders` crosses into RafuCore and is enforced
+as a *permission* (ADR 0018; violation is exit 77). A model is a launch
+*preference* — declining it changes which model runs, never whether the run is
+authorized. Widening the grant to carry it would conflate the two and expand a
+security-reviewed contract for a display feature. The defaults ride on
+`ConductorCoordinatorSession.providerModelDefaults` instead, a Rafu-side record
+the child process never sees (it still receives only the opaque token).
+`ConductorEnsembleRequestService.applyModelDefaults(to:payload:workspace:)`
+reads them back via the request's own token → `coordinatorID` →
+`session.conductorCoordinatorSessions`.
+
+The child-run chain is `role.model` → this Ensemble's per-provider default →
+Settings → Agents → nothing, through the one shared resolver. It is applied
+**after** `--role` overrides (an override is the coordinator's explicit per-run
+choice and must outrank an ensemble-wide preference) and **inside**
+`resolveRunDefinitions`, so the plan-gate re-parse inherits identical
+semantics rather than a second implementation.
+
+**Cross-vendor safety, restated for two shapes.** The coordinator's single
+field still resets unconditionally in `selectProvider(_:)`. The per-CLI models
+need no such guard because they are *keyed by CLI*: a value stored under Codex
+is unrepresentable as Claude Code's, which is the structural version of the
+same rule. De-allowing a CLI drops its entry, so re-allowing re-inherits from
+Settings instead of resurrecting a stale pick.
+
+**Honesty nuance worth reusing.** `selectProvider` prefills the Settings
+default *into* the coordinator field. Passing that prefilled value to the
+resolver as `explicit:` would report `.explicit` for a choice the user never
+made, so `coordinatorModelResolution` hands it over as `settingsDefault:` when
+it still equals the stored default. The same reasoning is why allowing a CLI
+seeds no per-CLI model at all: pre-filling an inherited value turns it into a
+claimed pick. Generalises to any surface that prefills a default and then
+reports where a value came from — a prefill is not a decision.
+
+`ConductorModelCatalog` (merge curated+discovered, classify a stored string as
+known or `.custom`) was extracted from `ConductorSettingsTab`'s two inline
+methods, which now delegate to it; nothing else in `Settings/**` changed. The
+canvas deliberately consumes **curated only** — discovery runs the user's CLI,
+and opening this canvas must not, the same rule that keeps probing out of
+`EnsembleStartModel.init`.
 
 ### Naming an Ensemble
 
@@ -223,7 +290,7 @@ Settings, never a hidden default:
 |---|---|---|
 | `maxConcurrentChildRuns` | 3, clamped to `session.conductorConcurrentRuns.activeLimit` | Stepper, captioned "Capped at N per window" |
 | `maxTotalChildRuns` | 12 | Stepper |
-| `allowedProviders` | Every CLI that probed ready (ADR 0018: a coordinator cannot reach a vendor the user did not authorize) | Multi-select icon grid (`EnsembleCLIIconCard`, `.allowed` mode), seeded once per probe |
+| `allowedProviders` | Every CLI that probed ready (ADR 0018: a coordinator cannot reach a vendor the user did not authorize) | Multi-select icon grid (`EnsembleCLIIconCard`, `.allowed` mode), seeded once per probe, all changes through `setAllowed(_:for:)` |
 | `deadline` | None | Picker: 1 hour / 4 hours / 8 hours / no deadline |
 | `usageCeilingPercentPoints` | `nil` (out of v1 UI) | Not exposed — see Follow-ups |
 
@@ -380,6 +447,14 @@ bounding, the memoized timestamp fallback, typed-name precedence),
 to NOT carry `.frame(maxWidth: 600` and to carry the two-column split instead.
 The New Run canvas's half of that test is unchanged.
 
+M01 adds `coordinatorCardNamesItsModel`, `coordinatorCardNamesNoModelWhenUnset`
+(the resolver's refusal to guess, read through this surface),
+`perCLIModelsAreIsolated`, `blankPerCLIModelFallsThrough`,
+`ConductorModelCatalogTests`, and `childRunModelPrecedence` in
+`EnsembleMutatingVerbTests` — the full role → Ensemble → Settings → nothing
+chain asserted against the manifest's step binding, plus a `--role` override
+outranking the Ensemble default.
+
 `EnsembleStartCanvasTests` covers the CLI gating matrix, grant defaults/
 clamping/deadline mapping, the guided door's goal-required guard, a
 spy-verified launch success (registers a coordinator session, then Done
@@ -405,6 +480,10 @@ Agent Terminal, AT-01). ⌘⇧E was free and is now New Ensemble.
 - `Sources/RafuApp/Views/EnsembleStartCanvas.swift`
 - `Sources/RafuApp/Views/EnsembleGoalPane.swift`
 - `Sources/RafuApp/Views/EnsembleCLIIconGrid.swift`
+- `Sources/RafuApp/Views/EnsembleModelField.swift`
+- `Sources/RafuApp/Conductor/ConductorModelResolution.swift`
+- `Sources/RafuApp/Conductor/ConductorModelCatalog.swift`
+- `Sources/RafuApp/Conductor/Ensemble/ConductorEnsembleRequestService.swift`
 - `Sources/RafuApp/Markdown/RafuMarkdownStyling.swift`
 - `Sources/RafuApp/Conductor/ConductorCLIIcons.swift`
 - `Sources/RafuApp/Models/WorkspaceSession.swift` (`ensembleStartCanvasVisible`,

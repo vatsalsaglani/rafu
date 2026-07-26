@@ -69,6 +69,7 @@ final class EnsembleStartModel {
             _ goal: String,
             _ grant: ConductorEnsembleGrant,
             _ name: String,
+            _ providerModelDefaults: [ConductorCLIID: String],
             _ session: WorkspaceSession
         ) async throws -> ConductorCoordinatorSession
 
@@ -89,6 +90,19 @@ final class EnsembleStartModel {
     var allowedProviders: Set<ConductorCLIID> = []
     var deadlineChoice: EnsembleGrantDeadline = .none
 
+    /// This Ensemble's model choice per allowed CLI, so one pipeline can run
+    /// one model on one CLI and another elsewhere. `""`/absent means "no
+    /// choice here" and falls through to the Settings default.
+    ///
+    /// Keyed by CLI rather than held in one field, which IS the per-CLI
+    /// equivalent of the coordinator field's unconditional reset: a value
+    /// stored under Codex can never be read for Claude Code, so the
+    /// cross-vendor contamination the coordinator guard exists to prevent is
+    /// unrepresentable here. Disallowing a CLI drops its entry, so
+    /// re-allowing it re-seeds from that CLI's own Settings default rather
+    /// than resurrecting a stale pick.
+    private(set) var providerModels: [ConductorCLIID: String] = [:]
+
     private(set) var isStarting = false
     var errorMessage: String?
 
@@ -102,6 +116,13 @@ final class EnsembleStartModel {
 
     @ObservationIgnored
     private let adapters: [any ConductorCLIAdapter]
+    /// Each adapter's shipped model list, read once at construction.
+    /// `curatedModels()` is contractually pure — no process, no filesystem,
+    /// no network — which is the same reason `ConductorSettingsModel` reads
+    /// it in `init`. Discovery, which DOES run the user's CLI, is not done
+    /// here: opening this canvas must never invoke a CLI behind their back.
+    @ObservationIgnored
+    private let curatedModelsByID: [ConductorCLIID: [ConductorModelChoice]]
     @ObservationIgnored
     private let defaultModelStore: ConductorDefaultModelStore
     @ObservationIgnored
@@ -118,13 +139,18 @@ final class EnsembleStartModel {
         adapters: [any ConductorCLIAdapter] = ConductorAdapterRegistry.all,
         defaultModelStore: ConductorDefaultModelStore = ConductorDefaultModelStore(),
         clock: @escaping Clock = Date.init,
-        launch: @escaping Launch = { provider, model, goal, grant, name, session in
+        launch: @escaping Launch = {
+            provider, model, goal, grant, name, providerModelDefaults, session in
             try await ConductorCoordinatorLauncher().start(
                 provider: provider, model: model, goal: goal, grant: grant, label: name,
+                providerModelDefaults: providerModelDefaults,
                 in: session)
         }
     ) {
         self.adapters = adapters
+        self.curatedModelsByID = Dictionary(
+            adapters.map { ($0.id, $0.curatedModels()) },
+            uniquingKeysWith: { first, _ in first })
         self.defaultModelStore = defaultModelStore
         self.clock = clock
         self.launch = launch
@@ -147,7 +173,7 @@ final class EnsembleStartModel {
         cliOptions = loaded
         let readyIDs = loaded.filter(\.isReady).map(\.id)
         if allowedProviders.isEmpty {
-            allowedProviders = Set(readyIDs)
+            for id in readyIDs { setAllowed(true, for: id) }
         }
         if let selectedProvider, isEnabled(selectedProvider) {
             // Keep the user's (or a prior probe's) choice — the provider
@@ -171,7 +197,118 @@ final class EnsembleStartModel {
     /// vendor's model string on another vendor's CLI.
     func selectProvider(_ id: ConductorCLIID) {
         selectedProvider = id
-        model = cliOptions.first(where: { $0.id == id })?.defaultModel ?? ""
+        model = settingsDefaultModel(for: id) ?? ""
+    }
+
+    // MARK: - Models
+
+    /// The user's Settings → Agents default for this CLI, as probed. `nil`
+    /// when nothing is set (`AgentTerminalLaunchService` already trims and
+    /// empty-drops it).
+    func settingsDefaultModel(for id: ConductorCLIID) -> String? {
+        cliOptions.first { $0.id == id }?.defaultModel
+    }
+
+    /// What this CLI's pickers may list: its curated catalog, plus the user's
+    /// Settings default when that is a model Rafu does not ship in the list —
+    /// otherwise a hand-typed Settings default would be missing from the very
+    /// picker meant to show it.
+    func availableModels(for id: ConductorCLIID) -> [ConductorModelChoice] {
+        let curated = curatedModelsByID[id] ?? []
+        guard
+            let settingsChoice = ConductorModelCatalog.choice(
+                for: settingsDefaultModel(for: id), in: curated),
+            settingsChoice.source == .custom
+        else { return curated }
+        return curated + [settingsChoice]
+    }
+
+    /// This Ensemble's per-CLI choice, or `nil` when the user has not made
+    /// one and the Settings default should apply.
+    func ensembleModel(for id: ConductorCLIID) -> String? {
+        ConductorModelResolution.normalized(providerModels[id])
+    }
+
+    func setEnsembleModel(_ value: String, for id: ConductorCLIID) {
+        providerModels[id] = value
+    }
+
+    /// Which model an allowed CLI will actually run, through the ONE shared
+    /// resolver. There is no per-role explicit value at creation time — a
+    /// role's own `model:` is read from its agent file when a child run
+    /// starts — so this ensemble-level pick IS the top of the chain here.
+    func modelResolution(for id: ConductorCLIID) -> ConductorModelResolution {
+        ConductorModelResolution.resolve(
+            explicit: nil,
+            ensembleDefault: ensembleModel(for: id),
+            settingsDefault: settingsDefaultModel(for: id),
+            catalog: availableModels(for: id))
+    }
+
+    /// Which model the coordinator itself will run.
+    ///
+    /// The Settings default is PREFILLED into `model` by `selectProvider`
+    /// (the cross-vendor reset guard), so a field value equal to that default
+    /// is not a choice the user made — reporting it as `.explicit` would
+    /// claim one they never made. It is handed to the resolver as what it
+    /// actually is, which is why the card can honestly say "your default for
+    /// this CLI" instead of implying a pick.
+    var coordinatorModelResolution: ConductorModelResolution? {
+        guard let selectedProvider else { return nil }
+        let settingsDefault = settingsDefaultModel(for: selectedProvider)
+        let typed = ConductorModelResolution.normalized(model)
+        let explicit = typed == ConductorModelResolution.normalized(settingsDefault) ? nil : typed
+        return ConductorModelResolution.resolve(
+            explicit: explicit,
+            ensembleDefault: nil,
+            settingsDefault: settingsDefault,
+            catalog: availableModels(for: selectedProvider))
+    }
+
+    /// The per-provider defaults carried alongside — never inside — the
+    /// grant, for the CLIs the coordinator is actually allowed to reach.
+    /// A CLI with no choice contributes nothing, so the child-run path falls
+    /// through to Settings exactly as it would have before.
+    func providerModelDefaults() -> [ConductorCLIID: String] {
+        var result: [ConductorCLIID: String] = [:]
+        for id in allowedProviders {
+            guard let model = ensembleModel(for: id) else { continue }
+            result[id] = model
+        }
+        return result
+    }
+
+    // MARK: - Allowed CLIs
+
+    func isAllowed(_ id: ConductorCLIID) -> Bool {
+        allowedProviders.contains(id)
+    }
+
+    /// The one seam for the allowed-CLI grid, so clearing a CLI's model entry
+    /// can never be forgotten at a call site.
+    ///
+    /// Allowing a CLI deliberately seeds NO model. The picker then reads "CLI
+    /// default" and the caption names whatever Settings contributes, which is
+    /// the truth; pre-filling the Settings value as an Ensemble-level choice
+    /// would turn an inherited default into a claimed pick and make the
+    /// resolver report `.ensembleDefault` for a decision the user never made.
+    func setAllowed(_ allowed: Bool, for id: ConductorCLIID) {
+        if allowed {
+            allowedProviders.insert(id)
+        } else {
+            allowedProviders.remove(id)
+            providerModels.removeValue(forKey: id)
+        }
+    }
+
+    func toggleAllowed(_ id: ConductorCLIID) {
+        setAllowed(!isAllowed(id), for: id)
+    }
+
+    /// The allowed CLIs in the probed registry's own order, so the per-CLI
+    /// model rows never reshuffle as the set changes (a `Set` has no order).
+    var allowedOptionsInRegistryOrder: [AgentTerminalOption] {
+        cliOptions.filter { allowedProviders.contains($0.id) }
     }
 
     /// `nil` only for a ready CLI. The not-authenticated case reproduces the
@@ -306,17 +443,20 @@ final class EnsembleStartModel {
         defer { isStarting = false }
 
         let grant = makeGrant(windowCap: session.conductorConcurrentRuns.activeLimit)
-        let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The same resolver the coordinator card displays, so what launches
+        // is what the user read — never a second precedence rule.
+        let coordinatorModel = coordinatorModelResolution?.modelID
         let ensembleName = effectiveName(for: goal)
         session.beginEnsembleStartLaunch()
         defer { session.endEnsembleStartLaunch() }
         do {
             _ = try await launch(
                 selectedProvider,
-                trimmedModel.isEmpty ? nil : trimmedModel,
+                coordinatorModel,
                 trimmedGoal,
                 grant,
                 ensembleName,
+                providerModelDefaults(),
                 session)
             postLaunchGoalToPaste = trimmedGoal
             return true
@@ -358,7 +498,6 @@ struct EnsembleStartCanvas: View {
     @State private var expertWorkflowStartError: String?
 
     @FocusState private var isNameFieldFocused: Bool
-    @FocusState private var isModelFieldFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -648,26 +787,34 @@ struct EnsembleStartCanvas: View {
                 }
             } else {
                 EnsembleCLIIconGrid(options: model.cliOptions) { option in
+                    // The coordinator's card carries its own resolved model,
+                    // so "which CLI" and "which model in it" are one glance
+                    // rather than a card plus a field elsewhere in the rail.
+                    let isSelected = model.selectedProvider == option.id
+                    let resolution = isSelected ? model.coordinatorModelResolution : nil
                     EnsembleCLIIconCard(
                         option: option,
-                        selection: model.selectedProvider == option.id ? .selected : .unselected,
+                        selection: isSelected ? .selected : .unselected,
                         reason: model.disableReason(option.id),
                         actionDescription: "Use as the coordinator",
+                        detail: resolution?.label,
+                        detailHelp: resolution?.detailedLabel,
                         activate: { selectProvider(option) }
                     )
                 }
-                VStack(alignment: .leading, spacing: RafuMetrics.space1) {
-                    Text("Model (optional)")
-                        .font(.caption)
-                        .foregroundStyle(theme.palette.textSecondary)
-                    TextField("Provider default", text: $model.model)
-                        .textFieldStyle(.plain)
-                        .font(.callout)
-                        .foregroundStyle(theme.palette.textPrimary)
-                        .focused($isModelFieldFocused)
-                        .rafuField(isFocused: isModelFieldFocused)
-                        .disabled(model.selectedProvider == nil)
-                        .accessibilityLabel("Coordinator model")
+                if let selectedProvider = model.selectedProvider,
+                    let resolution = model.coordinatorModelResolution
+                {
+                    VStack(alignment: .leading, spacing: RafuMetrics.space1) {
+                        Text("Model")
+                            .font(.caption)
+                            .foregroundStyle(theme.palette.textSecondary)
+                        EnsembleModelField(
+                            label: "Coordinator model",
+                            available: model.availableModels(for: selectedProvider),
+                            resolution: resolution,
+                            value: $model.model)
+                    }
                 }
             }
         }
@@ -719,17 +866,48 @@ struct EnsembleStartCanvas: View {
                     .foregroundStyle(theme.palette.textSecondary)
             } else {
                 EnsembleCLIIconGrid(options: model.cliOptions) { option in
+                    let isAllowed = model.isAllowed(option.id)
+                    let resolution = isAllowed ? model.modelResolution(for: option.id) : nil
                     EnsembleCLIIconCard(
                         option: option,
-                        selection: model.allowedProviders.contains(option.id)
-                            ? .allowed : .unselected,
+                        selection: isAllowed ? .allowed : .unselected,
                         reason: model.disableReason(option.id),
                         actionDescription: "Allow the coordinator to reach this CLI",
+                        detail: resolution?.label,
+                        detailHelp: resolution?.detailedLabel,
                         activate: { toggleAllowed(option) }
                     )
                 }
+                // One model row per ALLOWED CLI, so a pipeline can run one
+                // model on one CLI and another elsewhere. Bounded by the
+                // user's own consent selection rather than listing all seven.
+                ForEach(model.allowedOptionsInRegistryOrder) { option in
+                    VStack(alignment: .leading, spacing: RafuMetrics.space1) {
+                        Text(option.displayName)
+                            .font(.caption)
+                            .foregroundStyle(theme.palette.textSecondary)
+                        EnsembleModelField(
+                            label: "\(option.displayName) model",
+                            available: model.availableModels(for: option.id),
+                            resolution: model.modelResolution(for: option.id),
+                            value: allowedModelBinding(option.id))
+                    }
+                }
+                Text("Each allowed CLI runs the model chosen here unless a role names its own.")
+                    .font(.caption)
+                    .foregroundStyle(theme.palette.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    /// Per-CLI, so a value stored for one vendor can never be read for
+    /// another — the structural equivalent of the coordinator field's reset
+    /// on provider switch.
+    private func allowedModelBinding(_ id: ConductorCLIID) -> Binding<String> {
+        Binding(
+            get: { model.ensembleModel(for: id) ?? "" },
+            set: { model.setEnsembleModel($0, for: id) })
     }
 
     private func selectProvider(_ option: AgentTerminalOption) {
@@ -739,11 +917,7 @@ struct EnsembleStartCanvas: View {
 
     private func toggleAllowed(_ option: AgentTerminalOption) {
         guard option.isReady else { return }
-        if model.allowedProviders.contains(option.id) {
-            model.allowedProviders.remove(option.id)
-        } else {
-            model.allowedProviders.insert(option.id)
-        }
+        model.toggleAllowed(option.id)
     }
 
     private var launchConfirmation: some View {

@@ -11,13 +11,14 @@ nonisolated private struct EnsembleFixtureAdapter: ConductorCLIAdapter {
     let id: ConductorCLIID
     let probeResult: AdapterProbe
     let authResult: AdapterAuthStatus
+    var curatedChoices: [ConductorModelChoice] = []
 
     let defaultEnabled = true
     let supportsModelDiscovery = false
 
     func probe() async -> AdapterProbe { probeResult }
     func authStatus() async -> AdapterAuthStatus { authResult }
-    func curatedModels() -> [ConductorModelChoice] { [] }
+    func curatedModels() -> [ConductorModelChoice] { curatedChoices }
     func discoverModels() async -> [ConductorModelChoice]? { nil }
 
     func invocation(
@@ -35,14 +36,17 @@ nonisolated private struct EnsembleFixtureAdapter: ConductorCLIAdapter {
     }
 }
 
-private func readyFixture(_ id: ConductorCLIID, path: String = "/bin/echo")
-    -> EnsembleFixtureAdapter
-{
+private func readyFixture(
+    _ id: ConductorCLIID,
+    path: String = "/bin/echo",
+    curated: [ConductorModelChoice] = []
+) -> EnsembleFixtureAdapter {
     EnsembleFixtureAdapter(
         id: id,
         probeResult: AdapterProbe(
             installed: true, executableURL: URL(fileURLWithPath: path), version: "test-1"),
-        authResult: .authenticated)
+        authResult: .authenticated,
+        curatedChoices: curated)
 }
 
 private func notInstalledFixture(_ id: ConductorCLIID) -> EnsembleFixtureAdapter {
@@ -216,6 +220,133 @@ struct EnsembleStartCanvasTests {
         #expect(model.model == "claude-model")
     }
 
+    /// The coordinator card names a model, and names it honestly: a field
+    /// value that was PREFILLED from Settings is reported as the Settings
+    /// default, not as a pick the user made.
+    @Test("The coordinator card resolves a real model name, with its source")
+    func coordinatorCardNamesItsModel() async throws {
+        let root = try makeEnsembleTestRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = "EnsembleStartCanvasTests.\(UUID().uuidString)"
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+        let store = ConductorDefaultModelStore(suiteName: suite)
+        store.setDefaultModel("gpt-5.6", for: .codex)
+
+        let model = EnsembleStartModel(
+            adapters: [
+                readyFixture(
+                    .codex,
+                    curated: [
+                        ConductorModelChoice(
+                            id: "gpt-5.6", displayName: "GPT-5.6", source: .curated)
+                    ])
+            ],
+            defaultModelStore: store)
+        await model.probeCLIs(workspaceRoot: root)
+
+        let inherited = try #require(model.coordinatorModelResolution)
+        #expect(inherited.modelID == "gpt-5.6")
+        #expect(inherited.label == "GPT-5.6", "the id must display as its catalog name")
+        #expect(inherited.source == .settingsDefault)
+
+        // A model Rafu has never heard of is legitimate and must survive.
+        model.model = "some-private-model"
+        let custom = try #require(model.coordinatorModelResolution)
+        #expect(custom.modelID == "some-private-model")
+        #expect(custom.source == .explicit)
+        #expect(custom.label == "some-private-model")
+    }
+
+    /// With nothing set anywhere, the card must say the CLI decides rather
+    /// than naming the first curated model — the resolver's safety property,
+    /// read through this surface.
+    @Test("With no default anywhere, the coordinator card guesses no model")
+    func coordinatorCardNamesNoModelWhenUnset() async throws {
+        let root = try makeEnsembleTestRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = "EnsembleStartCanvasTests.\(UUID().uuidString)"
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+
+        let model = EnsembleStartModel(
+            adapters: [
+                readyFixture(
+                    .codex,
+                    curated: [
+                        ConductorModelChoice(
+                            id: "gpt-5.6", displayName: "GPT-5.6", source: .curated)
+                    ])
+            ],
+            defaultModelStore: ConductorDefaultModelStore(suiteName: suite))
+        await model.probeCLIs(workspaceRoot: root)
+
+        let resolution = try #require(model.coordinatorModelResolution)
+        #expect(!resolution.namesAModel)
+        #expect(resolution.modelID == nil)
+        #expect(resolution.label != "GPT-5.6")
+        // The picker still OFFERS it; resolution simply does not claim it.
+        #expect(model.availableModels(for: .codex).map(\.id) == ["gpt-5.6"])
+    }
+
+    /// The per-CLI equivalent of the coordinator's cross-vendor reset: a
+    /// model chosen for one CLI is stored under that CLI and is therefore
+    /// unreadable for another, and de-allowing a CLI drops its pick rather
+    /// than resurrecting it later.
+    @Test("Each allowed CLI carries its own model; one vendor's never leaks to another")
+    func perCLIModelsAreIsolated() async throws {
+        let root = try makeEnsembleTestRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = "EnsembleStartCanvasTests.\(UUID().uuidString)"
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+        let store = ConductorDefaultModelStore(suiteName: suite)
+        store.setDefaultModel("claude-settings-default", for: .claudeCode)
+
+        let model = EnsembleStartModel(
+            adapters: [readyFixture(.claudeCode), readyFixture(.codex)],
+            defaultModelStore: store)
+        await model.probeCLIs(workspaceRoot: root)
+        #expect(model.allowedProviders == [.claudeCode, .codex])
+
+        // Allowing seeds no pick: the Settings default is inherited and
+        // reported as such, never restated as an Ensemble-level choice.
+        #expect(model.ensembleModel(for: .claudeCode) == nil)
+        #expect(model.modelResolution(for: .claudeCode).source == .settingsDefault)
+        #expect(model.modelResolution(for: .codex).source == .cliDecides)
+
+        model.setEnsembleModel("codex-only-model", for: .codex)
+        #expect(model.modelResolution(for: .codex).modelID == "codex-only-model")
+        #expect(model.modelResolution(for: .codex).source == .ensembleDefault)
+        #expect(
+            model.modelResolution(for: .claudeCode).modelID == "claude-settings-default",
+            "Codex's pick must be unreadable for Claude Code")
+
+        // Only allowed CLIs contribute, and only when they carry a pick.
+        #expect(model.providerModelDefaults() == [.codex: "codex-only-model"])
+
+        // De-allowing drops the pick, so re-allowing re-inherits from
+        // Settings instead of resurrecting a stale choice.
+        model.setAllowed(false, for: .codex)
+        #expect(model.providerModelDefaults().isEmpty)
+        model.setAllowed(true, for: .codex)
+        #expect(model.ensembleModel(for: .codex) == nil)
+    }
+
+    /// Whitespace must not survive into a `--model` flag, and a blank pick
+    /// must fall through rather than become a model named "".
+    @Test("A blank per-CLI model falls through instead of becoming an empty model")
+    func blankPerCLIModelFallsThrough() async throws {
+        let root = try makeEnsembleTestRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = EnsembleStartModel(adapters: [readyFixture(.codex)])
+        await model.probeCLIs(workspaceRoot: root)
+
+        model.setEnsembleModel("   ", for: .codex)
+        #expect(model.ensembleModel(for: .codex) == nil)
+        #expect(model.providerModelDefaults().isEmpty)
+
+        model.setEnsembleModel("  spaced-model  ", for: .codex)
+        #expect(model.providerModelDefaults() == [.codex: "spaced-model"])
+    }
+
     @Test("A successful launch registers the coordinator; Done routes to the graph")
     func launchSuccessRegistersAndRoutes() async throws {
         let root = try makeEnsembleTestRoot()
@@ -235,7 +366,7 @@ struct EnsembleStartCanvasTests {
         let model = EnsembleStartModel(
             adapters: [readyFixture(.codex)],
             clock: { now },
-            launch: { provider, launchModel, goal, grant, name, session in
+            launch: { provider, launchModel, goal, grant, name, providerModels, session in
                 try await ConductorCoordinatorLauncher(
                     adapters: [readyFixture(.codex)],
                     tokenStore: tokenStore,
@@ -244,14 +375,21 @@ struct EnsembleStartCanvasTests {
                     makeCoordinatorID: { "co-test0001" }
                 ).start(
                     provider: provider, model: launchModel, goal: goal, grant: grant, label: name,
+                    providerModelDefaults: providerModels,
                     in: session)
             })
         await model.probeCLIs(workspaceRoot: root)
         model.goal = "Coordinate the release"
+        model.setEnsembleModel("codex-child-model", for: .codex)
 
         let started = await model.start(in: session)
         #expect(started)
         #expect(session.conductorCoordinatorSessions.map(\.id) == ["co-test0001"])
+        // Per-provider model defaults ride ALONGSIDE the grant on the
+        // coordinator record — the grant itself stays a permission contract.
+        #expect(
+            session.conductorCoordinatorSessions.first?.providerModelDefaults
+                == [.codex: "codex-child-model"])
         // The name flows through to the coordinator session, defaulted from
         // the goal's first line because the name field was left blank.
         #expect(session.conductorCoordinatorSessions.first?.label == "Coordinate the release")
@@ -279,7 +417,7 @@ struct EnsembleStartCanvasTests {
 
         let model = EnsembleStartModel(
             adapters: [readyFixture(.codex)],
-            launch: { _, _, _, _, _, _ in
+            launch: { _, _, _, _, _, _, _ in
                 throw ConductorCoordinatorLaunchError.notAuthenticated(
                     .codex, "run `codex login` in a terminal")
             })
@@ -539,7 +677,7 @@ struct EnsembleStartCanvasTests {
         var observedGoal: String?
         let model = EnsembleStartModel(
             adapters: [readyFixture(.codex)],
-            launch: { provider, launchModel, goal, grant, name, session in
+            launch: { provider, _, goal, _, _, _, _ in
                 observedGoal = goal
                 throw ConductorCoordinatorLaunchError.providerUnavailable(provider)
             })

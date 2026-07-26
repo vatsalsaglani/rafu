@@ -111,6 +111,10 @@ final class ConductorEnsembleRequestService {
             ConductorDefinitionLibrary.defaultUserLibraryRoot
         }
         var tokenStore: ConductorEnsembleTokenStore = .shared
+        /// Settings → Agents' per-CLI default model, the LAST fallback before
+        /// "let the CLI decide". Injected so a test can point at its own
+        /// `UserDefaults` suite instead of the user's.
+        var defaultModelStore = ConductorDefaultModelStore()
         var eventCenter: ConductorEnsembleEventCenter
         var makeRunID: () -> String = {
             UUID().uuidString.lowercased()
@@ -373,6 +377,8 @@ final class ConductorEnsembleRequestService {
             }
         }
 
+        roles = applyModelDefaults(to: roles, payload: payload, workspace: workspace)
+
         let artifacts = payload.artifacts ?? []
         guard artifacts.allSatisfy({ $0.hasPrefix("/") && !$0.utf8.contains(0) }) else {
             return .failure(.failure(code: 64, message: "run artifacts must be absolute paths"))
@@ -396,6 +402,56 @@ final class ConductorEnsembleRequestService {
         }
 
         return .success((workflow, roles))
+    }
+
+    /// Fills in each role's model through the ONE shared resolver:
+    /// `role.model` (the agent file's own choice, or a `--role` override) →
+    /// this Ensemble's per-provider default → the user's Settings default →
+    /// nothing, in which case no `--model` flag is passed and the CLI applies
+    /// its own configuration.
+    ///
+    /// Applied AFTER `--role` overrides deliberately: an override is the
+    /// coordinator's explicit per-run choice and must outrank an
+    /// ensemble-wide preference. Applied inside `resolveRunDefinitions` so
+    /// the plan-gate re-parse gets identical semantics rather than a second,
+    /// drifting implementation.
+    private func applyModelDefaults(
+        to roles: [ConductorAgentDefinition],
+        payload: EnsembleRequestPayload,
+        workspace: WorkspaceSnapshot
+    ) -> [ConductorAgentDefinition] {
+        let ensembleDefaults = ensembleModelDefaults(payload: payload, workspace: workspace)
+        return roles.map { role in
+            let resolution = ConductorModelResolution.resolve(
+                explicit: role.model,
+                ensembleDefault: ensembleDefaults[role.provider],
+                settingsDefault: dependencies.defaultModelStore.defaultModel(for: role.provider))
+            let model = resolution.modelID ?? ""
+            guard model != role.model else { return role }
+            return ConductorAgentDefinition(
+                name: role.name,
+                provider: role.provider,
+                model: model,
+                autonomy: role.autonomy,
+                handoffArtifact: role.handoffArtifact,
+                promptBody: role.promptBody)
+        }
+    }
+
+    /// The launching Ensemble's per-provider model preferences, read from the
+    /// coordinator record the request's own token identifies. These ride
+    /// ALONGSIDE the grant, never inside it: the grant is a permission
+    /// contract (ADR 0018), and a model preference is not a permission. An
+    /// unknown or already-revoked token simply contributes no defaults.
+    private func ensembleModelDefaults(
+        payload: EnsembleRequestPayload,
+        workspace: WorkspaceSnapshot
+    ) -> [ConductorCLIID: String] {
+        guard let coordinatorID = dependencies.tokenStore.validate(payload.token)?.coordinatorID
+        else { return [:] }
+        return workspace.session.conductorCoordinatorSessions
+            .first { $0.id == coordinatorID }?
+            .providerModelDefaults ?? [:]
     }
 
     /// Workspace-relative paths for the plan gate's "files as tabs" UI: the
