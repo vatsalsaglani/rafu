@@ -153,6 +153,26 @@ nonisolated struct AgentLauncherRow: Identifiable, Equatable, Sendable {
         }
     }
 
+    /// The card's tooltip. The launcher grid is icon-only (UX2-03), so this
+    /// string — not a label — is the pointer user's carrier of the provider's
+    /// NAME, and it must therefore always contain the name, in every state.
+    /// Pairing it with `accessibilityLabel` is what makes an icon-only control
+    /// legitimate under AGENTS' "never meaning by icon alone" rule.
+    var tooltip: String {
+        switch state {
+        case .probing:
+            "\(displayName) — checking whether it is installed…"
+        case .ready:
+            if let verificationNote {
+                "Launch \(displayName) — \(verificationNote)"
+            } else {
+                "Launch \(displayName)"
+            }
+        case .unavailable(let reason):
+            "\(displayName) — \(reason)"
+        }
+    }
+
     /// Name + state + reason in one string, per the UX-03 accessibility
     /// contract. VoiceOver must never have to infer state from styling.
     var accessibilityLabel: String {
