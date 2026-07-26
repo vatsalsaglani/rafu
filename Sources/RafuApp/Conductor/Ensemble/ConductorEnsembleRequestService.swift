@@ -541,10 +541,26 @@ final class ConductorEnsembleRequestService {
         // semantics this request just used (advisor A2), so it re-runs the
         // one shared resolver against the SAME captured payload/workspace
         // rather than reconstructing overrides from the parked manifest.
-        controller.planGateReparse = { [weak self] _ in
-            guard let self else {
+        // `session` is captured WEAKLY and the snapshot rebuilt inside. The
+        // session transitively owns this closure — session →
+        // `conductorConcurrentRuns` → `controllersByRunID` → controller →
+        // `planGateReparse` — so capturing `workspace` (which holds a strong
+        // `session`) would retain the whole workspace, its terminal sessions,
+        // and its text storages for the app's lifetime, since the only pruner
+        // is a manual UI action. `onGateReady` uses `[weak self]` for exactly
+        // this reason; this follows that discipline.
+        let workspaceRootURL = workspace.rootURL
+        let workspaceIsKeyWindow = workspace.isKeyWindow
+        let workspaceRegistrationOrder = workspace.registrationOrder
+        controller.planGateReparse = { [weak self, weak session = workspace.session] _ in
+            guard let self, let session else {
                 return .failure("Ensemble definitions could not be re-read.")
             }
+            let workspace = WorkspaceSnapshot(
+                rootURL: workspaceRootURL,
+                session: session,
+                isKeyWindow: workspaceIsKeyWindow,
+                registrationOrder: workspaceRegistrationOrder)
             switch await self.resolveRunDefinitions(payload: payload, workspace: workspace) {
             case .success(let resolved):
                 return .success(workflow: resolved.workflow, roles: resolved.roles)

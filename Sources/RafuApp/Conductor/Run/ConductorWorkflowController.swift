@@ -14,10 +14,13 @@ nonisolated enum ConductorWorkflowState: Equatable, Sendable {
     case awaitingArtifact(index: Int)
     case awaitingGate(index: Int)
     /// Parked at the human plan gate (C8-04): a fully-validated
-    /// `run --plan-gate` request with every step still `.pending` and
-    /// NOTHING spawned — no worktree, no adapter process, no evidence
-    /// directory. In-flight (counts against grant concurrency) but has no
-    /// "current step index" the way `.runningStep`/`.awaitingGate` do.
+    /// `run --plan-gate` request with every step still `.pending` and NO
+    /// AGENT spawned — no worktree, no agent process, no evidence directory.
+    /// Validation itself is not free: reaching this state has already run
+    /// read-only git queries and each step's adapter-version probe
+    /// (`<cli> --version`), which is what makes the parked plan trustworthy.
+    /// In-flight (counts against grant concurrency) but has no "current step
+    /// index" the way `.runningStep`/`.awaitingGate` do.
     case awaitingPlanGate
     case awaitingMergeGate
     case completed
@@ -529,10 +532,11 @@ final class ConductorWorkflowController {
             try Self.requireCurrent(generation, activeGeneration)
 
             if request.planGateRequested {
-                // Nothing spawns behind a plan gate (advisor A1): `prepare`
-                // above ran only read-only git and adapter-version probes —
-                // no worktree, no adapter process, no evidence directory
-                // exists yet. Park and return BEFORE materialize/launch.
+                // No AGENT spawns behind a plan gate (advisor A1): `prepare`
+                // above ran read-only git queries and each step's
+                // adapter-version probe, but no worktree, no agent process,
+                // and no evidence directory exists yet. Park and return
+                // BEFORE materialize/launch.
                 planGateFiles = request.planGateFiles
                 parkedPlanGateRequest = request
                 state = .awaitingPlanGate
@@ -1474,7 +1478,21 @@ final class ConductorWorkflowController {
         let previousState = state
         state = .aborted
         if var currentManifest = manifest {
-            if let index = Self.activeStepIndex(in: previousState),
+            if previousState == .awaitingPlanGate {
+                // Same observability rule as `declinePlanGate`: nothing ran,
+                // so there is no active step for `activeStepIndex` to stamp,
+                // and `runChanged(manifest:)` derives state from step status
+                // alone. Leaving every step `.pending` would publish an abort
+                // no coordinator could ever see — `await <run> --state
+                // aborted` would block until timeout while the run sat
+                // projecting `.pending` forever. Reachable whenever the human
+                // clicks "Abort Run" on a parked plan gate instead of
+                // "Request Changes".
+                for index in currentManifest.steps.indices {
+                    currentManifest.steps[index].status = .aborted
+                    currentManifest.steps[index].finishedAt = Date()
+                }
+            } else if let index = Self.activeStepIndex(in: previousState),
                 currentManifest.steps.indices.contains(index)
             {
                 currentManifest.steps[index].status = .aborted

@@ -496,6 +496,17 @@ final class ConductorRunController {
             case .historyOnly:
                 // The worktree is gone, so no gate can be resolved against it.
                 revised.gate = nil
+            case .abandonedAtPlanGate:
+                // Every step is stamped `.aborted`, not left `.pending`, for
+                // the same reason `declinePlanGate` does it: the projection
+                // derives a manifest-only run state from step status alone, so
+                // a `.pending` step would leave an awaiting coordinator
+                // blocked on a run that can never move again.
+                revised.gate = nil
+                for index in revised.steps.indices {
+                    revised.steps[index].status = .aborted
+                    revised.steps[index].finishedAt = Date()
+                }
             }
             revised.recoveryNote = plan.note
             guard revised != manifest else {
