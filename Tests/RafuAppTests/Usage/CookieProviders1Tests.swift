@@ -188,9 +188,9 @@ struct CookieProviders1Tests {
             credentials: [.kiloCode: "key"],
             cookies: [.grokBuild: "sso=cached"])
 
-        if case .piggybackNetwork = AntigravityProvider.descriptor.authPattern {
+        if case .localSessionPiggyback = AntigravityProvider.descriptor.authPattern {
         } else {
-            Issue.record("Antigravity must use piggyback-network auth")
+            Issue.record("Antigravity must use local-session piggyback auth")
         }
         if case .cookieImport = GrokBuildProvider.descriptor.authPattern {
         } else {

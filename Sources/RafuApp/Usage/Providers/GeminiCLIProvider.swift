@@ -325,7 +325,7 @@ nonisolated enum GeminiCLIProvider {
     static let descriptor = UsageProviderDescriptor(
         id: .geminiCLI,
         displayName: "Gemini CLI",
-        authPattern: .piggybackNetwork,
+        authPattern: .localSessionPiggyback,
         disclosure:
             "Reads ~/.gemini/oauth_creds.json and ~/.gemini/settings.json; sends only the access token to cloudcode-pa.googleapis.com/v1internal:loadCodeAssist and cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota (and cloudresourcemanager.googleapis.com/v1/projects only when needed) to fetch usage numbers.",
         defaultEnabled: false,

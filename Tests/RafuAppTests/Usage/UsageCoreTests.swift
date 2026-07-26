@@ -679,3 +679,32 @@ func frontLineWindowCapSelectsPerProviderCount() {
     #expect(
         UsageDisplayPolicy.frontLineWindowCap(providerCount: 4) == UsageDisplayPolicy.tileWindowCap)
 }
+
+/// A `.localSessionPiggyback` provider's only strategies are
+/// credential-bearing network calls, so "Not connected" in Settings must
+/// actually mean no request happens. Consent gates the whole descriptor for
+/// that pattern — unlike `.piggybackNetwork`, whose local fallback strategy
+/// must keep working while disconnected.
+@Test(
+    "UsageRegistryReader gates a local-session provider on recorded network consent",
+    arguments: [true, false])
+func usageRegistryReaderGatesLocalSessionOnConsent(consented: Bool) async {
+    let snapshot = UsageSnapshot(
+        providerID: .cursor,
+        windows: [UsageWindow(label: "monthly", percent: 42, tokens: nil, resetsAt: nil)],
+        costLine: nil, identity: nil)
+    let descriptor = UsageProviderDescriptor(
+        id: .cursor, displayName: "Cursor", authPattern: .localSessionPiggyback,
+        disclosure: "fixture", defaultEnabled: false,
+        makeStrategies: { _ in [StubStrategy(id: "cursor.stub", result: .success(snapshot))] })
+    let reader = UsageRegistryReader(
+        descriptors: [descriptor],
+        makeContext: { now in fixtureContext(now: now) },
+        isEnabled: { _ in true },
+        resolveCredentials: { _, _ in [:] },
+        hasNetworkConsent: { _ in consented })
+
+    let snapshots = await reader.snapshots(now: Date())
+
+    #expect(snapshots.map(\.providerID) == (consented ? [.cursor] : []))
+}

@@ -62,8 +62,53 @@ nonisolated struct UsageSnapshot: Equatable, Sendable {
 /// panel" + the roster's cookie-import addendum). Purely descriptive — the
 /// Settings tab uses it to choose which (possibly disabled-placeholder)
 /// affordance to render.
+///
+/// `piggybackNetwork` and `localSessionPiggyback` are BOTH "Rafu sends a
+/// credential-bearing usage request on your behalf", but they differ in
+/// where that credential lives, and therefore in what Connect can do:
+///
+/// - `piggybackNetwork` (Claude, Codex): Rafu loads the CLI's own OAuth
+///   credential file (or, for Claude only, Claude Code's Keychain item) and
+///   passes it through `UsageFetchContext.credential`. Connect succeeds only
+///   if that documented credential source parses and is unexpired.
+/// - `localSessionPiggyback` (Cursor, Antigravity, Gemini CLI, Kimi): the
+///   credential never crosses into Rafu's own storage at all — the strategy
+///   reads the vendor app's local session itself, at fetch time. There is no
+///   credential for Rafu to "load", so Connect verifies (locally, with no
+///   network) that a signed-in session exists and records network consent.
+///
+/// `unavailable` is the honest state for a rostered provider with no
+/// obtainable signal: no Connect action exists, so Settings must not render
+/// one. See `connectAffordance`.
 nonisolated enum UsageAuthPattern: Sendable {
-    case localZeroConfig, piggybackNetwork, apiKey, cookieImport
+    case localZeroConfig, piggybackNetwork, localSessionPiggyback, apiKey, cookieImport,
+        unavailable
+
+    /// What a Connect button would actually do for this pattern — `.none`
+    /// means Settings must NOT offer one. A Connect affordance that can only
+    /// ever fail is worse than a stated limitation.
+    var connectAffordance: UsageConnectAffordance {
+        switch self {
+        case .piggybackNetwork: .externalCredential
+        case .localSessionPiggyback: .localSession
+        case .localZeroConfig, .apiKey, .cookieImport, .unavailable: .none
+        }
+    }
+}
+
+/// The three honest outcomes of "can the user connect this provider?".
+/// `UsageOAuthConnector.connect(_:affordance:now:)` switches on this rather
+/// than on a hardcoded provider list, so a provider added without a
+/// connection path reports `.unsupportedProvider` by construction instead of
+/// silently reaching a `default: return nil` credential lookup.
+nonisolated enum UsageConnectAffordance: Equatable, Sendable {
+    /// Rafu loads the CLI's documented credential file/Keychain item.
+    case externalCredential
+    /// Rafu verifies the vendor app's local signed-in session, no network,
+    /// and never copies the credential into its own storage.
+    case localSession
+    /// Nothing to connect. Settings renders a stated reason, not a button.
+    case none
 }
 
 /// Everything a `UsageFetchStrategy` needs, injected so every strategy is

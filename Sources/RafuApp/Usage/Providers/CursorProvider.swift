@@ -269,11 +269,20 @@ nonisolated struct CursorVSCDBStrategy: UsageFetchStrategy {
 /// Piggyback network providers are opt-in: opening Settings can discover
 /// this row without touching Cursor's database because strategy creation is
 /// unconditional and all availability checks remain inside the strategy.
+///
+/// `cursor-agent` is NOT a usage source. Probed at 2026.07.23-e383d2b, its
+/// only account verbs are `status`/`whoami` ("Logged in as <email>") and
+/// `about` (which prints a subscription TIER, never a quota, percentage, or
+/// reset time); `--help` exposes no usage/quota/limit/credit/billing verb at
+/// all. Cursor.app's own `state.vscdb` session plus `cursor.com`'s
+/// usage-summary endpoint remain the only obtainable signal — hence
+/// `.localSessionPiggyback`, whose Connect verifies that local session
+/// instead of looking for a Rafu-owned credential that will never exist.
 nonisolated enum CursorProvider {
     static let descriptor = UsageProviderDescriptor(
         id: .cursor,
         displayName: "Cursor",
-        authPattern: .piggybackNetwork,
+        authPattern: .localSessionPiggyback,
         disclosure:
             "Reads Cursor's signed-in token from its local state.vscdb and sends only the derived session cookie to cursor.com to fetch plan usage. No message or prompt content is read.",
         defaultEnabled: false,

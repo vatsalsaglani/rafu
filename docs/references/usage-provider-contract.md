@@ -4,9 +4,9 @@
   `UsageSupport.swift`, `UsageSQLite.swift`, `UsageStores.swift`,
   `UsageProviderRegistry.swift`, `UsageRegistryReader.swift`,
   `Sources/RafuApp/Usage/Providers/*Provider.swift`)
-- Last verified: Swift 6.2, macOS 26, 2026-07-23 (CodexBar de-brand +
-  Antigravity `state.vscdb` token source + notch strip-order picker
-  follow-up; supersedes the provider-input completion follow-up)
+- Last verified: Swift 6.2, macOS 26, 2026-07-27 (connect-affordance split:
+  `.localSessionPiggyback`/`.unavailable` + Cursor headless probe; supersedes
+  the CodexBar de-brand + Antigravity `state.vscdb` + strip-order follow-up)
 
 ## Rule or observed behavior
 
@@ -112,6 +112,64 @@
     `frontLineCap` (4) with data. Disabled providers are excluded from the
     arrangement because they never produce a snapshot.
 
+11. **`UsageAuthPattern` describes where the credential LIVES, and that
+    decides whether Connect can succeed at all.** The pattern is not
+    cosmetic: `UsageSettingsTab` renders a Connect button for it, and
+    `UsageOAuthConnector` decides what to do from
+    `UsageAuthPattern.connectAffordance`. Three honest cases:
+
+    - `.piggybackNetwork` → `.externalCredential`. Rafu loads the CLI's
+      documented credential file (`~/.claude/.credentials.json`,
+      `$CODEX_HOME/auth.json`), or, for Claude only, Claude Code's Keychain
+      item. **Only Claude and Codex may use this pattern**, because
+      `UsageOAuthConnector.credentialFileURL(for:environment:)` has an entry
+      only for those two and correctly returns `nil` for everything else —
+      inventing a plausible-looking path for another vendor is forbidden
+      (ADR 0018: Rafu holds no inference credentials).
+    - `.localSessionPiggyback` → `.localSession`. The credential never
+      crosses into Rafu at all; the strategy reads the vendor app's own
+      local session at fetch time (Cursor/Antigravity `state.vscdb`, Gemini
+      CLI/Kimi JSON creds). There is nothing for Rafu to "load", so Connect
+      instead runs the provider's OWN strategies' `isAvailable` against
+      `UsageOAuthConnector.localSessionProbeContext(now:)` — bounded file
+      reads, `UsageHTTPClient.noop`, no credential returned to the connector
+      — and records network consent on success. Reusing the strategies means
+      Connect and the refresh pipeline can never disagree about whether a
+      session exists.
+    - `.unavailable` → `.none`. A rostered provider with no obtainable
+      signal (Copilot). Settings renders a stated reason next to a **disabled
+      toggle** and no button at all. An error the user cannot act on is worse
+      than a stated limitation.
+
+    A `.piggybackNetwork` provider with no credential file is the exact
+    defect this rule exists to prevent: Cursor shipped a Connect button that
+    returned `.unsupportedProvider` on every press, because the pattern
+    promised a credential source that only Claude and Codex have.
+    `externalCredentialProvidersHaveACredentialSource` in `UsageStoreTests`
+    fails the moment a provider claims that pattern without one.
+
+12. **Consent granularity follows the pattern, not the provider.**
+    `.piggybackNetwork` gates consent per **credential**, inside
+    `UsageRegistryReader.productionCredentials`, so Claude's and Codex's
+    LOCAL transcript/rollout fallback strategies keep producing a snapshot
+    while disconnected. `.localSessionPiggyback` providers have only
+    credential-bearing network strategies, so `snapshots(now:)` gates the
+    whole **descriptor** on `hasNetworkConsent`. Gating a `.piggybackNetwork`
+    descriptor wholesale would silently kill its local fallback; not gating a
+    `.localSessionPiggyback` one lets Settings say "Not connected" while Rafu
+    is already talking to the vendor.
+
+13. **`cursor-agent` is not a usage source.** Probed at
+    `2026.07.23-e383d2b`: `status`/`whoami` print only `✓ Logged in as
+    <email>` (`--format json` available, still auth-only), `about` prints a
+    subscription **tier** (`Free`) with no quota, percentage, or reset time,
+    and `--help` lists no usage/quota/limit/credit/billing verb. Cursor's
+    only obtainable usage signal remains Cursor.app's `state.vscdb`
+    `cursorAuth/accessToken` (a ~400-byte JWT) converted to the
+    `WorkosCursorSessionToken` cookie for `cursor.com/api/usage-summary` —
+    which `CursorVSCDBStrategy` already implements. Do not add a
+    `cursor-agent` probe to the usage path expecting numbers from it.
+
 ## Why it matters
 
 These are the seams every downstream usage-provider phase (W1–W8) writes
@@ -123,6 +181,17 @@ background refresh from becoming a surprise browser/Keychain consent action
 and prevent secrets from lingering in model diagnostics.
 
 ## Reproduction or evidence
+
+Rules 11–13 come from the 2026-07-27 Cursor Connect fix. The Cursor probe was
+run against the installed, authenticated `~/.local/bin/cursor-agent`
+(`cursor-agent status </dev/null`, `about`, `--help | grep -iE
+"usage|quota|limit|credit|billing"`); the local session was confirmed by
+listing `ItemTable` keys matching `cursorAuth/%` in a copy of Cursor.app's
+`state.vscdb` and reading only their `length(value)`, never a value. Rules
+11–12 are covered by `externalCredentialProvidersHaveACredentialSource`,
+`rosterConnectAffordances`, `connectorLocalSessionOutcome`,
+`localSessionProbeContextIsOffline`, and
+`usageRegistryReaderGatesLocalSessionOnConsent`.
 
 W0 established rules 1–5. The 2026-07-23 provider-input follow-up added
 fixture-only Settings tests covering the exact six API-key rows, three

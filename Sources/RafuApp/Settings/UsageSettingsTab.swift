@@ -218,7 +218,7 @@ final class UsageSettingsModel {
             enabledByID[descriptor.id] = enableStore.isEnabled(
                 descriptor.id, default: descriptor.defaultEnabled)
             switch descriptor.authPattern {
-            case .piggybackNetwork:
+            case .piggybackNetwork, .localSessionPiggyback:
                 connectionStateByID[descriptor.id] =
                     oauthConnector.hasConsent(for: descriptor.id) ? .connected : .disconnected
             case .apiKey:
@@ -227,7 +227,7 @@ final class UsageSettingsModel {
             case .cookieImport:
                 cookieStateByID[descriptor.id] = .loading
                 hasImportedCookieByID[descriptor.id] = false
-            case .localZeroConfig:
+            case .localZeroConfig, .unavailable:
                 break
             }
         }
@@ -256,8 +256,10 @@ final class UsageSettingsModel {
     /// a snapshot, so they are excluded from the arrangement entirely.
     func stripOrderedEnabledRows() -> [Row] {
         stripOrderIDs.compactMap { id in
-            guard isEnabled(id) else { return nil }
-            return rowsByID[id]
+            guard isEnabled(id), let row = rowsByID[id],
+                row.authPattern != .unavailable
+            else { return nil }
+            return row
         }
     }
 
@@ -292,10 +294,22 @@ final class UsageSettingsModel {
         connectionStateByID[id] ?? .disconnected
     }
 
+    /// The row's own auth pattern decides what connecting means, so a
+    /// provider with no connection path can never be handed to a credential
+    /// lookup that has no entry for it.
+    func connectAffordance(for id: UsageProviderID) -> UsageConnectAffordance {
+        rowsByID[id]?.authPattern.connectAffordance ?? .none
+    }
+
     func connect(_ id: UsageProviderID, now: Date = Date()) async {
         guard connectionState(for: id) != .connecting else { return }
+        let affordance = connectAffordance(for: id)
+        guard affordance != .none else {
+            connectionStateByID[id] = .failed(.unsupportedProvider)
+            return
+        }
         connectionStateByID[id] = .connecting
-        switch await oauthConnector.connect(id, now: now) {
+        switch await oauthConnector.connect(id, affordance: affordance, now: now) {
         case .connected:
             connectionStateByID[id] = .connected
         case .failed(let issue):
@@ -331,7 +345,7 @@ final class UsageSettingsModel {
                 hasImportedCookieByID[row.id] = await inputClient.hasImportedCookie(row.id)
                 guard !Task.isCancelled else { return }
                 cookieStateByID[row.id] = .idle
-            case .localZeroConfig, .piggybackNetwork:
+            case .localZeroConfig, .piggybackNetwork, .localSessionPiggyback, .unavailable:
                 break
             }
         }
@@ -530,6 +544,7 @@ private struct UsageProviderRow: View {
             Toggle(isOn: model.binding(for: row.id)) {
                 Text(row.displayName).font(.body.weight(.medium))
             }
+            .disabled(row.authPattern == .unavailable)
             Text(row.disclosure)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -537,9 +552,10 @@ private struct UsageProviderRow: View {
             switch row.authPattern {
             case .localZeroConfig:
                 EmptyView()
-            case .piggybackNetwork:
+            case .piggybackNetwork, .localSessionPiggyback:
                 UsageOAuthConnectionControls(
                     providerName: row.displayName,
+                    affordance: row.authPattern.connectAffordance,
                     state: model.connectionState(for: row.id),
                     connect: { await model.connect(row.id) },
                     disconnect: { await model.disconnect(row.id) })
@@ -547,9 +563,29 @@ private struct UsageProviderRow: View {
                 UsageAPIKeyControls(row: row, model: model)
             case .cookieImport:
                 UsageCookieImportControls(row: row, model: model)
+            case .unavailable:
+                UsageUnavailableProviderNote(providerName: row.displayName)
             }
         }
         .padding(.vertical, 3)
+    }
+}
+
+/// A rostered provider with no obtainable usage signal. There is deliberately
+/// no button here: an error the user cannot act on is worse than a stated
+/// limitation, so the reason is plain text next to the disabled toggle
+/// (never colour or a tooltip alone).
+private struct UsageUnavailableProviderNote: View {
+    let providerName: String
+
+    var body: some View {
+        Label(
+            "Rafu can't show \(providerName) usage: it exposes no local session or CLI credential Rafu is able to read, so there is nothing to turn on or connect.",
+            systemImage: "info.circle"
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -770,6 +806,7 @@ private struct UsageCookieImportControls: View {
 
 private struct UsageOAuthConnectionControls: View {
     let providerName: String
+    let affordance: UsageConnectAffordance
     let state: UsageSettingsModel.ConnectionState
     let connect: @MainActor () async -> Void
     let disconnect: @MainActor () async -> Void
@@ -807,13 +844,33 @@ private struct UsageOAuthConnectionControls: View {
     private var statusText: String {
         switch state {
         case .disconnected:
-            "Not connected. Local usage remains enabled."
+            switch affordance {
+            case .externalCredential, .none:
+                "Not connected. Local usage remains enabled."
+            case .localSession:
+                "Not connected. Rafu sends no \(providerName) usage request until you connect."
+            }
         case .connecting:
-            "Connecting…"
+            switch affordance {
+            case .externalCredential, .none:
+                "Connecting…"
+            case .localSession:
+                "Checking for a signed-in \(providerName) session on this Mac…"
+            }
         case .connected:
-            "Connected for exact usage requests."
+            switch affordance {
+            case .externalCredential, .none:
+                "Connected for exact usage requests."
+            case .localSession:
+                "Connected. Rafu uses \(providerName)'s own signed-in session on this Mac."
+            }
         case .failed(.credentialsUnavailable):
-            "Connection failed: credentials were not found."
+            switch affordance {
+            case .externalCredential, .none:
+                "Connection failed: credentials were not found."
+            case .localSession:
+                "Connection failed: no signed-in \(providerName) session was found on this Mac. Sign in to \(providerName), then connect again."
+            }
         case .failed(.credentialsInvalid):
             "Connection failed: credentials could not be validated."
         case .failed(.credentialsExpired):

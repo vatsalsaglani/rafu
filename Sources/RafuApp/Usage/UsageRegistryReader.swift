@@ -19,6 +19,7 @@ nonisolated struct UsageRegistryReader: Sendable {
     let makeContext: @Sendable (Date) async -> UsageFetchContext
     let isEnabled: @Sendable (UsageProviderID) -> Bool
     let resolveCredentials: CredentialResolver
+    let hasNetworkConsent: @Sendable (UsageProviderID) -> Bool
 
     init(
         descriptors: [UsageProviderDescriptor] = UsageProviderRegistry.all,
@@ -27,12 +28,15 @@ nonisolated struct UsageRegistryReader: Sendable {
         isEnabled: @escaping @Sendable (UsageProviderID) -> Bool = UsageRegistryReader
             .productionIsEnabled,
         resolveCredentials: @escaping CredentialResolver = UsageRegistryReader
-            .productionCredentials
+            .productionCredentials,
+        hasNetworkConsent: @escaping @Sendable (UsageProviderID) -> Bool = UsageRegistryReader
+            .productionNetworkConsent
     ) {
         self.descriptors = descriptors
         self.makeContext = makeContext
         self.isEnabled = isEnabled
         self.resolveCredentials = resolveCredentials
+        self.hasNetworkConsent = hasNetworkConsent
     }
 
     /// Resolves every enabled, strategy-bearing descriptor through
@@ -42,7 +46,17 @@ nonisolated struct UsageRegistryReader: Sendable {
     /// providers read whichever slice of it they need (`credential`/
     /// `cookieHeader` are keyed by `UsageProviderID`).
     func snapshots(now: Date) async -> [UsageSnapshot] {
-        let enabledDescriptors = descriptors.filter { isEnabled($0.id) }
+        let enabledDescriptors = descriptors.filter { descriptor in
+            guard isEnabled(descriptor.id) else { return false }
+            // `.piggybackNetwork` providers gate consent per credential (in
+            // `productionCredentials`) so their LOCAL fallback strategy keeps
+            // working while disconnected. `.localSessionPiggyback` providers
+            // have only credential-bearing network strategies, so consent
+            // gates the whole descriptor — otherwise Settings would say "Not
+            // connected" while Rafu was already talking to the vendor.
+            guard descriptor.authPattern.connectAffordance == .localSession else { return true }
+            return hasNetworkConsent(descriptor.id)
+        }
         let resolvedCredentials = await resolveCredentials(
             enabledDescriptors.map(\.id), now)
         let baseContext = await makeContext(now)
@@ -99,6 +113,10 @@ nonisolated struct UsageRegistryReader: Sendable {
             credential: { _ in nil },
             cookieHeader: cookieHeader
         )
+    }
+
+    static func productionNetworkConsent(_ id: UsageProviderID) -> Bool {
+        UsageNetworkConsentStore().hasConsent(for: id)
     }
 
     static func productionIsEnabled(_ id: UsageProviderID) -> Bool {

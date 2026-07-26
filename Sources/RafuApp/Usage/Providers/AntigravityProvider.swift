@@ -7,7 +7,7 @@ nonisolated enum AntigravityProvider {
     static let descriptor = UsageProviderDescriptor(
         id: .antigravity,
         displayName: "Antigravity",
-        authPattern: .piggybackNetwork,
+        authPattern: .localSessionPiggyback,
         disclosure:
             "Reads Antigravity's own signed-in OAuth token from its local state.vscdb; sends only that token to cloudcode-pa.googleapis.com/v1internal:loadCodeAssist and cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels (and v1internal:retrieveUserQuota only when needed) to fetch model quota percentages. No prompt or message content is read.",
         defaultEnabled: false,
