@@ -7,8 +7,10 @@ import Testing
 struct CLIInstallerTests {
     /// Writes an executable stand-in for the bundled `rafu` under a fake
     /// `Rafu.app/Contents/SharedSupport/bin/` tree and returns its URL.
-    private func makeBundledCLI(in root: URL) throws -> URL {
-        let source = root.appending(path: "Rafu.app/Contents/SharedSupport/bin/rafu")
+    private func makeBundledCLI(in root: URL, appName: String = "Rafu") throws -> URL {
+        let source = root.appending(
+            path: "\(appName).app/Contents/SharedSupport/bin/rafu"
+        )
         try FileManager.default.createDirectory(
             at: source.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("#!/bin/sh\nexit 0\n".utf8).write(to: source)
@@ -109,6 +111,37 @@ struct CLIInstallerTests {
             await #expect(throws: CLIInstallerError.missingBundledExecutable) {
                 try await installer.install()
             }
+        }
+    }
+
+    @Test("Release and Lightning symlinks coexist and point to their own bundles")
+    func variantSymlinksCoexist() async throws {
+        try await withTemporaryDirectory { root in
+            let releaseSource = try makeBundledCLI(in: root)
+            let lightningSource = try makeBundledCLI(in: root, appName: "Rafu Lightning")
+            let binDirectory = root.appending(path: "bin")
+
+            let release = try await CLIInstaller(
+                source: releaseSource,
+                binDirectory: binDirectory,
+                identity: .release
+            ).install()
+            let lightning = try await CLIInstaller(
+                source: lightningSource,
+                binDirectory: binDirectory,
+                identity: .lightning
+            ).install()
+
+            #expect(release.installedURL.lastPathComponent == "rafu")
+            #expect(lightning.installedURL.lastPathComponent == "rafu-lightning")
+            #expect(
+                try FileManager.default.destinationOfSymbolicLink(
+                    atPath: release.installedURL.path
+                ) == releaseSource.path)
+            #expect(
+                try FileManager.default.destinationOfSymbolicLink(
+                    atPath: lightning.installedURL.path
+                ) == lightningSource.path)
         }
     }
 }

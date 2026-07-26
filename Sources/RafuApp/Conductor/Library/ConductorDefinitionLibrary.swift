@@ -1,4 +1,5 @@
 import Foundation
+import RafuCore
 
 /// The two file-backed definition scopes C6 resolves. The on-disk global
 /// directory deliberately keeps the historical `conductor` component from
@@ -141,13 +142,12 @@ nonisolated struct ConductorDefinitionLibrary: Sendable {
     }
 
     static var defaultUserLibraryRoot: URL {
-        let applicationSupport =
-            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? FileManager.default.homeDirectoryForCurrentUser
-            .appending(path: "Library/Application Support", directoryHint: .isDirectory)
-        return
-            applicationSupport
-            .appending(path: "Rafu", directoryHint: .isDirectory)
+        defaultUserLibraryRoot(identity: .current)
+    }
+
+    static func defaultUserLibraryRoot(identity: RafuAppIdentity) -> URL {
+        identity
+            .applicationSupportRoot()
             .appending(path: "conductor", directoryHint: .isDirectory)
     }
 

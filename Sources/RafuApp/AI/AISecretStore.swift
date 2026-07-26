@@ -1,4 +1,5 @@
 import Foundation
+import RafuCore
 import Security
 
 nonisolated protocol AISecretStoring: Sendable {
@@ -12,7 +13,7 @@ actor KeychainAISecretStore: AISecretStoring {
 
     private let service: String
 
-    init(service: String = "com.rafu.ai-provider-key") {
+    init(service: String = RafuAppIdentity.current.keychainService) {
         self.service = service
     }
 
