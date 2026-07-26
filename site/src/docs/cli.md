@@ -1,6 +1,6 @@
 ---
 title: The rafu command
-description: A deliberately small launcher — rafu ., --goto, --new-window.
+description: A deliberately small launcher — rafu ., --goto, --new-window — plus the ensemble verbs a coordinator speaks.
 ---
 
 # The `rafu` command
@@ -11,7 +11,7 @@ and talks to it over a private, peer-validated Unix socket.
 
 > IPC v1 ships today: opening folders and files, `--goto`, and window routing.
 > `--wait` (editor `$EDITOR` flows) is honestly deferred to v2; `--ssh` arrives with
-> SSH workspaces.
+> SSH workspaces. `rafu ensemble` — the coordinator wire — lands with the next beta.
 
 ## Command surface
 
@@ -45,6 +45,37 @@ rafu --list-ssh-hosts
 rafu --status
 rafu --version
 ```
+
+## The `rafu ensemble` subcommand
+
+`ensemble` is the launcher's first reserved subcommand — the wire an external
+coordinator CLI speaks when it drives [the Ensemble](/docs/ensemble).
+
+| Verb | Needs the token | What it does |
+|---|---|---|
+| `status` | no | Runs, steps, states, artifact paths |
+| `await` | no | Block on a streaming subscription until runs reach a state |
+| `artifact` | no | Read a handoff artifact |
+| `grant` | yes | The coordinator's remaining budget, so it can self-pace |
+| `run` | yes | Start a child run — `--role`, `--input`, `--artifact`, `--base`, `--label`, `--plan-gate`, `--json` |
+| `note` | yes | Post a line to the run timeline |
+| `propose-merge` | yes | Queue a diff at the human gate — it **never merges** |
+| `abort` | yes | Stop a run this coordinator started |
+
+The token is minted per coordinator session, bound to one grant, and injected as
+`RAFU_ENSEMBLE_TOKEN` when Rafu launches the coordinator — you never type it
+yourself. It lives only in memory and dies with the app; after a relaunch the
+coordinator must be re-granted, and the token-free verbs stay available so it can
+re-orient.
+
+Exit codes reuse `sysexits`: `0` success, `64` usage error, `65` data error, `69`
+unavailable, `75` temporary failure — including grant exhaustion, which parks the
+coordinator and asks rather than failing silently — and `77` for a missing or dead
+token.
+
+One collision rule is strict: if a file or folder named `ensemble` exists in the
+working directory, the bare invocation fails with a usage error that names
+`rafu ./ensemble` as the way through. The launcher never guesses.
 
 ## Installation
 

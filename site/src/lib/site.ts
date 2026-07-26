@@ -18,8 +18,8 @@ export const GITHUB_RELEASES_URL = `${GITHUB_URL}/releases`;
 
 /** Bump with each published release; shown in the post-download install dialog. */
 export const LATEST_RELEASE = {
-  version: "v0.1.2-beta",
-  asset: "Rafu-v0.1.2-beta-macos-arm64.zip",
+  version: "v0.1.3-beta",
+  asset: "Rafu-v0.1.3-beta-macos-arm64.zip",
 } as const;
 
 export const NAV_SECTIONS = [

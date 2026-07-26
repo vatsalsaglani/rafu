@@ -5,13 +5,15 @@ const stats = [
   { value: "1 frame", label: "p95 target for typing-path work" },
   { value: "0", label: "persistent Git processes held open" },
   { value: "0", label: "network calls without an explicit action" },
+  { value: "0", label: "inference credentials held — agent auth stays in each vendor's CLI" },
+  { value: "7", label: "agent CLIs the Ensemble conducts, on subscriptions you already have" },
 ];
 
 export function Numbers() {
   return (
     <section className="px-5 py-20 sm:px-8 sm:py-24">
       <div className="mx-auto max-w-6xl">
-        <div className="grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-3">
           {stats.map((s, i) => (
             <Reveal key={s.label} delay={0.05 * i} className="bg-surface">
               <div className="p-7">

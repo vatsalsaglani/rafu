@@ -5,6 +5,7 @@ import {
   GitFork,
   Layers,
   Lock,
+  Network,
   Palette,
   Radar,
   Sparkles,
@@ -19,6 +20,11 @@ const features: { icon: ReactNode; title: string; body: string }[] = [
     icon: <Layers size={18} strokeWidth={1.75} />,
     title: "Truly native",
     body: "TextKit 2 editing with real multiple cursors, real windows, real menus, system appearance. No Electron, no WebView canvas — typing that never waits on anything.",
+  },
+  {
+    icon: <Network size={18} strokeWidth={1.75} />,
+    title: "The Ensemble, on your subscriptions",
+    body: "Bind roles to the agent CLIs you already pay for — advisor on Claude, implementor on Codex, documentor on Gemini — and run them as plain-file pipelines from .rafu/. Each mutating role works in its own Rafu-created worktree, and merge-back is always your gate. Rafu embeds no agent and holds no keys.",
   },
   {
     icon: <GitCompareArrows size={18} strokeWidth={1.75} />,
@@ -38,7 +44,7 @@ const features: { icon: ReactNode; title: string; body: string }[] = [
   {
     icon: <SquareTerminal size={18} strokeWidth={1.75} />,
     title: "Terminals that stay put",
-    body: "Hide a session instead of killing it — the shell keeps running, one keystroke brings it back. Pick zsh, bash, fish, or nu, name and color each tab, and get a notification with a reply box when a backgrounded agent needs you.",
+    body: "Hide a session instead of killing it — the shell keeps running, one keystroke brings it back. Pick zsh, bash, fish, or nu, name and color each tab, and get a notification with a reply box when a backgrounded agent needs you. Or skip the shell: one action opens Claude, Codex, or five other agent CLIs as interactive sessions — the vendor's mark in the tab, your chosen model.",
   },
   {
     icon: <Radar size={18} strokeWidth={1.75} />,

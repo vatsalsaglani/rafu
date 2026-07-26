@@ -1,4 +1,5 @@
 import { motion } from "motion/react";
+import { Link } from "react-router-dom";
 import { AppWindow } from "../components/AppWindow";
 import { Button } from "../components/Button";
 import { DownloadButton } from "../components/DownloadButton";
@@ -75,8 +76,29 @@ export function Hero() {
           <motion.p
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
+            transition={{ duration: 0.5, delay: 0.24 }}
+            className="mt-7 text-xs tracking-wide"
+          >
+            <Link
+              to="/docs/ensemble"
+              className="group inline-flex items-center gap-2 text-text-3 transition-colors duration-150 hover:text-text-2"
+            >
+              <span className="h-1 w-1 rounded-full" style={{ background: "var(--accent)" }} />
+              <span>
+                Coming in the next beta — <span className="text-text-2">the Ensemble</span>: seven agent CLIs, one
+                window, your gate
+              </span>
+              <span aria-hidden="true" className="transition-transform duration-150 group-hover:translate-x-0.5">
+                →
+              </span>
+            </Link>
+          </motion.p>
+
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
             transition={{ duration: 0.5, delay: 0.3 }}
-            className="mt-6 text-xs tracking-wide text-text-3"
+            className="mt-4 text-xs tracking-wide text-text-3"
           >
             Free · Native · No account · macOS 15+
           </motion.p>

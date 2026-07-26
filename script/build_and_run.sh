@@ -207,6 +207,14 @@ test -f "$APP_RESOURCES/FileIcons/agent-claude-code.svg" && test -f "$APP_RESOUR
 test -f "$APP_RESOURCES/FileIcons/agent-opencode.svg" && test -f "$APP_RESOURCES/FileIcons/agent-cline.svg"
 test -f "$APP_RESOURCES/FileIcons/agent-kimi.svg" && test -f "$APP_RESOURCES/FileIcons/agent-gemini.svg"
 test -f "$APP_RESOURCES/FileIcons/agent-cursor.svg"
+# First-launch onboarding ("The Unfolding") — stills for both grades.
+# Video and the score were both cut from the experience (2026-07-27):
+# stills + motion design only.
+for grade in indigo khadi; do
+  for shot in V0-knot V1-loom V2-bobbins V3-resolve I1-native I2-private I3-quiet; do
+    test -f "$APP_RESOURCES/Onboarding/$grade/$shot.jpg"
+  done
+done
 "$CLI_BINARY" --version >/dev/null
 
 open_app() {

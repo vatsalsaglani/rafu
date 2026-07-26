@@ -11,7 +11,7 @@ is the source of truth.
 
 ## Where it stands
 
-**Current checkpoint: public beta** (`v0.1.2-beta`, on the
+**Current checkpoint: public beta** (`v0.1.3-beta`, on the
 [releases page](https://github.com/vatsalsaglani/rafu/releases)). The app provides,
 today:
 
@@ -39,6 +39,20 @@ today:
 - Read-only usage tracking for the coding agents and tools you connect — Claude,
   Codex, Cursor, Cline, OpenCode, and more — opt-in per provider, shown in the notch
 
+## On main, not yet in a beta
+
+Merged and tested on `main`, shipping with the next beta:
+
+- **[The Ensemble](/docs/ensemble)** — conduct the agent CLIs you already installed
+  (Claude Code, Codex, OpenCode, Cline, Kimi, Gemini, Cursor) as plain-file agents
+  and workflows in `.rafu/`, with a Rafu-created worktree per mutating role, a live
+  graph canvas, and a merge gate that is always yours
+- **[Agent terminals](/docs/agent-terminals)** — one action opens a vendor CLI as an
+  interactive terminal session: the vendor's mark, your chosen model, no grant, no
+  capture
+- **Model visibility** — one resolver answers *which model will actually run*, shown
+  wherever the CLI is shown
+
 ## Next
 
 | Phase | What lands |
@@ -61,7 +75,9 @@ Recorded as *optional future scope* — considered only after the core product i
 Extension marketplaces, embedded coding agents, AI chat, debuggers, collaboration, and
 per-document WebViews are not "later" — they are **never**, by written decision. See
 [the landing page](/#features) for the short version, or the product plan for the long
-one.
+one. Orchestrating the CLIs you already installed is not an embedded agent —
+[the Ensemble](/docs/ensemble) holds that line exactly: no embedded agent, no held
+credentials, nothing automatic.
 
 ## Open decisions
 

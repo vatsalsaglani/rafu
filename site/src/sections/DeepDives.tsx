@@ -124,6 +124,70 @@ function RemoteMock() {
   );
 }
 
+function EnsembleMock() {
+  const steps = [
+    { role: "advisor", cli: "Claude Code", detail: "plan.md handed off", state: "done" },
+    { role: "implementor", cli: "Codex", detail: "rafu/run-7f3a · 2 files", state: "running" },
+    { role: "documentor", cli: "Gemini CLI", detail: "queued behind the gate", state: "queued" },
+  ] as const;
+  return (
+    <div className="overflow-hidden rounded-xl border border-border-strong bg-elevated shadow-[0_20px_60px_-20px_rgba(0,0,0,0.5)]">
+      <div className="flex items-center gap-2 border-b border-border px-4 py-2.5 text-[10px] font-semibold tracking-[0.08em] text-text-3 uppercase">
+        Ensemble graph — mend-and-verify
+        <span className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-[9.5px] font-medium normal-case tracking-normal text-text-2">
+          <span className="h-1 w-1 rounded-full" style={{ background: "var(--accent)" }} />
+          plan gate · approved
+        </span>
+      </div>
+      <div className="px-4 py-3">
+        {steps.map((s, i) => (
+          <div key={s.role} className="relative flex items-center gap-3 py-2">
+            {i < steps.length - 1 ? (
+              <span
+                aria-hidden="true"
+                className="absolute top-[26px] left-[5px] h-[calc(100%-18px)] w-px"
+                style={{ background: "var(--border-strong)" }}
+              />
+            ) : null}
+            <span
+              className={`h-[11px] w-[11px] shrink-0 rounded-full border-2 ${s.state === "running" ? "animate-pulse" : ""}`}
+              style={{
+                borderColor:
+                  s.state === "done"
+                    ? "var(--success)"
+                    : s.state === "running"
+                      ? "var(--accent)"
+                      : "var(--border-strong)",
+                background: s.state === "done" ? "var(--success)" : "transparent",
+              }}
+            />
+            <span className="text-[13px] text-text">{s.role}</span>
+            <span className="text-[11.5px] text-text-3">{s.cli}</span>
+            <span className="ml-auto font-mono text-[10.5px] text-text-3">{s.detail}</span>
+          </div>
+        ))}
+        <div
+          className="mt-1 flex items-center gap-3 rounded-lg border border-dashed px-3 py-2"
+          style={{ borderColor: "var(--border-strong)" }}
+        >
+          <span
+            className="h-[11px] w-[11px] shrink-0 rounded-full border-2 border-dashed"
+            style={{ borderColor: "var(--text-3)" }}
+          />
+          <span className="text-[13px] text-text-3">reviewer · Cline</span>
+          <span className="ml-auto font-mono text-[10.5px] text-text-3">proposed — your call</span>
+        </div>
+      </div>
+      <div className="flex items-center gap-4 border-t border-border px-4 py-2 text-[10.5px] text-text-3">
+        <span>⏸ propose-merge queued — the diff waits for you</span>
+        <span className="ml-auto" style={{ color: "var(--accent)" }}>
+          review in the diff canvas
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- section ---------- */
 
 interface Dive {
@@ -140,6 +204,24 @@ const dives: Dive[] = [
     index: "01",
     title: (
       <>
+        Conduct the <em className="font-display font-normal italic">weave</em>, too
+      </>
+    ),
+    body: "An advisor on Claude, an implementor on Codex, a documentor on Gemini — the CLIs you already installed, on the subscriptions you already pay for, coordinated from one window. Agents and workflows are plain Markdown in .rafu/, each mutating role works in its own Rafu-created worktree, and nothing comes home except through your diff review.",
+    points: [
+      "Seven CLIs — Claude Code, Codex, OpenCode, Cline, Kimi, Gemini, Cursor — with per-role model selection",
+      "Plain files in .rafu/: committable, diffable, usable without Rafu",
+      "Rafu creates the worktrees; agents never touch your checkout",
+      "A plan gate before a coordinator fans out; propose-merge queues a diff, never merges",
+      "No inference credentials — login stays in each vendor's CLI",
+    ],
+    mock: <EnsembleMock />,
+    badge: "in the next beta",
+  },
+  {
+    index: "02",
+    title: (
+      <>
         Made for the <em className="font-display font-normal italic">last mile</em> of agent work
       </>
     ),
@@ -152,7 +234,7 @@ const dives: Dive[] = [
     mock: <QuickOpenMock />,
   },
   {
-    index: "02",
+    index: "03",
     title: (
       <>
         Review, then commit — on <em className="font-display font-normal italic">your</em> terms
@@ -168,7 +250,7 @@ const dives: Dive[] = [
     mock: <CommitMock />,
   },
   {
-    index: "03",
+    index: "04",
     title: (
       <>
         One window, <em className="font-display font-normal italic">local or remote</em>

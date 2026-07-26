@@ -24,6 +24,10 @@ The moment a session in any window rings the bell, the strip widens on its own t
 an accent dot and a count, even before you hover. It shrinks back the instant that
 attention clears.
 
+An active [Ensemble](/docs/ensemble) run does something similar: the strip shows the
+role the run is on and its step count, with a marker when a gate is waiting on you —
+then shrinks back when the run finishes.
+
 ## Hover
 
 Hovering (or clicking, which pins it open) expands the strip downward into a panel:
@@ -32,11 +36,14 @@ Hovering (or clicking, which pins it open) expands the strip downward into a pan
    (Claude, Codex, Cursor, and however many more you've set up), plus a
    `▸ N more providers` disclosure if you're tracking more than four. See
    [Usage tracking](/docs/usage-tracking).
-2. **Editors** — one row per open workspace window: its name, a one-line git status
+2. **Ensemble runs** — one row per active workflow across your windows: the role it's
+   on, step n of m, and gate-waiting state. Each row is a real button that opens that
+   run's canvas in its own workspace window.
+3. **Editors** — one row per open workspace window: its name, a one-line git status
    (`⎇ main · 3± · ↑2`), and terminal-status chips for running, attention, and exited
    sessions. Click a row to bring that window forward. Past six windows, a filter field
    appears — type to narrow by name or branch.
-3. **Attention** — a card for every session, across every window, that's waiting on
+4. **Attention** — a card for every session, across every window, that's waiting on
    you: the session's name, a bounded snippet of what it last printed, and a reply
    field. Type and send; the text goes into that exact shell, nothing inferred or
    executed on your behalf.

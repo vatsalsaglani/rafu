@@ -40,6 +40,14 @@ machine — Rafu checks `/etc/shells`, `$SHELL`, and common Homebrew install pat
 zsh, bash, **fish**, and nu — the Rafu menu's **New Terminal With Shell** submenu lists
 them by name and path, and the last one you pick becomes the new default.
 
+## Agent terminals
+
+**New Agent Terminal…** (Rafu menu, or the agents section of the Terminals panel)
+launches a discovered coding-agent CLI — Claude Code, Codex, and five others —
+directly as a session: the vendor's mark in the tab, the model you picked, no shell
+in between. It's your interactive session, not an Ensemble run: no grant, no
+capture, and never restored after relaunch. See [Agent terminals](/docs/agent-terminals).
+
 ## Naming and coloring sessions
 
 Double-click a session in the Terminals panel to rename it — useful once you have

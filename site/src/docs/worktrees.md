@@ -38,3 +38,7 @@ a process you didn't ask for.
 The flow this enables: point the agent at a worktree, keep your own checkout clean,
 then **Compare with Current** when it reports back — the whole weave, reviewed as one
 diff, before a single line lands in your tree.
+
+The [Ensemble](/docs/ensemble) builds on exactly this contract: every mutating role
+works in a Rafu-created worktree on a `rafu/run-<id>` branch, removal is never forced,
+and its diff returns to your checkout only through the same review canvas.

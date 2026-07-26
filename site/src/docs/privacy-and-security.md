@@ -33,6 +33,7 @@ Native app → system SSH process     your config, your keys, your known_hosts
 System SSH → remote host            OpenSSH is the security authority
 Native app → AI provider            HTTPS, Keychain-stored key, previewed payloads
 Workspace files → Git hooks         trust prompt before the first hook can run
+Native app → agent CLI (Ensemble)   delegated auth, curated environment, worktree-bounded
 ```
 
 ## Per-subsystem controls
@@ -62,6 +63,15 @@ one-time cookie import before it makes a single request. Only metric fields — 
 used, token totals, reset times — are ever read; message and prompt content are never
 touched. Pasted keys live in the Keychain; nothing is logged, and a failing or
 unauthenticated provider just doesn't show a tile.
+
+**The Ensemble** *(next beta)*. Agent CLIs spawn as an executable plus an argument
+array with a minimal curated environment — no inherited variables, no provider
+credentials. Authentication is delegated entirely to each vendor's own CLI; Rafu holds
+no inference credentials at all. A coordinator session's capability token exists only
+in memory, dies with the app, and is never logged or persisted. Mutating roles work
+inside Rafu-created worktrees, merge-back is always a user gate, and prompts,
+artifacts, and agent output stay under `.rafu/runs/` in the repository — never in
+Rafu's own logs.
 
 ## Local builds and Gatekeeper
 

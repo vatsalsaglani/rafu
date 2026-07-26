@@ -21,7 +21,7 @@ editing, reviewing, or committing a repository.
 
 ## Install
 
-**Download the beta.** Grab `Rafu-v0.1.2-beta-macos-arm64.zip` from the
+**Download the beta.** Grab `Rafu-v0.1.3-beta-macos-arm64.zip` from the
 [latest release](https://github.com/vatsalsaglani/rafu/releases), unzip, and move
 `Rafu.app` to `/Applications`. Beta builds are not yet notarized, so clear the
 quarantine flag once, on that app only:
@@ -81,6 +81,8 @@ Commit
 - [Workspaces](/docs/workspaces) — local today, SSH in a later release, one window each
 - [The editor](/docs/the-editor) — what the TextKit 2 editor does and doesn't do
 - [Worktrees](/docs/worktrees) — the agent in one tree, you in another
+- [The Ensemble](/docs/ensemble) — conduct the agent CLIs you already installed,
+  behind a gate that stays yours *(next beta)*
 - [The notch companion](/docs/notch-companion) — a strip that merges into the notch
   and expands into every open window's git status
 - [Keyboard shortcuts](/docs/shortcuts) — the full, verified map

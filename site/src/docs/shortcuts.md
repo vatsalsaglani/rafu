@@ -68,4 +68,8 @@ own readline bindings or an existing app shortcut, so menu + palette is the path
   unconflicted.
 - The notch companion is pointer-first: hover or click the strip, `Escape` collapses
   it. There's no shortcut to open it from the keyboard yet.
+- Ensemble and agent actions — New Ensemble…, New Ensemble Run…, Show Ensemble Graph,
+  and New Agent Terminal… — live in the Rafu menu and the command palette without
+  dedicated shortcuts, for the same collision-avoidance reason as the terminal
+  actions.
 - `⌘P` owns Go to File; the system Print command is deliberately replaced.

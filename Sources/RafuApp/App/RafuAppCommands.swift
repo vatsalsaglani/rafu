@@ -385,6 +385,16 @@ struct RafuAppCommands: Commands {
             }
             .keyboardShortcut("w", modifiers: .command)
         }
+
+        // `after: .help`, never `replacing: .help` — replacing deletes the
+        // system Help menu item entirely.
+        CommandGroup(after: .help) {
+            Button("Play the Intro Again") {
+                guard let workspaceSession else { return }
+                FirstLaunchExperienceModel.shared.replay(hostedBy: workspaceSession)
+            }
+            .disabled(workspaceSession == nil)
+        }
     }
 
     private func soleHunk(in session: WorkspaceSession, scope: GitDiffScope) -> GitDiffHunk? {

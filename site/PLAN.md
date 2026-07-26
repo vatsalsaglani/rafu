@@ -193,10 +193,10 @@ Headline: **Deliberately *not* an IDE.**
 *                     404
 ```
 
-Landing sections (in order): nav · hero · story · feature grid · deep dive ×3 ·
+Landing sections (in order): nav · hero · story · feature grid · deep dive ×4 ·
 non-goals · themes · numbers · CTA · footer.
 
-### Docs information architecture (14 pages)
+### Docs information architecture (19 pages)
 
 | Slug | Title | Source of truth |
 |---|---|---|
@@ -206,10 +206,15 @@ non-goals · themes · numbers · CTA · footer.
 | search | Find & replace | editor-search-and-restoration.md |
 | markdown | Markdown & Mermaid | plan §7.7, ADR 0008 |
 | git | Git in Rafu | plan §11, ADR 0011, phase-3 |
+| worktrees | Worktrees | ADR 0013, git-experience-and-worktrees.md |
+| ensemble | The Ensemble | ADR 0018 + amendment, conductor/ phase plans |
 | commit-messages | AI commit messages | plan §12, phase-4 |
 | themes | Themes | plan §4.5–4.6, indigo/khadi.json |
 | cli | The `rafu` command | plan §9, ADR 0007/0009 |
 | terminal | The terminal | ADR 0004 |
+| agent-terminals | Agent terminals | ADR 0021, agent-terminals.md |
+| notch-companion | The notch companion | ADR 0016, terminal-notch-hud.md |
+| usage-tracking | Usage tracking | ADR 0017, agent-usage-providers.md |
 | language-intelligence | Language intelligence | ADR 0005, language-intelligence.md |
 | shortcuts | Keyboard shortcuts | plan §4, workbench phase |
 | privacy-and-security | Privacy & security | plan §13, SECURITY.md |
@@ -236,7 +241,7 @@ rafu-land-doc/
 │   ├── sections/                ← Hero, Story, Features, DeepDives, NonGoals,
 │   │                              Themes, Numbers, Cta
 │   ├── pages/                   ← Landing, DocsLayout, DocsPage, NotFound
-│   ├── docs/                    ← the 14 markdown files (+ frontmatter)
+│   ├── docs/                    ← the markdown files (+ frontmatter)
 │   └── lib/                     ← docs registry, search index, shiki theme JSON
 └── public/                      ← favicon.svg (squircle seam), og.png
 ```
@@ -266,7 +271,7 @@ color-only meaning.
 2. Tokens, theme provider, fonts, logo/favicon
 3. Landing: all sections + copy
 4. Docs system: plugin, Shiki themes, layout, search, pager
-5. Docs content: 14 pages from the sources above
+5. Docs content: the pages above, from the sources listed
 6. Polish: motion pass, reduced-motion, responsive, meta/OG
 7. Verify: `npm run build` clean + dev-server smoke test
 

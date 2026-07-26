@@ -40,8 +40,8 @@ export function Cta() {
         </Reveal>
         <Reveal delay={0.08}>
           <p className="mx-auto mt-5 max-w-lg text-[16px] leading-[1.75] text-text-2">
-            The beta is live. The docs are already honest about what Rafu does, what it costs, and what it will
-            never do.
+            The beta is live — and the Ensemble is on main, waiting at its own gate. The docs are already honest
+            about what Rafu does, what it costs, and what it will never do.
           </p>
         </Reveal>
         <Reveal delay={0.14}>
