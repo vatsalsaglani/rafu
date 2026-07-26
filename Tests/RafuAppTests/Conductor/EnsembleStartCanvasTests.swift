@@ -276,7 +276,9 @@ struct EnsembleStartCanvasTests {
                             id: "gpt-5.6", displayName: "GPT-5.6", source: .curated)
                     ])
             ],
-            defaultModelStore: ConductorDefaultModelStore(suiteName: suite))
+            defaultModelStore: ConductorDefaultModelStore(suiteName: suite),
+            discoveredModels: ConductorDiscoveredModelCache(
+                store: ConductorDiscoveredModelStore(suiteName: suite)))
         await model.probeCLIs(workspaceRoot: root)
 
         let resolution = try #require(model.coordinatorModelResolution)
@@ -285,6 +287,74 @@ struct EnsembleStartCanvasTests {
         #expect(resolution.label != "GPT-5.6")
         // The picker still OFFERS it; resolution simply does not claim it.
         #expect(model.availableModels(for: .codex).map(\.id) == ["gpt-5.6"])
+    }
+
+    /// The bug this closes: a user refreshed Cursor's models in Settings, saw
+    /// a long list there, then opened this canvas and saw the three curated
+    /// entries — same CLI, same machine, same minute, two different answers.
+    @Test("The canvas offers the models Settings discovered, without discovering itself")
+    func canvasSeesDiscoveredModelsWithoutSpawningAnything() async throws {
+        let root = try makeEnsembleTestRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = "EnsembleStartCanvasTests.\(UUID().uuidString)"
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+
+        let cache = ConductorDiscoveredModelCache(
+            store: ConductorDiscoveredModelStore(suiteName: suite))
+        let curated = ConductorModelChoice(
+            id: "gpt-5.6-sol", displayName: "GPT-5.6 Sol", source: .curated)
+        let adapter = readyFixture(.codex, curated: [curated])
+
+        let model = EnsembleStartModel(
+            adapters: [adapter],
+            defaultModelStore: ConductorDefaultModelStore(suiteName: suite),
+            discoveredModels: cache)
+        await model.probeCLIs(workspaceRoot: root)
+
+        // Before any discovery: curated only. Opening the canvas must never
+        // have run a CLI to learn more.
+        #expect(model.availableModels(for: .codex).map(\.id) == ["gpt-5.6-sol"])
+
+        // Someone else — Settings → Agents → Refresh models — discovers.
+        cache.setModels(
+            [
+                ConductorModelChoice(
+                    id: "gpt-5.4", displayName: "GPT-5.4", source: .discovered),
+                ConductorModelChoice(
+                    id: "gpt-5.6-sol", displayName: "GPT-5.6 Sol", source: .discovered),
+            ],
+            for: .codex)
+
+        // The ALREADY-OPEN canvas now offers the same catalog, curated first
+        // and deduplicated by id — the exact `ConductorModelCatalog.merge`
+        // contract Settings uses.
+        #expect(model.availableModels(for: .codex).map(\.id) == ["gpt-5.6-sol", "gpt-5.4"])
+        #expect(model.availableModels(for: .codex).first?.source == .curated)
+
+        // A CLI nobody discovered for is unaffected.
+        #expect(model.availableModels(for: .cursor).isEmpty)
+    }
+
+    /// A discovered list is catalog metadata, not a credential, and surviving
+    /// relaunch is the whole point — otherwise both surfaces silently collapse
+    /// back to curated on every launch and the bug returns.
+    @Test("A discovered list survives a new cache over the same store")
+    func discoveredModelsPersist() {
+        let suite = "EnsembleStartCanvasTests.\(UUID().uuidString)"
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+        let store = ConductorDiscoveredModelStore(suiteName: suite)
+
+        #expect(ConductorDiscoveredModelCache(store: store).models(for: .cursor).isEmpty)
+
+        ConductorDiscoveredModelCache(store: store).setModels(
+            [ConductorModelChoice(id: "auto", displayName: "Auto", source: .discovered)],
+            for: .cursor)
+
+        let reloaded = ConductorDiscoveredModelCache(store: store)
+        #expect(reloaded.models(for: .cursor).map(\.id) == ["auto"])
+        #expect(reloaded.models(for: .cursor).first?.source == .discovered)
+        // Keyed per CLI: one vendor's catalog can never be read for another.
+        #expect(reloaded.models(for: .openCode).isEmpty)
     }
 
     /// The per-CLI equivalent of the coordinator's cross-vendor reset: a

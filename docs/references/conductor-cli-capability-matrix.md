@@ -12,6 +12,8 @@
   on 2026-07-26; Cursor's installed, authenticated runtime was probed on
   2026-07-27. Gemini's installed version was confirmed but its Ensemble
   runtime remains unverified; Kimi remains absent and unverified.
+  Model listing and every curated model list were re-probed on 2026-07-27 —
+  see "Curated model lists: what each was verified against".
 
 ## Verified versions
 
@@ -36,7 +38,7 @@
 | Read-only / plan | `--permission-mode plan` `RW` | `-s/--sandbox read-only` `RW` | `--agent plan` `RW` | `-p/--plan` + `--auto-approve false` `RW` | **`--mode plan` / `--plan`**; **`--mode ask`** is also read-only. A fresh headless workspace needs **`--trust`**. |
 | Write / act | `--permission-mode bypassPermissions` `RW` | `-s/--sandbox workspace-write` `RW` | default agent `RW` | `--auto-approve true` `RW` | `-f/--force` `RW` |
 | Working directory | `--add-dir` / cwd `RW` | `-C/--cd <DIR>` `RW` | `--dir` `RW` | `-c/--cwd` `RW` | cwd `RW`; **`--workspace <path-or-name>`** and **`--add-dir`** also exist |
-| Model | `--model <alias\|full>` `RW` | `--model` `RW` | `-m provider/model` `RW` | `-m <id>` (+ `-P <provider>`) `RW` | `--model <id>` `RW`; current Rafu defaults are stale, see below |
+| Model | `--model <alias\|full>` `RW` | `--model` `RW` | `-m provider/model` `RW` | `-m <id>` (+ `-P <provider>`) `RW` | `--model <id>` `RW` |
 | Machine-readable output | `--output-format stream-json --verbose` `RW` | `--json` (JSONL) `RW` | `--format json` `RW` | `--json` `RW` | `--output-format json` `RW`; **`stream-json`** is available |
 | **Reasoning effort** | **`--effort low\|medium\|high\|xhigh\|max`** | **`-c model_reasoning_effort=<level>`** (config override; no dedicated flag) | — no per-run flag; see note below | **`--thinking none\|low\|medium\|high\|xhigh`** | Effort-bearing model IDs or `--model 'id[effort=<level>]'`; passable today through Rafu's free-text model field, but no portable `effort:` field |
 | **Continue last session** | **`-c/--continue`** | **`exec resume --last`** | **`-c/--continue`** | — | **`--continue`** or **`resume`** |
@@ -44,7 +46,7 @@
 | **Assign a session id** | **`--session-id <uuid>`** | — (Codex mints its own) | — | — | **`create-chat`** pre-creates a CLI-minted ID; no arbitrary ID assignment |
 | **Fork on resume** | **`--fork-session`** | — | **`--fork`** | — | — |
 | List sessions | *unverified* | `exec resume --last` implies a recorded store | `export [sessionID]` (JSON), `stats` | `history --json` | **`ls`** / interactive resume selector |
-| Model listing | — (curated) | — (curated) | `opencode models` `RW` | — (reads bundled `@cline/llms` catalog) `RW` | **`models` / `--list-models`**; not used by Rafu |
+| Model listing | — (curated; verified absent) | — (curated; verified absent) | `opencode models` `RW` | — (reads bundled `@cline/llms` catalog) `RW` | `models` / `--list-models` `RW` |
 | Auth status, headless | `auth status --json` `RW` | `login status` `RW` | `auth list` `RW` | — (all status commands need a TTY) | `status` / `whoami` `RW` |
 
 ## What this means for the three questions
@@ -80,24 +82,58 @@ write mapping remains syntactically valid:
 
 ### 2. "Which model, what reasoning effort?"
 
-**Model: wired, with a Cursor drift bug.** `model:` in the agent file is
+**Model: wired. The Cursor drift bug is fixed.** `model:` in the agent file is
 overridable per run at launch (C6) and snapshotted into the run manifest so
-later file edits never rewrite history. Cursor 2026.07.23 adds account-backed
-`models` / `--list-models`, but `CursorAdapter.supportsModelDiscovery` is
-still `false`.
+later file edits never rewrite history.
 
-More importantly, the adapter's curated `gpt-5`, `sonnet-4`, and
-`sonnet-4-thinking` choices came from the old help examples. On 2026-07-27:
+The three findings that drove the fix, all probed 2026-07-27:
 
 - `models` returned 190 catalog rows, including `auto`, but no exact `gpt-5`;
-- the exact Rafu default (`--model gpt-5`) failed before starting the agent;
-- a listed named model was also rejected for this account's entitlement; and
+- the then-current Rafu default (`--model gpt-5`) failed before starting the
+  agent, and a listed named model was also rejected for this account's
+  entitlement;
 - the same write probe with `--model auto` succeeded and created exactly the
   requested three-byte `OK\n` file.
 
-Listing a model therefore does not prove the account may select it. Rafu
-needs dynamic discovery plus honest run-time entitlement errors, and an empty
-Cursor model must not silently resolve to the stale `gpt-5` default.
+Listing a model does not prove the account may select it. What landed:
+
+1. `CursorAdapter.supportsModelDiscovery` is now `true` and
+   `discoverModels()` runs `cursor-agent models`, parsing the verified
+   `<id> - <display name>` table (see the Cursor section below for the exact
+   shape and the parser's rule).
+2. An empty Cursor model now passes **no** `--model` flag at all, matching
+   every other adapter and `ConductorModelResolution.cliDecides`. It
+   previously substituted `curatedModels()[0]`, i.e. exactly the guess that
+   resolver forbids — and that guess was `gpt-5`, which this account could not
+   run.
+3. Cursor's curated fallback was rebuilt from ids read verbatim out of the
+   probed catalog, with `auto` first as the safe choice.
+
+`GeminiCLIAdapter` carried the identical empty-model substitution and was
+fixed the same way. It was benign only for as long as the curated list
+happened to begin with the CLI's own default; refreshing that list would have
+silently changed which model ran.
+
+### Curated model lists: what each was verified against
+
+Curated lists are what a user sees when a CLI cannot list its own models, so a
+stale one is actively misleading rather than merely incomplete. State on
+2026-07-27:
+
+| CLI | Curated list | Verified against |
+|---|---|---|
+| Claude Code | `fable`, `opus`, `sonnet`, `haiku` — **unchanged** | 2.1.220's own alias array and its alias→label map. `mythos` is in that array but is documented as restricted to Project Glasswing participants, so it is deliberately not offered. |
+| Codex | The 7 Codex offers, Codex's order, `gpt-5.6-sol` first | `~/.codex/models_cache.json` (the account-scoped list Codex fetches; ids and names read verbatim). Both binaries' embedded fallback tables agree on the first six and carry `gpt-5.2` where the live list has `gpt-5.3-codex-spark`; the live list wins because it is what the user's picker shows. Was 4 entries incl. the `gpt-5.6` alias. |
+| Gemini | 7 entries, `gemini-3.5-flash` → `gemini-2.5-flash` | CLI 0.52.0's bundled model-config registry, whose own source comment marks that block **user-facing** ("they could be passed via `--model`") as against the internal `*-base` entries after it. `-base` and `-customtools` excluded. Was 2 stale 2.5-only entries. |
+| Cursor | 6 entries, `auto` first | Ids read verbatim from the probed 190-row catalog. Fallback only — discovery now supplies the full list. Was `gpt-5`, `sonnet-4`, `sonnet-4-thinking` from old help examples. |
+| OpenCode, Cline | unchanged | Both already discover; curated is fallback only. |
+| Kimi | unchanged | **Unverified — the CLI is not installed.** Run `kimi --help \| grep -i model` to settle both its curated list and whether it has a listing verb. |
+
+Claude Code and Codex are recorded as **verified absent**, not assumed: their
+full `--help` (and `codex exec --help`) expose no `--list-models` flag and no
+listing subcommand. Gemini is the same — it has `--list-extensions` and
+`--list-sessions` but no `--list-models`. Each adapter's `discoverModels()`
+carries that one-line reason and the re-check command in code.
 
 **Portable reasoning effort: NOT wired — this is a real gap.** Four of the
 five runtime-probed CLIs accept it:
@@ -141,11 +177,9 @@ rejection or downgrade must be visible, not silently clamped.
 **A CLI's own config should be the default when the CLI supports that
 contract.** Codex reads `model` and `model_reasoning_effort` from
 `~/.codex/config.toml`, so a role with an empty Codex `model:` genuinely means
-"whatever the user configured for that CLI". Cursor differs today:
-`CursorAdapter` replaces an empty model with its first curated choice
-(`gpt-5`), and that choice is now invalid for the authenticated local account.
-That is exactly the kind of guessed default delegated configuration is meant
-to avoid.
+"whatever the user configured for that CLI". As of 2026-07-27 every adapter
+honours this: an unset model passes no model flag at all. Cursor and Gemini
+were the two exceptions and are fixed.
 
 ### 3. "Continue a previous conversation, or switch model mid-run?"
 
@@ -238,13 +272,63 @@ The account-backed probes established four separate facts:
    environment, so delegated login works without forwarding
    `CURSOR_API_KEY`.
 2. `models` and `--list-models` both work headlessly and returned the same
-   190-row catalog.
+   190-row catalog. Rafu now wires this: `CursorAdapter.discoverModels()`.
 3. That catalog is not an entitlement list: the account rejected a listed
    named model and directed the caller to Auto. The old curated `gpt-5`
    default was absent and failed too.
 4. `--model auto` completed the exact Rafu write argv shape. A separate
    `--trust --mode plan --model auto` run completed without changing the
    scratch repository.
+
+### The `models` output shape Rafu parses
+
+Verified 2026-07-27, 194 lines / 8,777 bytes:
+
+```text
+Available models
+
+auto - Auto (current, default)
+gpt-5.3-codex-low - Codex 5.3 Low
+…
+glm-5.2-max - GLM 5.2 Max
+
+Tip: use --model <id> (or /model <id> in interactive mode) to switch. …
+```
+
+A header, a blank line, one `<id> - <display name>` row per model, a trailing
+tip. Exactly three of the 194 lines are not rows (lines 1, 2, and the tip).
+
+`CursorAdapter.parseDiscoveredModels` deliberately does **not** encode "skip
+line 1 and the last line" — a wording change would silently break that. It
+keeps only lines that parse as `<id> - <name>` where the id is ASCII
+alphanumerics plus `-._/@:+`, and drops everything else. The header and tip
+fall out for free, as will any future prose. Zero parsed rows returns `nil`,
+which the caller answers with the curated list, so a failed listing can never
+present as an empty catalog.
+
+The tip line also documents parameterized model strings — `--model
+'claude-opus-4-8[context=1m,effort=high,fast=false]'` — which is the
+effort-bearing form referenced in the reasoning-effort section above.
+
+### Where a discovered list is kept
+
+`ConductorDiscoveredModelCache` (`Sources/RafuApp/Conductor/`), an app-wide
+`@MainActor @Observable` cache write-through to `UserDefaults` via
+`ConductorDiscoveredModelStore`.
+
+This exists because Settings → Agents and the New Ensemble canvas used to give
+different answers to "which models can I pick?" for the same CLI on the same
+machine — Settings ran discovery and showed 190 Cursor models, the canvas
+showed 3 curated ones. The canvas is right to refuse to discover (opening a
+creation canvas must never spawn seven CLI processes), but it was wrong to
+conclude it could not *read* a result someone else already paid for.
+
+So: discovery is still only ever an explicit user action, in Settings. Both
+surfaces now merge curated + cached-discovered through the same
+`ConductorModelCatalog.merge` call. Reading the cache spawns nothing and is
+safe from a view body. It persists because a discovered list is public catalog
+metadata — model ids and display names, never a credential — and without
+persistence both surfaces silently collapse back to curated on every launch.
 
 Cursor's JSON result includes `session_id`. Resuming that exact id with
 `--resume <chatId>` and then using `--continue` both preserved the id and
@@ -284,6 +368,40 @@ cd "$cursor_plan_dir"
 cursor-agent -p --output-format json --trust --mode plan --model auto \
   "Plan how to create should-not-exist.txt. Do not edit files." </dev/null
 /bin/test ! -e "$cursor_plan_dir/should-not-exist.txt"
+```
+
+Model listing and curated lists, 2026-07-27:
+
+```bash
+# Cursor: does `models` still emit `<id> - <display name>` rows?
+cursor-agent models </dev/null | grep -cvE '^[A-Za-z0-9._-]+ - .+$'   # expect 3
+
+# Claude Code / Codex / Gemini: still NO listing verb?
+claude --help </dev/null | grep -iE 'list-models|^  [a-z-]+ +.*model'
+codex --help </dev/null | grep -iE 'list-models|^  models'
+codex exec --help </dev/null | grep -iE 'list-models'
+gemini --help </dev/null | grep -iE 'list-models'      # only --list-extensions/--list-sessions
+
+# Codex's own 7, ids and display names, from the list Codex itself caches:
+python3 -c 'import json;d=json.load(open("'"$HOME"'/.codex/models_cache.json"))
+def w(o):
+    if isinstance(o,dict):
+        if "slug" in o: print(o["slug"], "|", o.get("display_name"))
+        [w(v) for v in o.values()]
+    elif isinstance(o,list): [w(v) for v in o]
+w(d)'
+
+# Gemini's user-facing registry (the block its own comment marks user-facing,
+# as opposed to the internal `*-base` entries that follow it):
+grep -oE '"gemini-[0-9][0-9a-z.-]*": \{' \
+  "$(npm root -g)/@google/gemini-cli/bundle"/*.js | sort -u
+
+# Claude Code's family aliases and their labels:
+strings -a "$(readlink -f "$(which claude)")" \
+  | grep -F 'yPu=["fable"' | head -c 200
+
+# Kimi — UNVERIFIED, not installed. Run once it is:
+kimi --help | grep -i model
 ```
 
 Anything a probe cannot confirm must be recorded *unverified* with the exact

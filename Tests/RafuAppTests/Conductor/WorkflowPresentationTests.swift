@@ -204,26 +204,29 @@ func runRowAgentSummaryCollapsesHonestly() throws {
             id: "uniform",
             bindings: [
                 ConductorRunManifest.AgentBinding(
-                    provider: .codex, model: "gpt-5.6", autonomy: .readOnly, adapterVersion: nil),
+                    provider: .codex, model: "gpt-5.6-sol", autonomy: .readOnly,
+                    adapterVersion: nil),
                 ConductorRunManifest.AgentBinding(
-                    provider: .codex, model: "gpt-5.6", autonomy: .readOnly, adapterVersion: nil),
+                    provider: .codex, model: "gpt-5.6-sol", autonomy: .readOnly,
+                    adapterVersion: nil),
             ]))
-    #expect(uniform.agentLabel == "Codex · GPT-5.6")
-    #expect(uniform.agentDetailLabel == "Codex — GPT-5.6")
+    #expect(uniform.agentLabel == "Codex · GPT-5.6 Sol")
+    #expect(uniform.agentDetailLabel == "Codex — GPT-5.6 Sol")
 
     let sameCLI = ConductorRunPresentation.runRow(
         for: modelManifest(
             id: "same-cli",
             bindings: [
                 ConductorRunManifest.AgentBinding(
-                    provider: .codex, model: "gpt-5.6", autonomy: .readOnly, adapterVersion: nil),
+                    provider: .codex, model: "gpt-5.6-sol", autonomy: .readOnly,
+                    adapterVersion: nil),
                 ConductorRunManifest.AgentBinding(
                     provider: .codex, model: "", autonomy: .readOnly, adapterVersion: nil),
             ]))
     #expect(sameCLI.agentLabel == "Codex · 2 models")
     // The short form abbreviates; the long form never does.
     let sameCLIDetail = try #require(sameCLI.agentDetailLabel)
-    #expect(sameCLIDetail.contains("GPT-5.6"))
+    #expect(sameCLIDetail.contains("GPT-5.6 Sol"))
     #expect(sameCLIDetail.contains(ConductorRunPresentation.unsetModelLabel))
 
     let mixed = ConductorRunPresentation.runRow(
@@ -231,13 +234,14 @@ func runRowAgentSummaryCollapsesHonestly() throws {
             id: "mixed",
             bindings: [
                 ConductorRunManifest.AgentBinding(
-                    provider: .codex, model: "gpt-5.6", autonomy: .readOnly, adapterVersion: nil),
+                    provider: .codex, model: "gpt-5.6-sol", autonomy: .readOnly,
+                    adapterVersion: nil),
                 ConductorRunManifest.AgentBinding(
                     provider: .claudeCode, model: "private-a", autonomy: .readOnly,
                     adapterVersion: nil),
             ]))
     #expect(mixed.agentLabel == "2 CLIs · 2 models")
-    #expect(mixed.agentDetailLabel == "Codex — GPT-5.6, Claude Code — private-a")
+    #expect(mixed.agentDetailLabel == "Codex — GPT-5.6 Sol, Claude Code — private-a")
 
     // Nothing to name when there are no steps.
     #expect(ConductorRunPresentation.runRow(for: modelManifest(bindings: [])).agentLabel == nil)

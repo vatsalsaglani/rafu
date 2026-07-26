@@ -11,7 +11,35 @@ nonisolated struct GeminiCLIAdapter: ConductorCLIAdapter {
     let defaultEnabled = true
     let supportsModelDiscovery = false
 
+    /// Verified 2026-07-27 against the installed Gemini CLI 0.52.0 bundle's
+    /// own model-config registry, which the source comments there mark as the
+    /// **user-facing** set — "they could be passed via `--model`" — as opposed
+    /// to the internal `*-base` entries that follow it in the same table.
+    ///
+    /// The previous two-entry list was not wrong so much as a year stale: it
+    /// offered only the 2.5 family while the installed CLI accepts the whole
+    /// 3.x line. `-base` variants and `gemini-3.1-pro-preview-customtools` are
+    /// deliberately excluded as internal, and the Gemma routes belong to
+    /// `gemini gemma`, not `--model`.
+    ///
+    /// `gemini-2.5-pro` is kept because it is still this CLI's own
+    /// `DEFAULT_GEMINI_MODEL`; it is last because it is the oldest, and
+    /// nothing here is treated as Rafu's default — an unset model passes no
+    /// `-m` flag at all.
     static let curatedModelChoices = [
+        ConductorModelChoice(
+            id: "gemini-3.5-flash", displayName: "Gemini 3.5 Flash", source: .curated),
+        ConductorModelChoice(
+            id: "gemini-3.1-pro-preview", displayName: "Gemini 3.1 Pro (preview)",
+            source: .curated),
+        ConductorModelChoice(
+            id: "gemini-3.1-flash-lite", displayName: "Gemini 3.1 Flash Lite",
+            source: .curated),
+        ConductorModelChoice(
+            id: "gemini-3-pro-preview", displayName: "Gemini 3 Pro (preview)", source: .curated),
+        ConductorModelChoice(
+            id: "gemini-3-flash-preview", displayName: "Gemini 3 Flash (preview)",
+            source: .curated),
         ConductorModelChoice(
             id: "gemini-2.5-pro", displayName: "Gemini 2.5 Pro", source: .curated),
         ConductorModelChoice(
@@ -91,6 +119,10 @@ nonisolated struct GeminiCLIAdapter: ConductorCLIAdapter {
 
     func curatedModels() -> [ConductorModelChoice] { Self.curatedModelChoices }
 
+    /// Gemini CLI 0.52.0 has no model-listing verb. Its help exposes
+    /// `--list-extensions` and `--list-sessions` but no `--list-models`, and
+    /// no subcommand lists models either. Curated stays the only list.
+    /// (Re-check with `gemini --help | grep -i 'list\|model'`.)
     func discoverModels() async -> [ConductorModelChoice]? { nil }
 
     func invocation(
@@ -117,10 +149,18 @@ nonisolated struct GeminiCLIAdapter: ConductorCLIAdapter {
             // unattended write mode for a Rafu-owned worktree.
             case .worktreeWrite: "auto_edit"
             }
-        let resolvedModel = model.isEmpty ? Self.curatedModelChoices[0].id : model
-        let arguments = [
-            "-p", prompt,
-            "-m", resolvedModel,
+        // An unset model means "let the CLI decide" — pass no `-m` at all —
+        // matching every other adapter and `ConductorModelResolution
+        // .cliDecides`. This previously substituted `curatedModelChoices[0]`,
+        // which happened to coincide with the CLI's own default only for as
+        // long as that list began with `gemini-2.5-pro`; reordering the
+        // curated list would silently have changed which model ran.
+        var arguments = ["-p", prompt]
+        let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedModel.isEmpty {
+            arguments += ["-m", trimmedModel]
+        }
+        arguments += [
             "--output-format", "json",
             "--approval-mode", approvalMode,
         ]

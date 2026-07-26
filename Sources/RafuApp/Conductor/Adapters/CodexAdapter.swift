@@ -41,18 +41,44 @@ nonisolated final class CodexAdapter: ConductorCLIAdapter, Sendable {
         return Self.authStatus(from: outcome)
     }
 
+    /// The seven models Codex itself offers, in Codex's own picker order —
+    /// `gpt-5.6-sol` is the CLI's default and comes first.
+    ///
+    /// Verified 2026-07-27 against the installed CLI's own model metadata
+    /// (`~/.codex/models_cache.json`, the account-scoped list Codex fetches
+    /// and caches; ids and display names read from it verbatim). The embedded
+    /// fallback table inside both codex binaries — `~/.local/bin/codex`
+    /// 0.145.0 and the ChatGPT.app 0.146.0-alpha build — agrees on the first
+    /// six and ships `gpt-5.2` where the live list has `gpt-5.3-codex-spark`.
+    /// The live list wins because it is what the user's picker shows.
+    ///
+    /// The previous list carried the `gpt-5.6` alias (which routes to Sol) and
+    /// omitted `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, and
+    /// `gpt-5.3-codex-spark`, so a Rafu user saw four choices where Codex
+    /// offers seven. Aliases are deliberately gone: an explicit slug is what
+    /// appears in dashboards and billing metadata.
     func curatedModels() -> [ConductorModelChoice] {
         [
-            ConductorModelChoice(id: "gpt-5.6", displayName: "GPT-5.6", source: .curated),
             ConductorModelChoice(
                 id: "gpt-5.6-sol", displayName: "GPT-5.6 Sol", source: .curated),
             ConductorModelChoice(
                 id: "gpt-5.6-terra", displayName: "GPT-5.6 Terra", source: .curated),
             ConductorModelChoice(
                 id: "gpt-5.6-luna", displayName: "GPT-5.6 Luna", source: .curated),
+            ConductorModelChoice(id: "gpt-5.5", displayName: "GPT-5.5", source: .curated),
+            ConductorModelChoice(id: "gpt-5.4", displayName: "GPT-5.4", source: .curated),
+            ConductorModelChoice(
+                id: "gpt-5.4-mini", displayName: "GPT-5.4 Mini", source: .curated),
+            ConductorModelChoice(
+                id: "gpt-5.3-codex-spark", displayName: "GPT-5.3 Codex Spark",
+                source: .curated),
         ]
     }
 
+    /// Codex 0.145.0 has no model-listing verb: neither `codex --help` nor
+    /// `codex exec --help` exposes one, and its model set is chosen in the
+    /// interactive picker. Curated stays the only list. (Re-check with
+    /// `codex --help` and `codex exec --help | grep -i model`.)
     func discoverModels() async -> [ConductorModelChoice]? { nil }
 
     func invocation(

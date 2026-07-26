@@ -137,7 +137,9 @@ func settingsRowsFollowTheRegistry() {
     withIsolatedSuite { suite in
         let model = ConductorSettingsModel(
             enableStore: ConductorEnableStore(suiteName: suite),
-            defaultModelStore: ConductorDefaultModelStore(suiteName: suite))
+            defaultModelStore: ConductorDefaultModelStore(suiteName: suite),
+            discoveredModels: ConductorDiscoveredModelCache(
+                store: ConductorDiscoveredModelStore(suiteName: suite)))
         #expect(model.rows.map(\.id) == ConductorAdapterRegistry.all.map(\.id))
         #expect(model.rows.map(\.id) == ConductorCLIID.allCases)
         #expect(model.rows.map(\.displayName) == ConductorCLIID.allCases.map(\.displayName))
@@ -152,7 +154,9 @@ func settingsModelDoesNoWorkOnConstruction() async {
         let model = ConductorSettingsModel(
             adapters: [adapter],
             enableStore: ConductorEnableStore(suiteName: suite),
-            defaultModelStore: ConductorDefaultModelStore(suiteName: suite))
+            defaultModelStore: ConductorDefaultModelStore(suiteName: suite),
+            discoveredModels: ConductorDiscoveredModelCache(
+                store: ConductorDiscoveredModelStore(suiteName: suite)))
 
         // Opening Settings must never probe the user's machine behind their
         // back: no binary discovery, no auth check, no model listing.
@@ -181,7 +185,9 @@ func settingsEnableTogglePersists() {
         let model = ConductorSettingsModel(
             adapters: [CountingAdapter(id: .cline, defaultEnabled: false)],
             enableStore: ConductorEnableStore(suiteName: suite),
-            defaultModelStore: ConductorDefaultModelStore(suiteName: suite))
+            defaultModelStore: ConductorDefaultModelStore(suiteName: suite),
+            discoveredModels: ConductorDiscoveredModelCache(
+                store: ConductorDiscoveredModelStore(suiteName: suite)))
 
         // Unset key ⇒ the adapter's own default.
         #expect(!model.isEnabled(.cline))
@@ -193,7 +199,9 @@ func settingsEnableTogglePersists() {
         let reloaded = ConductorSettingsModel(
             adapters: [CountingAdapter(id: .cline, defaultEnabled: false)],
             enableStore: ConductorEnableStore(suiteName: suite),
-            defaultModelStore: ConductorDefaultModelStore(suiteName: suite))
+            defaultModelStore: ConductorDefaultModelStore(suiteName: suite),
+            discoveredModels: ConductorDiscoveredModelCache(
+                store: ConductorDiscoveredModelStore(suiteName: suite)))
         #expect(reloaded.isEnabled(.cline))
     }
 }
@@ -206,7 +214,9 @@ func settingsDefaultModelSelection() {
         let model = ConductorSettingsModel(
             adapters: [CountingAdapter(id: .kimi)],
             enableStore: ConductorEnableStore(suiteName: suite),
-            defaultModelStore: ConductorDefaultModelStore(suiteName: suite))
+            defaultModelStore: ConductorDefaultModelStore(suiteName: suite),
+            discoveredModels: ConductorDiscoveredModelCache(
+                store: ConductorDiscoveredModelStore(suiteName: suite)))
 
         #expect(model.resolvedModelChoice(for: .kimi) == nil)
 
@@ -235,7 +245,9 @@ func settingsRefreshModels() async {
         let model = ConductorSettingsModel(
             adapters: [listing, noListing],
             enableStore: ConductorEnableStore(suiteName: suite),
-            defaultModelStore: ConductorDefaultModelStore(suiteName: suite))
+            defaultModelStore: ConductorDefaultModelStore(suiteName: suite),
+            discoveredModels: ConductorDiscoveredModelCache(
+                store: ConductorDiscoveredModelStore(suiteName: suite)))
 
         #expect(model.rows.map(\.supportsModelDiscovery) == [true, false])
         #expect(model.availableModels(for: .openCode).map(\.id) == ["curated-1"])
@@ -266,7 +278,9 @@ func settingsCancelledRefreshDoesNotClaimUnsupported() async {
         let model = ConductorSettingsModel(
             adapters: [adapter],
             enableStore: ConductorEnableStore(suiteName: suite),
-            defaultModelStore: ConductorDefaultModelStore(suiteName: suite))
+            defaultModelStore: ConductorDefaultModelStore(suiteName: suite),
+            discoveredModels: ConductorDiscoveredModelCache(
+                store: ConductorDiscoveredModelStore(suiteName: suite)))
 
         // Cancelling before the child task's first resumption is
         // deterministic: this test is already on the main actor, so the
@@ -282,7 +296,9 @@ func settingsCancelledRefreshDoesNotClaimUnsupported() async {
         let second = ConductorSettingsModel(
             adapters: [noListing],
             enableStore: ConductorEnableStore(suiteName: suite),
-            defaultModelStore: ConductorDefaultModelStore(suiteName: suite))
+            defaultModelStore: ConductorDefaultModelStore(suiteName: suite),
+            discoveredModels: ConductorDiscoveredModelCache(
+                store: ConductorDiscoveredModelStore(suiteName: suite)))
         await second.refreshModels(for: .cursor)
         #expect(second.modelRefreshState(for: .cursor) == .unsupported)
     }
@@ -295,7 +311,9 @@ func settingsAuthLineIsVerbatim() async {
         let model = ConductorSettingsModel(
             adapters: [CountingAdapter(id: .codex)],
             enableStore: ConductorEnableStore(suiteName: suite),
-            defaultModelStore: ConductorDefaultModelStore(suiteName: suite))
+            defaultModelStore: ConductorDefaultModelStore(suiteName: suite),
+            discoveredModels: ConductorDiscoveredModelCache(
+                store: ConductorDiscoveredModelStore(suiteName: suite)))
 
         #expect(model.authStatusText(for: .codex).contains("unknown"))
         await model.refreshStatuses()
@@ -312,7 +330,9 @@ func settingsRowCarriesNoCredential() {
     withIsolatedSuite { suite in
         let model = ConductorSettingsModel(
             enableStore: ConductorEnableStore(suiteName: suite),
-            defaultModelStore: ConductorDefaultModelStore(suiteName: suite))
+            defaultModelStore: ConductorDefaultModelStore(suiteName: suite),
+            discoveredModels: ConductorDiscoveredModelCache(
+                store: ConductorDiscoveredModelStore(suiteName: suite)))
         let row = model.rows[0]
         let forbidden = ["token", "secret", "key", "password", "cookie", "credential", "auth"]
         for child in Mirror(reflecting: row).children {

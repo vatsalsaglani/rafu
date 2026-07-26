@@ -21,10 +21,10 @@ struct CodexInvocationFixture: Sendable {
 private let codexInvocationFixtures: [CodexInvocationFixture] = {
     let models = [
         "",
-        "gpt-5.6",
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-5.6-luna",
+        "gpt-5.3-codex-spark",
         "provider/custom-model",
     ]
     let directories = [
@@ -115,17 +115,32 @@ func codexAdapterContract() async {
     #expect(adapter.id == .codex)
     #expect(adapter.defaultEnabled)
     #expect(ConductorAdapterRegistry.adapter(for: .codex) is CodexAdapter)
+    // The seven models Codex itself offers, in Codex's own picker order,
+    // verified 2026-07-27 against the CLI's own model metadata. The list
+    // previously held four, including the `gpt-5.6` alias, so a Rafu user saw
+    // fewer choices than their CLI offered — and different ones.
     #expect(
         adapter.curatedModels()
             == [
-                ConductorModelChoice(id: "gpt-5.6", displayName: "GPT-5.6", source: .curated),
                 ConductorModelChoice(
                     id: "gpt-5.6-sol", displayName: "GPT-5.6 Sol", source: .curated),
                 ConductorModelChoice(
                     id: "gpt-5.6-terra", displayName: "GPT-5.6 Terra", source: .curated),
                 ConductorModelChoice(
                     id: "gpt-5.6-luna", displayName: "GPT-5.6 Luna", source: .curated),
+                ConductorModelChoice(id: "gpt-5.5", displayName: "GPT-5.5", source: .curated),
+                ConductorModelChoice(id: "gpt-5.4", displayName: "GPT-5.4", source: .curated),
+                ConductorModelChoice(
+                    id: "gpt-5.4-mini", displayName: "GPT-5.4 Mini", source: .curated),
+                ConductorModelChoice(
+                    id: "gpt-5.3-codex-spark", displayName: "GPT-5.3 Codex Spark",
+                    source: .curated),
             ])
+    // Codex's own default comes first.
+    #expect(adapter.curatedModels().first?.id == "gpt-5.6-sol")
+    // Aliases are deliberately gone: an explicit slug is what shows up in
+    // dashboards and billing metadata.
+    #expect(!adapter.curatedModels().contains { $0.id == "gpt-5.6" })
     #expect(!adapter.supportsModelDiscovery)
     #expect(await adapter.discoverModels() == nil)
 }

@@ -123,6 +123,13 @@ final class EnsembleStartModel {
     /// here: opening this canvas must never invoke a CLI behind their back.
     @ObservationIgnored
     private let curatedModelsByID: [ConductorCLIID: [ConductorModelChoice]]
+    /// Results of discovery passes the user already ran elsewhere (today,
+    /// Settings → Agents → "Refresh models"). Reading this spawns nothing —
+    /// it is a plain in-memory/`UserDefaults` cache — which is what lets the
+    /// canvas offer the SAME catalog Settings offers while keeping the rule
+    /// above intact. Deliberately NOT `@ObservationIgnored`: the cache is
+    /// itself `@Observable`, so an open canvas picks up a refresh live.
+    private let discoveredModels: ConductorDiscoveredModelCache
     @ObservationIgnored
     private let defaultModelStore: ConductorDefaultModelStore
     @ObservationIgnored
@@ -138,6 +145,7 @@ final class EnsembleStartModel {
     init(
         adapters: [any ConductorCLIAdapter] = ConductorAdapterRegistry.all,
         defaultModelStore: ConductorDefaultModelStore = ConductorDefaultModelStore(),
+        discoveredModels: ConductorDiscoveredModelCache = .shared,
         clock: @escaping Clock = Date.init,
         launch: @escaping Launch = {
             provider, model, goal, grant, name, providerModelDefaults, session in
@@ -151,6 +159,7 @@ final class EnsembleStartModel {
         self.curatedModelsByID = Dictionary(
             adapters.map { ($0.id, $0.curatedModels()) },
             uniquingKeysWith: { first, _ in first })
+        self.discoveredModels = discoveredModels
         self.defaultModelStore = defaultModelStore
         self.clock = clock
         self.launch = launch
@@ -209,18 +218,27 @@ final class EnsembleStartModel {
         cliOptions.first { $0.id == id }?.defaultModel
     }
 
-    /// What this CLI's pickers may list: its curated catalog, plus the user's
-    /// Settings default when that is a model Rafu does not ship in the list —
-    /// otherwise a hand-typed Settings default would be missing from the very
-    /// picker meant to show it.
+    /// What this CLI's pickers may list: its curated catalog, then anything a
+    /// discovery pass already found, then the user's Settings default when
+    /// that is a model neither list contains — otherwise a hand-typed
+    /// Settings default would be missing from the very picker meant to show
+    /// it.
+    ///
+    /// The curated+discovered merge goes through `ConductorModelCatalog`, the
+    /// same call Settings → Agents makes, so the two surfaces cannot present
+    /// different catalogs for one CLI. That divergence was the bug: Settings
+    /// listed a refreshed 190-model Cursor catalog while this canvas listed
+    /// three curated entries, for the same CLI on the same machine.
     func availableModels(for id: ConductorCLIID) -> [ConductorModelChoice] {
-        let curated = curatedModelsByID[id] ?? []
+        let known = ConductorModelCatalog.merge(
+            curated: curatedModelsByID[id] ?? [],
+            discovered: discoveredModels.models(for: id))
         guard
             let settingsChoice = ConductorModelCatalog.choice(
-                for: settingsDefaultModel(for: id), in: curated),
+                for: settingsDefaultModel(for: id), in: known),
             settingsChoice.source == .custom
-        else { return curated }
-        return curated + [settingsChoice]
+        else { return known }
+        return known + [settingsChoice]
     }
 
     /// This Ensemble's per-CLI choice, or `nil` when the user has not made
@@ -893,10 +911,17 @@ struct EnsembleStartCanvas: View {
                             value: allowedModelBinding(option.id))
                     }
                 }
-                Text("Each allowed CLI runs the model chosen here unless a role names its own.")
-                    .font(.caption)
-                    .foregroundStyle(theme.palette.textMuted)
-                    .fixedSize(horizontal: false, vertical: true)
+                // Names where the longer lists come from. Opening this canvas
+                // deliberately runs no CLI, so a CLI that can list its own
+                // models shows that list only after the user asks for it in
+                // Settings — this says so rather than leaving the shorter
+                // list looking like the whole truth.
+                Text(
+                    "Each allowed CLI runs the model chosen here unless a role names its own. For CLIs that can list their own models, use Settings → Agents → Refresh models to show the full catalog here too."
+                )
+                .font(.caption)
+                .foregroundStyle(theme.palette.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
