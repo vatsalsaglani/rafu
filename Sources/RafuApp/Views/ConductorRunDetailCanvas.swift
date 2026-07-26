@@ -97,6 +97,7 @@ private struct RunDetailContent: View {
     @Bindable var session: WorkspaceSession
     let manifest: ConductorRunManifest
     let isActiveRun: Bool
+    @State private var notes: [ConductorEnsembleNoteStore.Note] = []
 
     var body: some View {
         // The engine owning THIS run (C6: one of several concurrent
@@ -126,6 +127,9 @@ private struct RunDetailContent: View {
                         )
                     }
                 }
+                if !notes.isEmpty {
+                    ConductorEnsembleNotesSection(notes: notes)
+                }
                 if isActiveRun, manifest.gate?.kind == .merge, let workflow {
                     ConductorMergeGateSection(
                         files: workflow.mergeGateFiles,
@@ -146,6 +150,17 @@ private struct RunDetailContent: View {
             .padding(RafuMetrics.space4)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .task(id: manifest.id) {
+            guard let rootURL = session.rootURL else {
+                notes = []
+                return
+            }
+            notes =
+                (try? await ConductorEnsembleNoteStore(
+                    workspaceRoot: rootURL,
+                    eventCenter: .shared
+                ).read(runID: manifest.id)) ?? []
+        }
     }
 
     /// C7 recovery: an interrupted run states plainly that its process was not
@@ -286,6 +301,46 @@ private struct RunDetailContent: View {
             case .failed(let index, _) = session.workflowController(forRunID: manifest.id)?.state
         else { return nil }
         return index
+    }
+}
+
+private struct ConductorEnsembleNotesSection: View {
+    @Environment(\.rafuTheme) private var theme
+    let notes: [ConductorEnsembleNoteStore.Note]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: RafuMetrics.space2) {
+            Text("Notes")
+                .font(.headline)
+                .foregroundStyle(theme.palette.textPrimary)
+                .accessibilityAddTraits(.isHeader)
+            ForEach(notes, id: \.self) { note in
+                HStack(alignment: .firstTextBaseline, spacing: RafuMetrics.space2) {
+                    Text(note.at, style: .relative)
+                        .font(.caption)
+                        .foregroundStyle(theme.palette.textMuted)
+                    Text(note.text)
+                        .font(.callout)
+                        .foregroundStyle(theme.palette.textPrimary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Note \(note.text)")
+            }
+        }
+        .padding(RafuMetrics.space4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
+                .fill(theme.palette.cardBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
+                .strokeBorder(theme.palette.borderSubtle)
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Ensemble run notes")
     }
 }
 

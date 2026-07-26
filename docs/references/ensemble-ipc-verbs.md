@@ -1,18 +1,24 @@
-# Ensemble read-only IPC verbs
+# Ensemble IPC verbs
 
-- **Applies to:** `rafu ensemble status|artifact|await`, their shared DTOs,
-  read-only app request service, event stream, state projection, and exit codes
+- **Applies to:** `rafu ensemble run|status|artifact|await|abort|note|grant`,
+  their shared DTOs, app request service, event stream, state projection,
+  capability enforcement, and exit codes
 - **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-26
 
 ## Rule or observed behavior
 
-Verb version 1 is a read-only observation surface for runs in an already-open
-local Rafu workspace:
+Verb version 1 is an observation and capability-scoped mutation surface for
+runs in an already-open local Rafu workspace:
 
 ```text
 rafu ensemble status [<run>...] [--tree] [--since <cursor>] [--json]
 rafu ensemble artifact <run> <step> [--json]
 rafu ensemble await <run>... --state <state> [--any] [--timeout <sec>] [--json]
+rafu ensemble run <workflow> [--role <name>=<cli>[:<model>]] [--prompt <text>]
+  [--artifact <path>]... [--base <ref>] [--label <text>] [--json]
+rafu ensemble abort <run>
+rafu ensemble note <run> <text>
+rafu ensemble grant [--json]
 rafu ensemble --help | help
 ```
 
@@ -25,8 +31,9 @@ deliberately.
 The bare first positional `ensemble` is reserved only when no `./ensemble`
 filesystem entry exists. A collision exits 64 and names `rafu ./ensemble`;
 that explicit path continues through the workspace launcher. Parsing completes
-before socket access. None of these verbs starts an agent, creates a worktree,
-writes repository state, approves a gate, or merges.
+before socket access. The read-only verbs never start an agent, create a
+worktree, or write repository state. The four mutating verbs require the live
+coordinator capability; no verb approves a gate or merges.
 
 ### Verb semantics
 
@@ -88,7 +95,7 @@ The flat `EnsembleRequestPayload` fields are:
 | `states` | state array | Requested terminal condition for `await` |
 | `any` | boolean | Any-run rather than all-runs matching |
 | `sinceCursor` | optional unsigned integer | Exclusive event cursor |
-| `token` | optional string | Reserved for a later authenticated surface; omitted in v1 |
+| `token` | optional string | Live coordinator capability; required by every mutating verb and omitted by read-only verbs |
 | `tree` | optional boolean | Parent-before-child status ordering |
 
 An `artifact` request payload looks like:
@@ -279,7 +286,8 @@ codes are surfaced as a data error rather than silently treated as success.
 `ConductorRunManifest` now decodes and encodes three optional fields:
 `startedBy` (coordinator run ID), `label` (human graph label), and `mergedAt`
 (merge completion date). They default to nil, so pre-C8 JSON decodes unchanged.
-This phase reads and projects them but does not write non-nil values.
+Coordinator-started workflow runs write `startedBy` and optional `label` at
+engine start; read-only status projects them without needing a token.
 
 ## Why it matters
 
@@ -340,3 +348,89 @@ rg -n "print\\(|Logger|os_log" Sources/RafuApp/Conductor/Ensemble
 - [`C8-02-ipc-streaming-and-readonly-verbs.md`](../plans/phases/conductor/C8-02-ipc-streaming-and-readonly-verbs.md)
 - [ADR 0009](../decisions/0009-local-cli-app-ipc.md)
 - [ADR 0018](../decisions/0018-conductor-external-agent-orchestration.md)
+
+## Capability-scoped mutating verbs
+
+The mutating envelope kinds are `ensembleRun`, `ensembleAbort`,
+`ensembleNote`, and `ensembleGrant`. They retain the normal launcher handshake
+followed by one request/response connection. Every request carries the
+process-local capability in `EnsembleRequestPayload.token`. The server
+validates it before loading definitions, resolving a run, or writing a note.
+The value is never returned in a response or error.
+
+Additional request fields are:
+
+| Field | Type | Verb and meaning |
+|---|---|---|
+| `workflow` | optional string | `run`; required workflow stem or declared name |
+| `roleOverrides` | optional array | `run`; `{name, provider, model?}` bindings |
+| `prompt` | optional string | `run`; task prompt, defaulting to workflow name |
+| `artifacts` | optional string array | `run`; absolute file references, never file content |
+| `baseReference` | optional string | `run`; Git ref, default `HEAD` |
+| `label` | optional string | `run`; human graph label |
+| `text` | optional string | `note`; nonempty text bounded to 1000 characters |
+
+`run` resolves the file-backed workflow and roles, applies overrides, checks
+the token grant against the resolved providers, and starts the workflow
+through the window's concurrent-run coordinator. Input artifact paths are
+normalized by the CLI and added by reference to the first role prompt.
+Worker process environments remain the three-key `PATH`, `RAFU_HANDOFF`,
+`RAFU_RUN_DIR` contract; the coordinator capability is never copied into a
+worker.
+
+Successful `run --json` output is the `EnsembleRunStartResult` itself:
+
+```json
+{
+  "branch": "rafu/run-run-a",
+  "runID": "run-a",
+  "startedBy": "co-a1b2c3d4",
+  "state": "running",
+  "workflow": "Ship",
+  "worktree": "/Users/me/.rafu-worktrees/project-run-a"
+}
+```
+
+The framed response wraps the same object as:
+
+```json
+{"result":"runStarted","runStarted":{"branch":"rafu/run-run-a","runID":"run-a","startedBy":"co-a1b2c3d4","state":"running","workflow":"Ship","worktree":"/Users/me/.rafu-worktrees/project-run-a"}}
+```
+
+`abort` and `note` require the token coordinator to match the target
+manifest's `startedBy`. `abort` parks the live workflow without deleting its
+evidence or worktree. `note` appends `{at,from,text}` as one bounded JSON line
+under `.rafu/runs/<id>/notes.jsonl` and publishes a `note` event. Their
+success envelope uses `result: "mutation"`:
+
+```json
+{"mutation":{"runID":"run-a","state":"aborted","verb":"aborted"},"result":"mutation"}
+```
+
+`grant` reports only the caller's own counts and limits. Its JSON result shape
+is:
+
+```json
+{
+  "activeChildRuns": 1,
+  "allowedProviders": ["codex"],
+  "maxConcurrentChildRuns": 3,
+  "maxTotalChildRuns": 12,
+  "startedChildRuns": 2,
+  "usageCeilingPercentPoints": 10,
+  "usageConsumedPercentPoints": 4.5
+}
+```
+
+`deadline`, `usageCeilingPercentPoints`, and
+`usageConsumedPercentPoints` are omitted by Codable when nil. An unresolved
+meter is represented by absent usage consumed data and never guessed as zero.
+
+Authorization failures are exit 77: missing/revoked token, provider outside
+the allow-list, or a coordinator attempting to abort/note another
+coordinator's run. Capacity failures are exit 75: grant concurrent/total
+limit, deadline, metered usage ceiling, the tighter per-window run cap, or a
+full 256 KiB notes file. A 75 response is returned before another child
+continues; the coordinator must park and request a new grant rather than
+retrying silently. Usage grammar remains 64 and invalid definitions or run
+identity remain 65.

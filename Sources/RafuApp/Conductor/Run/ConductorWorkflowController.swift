@@ -28,19 +28,25 @@ nonisolated struct ConductorWorkflowRunRequest: Sendable {
     let taskPrompt: String
     let baseReference: String
     let runID: String
+    var startedBy: String? = nil
+    var label: String? = nil
 
     init(
         workflow: ConductorWorkflowDefinition,
         roles: [ConductorAgentDefinition],
         taskPrompt: String,
         baseReference: String = "HEAD",
-        runID: String = UUID().uuidString.lowercased()
+        runID: String = UUID().uuidString.lowercased(),
+        startedBy: String? = nil,
+        label: String? = nil
     ) {
         self.workflow = workflow
         self.roles = roles
         self.taskPrompt = taskPrompt
         self.baseReference = baseReference
         self.runID = runID
+        self.startedBy = startedBy
+        self.label = label
     }
 }
 
@@ -414,7 +420,9 @@ final class ConductorWorkflowController {
                 worktreeBranch: workspacePlan.branchName ?? "",
                 createdAt: now,
                 updatedAt: now,
-                steps: steps)
+                steps: steps,
+                startedBy: request.startedBy,
+                label: request.label)
             manifest = newManifest
             runsPublisher.publish(newManifest)
             try Self.requireCurrent(generation, activeGeneration)

@@ -32,6 +32,68 @@ struct EnsembleArgumentParserTests {
         )
     }
 
+    @Test("Run accepts the complete flag matrix and both role override forms")
+    func run() throws {
+        #expect(
+            try parser.parse([
+                "run", "ship", "--role", "reviewer=codex:gpt-5.3-codex",
+                "--role", "writer=claude-code", "--prompt", "Ship it",
+                "--artifact", "brief.md", "--artifact", "spec.md",
+                "--base", "main", "--label", "Release prep", "--json",
+            ])
+                == .run(
+                    workflow: "ship",
+                    roleOverrides: [
+                        EnsembleRoleOverride(
+                            name: "reviewer",
+                            provider: "codex",
+                            model: "gpt-5.3-codex"
+                        ),
+                        EnsembleRoleOverride(
+                            name: "writer",
+                            provider: "claude-code",
+                            model: nil
+                        ),
+                    ],
+                    prompt: "Ship it",
+                    artifacts: ["brief.md", "spec.md"],
+                    baseReference: "main",
+                    label: "Release prep",
+                    json: true
+                )
+        )
+        #expect(throws: EnsembleArgumentError.missingArgument("<workflow>")) {
+            try parser.parse(["run", "--json"])
+        }
+        #expect(
+            throws: EnsembleArgumentError.invalidValue(
+                option: "--role",
+                value: "reviewer=codex:"
+            )
+        ) {
+            try parser.parse(["run", "ship", "--role", "reviewer=codex:"])
+        }
+    }
+
+    @Test("Abort, note, and grant parse their bounded forms")
+    func mutatingVerbs() throws {
+        #expect(try parser.parse(["abort", "run-a"]) == .abort(runID: "run-a"))
+        #expect(
+            try parser.parse(["note", "run-a", "Check the diff"])
+                == .note(runID: "run-a", text: "Check the diff")
+        )
+        #expect(try parser.parse(["grant"]) == .grant(json: false))
+        #expect(try parser.parse(["grant", "--json"]) == .grant(json: true))
+        #expect(
+            throws: EnsembleArgumentError.valueTooLong(
+                option: "<text>",
+                maximumCharacters: 1_000
+            )
+        ) {
+            try parser.parse(["note", "run-a", String(repeating: "x", count: 1_001)])
+        }
+    }
+
     @Test("Artifact requires one run and a nonnegative step")
     func artifact() throws {
         #expect(
@@ -83,6 +145,9 @@ struct EnsembleArgumentParserTests {
             (["status", "--since", "--json"], "--since"),
             (["await", "run", "--state", "--any"], "--state"),
             (["await", "run", "--state", "running", "--timeout", "--json"], "--timeout"),
+            (["run", "ship", "--role", "--json"], "--role"),
+            (["run", "ship", "--prompt", "--json"], "--prompt"),
+            (["run", "ship", "--artifact", "--json"], "--artifact"),
         ]
     )
     func valuesDoNotConsumeOptions(arguments: [String], option: String) {

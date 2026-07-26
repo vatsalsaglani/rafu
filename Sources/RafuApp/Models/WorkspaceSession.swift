@@ -316,6 +316,49 @@ final class WorkspaceSession {
             && conductorConcurrentRuns.activeCount < conductorConcurrentRuns.activeLimit
     }
 
+    private(set) var conductorCoordinatorSessions: [ConductorCoordinatorSession] = []
+
+    @ObservationIgnored
+    private var conductorCoordinatorEndHandlers: [String: @MainActor () -> Void] = [:]
+
+    func registerCoordinatorSession(
+        _ coordinatorSession: ConductorCoordinatorSession,
+        onEnd: @escaping @MainActor () -> Void = {}
+    ) {
+        if let index = conductorCoordinatorSessions.firstIndex(where: {
+            $0.id == coordinatorSession.id
+        }) {
+            conductorCoordinatorSessions[index] = coordinatorSession
+        } else {
+            conductorCoordinatorSessions.append(coordinatorSession)
+        }
+        conductorCoordinatorEndHandlers[coordinatorSession.id] = onEnd
+    }
+
+    func coordinatorSessionDidEnd(_ id: String) {
+        guard let index = conductorCoordinatorSessions.firstIndex(where: { $0.id == id }),
+            conductorCoordinatorSessions[index].endedAt == nil
+        else { return }
+        conductorCoordinatorSessions[index].endedAt = Date()
+        let onEnd = conductorCoordinatorEndHandlers.removeValue(forKey: id)
+        onEnd?()
+    }
+
+    private func endCoordinatorSession(for terminalSessionID: UUID) {
+        guard
+            let coordinatorID = conductorCoordinatorSessions.first(where: {
+                $0.terminalSessionID == terminalSessionID && $0.endedAt == nil
+            })?.id
+        else { return }
+        coordinatorSessionDidEnd(coordinatorID)
+    }
+
+    private func endAllCoordinatorSessions() {
+        for id in conductorCoordinatorSessions.filter({ $0.endedAt == nil }).map(\.id) {
+            coordinatorSessionDidEnd(id)
+        }
+    }
+
     let workspaceSearch = WorkspaceSearchModel()
 
     @ObservationIgnored
@@ -908,6 +951,7 @@ final class WorkspaceSession {
             case .terminal(let sessionID) = tab.resource
         else { return }
         _ = editorLayout.closeTab(tabID)
+        endCoordinatorSession(for: sessionID)
         terminal.close(sessionID)
         synchronizeSelectionFromLayout()
         persistWorkspaceState()
@@ -923,6 +967,7 @@ final class WorkspaceSession {
         if let tab = editorLayout.tab(matching: .terminal(sessionID: sessionID)) {
             _ = editorLayout.closeTab(tab.id)
         }
+        endCoordinatorSession(for: sessionID)
         terminal.close(sessionID)
         synchronizeSelectionFromLayout()
         persistWorkspaceState()
@@ -1242,6 +1287,7 @@ final class WorkspaceSession {
         selectedTreePath = nil
         resetGitWorkbenchState()
         resetFileTreeState()
+        endAllCoordinatorSessions()
         terminal.shutdownAll()
         languageIntelligence.workspaceDidClose()
         RecentWorkspacesStore().record(url: url, displayName: name)

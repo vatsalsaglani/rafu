@@ -611,6 +611,10 @@ actor LauncherIPCServer {
         case .ensembleStatus: "ensembleStatus"
         case .ensembleArtifact: "ensembleArtifact"
         case .ensembleSubscribe: "ensembleSubscribe"
+        case .ensembleRun: "ensembleRun"
+        case .ensembleAbort: "ensembleAbort"
+        case .ensembleNote: "ensembleNote"
+        case .ensembleGrant: "ensembleGrant"
         case .unknown: "unknown"
         }
     }
@@ -619,7 +623,10 @@ actor LauncherIPCServer {
     private static func defaultHandler(
         _ envelope: LauncherIPCEnvelope
     ) async -> LauncherIPCResponse {
-        LauncherRequestRouter.shared.handle(envelope)
+        if envelope.kind.isEnsemble {
+            return await ConductorEnsembleRequestService.shared.handleAsync(envelope)
+        }
+        return LauncherRequestRouter.shared.handle(envelope)
     }
 
     @MainActor

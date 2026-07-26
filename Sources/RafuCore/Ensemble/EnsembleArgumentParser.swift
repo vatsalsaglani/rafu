@@ -9,6 +9,7 @@ public enum EnsembleArgumentError: Error, Equatable, LocalizedError, Sendable {
     case unknownOption(String)
     case unknownState(String)
     case unknownVerb(String)
+    case valueTooLong(option: String, maximumCharacters: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -28,11 +29,22 @@ public enum EnsembleArgumentError: Error, Equatable, LocalizedError, Sendable {
             "Unknown Ensemble state '\(state)'."
         case .unknownVerb(let verb):
             "Unknown Ensemble verb '\(verb)'."
+        case .valueTooLong(let option, let maximumCharacters):
+            "\(option) must be at most \(maximumCharacters) characters."
         }
     }
 }
 
 public enum EnsembleInvocation: Hashable, Sendable {
+    case run(
+        workflow: String,
+        roleOverrides: [EnsembleRoleOverride],
+        prompt: String?,
+        artifacts: [String],
+        baseReference: String?,
+        label: String?,
+        json: Bool
+    )
     case status(runIDs: [String], tree: Bool, sinceCursor: UInt64?, json: Bool)
     case artifact(runID: String, stepIndex: Int, json: Bool)
     case await(
@@ -42,6 +54,9 @@ public enum EnsembleInvocation: Hashable, Sendable {
         timeout: TimeInterval?,
         json: Bool
     )
+    case abort(runID: String)
+    case note(runID: String, text: String)
+    case grant(json: Bool)
     case help
 }
 
@@ -75,13 +90,87 @@ public struct EnsembleArgumentParser: Sendable {
             return .help
         case "status":
             return try parseStatus(remainder)
+        case "run":
+            return try parseRun(remainder)
         case "artifact":
             return try parseArtifact(remainder)
         case "await":
             return try parseAwait(remainder)
+        case "abort":
+            return try parseAbort(remainder)
+        case "note":
+            return try parseNote(remainder)
+        case "grant":
+            return try parseGrant(remainder)
         default:
             throw EnsembleArgumentError.unknownVerb(verb)
         }
+    }
+
+    private func parseRun(_ arguments: [String]) throws -> EnsembleInvocation {
+        var workflow: String?
+        var roleOverrides: [EnsembleRoleOverride] = []
+        var prompt: String?
+        var artifacts: [String] = []
+        var baseReference: String?
+        var label: String?
+        var json = false
+        var index = 0
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            switch argument {
+            case "--role":
+                let raw = try value(after: argument, in: arguments, index: &index)
+                roleOverrides.append(try parseRoleOverride(raw))
+            case "--prompt":
+                guard prompt == nil else {
+                    throw EnsembleArgumentError.duplicateOption(argument)
+                }
+                prompt = try value(after: argument, in: arguments, index: &index)
+            case "--artifact":
+                artifacts.append(try value(after: argument, in: arguments, index: &index))
+            case "--base":
+                guard baseReference == nil else {
+                    throw EnsembleArgumentError.duplicateOption(argument)
+                }
+                baseReference = try value(after: argument, in: arguments, index: &index)
+            case "--label":
+                guard label == nil else {
+                    throw EnsembleArgumentError.duplicateOption(argument)
+                }
+                label = try value(after: argument, in: arguments, index: &index)
+            case "--json":
+                guard !json else { throw EnsembleArgumentError.duplicateOption(argument) }
+                json = true
+            default:
+                if argument.hasPrefix("-") {
+                    throw EnsembleArgumentError.unknownOption(argument)
+                }
+                guard workflow == nil else {
+                    throw EnsembleArgumentError.unexpectedArgument(argument)
+                }
+                workflow = argument
+            }
+            index += 1
+        }
+
+        guard let workflow else {
+            throw EnsembleArgumentError.missingArgument("<workflow>")
+        }
+        let names = roleOverrides.map(\.name)
+        guard Set(names).count == names.count else {
+            throw EnsembleArgumentError.invalidValue(option: "--role", value: "duplicate name")
+        }
+        return .run(
+            workflow: workflow,
+            roleOverrides: roleOverrides,
+            prompt: prompt,
+            artifacts: artifacts,
+            baseReference: baseReference,
+            label: label,
+            json: json
+        )
     }
 
     private func parseStatus(_ arguments: [String]) throws -> EnsembleInvocation {
@@ -199,6 +288,79 @@ public struct EnsembleArgumentParser: Sendable {
             throw EnsembleArgumentError.missingValue("--state")
         }
         return .await(runIDs: runIDs, states: states, any: any, timeout: timeout, json: json)
+    }
+
+    private func parseAbort(_ arguments: [String]) throws -> EnsembleInvocation {
+        guard let runID = arguments.first else {
+            throw EnsembleArgumentError.missingArgument("<run>")
+        }
+        guard arguments.count == 1 else {
+            throw EnsembleArgumentError.unexpectedArgument(arguments[1])
+        }
+        return .abort(runID: runID)
+    }
+
+    private func parseNote(_ arguments: [String]) throws -> EnsembleInvocation {
+        guard let runID = arguments.first else {
+            throw EnsembleArgumentError.missingArgument("<run>")
+        }
+        guard arguments.count >= 2 else {
+            throw EnsembleArgumentError.missingArgument("<text>")
+        }
+        guard arguments.count == 2 else {
+            throw EnsembleArgumentError.unexpectedArgument(arguments[2])
+        }
+        let text = arguments[1]
+        guard text.count <= 1_000 else {
+            throw EnsembleArgumentError.valueTooLong(
+                option: "<text>",
+                maximumCharacters: 1_000
+            )
+        }
+        return .note(runID: runID, text: text)
+    }
+
+    private func parseGrant(_ arguments: [String]) throws -> EnsembleInvocation {
+        switch arguments {
+        case []:
+            return .grant(json: false)
+        case ["--json"]:
+            return .grant(json: true)
+        default:
+            let argument = arguments[0]
+            if argument == "--json" {
+                throw EnsembleArgumentError.duplicateOption(argument)
+            }
+            if argument.hasPrefix("-") {
+                throw EnsembleArgumentError.unknownOption(argument)
+            }
+            throw EnsembleArgumentError.unexpectedArgument(argument)
+        }
+    }
+
+    private func parseRoleOverride(_ raw: String) throws -> EnsembleRoleOverride {
+        guard let equals = raw.firstIndex(of: "=") else {
+            throw EnsembleArgumentError.invalidValue(option: "--role", value: raw)
+        }
+        let name = String(raw[..<equals])
+        let providerAndModel = String(raw[raw.index(after: equals)...])
+        let pieces = providerAndModel.split(
+            separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+        guard !name.isEmpty, let providerPiece = pieces.first, !providerPiece.isEmpty else {
+            throw EnsembleArgumentError.invalidValue(option: "--role", value: raw)
+        }
+        let model =
+            pieces.count == 2 && !pieces[1].isEmpty
+            ? String(pieces[1])
+            : nil
+        if pieces.count == 2, model == nil {
+            throw EnsembleArgumentError.invalidValue(option: "--role", value: raw)
+        }
+        return EnsembleRoleOverride(
+            name: name,
+            provider: String(providerPiece),
+            model: model
+        )
     }
 
     private func value(

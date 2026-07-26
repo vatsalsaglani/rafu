@@ -87,6 +87,10 @@ public struct EnsembleCLIClient: EnsembleCLIClientProtocol, Sendable {
         switch payload.verb {
         case "status": kind = .ensembleStatus
         case "artifact": kind = .ensembleArtifact
+        case "run": kind = .ensembleRun
+        case "abort": kind = .ensembleAbort
+        case "note": kind = .ensembleNote
+        case "grant": kind = .ensembleGrant
         default: throw EnsembleCLIClientError.unexpectedResponse
         }
         let response = try exchange(

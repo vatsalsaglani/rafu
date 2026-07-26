@@ -16,21 +16,35 @@ struct EnsembleFramingTests {
         startedBy: "coordinator"
     )
 
-    @Test("Request payload and envelope round-trip every read-only kind")
+    @Test("Request payload and envelope round-trip every Ensemble kind")
     func payloadRoundTrips() throws {
         let payload = EnsembleRequestPayload(
-            verb: "status",
+            verb: "run",
             workingDirectory: "/work/project",
             runIDs: ["run-a"],
             states: [.running, .completed],
             any: true,
             sinceCursor: 7,
-            tree: true
+            token: "opaque-capability",
+            tree: true,
+            workflow: "ship",
+            roleOverrides: [
+                EnsembleRoleOverride(name: "worker", provider: "codex", model: "gpt-5.6")
+            ],
+            prompt: "Ship it",
+            artifacts: ["/work/spec.md"],
+            baseReference: "main",
+            label: "Release",
+            text: "Review this"
         )
         for kind in [
             LauncherIPCRequestKind.ensembleStatus,
             .ensembleArtifact,
             .ensembleSubscribe,
+            .ensembleRun,
+            .ensembleAbort,
+            .ensembleNote,
+            .ensembleGrant,
         ] {
             let envelope = LauncherIPCEnvelope(kind: kind, ensemble: payload)
             let decoded: LauncherIPCEnvelope = try frameRoundTrip(envelope)
@@ -40,7 +54,7 @@ struct EnsembleFramingTests {
         }
     }
 
-    @Test("Status, artifact, subscribed, and failure responses use stable result envelopes")
+    @Test("Every response uses a stable result envelope")
     func responsesRoundTrip() throws {
         let run = EnsembleRunSummary(
             runID: "run-a",
@@ -77,6 +91,32 @@ struct EnsembleFramingTests {
                     runID: "run-a",
                     stepIndex: 0,
                     artifacts: ["/work/report.md"]
+                )),
+            .runStarted(
+                EnsembleRunStartResult(
+                    runID: "run-b",
+                    workflow: "Ship",
+                    worktree: "/work/.rafu-worktrees/work-run-b",
+                    branch: "rafu/run-run-b",
+                    state: .running,
+                    startedBy: "coordinator"
+                )),
+            .mutation(
+                EnsembleMutationResult(
+                    verb: "aborted",
+                    runID: "run-b",
+                    state: .aborted
+                )),
+            .grant(
+                EnsembleGrantResult(
+                    maxConcurrentChildRuns: 3,
+                    activeChildRuns: 1,
+                    maxTotalChildRuns: 12,
+                    startedChildRuns: 2,
+                    allowedProviders: ["codex"],
+                    deadline: Date(timeIntervalSince1970: 1_800_000_000),
+                    usageConsumedPercentPoints: 4.5,
+                    usageCeilingPercentPoints: 10
                 )),
             .subscribed(cursor: 8),
             .failure(code: 65, message: "step not found"),
