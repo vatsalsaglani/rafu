@@ -152,6 +152,12 @@ struct ConductorRunsPanelView: View {
                     .help("New from Template")
                     .disabled(libraryModel.isMutating || session.rootURL == nil)
                 }
+                Button("New Ensemble…", systemImage: "circle.hexagongrid") {
+                    session.presentEnsembleStartSheet()
+                }
+                .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+                .help("New Ensemble…")
+                .disabled(session.rootURL == nil)
                 Button("New Run…", systemImage: "plus") {
                     session.conductorRunController.presentNewRun()
                 }

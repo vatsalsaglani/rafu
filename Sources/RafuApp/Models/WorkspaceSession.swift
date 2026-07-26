@@ -515,6 +515,16 @@ final class WorkspaceSession {
         }
     }
 
+    /// C8-07 "New Ensemble…" sheet-flag seam. Guards on an open workspace so
+    /// ⌘⇧E, the menu item, the palette command, and the Runs-panel button all
+    /// no-op identically before a workspace is open.
+    var ensembleStartSheetPresented: Bool = false
+
+    func presentEnsembleStartSheet() {
+        guard descriptor != nil else { return }
+        ensembleStartSheetPresented = true
+    }
+
     /// Drives `WorkspaceWindowView`'s `NavigationSplitView` column
     /// visibility — the ⌘B Files/Search/Source Control sidebar toggle
     /// (issue #14). ADR 0002's "one system sidebar toggle" stays true: this

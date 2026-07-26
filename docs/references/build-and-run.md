@@ -72,6 +72,17 @@ holder, after which every later invocation blocks on nothing, forever.
   recycled pid can make a dead owner look alive. Deleting a lock that a live
   build holds corrupts nothing on its own but lets two builds write `.build`
   concurrently, which does.
+- **One SwiftPM invocation at a time — never start a second while one is
+  running.** Verified 2026-07-26 during C8-07: a `swift build` started while a
+  `swift test` was still running stranded both processes and left a stale
+  `.build/.lock` behind, after which every subsequent invocation appeared to
+  hang. Backgrounding is not itself the defect — a long suite may legitimately
+  run in the background rather than blocking a session — but it removes the
+  cue that would reveal the collision: the second command emits no output to
+  show it is blocked. So if you background one, treat the checkout as busy and
+  launch nothing else against it until that task reports. Recovery was
+  `./script/await_build_lock.sh`, which found no live holder and a dead owner
+  pid and removed the lock.
 - **Wait, don't kill.** Default `RAFU_LOCK_ATTEMPTS=4` × `RAFU_LOCK_WAIT=180`
   — roughly nine minutes of patience for a genuinely long build — then exit 1
   and report rather than forcing it.
