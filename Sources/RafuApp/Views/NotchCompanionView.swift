@@ -69,7 +69,7 @@ struct NotchCompanionView: View {
             reduceMotion ? .easeOut(duration: 0.12) : .easeOut(duration: 0.18),
             value: model.hoverState
         )
-        .environment(\.rafuTheme, theme)
+        .rafuTheme(theme)
     }
 
     /// Always true black (terminal-notch-hud.md, "Resting": "housing-black
