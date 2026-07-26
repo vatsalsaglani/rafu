@@ -18,9 +18,13 @@
 | Settings is a separate window | preference: editor tab + a button bottom-right | UX-02 |
 | Want agents listed under "New Terminal" with icons and shortcuts | the inline list is also the *fix* for the NSMenu limitation | UX-03 |
 
-The menu-icon finding is worth internalising: the user's preference for fewer
-popups and the platform's rendering limitation point at the same answer.
-Inline SwiftUI surfaces render real views; menus do not.
+The menu-icon finding is worth internalising twice over. First, the user's
+preference for fewer popups and the platform's constraint point at the same
+answer — moving agents out of the menu fixed both. Second, it is not specific
+to the agent catalog: the file-tree icons are authored `1em` too and would
+fail identically in a menu. **Any `1em` SVG handed to AppKit is 1×1 unless
+something stamps a size on it**, so a vendor mark belongs in an inline
+SwiftUI surface, not an `NSMenuItem`.
 
 ## Why UX-00 goes first
 
