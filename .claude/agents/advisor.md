@@ -7,7 +7,7 @@ tools: Read, Grep, Glob, Bash
 disallowedTools: Write, Edit, NotebookEdit
 model: claude-opus-5
 permissionMode: plan
-effort: high
+effort: medium
 maxTurns: 60
 color: purple
 ---

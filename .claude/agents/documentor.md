@@ -6,10 +6,10 @@ description: >
   edits source code.
 tools: Read, Grep, Glob, Edit, Write
 disallowedTools: NotebookEdit
-model: claude-haiku-4-5-20251001
+model: claude-opus-5
 permissionMode: acceptEdits
-effort: medium
-maxTurns: 40
+effort: low
+maxTurns: 20
 color: yellow
 ---
 
