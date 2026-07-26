@@ -83,7 +83,7 @@ struct ThemeSettingsSection: View {
                     Spacer()
                     Button("Cancel", role: .cancel) { isCreating = false }
                     Button("Create") { Task { await createThemeCopy() } }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(RafuProminentButtonStyle())
                         .disabled(
                             newThemeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }

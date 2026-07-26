@@ -161,13 +161,12 @@ struct ResourcesView: View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Resources", systemImage: "memorychip")
                 .font(.headline)
-            Picker("View", selection: $tab) {
-                ForEach(ResourcesTab.allCases) { option in
-                    Text(option.title).tag(option)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            RafuSegmentedPicker(
+                items: ResourcesTab.allCases,
+                selection: $tab,
+                fillsWidth: true
+            ) { $0.title }
+            .accessibilityLabel("View")
         }
         .padding(12)
     }

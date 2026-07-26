@@ -22,15 +22,20 @@ struct UserServerEntryForm: View {
             }
 
             Section("Source") {
-                Picker("Source", selection: $model.entryDraft.sourceKind) {
-                    Text("HTTPS Release Asset")
-                        .tag(
-                            LanguageServersCatalogModel.UserEntryDraft.SourceKind.httpsReleaseAsset)
-                    Text("Local Binary")
-                        .tag(LanguageServersCatalogModel.UserEntryDraft.SourceKind.localBinary)
+                RafuSegmentedPicker(
+                    items: [
+                        LanguageServersCatalogModel.UserEntryDraft.SourceKind.httpsReleaseAsset,
+                        .localBinary,
+                    ],
+                    selection: $model.entryDraft.sourceKind,
+                    fillsWidth: true
+                ) { kind in
+                    switch kind {
+                    case .httpsReleaseAsset: "HTTPS Release Asset"
+                    case .localBinary: "Local Binary"
+                    }
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                .accessibilityLabel("Source")
 
                 switch model.entryDraft.sourceKind {
                 case .httpsReleaseAsset:
@@ -54,7 +59,7 @@ struct UserServerEntryForm: View {
                         .keyboardShortcut(.cancelAction)
                     Button("Add") { submit() }
                         .keyboardShortcut(.defaultAction)
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(RafuProminentButtonStyle())
                         .disabled(isSubmitting)
                 }
             }

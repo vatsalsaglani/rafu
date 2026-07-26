@@ -52,13 +52,12 @@ struct ConductorRunsPanelView: View {
 
         VStack(spacing: 0) {
             header
-            Picker("Ensemble Section", selection: $section) {
-                ForEach(ConductorRunsPanelSection.allCases) { item in
-                    Text(item.title).tag(item)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            RafuSegmentedPicker(
+                items: ConductorRunsPanelSection.allCases,
+                selection: $section,
+                fillsWidth: true
+            ) { $0.title }
+            .accessibilityLabel("Ensemble Section")
             .padding(.horizontal, RafuMetrics.space3)
             .padding(.vertical, RafuMetrics.space2)
 
@@ -688,12 +687,12 @@ private struct ConductorNewRunSheet: View {
                     .foregroundStyle(.secondary)
             }
 
-            Picker("Mode", selection: $model.mode) {
-                ForEach(ConductorNewRunMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
+            RafuSegmentedPicker(
+                items: ConductorNewRunMode.allCases,
+                selection: $model.mode,
+                fillsWidth: true
+            ) { $0.title }
+            .accessibilityLabel("Mode")
 
             if model.isLoading || (model.mode == .workflow && workflowModel.isLoading) {
                 ProgressView("Reading .rafu files…")
