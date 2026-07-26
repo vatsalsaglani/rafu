@@ -243,9 +243,17 @@ struct ProposeMergeTests {
 
         async let applyTask: Void = controller.applyToWorkspace()
 
+        // BOUNDED deliberately. This subscribes to the shared event center,
+        // whose heartbeat keeps yielding, so `iterator.next()` never returns
+        // nil: if the merged event regressed, an unbounded loop would spin
+        // forever and hang the whole serialized suite rather than failing.
+        // The bound is a number of events, not a sleep — no timing assumption.
         var matched: EnsembleEvent?
-        while matched == nil {
+        var inspected = 0
+        let maxEventsToInspect = 64
+        while matched == nil, inspected < maxEventsToInspect {
             guard let event = await iterator.next() else { break }
+            inspected += 1
             if event.runID == runID, event.kind == "merged" {
                 matched = event
             }

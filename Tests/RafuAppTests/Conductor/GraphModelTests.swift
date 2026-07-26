@@ -193,10 +193,14 @@ struct GraphModelTests {
 
     @Test("Over-cap proposals never emit more than 16 ghost nodes")
     func proposalsCapAtSixteenGhostNodes() throws {
+        // Deliberately 20, ABOVE the cap. The parser normally caps at 16
+        // before this point, so feeding an already-capped 16 would leave
+        // `ConductorGraphModel`'s own `prefix(16)` — the belt-and-braces this
+        // test exists to pin — never exercised. A hand-edited or
+        // future-version manifest can carry more.
         var completedStep = step(agent: "advisor", artifact: "brief.md", status: .completed)
-        completedStep.proposals =
-            (1...15).map { "Proposal \($0)" } + ["… (truncated)"]
-        #expect(completedStep.proposals?.count == 16)
+        completedStep.proposals = (1...20).map { "Proposal \($0)" }
+        #expect(completedStep.proposals?.count == 20)
         let run = manifest(id: "capped", steps: [completedStep])
 
         let graph = ConductorGraphModel.build(
@@ -204,7 +208,8 @@ struct GraphModelTests {
 
         let ghosts = graph.nodes.filter { $0.kind == .proposedGhost }
         #expect(ghosts.count == 16)
-        #expect(ghosts.last?.detail == "… (truncated)")
+        #expect(ghosts.first?.detail == "Proposal 1")
+        #expect(ghosts.last?.detail == "Proposal 16")
     }
 
     @Test("Graph step states keep shape-distinct glyphs and non-empty labels")

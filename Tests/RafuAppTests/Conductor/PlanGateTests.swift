@@ -160,6 +160,70 @@ struct PlanGateTests {
     }
 
     @MainActor
+    @Test("Abort at a parked plan gate is observable to an awaiting coordinator")
+    func abortAtPlanGateIsObservable() async throws {
+        // The human can click "Abort Run" instead of "Request Changes" on a
+        // parked plan gate. That path goes through `markAborted()`, not
+        // `declinePlanGate`, and `activeStepIndex` returns nil for
+        // `.awaitingPlanGate` — so before this regression the manifest
+        // published with every step still `.pending` and the abort projected
+        // as `.pending` forever, blocking `await <run> --state aborted`.
+        let root = try makeWorkflowTestRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (_, controller) = makeWorkflowController(root: root)
+        let launcher = WorkflowFakeLauncher()
+        let runID = "plan-gate-abort"
+
+        var request = threeStepRequest(runID: runID)
+        request.planGateRequested = true
+        await controller.start(request, launcher: launcher)
+        #expect(controller.state == .awaitingPlanGate)
+
+        let cursorBefore = ConductorEnsembleEventCenter.shared.cursor
+        controller.abort()
+
+        #expect(controller.state == .aborted)
+        #expect(controller.manifest?.gate == nil)
+        #expect(controller.manifest?.steps.allSatisfy { $0.status == .aborted } == true)
+        #expect(launcher.recorded.isEmpty)
+
+        let events = ConductorEnsembleEventCenter.shared.eventsSince(cursorBefore)
+        #expect(events.contains { $0.runID == runID && $0.state == .aborted })
+    }
+
+    @MainActor
+    @Test("A plan gate parked across a restart is abandoned truthfully, not left a zombie")
+    func planGateAcrossRestartIsAbandoned() async throws {
+        // A plan gate parks BEFORE materialization, so a worktreeWrite role
+        // leaves a non-empty `worktreeBranch` with nothing on disk. Without
+        // the plan-gate check that fell into `.historyOnly`, whose note
+        // ("removed outside Rafu") is false, and the run then had no live
+        // controller, no human verb, and no coordinator verb — a zombie.
+        // The manifest comes from a REAL parked controller so the fixture
+        // cannot drift from what parking actually persists.
+        let root = try makeWorkflowTestRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (_, controller) = makeWorkflowController(root: root)
+        let launcher = WorkflowFakeLauncher()
+
+        var request = threeStepRequest(runID: "plan-gate-restart")
+        request.planGateRequested = true
+        await controller.start(request, launcher: launcher)
+        #expect(controller.state == .awaitingPlanGate)
+        let manifest = try #require(controller.manifest)
+        #expect(manifest.gate?.kind == .plan)
+
+        let plan = ConductorRunRecoveryService.plan(for: manifest, worktreeExists: false)
+
+        #expect(plan.disposition == .abandonedAtPlanGate)
+        #expect(plan.verbs.isEmpty)
+        let note = try #require(plan.note)
+        #expect(note.contains("plan gate"))
+        // The false claim the old `.historyOnly` path would have made.
+        #expect(!note.contains("removed outside Rafu"))
+    }
+
+    @MainActor
     @Test("A plan gate is never remotely approvable, whatever any step declares")
     func planGateIsNeverRemotelyApprovable() async throws {
         let root = try makeWorkflowTestRoot()
