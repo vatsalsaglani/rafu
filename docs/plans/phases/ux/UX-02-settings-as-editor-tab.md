@@ -71,9 +71,18 @@ panes, it does not change what they do.
 ### 1. The route
 
 Add `case settings` to `EditorCanvasRoute` plus the `WorkspaceSession` seam,
-beside the existing canvas methods. Settings is a **peer** of run detail and
-graph: opening it replaces them, and opening them replaces it — the same
-mutual exclusion those two already have.
+beside the existing canvas methods.
+
+**Before anything else: your activator must clear the other canvas modes,
+and theirs must clear yours.** Exclusivity lives in the mutators, not the
+resolver — that is why the existing modes' relative precedence is
+unreachable. A mode that sets its own flag without clearing the others makes
+the ordering suddenly load-bearing, and the bug is "the wrong screen appears"
+with no error and no failing test. See `editor-canvas-routing.md`,
+"Exclusivity lives in the mutators", and extend its table.
+
+Settings is a **peer** of run detail and graph: opening it replaces them, and
+opening them replaces it — the same mutual exclusion those two already have.
 
 ### 2. Re-host the panes unchanged
 

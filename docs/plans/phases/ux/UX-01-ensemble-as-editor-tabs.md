@@ -62,6 +62,15 @@ request service, `ConductorGraphCanvas.swift`.
 
 Add `case ensembleStart` and `case ensembleNewRun` to `EditorCanvasRoute`,
 and the matching `WorkspaceSession` state beside the existing canvas seams.
+
+**Before anything else: your activators must clear the other canvas modes,
+and theirs must clear yours.** Exclusivity lives in the mutators, not the
+resolver — `showConductorRunDetail` clears `conductorGraphVisible` and vice
+versa, which is why their relative precedence is unreachable. A mode that
+sets its own flag without clearing the others makes the ordering suddenly
+load-bearing, and the bug is "the wrong screen appears" with no error and no
+failing test. See `editor-canvas-routing.md`, "Exclusivity lives in the
+mutators", and extend its table.
 **Where they sit in the precedence order is a real decision:** put them
 above `editor` and below `blame`/`standaloneDiff`, matching how
 `runDetail`/`graph` already behave, and add the route tests that pin it.

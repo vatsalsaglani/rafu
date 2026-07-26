@@ -50,13 +50,39 @@ Two subtleties worth keeping in mind before "simplifying" anything here:
 
 ## How to add a canvas mode
 
-1. Add a case to `EditorCanvasRoute`.
-2. Add its condition to `resolve`, **stating explicitly where in the
+1. **Make the mode's activator clear every other canvas mode's state**, and
+   make theirs clear yours. This is the step that is easy to skip and
+   expensive to miss — see "Exclusivity lives in the mutators" below.
+2. Add a case to `EditorCanvasRoute`.
+3. Add its condition to `resolve`, **stating explicitly where in the
    precedence it sits** and why. Adding fields to `Inputs` is fine; reading
    the session inside `resolve` is not.
-3. Add a branch to `EditorCanvasView.canvas(for:)`.
-4. Add tests to `EditorCanvasRouteTests`: one for the case itself, plus a
+4. Add a branch to `EditorCanvasView.canvas(for:)`.
+5. Add tests to `EditorCanvasRouteTests`: one for the case itself, plus a
    precedence pair against each neighbouring mode.
+
+## Exclusivity lives in the mutators, not the resolver
+
+`resolve` orders the canvas modes, but in practice **no two full-canvas modes
+are ever active at once**, because each activator clears the others:
+
+| Activator | Sets | Clears |
+|---|---|---|
+| `showConductorRunDetail` | `conductorRunCanvasID` | `conductorGraphVisible` |
+| `showConductorGraph` | `conductorGraphVisible` | `conductorRunCanvasID` |
+| `revealTerminalSession` | — | both |
+
+The consequence is worth stating, because it was already misread once: the
+precedence between graph and run detail is **unreachable**, so the fact that
+the resolver puts graph first is a defensive statement of intent rather than
+observable behaviour. `graphBeatsRunDetail` pins it so a future change is
+deliberate.
+
+A new canvas mode that sets its own flag **without clearing the others**
+silently makes the resolver's ordering load-bearing — and the resulting bug
+is "the wrong screen appears" with no error and no failing test, because the
+route tests only assert the ordering, not the invariant that keeps it moot.
+If you add a mode, extend this table.
 
 If the new mode should not be dismissed by a selected document, say so in the
 code comment — that is the exception blame carries, and the next reader will

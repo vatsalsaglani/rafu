@@ -41,7 +41,7 @@ It unblocks UX-01/UX-02 and fixes the blue controls in one pass.
 
 | # | Plan | Branch | Wave |
 |---|---|---|---|
-| UX-00 | [`UX-00-canvas-route-and-theme.md`](UX-00-canvas-route-and-theme.md) | `ux/00-canvas-route-and-theme` | 1 (serial) |
+| UX-00 | [`UX-00-canvas-route-and-theme.md`](UX-00-canvas-route-and-theme.md) | `ux/00-canvas-route-and-theme` | **Merged 2026-07-26** (`4349dea`) — UX-01/UX-02 unblocked |
 | UX-03 | [`UX-03-agent-identity-and-terminals.md`](UX-03-agent-identity-and-terminals.md) | `ux/03-agent-identity` | **Merged 2026-07-26** (`9d1492f`) |
 | UX-01 | [`UX-01-ensemble-as-editor-tabs.md`](UX-01-ensemble-as-editor-tabs.md) | `ux/01-ensemble-tabs` | 2 |
 | UX-02 | [`UX-02-settings-as-editor-tab.md`](UX-02-settings-as-editor-tab.md) | `ux/02-settings-tab` | 2 |

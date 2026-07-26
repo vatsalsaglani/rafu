@@ -35,6 +35,7 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`ensemble-graph-canvas.md`](ensemble-graph-canvas.md) | Changing the Ensemble graph projection, node verbs, Activity feed, provider badges, or coordinator attribution |
 | [`ensemble-skill-pack.md`](ensemble-skill-pack.md) | Updating the bundled coordinator skill, installer destinations, or the verb-version drift guard |
 | [`app-variants-and-state-isolation.md`](app-variants-and-state-isolation.md) | Bundle-derived release/Lightning identity, isolated Application Support / Keychain / IPC / CLI state, and the safe build and package commands |
+| [`editor-canvas-routing.md`](editor-canvas-routing.md) | Adding or reordering an editor-canvas mode, changing which surface wins over another, or touching segmented/prominent control styling |
 | [`agent-terminals.md`](agent-terminals.md) | Changing interactive Agent Terminal discovery, auth gating, argv/environment, per-CLI model flags, session identity, or lifecycle |
 | [`agent-icon-assets.md`](agent-icon-assets.md) | Refreshing or reviewing the pinned Agent Terminal icon catalog — provenance, checksums, normalization, licensing posture, or fallbacks |
 | [`ai-provider-rest-contracts.md`](ai-provider-rest-contracts.md) | Changing provider endpoints, streaming, Keychain secrets, connection tests, or commit generation |
