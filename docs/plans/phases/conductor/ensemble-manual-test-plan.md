@@ -6,6 +6,11 @@
 - **How to report back:** for each check write **PASS**, **FAIL**, or **N/A**,
   plus what you actually saw. A one-line "expected X, saw Y" is enough — I do
   not need screenshots unless something looks visually wrong.
+- **Fixture:** the roles below are **Phase 1 of `tinyunits`**, the real
+  unit-converter CLI that
+  [`ensemble-integration-test-plan.md`](ensemble-integration-test-plan.md)
+  builds end to end with a full agent graph. Run this plan first; the
+  integration plan picks up the same project where this one stops.
 
 ## Before you start (5 minutes)
 
@@ -19,7 +24,24 @@ git add . && git commit -m "initial"
 
 Then create role and workflow files. In Rafu, open `~/rafu-ensemble-test`,
 and create these five files (the Ensemble reads plain Markdown — you can
-create them in Rafu's editor or in a terminal):
+create them in Rafu's editor or in a terminal).
+
+The fixture is **Phase 1 of the `tinyunits` example** — the same tiny
+unit-converter CLI the integration plan
+([`ensemble-integration-test-plan.md`](ensemble-integration-test-plan.md))
+builds end to end. Here the advisor writes a real (small) spec and the
+implementor writes real (small) code, so the Revise flow in section D edits
+something that visibly changes the output — instead of a toy sentence.
+
+```mermaid
+flowchart LR
+    A[advisor writes brief.md - a mini spec] --> G{step gate}
+    G -->|Revise| E[you edit brief.md and save]
+    E --> G
+    G -->|Approve| I[implementor writes units.py per the brief]
+    I --> M[merge gate - changed files, diff, Apply]
+    M --> W[units.py lands uncommitted in your repo]
+```
 
 `.rafu/agents/advisor.md`
 ```markdown
@@ -29,7 +51,13 @@ provider: claudeCode
 autonomy: readOnly
 handoffArtifact: brief.md
 ---
-Read the repository and write a two-sentence plan to $RAFU_HANDOFF/brief.md.
+Write an implementation brief to brief.md inside the directory given by
+RAFU_HANDOFF, and nothing else. The brief must specify a single file
+units.py at the repository root exposing exactly
+convert(value, src, dst) supporting km<->mi (1 km = 0.621371 mi) and
+c<->f (F = C * 9 / 5 + 32), raising ValueError for any other pair. Include
+one worked example: convert(5, "km", "mi") == 3.106855. Do not read, list,
+or modify any repository file. Then stop.
 ```
 
 `.rafu/agents/implementor.md`
@@ -40,7 +68,12 @@ provider: codex
 autonomy: worktreeWrite
 handoffArtifact: patch.md
 ---
-Read the brief you were given, make the change, and summarise it in $RAFU_HANDOFF/patch.md.
+Your prompt names an input artifact by absolute path — the brief. Read
+ONLY that file. Create units.py in the current working directory
+implementing exactly what the brief specifies, including any lines the
+brief adds after the word ALSO. Summarise what you built in patch.md
+inside the directory given by RAFU_HANDOFF. Do not read, list, or modify
+any other file. Then stop.
 ```
 
 `.rafu/workflows/advise-implement.md`
@@ -105,11 +138,11 @@ middle when the list is short, that is the recurring AGENTS.md alignment bug.
 
 | # | Do this | Expect |
 |---|---|---|
-| C1 | **New Run…** → choose Single role → advisor → task "Summarise this repo" → Run | A terminal tab opens showing the real Claude Code CLI working. The tab is badged with the role name. |
+| C1 | **New Run…** → choose Single role → advisor → task "Write the units brief" → Run | A terminal tab opens showing the real Claude Code CLI working. The tab is badged with the role name. |
 | C2 | Watch the Runs panel while it runs | The run appears under **Active** with a status symbol AND a text label — never colour alone. |
 | C3 | Let it finish | The run parks. Because advisor is `readOnly`, there should be **no** merge gate — it completes. |
 | C4 | Click the run in the panel | The run timeline canvas opens as an editor tab: role name, provider/model chips, status, duration. |
-| C5 | Click **Open Artifact** on the completed step | `brief.md` opens as a normal editor tab with the advisor's actual output. |
+| C5 | Click **Open Artifact** on the completed step | `brief.md` opens as a normal editor tab containing the actual mini spec — `convert(value, src, dst)`, the two unit pairs, and the worked example. |
 | C6 | Check `.rafu/runs/<id>/` in the file tree | You see `prompt.md`, `handoff/brief.md`, and `logs/output.log`. **Open `output.log`** — it should contain the raw terminal output of the run (with escape codes; it is a transcript, not clean text). |
 
 **Watch for:** C6's `output.log` being empty. That is handoff-era work (the
@@ -119,7 +152,27 @@ PTY tee) and the single most likely thing to be silently broken.
 
 ## D. A gated pipeline, and the Revise flow (C5)
 
-This is the flagship path — the one that makes Ensemble worth building.
+This is the flagship path — the one that makes Ensemble worth building. The
+key assertion is D7: your **edited** brief, not the original, is what flows
+to the implementor — and because the brief is a real spec here, the proof is
+a line of code, not a leap of faith.
+
+```mermaid
+sequenceDiagram
+    participant Y as You
+    participant R as Rafu
+    participant A as advisor (Claude)
+    participant I as implementor (Codex)
+    R->>A: step 1 - write the brief
+    A-->>R: brief.md (km/mi + c/f only)
+    R-->>Y: parked at step gate
+    Y->>R: Revise - edit brief.md, add ALSO kg/lb, save
+    Y->>R: Approve
+    R->>I: step 2 - brief path (the edited file)
+    I-->>R: units.py + patch.md
+    R-->>Y: merge gate - diff shows kg/lb support
+    Y->>R: Apply to Workspace
+```
 
 | # | Do this | Expect |
 |---|---|---|
@@ -128,16 +181,17 @@ This is the flagship path — the one that makes Ensemble worth building.
 | D3 | Run it | Step 1 (advisor, Claude) runs in a terminal tab. |
 | D4 | When step 1 finishes | The run **parks at the gate**. Step 2 must NOT have started. The timeline shows Approve / Revise / Abort as visible buttons with text labels. |
 | D5 | You should get a notification / notch signal | A gate-ready signal appears with the workflow and role name — and **nothing else** (no artifact text, no captured output). Its only action should be **Open Run** (not Approve — this workflow uses a plain `[gate]`). |
-| D6 | Click **Revise** | `brief.md` opens as an editor tab. **Edit it meaningfully** — e.g. add a line "ALSO: add a file called REVISED.txt". Save it. |
-| D7 | Click **Approve** | Step 2 (implementor, Codex) starts, and it should act on your EDITED brief. This is the key assertion: your edit must be what flowed forward. |
-| D8 | Let step 2 finish | The run parks at the **merge gate** (implementor is `worktreeWrite`), showing the changed-file list. |
-| D9 | Click a changed file | It opens in the diff canvas. |
-| D10 | Click **Apply to Workspace** | The diff is applied to your working tree. `git status` in the repo shows the changes as **uncommitted** — Rafu must never auto-commit. The run's worktree is removed. |
+| D6 | Click **Revise** | `brief.md` opens as an editor tab. **Edit it meaningfully**: add the line `ALSO: also support kg<->lb (1 kg = 2.20462 lb).` Save it. |
+| D7 | Click **Approve** | Step 2 (implementor, Codex) starts, and it should act on your EDITED brief. The check is objective: the resulting `units.py` must handle kg/lb — grep the diff for `2.20462`. If it only has km/mi and c/f, the original brief flowed forward and the Revise flow is broken. |
+| D8 | Let step 2 finish | The run parks at the **merge gate** (implementor is `worktreeWrite`), showing `units.py` in the changed-file list. |
+| D9 | Click the changed file | It opens in the diff canvas; the kg/lb branch is visible in the diff. |
+| D10 | Click **Apply to Workspace** | `units.py` is applied to your working tree. `git status` shows it **uncommitted** — Rafu must never auto-commit. The run's worktree is removed. Optional smoke: `python3 -c "from units import convert; print(convert(5,'kg','lb'))"` prints ≈ `11.0231`. |
 | D11 | Check the run timeline again | Both steps show completed, with durations. If your Codex/Claude usage is metered, you should see usage lines per step and a "Run usage" line in the header. |
 
 **Watch for:**
-- D7 is the single most important check in this document. If step 2 acts on
-  the *original* brief rather than your edit, the Revise flow is broken.
+- D7 is the single most important check in this document, and `2.20462` in
+  the diff is its whole proof. If step 2 acts on the *original* brief rather
+  than your edit, the Revise flow is broken.
 - D11's usage lines: if a provider has no metering, showing **nothing** is
   correct. A "0%" would be the bug.
 

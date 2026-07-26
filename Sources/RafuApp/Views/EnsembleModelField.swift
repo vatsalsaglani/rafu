@@ -41,7 +41,7 @@ struct EnsembleModelField: View {
     var body: some View {
         VStack(alignment: .leading, spacing: RafuMetrics.space1) {
             Picker(label, selection: selectionBinding) {
-                Text("CLI default").tag(Self.defaultTag)
+                Text(ConductorModelResolution.unsetLabel).tag(Self.defaultTag)
                 ForEach(available) { choice in
                     Text(choice.displayName).tag(choice.id)
                 }

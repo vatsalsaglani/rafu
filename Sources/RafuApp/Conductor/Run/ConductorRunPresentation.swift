@@ -128,7 +128,7 @@ nonisolated enum ConductorRunPresentation {
     /// decides: no `--model` flag is passed, and the CLI applies its own
     /// configured default, which Rafu cannot read. "Adapter" named the wrong
     /// party — Rafu's adapter is precisely the thing that is NOT choosing.
-    static let unsetModelLabel = "CLI default"
+    static let unsetModelLabel = ConductorModelResolution.unsetLabel
 
     /// Display names for `provider`'s shipped models. `curatedModels()` is
     /// contractually pure and synchronous (see `ConductorCLIAdapter`), so this

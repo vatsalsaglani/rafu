@@ -45,6 +45,17 @@ nonisolated struct ConductorModelResolution: Equatable, Sendable {
         case cliDecides
     }
 
+    /// The one wording for "nothing is set, the CLI will decide", shared by
+    /// every surface that can show it: the creation canvas's picker, the
+    /// graph, the Runs panel, run detail, the plan gate, and Settings.
+    ///
+    /// It is a constant rather than a literal per site because this string
+    /// already drifted once — run detail said "Adapter default" while the
+    /// creation canvas said "Provider default", for the same state. It names
+    /// the **CLI** deliberately: the CLI is the party that actually chooses
+    /// here, and "adapter" named the one component that is not.
+    static let unsetLabel = "CLI default"
+
     /// Short, human-facing label for a chip or a caption.
     var label: String { displayName }
 
@@ -82,7 +93,7 @@ nonisolated struct ConductorModelResolution: Equatable, Sendable {
         ensembleDefault: String?,
         settingsDefault: String?,
         catalog: [ConductorModelChoice] = [],
-        unsetLabel: String = "CLI default"
+        unsetLabel: String = ConductorModelResolution.unsetLabel
     ) -> ConductorModelResolution {
         let candidates: [(String?, Source)] = [
             (explicit, .explicit),

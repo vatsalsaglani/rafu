@@ -251,7 +251,7 @@ private struct ConductorAdapterRow: View {
 
             HStack(spacing: 8) {
                 Picker("Default model", selection: model.defaultModelBinding(for: row.id)) {
-                    Text("Adapter default").tag("")
+                    Text(ConductorModelResolution.unsetLabel).tag("")
                     ForEach(model.availableModels(for: row.id)) { choice in
                         Text(choice.displayName).tag(choice.id)
                     }

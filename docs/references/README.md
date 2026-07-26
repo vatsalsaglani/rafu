@@ -38,6 +38,7 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`editor-canvas-routing.md`](editor-canvas-routing.md) | Adding or reordering an editor-canvas mode, changing which surface wins over another, or touching segmented/prominent control styling |
 | [`settings-surface.md`](settings-surface.md) | Changing the Settings command or ⌘, routing, editor-hosted Settings canvas, native no-window fallback, Settings layout, or restoration behavior |
 | [`agent-terminals.md`](agent-terminals.md) | Changing interactive Agent Terminal discovery, auth gating, argv/environment, per-CLI model flags, session identity, or lifecycle |
+| [`onboarding-assets.md`](onboarding-assets.md) | Regenerating or re-grading the first-launch onboarding stills/video, adding a new scene asset, or hitting the hex-code/interface-vocabulary/light-fixture prompt failure modes again |
 | [`agent-icon-assets.md`](agent-icon-assets.md) | Refreshing or reviewing the pinned Agent Terminal icon catalog — provenance, checksums, normalization, licensing posture, or fallbacks |
 | [`ai-provider-rest-contracts.md`](ai-provider-rest-contracts.md) | Changing provider endpoints, streaming, Keychain secrets, connection tests, or commit generation |
 | [`git-process-and-parsing.md`](git-process-and-parsing.md) | Changing Git capture, porcelain parsing, unborn repositories, diffs, history, branch operations, batch staging, whole-hunk staging/unstaging, stash, blame, inline blame decorations, hunk peek, commit graph layout, worktree parsing, or the Source Control tree view |

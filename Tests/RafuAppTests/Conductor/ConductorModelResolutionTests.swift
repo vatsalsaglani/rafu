@@ -98,6 +98,38 @@ struct ConductorModelResolutionTests {
                 || settings.detailedLabel.contains("your default"))
     }
 
+    /// This string drifted once already — run detail said "Adapter default",
+    /// the creation canvas said "Provider default", for the same state — and
+    /// the drift was invisible because each site read correctly on its own.
+    /// Every surface now reads one constant, so a source scan is the guard
+    /// that keeps a fresh literal from reintroducing a second vocabulary.
+    @Test("One unset wording, referenced rather than retyped, across every surface")
+    func unsetWordingIsCentralised() throws {
+        let sites = [
+            "Sources/RafuApp/Conductor/Run/ConductorRunPresentation.swift",
+            "Sources/RafuApp/Views/EnsembleModelField.swift",
+            "Sources/RafuApp/Settings/ConductorSettingsTab.swift",
+        ]
+        for site in sites {
+            let text = try Self.source(site)
+            #expect(
+                text.contains("ConductorModelResolution.unsetLabel"),
+                "\(site) should reference the shared constant")
+            // Comments are excluded deliberately: the doc comment on
+            // `unsetModelLabel` *quotes* both retired strings to explain why
+            // they were retired, and a scan that punished the explanation
+            // would push the reasoning out of the code.
+            for line in Self.codeLines(text) {
+                #expect(
+                    !line.contains("\"Adapter default\""),
+                    "\(site) still carries the old wording that named the wrong party")
+                #expect(
+                    !line.contains("\"Provider default\""),
+                    "\(site) still carries the creation canvas's competing wording")
+            }
+        }
+    }
+
     @Test("A caller may state its own unset wording without changing the semantics")
     func customUnsetLabel() {
         let resolution = ConductorModelResolution.resolve(
@@ -106,5 +138,31 @@ struct ConductorModelResolutionTests {
         #expect(resolution.displayName == "Adapter default")
         #expect(resolution.modelID == nil)
         #expect(resolution.source == .cliDecides)
+    }
+
+    /// Lines that are not `//` comments. Crude on purpose — it does not try to
+    /// parse block comments or strings, because the only thing it must get
+    /// right is "don't fail the file for explaining itself".
+    private static func codeLines(_ text: String) -> [Substring] {
+        text.split(separator: "\n").filter {
+            !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//")
+        }
+    }
+
+    private static func source(_ path: String, file: StaticString = #filePath) throws -> String {
+        var directory = URL(fileURLWithPath: "\(file)").deletingLastPathComponent()
+        while directory.path != "/" {
+            if FileManager.default.fileExists(
+                atPath: directory.appending(path: "Package.swift").path)
+            {
+                return try String(contentsOf: directory.appending(path: path), encoding: .utf8)
+            }
+            directory = directory.deletingLastPathComponent()
+        }
+        throw ModelResolutionTestError.repositoryRootNotFound
+    }
+
+    private enum ModelResolutionTestError: Error {
+        case repositoryRootNotFound
     }
 }

@@ -133,13 +133,73 @@ d490556c80f4fefcb07a9214212f8255b2e9717f10782fb8db2b9c9d44801e97  khadi/V2-bobbi
 a06a230092cbd5f7d22d1f87e09974f4120b06772bb12c916a3a27874e8eb7e9  khadi/V3-resolve.jpg
 ```
 
+## Video
+
+Eight clips (V0/V1/V2/V3 × Indigo/Khadi), promoted to
+`Resources/Onboarding/{grade}/*.mp4`:
+
+- **Model:** `seedance_2_0` via Higgsfield CLI, image-to-video from the
+  graded stills above as `--start-image`.
+- **Settings:** `--aspect-ratio 16:9 --resolution 1080p --duration 5
+  --generate-audio false --mode std`. Audio generation deliberately
+  disabled — music/SFX are a separate, designed pass (see the
+  screenplay's Score section), not something the video model should
+  auto-generate.
+- **Output:** 1920×1080, 24fps, ~5.04s, silent, 41 MB total (8 clips).
+- **Cost:** 45 credits/clip on PRO — 360 credits for the original 8, plus
+  90 more for one re-generation (see below). 600-credit monthly grant,
+  52 remaining after this pass.
+
+### V3-resolve required a prompt fix — do not regress this
+
+First attempt described the ending as "the ruled lines retract, leaving
+only the outer rectangle" — the model retracted the **outer border
+too**, in both grades, leaving only the pulsing caret with no frame. This
+breaks the intended exact match to the promoted `V3-resolve.jpg` still
+(scripted as a match-cut / freeze-frame target). Confirmed by extracting
+the true last frame (`ffmpeg -sseof -0.15 ... -frames:v 1`), not a
+mid-pulse dim phase.
+
+Fix: state the constraint about what must **stay the same** as
+explicitly and separately from what changes: *"The outer rectangle
+border stays perfectly intact, fully visible, and completely unchanged
+in brightness and position for the entire clip — it must never fade,
+dim, or disappear. Only the interior horizontal ruled lines slowly
+retract..."* Splitting "this stays fixed" from "this changes" into two
+separate sentences was what made the difference — the original single
+sentence ("lines retract, leaving only X") let the model treat the whole
+frame as transitional.
+
+## Known open issue: media budget
+
+`Resources/Onboarding/` is now **47 MB** (6.7 MB stills + 41 MB video) —
+video alone puts the manifest at roughly double the screenplay's
+own `≤25MB` target (`first-launch-onboarding.md`'s asset manifest
+section). This is not a rounding error: 1080p/5s clips are inherently
+4–7 MB each at this bitrate, and there are 8 of them. Options if this
+needs to come down: lower resolution/duration, drop `bitrate_mode` to
+match `standard` more aggressively (already default), cut the number of
+grades bundled (ship one, generate/download the other on first launch),
+or accept the larger footprint and revise the budget line in the ADR.
+Not resolved here — flagging it is the requirement, not solving it
+unilaterally, since the ceiling itself was never ratified as a hard
+constraint (see "Open decisions" in the screenplay doc).
+
 ## Related / next
 
-- Video assets (V0–V3 animated, both grades) are the next step: feed
-  these graded stills in as start-image references to a Higgsfield video
-  model (e.g. `seedance_2_0`) or `/openrouter-video`. Not yet done as of
-  this note.
-- Music/SFX generation and the onboarding ADR (media-budget ceiling,
-  whether to ship music, localization of copy, feature-flag gating on
-  the Ensemble discovery scene) remain open per
+- Music/SFX generation and the onboarding ADR (media-budget ceiling —
+  see above, whether to ship music, localization of copy, feature-flag
+  gating on the Ensemble discovery scene) remain open per
   `first-launch-onboarding.md`'s "Open decisions" section.
+- SHA-256 for the eight video files:
+
+```
+1ff9dc421887d3ccf9c7e9de1179e6ee41cecb5be2ccb84e26cef5a06d942311  indigo/V0-knot.mp4
+b1e7e634d6c071fecf4f0cfa68af8b251c6bb284de0165e3255d5b86f9975a7f  indigo/V1-loom.mp4
+ba3da1fcd25c42cfd297f724246ed0dbe7a7e8a1c4f19128f086ffb55ee7f5ca  indigo/V2-bobbins.mp4
+dbe3374c2d76ddaea77f00c6c0e2b740a479cddecc0b58a355daff12227d2fad  indigo/V3-resolve.mp4
+d5082e2c90e73dd87b3b25a9991b4ee456ffd633655dc337c193c2f8fdf8fc22  khadi/V0-knot.mp4
+4898ecc1d57c323825b5afa29ff1f60771bfde6e6c1bbf91b4e2376a4a7da6cc  khadi/V1-loom.mp4
+e8c55e8515360a6860706fd1451e388ce9eda4cbf06fd08c5325daf7e9e22854  khadi/V2-bobbins.mp4
+8e0f6c9e6f61ae17e1ebda49b3381a9a662ade4f2a43f8227d241db2608c38b3  khadi/V3-resolve.mp4
+```
