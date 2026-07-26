@@ -20,7 +20,13 @@ struct WorkspaceTerminalsPanelView: View {
     /// be renaming at a time.
     @State private var renamingID: UUID?
     @State private var renameText = ""
-    @State private var agentTerminalOptions: [AgentTerminalOption] = []
+    /// `nil` means the probe has not resolved yet — the launcher shows pending
+    /// rows for that state rather than an empty list (UX-03). Resolved-empty
+    /// and still-probing must never look the same.
+    @State private var agentTerminalOptions: [AgentTerminalOption]?
+    /// Bumped by the launcher's explicit "Check Again": the probe spawns real
+    /// CLIs, so it runs once per `.task` identity and never per render.
+    @State private var agentProbeToken = 0
 
     var body: some View {
         // Derived ONCE per body evaluation, never per-row inside a `ForEach`
@@ -35,6 +41,15 @@ struct WorkspaceTerminalsPanelView: View {
         )
         VStack(spacing: 0) {
             header(count: rows.count)
+            if session.rootURL != nil {
+                AgentLauncherSectionView(
+                    rows: agentLauncherRows,
+                    isProbing: agentTerminalOptions == nil,
+                    launch: launchAgent,
+                    refresh: { agentProbeToken += 1 }
+                )
+                Divider().overlay(theme.palette.borderSubtle)
+            }
             if rows.isEmpty {
                 emptyState
             } else {
@@ -47,17 +62,27 @@ struct WorkspaceTerminalsPanelView: View {
         // (few/no sessions) would float the header + list stack to the
         // vertical middle instead of pinning to the top.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .task(id: session.rootURL) {
+        .task(id: AgentProbeIdentity(root: session.rootURL, token: agentProbeToken)) {
             guard let root = session.rootURL else {
                 agentTerminalOptions = []
                 return
             }
+            // Back to pending so a refresh shows the probe honestly instead of
+            // leaving the previous answer on screen as if it were current.
+            agentTerminalOptions = nil
             let loaded = await AgentTerminalLaunchService(
                 workspaceRoot: root
             ).options()
             guard !Task.isCancelled else { return }
             agentTerminalOptions = loaded
         }
+    }
+
+    /// Pending rows until the probe resolves — one per known provider, so the
+    /// section is never an empty list that later fills in silently.
+    private var agentLauncherRows: [AgentLauncherRow] {
+        guard let agentTerminalOptions else { return AgentLauncherModel.probingRows() }
+        return AgentLauncherModel.rows(options: agentTerminalOptions)
     }
 
     private func header(count: Int) -> some View {
@@ -71,6 +96,13 @@ struct WorkspaceTerminalsPanelView: View {
                     .foregroundStyle(theme.palette.textPrimary)
             }
         } trailing: {
+            // Shell choices only. Agent identity deliberately does NOT live in
+            // this menu: SwiftUI bridges menu content to `NSMenuItem`, which
+            // draws its image at the image's own size, so the vendored `1em`
+            // SVGs rendered as 1×1-pt dots here while the same `FileIconView`
+            // drew correctly in the sheet. `Label(systemImage:)` survives
+            // because an SF Symbol carries a real size. See
+            // `docs/references/agent-terminals.md`.
             Menu {
                 Button("New Terminal", systemImage: "terminal") {
                     session.newTerminalTab()
@@ -88,12 +120,6 @@ struct WorkspaceTerminalsPanelView: View {
                         }
                     }
                 }
-
-                Divider()
-                Text("Agent Terminals")
-                ForEach(agentTerminalOptions) { option in
-                    agentTerminalMenuRow(option)
-                }
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 11, weight: .semibold))
@@ -109,31 +135,13 @@ struct WorkspaceTerminalsPanelView: View {
         }
     }
 
-    @ViewBuilder
-    private func agentTerminalMenuRow(_ option: AgentTerminalOption) -> some View {
-        Button {
-            launchAgentTerminal(option)
-        } label: {
-            Label {
-                Text(option.displayName)
-            } icon: {
-                FileIconView(icon: option.icon, size: 13)
-            }
-        }
-        .disabled(!option.isReady)
-        .help(option.availability.reason ?? "Launch \(option.displayName)")
-
-        if let reason = option.availability.reason {
-            Text(reason)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .disabled(true)
-        } else if let note = option.launchVerificationNote {
-            Text(note)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .disabled(true)
-        }
+    /// The launcher's only path to a spawn: an unavailable row cannot reach the
+    /// launch service, because `launchableOption` gates on the row's state.
+    private func launchAgent(_ row: AgentLauncherRow) {
+        guard let options = agentTerminalOptions,
+            let option = AgentLauncherModel.launchableOption(for: row, in: options)
+        else { return }
+        launchAgentTerminal(option)
     }
 
     private func launchAgentTerminal(_ option: AgentTerminalOption) {
@@ -202,6 +210,146 @@ struct WorkspaceTerminalsPanelView: View {
     private func cancelRename() {
         renamingID = nil
         renameText = ""
+    }
+}
+
+/// `.task(id:)` identity for the agent probe: the workspace root plus a
+/// user-refresh counter. Any other change to the view must NOT re-probe —
+/// `options()` spawns one process per provider.
+private struct AgentProbeIdentity: Equatable {
+    let root: URL?
+    let token: Int
+}
+
+/// The inline agent launcher (UX-03): one row per provider with its real
+/// vendor mark, an honest pending state, and unavailable rows that stay
+/// visible and say why in text.
+///
+/// This replaced an agent section inside the `+` `Menu`. It is not a styling
+/// preference: menu content is bridged to `NSMenuItem`, which draws its image
+/// at the image's own size, and the vendored SVGs are authored `width="1em"`
+/// so `NSImage` reports 1×1 pt. SwiftUI's `.resizable().frame(_:)` — which is
+/// what makes `FileIconView` correct everywhere else — has no effect there.
+private struct AgentLauncherSectionView: View {
+    let rows: [AgentLauncherRow]
+    let isProbing: Bool
+    let launch: (AgentLauncherRow) -> Void
+    let refresh: () -> Void
+
+    @Environment(\.rafuTheme) private var theme
+
+    /// Bounded so the launcher cannot crowd out the session list it sits
+    /// above; the provider roster is fixed at seven, so this always has
+    /// content to scroll and never leaves a gap. Roughly six rows: enough that
+    /// unavailable providers (which sort last, being registry-ordered) are one
+    /// short scroll away rather than invisible, and the header's "n of 7 ready"
+    /// states the full total either way.
+    private static let maxListHeight: CGFloat = 240
+
+    var body: some View {
+        VStack(spacing: 0) {
+            RafuCardHeaderRow {
+                HStack(spacing: 6) {
+                    Image(systemName: "terminal.badge")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(theme.palette.textSecondary)
+                    Text(AgentLauncherModel.headerTitle(rows: rows, isProbing: isProbing))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(theme.palette.textPrimary)
+                    if isProbing {
+                        ProgressView()
+                            .controlSize(.small)
+                            .scaleEffect(0.6)
+                            .frame(width: 12, height: 12)
+                            .accessibilityHidden(true)
+                    }
+                }
+            } trailing: {
+                Button {
+                    refresh()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(theme.palette.textSecondary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .disabled(isProbing)
+                .help("Check installed agent CLIs again")
+                .accessibilityLabel("Check installed agent CLIs again")
+            }
+
+            ScrollView(.vertical) {
+                VStack(spacing: 2) {
+                    ForEach(rows) { row in
+                        AgentLauncherRowView(row: row, launch: { launch(row) })
+                    }
+                }
+                .padding(.horizontal, RafuMetrics.space2)
+                .padding(.vertical, RafuMetrics.space2)
+            }
+            .frame(maxHeight: Self.maxListHeight)
+        }
+    }
+}
+
+/// One provider row. A click launches; under Full Keyboard Access the row is a
+/// focusable button, so Tab reaches it and Return activates it — which is why
+/// UX-03 mints no per-agent global chord (⌘⇧ n/f/g/l/k/p/e/a are all taken,
+/// and ⌘⇧A already opens the Agent Terminal sheet).
+private struct AgentLauncherRowView: View {
+    let row: AgentLauncherRow
+    let launch: () -> Void
+
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        Button(action: launch) {
+            HStack(spacing: RafuMetrics.space2) {
+                // The mark renders here because a normal SwiftUI view honors
+                // `FileIconView`'s resizable frame; the same view inside a
+                // `Menu` could not.
+                FileIconView(icon: row.icon, size: 16)
+                    .frame(width: 20, height: 20)
+                    .opacity(row.isLaunchable ? 1 : 0.5)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(row.displayName)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(
+                            row.isLaunchable ? theme.palette.textPrimary : theme.palette.textMuted
+                        )
+                        .lineLimit(1)
+                    // The state is ALWAYS text — dimming is a second signal,
+                    // never the only one (AGENTS: no meaning by color alone).
+                    Text(row.statusText)
+                        .font(.caption2)
+                        .foregroundStyle(theme.palette.textMuted)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, RafuMetrics.space2)
+            .padding(.vertical, 5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
+                    .fill(theme.palette.cardBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
+                    .strokeBorder(theme.palette.borderSubtle.opacity(0.5), lineWidth: 1)
+            )
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(!row.isLaunchable)
+        .help(row.isLaunchable ? "Launch \(row.displayName)" : row.statusText)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(row.accessibilityLabel)
     }
 }
 
