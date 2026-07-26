@@ -257,6 +257,15 @@ rather than engine-complete:
 Post-integration gates: 0 warnings, **1539 tests** green parallel and serial,
 lint clean, no `@unchecked Sendable` or logging in Conductor sources.
 
+**Two human-verification documents:**
+[`ensemble-manual-test-plan.md`](ensemble-manual-test-plan.md) covers UI
+behaviour; [`ensemble-integration-test-plan.md`](ensemble-integration-test-plan.md)
+covers what only a **real agent CLI** can prove — the handoff contract, adapter
+argv under execution, the curated PATH, autonomy restriction, cross-vendor
+artifact passing, and whether the skill teaches a coordinator correctly. Every
+existing automated test runs against `FakeConductorAdapter`, so none of that is
+covered today.
+
 **What a human still has to verify:**
 [`ensemble-manual-test-plan.md`](ensemble-manual-test-plan.md) — the checks
 headless tests cannot make (the Revise flow actually carrying an edited
