@@ -93,6 +93,12 @@ need in its handoff instead of editing it.
   `--lint` clean. HEADLESS ONLY — do NOT run `build_and_run.sh`, do not
   launch or kill `Rafu.app` (integrated GUI passes happen on `main` after
   merge).
+- When your phase is finished — gates green, everything committed — delete
+  your worktree's build cache (`rm -rf .build`) as the LAST step. One is
+  2-5 GB and a fan-out of them fills the disk, after which the next agent's
+  build dies on ENOSPC with corrupt-module-cache errors that look like
+  source bugs. Never delete it before the gates pass, and never to make a
+  failing build go away.
 - Zero-warning gates are only meaningful on files that actually recompiled:
   incremental `swift build` silently skips (and therefore hides) warnings in
   unchanged files. A fresh worktree's first build is clean and re-emits

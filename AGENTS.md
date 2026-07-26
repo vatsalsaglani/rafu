@@ -67,6 +67,22 @@ Only remove the lock when *both* signals say nobody owns it. `lsof` alone can mi
 
 A silent SwiftPM invocation is a lock question until proven otherwise. A genuinely slow build still prints progress.
 
+### Worktree build cache: delete it when you finish
+
+One `.build` is 2–5 GB. Phase worktrees accumulate silently: this repository reached **20 build directories totalling 48 GB with 13 GB of disk left**, which is one fan-out away from the next agent's build dying on ENOSPC. SwiftPM does not fail cleanly when the disk fills — you get corrupt module caches and "cannot find type in scope" errors that read like source bugs, so the agent that hits it wastes its run debugging your code instead of the disk.
+
+**If you are working in a git worktree — not the primary checkout on `main` or a long-lived `dev` branch — delete the build cache as your final step**, after your gates are green and every commit is made:
+
+```bash
+rm -rf .build
+```
+
+Ordering is the whole rule. Never delete it *before* the gates pass, and never as a way to make a failing build go away: a broken build is a real signal, and a cold rebuild that "fixes" it has only hidden something. Deleting last costs nothing — the branch is committed, and anyone who needs to rebuild can.
+
+Do **not** do this in the primary checkout. The coordinator builds, tests, and launches there on every merge, and a cold rebuild there is minutes off each one.
+
+The coordinator reclaims already-merged worktrees on `main` with the guarded sweep in [`docs/references/build-and-run.md`](docs/references/build-and-run.md) — merged branches only, never the primary checkout, never a worktree with a live process.
+
 ## Architecture invariants
 
 - Use SwiftUI for scenes, window composition, toolbars, commands, settings, sheets, and observable UI metadata.

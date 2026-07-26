@@ -80,6 +80,40 @@ Evidence: with a Python process holding an `flock`, the script reported the
 holder pid and exited 1 across both attempts with the lock file intact; with
 a stale file (no holder, dead pid) it removed the file and exited 0.
 
+## Reclaiming worktree build caches (verified 2026-07-26)
+
+Each `.build` is 2-5 GB. Phase fan-outs accumulate them: this repository
+reached **20 build directories totalling 48 GB with 13 GB free**. SwiftPM
+does not fail cleanly on ENOSPC — the symptom is a corrupt module cache and
+"cannot find type in scope" errors that look like source bugs, so the agent
+that hits it debugs the wrong thing.
+
+Phase agents delete their own `.build` as their last step (see AGENTS.md,
+"Worktree build cache"). The coordinator sweeps already-merged worktrees
+from the primary checkout:
+
+```bash
+git worktree list --porcelain \
+| awk '/^worktree /{w=$2} /^branch /{b=$2; sub("refs/heads/","",b); print w"\t"b}' \
+| while IFS=$'\t' read -r w b; do
+    [ "$b" = "main" ] && continue                                  # never the primary checkout
+    [ -d "$w/.build" ] || continue
+    git merge-base --is-ancestor "$b" main 2>/dev/null || continue # merged branches only
+    pgrep -f "$w" >/dev/null 2>&1 && continue                      # skip anything live
+    rm -rf "$w/.build"
+  done
+```
+
+All three guards are load-bearing. Skipping `main` protects the checkout the
+coordinator builds and launches from; the merge-base test keeps unmerged work
+rebuildable; the `pgrep` test is what stops this from destroying an in-flight
+agent's build. Swap `rm -rf` for `echo` to dry-run — do that first when any
+agent is running.
+
+Evidence: the sweep above reclaimed **29.5 GB** in one pass (13 GiB free ->
+43 GiB), keeping `main`, two actively-running phase worktrees, and one
+unmerged branch.
+
 ## CI and resource validation
 
 The bootstrap GitHub workflow uses the explicit `macos-26` hosted-runner label and pins the official `actions/checkout` v6 tag commit verified on 2026-07-12. CI runs `script/verify.sh`; foreground GUI launch verification remains local.
