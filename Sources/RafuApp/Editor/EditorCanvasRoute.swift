@@ -15,6 +15,8 @@ nonisolated enum EditorCanvasRoute: Equatable {
     case standaloneDiff
     case graph
     case runDetail
+    case ensembleStart
+    case ensembleNewRun
     case editor
 
     /// The canvas-relevant slice of `WorkspaceSession`, reduced to plain
@@ -34,6 +36,8 @@ nonisolated enum EditorCanvasRoute: Equatable {
         var hasGitOpenDiff: Bool
         var hasConductorRunCanvasID: Bool
         var conductorGraphVisible: Bool
+        var ensembleStartCanvasVisible: Bool
+        var ensembleNewRunCanvasVisible: Bool
         var hasSelectedDocument: Bool
         var hasSelectedDocumentID: Bool
 
@@ -44,6 +48,8 @@ nonisolated enum EditorCanvasRoute: Equatable {
             hasGitOpenDiff: Bool = false,
             hasConductorRunCanvasID: Bool = false,
             conductorGraphVisible: Bool = false,
+            ensembleStartCanvasVisible: Bool = false,
+            ensembleNewRunCanvasVisible: Bool = false,
             hasSelectedDocument: Bool = false,
             hasSelectedDocumentID: Bool = false
         ) {
@@ -53,6 +59,8 @@ nonisolated enum EditorCanvasRoute: Equatable {
             self.hasGitOpenDiff = hasGitOpenDiff
             self.hasConductorRunCanvasID = hasConductorRunCanvasID
             self.conductorGraphVisible = conductorGraphVisible
+            self.ensembleStartCanvasVisible = ensembleStartCanvasVisible
+            self.ensembleNewRunCanvasVisible = ensembleNewRunCanvasVisible
             self.hasSelectedDocument = hasSelectedDocument
             self.hasSelectedDocumentID = hasSelectedDocumentID
         }
@@ -66,9 +74,10 @@ nonisolated enum EditorCanvasRoute: Equatable {
         }
 
         // 2. A workspace with nothing whatsoever to render: no tab, and none
-        //    of the four tabless canvases is open.
+        //    of the six tabless canvases is open.
         if !inputs.hasAnyEditorTabs, !inputs.hasGitOpenDiff, !inputs.hasGitOpenBlame,
-            !inputs.hasConductorRunCanvasID, !inputs.conductorGraphVisible
+            !inputs.hasConductorRunCanvasID, !inputs.conductorGraphVisible,
+            !inputs.ensembleStartCanvasVisible, !inputs.ensembleNewRunCanvasVisible
         {
             return .empty
         }
@@ -79,7 +88,7 @@ nonisolated enum EditorCanvasRoute: Equatable {
             return .blame
         }
 
-        // 4-6. The tabless canvases. Each yields to a selected document id,
+        // 4-8. The tabless canvases. Each yields to a selected document id,
         //      so opening a file always returns the canvas to the editor.
         if inputs.hasGitOpenDiff, !inputs.hasSelectedDocumentID {
             return .standaloneDiff
@@ -90,8 +99,14 @@ nonisolated enum EditorCanvasRoute: Equatable {
         if inputs.hasConductorRunCanvasID, !inputs.hasSelectedDocumentID {
             return .runDetail
         }
+        if inputs.ensembleStartCanvasVisible, !inputs.hasSelectedDocumentID {
+            return .ensembleStart
+        }
+        if inputs.ensembleNewRunCanvasVisible, !inputs.hasSelectedDocumentID {
+            return .ensembleNewRun
+        }
 
-        // 7. The editor layout tree.
+        // 9. The editor layout tree.
         return .editor
     }
 }
@@ -109,6 +124,8 @@ extension EditorCanvasRoute.Inputs {
             hasGitOpenDiff: session.gitOpenDiff != nil,
             hasConductorRunCanvasID: session.conductorRunCanvasID != nil,
             conductorGraphVisible: session.conductorGraphVisible,
+            ensembleStartCanvasVisible: session.ensembleStartCanvasVisible,
+            ensembleNewRunCanvasVisible: session.ensembleNewRunCanvasVisible,
             hasSelectedDocument: session.selectedDocument != nil,
             hasSelectedDocumentID: session.selectedDocumentID != nil
         )

@@ -62,7 +62,7 @@ private func notAuthenticatedFixture(
 
 private func makeEnsembleTestRoot() throws -> URL {
     let root = FileManager.default.temporaryDirectory
-        .appending(path: "rafu-ensemble-sheet-\(UUID().uuidString)", directoryHint: .isDirectory)
+        .appending(path: "rafu-ensemble-canvas-\(UUID().uuidString)", directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     return root
 }
@@ -80,14 +80,14 @@ private func ensembleCapRequest(runID: String) -> ConductorWorkflowRunRequest {
 }
 
 @MainActor
-@Suite("New Ensemble sheet", .serialized)
-struct EnsembleStartSheetTests {
+@Suite("New Ensemble canvas", .serialized)
+struct EnsembleStartCanvasTests {
 
     @Test("Only a ready CLI is enabled; the others carry a stated reason")
     func gatingMatrix() async throws {
         let root = try makeEnsembleTestRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let suite = "EnsembleStartSheetTests.\(UUID().uuidString)"
+        let suite = "EnsembleStartCanvasTests.\(UUID().uuidString)"
         defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
 
         let model = EnsembleStartModel(
@@ -189,7 +189,7 @@ struct EnsembleStartSheetTests {
     func selectProviderResetsModelAcrossVendors() async throws {
         let root = try makeEnsembleTestRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let suite = "EnsembleStartSheetTests.\(UUID().uuidString)"
+        let suite = "EnsembleStartCanvasTests.\(UUID().uuidString)"
         defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
         let defaultModelStore = ConductorDefaultModelStore(suiteName: suite)
         defaultModelStore.setDefaultModel("claude-model", for: .claudeCode)
@@ -230,7 +230,7 @@ struct EnsembleStartSheetTests {
 
         let session = WorkspaceSession()
         session.openLocalWorkspace(at: root)
-        session.ensembleStartSheetPresented = true
+        session.showEnsembleStart()
 
         let model = EnsembleStartModel(
             adapters: [readyFixture(.codex)],
@@ -252,24 +252,24 @@ struct EnsembleStartSheetTests {
         #expect(started)
         #expect(session.conductorCoordinatorSessions.map(\.id) == ["co-test0001"])
         #expect(model.postLaunchGoalToPaste == "Coordinate the release")
-        // The sheet stays open on the copyable-goal confirmation until Done.
-        #expect(session.ensembleStartSheetPresented)
+        // The canvas stays open on the copyable-goal confirmation until Done.
+        #expect(session.ensembleStartCanvasVisible)
         #expect(!session.conductorGraphVisible)
 
         model.finishAndShowGraph(in: session)
-        #expect(!session.ensembleStartSheetPresented)
+        #expect(!session.ensembleStartCanvasVisible)
         #expect(session.conductorGraphVisible)
         #expect(model.postLaunchGoalToPaste == nil)
     }
 
-    @Test("A launch failure keeps the sheet open with an inline error and spawns nothing")
-    func launchFailureKeepsSheet() async throws {
+    @Test("A launch failure keeps the canvas open with an inline error and spawns nothing")
+    func launchFailureKeepsCanvas() async throws {
         let root = try makeEnsembleTestRoot()
         defer { try? FileManager.default.removeItem(at: root) }
 
         let session = WorkspaceSession()
         session.openLocalWorkspace(at: root)
-        session.ensembleStartSheetPresented = true
+        session.showEnsembleStart()
 
         let model = EnsembleStartModel(
             adapters: [readyFixture(.codex)],
@@ -282,7 +282,7 @@ struct EnsembleStartSheetTests {
 
         let started = await model.start(in: session)
         #expect(!started)
-        #expect(session.ensembleStartSheetPresented)
+        #expect(session.ensembleStartCanvasVisible)
         #expect(!session.conductorGraphVisible)
         #expect(model.errorMessage != nil)
         #expect(session.conductorCoordinatorSessions.isEmpty)
@@ -354,18 +354,201 @@ struct EnsembleStartSheetTests {
         #expect(try String(contentsOf: reviewerURL, encoding: .utf8) != "custom content")
     }
 
-    @Test("The command seam guards on descriptor == nil")
-    func commandGuardsOnDescriptor() throws {
+    @Test("The canvas seams guard on descriptor == nil")
+    func canvasSeamsGuardOnDescriptor() throws {
         let root = try makeEnsembleTestRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let session = WorkspaceSession()
         #expect(session.descriptor == nil)
 
-        session.presentEnsembleStartSheet()
-        #expect(!session.ensembleStartSheetPresented)
+        session.showEnsembleStart()
+        session.showEnsembleNewRun()
+        #expect(!session.ensembleStartCanvasVisible)
+        #expect(!session.ensembleNewRunCanvasVisible)
 
         session.openLocalWorkspace(at: root)
-        session.presentEnsembleStartSheet()
-        #expect(session.ensembleStartSheetPresented)
+        session.showEnsembleStart()
+        #expect(session.ensembleStartCanvasVisible)
+        session.showEnsembleNewRun()
+        #expect(session.ensembleNewRunCanvasVisible)
+    }
+
+    @Test("Creation canvases replace peers and close to the last document")
+    func creationCanvasesReplacePeersAndCloseToDocument() throws {
+        let root = try makeEnsembleTestRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = WorkspaceSession()
+        session.openLocalWorkspace(at: root)
+        session.newUntitledDocument()
+        let document = try #require(session.openDocuments.last)
+
+        session.showConductorGraph()
+        session.showEnsembleStart()
+
+        #expect(session.ensembleStartCanvasVisible)
+        #expect(!session.ensembleNewRunCanvasVisible)
+        #expect(!session.conductorGraphVisible)
+        #expect(session.conductorRunCanvasID == nil)
+        #expect(session.selectedDocumentID == nil)
+
+        session.closeEnsembleStart()
+        #expect(!session.ensembleStartCanvasVisible)
+        #expect(session.selectedDocumentID == document.id)
+
+        session.showConductorRunDetail("run-1")
+        session.showEnsembleNewRun()
+
+        #expect(session.ensembleNewRunCanvasVisible)
+        #expect(!session.ensembleStartCanvasVisible)
+        #expect(!session.conductorGraphVisible)
+        #expect(session.conductorRunCanvasID == nil)
+        #expect(session.selectedDocumentID == nil)
+
+        session.closeEnsembleNewRun()
+        #expect(!session.ensembleNewRunCanvasVisible)
+        #expect(session.selectedDocumentID == document.id)
+
+        session.showEnsembleStart()
+        session.showEnsembleNewRun()
+        #expect(!session.ensembleStartCanvasVisible)
+        #expect(session.ensembleNewRunCanvasVisible)
+
+        session.showConductorGraph()
+        #expect(!session.ensembleStartCanvasVisible)
+        #expect(!session.ensembleNewRunCanvasVisible)
+        #expect(session.conductorGraphVisible)
+    }
+
+    @Test("Creation canvas visibility belongs to one workspace window")
+    func secondWindowIndependence() throws {
+        let root = try makeEnsembleTestRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = WorkspaceSession()
+        let second = WorkspaceSession()
+        first.openLocalWorkspace(at: root)
+        second.openLocalWorkspace(at: root)
+
+        first.showEnsembleStart()
+        #expect(first.ensembleStartCanvasVisible)
+        #expect(!second.ensembleStartCanvasVisible)
+        #expect(!second.ensembleNewRunCanvasVisible)
+
+        second.showEnsembleNewRun()
+        #expect(second.ensembleNewRunCanvasVisible)
+        first.closeEnsembleStart()
+        #expect(!first.ensembleStartCanvasVisible)
+        #expect(second.ensembleNewRunCanvasVisible)
+    }
+
+    @Test("Revealing a terminal replaces either creation canvas")
+    func terminalReplacesCreationCanvases() throws {
+        let root = try makeEnsembleTestRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = WorkspaceSession()
+        session.openLocalWorkspace(at: root)
+        session.newTerminalTab()
+        let terminal = try #require(session.terminal.sessions.first)
+
+        session.showEnsembleStart()
+        session.revealTerminalSession(terminal.id)
+        #expect(!session.ensembleStartCanvasVisible)
+
+        session.showEnsembleNewRun()
+        session.revealTerminalSession(terminal.id)
+        #expect(!session.ensembleNewRunCanvasVisible)
+        #expect(session.terminal.selectedID == terminal.id)
+    }
+
+    @Test("Every entry point uses the canvas seams and no Ensemble sheet is presented")
+    func entryPointsUseCanvasSeams() throws {
+        let root = try repositoryRoot()
+        let commands = try source("Sources/RafuApp/App/RafuAppCommands.swift", root: root)
+        let palette = try source("Sources/RafuApp/Views/CommandPaletteView.swift", root: root)
+        let runsPanel = try source(
+            "Sources/RafuApp/Views/ConductorRunsPanelView.swift", root: root)
+        let presentations = try source(
+            "Sources/RafuApp/Views/WorkspaceWindowView.swift", root: root)
+
+        #expect(commands.contains("workspaceSession?.showEnsembleStart()"))
+        #expect(commands.contains(".keyboardShortcut(\"e\", modifiers: [.command, .shift])"))
+        #expect(palette.contains("session.showEnsembleStart()"))
+        #expect(runsPanel.contains("session.showEnsembleStart()"))
+
+        #expect(commands.contains("workspaceSession?.showEnsembleNewRun()"))
+        #expect(palette.contains("session.showEnsembleNewRun()"))
+        #expect(runsPanel.contains("session.showEnsembleNewRun()"))
+
+        #expect(!presentations.contains("EnsembleStart"))
+        #expect(!runsPanel.contains(".sheet("))
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: root.appending(path: "Sources/RafuApp/Views/EnsembleStartSheet.swift").path)
+        )
+    }
+
+    @Test("Creation canvases expose close and Esc at a readable width")
+    func canvasCloseAndWidthContract() throws {
+        let root = try repositoryRoot()
+        let startCanvas = try source(
+            "Sources/RafuApp/Views/EnsembleStartCanvas.swift", root: root)
+        let runCanvas = try source(
+            "Sources/RafuApp/Views/ConductorRunsPanelView.swift", root: root)
+
+        #expect(startCanvas.contains(".onExitCommand(perform: session.closeEnsembleStart)"))
+        #expect(startCanvas.contains(".frame(maxWidth: 600"))
+        #expect(startCanvas.contains(".accessibilityLabel(\"Close New Ensemble\")"))
+        #expect(startCanvas.contains(".help(\"Close New Ensemble\")"))
+
+        #expect(runCanvas.contains(".onExitCommand(perform: session.closeEnsembleNewRun)"))
+        #expect(runCanvas.contains(".frame(maxWidth: 600"))
+        #expect(runCanvas.contains(".accessibilityLabel(\"Close New Ensemble Run\")"))
+        #expect(runCanvas.contains(".help(\"Close New Ensemble Run\")"))
+    }
+
+    @Test("Runs header icons have labels, tooltips, and menu/palette equivalents")
+    func runsHeaderIconContract() throws {
+        let root = try repositoryRoot()
+        let runsPanel = try source(
+            "Sources/RafuApp/Views/ConductorRunsPanelView.swift", root: root)
+        let commands = try source("Sources/RafuApp/App/RafuAppCommands.swift", root: root)
+        let palette = try source("Sources/RafuApp/Views/CommandPaletteView.swift", root: root)
+
+        #expect(
+            runsPanel.components(separatedBy: ".buttonStyle(RafuIconButtonStyle(size: 24))")
+                .count - 1 >= 3)
+        #expect(runsPanel.contains(".help(\"Show Ensemble Graph\")"))
+        #expect(runsPanel.contains(".accessibilityLabel(\"Show Ensemble Graph\")"))
+        #expect(runsPanel.contains(".help(\"New Ensemble…\")"))
+        #expect(runsPanel.contains(".accessibilityLabel(\"New Ensemble\")"))
+        #expect(runsPanel.contains(".help(\"New Run…\")"))
+        #expect(runsPanel.contains(".accessibilityLabel(\"New Ensemble Run\")"))
+
+        #expect(commands.contains("workspaceSession?.showConductorGraph()"))
+        #expect(palette.contains("session.showConductorGraph()"))
+        #expect(commands.contains("workspaceSession?.showEnsembleStart()"))
+        #expect(palette.contains("session.showEnsembleStart()"))
+        #expect(commands.contains("workspaceSession?.showEnsembleNewRun()"))
+        #expect(palette.contains("session.showEnsembleNewRun()"))
+    }
+
+    private func repositoryRoot(file: StaticString = #filePath) throws -> URL {
+        var directory = URL(fileURLWithPath: "\(file)").deletingLastPathComponent()
+        while directory.path != "/" {
+            if FileManager.default.fileExists(
+                atPath: directory.appending(path: "Package.swift").path)
+            {
+                return directory
+            }
+            directory = directory.deletingLastPathComponent()
+        }
+        throw EnsembleCanvasTestError.repositoryRootNotFound
+    }
+
+    private func source(_ path: String, root: URL) throws -> String {
+        try String(contentsOf: root.appending(path: path), encoding: .utf8)
+    }
+
+    private enum EnsembleCanvasTestError: Error {
+        case repositoryRootNotFound
     }
 }

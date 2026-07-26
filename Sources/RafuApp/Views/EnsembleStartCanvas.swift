@@ -57,7 +57,7 @@ enum EnsembleGrantDeadline: String, CaseIterable, Hashable, Identifiable {
 /// mapping the Agent Terminal picker uses, so Door 1's CLI gating can never
 /// drift from that picker's (one policy, read twice). Never touches the
 /// filesystem or a CLI from `init`; `probeCLIs(workspaceRoot:)` is the one
-/// async entry point, called only from the sheet's `.task`.
+/// async entry point, called only from the canvas's `.task`.
 @MainActor
 @Observable
 final class EnsembleStartModel {
@@ -87,7 +87,7 @@ final class EnsembleStartModel {
     var errorMessage: String?
 
     /// Non-`nil` once the coordinator has actually launched — the signal the
-    /// sheet uses to show the copyable-goal confirmation row. Every current
+    /// canvas uses to show the copyable-goal confirmation row. Every current
     /// CLI's launch shape has no initial-prompt argument
     /// (`AgentTerminalLaunchShape.arguments(model:)` only ever appends a
     /// model flag), so this row is unconditional for Door 1, never a
@@ -164,7 +164,7 @@ final class EnsembleStartModel {
 
     /// `nil` only for a ready CLI. The not-authenticated case reproduces the
     /// adapter's own hint text verbatim (never rewritten); the not-installed
-    /// case is reworded for THIS sheet's action rather than reusing the
+    /// case is reworded for THIS canvas's action rather than reusing the
     /// Agent Terminal picker's wording, which names a different feature.
     func disableReason(_ id: ConductorCLIID) -> String? {
         guard let option = cliOptions.first(where: { $0.id == id }) else { return nil }
@@ -206,11 +206,11 @@ final class EnsembleStartModel {
     }
 
     /// Launches the coordinator via the injected `launch` closure (real
-    /// `ConductorCoordinatorLauncher.start` by default). On success the sheet
+    /// `ConductorCoordinatorLauncher.start` by default). On success the canvas
     /// STAYS open showing `postLaunchGoalToPaste` — `finishAndShowGraph(in:)`
     /// is the explicit "Done" verb that actually lands the user on the graph
     /// canvas, so the copyable goal is never a toast the user might miss. On
-    /// failure nothing is registered and `errorMessage` is set; the sheet
+    /// failure nothing is registered and `errorMessage` is set; the canvas
     /// stays open with the form untouched.
     @discardableResult
     func start(in session: WorkspaceSession) async -> Bool {
@@ -224,6 +224,8 @@ final class EnsembleStartModel {
 
         let grant = makeGrant(windowCap: session.conductorConcurrentRuns.activeLimit)
         let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        session.beginEnsembleStartLaunch()
+        defer { session.endEnsembleStartLaunch() }
         do {
             _ = try await launch(
                 selectedProvider,
@@ -244,17 +246,15 @@ final class EnsembleStartModel {
     /// The "Done" verb after the post-launch confirmation row.
     func finishAndShowGraph(in session: WorkspaceSession) {
         session.showConductorGraph()
-        session.ensembleStartSheetPresented = false
         postLaunchGoalToPaste = nil
     }
 }
 
 /// "New Ensemble…" (⌘⇧E / Rafu menu / palette / Runs-panel button): the one
-/// cold-start sheet a user needs, ever. Structure copied from
-/// `GitHubPublishSheet` (header, grouped form, cancel/default keyboard
-/// shortcuts, fixed width, `RafuMetrics.sheetPadding`).
-struct EnsembleStartSheet: View {
-    @Environment(\.dismiss) private var dismiss
+/// cold-start canvas a user needs, ever. UX-01 re-hosts C8-07's unchanged
+/// three-door workflow at a readable editor width and gives it tab close/Esc
+/// semantics instead of modal dismissal.
+struct EnsembleStartCanvas: View {
     @Environment(\.rafuTheme) private var theme
     @Bindable var session: WorkspaceSession
 
@@ -271,42 +271,53 @@ struct EnsembleStartSheet: View {
     @State private var expertWorkflowStartError: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            RafuSheetHeader(
-                icon: "circle.hexagongrid",
-                title: "New Ensemble",
-                subtitle: "Describe a goal, start from a template, or launch an existing workflow."
-            )
+        VStack(spacing: 0) {
+            tabStrip
+            Divider().overlay(theme.palette.borderSubtle)
+            VStack(alignment: .leading, spacing: 16) {
+                RafuSheetHeader(
+                    icon: "circle.hexagongrid",
+                    title: "New Ensemble",
+                    subtitle:
+                        "Describe a goal, start from a template, or launch an existing workflow."
+                )
 
-            RafuSegmentedPicker(items: EnsembleDoor.allCases, selection: $model.door) { $0.title }
+                RafuSegmentedPicker(items: EnsembleDoor.allCases, selection: $model.door) {
+                    $0.title
+                }
 
-            Group {
-                if isShowingLaunchConfirmation {
-                    launchConfirmation
-                } else {
-                    switch model.door {
-                    case .guided:
-                        guidedDoor
-                    case .template:
-                        templateDoor
-                    case .expert:
-                        expertDoor
+                Group {
+                    if isShowingLaunchConfirmation {
+                        launchConfirmation
+                    } else {
+                        switch model.door {
+                        case .guided:
+                            guidedDoor
+                        case .template:
+                            templateDoor
+                        case .expert:
+                            expertDoor
+                        }
                     }
                 }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            if let doorErrorMessage {
-                Label(doorErrorMessage, systemImage: "exclamationmark.triangle")
-                    .font(.callout)
-                    .foregroundStyle(theme.palette.error)
-                    .accessibilityLabel("Cannot start: \(doorErrorMessage)")
-            }
+                if let doorErrorMessage {
+                    Label(doorErrorMessage, systemImage: "exclamationmark.triangle")
+                        .font(.callout)
+                        .foregroundStyle(theme.palette.error)
+                        .accessibilityLabel("Cannot start: \(doorErrorMessage)")
+                }
 
-            footer
+                footer
+            }
+            .padding(RafuMetrics.sheetPadding)
+            .frame(maxWidth: 600, maxHeight: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .padding(RafuMetrics.sheetPadding)
-        .frame(width: 480)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(theme.palette.editorBackground)
+        .onExitCommand(perform: session.closeEnsembleStart)
         .task(id: session.rootURL?.standardizedFileURL) {
             async let cliProbe: Void = model.probeCLIs(workspaceRoot: session.rootURL)
             async let templateLoad: Void = templateLibraryModel.load(
@@ -339,14 +350,38 @@ struct EnsembleStartSheet: View {
         }
     }
 
+    private var tabStrip: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "circle.hexagongrid")
+                .font(.system(size: 11))
+                .foregroundStyle(theme.palette.info)
+                .accessibilityHidden(true)
+            Text("New Ensemble")
+                .lineLimit(1)
+                .foregroundStyle(theme.palette.textPrimary)
+            Button(
+                "Close New Ensemble",
+                systemImage: "xmark",
+                action: session.closeEnsembleStart
+            )
+            .buttonStyle(RafuIconButtonStyle(size: 18, iconSize: 9))
+            .help("Close New Ensemble")
+            .accessibilityLabel("Close New Ensemble")
+            Spacer()
+        }
+        .font(.callout)
+        .padding(.horizontal, 10)
+        .frame(height: RafuMetrics.tabBarHeight)
+        .background(theme.palette.tabBarBackground)
+    }
+
     // MARK: - Footer
 
     private var footer: some View {
         HStack {
             if !isShowingLaunchConfirmation {
-                Button("Cancel", role: .cancel) { dismiss() }
+                Button("Close", action: session.closeEnsembleStart)
                     .buttonStyle(RafuSecondaryButtonStyle())
-                    .keyboardShortcut(.cancelAction)
             }
             Spacer()
             if isBusy {
@@ -624,7 +659,7 @@ struct EnsembleStartSheet: View {
                 url: url,
                 relativePath: ".rafu/\(workflowFile.relativePath)",
                 isDirectory: false))
-        dismiss()
+        session.closeEnsembleStart()
     }
 
     // MARK: - Door 3: expert
@@ -696,7 +731,7 @@ struct EnsembleStartSheet: View {
             })
     }
 
-    /// Mirrors `ConductorNewRunSheet`'s own `canStart` exactly: it checks the
+    /// Mirrors `ConductorNewRunCanvas`'s own `canStart` exactly: it checks the
     /// LOCAL `expertTaskPrompt` binding rather than
     /// `workflowLaunchModel.canStart`, because that model's own `taskPrompt`
     /// is only synced into it right before `makeRequest()` — reading it here
@@ -733,7 +768,7 @@ struct EnsembleStartSheet: View {
                 let request = try workflowLaunchModel.makeRequest()
                 // Free slots held by runs that already finished, so the cap
                 // counts only genuinely active pipelines (mirrors the panel's
-                // own New Run sheet).
+                // own New Run canvas).
                 session.conductorConcurrentRuns.removeFinishedRuns()
                 let launcher = WorkspaceConductorRunLauncher(
                     workspaceSession: session, runID: request.runID)
@@ -745,7 +780,7 @@ struct EnsembleStartSheet: View {
                 }
                 if controller.isInFlight {
                     session.navigatorMode = .runs
-                    dismiss()
+                    session.closeEnsembleStart()
                 }
             } catch {
                 expertWorkflowStartError =

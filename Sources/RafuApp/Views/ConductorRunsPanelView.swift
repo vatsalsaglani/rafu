@@ -83,9 +83,6 @@ struct ConductorRunsPanelView: View {
         .task(id: activitySubscriptionID) {
             await observeActivity()
         }
-        .sheet(item: $controller.newRunPresentation) { _ in
-            ConductorNewRunSheet(session: session)
-        }
         .confirmationDialog(
             "Replace existing definition files?",
             isPresented: pendingReplacementPresented,
@@ -130,8 +127,9 @@ struct ConductorRunsPanelView: View {
                 Button("Graph", systemImage: "point.3.connected.trianglepath.dotted") {
                     session.showConductorGraph()
                 }
-                .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+                .buttonStyle(RafuIconButtonStyle(size: 24))
                 .help("Show Ensemble Graph")
+                .accessibilityLabel("Show Ensemble Graph")
                 .disabled(session.rootURL == nil)
                 if section == .workflows {
                     Menu("New from Template", systemImage: "doc.badge.plus") {
@@ -152,16 +150,18 @@ struct ConductorRunsPanelView: View {
                     .disabled(libraryModel.isMutating || session.rootURL == nil)
                 }
                 Button("New Ensemble…", systemImage: "circle.hexagongrid") {
-                    session.presentEnsembleStartSheet()
+                    session.showEnsembleStart()
                 }
-                .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+                .buttonStyle(RafuIconButtonStyle(size: 24))
                 .help("New Ensemble…")
+                .accessibilityLabel("New Ensemble")
                 .disabled(session.rootURL == nil)
                 Button("New Run…", systemImage: "plus") {
-                    session.conductorRunController.presentNewRun()
+                    session.showEnsembleNewRun()
                 }
                 .buttonStyle(RafuIconButtonStyle(size: 24))
                 .help("New Run…")
+                .accessibilityLabel("New Ensemble Run")
                 .disabled(!canStartNewRun)
             }
         }
@@ -195,7 +195,7 @@ struct ConductorRunsPanelView: View {
                 )
             } actions: {
                 Button("New Run…", systemImage: "plus") {
-                    controller.presentNewRun()
+                    session.showEnsembleNewRun()
                 }
                 .disabled(!canStartNewRun)
             }
@@ -666,8 +666,8 @@ private struct ConductorWorkflowLibraryRow: View {
     }
 }
 
-private struct ConductorNewRunSheet: View {
-    @Environment(\.dismiss) private var dismiss
+struct ConductorNewRunCanvas: View {
+    @Environment(\.rafuTheme) private var theme
     @Bindable var session: WorkspaceSession
     @State private var model = ConductorNewRunModel()
     @State private var workflowModel = ConductorWorkflowLaunchModel()
@@ -678,70 +678,75 @@ private struct ConductorNewRunSheet: View {
     @FocusState private var promptFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("New Ensemble Run")
-                    .font(.title2.weight(.semibold))
-                Text("Choose a role or workflow. Rafu starts nothing until you select Run.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-
-            RafuSegmentedPicker(
-                items: ConductorNewRunMode.allCases,
-                selection: $model.mode,
-                fillsWidth: true
-            ) { $0.title }
-            .accessibilityLabel("Mode")
-
-            if model.isLoading || (model.mode == .workflow && workflowModel.isLoading) {
-                ProgressView("Reading .rafu files…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                switch model.mode {
-                case .singleRole:
-                    singleRoleForm
-                case .workflow:
-                    workflowForm
+        VStack(spacing: 0) {
+            tabStrip
+            Divider().overlay(theme.palette.borderSubtle)
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("New Ensemble Run")
+                        .font(.title2.weight(.semibold))
+                    Text("Choose a role or workflow. Rafu starts nothing until you select Run.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                 }
-            }
 
-            if let error = visibleError {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .font(.callout)
-                    .foregroundStyle(.red)
-                    .accessibilityLabel("Run error: \(error)")
-            }
+                RafuSegmentedPicker(
+                    items: ConductorNewRunMode.allCases,
+                    selection: $model.mode,
+                    fillsWidth: true
+                ) { $0.title }
+                .accessibilityLabel("Mode")
 
-            HStack {
-                Spacer()
-                Button("Cancel", role: .cancel) {
-                    dismiss()
-                }
-                .keyboardShortcut(.cancelAction)
-                Button {
-                    Task {
-                        let started =
-                            switch model.mode {
-                            case .singleRole: await startSingleRole()
-                            case .workflow: await startWorkflow()
-                            }
-                        if started { dismiss() }
-                    }
-                } label: {
-                    if model.isStarting || isStartingWorkflow {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Text("Run")
+                if model.isLoading || (model.mode == .workflow && workflowModel.isLoading) {
+                    ProgressView("Reading .rafu files…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    switch model.mode {
+                    case .singleRole:
+                        singleRoleForm
+                    case .workflow:
+                        workflowForm
                     }
                 }
-                .keyboardShortcut(.defaultAction)
-                .disabled(!canStart)
+
+                if let error = visibleError {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                        .accessibilityLabel("Run error: \(error)")
+                }
+
+                HStack {
+                    Spacer()
+                    Button("Close", action: session.closeEnsembleNewRun)
+                    Button {
+                        Task {
+                            let started =
+                                switch model.mode {
+                                case .singleRole: await startSingleRole()
+                                case .workflow: await startWorkflow()
+                                }
+                            if started { session.closeEnsembleNewRun() }
+                        }
+                    } label: {
+                        if model.isStarting || isStartingWorkflow {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Text("Run")
+                        }
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canStart)
+                }
             }
+            .padding(20)
+            .frame(maxWidth: 600, maxHeight: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .padding(20)
-        .frame(minWidth: 520, idealWidth: 520, minHeight: 420)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(theme.palette.editorBackground)
+        .onExitCommand(perform: session.closeEnsembleNewRun)
         .task(id: session.rootURL?.standardizedFileURL) {
             await model.load(workspaceRoot: session.rootURL)
             await workflowModel.load(workspaceRoot: session.rootURL)
@@ -749,6 +754,31 @@ private struct ConductorNewRunSheet: View {
                 promptFocused = true
             }
         }
+    }
+
+    private var tabStrip: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "plus")
+                .font(.system(size: 11))
+                .foregroundStyle(theme.palette.info)
+                .accessibilityHidden(true)
+            Text("New Ensemble Run")
+                .lineLimit(1)
+                .foregroundStyle(theme.palette.textPrimary)
+            Button(
+                "Close New Ensemble Run",
+                systemImage: "xmark",
+                action: session.closeEnsembleNewRun
+            )
+            .buttonStyle(RafuIconButtonStyle(size: 18, iconSize: 9))
+            .help("Close New Ensemble Run")
+            .accessibilityLabel("Close New Ensemble Run")
+            Spacer()
+        }
+        .font(.callout)
+        .padding(.horizontal, 10)
+        .frame(height: RafuMetrics.tabBarHeight)
+        .background(theme.palette.tabBarBackground)
     }
 
     @ViewBuilder
