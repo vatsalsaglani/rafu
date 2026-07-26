@@ -291,21 +291,23 @@ and visibly says its model flag is unverified.
 
 ---
 
-## M. New Ensemble sheet (C8-07)
+## M. New Ensemble editor canvases (C8-07 / UX-01)
 
-The cold-start onboarding sheet: three doors, guided preselected. This is the
-FIRST thing a brand-new user sees before they have ever touched an agent or
-workflow file.
+The cold-start onboarding editor tab: three doors, guided preselected. This is
+the FIRST thing a brand-new user sees before they have ever touched an agent
+or workflow file.
 
 | # | Do this | Expect |
 |---|---|---|
-| M1 | Open a workspace, then press **⌘⇧E** (also try the Rafu menu, ⌘⇧P palette "New Ensemble…", and the Runs panel's header button) | All four open the SAME sheet. The **Describe a Goal** door is preselected — never Template or Existing Workflow. |
-| M2 | Look at the CLI picker in Door 1 | Every installed-but-signed-out CLI (and every CLI Rafu cannot find) is visibly disabled with a stated reason (glyph + text), never grayed out with no explanation and never color-only. For a SIGNED-OUT CLI, its sign-in hint text must match **Settings → Agents** VERBATIM — that specific string is the adapter's own hint, shared as-is. The "not installed" wording is intentionally DIFFERENT between the two surfaces (this sheet names its own action; Settings does not) — that mismatch is not a bug. A CLI whose sign-in state Rafu cannot determine reads as READY here with no reason (delegated-auth "unknown never blocks a run"), even though Settings shows an explicit "unknown" explanation for the same CLI — that difference is also expected. |
+| M1 | Open a workspace, then press **⌘⇧E** (also try the Rafu menu, ⌘⇧P palette "New Ensemble…", and the Runs panel's header button) | All four open the SAME editor canvas, never a sheet. The **Describe a Goal** door is preselected — never Template or Existing Workflow. The form stays centred at a readable width instead of stretching across the editor. |
+| M2 | Look at the CLI picker in Door 1 | Every installed-but-signed-out CLI (and every CLI Rafu cannot find) is visibly disabled with a stated reason (glyph + text), never grayed out with no explanation and never color-only. For a SIGNED-OUT CLI, its sign-in hint text must match **Settings → Agents** VERBATIM — that specific string is the adapter's own hint, shared as-is. The "not installed" wording is intentionally DIFFERENT between the two surfaces (this canvas names its own action; Settings does not) — that mismatch is not a bug. A CLI whose sign-in state Rafu cannot determine reads as READY here with no reason (delegated-auth "unknown never blocks a run"), even though Settings shows an explicit "unknown" explanation for the same CLI — that difference is also expected. |
 | M3 | Look at the "Budget grant" section without scrolling or expanding anything | Max concurrent runs, max total runs, allowed CLIs, and a deadline picker are all visible immediately — never hidden behind a disclosure triangle or a second screen. Changing "Max concurrent" past the window cap is not possible; the caption states the cap. |
-| M4 | Type a goal in plain language, pick a ready CLI, and click **Start Coordinator** | A coordinator terminal opens for that CLI. The sheet does NOT instantly vanish — it shows your goal in a copyable field with a note that this CLI cannot receive it automatically, plus **Copy** and **Done**. Click **Done**: the sheet closes and the Ensemble Graph canvas appears with the coordinator's root node live. Paste the goal into the terminal and confirm the coordinator receives it as ordinary keyboard input Rafu never synthesized. |
+| M4 | Type a goal in plain language, pick a ready CLI, and click **Start Coordinator** | A coordinator terminal opens for that CLI. The canvas does NOT get replaced by the terminal — it shows your goal in a copyable field with a note that this CLI cannot receive it automatically, plus **Copy** and **Done**. Click **Done**: the creation tab closes and the Ensemble Graph canvas appears with the coordinator's root node live. Paste the goal into the terminal and confirm the coordinator receives it as ordinary keyboard input Rafu never synthesized. |
 | M5 | Switch to **From a Template**, pick one of the three bundled templates, click **Add to This Repository** | It writes into `.rafu/`, using the SAME conflict-confirmation dialog you already know from the Runs panel's "New from Template" (repeat with a template you already installed once — it must ask before replacing, never silently overwrite). On success the new workflow file opens as an ordinary editor tab. |
-| M6 | Switch to **Existing Workflow**, and with three Ensemble runs already active in this window, try to start a fourth from here | The **Start Run** button is disabled with the SAME "already has 3 active Ensemble runs" wording the Runs panel's New Run sheet shows — not a different message. |
-| M7 | Close the sheet with **Esc**; reopen it and complete the entire guided door using ONLY the keyboard (Tab/Space/Return, no mouse) | Esc cancels without starting anything. Every control — the door picker, CLI rows, goal field, grant steppers/toggles, deadline picker, and Start/Cancel — is reachable and operable by keyboard alone. |
+| M6 | Switch to **Existing Workflow**, and with three Ensemble runs already active in this window, try to start a fourth from here | The **Start Run** button is disabled with the SAME "already has 3 active Ensemble runs" wording the Runs panel's New Run canvas shows — not a different message. |
+| M7 | Close the tab with **Esc**; reopen it and complete the entire guided door using ONLY the keyboard (Tab/Space/Return, no mouse) | Esc closes without starting anything and returns to the last open document. Every control — the door picker, CLI rows, goal field, grant steppers/toggles, deadline picker, and Start/Close — is reachable and operable by keyboard alone. |
+| M8 | Open **New Ensemble Run…** from the Rafu menu, ⌘⇧P palette, and the Runs panel's plus button | Every path opens the same centred editor canvas, never a sheet. Esc and the tab close button return to the last open document. |
+| M9 | In the Runs panel header, inspect and hover Graph, New Ensemble, and New Run | All three are legible icon-only buttons with working tooltips and no truncation. Their actions remain reachable from the Rafu menu and command palette. |
 
 **Watch for:** in M2, what must match Settings → Agents is the READY/DISABLED
 verdict for each CLI (both surfaces read the same probe, so a CLI enabled in
@@ -313,7 +315,7 @@ one and disabled in the other is a real regression) and the signed-out hint
 text. The not-installed wording and the `.unknown` case are deliberately
 different per surface, as M2 spells out — do not report those as mismatches.
 M4 is the single most important check in this section: if
-the sheet dismisses before showing the copyable goal, the user has no way to
+the canvas is replaced before showing the copyable goal, the user has no way to
 tell the coordinator what to do.
 
 ---

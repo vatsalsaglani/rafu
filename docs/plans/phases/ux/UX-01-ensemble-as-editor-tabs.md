@@ -1,6 +1,6 @@
 # UX-01 — Ensemble surfaces become editor tabs, not modals
 
-- **Status:** Ready. Branch: `ux/01-ensemble-tabs` (from `main` AFTER UX-00
+- **Status:** Complete. Branch: `ux/01-ensemble-tabs` (from `main` AFTER UX-00
   merges — verify `Sources/RafuApp/Editor/EditorCanvasRoute.swift` exists;
   missing ⇒ STOP and report). Wave 2 — parallel with UX-02.
 

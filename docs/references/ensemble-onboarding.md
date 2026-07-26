@@ -2,15 +2,15 @@
 
 ## Applies to
 
-The `EnsembleStartSheet` opened by ⌘⇧E, the Rafu menu, the command palette,
+The `EnsembleStartCanvas` opened by ⌘⇧E, the Rafu menu, the command palette,
 and the Runs panel's header button
-(`Sources/RafuApp/Views/EnsembleStartSheet.swift`): its three doors, the
+(`Sources/RafuApp/Views/EnsembleStartCanvas.swift`): its three doors, the
 guided (Door 1) CLI gating and budget-grant defaults, the template (Door 2)
 instantiation reuse, and the expert (Door 3) workflow-launch reuse. It does
 not change `ConductorCoordinatorLauncher`, `ConductorEnsembleGrant`,
 `ConductorWorkflowLibraryModel`, `ConductorWorkflowLaunchModel`,
 `ConductorConcurrentRunCoordinator`, or the Ensemble request service — this
-sheet is a caller of all of them, never a second implementation.
+canvas is a caller of all of them, never a second implementation.
 
 ## Last verified
 
@@ -20,18 +20,48 @@ sheet is a caller of all of them, never a second implementation.
 
 ## The three-door contract
 
-One sheet, one `EnsembleDoor` segmented picker, guided preselected
+One canvas, one `EnsembleDoor` segmented picker, guided preselected
 (C8-coordinator-ux.md "Three doors, one default"):
 
 | Door | Purpose | Reused code path |
 |---|---|---|
 | **Describe a Goal** (default) | Plain-language goal + CLI + budget grant → a live coordinator terminal | `ConductorCoordinatorLauncher.start(provider:model:goal:grant:in:)` |
-| **From a Template** | Copies one bundled agent/workflow file set into `.rafu/` | `ConductorWorkflowLibraryModel.instantiate(templateID:scope:replaceConfirmed:)` + its `pendingReplacement` confirmation dialog, lifted into this sheet unchanged |
-| **Existing Workflow** (expert) | Launches an already-authored workflow | `ConductorWorkflowLaunchModel` + `session.conductorConcurrentRuns.start(_:launcher:)`, exactly as `ConductorRunsPanelView`'s `ConductorNewRunSheet` already does |
+| **From a Template** | Copies one bundled agent/workflow file set into `.rafu/` | `ConductorWorkflowLibraryModel.instantiate(templateID:scope:replaceConfirmed:)` + its `pendingReplacement` confirmation dialog, lifted into this canvas unchanged |
+| **Existing Workflow** (expert) | Launches an already-authored workflow | `ConductorWorkflowLaunchModel` + `session.conductorConcurrentRuns.start(_:launcher:)`, exactly as `ConductorRunsPanelView`'s `ConductorNewRunCanvas` already does |
 
 Door switching has no transition animation — a `switch` inside a plain
 `Group`, not a `withAnimation` — so there is nothing to suppress for Reduce
 Motion; it was simply never added.
+
+## Canvas host and navigation contract (UX-01)
+
+`EditorCanvasRoute` owns two creation routes: `.ensembleStart` and
+`.ensembleNewRun`. Both sit below blame, standalone diff, graph, and run
+detail, and above the editor fallback. That defensive precedence is normally
+unreachable because `WorkspaceSession` activators make all four Ensemble
+canvases mutually exclusive before clearing the document selection.
+
+Both creation canvases:
+
+- render a normal editor-style tab strip with a visible close button;
+- close on Esc through `onExitCommand`, with no sheet `.cancelAction`;
+- fall back to the last open document exactly like
+  `closeConductorRunDetail()`;
+- are window-scoped because every window owns its own `WorkspaceSession`;
+- constrain form content to a centered 600 pt maximum width, so a wide editor
+  does not stretch the former 480 pt sheet layout into an unreadable form.
+
+The general surface rule established here is: **configuration surfaces are
+editor tabs; modals are reserved for destructive confirmations.** The
+template-conflict `confirmationDialog` therefore remains deliberate — it is a
+safety prompt, not a configuration surface.
+
+The Runs header's Graph, New Ensemble, and New Run actions use
+`RafuIconButtonStyle`. Each has a help tooltip and explicit accessibility
+label, while the same actions remain available from the Rafu menu and command
+palette. New Ensemble's four entry paths all call the same
+`WorkspaceSession.showEnsembleStart()` seam; New Run's panel, menu, and palette
+paths call `showEnsembleNewRun()`.
 
 ## Door 1: CLI gating reuses the Agent Terminal picker's own policy
 
@@ -48,7 +78,7 @@ matching the adapter contract's "unknown never blocks a run" rule).
 `AgentTerminalLaunchService.options()` maps BOTH `.authenticated` and
 `.unknown` to `.ready`, which is byte-identical to the launch-time re-check
 inside `ConductorCoordinatorLauncher` — the same two-case mapping written
-once per side, deliberately, so the sheet cannot enable a CLI the launcher
+once per side, deliberately, so the canvas cannot enable a CLI the launcher
 would then refuse (or vice versa). `.unknown` being launchable is intentional
 policy for delegated-auth CLIs, not a gap.
 
@@ -60,7 +90,7 @@ surfaces, and a diff of the strings is not evidence of drift:
   own vendor text).
 - **Not-installed** wording is per-surface by design.
 - **`.unknown`** shows an explicit explanation in Settings → Agents but no
-  reason at all in this sheet, because here it is simply ready.
+  reason at all in this canvas, because here it is simply ready.
 
 A
 disabled row always carries a stated reason (glyph + text via
@@ -76,8 +106,8 @@ disabled row always carries a stated reason (glyph + text via
   never rewritten (AGENTS.md: an adapter's sign-in instruction is the vendor's
   own words).
 
-Probing happens ONLY from the sheet's `.task(id: session.rootURL...)`, never
-from `EnsembleStartModel.init` — opening the sheet must never probe the
+Probing happens ONLY from the canvas's `.task(id: session.rootURL...)`, never
+from `EnsembleStartModel.init` — opening the canvas must never probe the
 user's machine behind their back, mirroring `ConductorSettingsModel`'s own
 rule ("opening Settings must never probe").
 
@@ -96,7 +126,7 @@ Settings, never a hidden default:
 | `usageCeilingPercentPoints` | `nil` (out of v1 UI) | Not exposed — see Follow-ups |
 
 `EnsembleStartModel.makeGrant(windowCap:)` is pure and synchronous: it clamps
-`maxConcurrentChildRuns` to `min(maxConcurrent, windowCap)` so the sheet can
+`maxConcurrentChildRuns` to `min(maxConcurrent, windowCap)` so the canvas can
 never promise more concurrency than `ConductorConcurrentRunCoordinator`
 (C6) will actually honor, and maps the deadline choice through an injected
 clock (`Date.init` by default, a fixed closure in tests).
@@ -115,26 +145,33 @@ passes that shape's argv straight through, so the goal text provably never
 reaches the child process: `EnsembleCoordinatorLaunchTests` asserts
 `!spec.arguments.contains(coordinator.goal)`. Rafu never
 synthesizes terminal input, so the copyable-goal confirmation row
-(`EnsembleStartSheet.launchConfirmation`) is shown **after every successful
+(`EnsembleStartCanvas.launchConfirmation`) is shown **after every successful
 guided launch**, unconditionally — it is not gated on a per-CLI capability
 check, because none currently exists to gate on. If a future CLI gains a
 verified prompt argument, the seam to extend is
-`AgentTerminalLaunchShape.forCLI(_:)`/`.arguments(model:)`, not this sheet —
+`AgentTerminalLaunchShape.forCLI(_:)`/`.arguments(model:)`, not this canvas —
 and only at that point does a per-CLI capability check become meaningful.
-Do not add a "does this CLI take a prompt?" branch to the sheet while the
+Do not add a "does this CLI take a prompt?" branch to the canvas while the
 answer is uniformly no; it would be dead code that reads as a live policy.
 
-### Dismiss timing (a deliberate two-phase flow)
+### Close timing (a deliberate two-phase flow)
 
 `EnsembleStartModel.start(in:)` launches the coordinator and, on success,
-sets `postLaunchGoalToPaste` — but the sheet **stays open** on the
+sets `postLaunchGoalToPaste` — but the canvas **stays open** on the
 confirmation row (goal text + Copy + "Done") instead of instantly closing.
 Only `finishAndShowGraph(in:)` — the Done button's action — calls
-`session.showConductorGraph()` and clears
-`session.ensembleStartSheetPresented`. This is intentional: the copyable goal
+`session.showConductorGraph()`, which clears
+`session.ensembleStartCanvasVisible`. This is intentional: the copyable goal
 is the ONLY way the user gets their plain-language intent into the
 coordinator's terminal for the CLIs available today, so it must never be a
-toast the user could miss by an instantly-dismissing sheet.
+toast the user could miss behind an instantly-replaced canvas.
+
+The launcher reveals the new coordinator terminal as part of starting Door 1.
+Ordinary terminal reveal clears both creation canvases, but
+`beginEnsembleStartLaunch()` / `endEnsembleStartLaunch()` narrowly retain the
+start canvas during this internal reveal. Without that guard, the form
+disappears before `postLaunchGoalToPaste` can render; with it, a user who
+explicitly closes the canvas during launch still keeps it closed.
 
 ## Door 2: template reuse, and the one deferred seam
 
@@ -158,7 +195,7 @@ others — can request a specific panel tab, not just panel visibility.
 
 ## Two defect classes caught in review (patterns, not one-offs)
 
-Both were found by read-only review of this sheet, and both generalise to any
+Both were found by read-only review of this canvas, and both generalise to any
 future Rafu form that prefills per-provider defaults or gathers consent.
 
 **1. A per-provider default prefilled with `if field.isEmpty` leaks one
@@ -187,9 +224,9 @@ nothing" is indistinguishable from a broken product from the user's seat.
 ## Door 3: expert reuse
 
 Door 3 embeds `ConductorWorkflowLaunchModel` exactly as
-`ConductorNewRunSheet`'s workflow mode does (same `load`/`selectWorkflow`/
+`ConductorNewRunCanvas`'s workflow mode does (same `load`/`selectWorkflow`/
 `resolvedRoles`/`modelValue`/`makeRequest()` calls), and its `expertCanStart`
-computed property is a line-for-line mirror of that sheet's own `canStart` —
+computed property is a line-for-line mirror of that canvas's own `canStart` —
 deliberately checking the LOCAL task-prompt `@State` rather than
 `ConductorWorkflowLaunchModel.canStart`, because the model's own `taskPrompt`
 is only synced into it immediately before `makeRequest()`; reading the
@@ -203,12 +240,12 @@ rather than writing a second copy of that message.
 ## Follow-ups (recorded, not built this phase)
 
 - **Usage-ceiling UI.** `ConductorEnsembleGrant.usageCeilingPercentPoints`
-  stays `nil` from this sheet; C7's per-step usage deltas make a percentage
+  stays `nil` from this canvas; C7's per-step usage deltas make a percentage
   ceiling meaningful, but no editor for it exists yet. Honesty over knobs:
   the field is real in the grant type, just not user-editable here.
 - **Editable defaults in Settings.** Max concurrent/total run defaults, the
   default deadline choice, and the default allowed-CLI set are all currently
-  in-sheet-only state (reset each time the sheet opens fresh). A Settings →
+  in-canvas-only state (reset each time the canvas opens fresh). A Settings →
   Ensemble surface to persist personal defaults is future work, not required
   for the guided door to be usable today.
 - **Door 2 → Workflows tab.** See "Door 2" above.
@@ -221,24 +258,28 @@ rather than writing a second copy of that message.
 ## Verification
 
 ```bash
-swift test --filter EnsembleStartSheetTests
+swift test --filter EnsembleStartCanvasTests
 swift test
 swift test --no-parallel
 swift build
+./script/build_and_run.sh --verify
 ./script/format.sh --fix
 ./script/format.sh --lint
 rg -n 'keyboardShortcut\("e"' Sources/RafuApp/App/RafuAppCommands.swift
 rg -n '\.keyboardShortcut\(' -o Sources/RafuApp/App/RafuAppCommands.swift | sort | uniq -c
 ```
 
-`EnsembleStartSheetTests` covers the CLI gating matrix, grant defaults/
+`EnsembleStartCanvasTests` covers the CLI gating matrix, grant defaults/
 clamping/deadline mapping, the guided door's goal-required guard, a
 spy-verified launch success (registers a coordinator session, then Done
-flips the sheet-closed/graph-visible flags), a launch failure (sheet stays
+flips the canvas-closed/graph-visible flags), a launch failure (canvas stays
 open, nothing registered), Door 3's cap guard equality with
 `session.canStartConductorWorkflowRun`, Door 2's clean-instantiate and
 conflict-then-confirm paths via `ConductorWorkflowLibraryModel` directly, and
-the command seam's `descriptor == nil` guard.
+the command seams' `descriptor == nil` guard. UX-01 adds route replacement,
+last-document fallback, second-window independence, terminal replacement,
+entry-point/no-sheet, readable-width/Esc, and header
+accessibility/equivalent-command coverage.
 
 ⌘⇧E collision: no enumerating test (impractical against
 `RafuAppCommands`'s declarative `Button` list). Verified by inspection
@@ -250,8 +291,10 @@ Agent Terminal, AT-01). ⌘⇧E was free and is now New Ensemble.
 
 ## Related code, ADRs, and phases
 
-- `Sources/RafuApp/Views/EnsembleStartSheet.swift`
-- `Sources/RafuApp/Models/WorkspaceSession.swift` (`ensembleStartSheetPresented`, `presentEnsembleStartSheet()`)
+- `Sources/RafuApp/Views/EnsembleStartCanvas.swift`
+- `Sources/RafuApp/Models/WorkspaceSession.swift` (`ensembleStartCanvasVisible`,
+  `ensembleNewRunCanvasVisible`, `showEnsembleStart()`,
+  `showEnsembleNewRun()`)
 - `Sources/RafuApp/App/RafuAppCommands.swift`
 - `Sources/RafuApp/Views/CommandPaletteView.swift`
 - `Sources/RafuApp/Views/ConductorRunsPanelView.swift`
