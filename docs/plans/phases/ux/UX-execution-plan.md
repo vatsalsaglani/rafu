@@ -13,7 +13,7 @@
 | New Ensemble + New Ensemble Run are modals | preference: editor tabs instead | UX-01 |
 | Segmented pickers and a Run button render **system blue** | 4 sites use raw `.pickerStyle(.segmented)` / `.borderedProminent`; `RafuSegmentedPicker` and `RafuProminentButtonStyle` already exist and are simply not adopted | UX-00 |
 | Panel header buttons truncate ("New Ensem…") | 40 pt-wide panel cannot fit two text buttons | UX-01 |
-| Agent icons are tiny dots in the terminal `+` menu | **SwiftUI `Menu` renders through AppKit `NSMenu`, which does not draw arbitrary SwiftUI image views.** The same `FileIconView` renders correctly at size 18 in the sheet | UX-03 |
+| Agent icons are tiny dots in the terminal `+` menu | **Measured (UX-03):** the SVGs are authored `width="1em"`, so `NSImage` reports a 1×1 intrinsic size, and AppKit draws `NSMenuItem.image` at the image's own size honouring no SwiftUI layout — so `.resizable().frame()` has no effect there. An SF Symbol on the same item reports 18×14, which is why `Label(_:systemImage:)` survived | UX-03 ✅ |
 | Codex icon differs between the file tree and agent surfaces | two different assets: `codex.svg` (file tree, pre-existing) vs `agent-codex.svg` (lobe, AT-01) | UX-03 |
 | Settings is a separate window | preference: editor tab + a button bottom-right | UX-02 |
 | Want agents listed under "New Terminal" with icons and shortcuts | the inline list is also the *fix* for the NSMenu limitation | UX-03 |
@@ -38,7 +38,7 @@ It unblocks UX-01/UX-02 and fixes the blue controls in one pass.
 | # | Plan | Branch | Wave |
 |---|---|---|---|
 | UX-00 | [`UX-00-canvas-route-and-theme.md`](UX-00-canvas-route-and-theme.md) | `ux/00-canvas-route-and-theme` | 1 (serial) |
-| UX-03 | [`UX-03-agent-identity-and-terminals.md`](UX-03-agent-identity-and-terminals.md) | `ux/03-agent-identity` | 1 (parallel with UX-00 — fully disjoint) |
+| UX-03 | [`UX-03-agent-identity-and-terminals.md`](UX-03-agent-identity-and-terminals.md) | `ux/03-agent-identity` | **Merged 2026-07-26** (`9d1492f`) |
 | UX-01 | [`UX-01-ensemble-as-editor-tabs.md`](UX-01-ensemble-as-editor-tabs.md) | `ux/01-ensemble-tabs` | 2 |
 | UX-02 | [`UX-02-settings-as-editor-tab.md`](UX-02-settings-as-editor-tab.md) | `ux/02-settings-tab` | 2 |
 
