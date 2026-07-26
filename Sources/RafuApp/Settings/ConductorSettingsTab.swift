@@ -69,12 +69,24 @@ final class ConductorSettingsModel {
     private(set) var rows: [Row] = []
     private(set) var probeByID: [ConductorCLIID: AdapterProbe] = [:]
     private(set) var authByID: [ConductorCLIID: AdapterAuthStatus] = [:]
-    private(set) var discoveredModelsByID: [ConductorCLIID: [ConductorModelChoice]] = [:]
     private(set) var modelRefreshStateByID: [ConductorCLIID: RefreshState] = [:]
+
+    /// Discovery results now live in the app-wide cache rather than in this
+    /// model, because the New Ensemble canvas needs the same answer and used
+    /// to give a different one. This stays a read-through accessor so
+    /// existing callers and tests keep working unchanged.
+    var discoveredModelsByID: [ConductorCLIID: [ConductorModelChoice]] {
+        Dictionary(
+            rows.map { ($0.id, discoveredModels.models(for: $0.id)) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        .filter { !$0.value.isEmpty }
+    }
 
     private let adapters: [any ConductorCLIAdapter]
     private let enableStore: ConductorEnableStore
     private let defaultModelStore: ConductorDefaultModelStore
+    private let discoveredModels: ConductorDiscoveredModelCache
     private var enabledByID: [ConductorCLIID: Bool] = [:]
     private var defaultModelByID: [ConductorCLIID: String] = [:]
     private var didRefreshStatuses = false
@@ -87,11 +99,13 @@ final class ConductorSettingsModel {
     init(
         adapters: [any ConductorCLIAdapter] = ConductorAdapterRegistry.all,
         enableStore: ConductorEnableStore = ConductorEnableStore(),
-        defaultModelStore: ConductorDefaultModelStore = ConductorDefaultModelStore()
+        defaultModelStore: ConductorDefaultModelStore = ConductorDefaultModelStore(),
+        discoveredModels: ConductorDiscoveredModelCache = .shared
     ) {
         self.adapters = adapters
         self.enableStore = enableStore
         self.defaultModelStore = defaultModelStore
+        self.discoveredModels = discoveredModels
         rows = adapters.map { adapter in
             Row(
                 id: adapter.id,
@@ -189,7 +203,7 @@ final class ConductorSettingsModel {
     func availableModels(for id: ConductorCLIID) -> [ConductorModelChoice] {
         ConductorModelCatalog.merge(
             curated: rows.first { $0.id == id }?.curatedModels ?? [],
-            discovered: discoveredModelsByID[id] ?? [])
+            discovered: discoveredModels.models(for: id))
     }
 
     /// Resolves the persisted string against what the adapter offers. A
@@ -223,7 +237,9 @@ final class ConductorSettingsModel {
             modelRefreshStateByID[id] = .unsupported
             return
         }
-        discoveredModelsByID[id] = discovered
+        // Into the app-wide cache, so the New Ensemble canvas shows this same
+        // list without ever having to run the CLI itself.
+        discoveredModels.setModels(discovered, for: id)
         modelRefreshStateByID[id] = .idle
     }
 }
