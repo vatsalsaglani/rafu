@@ -49,8 +49,9 @@ func skillVerbReferenceCoversParserCases() throws {
     let text = try #require(String(data: catalog.data(for: verbsFile), encoding: .utf8))
     let parser = EnsembleArgumentParser()
     // Every verb the shipped parser accepts. C8-03 added the mutating four
-    // while this plan ran in parallel; the exhaustive switch below is what
-    // forces this list to be extended rather than silently drifting.
+    // and C8-04 added propose-merge while this plan ran in parallel; the
+    // exhaustive switch below is what forces this list to be extended rather
+    // than silently drifting.
     let invocations = try [
         parser.parse(["status", "--json"]),
         parser.parse(["artifact", "run-a", "0", "--json"]),
@@ -59,6 +60,7 @@ func skillVerbReferenceCoversParserCases() throws {
         parser.parse(["abort", "run-a"]),
         parser.parse(["note", "run-a", "a bounded note"]),
         parser.parse(["grant", "--json"]),
+        parser.parse(["propose-merge", "run-a", "--json"]),
         parser.parse(["help"]),
     ]
 
@@ -79,6 +81,8 @@ func skillVerbReferenceCoversParserCases() throws {
                 "note"
             case .grant:
                 "grant"
+            case .proposeMerge:
+                "propose-merge"
             case .help:
                 "help"
             }

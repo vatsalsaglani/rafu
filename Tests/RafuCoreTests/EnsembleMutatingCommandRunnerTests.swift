@@ -35,6 +35,7 @@ struct EnsembleMutatingCommandRunnerTests {
                         startedChildRuns: 1,
                         allowedProviders: ["codex"]
                     )),
+                .proposeMerge(EnsembleProposeMergeResult(accepted: ["run-1"])),
             ])
         let runner = EnsembleCommandRunner(
             client: client,
@@ -49,17 +50,20 @@ struct EnsembleMutatingCommandRunnerTests {
                 artifacts: ["spec.md"],
                 baseReference: nil,
                 label: nil,
+                planGate: false,
                 json: false
             ),
             .abort(runID: "run-1"),
             .note(runID: "run-1", text: "Check this"),
             .grant(json: false),
+            .proposeMerge(runIDs: ["run-1"], message: "Please review", json: false),
         ]
         let results = invocations.map {
             runner.run($0, workingDirectory: "/work")
         }
 
-        #expect(client.payloads.map(\.verb) == ["run", "abort", "note", "grant"])
+        #expect(
+            client.payloads.map(\.verb) == ["run", "abort", "note", "grant", "propose-merge"])
         #expect(client.payloads.allSatisfy { $0.token == capability })
         #expect(client.payloads[0].artifacts == ["/work/spec.md"])
         for result in results {

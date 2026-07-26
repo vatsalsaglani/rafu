@@ -4,8 +4,19 @@ import Testing
 @testable import RafuApp
 @testable import RafuCore
 
+// `.serialized`: each test binds a real Unix-domain socket and drives a
+// real `LauncherIPCServer` actor plus a `Task.detached` client doing
+// blocking POSIX socket I/O. Four such flows racing in parallel (C8-04
+// added the fourth, `proposeMergeEndToEnd`) were observed to starve the
+// cooperative thread pool under load and miss the 2-second one-shot
+// timeout — reproduced by running all four together (fails) versus any
+// three (passes) versus each alone (passes). Serializing costs a little
+// wall time and removes the contention entirely, matching the same
+// precedent `EnsembleMutatingVerbTests`/`EnsembleServerStreamTests`/
+// `EnsembleCoordinatorLaunchTests` already establish for this exact class
+// of problem.
 @MainActor
-@Suite("Ensemble headless end to end")
+@Suite("Ensemble headless end to end", .serialized)
 struct EnsembleEndToEndTests {
     @Test("Status crosses the real CLI, UID-authenticated server, and request service")
     func statusEndToEnd() async throws {
@@ -92,6 +103,68 @@ struct EnsembleEndToEndTests {
         #expect(hook.didPublishAfterSnapshot)
     }
 
+    @Test("propose-merge crosses the real CLI, UID-authenticated server, and request service")
+    func proposeMergeEndToEnd() async throws {
+        let fixture = try makeFixture(status: .completed)
+        defer { fixture.remove() }
+        var manifest = try #require(fixture.session.conductorRuns.first)
+        manifest.gate = ConductorRunManifest.Gate(kind: .merge, stepIndex: 0)
+        manifest.startedBy = "co-e2e"
+        fixture.session.conductorRunController.publish(manifest)
+
+        let tokenStore = ConductorEnsembleTokenStore(
+            randomBytes: { count in [UInt8](repeating: 7, count: count) })
+        let token = tokenStore.mint(
+            coordinatorID: "co-e2e",
+            grant: ConductorEnsembleGrant(allowedProviders: [.codex]))
+
+        let center = quietEventCenter()
+        let service = requestService(fixture: fixture, eventCenter: center, tokenStore: tokenStore)
+        let server = LauncherIPCServer(
+            socketURL: fixture.socketURL,
+            handler: { envelope in
+                if envelope.kind == .handshake {
+                    return .accepted(
+                        workspaceMatched: false,
+                        windowFocused: false,
+                        waitSupported: false
+                    )
+                }
+                return await service.handleAsync(envelope)
+            }
+        )
+        try await server.startListening()
+        let runner = EnsembleCommandRunner(
+            client: EnsembleCLIClient(socketURL: fixture.socketURL),
+            tokenProvider: { token }
+        )
+        let workingDirectory = fixture.root.path
+        let invocation = try EnsembleArgumentParser().parse([
+            "propose-merge", "run-a", "--message", "Please review the diff.",
+        ])
+
+        let result = await Task.detached(name: "Ensemble end-to-end CLI") {
+            runner.run(invocation, workingDirectory: workingDirectory)
+        }.value
+        await server.stopListening()
+
+        #expect(result.exitCode == .ok)
+        #expect(result.standardOutput == "run-a proposed awaiting_human")
+        #expect(result.standardError.isEmpty)
+        #expect(!result.standardOutput.contains(token))
+
+        // The FULL real-socket round trip re-raised gate attention through
+        // WorkspaceSession's real notification leg without crashing —
+        // proving propose-merge is headless-safe end to end, not merely
+        // avoiding the crash by disabling surfaces.
+        await fixture.waitForNotification()
+        #expect(fixture.attentionHUD.shown.count == 1)
+        #expect(fixture.attentionNotifier.posted.count == 1)
+        #expect(
+            fixture.attentionNotifier.posted.first?.kind
+                == .ensembleGate(runID: "run-a", allowsApprove: false))
+    }
+
     private func runOneShot(
         _ invocation: EnsembleInvocation,
         fixture: EndToEndFixture
@@ -125,7 +198,8 @@ struct EnsembleEndToEndTests {
 
     private func requestService(
         fixture: EndToEndFixture,
-        eventCenter: ConductorEnsembleEventCenter
+        eventCenter: ConductorEnsembleEventCenter,
+        tokenStore: ConductorEnsembleTokenStore = .shared
     ) -> ConductorEnsembleRequestService {
         ConductorEnsembleRequestService(
             dependencies: .init(
@@ -140,6 +214,7 @@ struct EnsembleEndToEndTests {
                     ]
                 },
                 liveState: { _, _ in nil },
+                tokenStore: tokenStore,
                 eventCenter: eventCenter
             ))
     }
@@ -161,9 +236,23 @@ struct EnsembleEndToEndTests {
             withIntermediateDirectories: true
         )
         let session = WorkspaceSession()
+        let attentionSuiteName = "EnsembleEndToEndTests.\(UUID().uuidString)"
+        let surfaceStore = TerminalAttentionSurfaceStore(suiteName: attentionSuiteName)
+        surfaceStore.setSurface(.both)
+        session.terminalAttentionSurfaceStore = surfaceStore
+        let attentionNotifier = EndToEndAttentionSpyNotifier()
+        session.attentionNotifier = attentionNotifier
+        let attentionHUD = EndToEndAttentionSpyHUD()
+        session.attentionHUD = attentionHUD
+        session.hudThemeProvider = { RafuThemeCatalog.indigo }
         session.conductorRunController.publish(
             endToEndManifest(status: status, evidencePath: evidencePath))
-        return EndToEndFixture(root: root, session: session)
+        return EndToEndFixture(
+            root: root,
+            session: session,
+            attentionNotifier: attentionNotifier,
+            attentionHUD: attentionHUD,
+            attentionSuiteName: attentionSuiteName)
     }
 }
 
@@ -202,15 +291,56 @@ private final class AwaitSnapshotHook {
 private struct EndToEndFixture {
     let root: URL
     let session: WorkspaceSession
+    let attentionNotifier: EndToEndAttentionSpyNotifier
+    let attentionHUD: EndToEndAttentionSpyHUD
+    let attentionSuiteName: String
 
     var socketURL: URL {
         LauncherIPCSocketPath.resolve(
             baseDirectory: root.appending(path: "runtime", directoryHint: .isDirectory))
     }
 
+    /// Polls briefly for the fire-and-forget notification Task
+    /// `raiseConductorGateAttention` starts internally.
+    func waitForNotification(count: Int = 1) async {
+        for _ in 0..<20_000 {
+            if attentionNotifier.posted.count >= count { break }
+            await Task.yield()
+        }
+    }
+
     func remove() {
+        UserDefaults(suiteName: attentionSuiteName)?.removePersistentDomain(
+            forName: attentionSuiteName)
         try? FileManager.default.removeItem(at: root)
     }
+}
+
+/// `propose-merge` raises gate attention through the real `WorkspaceSession`
+/// seam; this rig keeps that FULL path (HUD + notification) reachable and
+/// headless-safe, mirroring `WorkflowPresentationTests.installGateAttentionRig`
+/// — `.both` matches the real app default, and these spies absorb what would
+/// otherwise construct the real, bundle-requiring `UNUserNotificationCenter`.
+@MainActor
+private final class EndToEndAttentionSpyNotifier: TerminalAttentionNotifying {
+    private(set) var posted: [TerminalAttentionNotification] = []
+
+    func requestAuthorizationIfNeeded() async -> Bool { true }
+
+    func post(_ notification: TerminalAttentionNotification) {
+        posted.append(notification)
+    }
+}
+
+@MainActor
+private final class EndToEndAttentionSpyHUD: NotchHUDPresenting {
+    private(set) var shown: [NotchHUDEvent] = []
+
+    func show(_ event: NotchHUDEvent, theme: RafuTheme) {
+        shown.append(event)
+    }
+
+    func attentionCleared(for sessionID: UUID) {}
 }
 
 private func endToEndManifest(

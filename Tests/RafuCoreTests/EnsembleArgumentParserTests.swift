@@ -59,6 +59,7 @@ struct EnsembleArgumentParserTests {
                     artifacts: ["brief.md", "spec.md"],
                     baseReference: "main",
                     label: "Release prep",
+                    planGate: false,
                     json: true
                 )
         )
@@ -72,6 +73,26 @@ struct EnsembleArgumentParserTests {
             )
         ) {
             try parser.parse(["run", "ship", "--role", "reviewer=codex:"])
+        }
+    }
+
+    @Test("run --plan-gate parks the request rather than requiring more flags")
+    func runPlanGate() throws {
+        #expect(
+            try parser.parse(["run", "ship", "--plan-gate"])
+                == .run(
+                    workflow: "ship",
+                    roleOverrides: [],
+                    prompt: nil,
+                    artifacts: [],
+                    baseReference: nil,
+                    label: nil,
+                    planGate: true,
+                    json: false
+                )
+        )
+        #expect(throws: EnsembleArgumentError.duplicateOption("--plan-gate")) {
+            try parser.parse(["run", "ship", "--plan-gate", "--plan-gate"])
         }
     }
 
@@ -91,6 +112,36 @@ struct EnsembleArgumentParserTests {
             )
         ) {
             try parser.parse(["note", "run-a", String(repeating: "x", count: 1_001)])
+        }
+    }
+
+    @Test("propose-merge accepts one or more runs, an optional bounded message, and --json")
+    func proposeMerge() throws {
+        #expect(
+            try parser.parse(["propose-merge", "run-a", "run-b"])
+                == .proposeMerge(runIDs: ["run-a", "run-b"], message: nil, json: false)
+        )
+        #expect(
+            try parser.parse(["propose-merge", "run-a", "--message", "Please review", "--json"])
+                == .proposeMerge(runIDs: ["run-a"], message: "Please review", json: true)
+        )
+        #expect(throws: EnsembleArgumentError.missingArgument("<run>")) {
+            try parser.parse(["propose-merge"])
+        }
+        #expect(throws: EnsembleArgumentError.duplicateOption("--message")) {
+            try parser.parse([
+                "propose-merge", "run-a", "--message", "one", "--message", "two",
+            ])
+        }
+        #expect(
+            throws: EnsembleArgumentError.valueTooLong(
+                option: "--message",
+                maximumCharacters: 1_000
+            )
+        ) {
+            try parser.parse([
+                "propose-merge", "run-a", "--message", String(repeating: "x", count: 1_001),
+            ])
         }
     }
 
@@ -148,6 +199,7 @@ struct EnsembleArgumentParserTests {
             (["run", "ship", "--role", "--json"], "--role"),
             (["run", "ship", "--prompt", "--json"], "--prompt"),
             (["run", "ship", "--artifact", "--json"], "--artifact"),
+            (["propose-merge", "run-a", "--message", "--json"], "--message"),
         ]
     )
     func valuesDoNotConsumeOptions(arguments: [String], option: String) {
