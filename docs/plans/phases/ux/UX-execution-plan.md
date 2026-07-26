@@ -82,6 +82,35 @@ deletion rule in `AGENTS.md` and
 [`../conductor/README.md`](../conductor/README.md) apply unchanged. Local
 builds are **Rafu Lightning**; never `pkill`/`pgrep` a bare `Rafu`.
 
+## Wave 3 — the second dogfooding pass (2026-07-26)
+
+Running the merged UX set surfaced six more issues. These were fanned out
+directly as three goal-mode agents on ad-hoc worktrees rather than written up
+as plan documents first, because each was a bounded presentation change with
+no cross-cutting contract to land.
+
+| # | Branch | Delivered |
+|---|---|---|
+| UI-01 | `ux2/01-theme-and-width` | Settings at full canvas width; `TabView` → `SettingsPaneStrip`; `View.rafuTheme(_:)` tints stock controls at the four scene roots |
+| UI-02 | `ux2/02-ensemble-canvas` | New Ensemble as a full-width 3/12 + 9/12 workbench; icon grids for coordinator and allowed CLIs; single-pane live-Markdown goal; ensemble naming |
+| UI-03 | `ux2/03-agent-grid` | Icon-only agent card grid in the terminals panel; Codex takes the OpenAI mark |
+
+Three findings worth carrying forward:
+
+- **`.tint` does not reach `TabView`'s macOS bar**, the same AppKit chrome
+  that forced `RafuSegmentedPicker` to exist. Replacing the bar was the only
+  option, not a preference.
+- **The scan needed a different shape for stock controls.** Scanning for
+  `Toggle(` is hopeless — dozens of legitimate sites, and correctness is not a
+  property of the line the control sits on. Banning unsanctioned theme roots
+  is the enforceable equivalent, because a root is the single place that
+  decides those controls' colour.
+- **Parallel ownership hid one fix again.** UI-01 found the `ColorPicker`
+  accent seed but could not touch the file UI-03 owned, so it was closed in
+  the integration pass. This is the same shape as the UX-01/UX-02 cross-clear
+  gap: each branch internally correct, the union not. Budget an integration
+  step for every parallel wave; do not merge and assume.
+
 ## Definition of done for the set
 
 1. No modal sheet remains for New Ensemble, New Ensemble Run, or Settings.
