@@ -138,6 +138,56 @@ struct EnsembleMutatingVerbTests {
         #expect(persisted?.label == "Release work")
     }
 
+    /// The child-run half of "one resolver, four surfaces": a role that names
+    /// no model of its own takes the Ensemble's per-provider default, then
+    /// the user's Settings default, then nothing — and an explicit `--role`
+    /// model outranks all three, because that is the coordinator's own
+    /// per-run choice.
+    @Test("A child run resolves role → Ensemble default → Settings default → nothing")
+    func childRunModelPrecedence() async throws {
+        let harness = try MutatingVerbHarness(
+            activeLimit: 8,
+            runIDs: ["run-ensemble", "run-settings", "run-none", "run-explicit"],
+            roleModel: nil)
+        defer { harness.cleanUp() }
+        let token = harness.mint(
+            coordinatorID: "co-primary",
+            grant: harness.grant(concurrent: 8, total: 12))
+        harness.defaultModelStore.setDefaultModel("settings-model", for: .codex)
+
+        // 1. The Ensemble's own per-provider default, carried on the
+        //    coordinator record ALONGSIDE the grant — never inside it.
+        harness.registerCoordinator(providerModelDefaults: [.codex: "ensemble-model"])
+        _ = await harness.request(kind: .ensembleRun, payload: harness.runPayload(token: token))
+        #expect(harness.bindingModel(runID: "run-ensemble") == "ensemble-model")
+
+        // 2. With no Ensemble default, the user's Settings default decides.
+        harness.registerCoordinator(providerModelDefaults: [:])
+        _ = await harness.request(kind: .ensembleRun, payload: harness.runPayload(token: token))
+        #expect(harness.bindingModel(runID: "run-settings") == "settings-model")
+
+        // 3. With nothing set anywhere, Rafu names no model and passes no
+        //    flag — it must not guess the adapter's first curated entry.
+        harness.defaultModelStore.setDefaultModel("", for: .codex)
+        _ = await harness.request(kind: .ensembleRun, payload: harness.runPayload(token: token))
+        #expect(harness.bindingModel(runID: "run-none") == "")
+
+        // 4. A `--role` override is the coordinator's explicit per-run
+        //    choice and outranks the Ensemble default it launched under.
+        harness.registerCoordinator(providerModelDefaults: [.codex: "ensemble-model"])
+        _ = await harness.request(
+            kind: .ensembleRun,
+            payload: harness.runPayload(
+                token: token,
+                roleOverrides: [
+                    EnsembleRoleOverride(
+                        name: "Worker",
+                        provider: ConductorCLIID.codex.rawValue,
+                        model: "override-model")
+                ]))
+        #expect(harness.bindingModel(runID: "run-explicit") == "override-model")
+    }
+
     @Test("Every tokenless mutating verb is refused with 77")
     func tokenlessMutations() async throws {
         let harness = try MutatingVerbHarness(runIDs: ["never-used"])
@@ -286,12 +336,20 @@ private final class MutatingVerbHarness {
     let tokenStore: ConductorEnsembleTokenStore
     let coordinator: ConductorConcurrentRunCoordinator
     private let definitionLibrary: ConductorDefinitionLibrary
+    /// A private suite so these tests never read — or depend on — the
+    /// developer's real Settings > Agents default model.
+    let defaultModelStore: ConductorDefaultModelStore
+    private let defaultModelSuite: String
     private var pendingRunIDs: [String]
     private(set) var launchers: [WorkflowFakeLauncher] = []
 
     init(
         activeLimit: Int = 3,
-        runIDs: [String]
+        runIDs: [String],
+        /// The `model:` line in the fixture agent file. `nil` writes no
+        /// line at all, which is how a role defers to the Ensemble's or the
+        /// user's default rather than naming its own.
+        roleModel: String? = "fake-fast"
     ) throws {
         container = FileManager.default.temporaryDirectory
             .appending(
@@ -301,7 +359,7 @@ private final class MutatingVerbHarness {
         root = container.appending(path: "workspace", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try initializeWorkflowRepository(at: root)
-        try Self.writeDefinitions(to: root)
+        try Self.writeDefinitions(to: root, roleModel: roleModel)
 
         session = WorkspaceSession()
         eventCenter = ConductorEnsembleEventCenter(
@@ -325,6 +383,8 @@ private final class MutatingVerbHarness {
                 suiteName: "EnsembleMutatingVerbTests-\(UUID().uuidString)"
             )
         )
+        defaultModelSuite = "EnsembleMutatingVerbTests.\(UUID().uuidString)"
+        defaultModelStore = ConductorDefaultModelStore(suiteName: defaultModelSuite)
         pendingRunIDs = runIDs
     }
 
@@ -333,6 +393,7 @@ private final class MutatingVerbHarness {
             controller.abort()
         }
         try? FileManager.default.removeItem(at: container)
+        UserDefaults.standard.removePersistentDomain(forName: defaultModelSuite)
     }
 
     func mint(
@@ -340,6 +401,43 @@ private final class MutatingVerbHarness {
         grant: ConductorEnsembleGrant
     ) -> String {
         tokenStore.mint(coordinatorID: coordinatorID, grant: grant)
+    }
+
+    /// Re-registers `co-primary` with the given per-provider model defaults.
+    /// Registration replaces by id, so this is how a test changes what the
+    /// launching Ensemble prefers between requests.
+    func registerCoordinator(providerModelDefaults: [ConductorCLIID: String]) {
+        session.registerCoordinatorSession(
+            ConductorCoordinatorSession(
+                id: "co-primary",
+                provider: .codex,
+                model: nil,
+                goal: "Ship it",
+                terminalSessionID: nil,
+                startedAt: Date(),
+                endedAt: nil,
+                label: nil,
+                providerModelDefaults: providerModelDefaults))
+    }
+
+    func runPayload(
+        token: String,
+        roleOverrides: [EnsembleRoleOverride]? = nil
+    ) -> EnsembleRequestPayload {
+        EnsembleRequestPayload(
+            verb: "run",
+            workingDirectory: root.path,
+            token: token,
+            workflow: "ship",
+            roleOverrides: roleOverrides,
+            prompt: "Implement the plan"
+        )
+    }
+
+    /// The model actually recorded on the run's first step binding — what
+    /// the adapter was told to launch, not what a request asked for.
+    func bindingModel(runID: String) -> String? {
+        session.conductorRuns.first { $0.id == runID }?.steps.first?.binding.model
     }
 
     func grant(
@@ -403,6 +501,7 @@ private final class MutatingVerbHarness {
                     )
                 },
                 tokenStore: tokenStore,
+                defaultModelStore: defaultModelStore,
                 eventCenter: eventCenter,
                 makeRunID: {
                     precondition(!self.pendingRunIDs.isEmpty)
@@ -412,7 +511,7 @@ private final class MutatingVerbHarness {
         )
     }
 
-    private static func writeDefinitions(to root: URL) throws {
+    private static func writeDefinitions(to root: URL, roleModel: String?) throws {
         let dot = RafuDotDirectory(workspaceRoot: root)
         try FileManager.default.createDirectory(
             at: dot.agentsURL,
@@ -427,8 +526,7 @@ private final class MutatingVerbHarness {
             ---
             name: Worker
             provider: codex
-            model: fake-fast
-            autonomy: worktreeWrite
+            \(roleModel.map { "model: \($0)\n" } ?? "")autonomy: worktreeWrite
             handoffArtifact: report.md
             ---
             Follow the requested workflow.

@@ -55,7 +55,35 @@ struct EnsembleCLIIconCard: View {
     /// Verb fragment for the tooltip and VoiceOver label, e.g. "Use as the
     /// coordinator". Each picker names its own action.
     let actionDescription: String
+    /// One short line under the name — today the model this CLI will actually
+    /// run (`ConductorModelResolution.label`), so "which model" is readable
+    /// off the card instead of by parsing a text field elsewhere in the rail.
+    /// A card is 76–120 pt wide, so this is truncated in the layout and
+    /// restated in full by `detailHelp` in both `help` and
+    /// `accessibilityLabel` — bounded, never dropped, exactly as `reason` is.
+    let detail: String?
+    /// The unabbreviated form of `detail` for pointer and VoiceOver, e.g.
+    /// "Sonnet — your default for this CLI". Falls back to `detail`.
+    let detailHelp: String?
     let activate: () -> Void
+
+    init(
+        option: AgentTerminalOption,
+        selection: Selection,
+        reason: String?,
+        actionDescription: String,
+        detail: String? = nil,
+        detailHelp: String? = nil,
+        activate: @escaping () -> Void
+    ) {
+        self.option = option
+        self.selection = selection
+        self.reason = reason
+        self.actionDescription = actionDescription
+        self.detail = detail
+        self.detailHelp = detailHelp
+        self.activate = activate
+    }
 
     @Environment(\.rafuTheme) private var theme
     @State private var isHovering = false
@@ -78,6 +106,14 @@ struct EnsembleCLIIconCard: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
+                if let detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(theme.palette.textMuted)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .accessibilityHidden(true)
+                }
             }
             .padding(.horizontal, RafuMetrics.space1)
             .padding(.vertical, RafuMetrics.space2)
@@ -129,13 +165,26 @@ struct EnsembleCLIIconCard: View {
         return theme.palette.cardBackground
     }
 
+    /// The full detail text, never the truncated on-card form.
+    private var spokenDetail: String? {
+        let text = detailHelp ?? detail
+        guard let text, !text.isEmpty else { return nil }
+        return text
+    }
+
     private var helpText: String {
         if let reason { return "\(option.displayName) — \(reason)" }
+        if let spokenDetail {
+            return "\(option.displayName) — \(actionDescription). Model: \(spokenDetail)"
+        }
         return "\(option.displayName) — \(actionDescription)"
     }
 
     private var accessibilityText: String {
         if let reason { return "\(option.displayName), unavailable, \(reason)" }
+        if let spokenDetail {
+            return "\(option.displayName), \(actionDescription), model \(spokenDetail)"
+        }
         return "\(option.displayName), \(actionDescription)"
     }
 }

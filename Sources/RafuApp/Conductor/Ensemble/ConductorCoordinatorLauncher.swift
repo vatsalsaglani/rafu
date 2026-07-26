@@ -18,6 +18,24 @@ nonisolated struct ConductorCoordinatorSession: Identifiable, Sendable {
     /// a parallel naming mechanism.
     var label: String? = nil
 
+    /// This Ensemble's per-provider model preference: "if a child run binds a
+    /// role to Codex and that role names no model of its own, use this one".
+    /// Keyed by CLI, so one vendor's model string can never be read for
+    /// another vendor's CLI — the structural equivalent of the coordinator
+    /// field's unconditional reset on provider switch.
+    ///
+    /// **Deliberately NOT part of `ConductorEnsembleGrant`.** The grant
+    /// crosses into RafuCore and is enforced as a *permission* boundary
+    /// (ADR 0018 and its consent amendment): `allowedProviders` answers "may
+    /// the coordinator reach this vendor at all", and a violation is exit 77.
+    /// A model is a launch *preference* — declining it changes which model
+    /// runs, never whether the run is authorized. Putting it in the grant
+    /// would conflate the two and widen a security-reviewed contract for a
+    /// display feature, so it rides alongside the grant on the Rafu-side
+    /// coordinator record instead. Nothing here is transmitted to the CLI;
+    /// the child process still receives only the opaque token.
+    var providerModelDefaults: [ConductorCLIID: String] = [:]
+
     /// What to show the user for this coordinator: its name when it has one,
     /// otherwise the goal text the graph has always shown.
     var displayTitle: String {
@@ -85,6 +103,7 @@ struct ConductorCoordinatorLauncher {
         goal: String,
         grant: ConductorEnsembleGrant,
         label: String? = nil,
+        providerModelDefaults: [ConductorCLIID: String] = [:],
         in session: WorkspaceSession
     ) async throws -> ConductorCoordinatorSession {
         guard let workspaceRoot = session.rootURL else {
@@ -136,7 +155,13 @@ struct ConductorCoordinatorLauncher {
             terminalSessionID: terminalController.id,
             startedAt: clock(),
             endedAt: nil,
-            label: trimmedLabel?.isEmpty == false ? trimmedLabel : nil
+            label: trimmedLabel?.isEmpty == false ? trimmedLabel : nil,
+            // Trimmed and empty-dropped here so "" — the established
+            // not-set value — never reaches the resolver as a model named
+            // "" and is never handed to a CLI as `--model ''`.
+            providerModelDefaults: providerModelDefaults.compactMapValues {
+                ConductorModelResolution.normalized($0)
+            }
         )
         session.registerCoordinatorSession(coordinatorSession) {
             tokenStore.revoke(coordinatorID: coordinatorID)
