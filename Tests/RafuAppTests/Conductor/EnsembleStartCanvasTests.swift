@@ -684,21 +684,19 @@ struct EnsembleStartCanvasTests {
 
         #expect(startCanvas.contains(".onExitCommand(perform: session.closeEnsembleStart)"))
         #expect(!startCanvas.contains(".frame(maxWidth: 600"))
-        #expect(startCanvas.contains("controlsWidth(inTotal:"))
+        #expect(startCanvas.contains("goalPaneMinimumWidth"))
+        #expect(startCanvas.contains("configurationRailWidth"))
         #expect(startCanvas.contains("EnsembleGoalPane(text: $model.goal)"))
-        #expect(startCanvas.contains(".accessibilityLabel(\"Close New Ensemble\")"))
-        #expect(startCanvas.contains(".help(\"Close New Ensemble\")"))
+        #expect(startCanvas.contains("AttachedWorkbenchTabCloseButton("))
+        #expect(startCanvas.contains("accessibilityLabel: \"Close New Ensemble\""))
+        #expect(startCanvas.contains("help: \"Close New Ensemble\""))
     }
 
-    @Test("The guided door splits 3/12 to 9/12, clamped so neither column collapses")
+    @Test("The guided door keeps the goal-first 420/4/300 composition")
     func guidedColumnSplit() throws {
-        // The fraction is the layout.
-        #expect(EnsembleStartCanvas.controlsWidth(inTotal: 1200) == 300)
-        #expect(EnsembleStartCanvas.controlsWidth(inTotal: 1600) == 400)
-        // Floored: a narrow window still shows a usable icon grid.
-        #expect(EnsembleStartCanvas.controlsWidth(inTotal: 800) == 280)
-        // Capped: the rail never eats a very wide display.
-        #expect(EnsembleStartCanvas.controlsWidth(inTotal: 4000) == 420)
+        #expect(EnsembleStartCanvas.goalPaneMinimumWidth == 420)
+        #expect(EnsembleStartCanvas.configurationRailWidth == 300)
+        #expect(EnsembleStartCanvas.footerMinimumHeight == 52)
     }
 
     @Test("The goal is handed to the launcher as plain text, byte for byte")
@@ -766,25 +764,28 @@ struct EnsembleStartCanvasTests {
         #expect(model.effectiveName(for: "# Ship the release") == "Ship the release")
     }
 
-    @Test("Both CLI pickers are icon grids sourced from ConductorCLIIcons")
-    func cliPickersAreIconGrids() throws {
+    @Test("Both CLI pickers are compact selection lists with one model relationship")
+    func cliPickersAreSelectionLists() throws {
         let root = try repositoryRoot()
         let startCanvas = try source(
             "Sources/RafuApp/Views/EnsembleStartCanvas.swift", root: root)
-        let grid = try source("Sources/RafuApp/Views/EnsembleCLIIconGrid.swift", root: root)
+        let list = try source(
+            "Sources/RafuApp/Views/EnsembleCLISelectionList.swift", root: root)
 
-        // Two grids: coordinator (single-select) and allowed CLIs
-        // (multi-select), not a row list and not a column of switches.
-        #expect(startCanvas.components(separatedBy: "EnsembleCLIIconGrid(options:").count - 1 == 2)
+        // Two lists: lead (single-select) and allowed CLIs (multi-select).
+        #expect(
+            startCanvas.components(separatedBy: "EnsembleCLISelectionList(options:").count - 1 == 2)
         #expect(!startCanvas.contains("Toggle(option.displayName"))
-        #expect(!startCanvas.contains("EnsembleCLIPickerRow"))
-        #expect(grid.contains("ConductorCLIIcons.icon(for: option.id)"))
-        #expect(grid.contains("LazyVGrid"))
+        #expect(!startCanvas.contains("EnsembleCLIIconGrid"))
+        #expect(list.contains("ConductorCLIIcons.icon(for: option.id)"))
+        #expect(list.contains("ForEach(options)"))
+        #expect(list.contains("case lead"))
+        #expect(list.contains("case allowed"))
         // Selection and unavailability are never color-only.
-        #expect(grid.contains("checkmark.circle.fill"))
-        #expect(grid.contains("exclamationmark.circle.fill"))
-        #expect(grid.contains(".accessibilityLabel(accessibilityText)"))
-        #expect(grid.contains(".help(helpText)"))
+        #expect(list.contains("radio button"))
+        #expect(list.contains("checkbox"))
+        #expect(list.contains("\"Unavailable\""))
+        #expect(list.contains("Unavailable —"))
     }
 
     @Test("The goal pane is one live-Markdown surface, not an editor/preview split")

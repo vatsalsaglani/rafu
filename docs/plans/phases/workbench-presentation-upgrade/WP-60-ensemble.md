@@ -232,6 +232,44 @@ Complete all changes before:
 Use the single Rafu Lightning GUI lease or report exact deferred states. Commit
 only owned paths, do not push, and remove `.build` after the green commit.
 
+### WP-60 manual and accessibility matrix
+
+Run this matrix in one Rafu Lightning window at 1,440 × 900 with Runs open;
+use the same workspace for every row so the tab lifecycle and window-scoped
+selection remain meaningful. Record **Pass**, **Fail**, or **N/A** with the
+observed state. A lane without the single GUI lease records the exact rows
+deferred to the coordinator merge round rather than implying a manual pass.
+
+| Surface | States and evidence |
+|---|---|
+| Goal-first common path | Name, Goal, selected lead and its model, Budget grant, and Start Coordinator are visible together; the goal is first after Name in Tab and VoiceOver order. |
+| Provider truth | Show one ready and one unavailable CLI. The unavailable row visibly says **Unavailable** and its reason; ready, hover, pressed, selected, disabled, and unavailable states remain distinguishable by text, shape, and role without hue. |
+| Selection and models | Confirm lead rows announce a single-selection radio role and Allowed CLIs announce multi-selection checkbox roles. Check inherited/default, discovered where available, and **Custom…** model selection; each CLI/model relationship appears only in its one row. |
+| Start state | Check empty goal, no allowed CLI, and a valid goal/lead/grant. Each disabled Start Coordinator state has an inline reason; enabled Start is the only filled footer action and Close remains secondary. |
+| Attached canvases | Open New Ensemble, Ensemble Graph, and run detail. Each selected tab has the shared attached cap with no bottom seam, a visible close control, and Escape/Close retains its current route and fallback behavior. |
+| Theme and contrast | Repeat the common path in Indigo, Khadi, and the converged-surface fixture with Increase Contrast. Verify the 4 pt gutter, 5 pt local surfaces, focus ring, and status/selection remain legible without hard-coded color. |
+| Larger text and keyboard | At default and the largest supported text size, provider rows retain both logical lines, advanced rail content scrolls, and the footer remains visible. Complete the guided door using Tab, Space, Return, and Escape only. |
+| VoiceOver and motion | With VoiceOver, confirm provider name, readiness, unavailable reason, model truth, and lead/allowed group labels; verify controls are individually reachable. With Reduce Motion and Reduce Transparency, no decorative transition appears and the compact surfaces remain coherent. |
+
+## Implementation record
+
+- Replaced the two icon grids and detached allowed-model stack with the
+  compact `EnsembleCLISelectionList`/`EnsembleCLISelectionRow` relationship
+  rows. Lead selection is single-select and Allowed selection is multi-select;
+  readiness, explicit unavailability reason, model resolution, inherited
+  defaults, and **Custom…** model entry stay in the existing model seam.
+- Reordered the guided source and visual hierarchy to Name/Goal, lead/model,
+  budget/deadline, Allowed CLIs/models, and Start. The goal pane now precedes
+  a 4 pt gutter and 300 pt rail, with its 420 pt minimum and a 52 pt footer
+  pinned outside advanced-content scrolling.
+- Moved New Ensemble, graph, and run-detail tabs to the WP-00 shared
+  `AttachedWorkbenchTab`; no route, close, launch, grant, probe, auth,
+  worktree, handoff, or model-resolution behavior was modified.
+- Added source and behavior contracts in the WP-60-owned test files. No
+  reusable platform nuance beyond the existing WP-00 canvas/accessibility
+  contract was discovered, so no reference note or reference-index row is
+  intended. ADR 0018 and ADR 0022 remain unchanged.
+
 ## Goal-mode start prompt
 
 ```text

@@ -564,27 +564,26 @@ struct EnsembleStartCanvas: View {
     }
 
     private var tabStrip: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "circle.hexagongrid")
-                .font(.system(size: 11))
-                .foregroundStyle(theme.palette.info)
-                .accessibilityHidden(true)
-            Text("New Ensemble")
-                .lineLimit(1)
-                .foregroundStyle(theme.palette.textPrimary)
-            Button(
-                "Close New Ensemble",
-                systemImage: "xmark",
-                action: session.closeEnsembleStart
-            )
-            .buttonStyle(RafuIconButtonStyle(size: 18, iconSize: 9))
-            .help("Close New Ensemble")
-            .accessibilityLabel("Close New Ensemble")
-            Spacer()
+        HStack(spacing: 0) {
+            AttachedWorkbenchTab(isSelected: true) {
+                HStack(spacing: 6) {
+                    Image(systemName: "circle.hexagongrid")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.palette.info)
+                        .accessibilityHidden(true)
+                    Text("New Ensemble")
+                        .lineLimit(1)
+                    AttachedWorkbenchTabCloseButton(
+                        accessibilityLabel: "Close New Ensemble",
+                        help: "Close New Ensemble",
+                        action: session.closeEnsembleStart
+                    )
+                }
+                .font(.callout)
+            }
+            Spacer(minLength: 0)
         }
-        .font(.callout)
-        .padding(.horizontal, 10)
-        .frame(height: RafuMetrics.tabBarHeight)
+        .frame(minHeight: RafuMetrics.tabBarHeight)
         .background(theme.palette.tabBarBackground)
     }
 
@@ -592,22 +591,22 @@ struct EnsembleStartCanvas: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: RafuMetrics.space3) {
-            HStack(alignment: .top, spacing: RafuMetrics.space4) {
-                RafuSheetHeader(
-                    icon: "circle.hexagongrid",
-                    title: "New Ensemble",
-                    subtitle:
-                        "Describe a goal, start from a template, or launch an existing workflow."
-                )
-                Spacer(minLength: RafuMetrics.space4)
+            HStack(spacing: RafuMetrics.space3) {
+                Label("New Ensemble", systemImage: "circle.hexagongrid")
+                    .font(.headline)
+                    .foregroundStyle(theme.palette.textPrimary)
+                Divider()
+                    .frame(height: 18)
                 nameField
+                Spacer(minLength: RafuMetrics.space2)
             }
             RafuSegmentedPicker(items: EnsembleDoor.allCases, selection: $model.door) {
                 $0.title
             }
         }
         .padding(.horizontal, RafuMetrics.sheetPadding)
-        .padding(.vertical, RafuMetrics.space4)
+        .padding(.vertical, RafuMetrics.space2)
+        .frame(minHeight: Self.headerTargetHeight, alignment: .top)
     }
 
     /// The name that flows into `ConductorCoordinatorSession.label` (Door 1)
@@ -615,7 +614,7 @@ struct EnsembleStartCanvas: View {
     /// placeholder's suggestion is what actually gets used — so the user can
     /// always read the name they are about to create.
     private var nameField: some View {
-        VStack(alignment: .leading, spacing: RafuMetrics.space1) {
+        HStack(spacing: RafuMetrics.space1) {
             Text("Name")
                 .font(.caption)
                 .foregroundStyle(theme.palette.textSecondary)
@@ -665,7 +664,196 @@ struct EnsembleStartCanvas: View {
         }
     }
 
-    // MARK: - Footer
+    // MARK: - Door 1: guided (two columns)
+
+    private var windowCap: Int {
+        session.conductorConcurrentRuns.activeLimit
+    }
+
+    /// Full editor width, in goal-first source order. The common task starts
+    /// in a 420 pt writing pane; a 4 pt app-background gutter separates it
+    /// from the fixed 300 pt configuration rail without using a divider.
+    private var guidedDoor: some View {
+        HStack(alignment: .top, spacing: 0) {
+            EnsembleGoalPane(text: $model.goal)
+                .frame(
+                    minWidth: Self.goalPaneMinimumWidth,
+                    maxWidth: .infinity,
+                    maxHeight: .infinity,
+                    alignment: .top
+                )
+                .background(ensembleSurface)
+
+            Rectangle()
+                .fill(theme.palette.appBackground)
+                .frame(width: RafuMetrics.workbenchInset)
+                .accessibilityHidden(true)
+
+            guidedControlsColumn
+                .frame(width: Self.configurationRailWidth)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .background(ensembleSurface)
+        }
+    }
+
+    nonisolated static let goalPaneMinimumWidth: CGFloat = 420
+    nonisolated static let configurationRailWidth: CGFloat = 300
+    nonisolated static let headerTargetHeight: CGFloat = 88
+    nonisolated static let footerMinimumHeight: CGFloat = 52
+
+    private var ensembleSurface: some View {
+        RoundedRectangle(cornerRadius: RafuMetrics.radiusEditorGroup, style: .continuous)
+            .fill(theme.palette.editorBackground)
+            .overlay(
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusEditorGroup, style: .continuous)
+                    .strokeBorder(theme.palette.borderSubtle, lineWidth: RafuMetrics.hairline)
+            )
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
+    private var guidedControlsColumn: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: RafuMetrics.space5) {
+                coordinatorSection
+                budgetSection
+                allowedCLISection
+            }
+            .padding(RafuMetrics.space4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var coordinatorSection: some View {
+        EnsembleControlSection(
+            title: "Lead coordinator", systemImage: "person.badge.shield.checkmark"
+        ) {
+            if model.cliOptions.isEmpty {
+                HStack(spacing: RafuMetrics.space2) {
+                    ProgressView().controlSize(.small)
+                    Text("Checking installed CLIs…")
+                        .font(.callout)
+                        .foregroundStyle(theme.palette.textSecondary)
+                }
+            } else {
+                EnsembleCLISelectionList(options: model.cliOptions) { option in
+                    let isSelected = model.selectedProvider == option.id
+                    let resolution = model.modelResolution(for: option.id)
+                    EnsembleCLISelectionRow(
+                        option: option,
+                        selection: .lead(isSelected: isSelected),
+                        unavailableReason: model.disableReason(option.id),
+                        activate: { selectProvider(option) }
+                    ) {
+                        if isSelected, let coordinatorResolution = model.coordinatorModelResolution
+                        {
+                            EnsembleModelField(
+                                label: "Lead coordinator model",
+                                available: model.availableModels(for: option.id),
+                                resolution: coordinatorResolution,
+                                value: $model.model
+                            )
+                        } else {
+                            Text(resolution.detailedLabel)
+                                .font(.caption)
+                                .foregroundStyle(theme.palette.textMuted)
+                                .accessibilityLabel("Resolved model: \(resolution.detailedLabel)")
+                        }
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Lead coordinator, single selection")
+                }
+            }
+        }
+    }
+
+    private var budgetSection: some View {
+        // The consent model (C8-coordinator-ux.md): the grant is always
+        // visible here, never buried in Settings. Usage ceiling is
+        // deliberately absent from v1 UI — the grant type supports it, but no
+        // per-provider usage editor exists yet.
+        EnsembleControlSection(
+            title: "Budget grant", systemImage: "gauge.with.dots.needle.33percent"
+        ) {
+            Stepper(
+                "Max concurrent child runs: \(model.maxConcurrent)",
+                value: $model.maxConcurrent,
+                in: 1...max(1, min(3, windowCap))
+            )
+            .font(.callout)
+            Text("Capped at \(windowCap) per window.")
+                .font(.caption)
+                .foregroundStyle(theme.palette.textMuted)
+            Stepper(
+                "Max total child runs: \(model.maxTotal)",
+                value: $model.maxTotal,
+                in: 1...50
+            )
+            .font(.callout)
+            Picker("Deadline", selection: $model.deadlineChoice) {
+                ForEach(EnsembleGrantDeadline.allCases) { choice in
+                    Text(choice.title).tag(choice)
+                }
+            }
+            .font(.callout)
+            Text(
+                "The coordinator can start at most this many child runs and reach only the CLIs you allow."
+            )
+            .font(.caption)
+            .foregroundStyle(theme.palette.textMuted)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var allowedCLISection: some View {
+        EnsembleControlSection(title: "Allowed CLIs", systemImage: "checklist") {
+            if model.cliOptions.isEmpty {
+                Text("No CLIs probed yet.")
+                    .font(.callout)
+                    .foregroundStyle(theme.palette.textSecondary)
+            } else {
+                EnsembleCLISelectionList(options: model.cliOptions) { option in
+                    let isAllowed = model.isAllowed(option.id)
+                    let resolution = model.modelResolution(for: option.id)
+                    EnsembleCLISelectionRow(
+                        option: option,
+                        selection: .allowed(isSelected: isAllowed),
+                        unavailableReason: model.disableReason(option.id),
+                        activate: { toggleAllowed(option) }
+                    ) {
+                        if isAllowed {
+                            EnsembleModelField(
+                                label: "\(option.displayName) allowed model",
+                                available: model.availableModels(for: option.id),
+                                resolution: resolution,
+                                value: allowedModelBinding(option.id)
+                            )
+                        } else {
+                            Text(resolution.detailedLabel)
+                                .font(.caption)
+                                .foregroundStyle(theme.palette.textMuted)
+                                .accessibilityLabel("Resolved model: \(resolution.detailedLabel)")
+                        }
+                    }
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Allowed CLIs, multiple selection")
+                // Names where the longer lists come from. Opening this canvas
+                // deliberately runs no CLI, so a CLI that can list its own
+                // models shows that list only after the user asks for it in
+                // Settings — this says so rather than leaving the shorter
+                // list looking like the whole truth.
+                Text(
+                    "Each allowed CLI runs the model chosen here unless a role names its own. For CLIs that can list their own models, use Settings → Agents → Refresh models to show the full catalog here too."
+                )
+                .font(.caption)
+                .foregroundStyle(theme.palette.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    // MARK: - Footer and primary action
 
     private var footer: some View {
         HStack(spacing: RafuMetrics.space3) {
@@ -690,7 +878,8 @@ struct EnsembleStartCanvas: View {
                 .disabled(!canStartPrimary)
         }
         .padding(.horizontal, RafuMetrics.sheetPadding)
-        .padding(.vertical, RafuMetrics.space3)
+        .padding(.vertical, RafuMetrics.space2)
+        .frame(minHeight: Self.footerMinimumHeight)
         .background(theme.palette.tabBarBackground)
     }
 
@@ -750,180 +939,6 @@ struct EnsembleStartCanvas: View {
                 "Allow at least one CLI in the budget grant so the coordinator can start a child run."
         }
         return nil
-    }
-
-    // MARK: - Door 1: guided (two columns)
-
-    private var windowCap: Int {
-        session.conductorConcurrentRuns.activeLimit
-    }
-
-    /// Full editor width, split 3/12 controls to 9/12 goal. No centered
-    /// measure: the goal is a writing surface and wants the room, while the
-    /// grant controls are compact and want a fixed, scannable rail.
-    private var guidedDoor: some View {
-        GeometryReader { proxy in
-            HStack(alignment: .top, spacing: 0) {
-                guidedControlsColumn
-                    .frame(width: Self.controlsWidth(inTotal: proxy.size.width))
-                    .frame(maxHeight: .infinity, alignment: .top)
-                Divider().overlay(theme.palette.borderSubtle)
-                EnsembleGoalPane(text: $model.goal)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            }
-        }
-    }
-
-    /// 3/12 of the canvas, floored at 280 pt and capped at 420 pt. The
-    /// fraction is the layout; the clamp keeps the icon grids usable in a
-    /// narrow window and stops the rail eating a 2000 pt display.
-    nonisolated static func controlsWidth(inTotal totalWidth: CGFloat) -> CGFloat {
-        let proportional = totalWidth * 3 / 12
-        return min(max(proportional, 280), 420)
-    }
-
-    private var guidedControlsColumn: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: RafuMetrics.space5) {
-                coordinatorSection
-                budgetSection
-                allowedCLISection
-            }
-            .padding(RafuMetrics.space4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private var coordinatorSection: some View {
-        EnsembleControlSection(title: "Coordinator", systemImage: "person.badge.shield.checkmark") {
-            if model.cliOptions.isEmpty {
-                HStack(spacing: RafuMetrics.space2) {
-                    ProgressView().controlSize(.small)
-                    Text("Checking installed CLIs…")
-                        .font(.callout)
-                        .foregroundStyle(theme.palette.textSecondary)
-                }
-            } else {
-                EnsembleCLIIconGrid(options: model.cliOptions) { option in
-                    // The coordinator's card carries its own resolved model,
-                    // so "which CLI" and "which model in it" are one glance
-                    // rather than a card plus a field elsewhere in the rail.
-                    let isSelected = model.selectedProvider == option.id
-                    let resolution = isSelected ? model.coordinatorModelResolution : nil
-                    EnsembleCLIIconCard(
-                        option: option,
-                        selection: isSelected ? .selected : .unselected,
-                        reason: model.disableReason(option.id),
-                        actionDescription: "Use as the coordinator",
-                        detail: resolution?.label,
-                        detailHelp: resolution?.detailedLabel,
-                        activate: { selectProvider(option) }
-                    )
-                }
-                if let selectedProvider = model.selectedProvider,
-                    let resolution = model.coordinatorModelResolution
-                {
-                    VStack(alignment: .leading, spacing: RafuMetrics.space1) {
-                        Text("Model")
-                            .font(.caption)
-                            .foregroundStyle(theme.palette.textSecondary)
-                        EnsembleModelField(
-                            label: "Coordinator model",
-                            available: model.availableModels(for: selectedProvider),
-                            resolution: resolution,
-                            value: $model.model)
-                    }
-                }
-            }
-        }
-    }
-
-    private var budgetSection: some View {
-        // The consent model (C8-coordinator-ux.md): the grant is always
-        // visible here, never buried in Settings. Usage ceiling is
-        // deliberately absent from v1 UI — the grant type supports it, but no
-        // per-provider usage editor exists yet.
-        EnsembleControlSection(
-            title: "Budget grant", systemImage: "gauge.with.dots.needle.33percent"
-        ) {
-            Stepper(
-                "Max concurrent child runs: \(model.maxConcurrent)",
-                value: $model.maxConcurrent,
-                in: 1...max(1, min(3, windowCap))
-            )
-            .font(.callout)
-            Text("Capped at \(windowCap) per window.")
-                .font(.caption)
-                .foregroundStyle(theme.palette.textMuted)
-            Stepper(
-                "Max total child runs: \(model.maxTotal)",
-                value: $model.maxTotal,
-                in: 1...50
-            )
-            .font(.callout)
-            Picker("Deadline", selection: $model.deadlineChoice) {
-                ForEach(EnsembleGrantDeadline.allCases) { choice in
-                    Text(choice.title).tag(choice)
-                }
-            }
-            .font(.callout)
-            Text(
-                "The coordinator can start at most this many child runs and reach only the CLIs you allow."
-            )
-            .font(.caption)
-            .foregroundStyle(theme.palette.textMuted)
-            .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var allowedCLISection: some View {
-        EnsembleControlSection(title: "Allowed CLIs", systemImage: "checklist") {
-            if model.cliOptions.isEmpty {
-                Text("No CLIs probed yet.")
-                    .font(.callout)
-                    .foregroundStyle(theme.palette.textSecondary)
-            } else {
-                EnsembleCLIIconGrid(options: model.cliOptions) { option in
-                    let isAllowed = model.isAllowed(option.id)
-                    let resolution = isAllowed ? model.modelResolution(for: option.id) : nil
-                    EnsembleCLIIconCard(
-                        option: option,
-                        selection: isAllowed ? .allowed : .unselected,
-                        reason: model.disableReason(option.id),
-                        actionDescription: "Allow the coordinator to reach this CLI",
-                        detail: resolution?.label,
-                        detailHelp: resolution?.detailedLabel,
-                        activate: { toggleAllowed(option) }
-                    )
-                }
-                // One model row per ALLOWED CLI, so a pipeline can run one
-                // model on one CLI and another elsewhere. Bounded by the
-                // user's own consent selection rather than listing all seven.
-                ForEach(model.allowedOptionsInRegistryOrder) { option in
-                    VStack(alignment: .leading, spacing: RafuMetrics.space1) {
-                        Text(option.displayName)
-                            .font(.caption)
-                            .foregroundStyle(theme.palette.textSecondary)
-                        EnsembleModelField(
-                            label: "\(option.displayName) model",
-                            available: model.availableModels(for: option.id),
-                            resolution: model.modelResolution(for: option.id),
-                            value: allowedModelBinding(option.id))
-                    }
-                }
-                // Names where the longer lists come from. Opening this canvas
-                // deliberately runs no CLI, so a CLI that can list its own
-                // models shows that list only after the user asks for it in
-                // Settings — this says so rather than leaving the shorter
-                // list looking like the whole truth.
-                Text(
-                    "Each allowed CLI runs the model chosen here unless a role names its own. For CLIs that can list their own models, use Settings → Agents → Refresh models to show the full catalog here too."
-                )
-                .font(.caption)
-                .foregroundStyle(theme.palette.textMuted)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-        }
     }
 
     /// Per-CLI, so a value stored for one vendor can never be read for

@@ -84,30 +84,34 @@ struct ConductorGraphCanvas: View {
     }
 
     private var tabStrip: some View {
-        HStack(spacing: 7) {
-            Image(systemName: WorkspaceNavigatorMode.runs.symbolName)
-                .font(.system(size: 11))
-                .foregroundStyle(theme.palette.info)
-                .accessibilityHidden(true)
-            Text("Ensemble Graph")
-                .lineLimit(1)
-                .foregroundStyle(theme.palette.textPrimary)
-            // The launched Ensemble's own identity: which CLI is coordinating
-            // and on which model. Setup states this once; without it here the
-            // choice disappears the moment the run starts.
-            if let identity = coordinatorIdentity {
-                RafuChip(text: identity.label)
-                    .help(identity.detailedLabel)
-                    .accessibilityLabel("Coordinator \(identity.detailedLabel)")
+        HStack(spacing: 0) {
+            AttachedWorkbenchTab(isSelected: true) {
+                HStack(spacing: 6) {
+                    Image(systemName: WorkspaceNavigatorMode.runs.symbolName)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.palette.info)
+                        .accessibilityHidden(true)
+                    Text("Ensemble Graph")
+                        .lineLimit(1)
+                    // The launched Ensemble's own identity: which CLI is
+                    // coordinating and on which model. Setup states this
+                    // once; without it here the choice disappears at launch.
+                    if let identity = coordinatorIdentity {
+                        RafuChip(text: identity.label)
+                            .help(identity.detailedLabel)
+                            .accessibilityLabel("Coordinator \(identity.detailedLabel)")
+                    }
+                    AttachedWorkbenchTabCloseButton(
+                        accessibilityLabel: "Close Graph",
+                        help: "Close Ensemble Graph",
+                        action: session.closeConductorGraph
+                    )
+                }
+                .font(.callout)
             }
-            Button("Close Graph", systemImage: "xmark", action: session.closeConductorGraph)
-                .buttonStyle(RafuIconButtonStyle(size: 18, iconSize: 9))
-                .accessibilityHint("Closes the Ensemble graph")
-            Spacer()
+            Spacer(minLength: 0)
         }
-        .font(.callout)
-        .padding(.horizontal, 10)
-        .frame(height: RafuMetrics.tabBarHeight)
+        .frame(minHeight: RafuMetrics.tabBarHeight)
         .background(theme.palette.tabBarBackground)
     }
 
