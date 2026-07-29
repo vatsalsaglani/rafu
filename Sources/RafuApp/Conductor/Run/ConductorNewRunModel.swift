@@ -128,6 +128,7 @@ nonisolated struct ConductorAgentCatalog: Sendable {
 nonisolated enum ConductorNewRunInputError: Error, Equatable, LocalizedError, Sendable {
     case workspaceUnavailable
     case agentUnavailable
+    case providerUnavailable(String)
     case workflowUnavailable
     case emptyTaskPrompt
 
@@ -137,6 +138,8 @@ nonisolated enum ConductorNewRunInputError: Error, Equatable, LocalizedError, Se
             "Open a local workspace before starting a run."
         case .agentUnavailable:
             "Choose an agent file before starting the run."
+        case .providerUnavailable(let reason):
+            reason
         case .workflowUnavailable:
             "Choose a workflow file before starting the run."
         case .emptyTaskPrompt:
@@ -162,6 +165,43 @@ nonisolated enum ConductorNewRunMode: String, CaseIterable, Identifiable, Sendab
     }
 }
 
+/// One provider choice for a Single Role run. The probe result is retained
+/// only for this canvas session; no choice or availability state is written to
+/// the selected agent file.
+nonisolated struct ConductorSingleRoleProviderOption: Equatable, Identifiable, Sendable {
+    nonisolated enum Availability: Equatable, Sendable {
+        case ready
+        case unavailable(String)
+
+        var reason: String? {
+            guard case .unavailable(let reason) = self else { return nil }
+            return reason
+        }
+
+        var isReady: Bool {
+            guard case .ready = self else { return false }
+            return true
+        }
+    }
+
+    let id: ConductorCLIID
+    let displayName: String
+    let curatedModels: [ConductorModelChoice]
+    let availability: Availability
+    /// `nil` means this provider supports read-only handoff. The text comes
+    /// from the adapter's verified capability declaration and is applied only
+    /// when the selected agent file is read-only.
+    let readOnlyUnsupportedReason: String?
+
+    var isReady: Bool {
+        availability.isReady
+    }
+
+    var unavailableReason: String? {
+        availability.reason
+    }
+}
+
 /// Window-owned launch-form state. The role prompt remains inside the parsed
 /// file definition and the task prompt remains ephemeral until the explicit
 /// Run action asks `ConductorRunController`/`ConductorWorkflowController` to
@@ -170,7 +210,16 @@ nonisolated enum ConductorNewRunMode: String, CaseIterable, Identifiable, Sendab
 @MainActor
 final class ConductorNewRunModel {
     var agents: [ConductorAgentFile] = []
-    var selectedAgentID: ConductorAgentFile.ID?
+    var selectedAgentID: ConductorAgentFile.ID? {
+        didSet {
+            guard selectedAgentID != oldValue else { return }
+            resetSingleRoleBinding()
+        }
+    }
+    /// The in-memory binding used for this run only. Selecting another agent
+    /// file resets both values from that file's frontmatter.
+    private(set) var singleRoleProvider: ConductorCLIID?
+    var singleRoleModel = ""
     var mode: ConductorNewRunMode = .singleRole
     var workflows: [ConductorWorkflowFile] = []
     var selectedWorkflowID: ConductorWorkflowFile.ID?
@@ -179,6 +228,7 @@ final class ConductorNewRunModel {
     private(set) var isLoading = false
     private(set) var isStarting = false
     private(set) var errorMessage: String?
+    private(set) var providerProbeOptions: [ConductorSingleRoleProviderOption] = []
 
     @ObservationIgnored
     private let catalog: ConductorAgentCatalog
@@ -187,14 +237,25 @@ final class ConductorNewRunModel {
     private let workflowCatalog: ConductorWorkflowCatalog
 
     @ObservationIgnored
+    private let adapters: [any ConductorCLIAdapter]
+
+    /// Read-only cache reads are safe from a view body. Settings owns the
+    /// explicit discovery action; this canvas only consumes its result.
+    private let discoveredModels: ConductorDiscoveredModelCache
+
+    @ObservationIgnored
     private var loadedWorkspaceRoot: URL?
 
     init(
         catalog: ConductorAgentCatalog = ConductorAgentCatalog(),
-        workflowCatalog: ConductorWorkflowCatalog = ConductorWorkflowCatalog()
+        workflowCatalog: ConductorWorkflowCatalog = ConductorWorkflowCatalog(),
+        adapters: [any ConductorCLIAdapter] = ConductorAdapterRegistry.all,
+        discoveredModels: ConductorDiscoveredModelCache = .shared
     ) {
         self.catalog = catalog
         self.workflowCatalog = workflowCatalog
+        self.adapters = adapters
+        self.discoveredModels = discoveredModels
     }
 
     var canStart: Bool {
@@ -203,7 +264,7 @@ final class ConductorNewRunModel {
         else { return false }
         switch mode {
         case .singleRole:
-            return selectedAgent != nil
+            return selectedAgent != nil && selectedSingleRoleProviderOption?.isReady == true
         case .workflow:
             guard let selectedWorkflow else { return false }
             let resolved = try? ConductorWorkflowBinder.resolve(
@@ -220,6 +281,59 @@ final class ConductorNewRunModel {
     var selectedWorkflow: ConductorWorkflowFile? {
         guard let selectedWorkflowID else { return nil }
         return workflows.first { $0.id == selectedWorkflowID }
+    }
+
+    /// Applies the selected agent file's read-only requirement to the live
+    /// adapter probes. Installation and sign-in failures take precedence, so
+    /// users see the action they can take before an additional capability
+    /// limitation. An unknown sign-in state intentionally stays ready: the
+    /// provider CLI remains the auth authority (manual-plan M2).
+    var singleRoleProviderOptions: [ConductorSingleRoleProviderOption] {
+        let isReadOnly = selectedAgent?.definition.autonomy == .readOnly
+        return providerProbeOptions.map { option in
+            guard
+                isReadOnly,
+                option.availability.isReady,
+                let reason = option.readOnlyUnsupportedReason
+            else { return option }
+            return ConductorSingleRoleProviderOption(
+                id: option.id,
+                displayName: option.displayName,
+                curatedModels: option.curatedModels,
+                availability: .unavailable(reason),
+                readOnlyUnsupportedReason: reason)
+        }
+    }
+
+    var selectedSingleRoleProviderOption: ConductorSingleRoleProviderOption? {
+        guard let singleRoleProvider else { return nil }
+        return singleRoleProviderOptions.first { $0.id == singleRoleProvider }
+    }
+
+    func modelChoices(for provider: ConductorCLIID) -> [ConductorModelChoice] {
+        let curated = singleRoleProviderOptions.first { $0.id == provider }?.curatedModels ?? []
+        return ConductorModelCatalog.merge(
+            curated: curated,
+            discovered: discoveredModels.models(for: provider))
+    }
+
+    var singleRoleModelResolution: ConductorModelResolution {
+        ConductorModelResolution.resolve(
+            explicit: singleRoleModel,
+            ensembleDefault: nil,
+            settingsDefault: nil,
+            catalog: singleRoleProvider.map(modelChoices(for:)) ?? [])
+    }
+
+    /// Changes only this canvas's in-memory binding. A model named for the
+    /// previous CLI is never carried into a different provider; clearing it
+    /// explicitly means the newly selected CLI chooses its own default.
+    func selectSingleRoleProvider(_ provider: ConductorCLIID) {
+        guard singleRoleProviderOptions.first(where: { $0.id == provider })?.isReady == true,
+            singleRoleProvider != provider
+        else { return }
+        singleRoleProvider = provider
+        singleRoleModel = ""
     }
 
     /// The resolved step preview for the selected workflow (agent name →
@@ -244,6 +358,9 @@ final class ConductorNewRunModel {
         guard let workspaceRoot else {
             agents = []
             selectedAgentID = nil
+            singleRoleProvider = nil
+            singleRoleModel = ""
+            providerProbeOptions = []
             workflows = []
             selectedWorkflowID = nil
             errorMessage = ConductorNewRunInputError.workspaceUnavailable.errorDescription
@@ -265,11 +382,15 @@ final class ConductorNewRunModel {
             try Task.checkCancellation()
             let loadedWorkflows = try await workflowCatalog.load(workspaceRoot: root)
             try Task.checkCancellation()
+            let loadedProviderOptions = await probeProviderOptions()
+            try Task.checkCancellation()
             guard loadedWorkspaceRoot == root else { return }
             agents = loadedAgents
             if !loadedAgents.contains(where: { $0.id == selectedAgentID }) {
                 selectedAgentID = loadedAgents.first?.id
             }
+            resetSingleRoleBinding()
+            providerProbeOptions = loadedProviderOptions
             workflows = loadedWorkflows
             if !loadedWorkflows.contains(where: { $0.id == selectedWorkflowID }) {
                 selectedWorkflowID = loadedWorkflows.first?.id
@@ -280,16 +401,23 @@ final class ConductorNewRunModel {
             guard loadedWorkspaceRoot == root else { return }
             agents = []
             selectedAgentID = nil
+            singleRoleProvider = nil
+            singleRoleModel = ""
+            providerProbeOptions = []
             errorMessage = error.errorDescription
         } catch let error as ConductorWorkflowCatalogError {
             guard loadedWorkspaceRoot == root else { return }
             workflows = []
             selectedWorkflowID = nil
+            providerProbeOptions = []
             errorMessage = error.errorDescription
         } catch {
             guard loadedWorkspaceRoot == root else { return }
             agents = []
             selectedAgentID = nil
+            singleRoleProvider = nil
+            singleRoleModel = ""
+            providerProbeOptions = []
             workflows = []
             selectedWorkflowID = nil
             errorMessage = "Rafu could not read this workspace's agent or workflow files."
@@ -303,16 +431,82 @@ final class ConductorNewRunModel {
         guard let selectedAgent else {
             throw ConductorNewRunInputError.agentUnavailable
         }
+        guard let provider = singleRoleProvider,
+            let providerOption = selectedSingleRoleProviderOption,
+            providerOption.isReady
+        else {
+            throw ConductorNewRunInputError.providerUnavailable(
+                selectedSingleRoleProviderOption?.unavailableReason
+                    ?? "Choose an available provider before starting the run.")
+        }
         let task = taskPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !task.isEmpty else {
             throw ConductorNewRunInputError.emptyTaskPrompt
         }
         let base = baseReference.trimmingCharacters(in: .whitespacesAndNewlines)
         return ConductorRunRequest(
-            role: selectedAgent.definition,
+            role: ConductorAgentDefinition(
+                name: selectedAgent.definition.name,
+                provider: provider,
+                model: singleRoleModel.trimmingCharacters(in: .whitespacesAndNewlines),
+                autonomy: selectedAgent.definition.autonomy,
+                handoffArtifact: selectedAgent.definition.handoffArtifact,
+                promptBody: selectedAgent.definition.promptBody),
             taskPrompt: task,
             baseReference: base.isEmpty ? "HEAD" : base,
             runID: runID)
+    }
+
+    private func resetSingleRoleBinding() {
+        guard let selectedAgent else {
+            singleRoleProvider = nil
+            singleRoleModel = ""
+            return
+        }
+        singleRoleProvider = selectedAgent.definition.provider
+        singleRoleModel = selectedAgent.definition.model
+    }
+
+    /// Mirrors the New Ensemble canvas availability rules without invoking a
+    /// second launch path. The adapter's own sign-in hint is shown verbatim;
+    /// Rafu only supplies its distinct run-specific not-installed wording.
+    private func probeProviderOptions() async -> [ConductorSingleRoleProviderOption] {
+        let roleLaunch = ConductorRoleLaunchService()
+        var options: [ConductorSingleRoleProviderOption] = []
+        options.reserveCapacity(adapters.count)
+
+        for adapter in adapters {
+            guard !Task.isCancelled else { break }
+            let availability: ConductorSingleRoleProviderOption.Availability
+            do {
+                _ = try await roleLaunch.resolve(adapter)
+                guard !Task.isCancelled else { break }
+                switch await adapter.authStatus() {
+                case .authenticated, .unknown:
+                    availability = .ready
+                case .notAuthenticated(let hint):
+                    availability = .unavailable(hint)
+                }
+            } catch {
+                availability = .unavailable(
+                    "Not installed — install this CLI to run this role.")
+            }
+
+            let readOnlyUnsupportedReason: String?
+            if case .unsupported(let reason) = adapter.readOnlyHandoffSupport {
+                readOnlyUnsupportedReason = reason
+            } else {
+                readOnlyUnsupportedReason = nil
+            }
+            options.append(
+                ConductorSingleRoleProviderOption(
+                    id: adapter.id,
+                    displayName: adapter.id.displayName,
+                    curatedModels: adapter.curatedModels(),
+                    availability: availability,
+                    readOnlyUnsupportedReason: readOnlyUnsupportedReason))
+        }
+        return options
     }
 
     func requestWorkflow(
