@@ -2,7 +2,7 @@
 
 ## Status and execution slot
 
-- **Status:** Planned.
+- **Status:** Implemented on `codex/presentation-foundation` (2026-07-29).
 - **Wave:** 0; serial prerequisite for every visible lane.
 - **Suggested branch:** `codex/presentation-foundation`.
 - **Recommended model:** `gpt-5.6-sol` with high reasoning.
@@ -235,6 +235,23 @@ the commit.
 The handoff must include the foundation commit SHA. The coordinator merges it
 and records the resulting integration SHA as `<FOUNDATION_SHA>` for all six
 Wave 1 worktrees.
+
+## Implementation record
+
+- Added the complete semantic workbench metric tier, shared deck/tab/group,
+  terminal-perimeter, utility, empty-state, Settings-section, and activity-rail
+  presentation contracts without changing a visible call site or theme schema.
+- Added pure/source contract coverage, the exact converged-surface fixture,
+  legacy-theme compatibility coverage, and WCAG contrast gates for all seven
+  bundled themes. Only failing existing tokens were corrected in their owning
+  bundled JSON files.
+- Moved the editor-terminal and Ensemble/Runs source contracts to their owning
+  lane test files without weakening behavior coverage.
+- Accepted ADR 0022 and indexed the deliberately narrow partial supersession of
+  ADR 0012.
+- No reusable platform nuance was discovered, so no reference note or reference
+  index row is required. The exact gate results and local foundation commit SHA
+  are recorded in the implementation handoff.
 
 ## Goal-mode start prompt
 

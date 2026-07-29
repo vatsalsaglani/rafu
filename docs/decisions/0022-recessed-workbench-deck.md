@@ -1,9 +1,8 @@
 # ADR 0022: Recessed workbench deck and compact surface geometry
 
-- **Status:** Proposed (records the user's 2026-07-29 presentation direction;
-  implementation has not begun)
+- **Status:** Accepted (2026-07-29)
 - **Date:** 2026-07-29
-- **Supersedes on acceptance:** ADR 0012's flush-main-pane composition,
+- **Supersedes:** ADR 0012's flush-main-pane composition,
   single-radius-scale wording, and rejection of all main-pane gutters
 
 ## Context
@@ -33,7 +32,7 @@ The full implementation contract is
 
 ## Decision
 
-On acceptance, Rafu adopts one narrowly recessed **workbench deck**:
+Rafu adopts one narrowly recessed **workbench deck**:
 
 - The window backing plane, Files surface, activity rails, and status bar remain
   edge-attached structural chrome.

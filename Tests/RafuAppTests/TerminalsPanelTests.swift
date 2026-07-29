@@ -524,17 +524,6 @@ struct TerminalIdentityGlyphTests {
         #expect(!panel.contains("ConductorCLIIcons.icon(for: provider), size: 14"))
     }
 
-    @Test("The editor terminal tab wears the vendor mark, falling back to the shell glyph")
-    func editorTabShowsVendorMark() throws {
-        let canvas = try Self.source("Sources/RafuApp/Views/EditorCanvasView.swift")
-
-        #expect(canvas.contains("if let provider = controller.agentProvider {"))
-        #expect(
-            canvas.contains("FileIconView(icon: ConductorCLIIcons.icon(for: provider), size: 12)"))
-        // The glyph stays for login shells rather than being deleted outright.
-        #expect(canvas.contains(#"Image(systemName: "terminal")"#))
-    }
-
     /// The mark is legitimate only because it is never alone: `agentProvider`
     /// is derived from the launch spec, and the row's accessibility text still
     /// names the session and its status independently of any icon.

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://rafu.dev/schemas/theme/v1.json",
+  "version": 1,
+  "name": "Workbench Converged Surfaces",
+  "id": "dev.rafu.test.workbench-converged-surfaces",
+  "appearance": "dark",
+  "ui": {
+    "appBackground": "#202020",
+    "sidebarBackground": "#202020",
+    "editorBackground": "#202020",
+    "elevatedBackground": "#202020",
+    "statusBarBackground": "#202020",
+    "tabBarBackground": "#202020",
+    "tabActiveBackground": "#202020",
+    "cardBackground": "#202020",
+    "fieldBackground": "#202020",
+    "textPrimary": "#F2F2F2",
+    "textSecondary": "#B8B8B8",
+    "textMuted": "#8A8A8A",
+    "accent": "#777777",
+    "focusRing": "#777777",
+    "borderSubtle": "#4A4A4A",
+    "borderStrong": "#777777",
+    "selection": "#242424",
+    "hover": "#242424"
+  },
+  "editor": {
+    "background": "#202020",
+    "foreground": "#F2F2F2",
+    "cursor": "#F2F2F2",
+    "selectionBackground": "#2A2A2A",
+    "lineHighlight": "#222222"
+  },
+  "syntax": {
+    "keyword": {
+      "color": "#D0D0D0"
+    }
+  }
+}
