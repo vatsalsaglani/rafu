@@ -8,10 +8,10 @@
   stay authoritative for probe transcripts and error taxonomy.
 - **Last verified:** 2026-07-29 against the CLIs installed on this Mac.
   Anything marked *unverified* was NOT re-probed and comes from the owning
-  phase's recorded shape. Claude Code, Codex, OpenCode, and Cline were probed
-  on 2026-07-26; Cursor's installed, authenticated runtime was probed on
-  2026-07-27. Gemini's installed version was confirmed but its Ensemble
-  runtime remains unverified; Kimi remains absent and unverified.
+  phase's recorded shape. Claude Code, Codex, OpenCode, Cline, and Cursor
+  were runtime-probed on 2026-07-29. Gemini's installed version was confirmed
+  but its Ensemble runtime remains unverified; Kimi remains absent and
+  unverified.
   Model listing and every curated model list were re-probed on 2026-07-27 —
   see "Curated model lists: what each was verified against".
 
@@ -35,8 +35,8 @@
 | Capability | Claude Code | Codex | OpenCode | Cline | Cursor CLI |
 |---|---|---|---|---|---|
 | Headless prompt | `-p/--print` `RW` | `exec` `RW` | `run <msg>` `RW` | positional prompt `RW` | `-p/--print` `RW` |
-| Read-only / plan | `--permission-mode plan` exists but cannot write the required handoff | `-s/--sandbox read-only` | `--agent plan` | `-p/--plan` + `--auto-approve false` | **`--mode plan` / `--plan`**; **`--mode ask`** is also read-only. A fresh headless workspace needs **`--trust`**. |
-| **Read-only + handoff write** | `--permission-mode default --allowedTools "Edit(//<absolute-handoff>/**)"` `RW`, verified 2026-07-29 | Unsupported until R5 probes a scoped writable root; Rafu refuses before spawn | Unsupported until R5 probes a scoped handoff rule; Rafu refuses before spawn | Unsupported until R5 probes a scoped handoff rule; Rafu refuses before spawn | Unsupported; Rafu refuses before spawn |
+| Read-only / plan | `--permission-mode plan` exists but cannot write the required handoff | `-s/--sandbox read-only` | `--agent plan` | `-p/--plan` + `--auto-approve false` | `--mode plan` / `--plan` exists, but it is not a write boundary. A fresh headless workspace needs `--trust`. |
+| **Read-only + handoff write** | `--permission-mode default --allowedTools "Edit(//<absolute-handoff>/**)"` `RW` | `exec --sandbox workspace-write --cd <handoff>` `RW` | `run --pure --agent rafu-readonly-handoff` plus inline scoped policy `RW` | Unsupported: headless plan mode requires interactive approval for both reads and writes | Unsupported: `--mode plan --sandbox enabled` still wrote the repository; Rafu refuses before spawn |
 | Write / act | `--permission-mode bypassPermissions` `RW` | `-s/--sandbox workspace-write` `RW` | default agent `RW` | `--auto-approve true` `RW` | `-f/--force` `RW` |
 | Working directory | `--add-dir` / cwd `RW` | `-C/--cd <DIR>` `RW` | `--dir` `RW` | `-c/--cwd` `RW` | cwd `RW`; **`--workspace <path-or-name>`** and **`--add-dir`** also exist |
 | Model | `--model <alias\|full>` `RW` | `--model` `RW` | `-m provider/model` `RW` | `-m <id>` (+ `-P <provider>`) `RW` | `--model <id>` `RW` |
@@ -61,13 +61,12 @@ an ad hoc per-step prompt convention:
 - `autonomy: worktreeWrite` → act/write mapping, and ADR 0018 confines it to
   a Rafu-created worktree, so "act" never means "loose in your checkout".
 
-Only Claude Code is verified and wired for the complete read-only-plus-handoff
-contract. Codex, OpenCode, Cline, and Cursor are temporarily unsupported for
-`readOnly` roles. Rafu refuses these runs before it starts a vendor process.
-R5 owns their scoped-write probes. Their plan or read-only modes remain listed
-above because they are real CLI surfaces, but a deny-all-writes mode does not
-satisfy the Ensemble contract. Gemini and Kimi also fail closed until their
-unverified Ensemble runtime mappings satisfy the same contract.
+Claude Code, Codex, and OpenCode are verified and wired for the complete
+read-only-plus-handoff contract. Cline and Cursor are unsupported for
+`readOnly` roles, and Rafu refuses them before it starts a vendor process.
+Cline's headless plan mode blocks every tool call; Cursor's plan mode does not
+enforce write denial. Gemini and Kimi also fail closed until their unverified
+Ensemble runtime mappings satisfy the same contract.
 
 The locally verified Cursor headless mapping is:
 
@@ -76,8 +75,9 @@ The locally verified Cursor headless mapping is:
 ```
 
 `--trust` acknowledges the selected workspace so the non-interactive process
-can start; `--mode plan` remains the read-only enforcement. The existing
-write mapping remains syntactically valid:
+can start. It is not sufficient for a read-only role: the R5 probe below shows
+that `--mode plan` allowed a repository write. The existing write mapping
+remains syntactically valid:
 
 ```text
 -p --output-format json --force --model <model> <prompt>
@@ -142,6 +142,114 @@ sed -n '1,20p' handoff/brief.md
 Both `test` commands exited `0`. This proves a new-file `Write` tool call is
 authorized by the scoped `Edit` rule while a repository write outside that
 rule is denied.
+
+### R5 read-only + handoff probes — 2026-07-29
+
+Each R5 fixture was a new Git repository outside `/tmp`, with the handoff at
+`.rafu/runs/probe/handoff/`. Codex grants `/tmp` and `$TMPDIR` as writable
+exceptions under `workspace-write`, so a repository under `/tmp` would give a
+false result for repository-write denial. No probe ran in the Rafu checkout.
+
+The same fixture setup and prompt were used for each vendor (with a
+vendor-specific `probe_root`):
+
+```bash
+probe_root="$(mktemp -d "$HOME/Library/Caches/rafu-<vendor>-readonly-probe.XXXXXX)"
+repo="$probe_root/repo"
+handoff="$repo/.rafu/runs/probe/handoff"
+mkdir -p "$handoff"
+git -C "$repo" init -q
+git -C "$repo" config rafu.probeReadToken orchid-731
+probe_prompt="Use shell commands only. First read the Git configuration key rafu.probeReadToken from the repository at $repo and remember its value. Then try to create $repo/repo-write-denied.txt containing exactly SHOULD_NOT_EXIST. If that write is denied, continue. Then create $handoff/brief.md with exactly two lines: READ_TOKEN=<the value you read> and REPO_WRITE_DENIED=true. Do not create any other files. Finish after creating the handoff artifact."
+```
+
+#### Codex 0.145.0 — supported
+
+The successful production-shape command used `gpt-5.4-mini`:
+
+```bash
+codex exec --sandbox workspace-write \
+  --cd /Users/vatsalsaglani/Library/Caches/rafu-codex-readonly-nested.7sCgRh/repo/.rafu/runs/probe/handoff \
+  --model gpt-5.4-mini --ephemeral "$probe_prompt"
+```
+
+The prompt read `rafu.probeReadToken` from the repository, attempted to write
+`repo-write-denied.txt` at the repository root, and then wrote `brief.md` in
+the handoff. Outcome: repository read **yes** (`orchid-731`); repository
+write **denied** (`operation not permitted`); handoff write **yes**; clean
+exit plus artifact **yes**. `brief.md` contained `READ_TOKEN=orchid-731` and
+`REPO_WRITE_DENIED=true`; `repo-write-denied.txt` was absent.
+
+Codex 0.145.0 rejected `--ask-for-approval never` before a model started, but
+reported `approval: never` for bare `codex exec`. Rafu therefore omits that
+newer flag. A writable-roots override did not remove write access to its
+current repository, so Rafu instead makes the handoff directory the Codex
+workspace. The repository remains readable by absolute path.
+
+#### OpenCode 1.18.4 — supported
+
+The probe used the no-cost `opencode/big-pickle` model, an inline
+configuration, and no external plugins:
+
+```bash
+OPENCODE_CONFIG_CONTENT='{"agent":{"rafu-readonly":{"mode":"primary","permission":{"*":"deny","read":"allow","glob":"allow","grep":"allow","list":"allow","bash":"deny","edit":{"*":"deny",".rafu/runs/probe/handoff/**":"allow"}}}}}' \
+opencode run --pure --format json \
+  --dir /Users/vatsalsaglani/Library/Caches/rafu-opencode-readonly-nested.7Xqesl/repo \
+  --model opencode/big-pickle --agent rafu-readonly -- "$probe_prompt"
+```
+
+The event stream showed a successful read of `.git/config`, a denied `write`
+call for `repo-write-denied.txt`, and a successful `write` call for
+`.rafu/runs/probe/handoff/brief.md`. Outcome: repository read **yes**;
+repository write **denied**; handoff write **yes**; clean exit plus artifact
+**yes**. The artifact had the expected two lines and the repository sentinel
+was absent. The first external-handoff attempt failed because its edit pattern
+did not match; Rafu's real handoff is inside the workspace, so its final policy
+uses the verified relative pattern and rejects shell access.
+
+#### Cline 3.0.46 — unsupported
+
+The main probe used the cheapest available Cline-route model:
+
+```bash
+cline --json --plan --auto-approve false \
+  --cwd /Users/vatsalsaglani/Library/Caches/rafu-cline-readonly-probe.bRTGh9/repo \
+  --provider cline --model moonshotai/kimi-k3 --timeout 60 -- "$probe_prompt"
+```
+
+No handoff artifact or repository sentinel appeared. The read-only control
+then ran:
+
+```bash
+cline --plan --auto-approve false \
+  --cwd /Users/vatsalsaglani/Library/Caches/rafu-cline-readonly-probe.bRTGh9/repo \
+  --provider cline --model moonshotai/kimi-k3 --timeout 30 -- \
+  'Use a read-only command to read rafu.probeReadToken and reply with its value.'
+```
+
+Cline attempted `git config --get rafu.probeReadToken`, but returned `Tool
+approval requires an interactive session, but this session is non-interactive`.
+Outcome: repository read **denied**; repository write **denied/no mutation**;
+handoff write **denied**; clean exit with artifact **no**. Its only exposed
+approval control is boolean, not path-scoped, so it stays fail-closed.
+
+#### Cursor Agent 2026.07.23-e383d2b — unsupported
+
+Cursor was trivial to re-probe because the installed, authenticated `agent`
+alias accepts the documented `auto` model:
+
+```bash
+cd /Users/vatsalsaglani/Library/Caches/rafu-cursor-readonly-probe.TMKYGo/repo
+agent -p --output-format json --trust --sandbox enabled --mode plan --model auto \
+  "$probe_prompt" </dev/null
+```
+
+The prompt read `rafu.probeReadToken`, then wrote both the repository-root
+`repo-write-denied.txt` sentinel and `.rafu/runs/probe/handoff/brief.md`.
+Outcome: repository read **yes**; repository write **allowed**; handoff write
+**yes**; clean exit plus artifact **yes**. This fails the contract. Cursor's
+plan mode is advisory, not a scopeable write boundary, so its adapter remains
+fail-closed.
 
 ### 2. "Which model, what reasoning effort?"
 
@@ -339,9 +447,11 @@ The account-backed probes established four separate facts:
 3. That catalog is not an entitlement list: the account rejected a listed
    named model and directed the caller to Auto. The old curated `gpt-5`
    default was absent and failed too.
-4. `--model auto` completed the exact Rafu write argv shape. A separate
-   `--trust --mode plan --model auto` run completed without changing the
-   scratch repository.
+4. `--model auto` completed the exact Rafu write argv shape. The earlier
+   non-mutating `--trust --mode plan --model auto` prompt did not edit its
+   scratch repository, but R5 later proved that this was prompt compliance,
+   not enforcement: a direct write request changed the repository in plan
+   mode.
 
 ### The `models` output shape Rafu parses
 
@@ -397,8 +507,10 @@ Cursor's JSON result includes `session_id`. Resuming that exact id with
 `--resume <chatId>` and then using `--continue` both preserved the id and
 completed successfully. Rafu deliberately does not parse or persist it today.
 
-These probes used new repositories under `/tmp`; no command was run against
-the Rafu checkout, and no credential file or credential value was read.
+The earlier catalog and model probes in this section used new repositories
+under `/tmp`. The R5 probes above use `~/Library/Caches` because Codex permits
+write access under `/tmp`. No command was run against the Rafu checkout, and
+no credential file or credential value was read.
 
 ## Re-verification
 
@@ -425,12 +537,8 @@ cursor-agent -p --output-format json --force --model auto \
   </dev/null
 /bin/test -f "$cursor_probe_dir/rafu-cursor-probe.txt"
 
-cursor_plan_dir="$(mktemp -d /tmp/rafu-cursor-plan.XXXXXX)"
-cd "$cursor_plan_dir"
-/usr/bin/git init -q
-cursor-agent -p --output-format json --trust --mode plan --model auto \
-  "Plan how to create should-not-exist.txt. Do not edit files." </dev/null
-/bin/test ! -e "$cursor_plan_dir/should-not-exist.txt"
+# Cursor's plan mode is not a security test. Re-run the R5 direct-write probe
+# above before changing its fail-closed readOnly adapter declaration.
 ```
 
 Model listing and curated lists, 2026-07-27:

@@ -162,15 +162,19 @@ func codexInvocationIsExact(fixture: CodexInvocationFixture) {
         runDirectory: fixture.runDirectory,
         handoffDirectory: fixture.handoffDirectory)
 
-    var expectedArguments = ["--ask-for-approval", "never", "exec"]
+    var expectedArguments = ["exec"]
     if !fixture.model.isEmpty {
         expectedArguments.append(contentsOf: ["--model", fixture.model])
     }
+    let executionDirectory =
+        fixture.autonomy == .readOnly
+        ? fixture.handoffDirectory
+        : fixture.workingDirectory
     expectedArguments.append(contentsOf: [
         "--sandbox",
-        fixture.autonomy == .readOnly ? "read-only" : "workspace-write",
+        "workspace-write",
         "--cd",
-        fixture.workingDirectory.path,
+        executionDirectory.path,
         "--json",
         "--ephemeral",
         prompt,
@@ -180,23 +184,18 @@ func codexInvocationIsExact(fixture: CodexInvocationFixture) {
     #expect(invocation.executableURL.path.hasPrefix("/"))
     #expect(invocation.arguments == expectedArguments)
     #expect(invocation.arguments.filter { $0 == prompt }.count == 1)
-    #expect(invocation.arguments.firstIndex(of: "--ask-for-approval") == 0)
-    #expect(invocation.arguments.firstIndex(of: "exec") == 2)
+    #expect(invocation.arguments.firstIndex(of: "exec") == 0)
+    #expect(!invocation.arguments.contains("--ask-for-approval"))
     #expect(!invocation.arguments.contains("danger-full-access"))
     #expect(!invocation.arguments.contains("--dangerously-bypass-approvals-and-sandbox"))
     #expect(!invocation.arguments.contains("--dangerously-bypass-hook-trust"))
-    var expectedEnvironment = [
+    let expectedEnvironment = [
         RafuConductorEnvironment.handoff: fixture.handoffDirectory.path,
         RafuConductorEnvironment.runDirectory: fixture.runDirectory.path,
         RafuConductorEnvironment.path:
             "/Applications/ChatGPT.app/Contents/Resources:"
             + RafuConductorEnvironment.curatedPath,
     ]
-    if fixture.autonomy == .readOnly,
-        case .unsupported(let reason) = adapter.readOnlyHandoffSupport
-    {
-        expectedEnvironment[RafuConductorEnvironment.readOnlyHandoffUnsupportedReason] = reason
-    }
     #expect(invocation.environment == expectedEnvironment)
 }
 

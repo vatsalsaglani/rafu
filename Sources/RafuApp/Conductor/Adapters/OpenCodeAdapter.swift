@@ -391,17 +391,13 @@ nonisolated enum C3AdapterText {
 }
 
 /// OpenCode 1.18.4 adapter. The installed CLI verifies worktree-write
-/// headless execution and dynamic model discovery. Its named `plan` agent is
-/// not a filesystem sandbox, so read-only roles fail closed rather than
-/// claiming an autonomy guarantee the CLI does not provide.
+/// headless execution, dynamic model discovery, and an inline, path-scoped
+/// read-only handoff policy.
 nonisolated struct OpenCodeAdapter: ConductorCLIAdapter {
     let id = ConductorCLIID.openCode
     let defaultEnabled = true
     let supportsModelDiscovery = true
-    let readOnlyHandoffSupport = ConductorReadOnlyHandoffSupport.unsupported(
-        reason:
-            "OpenCode does not yet have a verified read-only mode that permits the required Ensemble handoff write."
-    )
+    let readOnlyHandoffSupport = ConductorReadOnlyHandoffSupport.supported
 
     static let maximumModelOutputBytes = C3AdapterProcess.modelOutputLimit
     static let maximumModelRows = 2_048
@@ -413,7 +409,7 @@ nonisolated struct OpenCodeAdapter: ConductorCLIAdapter {
     init(
         runtime: C3AdapterRuntime = .live,
         executableURL: URL? = nil,
-        supportedAutonomies: Set<ConductorAutonomy> = [.worktreeWrite]
+        supportedAutonomies: Set<ConductorAutonomy> = [.readOnly, .worktreeWrite]
     ) {
         self.runtime = runtime
         state = C3AdapterProbeState(
@@ -521,9 +517,40 @@ nonisolated struct OpenCodeAdapter: ConductorCLIAdapter {
         if !trimmedModel.isEmpty {
             arguments += ["--model", trimmedModel]
         }
-        // Only worktreeWrite reaches this branch. OpenCode 1.18.4 documents
-        // `--auto` as dangerous; C1 confines this launch to Rafu's worktree.
-        arguments.append("--auto")
+        var environment = C3AdapterProcess.invocationEnvironment(
+            for: executableURL,
+            runDirectory: runDirectory,
+            handoffDirectory: handoffDirectory)
+        switch autonomy {
+        case .readOnly:
+            guard
+                let configuration = Self.readOnlyConfiguration(
+                    workingDirectory: workingDirectory,
+                    handoffDirectory: handoffDirectory)
+            else {
+                let unsupported = C3AdapterProcess.unsupportedInvocation(
+                    runDirectory: runDirectory,
+                    handoffDirectory: handoffDirectory)
+                var unsupportedEnvironment = unsupported.environment
+                unsupportedEnvironment[RafuConductorEnvironment.readOnlyHandoffUnsupportedReason] =
+                    "OpenCode requires the read-only handoff directory to be inside the workspace."
+                return invocationForLaunch(
+                    AdapterInvocation(
+                        executableURL: unsupported.executableURL,
+                        arguments: unsupported.arguments,
+                        environment: unsupportedEnvironment),
+                    autonomy: autonomy)
+            }
+            // The inline configuration overrides project and user rules for
+            // this one process. `--pure` excludes plugins that could add an
+            // unreviewed write surface outside the scoped built-in tools.
+            arguments += ["--pure", "--agent", Self.readOnlyAgentName]
+            environment[Self.inlineConfigurationEnvironmentKey] = configuration
+        case .worktreeWrite:
+            // OpenCode documents `--auto` as dangerous; C1 confines this
+            // launch to Rafu's worktree.
+            arguments.append("--auto")
+        }
         // Prevent a prompt beginning with `-` from being parsed as another
         // OpenCode option. The prompt remains one inert argv element.
         arguments += ["--", prompt]
@@ -532,10 +559,7 @@ nonisolated struct OpenCodeAdapter: ConductorCLIAdapter {
             AdapterInvocation(
                 executableURL: executableURL,
                 arguments: arguments,
-                environment: C3AdapterProcess.invocationEnvironment(
-                    for: executableURL,
-                    runDirectory: runDirectory,
-                    handoffDirectory: handoffDirectory)),
+                environment: environment),
             autonomy: autonomy)
     }
 
@@ -553,6 +577,13 @@ nonisolated struct OpenCodeAdapter: ConductorCLIAdapter {
             && help.contains("--auto")
             && help.contains("--dir")
             && help.contains("--format")
+        let hasReadOnlyHandoffMode =
+            hasHeadlessWriteMode
+            && help.contains("--agent")
+            && help.contains("--pure")
+        var supportedAutonomies: Set<ConductorAutonomy> = []
+        if hasHeadlessWriteMode { supportedAutonomies.insert(.worktreeWrite) }
+        if hasReadOnlyHandoffMode { supportedAutonomies.insert(.readOnly) }
         let displayedVersion =
             hasHeadlessWriteMode
             ? version
@@ -562,7 +593,52 @@ nonisolated struct OpenCodeAdapter: ConductorCLIAdapter {
                 installed: true,
                 executableURL: executableURL,
                 version: displayedVersion),
-            supportedAutonomies: hasHeadlessWriteMode ? [.worktreeWrite] : [])
+            supportedAutonomies: supportedAutonomies)
+    }
+
+    private static let readOnlyAgentName = "rafu-readonly-handoff"
+    private static let inlineConfigurationEnvironmentKey = "OPENCODE_CONFIG_CONTENT"
+
+    /// Builds the whole permission policy inline so it cannot persist in, or
+    /// be weakened by, a user's OpenCode configuration. Rafu creates each
+    /// handoff below the workspace's `.rafu/runs/` directory.
+    private static func readOnlyConfiguration(
+        workingDirectory: URL,
+        handoffDirectory: URL
+    ) -> String? {
+        let workspacePath = workingDirectory.standardizedFileURL.path
+        let handoffPath = handoffDirectory.standardizedFileURL.path
+        let workspacePrefix = workspacePath.hasSuffix("/") ? workspacePath : workspacePath + "/"
+        guard handoffPath.hasPrefix(workspacePrefix) else { return nil }
+
+        let handoffPattern = String(handoffPath.dropFirst(workspacePrefix.count)) + "/**"
+        let permission: [String: Any] = [
+            "*": "deny",
+            "read": "allow",
+            "glob": "allow",
+            "grep": "allow",
+            "list": "allow",
+            "bash": "deny",
+            "edit": [
+                "*": "deny",
+                handoffPattern: "allow",
+            ],
+        ]
+        let configuration: [String: Any] = [
+            "agent": [
+                readOnlyAgentName: [
+                    "description": "Rafu read-only handoff role",
+                    "mode": "primary",
+                    "permission": permission,
+                ]
+            ]
+        ]
+        guard JSONSerialization.isValidJSONObject(configuration),
+            let data = try? JSONSerialization.data(
+                withJSONObject: configuration,
+                options: [.sortedKeys])
+        else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     static func classifyAuthStatus(

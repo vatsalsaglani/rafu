@@ -2,9 +2,9 @@ import Darwin
 import Foundation
 import Synchronization
 
-/// Best-effort Cursor Agent CLI adapter. Cursor's installed help confirms an
-/// unattended mutating surface but no read-only/plan flag, so read-only runs
-/// fail closed instead of receiving a weaker approximation.
+/// Best-effort Cursor Agent CLI adapter. Its installed `--mode plan` surface
+/// is not an enforcement boundary: the R5 probe wrote a repository file while
+/// in plan mode. Read-only runs therefore fail closed.
 nonisolated struct CursorAdapter: ConductorCLIAdapter {
     let id = ConductorCLIID.cursor
     let defaultEnabled = true

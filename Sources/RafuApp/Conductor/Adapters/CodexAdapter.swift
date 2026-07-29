@@ -1,15 +1,13 @@
 import Foundation
 
-/// Verified against codex-cli 0.146.0-alpha.3. Authentication stays
-/// delegated to `codex login`; this adapter never opens `auth.json`.
+/// Verified against codex-cli 0.145.0, which is the resolved local binary.
+/// Authentication stays delegated to `codex login`; this adapter never opens
+/// `auth.json`.
 nonisolated final class CodexAdapter: ConductorCLIAdapter, Sendable {
     let id = ConductorCLIID.codex
     let defaultEnabled = true
     let supportsModelDiscovery = false
-    let readOnlyHandoffSupport = ConductorReadOnlyHandoffSupport.unsupported(
-        reason:
-            "Codex does not yet have a verified read-only mode that permits the required Ensemble handoff write."
-    )
+    let readOnlyHandoffSupport = ConductorReadOnlyHandoffSupport.supported
 
     private let probeSupport: ConductorAdapterProbeSupport
 
@@ -100,15 +98,20 @@ nonisolated final class CodexAdapter: ConductorCLIAdapter, Sendable {
                 autonomy: autonomy)
         }
 
-        var arguments = ["--ask-for-approval", "never", "exec"]
+        // `codex exec` reports approval as `never` by default. Do not pass
+        // `--ask-for-approval`: the resolved 0.145.0 CLI rejects that newer
+        // option before it can start a role.
+        var arguments = ["exec"]
         if !model.isEmpty {
             arguments.append(contentsOf: ["--model", model])
         }
+        let executionDirectory =
+            autonomy == .readOnly ? handoffDirectory : workingDirectory
         arguments.append(contentsOf: [
             "--sandbox",
-            autonomy == .readOnly ? "read-only" : "workspace-write",
+            "workspace-write",
             "--cd",
-            workingDirectory.path,
+            executionDirectory.path,
             "--json",
             "--ephemeral",
             prompt,
