@@ -6,7 +6,7 @@
   [opencode-cline-kimi](conductor-adapter-opencode-cline-kimi.md),
   [gemini-cursor](conductor-adapter-gemini-cursor.md))
   stay authoritative for probe transcripts and error taxonomy.
-- **Last verified:** 2026-07-27 against the CLIs installed on this Mac.
+- **Last verified:** 2026-07-29 against the CLIs installed on this Mac.
   Anything marked *unverified* was NOT re-probed and comes from the owning
   phase's recorded shape. Claude Code, Codex, OpenCode, and Cline were probed
   on 2026-07-26; Cursor's installed, authenticated runtime was probed on
@@ -35,7 +35,8 @@
 | Capability | Claude Code | Codex | OpenCode | Cline | Cursor CLI |
 |---|---|---|---|---|---|
 | Headless prompt | `-p/--print` `RW` | `exec` `RW` | `run <msg>` `RW` | positional prompt `RW` | `-p/--print` `RW` |
-| Read-only / plan | `--permission-mode plan` `RW` | `-s/--sandbox read-only` `RW` | `--agent plan` `RW` | `-p/--plan` + `--auto-approve false` `RW` | **`--mode plan` / `--plan`**; **`--mode ask`** is also read-only. A fresh headless workspace needs **`--trust`**. |
+| Read-only / plan | `--permission-mode plan` exists but cannot write the required handoff | `-s/--sandbox read-only` | `--agent plan` | `-p/--plan` + `--auto-approve false` | **`--mode plan` / `--plan`**; **`--mode ask`** is also read-only. A fresh headless workspace needs **`--trust`**. |
+| **Read-only + handoff write** | `--permission-mode default --allowedTools "Edit(//<absolute-handoff>/**)"` `RW`, verified 2026-07-29 | Unsupported until R5 probes a scoped writable root; Rafu refuses before spawn | Unsupported until R5 probes a scoped handoff rule; Rafu refuses before spawn | Unsupported until R5 probes a scoped handoff rule; Rafu refuses before spawn | Unsupported; Rafu refuses before spawn |
 | Write / act | `--permission-mode bypassPermissions` `RW` | `-s/--sandbox workspace-write` `RW` | default agent `RW` | `--auto-approve true` `RW` | `-f/--force` `RW` |
 | Working directory | `--add-dir` / cwd `RW` | `-C/--cd <DIR>` `RW` | `--dir` `RW` | `-c/--cwd` `RW` | cwd `RW`; **`--workspace <path-or-name>`** and **`--add-dir`** also exist |
 | Model | `--model <alias\|full>` `RW` | `--model` `RW` | `-m provider/model` `RW` | `-m <id>` (+ `-P <provider>`) `RW` | `--model <id>` `RW` |
@@ -60,11 +61,13 @@ an ad hoc per-step prompt convention:
 - `autonomy: worktreeWrite` → act/write mapping, and ADR 0018 confines it to
   a Rafu-created worktree, so "act" never means "loose in your checkout".
 
-Claude Code, Codex, OpenCode, and Cline are fully wired. Cursor is now a
-documented exception: its current CLI has a genuine read-only plan mode, but
-Rafu's adapter predates that surface and still declares `readOnly`
-unsupported. It therefore fails closed rather than silently using write
-access, but it also leaves a now-supported capability unreachable.
+Only Claude Code is verified and wired for the complete read-only-plus-handoff
+contract. Codex, OpenCode, Cline, and Cursor are temporarily unsupported for
+`readOnly` roles. Rafu refuses these runs before it starts a vendor process.
+R5 owns their scoped-write probes. Their plan or read-only modes remain listed
+above because they are real CLI surfaces, but a deny-all-writes mode does not
+satisfy the Ensemble contract. Gemini and Kimi also fail closed until their
+unverified Ensemble runtime mappings satisfy the same contract.
 
 The locally verified Cursor headless mapping is:
 
@@ -79,6 +82,66 @@ write mapping remains syntactically valid:
 ```text
 -p --output-format json --force --model <model> <prompt>
 ```
+
+### Claude Code read-only + handoff probe — 2026-07-29
+
+The probe used Claude Code 2.1.220 and model `claude-haiku-4-5`. It ran only in
+the new Git repository
+`/private/tmp/rafu-claude-readonly-probe.4rs8TV`. The repository fixture
+`repo-read.txt` contained `READ_TOKEN=orchid-731`; `handoff/` was the only
+permitted write root.
+
+The requested `Write(...)` rule was tested first:
+
+```bash
+claude -p 'Use only the Read and Write tools. Read repo-read.txt. Then try to create repo-write-denied.txt in the repository root with exact content SHOULD_NOT_EXIST using Write. If that write is denied, continue. Then create /tmp/rafu-claude-readonly-probe.4rs8TV/handoff/brief.md using Write with exactly two lines: READ_TOKEN=orchid-731 and REPO_WRITE_DENIED=true. Do not create any other file. Finish after the handoff write.' --model claude-haiku-4-5 --permission-mode default --allowedTools 'Write(/tmp/rafu-claude-readonly-probe.4rs8TV/handoff/**)'
+```
+
+Outcome: exit `0`; the repository read succeeded; both writes were denied; no
+artifact was present. Claude Code printed that only `Edit(path)` rules take
+part in file permission checks and that an `Edit` rule covers all file-editing
+tools.
+
+The successful command used Claude's absolute-path grammar. In this grammar,
+`//private/...` is an absolute filesystem path; `/private/...` would be
+project-relative:
+
+```bash
+claude -p 'Use only the Read and Write tools. Read repo-read.txt. Then try to create repo-write-denied.txt in the repository root with exact content SHOULD_NOT_EXIST using Write. If that write is denied, continue. Then create /private/tmp/rafu-claude-readonly-probe.4rs8TV/handoff/brief.md using Write with exactly two lines: READ_TOKEN=orchid-731 and REPO_WRITE_DENIED=true. Do not create any other file. Finish after the handoff write.' --model claude-haiku-4-5 --permission-mode default --allowedTools 'Edit(//private/tmp/rafu-claude-readonly-probe.4rs8TV/handoff/**)'
+```
+
+Outcome: exit `0`; `repo-read.txt` was read; `repo-write-denied.txt` did not
+exist; `handoff/brief.md` existed with:
+
+```text
+READ_TOKEN=orchid-731
+REPO_WRITE_DENIED=true
+```
+
+The adapter also has to cover a symlinked handoff path. On macOS, `/tmp`
+resolves to `/private/tmp`, and Claude checks both paths. The final
+production-shape probe supplied both rules in one comma-separated argument:
+
+```bash
+claude -p 'Use only the Read and Write tools. Read repo-read.txt. Then try to create repo-write-denied.txt in the repository root with exact content SHOULD_NOT_EXIST using Write. If that write is denied, continue. Then create /tmp/rafu-claude-readonly-probe.4rs8TV/handoff/brief.md using Write with exactly two lines: READ_TOKEN=orchid-731 and REPO_WRITE_DENIED=true. Do not create any other file. Finish after the handoff write.' --model claude-haiku-4-5 --permission-mode default --allowedTools 'Edit(//tmp/rafu-claude-readonly-probe.4rs8TV/handoff/**),Edit(//private/tmp/rafu-claude-readonly-probe.4rs8TV/handoff/**)'
+```
+
+Outcome: exit `0`; the repository write stayed absent; the handoff artifact
+was present with the same two lines. Rafu therefore emits one rule for the
+supplied handoff path and a second rule for its resolved target when they
+differ.
+
+Verification:
+
+```bash
+test -f handoff/brief.md
+test ! -e repo-write-denied.txt
+sed -n '1,20p' handoff/brief.md
+```
+
+Both `test` commands exited `0`. This proves a new-file `Write` tool call is
+authorized by the scoped `Edit` rule while a repository write outside that
+rule is denied.
 
 ### 2. "Which model, what reasoning effort?"
 

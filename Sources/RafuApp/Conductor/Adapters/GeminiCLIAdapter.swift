@@ -134,8 +134,10 @@ nonisolated struct GeminiCLIAdapter: ConductorCLIAdapter {
         handoffDirectory: URL
     ) -> AdapterInvocation {
         guard let executableURL = cache.load() else {
-            return ConductorStubInvocation.placeholder(
-                runDirectory: runDirectory, handoffDirectory: handoffDirectory)
+            return invocationForLaunch(
+                ConductorStubInvocation.placeholder(
+                    runDirectory: runDirectory, handoffDirectory: handoffDirectory),
+                autonomy: autonomy)
         }
 
         let approvalMode =
@@ -164,13 +166,15 @@ nonisolated struct GeminiCLIAdapter: ConductorCLIAdapter {
             "--output-format", "json",
             "--approval-mode", approvalMode,
         ]
-        return AdapterInvocation(
-            executableURL: executableURL,
-            arguments: arguments,
-            environment: Self.invocationEnvironment(
+        return invocationForLaunch(
+            AdapterInvocation(
                 executableURL: executableURL,
-                runDirectory: runDirectory,
-                handoffDirectory: handoffDirectory))
+                arguments: arguments,
+                environment: Self.invocationEnvironment(
+                    executableURL: executableURL,
+                    runDirectory: runDirectory,
+                    handoffDirectory: handoffDirectory)),
+            autonomy: autonomy)
     }
 
     static func classifyProbe(

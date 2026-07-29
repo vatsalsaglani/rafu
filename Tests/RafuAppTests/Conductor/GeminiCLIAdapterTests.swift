@@ -96,7 +96,11 @@ struct GeminiCLIAdapterTests {
                 == "/private/var/gvm/bin:\(RafuConductorEnvironment.curatedPath)")
         #expect(external.environment["RAFU_RUN_DIR"] == run.path)
         #expect(external.environment["RAFU_HANDOFF"] == handoff.path)
-        #expect(external.environment.count == 3)
+        #expect(
+            external.environment[RafuConductorEnvironment.readOnlyHandoffUnsupportedReason]
+                == "Gemini CLI does not have a verified read-only mode that permits the required Ensemble handoff write."
+        )
+        #expect(external.environment.count == 4)
         #expect(!GeminiCLIAdapter.containsCredentialEnvironmentKey(external.environment))
 
         let curated = GeminiCLIAdapter(

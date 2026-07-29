@@ -15,7 +15,10 @@ nonisolated struct CursorAdapter: ConductorCLIAdapter {
 
     static let supportedAutonomies: Set<ConductorAutonomy> = [.worktreeWrite]
     static let readOnlyUnsupportedReason =
-        "Cursor CLI has no verified read-only or plan mode; read-only runs fail closed."
+        "Cursor CLI does not yet have a verified read-only mode that permits the required Ensemble handoff write."
+    var readOnlyHandoffSupport: ConductorReadOnlyHandoffSupport {
+        .unsupported(reason: Self.readOnlyUnsupportedReason)
+    }
 
     /// Fallback only — `discoverModels()` returns the account's live catalog
     /// (190 rows on 2026-07-27). Every id here was read verbatim from that
@@ -244,8 +247,10 @@ nonisolated struct CursorAdapter: ConductorCLIAdapter {
         handoffDirectory: URL
     ) -> AdapterInvocation {
         guard Self.supportedAutonomies.contains(autonomy), let executableURL = cache.load() else {
-            return ConductorStubInvocation.placeholder(
-                runDirectory: runDirectory, handoffDirectory: handoffDirectory)
+            return invocationForLaunch(
+                ConductorStubInvocation.placeholder(
+                    runDirectory: runDirectory, handoffDirectory: handoffDirectory),
+                autonomy: autonomy)
         }
 
         // An unset model means "let the CLI decide" — pass no `--model` at
@@ -261,13 +266,15 @@ nonisolated struct CursorAdapter: ConductorCLIAdapter {
             arguments += ["--model", trimmedModel]
         }
         arguments.append(prompt)
-        return AdapterInvocation(
-            executableURL: executableURL,
-            arguments: arguments,
-            environment: Self.invocationEnvironment(
+        return invocationForLaunch(
+            AdapterInvocation(
                 executableURL: executableURL,
-                runDirectory: runDirectory,
-                handoffDirectory: handoffDirectory))
+                arguments: arguments,
+                environment: Self.invocationEnvironment(
+                    executableURL: executableURL,
+                    runDirectory: runDirectory,
+                    handoffDirectory: handoffDirectory)),
+            autonomy: autonomy)
     }
 
     static func classifyProbe(

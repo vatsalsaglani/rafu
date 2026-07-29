@@ -294,9 +294,27 @@ func claudeInvocationIsExact(fixture: ClaudeInvocationFixture) {
         "stream-json",
         "--verbose",
         "--no-session-persistence",
-        "--permission-mode",
-        fixture.autonomy == .readOnly ? "plan" : "bypassPermissions",
     ])
+    switch fixture.autonomy {
+    case .readOnly:
+        let handoffPaths = [
+            fixture.handoffDirectory.standardizedFileURL.path
+        ]
+        var seenHandoffPaths: Set<String> = []
+        let permissionRules =
+            handoffPaths
+            .filter { seenHandoffPaths.insert($0).inserted }
+            .map { "Edit(/\($0)/**)" }
+            .joined(separator: ",")
+        expectedArguments += [
+            "--permission-mode",
+            "default",
+            "--allowedTools",
+            permissionRules,
+        ]
+    case .worktreeWrite:
+        expectedArguments += ["--permission-mode", "bypassPermissions"]
+    }
 
     #expect(invocation.executableURL == executableURL)
     #expect(invocation.executableURL.path.hasPrefix("/"))
