@@ -847,6 +847,33 @@ struct ConductorNewRunCanvas: View {
                             .tag(Optional(agent.id))
                     }
                 }
+                Picker("Provider override", selection: singleRoleProviderBinding) {
+                    ForEach(model.singleRoleProviderOptions) { option in
+                        singleRoleProviderLabel(option)
+                            .tag(Optional(option.id))
+                            .disabled(!option.isReady)
+                    }
+                }
+                .accessibilityLabel("Provider override for this run")
+                if let provider = model.singleRoleProvider {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Model override")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        EnsembleModelField(
+                            label: "Role model override",
+                            available: model.modelChoices(for: provider),
+                            resolution: model.singleRoleModelResolution,
+                            value: $model.singleRoleModel
+                        )
+                        .disabled(model.selectedSingleRoleProviderOption?.isReady != true)
+                    }
+                }
+                Text(
+                    "Provider and model defaults come from the selected agent file. Changes apply only to this run."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
                 TextField("Task prompt", text: $taskPrompt, axis: .vertical)
                     .lineLimit(4...8)
                     .focused($promptFocused)
@@ -922,13 +949,27 @@ struct ConductorNewRunCanvas: View {
                 }
                 Spacer()
             }
-            TextField(
-                "Model override",
-                text: Binding(
+            Text("Model override")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            EnsembleModelField(
+                label: "\(role.step.agentName) model override",
+                available: role.modelChoices,
+                resolution: workflowModelResolution(for: role),
+                value: Binding(
                     get: { workflowModel.modelValue(for: role.stepIndex) },
-                    set: { workflowModel.setModelValue($0, for: role.stepIndex) })
-            )
-            .help(modelHelp(for: role))
+                    set: { workflowModel.setModelValue($0, for: role.stepIndex) }))
+        }
+    }
+
+    @ViewBuilder
+    private func singleRoleProviderLabel(_ option: ConductorSingleRoleProviderOption) -> some View {
+        if let reason = option.unavailableReason {
+            Label(
+                "\(option.displayName) — \(reason)",
+                systemImage: "exclamationmark.circle.fill")
+        } else {
+            Label(option.displayName, systemImage: "checkmark.circle")
         }
     }
 
@@ -938,6 +979,15 @@ struct ConductorNewRunCanvas: View {
             set: { newValue in
                 guard let newValue else { return }
                 workflowModel.selectWorkflow(id: newValue)
+            })
+    }
+
+    private var singleRoleProviderBinding: Binding<ConductorCLIID?> {
+        Binding(
+            get: { model.singleRoleProvider },
+            set: { newValue in
+                guard let newValue else { return }
+                model.selectSingleRoleProvider(newValue)
             })
     }
 
@@ -964,14 +1014,14 @@ struct ConductorNewRunCanvas: View {
             ?? (model.mode == .workflow ? workflowModel.errorMessage : model.errorMessage)
     }
 
-    private func modelHelp(for role: ConductorWorkflowLaunchRole) -> String {
-        let choices = role.modelChoices.map(\.id)
-        guard !choices.isEmpty else {
-            return
-                "Leave the file's value unchanged, clear it for the adapter default, or enter a model identifier."
-        }
-        return
-            "Known models: \(choices.joined(separator: ", ")). You may also enter another identifier."
+    private func workflowModelResolution(
+        for role: ConductorWorkflowLaunchRole
+    ) -> ConductorModelResolution {
+        ConductorModelResolution.resolve(
+            explicit: workflowModel.modelValue(for: role.stepIndex),
+            ensembleDefault: nil,
+            settingsDefault: nil,
+            catalog: role.modelChoices)
     }
 
     private func startSingleRole() async -> Bool {
