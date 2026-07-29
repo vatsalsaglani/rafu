@@ -48,6 +48,12 @@ nonisolated struct ConductorRunRecoveryPlan: Equatable, Sendable {
 nonisolated struct ConductorRunRecoveryService: Sendable {
     typealias FileExists = @Sendable (URL) -> Bool
 
+    /// The literal note for historical evidence whose run manifest was lost.
+    /// Keep it stable: it tells the user both what remains on disk and why no
+    /// normal run details or recovery verbs are available.
+    static let manifestlessEvidenceNote =
+        "Evidence present, manifest missing. This run is available as degraded history."
+
     private let fileExists: FileExists
 
     init(
@@ -129,6 +135,26 @@ nonisolated struct ConductorRunRecoveryService: Sendable {
             note:
                 "The app closed while this step was running. Its process was not restored.",
             verbs: verbs)
+    }
+
+    /// A missing manifest is not repaired or guessed at. This value exists
+    /// only in memory so the Runs surface can show the evidence directory and
+    /// the explicit degradation note without overwriting the user's disk
+    /// state with invented workflow metadata.
+    static func manifestlessEvidenceHistory(
+        runID: String,
+        evidenceDate: Date
+    ) -> ConductorRunManifest {
+        var manifest = ConductorRunManifest(
+            id: runID,
+            workflowName: "Recovered evidence",
+            baseCommit: "",
+            worktreeBranch: "",
+            createdAt: evidenceDate,
+            updatedAt: evidenceDate,
+            steps: [])
+        manifest.recoveryNote = manifestlessEvidenceNote
+        return manifest
     }
 
     static func worktreeURL(workspaceRoot: URL, runID: String) -> URL {
