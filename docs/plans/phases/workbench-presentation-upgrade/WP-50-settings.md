@@ -2,7 +2,7 @@
 
 ## Status and execution slot
 
-- **Status:** Planned.
+- **Status:** Implemented locally on `codex/presentation-settings` (2026-07-29).
 - **Wave:** 1; parallel.
 - **Suggested branch:** `codex/presentation-settings`.
 - **Recommended model:** `gpt-5.6-terra` with xhigh reasoning.
@@ -226,6 +226,31 @@ Complete all source, tests, and documentation before:
 
 Use the single Rafu Lightning GUI lease or report exact deferred checks. Commit
 only owned paths, do not push, and remove `.build` after the green commit.
+
+## Implementation record
+
+- Replaced the former `SettingsPaneStrip` with `SettingsPaneNavigation`: a
+  188 pt regular category column and a compact top category menu selected from
+  the available Settings canvas width only. The pure 812 pt policy is covered
+  by `SettingsPresentationTests`; compact navigation contains all seven real
+  button actions without horizontal scrolling.
+- Preserved the one lazy-first-visit, retained `ZStack` pane host outside the
+  navigation conditional. Hidden panes remain transparent, disabled, and
+  accessibility-hidden, preserving task, focus, and scroll lifetime across
+  resizes.
+- Added Settings page title/subtitle metadata, the bounded 840 pt page measure,
+  1,092 pt regular combined maximum, 24 pt outer padding, and the shared
+  attached Settings canvas tab. Existing editor routing, native no-window
+  fallback, per-window ownership, and non-restoration were not changed.
+- Replaced outer Settings `Form`/page `Section` geometry with a non-lazy
+  `ScrollView` plus `RafuSettingsSection` containers, leaving the existing
+  native controls, provider, Keychain, network, language-server, usage, and
+  agent behavior in place.
+- No new reusable platform or lifecycle nuance was discovered beyond the
+  existing Settings-surface contract, so no reference note or shared-index row
+  is required. The complete GUI/manual matrix is deferred to the coordinator's
+  single merge-round Rafu Lightning lease because another Rafu Lightning app is
+  already running outside this worktree.
 
 ## Goal-mode start prompt
 

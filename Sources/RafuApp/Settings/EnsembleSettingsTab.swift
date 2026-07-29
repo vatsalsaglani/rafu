@@ -8,7 +8,9 @@ struct EnsembleSettingsSection: View {
     @State private var installTask: Task<Void, Never>?
 
     var body: some View {
-        Section {
+        RafuSettingsSection {
+            Text("Ensemble Skill")
+        } content: {
             VStack(alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(model.metadata?.name ?? "ensemble-with-rafu")
@@ -82,9 +84,6 @@ struct EnsembleSettingsSection: View {
                     .accessibilityElement(children: .combine)
                 }
             }
-            .padding(.vertical, 3)
-        } header: {
-            Text("Coordinator Skill")
         } footer: {
             Text(
                 "Claude Code installs to ~/.claude/skills/ensemble-with-rafu. For Codex or another coordinator, choose its verified skills folder; Rafu does not guess vendor directories."

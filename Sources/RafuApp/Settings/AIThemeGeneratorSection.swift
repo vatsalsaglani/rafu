@@ -19,47 +19,59 @@ struct AIThemeGeneratorSection: View {
     private let client = AIProviderClient()
 
     var body: some View {
-        Section {
-            TextField(
-                "Describe the look you want",
-                text: $descriptionText,
-                prompt: Text("e.g. Warm paper tones with forest-green accents, easy on the eyes"),
-                axis: .vertical
-            )
-            .lineLimit(2...4)
-
-            HStack(spacing: 10) {
-                Button(
-                    didCopy ? "Copied" : "Copy Prompt",
-                    systemImage: didCopy ? "checkmark" : "doc.on.doc"
-                ) {
-                    copyPrompt()
-                }
-                .help(
-                    "Copies a complete prompt for ChatGPT, Claude, or any assistant. Import the JSON it returns."
-                )
-
-                Button("Generate with AI", systemImage: "sparkles") {
-                    generate()
-                }
-                .disabled(isGenerating)
-                .help(
-                    "Uses your configured commit-message provider to design and install the theme.")
-
-                if isGenerating {
-                    ProgressView().controlSize(.small)
-                    Button("Cancel") { generationTask?.cancel() }
-                }
-                Spacer()
-            }
-
-            if let statusMessage {
-                Label(statusMessage, systemImage: "info.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        } header: {
+        RafuSettingsSection {
             Text("Design a Theme with AI")
+        } content: {
+            VStack(alignment: .leading, spacing: RafuMetrics.space2) {
+                RafuSettingsRow {
+                    TextField(
+                        "Describe the look you want",
+                        text: $descriptionText,
+                        prompt: Text(
+                            "e.g. Warm paper tones with forest-green accents, easy on the eyes"),
+                        axis: .vertical
+                    )
+                    .lineLimit(2...4)
+                }
+                Divider()
+
+                RafuSettingsRow {
+                    HStack(spacing: 10) {
+                        Button(
+                            didCopy ? "Copied" : "Copy Prompt",
+                            systemImage: didCopy ? "checkmark" : "doc.on.doc"
+                        ) {
+                            copyPrompt()
+                        }
+                        .help(
+                            "Copies a complete prompt for ChatGPT, Claude, or any assistant. Import the JSON it returns."
+                        )
+
+                        Button("Generate with AI", systemImage: "sparkles") {
+                            generate()
+                        }
+                        .disabled(isGenerating)
+                        .help(
+                            "Uses your configured commit-message provider to design and install the theme."
+                        )
+
+                        if isGenerating {
+                            ProgressView().controlSize(.small)
+                            Button("Cancel") { generationTask?.cancel() }
+                        }
+                        Spacer()
+                    }
+                }
+
+                if let statusMessage {
+                    Divider()
+                    RafuSettingsRow {
+                        Label(statusMessage, systemImage: "info.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
         } footer: {
             Text(
                 "Generate uses the provider configured under Settings → AI and sends only your "

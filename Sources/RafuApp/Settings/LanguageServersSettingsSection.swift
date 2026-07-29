@@ -12,7 +12,14 @@ struct LanguageServersSettingsSection: View {
         @Bindable var model = model
 
         Group {
-            Section {
+            RafuSettingsSection {
+                HStack {
+                    Text("Curated Servers")
+                    Spacer()
+                    Button("Refresh") { model.beginRefresh() }
+                        .buttonStyle(.link)
+                }
+            } content: {
                 ForEach(model.rows) { row in
                     LanguageServerCatalogRow(
                         row: row,
@@ -22,13 +29,6 @@ struct LanguageServersSettingsSection: View {
                         onCancel: { model.cancelInstall(id: row.id) }
                     )
                 }
-            } header: {
-                HStack {
-                    Text("Curated Servers")
-                    Spacer()
-                    Button("Refresh") { model.beginRefresh() }
-                        .buttonStyle(.link)
-                }
             } footer: {
                 Text(
                     "Language servers are opt-in: Rafu only downloads and runs a server you "
@@ -36,7 +36,9 @@ struct LanguageServersSettingsSection: View {
                 )
             }
 
-            Section {
+            RafuSettingsSection {
+                Text("Packs")
+            } content: {
                 DisclosureGroup("Packs") {
                     ForEach(model.packs) { pack in
                         LanguageServerPackRow(
@@ -48,7 +50,9 @@ struct LanguageServersSettingsSection: View {
                 }
             }
 
-            Section {
+            RafuSettingsSection {
+                Text("Custom Servers")
+            } content: {
                 ForEach(model.userRows) { row in
                     LanguageServerCatalogRow(
                         row: row,
@@ -60,11 +64,11 @@ struct LanguageServersSettingsSection: View {
                     )
                 }
                 Button("Add Custom Server…") { model.isPresentingEntryForm = true }
-            } header: {
-                Text("Custom Servers")
             }
 
-            Section {
+            RafuSettingsSection {
+                Text("Workspace Trust")
+            } content: {
                 if trustModel.rows.isEmpty {
                     Text("No workspaces have approved a language server yet.")
                         .foregroundStyle(.secondary)
@@ -73,8 +77,6 @@ struct LanguageServersSettingsSection: View {
                         WorkspaceTrustApprovalRow(row: row, onRevoke: { trustModel.revoke(row) })
                     }
                 }
-            } header: {
-                Text("Workspace Trust")
             } footer: {
                 Text(
                     "Revoking takes effect the next time the workspace is reopened; a server "

@@ -11,7 +11,9 @@ struct UsageSettingsSection: View {
         Group {
             UsageStripOrderSection(model: model)
 
-            Section {
+            RafuSettingsSection {
+                Text("Usage")
+            } content: {
                 if model.visibleRows.isEmpty {
                     Text("No usage providers are available yet.")
                         .foregroundStyle(.secondary)
@@ -20,8 +22,6 @@ struct UsageSettingsSection: View {
                         UsageProviderRow(row: row, model: model)
                     }
                 }
-            } header: {
-                Text("Usage")
             } footer: {
                 Text(
                     "Rafu reads only metric fields — percent used, token totals, reset times — never message or prompt content. API keys and imported cookie headers are stored only in Rafu's Keychain. Provider tests and browser imports run only when you explicitly request them."
@@ -42,7 +42,9 @@ private struct UsageStripOrderSection: View {
 
     var body: some View {
         let rows = model.stripOrderedEnabledRows()
-        Section {
+        RafuSettingsSection {
+            Text("Notch Strip Order")
+        } content: {
             if rows.isEmpty {
                 Text("Enable a provider below to arrange the notch strip.")
                     .foregroundStyle(.secondary)
@@ -58,8 +60,6 @@ private struct UsageStripOrderSection: View {
                         moveDown: { model.moveStripProvider(row.id, up: false) })
                 }
             }
-        } header: {
-            Text("Notch strip order")
         } footer: {
             Text(
                 "The first \(model.stripFrontLineCap) enabled providers with data appear on the notch front line, in this order. The rest stay under “more providers.”"
