@@ -57,4 +57,11 @@ struct StatusBarBranchFormatterTests {
         #expect(presentation.label == "HEAD")
         #expect(presentation.isDetached == true)
     }
+
+    @Test("Long branch names remain intact for help and accessibility")
+    func longBranchNameIsPreserved() {
+        let branch = "feature/presentation/utility-panel-popover-bounds"
+        let presentation = StatusBarBranchFormatter.present(snapshot(currentBranch: branch))
+        #expect(presentation.label == branch)
+    }
 }

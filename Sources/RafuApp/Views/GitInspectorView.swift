@@ -1,64 +1,49 @@
 import SwiftUI
 
-struct GitInspectorView: View {
+struct SourceControlPanelView: View {
     @Environment(\.rafuTheme) private var theme
     @Bindable var session: WorkspaceSession
     @State private var isCreatingBranch = false
-    @State private var isStashSheetPresented = false
-    @State private var isStashesExpanded = true
-    @State private var isAddWorktreeSheetPresented = false
     @State private var newBranchName = ""
     @State private var pendingMergeBranch: String?
-    @State private var pendingStashAction: PendingStashAction?
-    @State private var pendingWorktreeRemoval: GitWorktree?
-    /// Whether the commit composer's hygiene-warning row is expanded to
-    /// list the flagged paths. Local, ephemeral UI state — never persisted.
-    @State private var isHygieneWarningExpanded = false
-    @AppStorage("gitChangesViewMode") private var gitChangesViewModeRaw =
-        GitChangesViewMode.flat.rawValue
-
-    private var changesViewMode: GitChangesViewMode {
-        GitChangesViewMode(rawValue: gitChangesViewModeRaw) ?? .flat
-    }
 
     var body: some View {
         VStack(spacing: 0) {
-            repositoryHeader
-            if let mergeState = session.gitMergeState {
-                mergeBanner(mergeState)
+            RafuUtilityPanelHeader(
+                icon: WorkspaceNavigatorMode.sourceControl.symbolName,
+                title: "Source Control",
+                closeAccessibilityLabel: "Close Source Control",
+                onClose: { session.navigatorMode = .files }
+            ) {
+                Button("Refresh", systemImage: "arrow.clockwise") {
+                    Task { await refreshAllGitState() }
+                }
+                .buttonStyle(RafuIconButtonStyle(size: 24))
+                .help("Refresh Source Control")
             }
-            Divider()
-            RafuSegmentedPicker(
-                items: GitInspectorSection.allCases,
-                selection: $session.gitInspectorSection,
-                title: \.title
-            )
-            .padding(10)
 
-            switch session.gitInspectorSection {
-            case .changes:
-                changesView
-            case .worktrees:
-                worktreesView
-            case .history:
-                historyView
+            if session.gitSnapshot != nil {
+                repositoryContext
+                GitInspectorView(session: session)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            } else {
+                RafuPanelEmptyState(
+                    icon: "arrow.triangle.branch",
+                    title: "No Git Repository",
+                    message: "Initialize Git in this workspace to use Source Control."
+                ) {
+                    // Explicit user action — Rafu never initializes a
+                    // repository on its own (AGENTS: Git stays explicit).
+                    Button("Initialize Repository") {
+                        Task { await session.gitInitializeRepository() }
+                    }
+                    .buttonStyle(RafuProminentButtonStyle())
+                    .disabled(session.descriptor == nil || session.isGitBusy)
+                }
             }
         }
         .frame(minWidth: 250, idealWidth: 310)
-        // `alignment: .top` is load-bearing: `.frame(maxHeight: .infinity)`
-        // defaults to CENTER alignment, so any tab whose content under-fills
-        // (History with no commits) floated the whole header/picker stack to
-        // the vertical middle of the panel. Header and tabs must stay pinned
-        // to the top regardless of how empty the selected tab is (AGENTS:
-        // panel/tab containers pin to the top).
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .overlay {
-            if session.isGitBusy {
-                ProgressView().controlSize(.small).padding(10)
-                    .background(.regularMaterial, in: .rect(cornerRadius: 10))
-            }
-        }
-        .task(id: session.rootURL) { await refreshAllGitState() }
         .alert("Create Branch", isPresented: $isCreatingBranch) {
             TextField("Branch name", text: $newBranchName)
             Button("Cancel", role: .cancel) { newBranchName = "" }
@@ -85,6 +70,213 @@ struct GitInspectorView: View {
         } message: {
             Text("Git may stop for conflicts. Rafu will show conflicted files in Changes.")
         }
+    }
+
+    private var repositoryContext: some View {
+        VStack(spacing: RafuMetrics.space2) {
+            HStack(spacing: 6) {
+                branchMenu
+                Spacer(minLength: RafuMetrics.space1)
+                syncMenu
+            }
+            if let branches = session.gitBranchSnapshot {
+                HStack(spacing: 10) {
+                    if let upstream = branches.upstream {
+                        Label(upstream, systemImage: "cloud")
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .help(upstream)
+                    } else {
+                        Label("No upstream", systemImage: "icloud.slash")
+                    }
+                    Spacer()
+                    if branches.aheadCount > 0 {
+                        Label("\(branches.aheadCount)", systemImage: "arrow.up")
+                            .help("Commits ahead")
+                    }
+                    if branches.behindCount > 0 {
+                        Label("\(branches.behindCount)", systemImage: "arrow.down")
+                            .help("Commits behind")
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(theme.palette.textSecondary)
+            }
+        }
+        .padding(.horizontal, RafuMetrics.utilityBodyInset)
+        .padding(.vertical, RafuMetrics.space2)
+        .background(theme.palette.elevatedBackground)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(theme.palette.borderSubtle)
+                .frame(height: RafuMetrics.hairline)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var branchMenu: some View {
+        HStack(spacing: 2) {
+            if let branches = session.gitBranchSnapshot {
+                RafuSearchableDropdown(
+                    items: branches.localBranches + branches.remoteBranches,
+                    text: \.name,
+                    keywords: { [$0.name] },
+                    isCurrent: \.isCurrent,
+                    onSelect: { branch in
+                        guard !branch.isCurrent else { return }
+                        Task { await session.gitCheckoutBranch(named: branch.name) }
+                    },
+                    searchPrompt: "Search branches",
+                    sectionTitle: { $0.kind == .local ? "Local" : "Remote" }
+                ) {
+                    Label(snapshot.branch, systemImage: "arrow.triangle.branch")
+                        .font(.headline)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .help("Switch branches — \(snapshot.branch)")
+
+                Menu {
+                    Menu("Merge into Current", systemImage: "arrow.triangle.merge") {
+                        ForEach(branches.localBranches.filter { !$0.isCurrent }) { branch in
+                            Button(branch.name) { pendingMergeBranch = branch.name }
+                        }
+                    }
+                    .disabled(branches.localBranches.allSatisfy(\.isCurrent))
+                    Divider()
+                    Button("Create Branch…", systemImage: "plus") { isCreatingBranch = true }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(theme.palette.textSecondary)
+                        .frame(width: 22, height: 22)
+                        .contentShape(.rect)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Merge or create a branch")
+                .accessibilityLabel("Branch actions")
+            } else {
+                Label(snapshot.branch, systemImage: "arrow.triangle.branch")
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .foregroundStyle(theme.palette.textMuted)
+                    .help(snapshot.branch)
+            }
+        }
+    }
+
+    private var syncMenu: some View {
+        Menu {
+            Button("Fetch All", systemImage: "arrow.clockwise") {
+                Task { await session.gitFetch() }
+            }
+            Menu("Pull", systemImage: "arrow.down.circle") {
+                Button("Merge") { Task { await session.gitPull(strategy: .merge) } }
+                Button("Rebase") { Task { await session.gitPull(strategy: .rebase) } }
+                Button("Fast-Forward Only") {
+                    Task { await session.gitPull(strategy: .fastForwardOnly) }
+                }
+            }
+            if session.gitBranchSnapshot?.upstream != nil {
+                Button("Push", systemImage: "arrow.up.circle") {
+                    Task { await session.gitPush() }
+                }
+            } else if !session.gitRemoteNames.isEmpty {
+                Menu("Publish Branch", systemImage: "arrow.up.circle") {
+                    ForEach(session.gitRemoteNames, id: \.self) { remote in
+                        Button(remote) { Task { await session.gitPush(remote: remote) } }
+                    }
+                }
+            } else {
+                Button("Push", systemImage: "arrow.up.circle") {
+                    Task { await session.gitPush() }
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.triangle.2.circlepath")
+        }
+        .menuStyle(.borderlessButton)
+        .help("Fetch, pull, or push")
+    }
+
+    private var snapshot: GitSnapshot {
+        session.gitSnapshot ?? GitSnapshot(branch: "Git", changes: [])
+    }
+
+    private var mergeConfirmationBinding: Binding<Bool> {
+        Binding(
+            get: { pendingMergeBranch != nil },
+            set: { if !$0 { pendingMergeBranch = nil } }
+        )
+    }
+
+    private func refreshAllGitState() async {
+        await session.refreshGit()
+        await GitStashCoordinator.refresh(session: session)
+    }
+}
+
+struct GitInspectorView: View {
+    @Environment(\.rafuTheme) private var theme
+    @Bindable var session: WorkspaceSession
+    @State private var isStashSheetPresented = false
+    @State private var isStashesExpanded = true
+    @State private var isAddWorktreeSheetPresented = false
+    @State private var pendingStashAction: PendingStashAction?
+    @State private var pendingWorktreeRemoval: GitWorktree?
+    /// Whether the commit composer's hygiene-warning row is expanded to
+    /// list the flagged paths. Local, ephemeral UI state — never persisted.
+    @State private var isHygieneWarningExpanded = false
+    @AppStorage("gitChangesViewMode") private var gitChangesViewModeRaw =
+        GitChangesViewMode.flat.rawValue
+
+    private var changesViewMode: GitChangesViewMode {
+        GitChangesViewMode(rawValue: gitChangesViewModeRaw) ?? .flat
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let mergeState = session.gitMergeState {
+                mergeBanner(mergeState)
+            }
+            RafuSegmentedPicker(
+                items: GitInspectorSection.allCases,
+                selection: $session.gitInspectorSection,
+                title: \.title
+            )
+            .padding(.horizontal, RafuMetrics.utilityBodyInset)
+            .padding(.vertical, RafuMetrics.space2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            switch session.gitInspectorSection {
+            case .changes:
+                changesView
+            case .worktrees:
+                worktreesView
+            case .history:
+                historyView
+            }
+        }
+        .frame(minWidth: 250, idealWidth: 310)
+        // `alignment: .top` is load-bearing: `.frame(maxHeight: .infinity)`
+        // defaults to CENTER alignment, so any tab whose content under-fills
+        // (History with no commits) floated the whole header/picker stack to
+        // the vertical middle of the panel. Header and tabs must stay pinned
+        // to the top regardless of how empty the selected tab is (AGENTS:
+        // panel/tab containers pin to the top).
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .overlay {
+            if session.isGitBusy {
+                ProgressView().controlSize(.small).padding(10)
+                    .background(.regularMaterial, in: .rect(cornerRadius: 10))
+            }
+        }
+        .task(id: session.rootURL) { await refreshAllGitState() }
         .confirmationDialog(
             pendingStashAction?.title ?? "Update stash?",
             isPresented: stashConfirmationBinding
@@ -134,147 +326,17 @@ struct GitInspectorView: View {
         .accessibilityLabel("Merge in progress: \(mergeState.headline)")
     }
 
-    private var repositoryHeader: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 6) {
-                branchMenu
-                Spacer(minLength: 4)
-                syncMenu
-                Button("Refresh", systemImage: "arrow.clockwise") {
-                    Task { await refreshAllGitState() }
-                }
-                .buttonStyle(RafuIconButtonStyle(size: 24))
-                .help("Refresh Source Control")
-            }
-            if let branches = session.gitBranchSnapshot {
-                HStack(spacing: 10) {
-                    if let upstream = branches.upstream {
-                        Label(upstream, systemImage: "cloud")
-                            .lineLimit(1)
-                    } else {
-                        Label("No upstream", systemImage: "icloud.slash")
-                    }
-                    Spacer()
-                    if branches.aheadCount > 0 {
-                        Label("\(branches.aheadCount)", systemImage: "arrow.up")
-                            .help("Commits ahead")
-                    }
-                    if branches.behindCount > 0 {
-                        Label("\(branches.behindCount)", systemImage: "arrow.down")
-                            .help("Commits behind")
-                    }
-                }
-                .font(.caption2)
-                .foregroundStyle(theme.palette.textSecondary)
-            }
-        }
-        .padding(10)
-    }
-
-    /// A searchable branch switcher (GD/GI 10) replacing the previous flat
-    /// `Menu` branch list, which had no way to filter a long branch set. The
-    /// switcher itself only switches branches; merge and create-branch stay
-    /// in the adjacent compact ellipsis menu so the trigger's accessible
-    /// name/help stays "switch branches" and the destructive/creation
-    /// actions stay one deliberate tap away rather than mixed into search
-    /// results.
-    private var branchMenu: some View {
-        HStack(spacing: 2) {
-            if let branches = session.gitBranchSnapshot {
-                RafuSearchableDropdown(
-                    items: branches.localBranches + branches.remoteBranches,
-                    text: \.name,
-                    keywords: { [$0.name] },
-                    isCurrent: \.isCurrent,
-                    onSelect: { branch in
-                        guard !branch.isCurrent else { return }
-                        Task { await session.gitCheckoutBranch(named: branch.name) }
-                    },
-                    searchPrompt: "Search branches",
-                    sectionTitle: { $0.kind == .local ? "Local" : "Remote" }
-                ) {
-                    Label(snapshot.branch, systemImage: "arrow.triangle.branch")
-                        .font(.headline)
-                        .lineLimit(1)
-                }
-                .help("Switch branches")
-
-                Menu {
-                    Menu("Merge into Current", systemImage: "arrow.triangle.merge") {
-                        ForEach(branches.localBranches.filter { !$0.isCurrent }) { branch in
-                            Button(branch.name) { pendingMergeBranch = branch.name }
-                        }
-                    }
-                    .disabled(branches.localBranches.allSatisfy(\.isCurrent))
-                    Divider()
-                    Button("Create Branch…", systemImage: "plus") { isCreatingBranch = true }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(theme.palette.textSecondary)
-                        .frame(width: 22, height: 22)
-                        .contentShape(.rect)
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Merge or create a branch")
-                .accessibilityLabel("Branch actions")
-            } else {
-                Label(snapshot.branch, systemImage: "arrow.triangle.branch")
-                    .font(.headline)
-                    .lineLimit(1)
-                    .foregroundStyle(theme.palette.textMuted)
-            }
-        }
-    }
-
-    private var syncMenu: some View {
-        Menu {
-            Button("Fetch All", systemImage: "arrow.clockwise") {
-                Task { await session.gitFetch() }
-            }
-            Menu("Pull", systemImage: "arrow.down.circle") {
-                Button("Merge") { Task { await session.gitPull(strategy: .merge) } }
-                Button("Rebase") { Task { await session.gitPull(strategy: .rebase) } }
-                Button("Fast-Forward Only") {
-                    Task { await session.gitPull(strategy: .fastForwardOnly) }
-                }
-            }
-            if session.gitBranchSnapshot?.upstream != nil {
-                Button("Push", systemImage: "arrow.up.circle") {
-                    Task { await session.gitPush() }
-                }
-            } else if !session.gitRemoteNames.isEmpty {
-                Menu("Publish Branch", systemImage: "arrow.up.circle") {
-                    ForEach(session.gitRemoteNames, id: \.self) { remote in
-                        Button(remote) { Task { await session.gitPush(remote: remote) } }
-                    }
-                }
-            } else {
-                Button("Push", systemImage: "arrow.up.circle") {
-                    Task { await session.gitPush() }
-                }
-            }
-        } label: {
-            Image(systemName: "arrow.triangle.2.circlepath")
-        }
-        .menuStyle(.borderlessButton)
-        .help("Fetch, pull, or push")
-    }
-
     private var changesView: some View {
         VStack(spacing: 0) {
             changesHeader
             if snapshot.changes.isEmpty && session.gitStashes.isEmpty {
                 // Expand so the commit composer pins to the panel bottom
                 // instead of floating mid-panel with dead space beneath.
-                ContentUnavailableView(
-                    "Working tree clean",
-                    systemImage: "checkmark.circle",
-                    description: Text("There are no local changes.")
+                RafuPanelEmptyState(
+                    icon: "checkmark.circle",
+                    title: "No Changes",
+                    message: "Your working tree is clean."
                 )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(selection: $session.gitSelectedChangeIDs) {
                     if !snapshot.conflicts.isEmpty {
@@ -554,14 +616,15 @@ struct GitInspectorView: View {
             .padding(10)
         }
         .background(theme.palette.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous))
+        .clipShape(
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusDenseCard, style: .continuous)
+        )
         .overlay(
-            RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusDenseCard, style: .continuous)
                 .strokeBorder(theme.palette.borderSubtle, lineWidth: RafuMetrics.hairline)
         )
         .aiCommitGeneratingBorder(isActive: session.isGeneratingAICommitMessage)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(RafuMetrics.utilityBodyInset)
     }
 
     /// Calm, advisory-only warning for `CommitHygieneChecker.findings` on the
@@ -680,13 +743,6 @@ struct GitInspectorView: View {
 
     private var snapshot: GitSnapshot {
         session.gitSnapshot ?? GitSnapshot(branch: "Git", changes: [])
-    }
-
-    private var mergeConfirmationBinding: Binding<Bool> {
-        Binding(
-            get: { pendingMergeBranch != nil },
-            set: { if !$0 { pendingMergeBranch = nil } }
-        )
     }
 
     private var stashConfirmationBinding: Binding<Bool> {
@@ -1056,6 +1112,8 @@ private struct GitChangeRow: View {
                 .foregroundStyle(statusColor)
                 .accessibilityLabel(change.statusLabel)
         }
+        .frame(minHeight: 40)
+        .listRowSeparator(.hidden)
     }
 
     private var statusSymbol: String {

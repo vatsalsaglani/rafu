@@ -128,7 +128,9 @@ struct WorkspaceStatusBar: View {
         ) {
             HStack(spacing: RafuMetrics.space1) {
                 Image(systemName: "arrow.triangle.branch")
-                Text(presentation.label).lineLimit(1)
+                Text(presentation.label)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                 if presentation.isDetached {
                     Text("detached")
                         .font(.system(size: 9.5, weight: .semibold))
@@ -146,7 +148,7 @@ struct WorkspaceStatusBar: View {
         .help(
             presentation.isDetached
                 ? "Detached HEAD — select a branch to check out"
-                : "Switch branches"
+                : "Current branch \(presentation.label) — switch branches"
         )
         .accessibilityLabel(
             presentation.isDetached

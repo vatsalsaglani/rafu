@@ -39,6 +39,27 @@ nonisolated enum RafuDropdownFilter {
     }
 }
 
+nonisolated enum RafuSearchableDropdownGeometry {
+    static let width: CGFloat = 340
+    static let minimumHeight: CGFloat = 160
+    static let maximumHeight: CGFloat = 420
+    static let searchFieldMinimumHeight: CGFloat = 28
+    static let rowMinimumHeight: CGFloat = 30
+    static let selectedRowRadius: CGFloat = 4
+}
+
+nonisolated struct RafuDropdownRowPresentation: Equatable, Sendable {
+    let showsCurrentCheckmark: Bool
+    let isKeyboardHighlighted: Bool
+
+    static func resolve(isCurrent: Bool, isKeyboardHighlighted: Bool) -> Self {
+        Self(
+            showsCurrentCheckmark: isCurrent,
+            isKeyboardHighlighted: isKeyboardHighlighted
+        )
+    }
+}
+
 /// Reusable, keyboard-navigable searchable dropdown: a trigger button that
 /// opens a popover with a filter field over a scrollable row list. Built for
 /// the Source Control branch switcher (GitInspectorView.branchMenu), and
@@ -114,6 +135,7 @@ struct RafuSearchableDropdown<Item: Identifiable, Label: View, Trailing: View>: 
                     .font(.caption)
                     .focused($searchFocused)
                     .onSubmit { chooseHighlightedOrFirst() }
+                    .frame(minHeight: RafuSearchableDropdownGeometry.searchFieldMinimumHeight)
             }
             .rafuField(isFocused: searchFocused)
             .padding(RafuMetrics.space2)
@@ -153,10 +175,18 @@ struct RafuSearchableDropdown<Item: Identifiable, Label: View, Trailing: View>: 
                 }
             }
         }
-        .frame(width: 260)
-        .frame(minHeight: 160, maxHeight: 320)
+        .frame(width: RafuSearchableDropdownGeometry.width)
+        .frame(
+            minHeight: RafuSearchableDropdownGeometry.minimumHeight,
+            maxHeight: RafuSearchableDropdownGeometry.maximumHeight
+        )
         .background(theme.palette.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous))
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: RafuMetrics.radiusTransientPopover,
+                style: .continuous
+            )
+        )
         .onKeyPress(.downArrow) {
             moveHighlight(1)
             return .handled
@@ -189,28 +219,47 @@ struct RafuSearchableDropdown<Item: Identifiable, Label: View, Trailing: View>: 
     }
 
     private func row(_ item: Item) -> some View {
-        RafuHoverRow(isSelected: item.id == highlighted) {
+        let presentation = RafuDropdownRowPresentation.resolve(
+            isCurrent: isCurrent(item),
+            isKeyboardHighlighted: item.id == highlighted
+        )
+        return Button {
+            choose(item)
+        } label: {
             HStack(spacing: RafuMetrics.space2) {
                 Image(systemName: "checkmark")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(theme.palette.accent)
                     .frame(width: 14)
-                    .opacity(isCurrent(item) ? 1 : 0)
+                    .opacity(presentation.showsCurrentCheckmark ? 1 : 0)
                 Text(text(item))
                     .font(.callout)
                     .foregroundStyle(theme.palette.textPrimary)
                     .lineLimit(1)
+                    .truncationMode(.middle)
                 Spacer(minLength: RafuMetrics.space2)
                 trailing(item)
             }
             .padding(.horizontal, RafuMetrics.space2)
-            .padding(.vertical, RafuMetrics.space1)
+            .frame(minHeight: RafuSearchableDropdownGeometry.rowMinimumHeight)
+            .background {
+                RoundedRectangle(
+                    cornerRadius: RafuSearchableDropdownGeometry.selectedRowRadius,
+                    style: .continuous
+                )
+                .fill(
+                    presentation.isKeyboardHighlighted
+                        ? theme.palette.selection : Color.clear
+                )
+            }
             .contentShape(.rect)
         }
-        .onTapGesture { choose(item) }
+        .buttonStyle(.plain)
         .onHover { hovering in
             if hovering { highlighted = item.id }
         }
+        .help(text(item))
+        .accessibilityValue(presentation.showsCurrentCheckmark ? "Current" : "")
     }
 
     private func moveHighlight(_ delta: Int) {

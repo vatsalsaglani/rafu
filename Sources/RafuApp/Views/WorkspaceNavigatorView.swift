@@ -8,35 +8,9 @@ struct WorkspaceUtilityPanelView: View {
     @Environment(\.rafuTheme) private var theme
 
     var body: some View {
-        VStack(spacing: 0) {
-            panelHeader
-            Divider().overlay(theme.palette.borderSubtle)
-            panelContent
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(theme.palette.sidebarBackground.opacity(0.92))
-    }
-
-    private var panelHeader: some View {
-        HStack(spacing: 6) {
-            Image(systemName: session.navigatorMode.symbolName)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(theme.palette.accent)
-            Text(session.navigatorMode.title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(theme.palette.textMuted)
-                .textCase(.uppercase)
-                .kerning(0.6)
-            Spacer()
-            Button("Close Panel", systemImage: "xmark") {
-                session.navigatorMode = .files
-            }
-            .buttonStyle(RafuIconButtonStyle(size: 22, iconSize: 10))
-            .help("Close Panel")
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        panelContent
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(theme.palette.elevatedBackground)
     }
 
     @ViewBuilder
@@ -47,23 +21,7 @@ struct WorkspaceUtilityPanelView: View {
         case .search:
             WorkspaceSearchNavigatorView(session: session)
         case .sourceControl:
-            if session.gitSnapshot != nil {
-                GitInspectorView(session: session)
-            } else {
-                ContentUnavailableView {
-                    Label("No Git Repository", systemImage: "arrow.triangle.branch")
-                } description: {
-                    Text("Initialize Git in this workspace to use Source Control.")
-                } actions: {
-                    // Explicit user action — Rafu never initializes a
-                    // repository on its own (AGENTS: Git stays explicit).
-                    Button("Initialize Repository") {
-                        Task { await session.gitInitializeRepository() }
-                    }
-                    .buttonStyle(RafuProminentButtonStyle())
-                    .disabled(session.descriptor == nil || session.isGitBusy)
-                }
-            }
+            SourceControlPanelView(session: session)
         case .terminals:
             WorkspaceTerminalsPanelView(session: session)
         case .runs:
@@ -118,17 +76,24 @@ struct WindowTopLeftControlCluster: View {
             Color.clear
                 .frame(width: lightsVisible ? Self.trafficLightSpan : 0, height: Self.rowHeight)
             Button("Toggle Sidebar", systemImage: "sidebar.left") {
-                withAnimation(.spring(duration: 0.25)) {
+                if reduceMotion {
                     session.toggleSidebar()
+                } else {
+                    withAnimation(.spring(duration: 0.25)) {
+                        session.toggleSidebar()
+                    }
                 }
             }
             .buttonStyle(
-                RafuIconButtonStyle(isActive: !session.isSidebarCollapsed, size: 30, iconSize: 14)
+                RafuRailButtonStyle(
+                    isSelected: !session.isSidebarCollapsed,
+                    deckFacingEdge: .trailing,
+                    tooltip: session.isSidebarCollapsed
+                        ? "Show Sidebar (⌘B)" : "Hide Sidebar (⌘B)"
+                )
             )
-            .help(session.isSidebarCollapsed ? "Show Sidebar (⌘B)" : "Hide Sidebar (⌘B)")
             .accessibilityLabel("Toggle Sidebar")
             .accessibilityValue(session.isSidebarCollapsed ? "Hidden" : "Shown")
-            .accessibilityAddTraits(session.isSidebarCollapsed ? [] : .isSelected)
             .padding(.leading, lightsVisible ? 0 : 5)
         }
         // Breathing room below the window's top edge; also drops the toggle
@@ -187,27 +152,17 @@ struct WorkspaceUtilityRail: View {
             : 0
         let button =
             Button(mode.title, systemImage: mode.symbolName) {
-                withAnimation(.spring(duration: 0.25)) {
-                    session.navigatorMode = isActive ? .files : mode
-                }
+                session.navigatorMode = isActive ? .files : mode
             }
-            .buttonStyle(RafuIconButtonStyle(isActive: isActive, size: 30, iconSize: 14))
+            .buttonStyle(
+                RafuRailButtonStyle(
+                    isSelected: isActive,
+                    deckFacingEdge: .leading,
+                    tooltip: hasWorkspace ? mode.title : "\(mode.title) — open a folder first",
+                    badge: mode == .terminals && attentionCount > 0 ? attentionCount : nil
+                )
+            )
             .disabled(!hasWorkspace)
-            .help(hasWorkspace ? mode.title : "\(mode.title) — open a folder first")
-            .accessibilityAddTraits(isActive ? .isSelected : [])
-            .overlay(alignment: .topTrailing) {
-                // Rail badge (terminal-manager.md T-B): always `0` today,
-                // since `TerminalSessionPresentation.needsAttention` returns
-                // `false` for every current `TerminalSessionStatus` — T-E's
-                // `.bell` case is the first thing that makes this render,
-                // and only that model function changes then, not this view.
-                if mode == .terminals, attentionCount > 0 {
-                    Circle()
-                        .fill(theme.palette.accent)
-                        .frame(width: 7, height: 7)
-                        .offset(x: -4, y: 4)
-                }
-            }
         return Group {
             if mode == .terminals, attentionCount > 0 {
                 button.accessibilityValue("\(attentionCount) needing attention")
@@ -222,7 +177,25 @@ struct WorkspaceSearchNavigatorView: View {
     @Bindable var session: WorkspaceSession
 
     var body: some View {
-        WorkspaceSearchContent(session: session, search: session.workspaceSearch)
+        VStack(spacing: 0) {
+            RafuUtilityPanelHeader(
+                icon: WorkspaceNavigatorMode.search.symbolName,
+                title: "Search",
+                closeAccessibilityLabel: "Close Search",
+                onClose: { session.navigatorMode = .files }
+            ) {
+                EmptyView()
+            }
+            WorkspaceSearchContent(session: session, search: session.workspaceSearch)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+}
+
+nonisolated enum SearchFileFilterDisclosure {
+    static func requiresExpandedFilters(includePattern: String, excludePattern: String) -> Bool {
+        !includePattern.isEmpty || !excludePattern.isEmpty
     }
 }
 
@@ -234,6 +207,7 @@ private struct WorkspaceSearchContent: View {
     @FocusState private var isIncludeFocused: Bool
     @FocusState private var isExcludeFocused: Bool
     @FocusState private var isReplaceFocused: Bool
+    @State private var isFileFiltersExpanded = false
     @State private var isApplyConfirmationPresented = false
 
     var body: some View {
@@ -294,28 +268,37 @@ private struct WorkspaceSearchContent: View {
                 .buttonStyle(RafuIconButtonStyle(isActive: search.isReplacePresented, size: 24))
                 .help(search.isReplacePresented ? "Hide Replace" : "Show Replace")
             }
-            HStack(spacing: 6) {
-                TextField("files to include", text: $search.includePattern)
-                    .textFieldStyle(.plain)
-                    .rafuField(isFocused: isIncludeFocused)
-                    .focused($isIncludeFocused)
-                    .controlSize(.small)
-                    .onSubmit(performSearch)
-                    .help("Include only matching files, e.g. *.swift, Sources/**")
-                TextField("files to exclude", text: $search.excludePattern)
-                    .textFieldStyle(.plain)
-                    .rafuField(isFocused: isExcludeFocused)
-                    .focused($isExcludeFocused)
-                    .controlSize(.small)
-                    .onSubmit(performSearch)
-                    .help("Skip matching files and folders, e.g. *.md, Tests/**")
+            DisclosureGroup("File filters", isExpanded: fileFiltersExpandedBinding) {
+                HStack(spacing: 6) {
+                    TextField("files to include", text: $search.includePattern)
+                        .textFieldStyle(.plain)
+                        .rafuField(isFocused: isIncludeFocused)
+                        .focused($isIncludeFocused)
+                        .controlSize(.small)
+                        .onSubmit(performSearch)
+                        .help("Include only matching files, e.g. *.swift, Sources/**")
+                    TextField("files to exclude", text: $search.excludePattern)
+                        .textFieldStyle(.plain)
+                        .rafuField(isFocused: isExcludeFocused)
+                        .focused($isExcludeFocused)
+                        .controlSize(.small)
+                        .onSubmit(performSearch)
+                        .help("Skip matching files and folders, e.g. *.md, Tests/**")
+                }
+                .padding(.top, RafuMetrics.space1)
             }
+            .font(.caption)
+            .foregroundStyle(theme.palette.textSecondary)
             HStack(spacing: 6) {
-                searchOptionButton("Case Sensitive", symbol: "textformat", option: .caseSensitive)
                 searchOptionButton(
-                    "Whole Word", symbol: "character.cursor.ibeam", option: .wholeWord)
+                    "Case", accessibilityLabel: "Case Sensitive",
+                    symbol: "textformat", option: .caseSensitive)
                 searchOptionButton(
-                    "Regular Expression", symbol: "asterisk", option: .regularExpression)
+                    "Whole Word", accessibilityLabel: "Whole Word",
+                    symbol: "character.cursor.ibeam", option: .wholeWord)
+                searchOptionButton(
+                    "Regex", accessibilityLabel: "Regular Expression",
+                    symbol: "asterisk", option: .regularExpression)
                 Spacer()
                 if search.isSearching { ProgressView().controlSize(.small) }
                 if let result = search.result {
@@ -344,7 +327,7 @@ private struct WorkspaceSearchContent: View {
                 }
             }
         }
-        .padding(10)
+        .padding(RafuMetrics.utilityBodyInset)
     }
 
     @ViewBuilder
@@ -407,12 +390,36 @@ private struct WorkspaceSearchContent: View {
         } else if search.isSearching {
             ProgressView("Searching…").frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            ContentUnavailableView(
-                "Search Workspace",
-                systemImage: "magnifyingglass",
-                description: Text("Find or replace text across the open folder.")
+            RafuPanelEmptyState(
+                icon: "magnifyingglass",
+                title: "Search Workspace",
+                message: "Find or replace text across the open folder."
             )
         }
+    }
+
+    private var fileFiltersExpandedBinding: Binding<Bool> {
+        Binding(
+            get: {
+                isFileFiltersExpanded
+                    || SearchFileFilterDisclosure.requiresExpandedFilters(
+                        includePattern: search.includePattern,
+                        excludePattern: search.excludePattern
+                    )
+            },
+            set: { requestedValue in
+                guard
+                    !SearchFileFilterDisclosure.requiresExpandedFilters(
+                        includePattern: search.includePattern,
+                        excludePattern: search.excludePattern
+                    )
+                else {
+                    isFileFiltersExpanded = true
+                    return
+                }
+                isFileFiltersExpanded = requestedValue
+            }
+        )
     }
 
     private var errorBinding: Binding<Bool> {
@@ -434,6 +441,7 @@ private struct WorkspaceSearchContent: View {
 
     private func searchOptionButton(
         _ title: String,
+        accessibilityLabel: String,
         symbol: String,
         option: TextSearchOptions
     ) -> some View {
@@ -445,8 +453,30 @@ private struct WorkspaceSearchContent: View {
                 search.options.insert(option)
             }
         }
-        .buttonStyle(RafuIconButtonStyle(isActive: selected, size: 24))
-        .help(title)
+        .font(.caption)
+        .foregroundStyle(selected ? theme.palette.textPrimary : theme.palette.textSecondary)
+        .padding(.horizontal, 6)
+        .frame(minHeight: 24)
+        .background(
+            selected ? theme.palette.selection : Color.clear,
+            in: RoundedRectangle(
+                cornerRadius: RafuMetrics.radiusDenseSelection,
+                style: .continuous
+            )
+        )
+        .overlay {
+            RoundedRectangle(
+                cornerRadius: RafuMetrics.radiusDenseSelection,
+                style: .continuous
+            )
+            .strokeBorder(
+                selected ? theme.palette.borderStrong : theme.palette.borderSubtle,
+                lineWidth: RafuMetrics.hairline
+            )
+        }
+        .buttonStyle(.plain)
+        .help(accessibilityLabel)
+        .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

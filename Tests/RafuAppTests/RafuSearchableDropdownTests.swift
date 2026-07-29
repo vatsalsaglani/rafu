@@ -92,4 +92,31 @@ struct RafuSearchableDropdownTests {
         let sections = RafuDropdownFilter.sectioned([Fixture]()) { _ in "Local" }
         #expect(sections.isEmpty)
     }
+
+    @Test("Popover geometry follows the bounded native branch-picker contract")
+    func boundedPopoverGeometry() {
+        #expect(RafuSearchableDropdownGeometry.width == 340)
+        #expect(RafuSearchableDropdownGeometry.minimumHeight == 160)
+        #expect(RafuSearchableDropdownGeometry.maximumHeight == 420)
+        #expect(RafuSearchableDropdownGeometry.searchFieldMinimumHeight == 28)
+        #expect(RafuSearchableDropdownGeometry.rowMinimumHeight == 30)
+        #expect(RafuSearchableDropdownGeometry.selectedRowRadius == 4)
+    }
+
+    @Test("Current checkmark and keyboard highlight remain independent states")
+    func currentAndHighlightAreIndependent() {
+        let current = RafuDropdownRowPresentation.resolve(
+            isCurrent: true,
+            isKeyboardHighlighted: false
+        )
+        #expect(current.showsCurrentCheckmark)
+        #expect(!current.isKeyboardHighlighted)
+
+        let highlighted = RafuDropdownRowPresentation.resolve(
+            isCurrent: false,
+            isKeyboardHighlighted: true
+        )
+        #expect(!highlighted.showsCurrentCheckmark)
+        #expect(highlighted.isKeyboardHighlighted)
+    }
 }
