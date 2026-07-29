@@ -3,6 +3,12 @@
 - **Applies to:** themes, palette tokens, RafuMetrics spacing/radius, shared components, button styles, toolbar configuration, and surface-level chrome across all Rafu windows
 - **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-18; theme-tint and pane-strip rules re-verified on 2026-07-26 (UX2-01)
 
+**Proposed successor:** the 2026-07-29
+[`workbench-presentation-upgrade.md`](../plans/phases/workbench-presentation-upgrade.md)
+and [ADR 0022](../decisions/0022-recessed-workbench-deck.md) propose revisiting
+the flush-main-pane and single-radius rules below. Until ADR 0022 is accepted
+and implemented, this note describes the verified current UI.
+
 ## Rules and observed behavior
 
 - **RafuMetrics code constants** (`Sources/RafuApp/Support/RafuMetrics.swift`) define geometry that is **not** theme-JSON:
@@ -55,7 +61,11 @@
   - Editor tab bar: `tabBarBackground` (quiet surface); active tab: `tabActiveBackground` + rounded-top card OR underline.
   - Editor canvas: `editorBackground` (unchanged mechanics; tonal step vs. tab bar/status bar reads as one flat family).
   - Status bar: `statusBarBackground` (slim flat bar, 24pt height, solid; memory/LSP/branch as quiet chips).
-  - Panels (Search, Source Control): `panelBackground` (slightly elevated from sidebar); sections with `RafuCardHeaderRow` (icon + title + trailing action + hairline).
+  - Panels (Search, Source Control): the current utility container uses
+    `sidebarBackground` at reduced opacity; embedded headers/sections use
+    `cardBackground`. There is no `panelBackground` palette property.
+    The proposed presentation successor uses the existing
+    `elevatedBackground` for a solid utility surface.
   - Overlays (command palette, peek, hover tooltip, sheets): `cardBackground` (rounded 14pt card, floating on the canvas); headers use `RafuCardHeaderRow`, body separated by hairline.
   - Diff view header: `cardBackground` rounded-12 card anatomy (file chip + scope + ±stats chips + trailing actions).
   - Blame header and row hover: same card header anatomy.
@@ -89,7 +99,9 @@ Every surface in the app — sidebar, editor tabs, panels, overlays, cards — f
 - Sheets: prominent button with `.keyboardShortcut(.defaultAction)`, cancel button with `.keyboardShortcut(.cancelAction)`.
 - Status bar: flat `statusBarBackground`, memory/LSP/branch as quiet `RafuChip` badges.
 
-Tests verify that every bundled theme plus AI-generated themes decode identically: `sources/RafuApp/Tests/ThemeTests.swift` snapshots palette values for Indigo, Khadi, and one generated theme at theme parse time.
+Tests verify that every bundled theme plus AI-generated themes decode
+identically: `Tests/RafuAppTests/RafuThemeTests.swift` snapshots palette values
+for Indigo, Khadi, and generated-theme parsing.
 
 ## Verification
 
@@ -112,9 +124,15 @@ Screenshot visually across Indigo + Khadi + one AI theme, both windows. Verify:
 - `Sources/RafuApp/Support/RafuControlStyles.swift` (`View.rafuTheme(_:)` — theme + tint at scene roots)
 - `Sources/RafuApp/Settings/SettingsPaneStrip.swift` (themed replacement for the macOS tab-view bar)
 - `Tests/RafuAppTests/ThemedControlStyleScanTests.swift` (system-accent source scan)
-- `Sources/RafuApp/DesignSystem/` (RafuChip, RafuField, RafuCardHeaderRow, RafuSheetHeader)
-- `Sources/RafuApp/Theme/RafuThemePalette.swift` (four optional `ui` keys + fallbacks)
-- `Sources/RafuApp/App/RafuApp.swift` (titlebar `.toolbarBackground(.hidden)`)
-- `docs/decisions/0012-flat-layered-workbench-chrome.md` (ADR 0012 — Proposed)
+- `Sources/RafuApp/Support/RafuControlStyles.swift` (RafuChip, RafuField,
+  RafuCardHeaderRow, RafuSheetHeader)
+- `Sources/RafuApp/Support/RafuTheme.swift` (palette, optional `ui` keys, and
+  fallbacks)
+- `Sources/RafuApp/Views/FlatWindowChrome.swift` and
+  `Sources/RafuApp/Views/WorkspaceWindowView.swift` (current titlebar/window
+  chrome; the former `.toolbarBackground(.hidden)` route is no longer present)
+- `docs/decisions/0012-flat-workbench-chrome.md` (ADR 0012 — Proposed)
+- `docs/decisions/0022-recessed-workbench-deck.md` (proposed composition
+  successor)
 - `docs/plans/phases/ui-flat-modern-refresh.md` (U0–U5 increments; deferrals: spring anchoring, fonts.markdownPreview)
 - `docs/plans/phases/git-experience-and-worktrees.md` (GX1–GX5 adopt the same design language)
