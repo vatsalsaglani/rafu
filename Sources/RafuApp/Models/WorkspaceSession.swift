@@ -1943,14 +1943,17 @@ final class WorkspaceSession {
         expandedDirectories.formIntersection(Set(updated.keys))
     }
 
-    /// FSEvents path: re-lists only the changed directories the sidebar has
-    /// already materialized, pruning a directory (and every materialized
-    /// descendant, by relative-path prefix) that no longer lists.
+    /// FSEvents path: re-lists affected directories that the sidebar has
+    /// already materialized. The refresh scope also includes materialized
+    /// direct children: FSEvents can report an expanded directory while the
+    /// classifier records its parent, as when `.rafu/runs` is created. Paths
+    /// never opened in the sidebar remain unloaded.
     private func refreshChangedDirectories(_ changedDirectoryRelativePaths: Set<String>) async {
         guard let rootURL else { return }
-        let materializedChanged = changedDirectoryRelativePaths.filter {
-            loadedChildren[$0] != nil
-        }
+        let materializedChanged = WorkspaceFileTreeRefreshScope.materializedDirectories(
+            affectedBy: changedDirectoryRelativePaths,
+            among: Set(loadedChildren.keys)
+        )
         for relativePath in materializedChanged {
             do {
                 let children = try await fileService.listDirectory(
