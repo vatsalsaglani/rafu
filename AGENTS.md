@@ -8,6 +8,9 @@ The repository is currently at the **pre-initial-push workbench checkpoint**. Th
 
 Explicit initial-product non-goals include an extension host, embedded coding agent, debugger, collaboration, full LSP ecosystem, custom SSH stack, and per-document web views. The embedded terminal was originally a non-goal; the user reversed that in ADR 0004 — one lazy, bounded SwiftTerm panel per window, no task runners or automatic command execution. Language servers were likewise excluded under the "full LSP ecosystem" non-goal; the user narrowed that in ADR 0005 — an opt-in, memory-bounded LSP client with a transparent, user-controlled server registry over Tree-sitter fallbacks, no extension host and no always-on servers (see [`docs/plans/phases/language-intelligence.md`](docs/plans/phases/language-intelligence.md)). The "embedded coding agent" non-goal was likewise narrowed in ADR 0018 — Rafu may *orchestrate* external, user-installed agent CLIs (the Ensemble: delegated auth, file-based handoffs, Rafu-created worktrees, gated merge-back) but still embeds no agent, holds no inference credentials, and executes nothing without a visible user-initiated run (see [`docs/plans/phases/conductor/README.md`](docs/plans/phases/conductor/README.md)). Naming: this feature is **Ensemble** in every user-visible string and all doc prose, but its internal Swift symbols keep the historical `Conductor*` prefix, as do the `docs/plans/phases/conductor/` folder, `conductor/*` branches, and `conductor-*` reference filenames — a deliberate split recorded in ADR 0018's Naming section (the name "Conductor" collides with conductor.build, an existing product in the same category). Never introduce "Conductor" into a new user-facing string; never rename `Conductor*` symbols to match the brand.
 
+Only report to me in ASD-STE100 Simplified Technical English
+
+
 ## Sources of truth
 
 Apply guidance in this order:
