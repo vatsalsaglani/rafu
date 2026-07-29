@@ -185,15 +185,19 @@ func codexInvocationIsExact(fixture: CodexInvocationFixture) {
     #expect(!invocation.arguments.contains("danger-full-access"))
     #expect(!invocation.arguments.contains("--dangerously-bypass-approvals-and-sandbox"))
     #expect(!invocation.arguments.contains("--dangerously-bypass-hook-trust"))
-    #expect(
-        invocation.environment
-            == [
-                RafuConductorEnvironment.handoff: fixture.handoffDirectory.path,
-                RafuConductorEnvironment.runDirectory: fixture.runDirectory.path,
-                RafuConductorEnvironment.path:
-                    "/Applications/ChatGPT.app/Contents/Resources:"
-                    + RafuConductorEnvironment.curatedPath,
-            ])
+    var expectedEnvironment = [
+        RafuConductorEnvironment.handoff: fixture.handoffDirectory.path,
+        RafuConductorEnvironment.runDirectory: fixture.runDirectory.path,
+        RafuConductorEnvironment.path:
+            "/Applications/ChatGPT.app/Contents/Resources:"
+            + RafuConductorEnvironment.curatedPath,
+    ]
+    if fixture.autonomy == .readOnly,
+        case .unsupported(let reason) = adapter.readOnlyHandoffSupport
+    {
+        expectedEnvironment[RafuConductorEnvironment.readOnlyHandoffUnsupportedReason] = reason
+    }
+    #expect(invocation.environment == expectedEnvironment)
 }
 
 @Test("Codex invocation fails closed until the same adapter instance probes successfully")

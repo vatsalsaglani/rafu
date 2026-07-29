@@ -415,3 +415,9 @@ Everything else is polish I can chase afterwards.
   Dynamic planning, parallel step fan-out, and agent-driven merges are
   analysed in [`orchestration-gap-analysis.md`](orchestration-gap-analysis.md)
   as candidate C8 work.
+- **As of 2026-07-29, only Claude Code supports the complete `readOnly` plus
+  handoff-write contract.** Codex, OpenCode, Cline, Cursor, Gemini, and Kimi
+  read-only roles stop before process spawn with a message that names the
+  unverified vendor limitation. R5 owns the scoped-write probes for Codex,
+  OpenCode, Cline, and Cursor; Gemini and Kimi remain under the unverified
+  runtime limitation above.

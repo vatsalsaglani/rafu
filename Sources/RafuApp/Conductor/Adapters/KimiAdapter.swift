@@ -90,9 +90,11 @@ nonisolated struct KimiAdapter: ConductorCLIAdapter {
         handoffDirectory: URL
     ) -> AdapterInvocation {
         guard let executableURL = state.executableURL(for: autonomy) else {
-            return C3AdapterProcess.unsupportedInvocation(
-                runDirectory: runDirectory,
-                handoffDirectory: handoffDirectory)
+            return invocationForLaunch(
+                C3AdapterProcess.unsupportedInvocation(
+                    runDirectory: runDirectory,
+                    handoffDirectory: handoffDirectory),
+                autonomy: autonomy)
         }
 
         var arguments = [
@@ -106,13 +108,15 @@ nonisolated struct KimiAdapter: ConductorCLIAdapter {
             arguments += ["--model", trimmedModel]
         }
 
-        return AdapterInvocation(
-            executableURL: executableURL,
-            arguments: arguments,
-            environment: C3AdapterProcess.invocationEnvironment(
-                for: executableURL,
-                runDirectory: runDirectory,
-                handoffDirectory: handoffDirectory))
+        return invocationForLaunch(
+            AdapterInvocation(
+                executableURL: executableURL,
+                arguments: arguments,
+                environment: C3AdapterProcess.invocationEnvironment(
+                    for: executableURL,
+                    runDirectory: runDirectory,
+                    handoffDirectory: handoffDirectory)),
+            autonomy: autonomy)
     }
 
     static func classifyProbe(

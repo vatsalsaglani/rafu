@@ -1,7 +1,19 @@
 import Foundation
 
-nonisolated enum WorkspaceConductorRunLauncherError: Error, Equatable, Sendable {
+nonisolated enum WorkspaceConductorRunLauncherError:
+    Error, Equatable, LocalizedError, Sendable
+{
     case workspaceReleased
+    case readOnlyHandoffUnsupported(reason: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .workspaceReleased:
+            "The workspace closed before Rafu could start the Ensemble role."
+        case .readOnlyHandoffUnsupported(let reason):
+            reason
+        }
+    }
 }
 
 /// Presents one Conductor process through the workspace's existing terminal
@@ -22,6 +34,11 @@ final class WorkspaceConductorRunLauncher: ConductorRunProcessLaunching {
         specification: TerminalProcessSpec,
         onExit: @escaping @MainActor @Sendable (UUID, Int32?) -> Void
     ) throws -> UUID {
+        if let reason = specification.environment[
+            RafuConductorEnvironment.readOnlyHandoffUnsupportedReason
+        ] {
+            throw WorkspaceConductorRunLauncherError.readOnlyHandoffUnsupported(reason: reason)
+        }
         guard let workspaceSession else {
             throw WorkspaceConductorRunLauncherError.workspaceReleased
         }

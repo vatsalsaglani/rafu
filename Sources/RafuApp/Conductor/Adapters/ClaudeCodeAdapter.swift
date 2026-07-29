@@ -510,12 +510,13 @@ nonisolated struct ConductorAdapterProbeSupport: Sendable {
     }
 }
 
-/// Verified against Claude Code 2.1.218. Authentication stays delegated to
+/// Verified against Claude Code 2.1.220. Authentication stays delegated to
 /// the official CLI; this adapter never reads a Claude credential store.
 nonisolated final class ClaudeCodeAdapter: ConductorCLIAdapter, Sendable {
     let id = ConductorCLIID.claudeCode
     let defaultEnabled = true
     let supportsModelDiscovery = false
+    let readOnlyHandoffSupport = ConductorReadOnlyHandoffSupport.supported
 
     private let probeSupport: ConductorAdapterProbeSupport
 
@@ -603,15 +604,59 @@ nonisolated final class ClaudeCodeAdapter: ConductorCLIAdapter, Sendable {
             "stream-json",
             "--verbose",
             "--no-session-persistence",
-            "--permission-mode",
-            autonomy == .readOnly ? "plan" : "bypassPermissions",
         ])
+        switch autonomy {
+        case .readOnly:
+            arguments += [
+                "--permission-mode",
+                "default",
+                "--allowedTools",
+                Self.handoffEditPermissionRules(for: handoffDirectory),
+            ]
+        case .worktreeWrite:
+            arguments += ["--permission-mode", "bypassPermissions"]
+        }
 
-        return AdapterInvocation(
-            executableURL: executableURL,
-            arguments: arguments,
-            environment: probeSupport.invocationEnvironment(
-                runDirectory: runDirectory, handoffDirectory: handoffDirectory))
+        return invocationForLaunch(
+            AdapterInvocation(
+                executableURL: executableURL,
+                arguments: arguments,
+                environment: probeSupport.invocationEnvironment(
+                    runDirectory: runDirectory, handoffDirectory: handoffDirectory)),
+            autonomy: autonomy)
+    }
+
+    /// Claude Code 2.1.220 applies path rules for every file-editing tool
+    /// through `Edit`, including a new-file `Write` call. A double leading
+    /// slash is Claude's absolute-path syntax; one leading slash means
+    /// project-relative.
+    private static func handoffEditPermissionRules(for handoffDirectory: URL) -> String {
+        let paths = [
+            handoffDirectory.standardizedFileURL.path,
+            resolvedPath(for: handoffDirectory),
+        ]
+        var seen: Set<String> = []
+        return
+            paths
+            .filter { seen.insert($0).inserted }
+            .map { "Edit(/\($0)/**)" }
+            .joined(separator: ",")
+    }
+
+    private static func resolvedPath(for directory: URL) -> String {
+        var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
+        let resolved = directory.withUnsafeFileSystemRepresentation { path in
+            guard let path else { return nil as String? }
+            return buffer.withUnsafeMutableBufferPointer { buffer in
+                guard let baseAddress = buffer.baseAddress,
+                    realpath(path, baseAddress) != nil
+                else {
+                    return nil
+                }
+                return String(cString: baseAddress)
+            }
+        }
+        return resolved ?? directory.standardizedFileURL.path
     }
 
     static func authStatus(from outcome: ConductorProbeCommandOutcome) -> AdapterAuthStatus {

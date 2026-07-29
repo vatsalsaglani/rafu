@@ -16,6 +16,7 @@ nonisolated struct FakeConductorAdapter: ConductorCLIAdapter {
     let id: ConductorCLIID
     let defaultEnabled: Bool
     let supportsModelDiscovery: Bool
+    let readOnlyHandoffSupport: ConductorReadOnlyHandoffSupport
 
     /// Absolute by construction — a PTY child inherits no `PATH` (see
     /// `TerminalProcessSpec.resolvedLaunch()`).
@@ -34,11 +35,13 @@ nonisolated struct FakeConductorAdapter: ConductorCLIAdapter {
     init(
         id: ConductorCLIID = .claudeCode,
         defaultEnabled: Bool = true,
-        supportsModelDiscovery: Bool = true
+        supportsModelDiscovery: Bool = true,
+        readOnlyHandoffSupport: ConductorReadOnlyHandoffSupport = .supported
     ) {
         self.id = id
         self.defaultEnabled = defaultEnabled
         self.supportsModelDiscovery = supportsModelDiscovery
+        self.readOnlyHandoffSupport = readOnlyHandoffSupport
     }
 
     func probe() async -> AdapterProbe {
@@ -73,10 +76,12 @@ nonisolated struct FakeConductorAdapter: ConductorCLIAdapter {
         arguments.append("--autonomy")
         arguments.append(autonomy.rawValue)
         arguments.append(prompt)
-        return AdapterInvocation(
-            executableURL: Self.executableURL,
-            arguments: arguments,
-            environment: RafuConductorEnvironment.childEnvironment(
-                runDirectory: runDirectory, handoffDirectory: handoffDirectory))
+        return invocationForLaunch(
+            AdapterInvocation(
+                executableURL: Self.executableURL,
+                arguments: arguments,
+                environment: RafuConductorEnvironment.childEnvironment(
+                    runDirectory: runDirectory, handoffDirectory: handoffDirectory)),
+            autonomy: autonomy)
     }
 }

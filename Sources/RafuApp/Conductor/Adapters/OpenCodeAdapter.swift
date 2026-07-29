@@ -398,6 +398,10 @@ nonisolated struct OpenCodeAdapter: ConductorCLIAdapter {
     let id = ConductorCLIID.openCode
     let defaultEnabled = true
     let supportsModelDiscovery = true
+    let readOnlyHandoffSupport = ConductorReadOnlyHandoffSupport.unsupported(
+        reason:
+            "OpenCode does not yet have a verified read-only mode that permits the required Ensemble handoff write."
+    )
 
     static let maximumModelOutputBytes = C3AdapterProcess.modelOutputLimit
     static let maximumModelRows = 2_048
@@ -499,9 +503,11 @@ nonisolated struct OpenCodeAdapter: ConductorCLIAdapter {
         handoffDirectory: URL
     ) -> AdapterInvocation {
         guard let executableURL = state.executableURL(for: autonomy) else {
-            return C3AdapterProcess.unsupportedInvocation(
-                runDirectory: runDirectory,
-                handoffDirectory: handoffDirectory)
+            return invocationForLaunch(
+                C3AdapterProcess.unsupportedInvocation(
+                    runDirectory: runDirectory,
+                    handoffDirectory: handoffDirectory),
+                autonomy: autonomy)
         }
 
         var arguments = [
@@ -522,13 +528,15 @@ nonisolated struct OpenCodeAdapter: ConductorCLIAdapter {
         // OpenCode option. The prompt remains one inert argv element.
         arguments += ["--", prompt]
 
-        return AdapterInvocation(
-            executableURL: executableURL,
-            arguments: arguments,
-            environment: C3AdapterProcess.invocationEnvironment(
-                for: executableURL,
-                runDirectory: runDirectory,
-                handoffDirectory: handoffDirectory))
+        return invocationForLaunch(
+            AdapterInvocation(
+                executableURL: executableURL,
+                arguments: arguments,
+                environment: C3AdapterProcess.invocationEnvironment(
+                    for: executableURL,
+                    runDirectory: runDirectory,
+                    handoffDirectory: handoffDirectory)),
+            autonomy: autonomy)
     }
 
     static func classifyProbe(

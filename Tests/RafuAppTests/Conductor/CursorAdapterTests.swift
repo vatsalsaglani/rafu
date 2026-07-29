@@ -167,7 +167,8 @@ struct CursorAdapterTests {
         #expect(CursorAdapter.supportedAutonomies == [.worktreeWrite])
         #expect(
             CursorAdapter.readOnlyUnsupportedReason
-                == "Cursor CLI has no verified read-only or plan mode; read-only runs fail closed.")
+                == "Cursor CLI does not yet have a verified read-only mode that permits the required Ensemble handoff write."
+        )
         let invocation = adapter.invocation(
             prompt: "analyze only",
             model: "",

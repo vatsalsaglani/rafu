@@ -54,9 +54,12 @@ nonisolated enum ConductorCLIID: String, CaseIterable, Codable, Sendable {
 /// How much a role may mutate (ADR 0018: "Rafu creates worktrees; models
 /// never do"). There is deliberately NO "full access to the main checkout"
 /// level — a mutating role is always confined to a Rafu-created worktree, so
-/// the blast radius is bounded by construction.
+/// the blast radius is bounded by construction. A `readOnly` role may not
+/// write to the repository, but it must be able to write its one required
+/// artifact inside the run's `RAFU_HANDOFF` directory.
 nonisolated enum ConductorAutonomy: String, CaseIterable, Codable, Hashable, Sendable {
-    /// Reads the checkout under the adapter's read-only sandbox mapping.
+    /// Reads the checkout without repository writes. Writes inside the run's
+    /// `RAFU_HANDOFF` directory are required and allowed.
     case readOnly
     /// Writes freely, but only inside the Rafu-created `rafu/run-<id>`
     /// worktree.
@@ -370,6 +373,14 @@ nonisolated struct AdapterInvocation: Equatable, Sendable {
     let environment: [String: String]
 }
 
+/// Whether an adapter can enforce the `readOnly` contract while still
+/// permitting the required handoff write. An unverified mapping is
+/// unsupported: Rafu must reject it before a paid agent process starts.
+nonisolated enum ConductorReadOnlyHandoffSupport: Equatable, Sendable {
+    case supported
+    case unsupported(reason: String)
+}
+
 /// The one seam an external agent CLI is reached through.
 ///
 /// Explicitly `nonisolated` on the protocol itself (mirrors
@@ -389,6 +400,10 @@ nonisolated protocol ConductorCLIAdapter: Sendable {
     /// can decide whether to offer "Refresh models" WITHOUT performing I/O
     /// at construction. Pure — never probes.
     var supportsModelDiscovery: Bool { get }
+
+    /// Whether this adapter can keep repository files read-only while it
+    /// permits writes only inside `RAFU_HANDOFF`.
+    var readOnlyHandoffSupport: ConductorReadOnlyHandoffSupport { get }
 
     /// Binary path, version string, `installed`.
     func probe() async -> AdapterProbe
@@ -430,6 +445,45 @@ nonisolated protocol ConductorCLIAdapter: Sendable {
     ) -> AdapterInvocation
 }
 
+nonisolated extension ConductorCLIAdapter {
+    /// Fail closed until a real vendor CLI probe proves the scoped-write
+    /// contract. Adapters with verified support override this value.
+    var readOnlyHandoffSupport: ConductorReadOnlyHandoffSupport {
+        .unsupported(
+            reason:
+                "\(id.displayName) does not have a verified read-only mode that permits the required Ensemble handoff write."
+        )
+    }
+
+    /// Carries a fail-closed decision through `TerminalProcessSpec`, whose
+    /// process seam otherwise has no adapter or autonomy metadata. The
+    /// launcher consumes and rejects this marker before it creates a terminal
+    /// session, so it never reaches a child process.
+    func environmentForLaunch(
+        _ environment: [String: String],
+        autonomy: ConductorAutonomy
+    ) -> [String: String] {
+        guard autonomy == .readOnly,
+            case .unsupported(let reason) = readOnlyHandoffSupport
+        else {
+            return environment
+        }
+        var result = environment
+        result[RafuConductorEnvironment.readOnlyHandoffUnsupportedReason] = reason
+        return result
+    }
+
+    func invocationForLaunch(
+        _ invocation: AdapterInvocation,
+        autonomy: ConductorAutonomy
+    ) -> AdapterInvocation {
+        AdapterInvocation(
+            executableURL: invocation.executableURL,
+            arguments: invocation.arguments,
+            environment: environmentForLaunch(invocation.environment, autonomy: autonomy))
+    }
+}
+
 // MARK: - Child-process environment
 
 /// The environment variables every Conductor child receives. Named constants
@@ -442,6 +496,11 @@ nonisolated enum RafuConductorEnvironment {
     static let runDirectory = "RAFU_RUN_DIR"
     /// Search path for the child and anything it shells out to.
     static let path = "PATH"
+    /// Internal launch marker for a read-only adapter that cannot permit the
+    /// required handoff write. The workspace launcher removes the run from
+    /// the spawn path before this value can reach a child.
+    static let readOnlyHandoffUnsupportedReason =
+        "RAFU_INTERNAL_READ_ONLY_HANDOFF_UNSUPPORTED_REASON"
 
     /// A CURATED search path — deliberately NOT the user's inherited
     /// `PATH`.

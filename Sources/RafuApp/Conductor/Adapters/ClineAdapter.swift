@@ -17,6 +17,10 @@ nonisolated struct ClineAdapter: ConductorCLIAdapter {
     // Discovery reads Cline's own bundled catalog rather than a CLI command
     // (it has none). Any failure falls back to `curatedModels()`.
     let supportsModelDiscovery = true
+    let readOnlyHandoffSupport = ConductorReadOnlyHandoffSupport.unsupported(
+        reason:
+            "Cline does not yet have a verified read-only mode that permits the required Ensemble handoff write."
+    )
 
     /// The catalog is ~800 KB of minified JS; the JSON we ask Node to emit is
     /// far smaller, but cap it anyway so a future format change cannot stream
@@ -216,9 +220,11 @@ nonisolated struct ClineAdapter: ConductorCLIAdapter {
         handoffDirectory: URL
     ) -> AdapterInvocation {
         guard let executableURL = state.executableURL(for: autonomy) else {
-            return C3AdapterProcess.unsupportedInvocation(
-                runDirectory: runDirectory,
-                handoffDirectory: handoffDirectory)
+            return invocationForLaunch(
+                C3AdapterProcess.unsupportedInvocation(
+                    runDirectory: runDirectory,
+                    handoffDirectory: handoffDirectory),
+                autonomy: autonomy)
         }
 
         var arguments = [
@@ -243,13 +249,15 @@ nonisolated struct ClineAdapter: ConductorCLIAdapter {
         // prompt beginning with `-` from becoming a Cline flag.
         arguments += ["--", prompt]
 
-        return AdapterInvocation(
-            executableURL: executableURL,
-            arguments: arguments,
-            environment: C3AdapterProcess.invocationEnvironment(
-                for: executableURL,
-                runDirectory: runDirectory,
-                handoffDirectory: handoffDirectory))
+        return invocationForLaunch(
+            AdapterInvocation(
+                executableURL: executableURL,
+                arguments: arguments,
+                environment: C3AdapterProcess.invocationEnvironment(
+                    for: executableURL,
+                    runDirectory: runDirectory,
+                    handoffDirectory: handoffDirectory)),
+            autonomy: autonomy)
     }
 
     static func classifyProbe(

@@ -6,6 +6,10 @@ nonisolated final class CodexAdapter: ConductorCLIAdapter, Sendable {
     let id = ConductorCLIID.codex
     let defaultEnabled = true
     let supportsModelDiscovery = false
+    let readOnlyHandoffSupport = ConductorReadOnlyHandoffSupport.unsupported(
+        reason:
+            "Codex does not yet have a verified read-only mode that permits the required Ensemble handoff write."
+    )
 
     private let probeSupport: ConductorAdapterProbeSupport
 
@@ -90,8 +94,10 @@ nonisolated final class CodexAdapter: ConductorCLIAdapter, Sendable {
         handoffDirectory: URL
     ) -> AdapterInvocation {
         guard let executableURL = probeSupport.executableCache.current() else {
-            return ConductorStubInvocation.placeholder(
-                runDirectory: runDirectory, handoffDirectory: handoffDirectory)
+            return invocationForLaunch(
+                ConductorStubInvocation.placeholder(
+                    runDirectory: runDirectory, handoffDirectory: handoffDirectory),
+                autonomy: autonomy)
         }
 
         var arguments = ["--ask-for-approval", "never", "exec"]
@@ -108,11 +114,13 @@ nonisolated final class CodexAdapter: ConductorCLIAdapter, Sendable {
             prompt,
         ])
 
-        return AdapterInvocation(
-            executableURL: executableURL,
-            arguments: arguments,
-            environment: probeSupport.invocationEnvironment(
-                runDirectory: runDirectory, handoffDirectory: handoffDirectory))
+        return invocationForLaunch(
+            AdapterInvocation(
+                executableURL: executableURL,
+                arguments: arguments,
+                environment: probeSupport.invocationEnvironment(
+                    runDirectory: runDirectory, handoffDirectory: handoffDirectory)),
+            autonomy: autonomy)
     }
 
     static func authStatus(from outcome: ConductorProbeCommandOutcome) -> AdapterAuthStatus {
