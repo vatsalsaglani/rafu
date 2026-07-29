@@ -2,7 +2,8 @@
 
 ## Status and execution slot
 
-- **Status:** Planned.
+- **Status:** Implemented on `codex/presentation-terminal-manager` (2026-07-29);
+  local commit and verification evidence are recorded in the worktree handoff.
 - **Wave:** 1; parallel.
 - **Suggested branch:** `codex/presentation-terminal-manager`.
 - **Recommended model:** `gpt-5.6-sol` with high reasoning.
@@ -202,6 +203,36 @@ Finish all edits and documentation before:
 Use only the Rafu Lightning GUI lease, or list deferred checks for the
 coordinator. Commit only owned paths, do not push, and remove `.build` after the
 green commit.
+
+## Implementation record
+
+- `WorkspaceSession.currentTerminalSessionID` is a read-only presentation seam
+  derived from the focused editor group's visible selected terminal. It adds no
+  persisted state or setter and deliberately ignores `terminal.selectedID`.
+- The terminal manager now supplies its complete shared utility header,
+  adaptive named provider cells, and 48 pt session rows. Current, attention,
+  identity, status, and parking feed independent presentation inputs through
+  WP-00's manager-row resolver.
+- Focused coverage pins file/no-focus, one-terminal, two-group focus switching,
+  parked/hidden, exited, non-editor canvas, exactly-one-current, launcher state,
+  neutral-edge collision, lifecycle regressions, and the unclipped SwiftTerm
+  body contract without mounting a shell.
+- Probe, launch/model/auth/error, reveal, rename, color, hide, close, close-all,
+  attention, process, responder, exit, and teardown implementations were not
+  changed. `EditorTerminalTabContent` and `TerminalSessionColor` required no
+  edits.
+- No new reusable platform, SDK, actor, lifecycle, security, or accessibility
+  nuance was discovered, so no ADR, reference note, or reference-index row is
+  required.
+- The single Rafu Lightning GUI lease was not held in this parallel worktree.
+  The coordinator's merge-round lease retains the complete manual matrix:
+  `build_and_run.sh --verify`; widths 250/310/460 pt; all provider and
+  empty/one/four-session states; current/background/attention/exited/parked/
+  uncolored rows; immediate unique current-row focus switching; keyboard-only
+  launch/reveal/rename/color/hide/close; VoiceOver provider/readiness/reason/
+  current/status/parked/attention announcements; rest/hover/pressed/current/
+  disabled states; and Indigo, Khadi, converged surfaces, Increase Contrast,
+  default text, and largest supported accessibility text.
 
 ## Goal-mode start prompt
 

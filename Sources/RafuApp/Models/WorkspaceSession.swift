@@ -769,6 +769,22 @@ final class WorkspaceSession {
         return sessionID
     }
 
+    /// The one terminal row that may present as current in the terminal
+    /// manager. Current follows the focused editor group's selected, visible
+    /// terminal tab; it is deliberately not a second selection backed by
+    /// `terminal.selectedID`. A parked terminal, a background group's terminal,
+    /// or any focused file/diff/canvas therefore produces no current row.
+    ///
+    /// Read-only presentation seam (workbench presentation WP-30): reveal or
+    /// editor focus remains the only way user interaction moves this value.
+    var currentTerminalSessionID: UUID? {
+        guard EditorCanvasRoute.resolve(.init(session: self)) == .editor,
+            let sessionID = focusedTerminalSessionID,
+            terminal.sessions.contains(where: { $0.id == sessionID })
+        else { return nil }
+        return sessionID
+    }
+
     /// Routes a BEL (terminal-manager.md T-E) to attention state and,
     /// opt-in, a system notification. "Not focused" = the session's tab is
     /// not the focused group's selected tab, OR the app is not active, OR
