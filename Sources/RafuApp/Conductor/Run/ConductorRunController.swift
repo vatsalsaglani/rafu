@@ -175,6 +175,28 @@ nonisolated struct ConductorRunEvidenceService: Sendable {
 
         let manager = FileManager.default
         let runDirectory = directory.runDirectoryURL(for: runID)
+        // Initial evidence must attach to a persisted run record. This covers
+        // the flat single-role layout and a workflow's first `-a1` attempt.
+        // A later retry only adds a fresh attempt under an already-present
+        // historical directory; it does not create a run directory.
+        let isInitialAttempt =
+            layout.stepComponents.isEmpty
+            || layout.stepComponents.last?.hasSuffix("-a1") == true
+        if isInitialAttempt {
+            let manifestURL = directory.runDirectoryURL(for: runID)
+                .appending(
+                    path: ConductorRunStore.manifestFileName, directoryHint: .notDirectory)
+            if !manager.fileExists(atPath: manifestURL.path),
+                let write = await ConductorRunInitialManifestBarrier.shared.task(
+                    workspaceRoot: directory.workspaceRoot,
+                    runID: runID)
+            {
+                await write.value
+            }
+            guard manager.fileExists(atPath: manifestURL.path) else {
+                throw ConductorRunError.unableToPersistEvidence
+            }
+        }
         var stepDirectory = runDirectory
         for component in layout.stepComponents {
             stepDirectory.append(path: component, directoryHint: .isDirectory)
@@ -285,6 +307,55 @@ final class ConductorRunManifestWriteQueue {
 
     var pendingTask: Task<Void, Never>? {
         tail
+    }
+}
+
+/// Bridges the workflow controller's synchronous `publish(_:)` call to the
+/// off-main first-manifest write. Evidence preparation reads this barrier only
+/// when it is about to create an initial evidence directory and the manifest
+/// is not present yet. It awaits the already-queued write; it never polls the
+/// file system and never creates a manifest from partial run data.
+@MainActor
+private final class ConductorRunInitialManifestBarrier {
+    private struct Key: Hashable {
+        let workspacePath: String
+        let runID: String
+    }
+
+    private struct Entry {
+        let token: UUID
+        let task: Task<Void, Never>
+    }
+
+    static let shared = ConductorRunInitialManifestBarrier()
+
+    private var entries: [Key: Entry] = [:]
+
+    func register(
+        _ task: Task<Void, Never>,
+        workspaceRoot: URL,
+        runID: String
+    ) {
+        let key = Self.key(workspaceRoot: workspaceRoot, runID: runID)
+        let token = UUID()
+        entries[key] = Entry(token: token, task: task)
+        Task { [weak self] in
+            await task.value
+            self?.remove(key: key, token: token)
+        }
+    }
+
+    func task(workspaceRoot: URL, runID: String) -> Task<Void, Never>? {
+        entries[Self.key(workspaceRoot: workspaceRoot, runID: runID)]?.task
+    }
+
+    private func remove(key: Key, token: UUID) {
+        guard entries[key]?.token == token else { return }
+        entries.removeValue(forKey: key)
+    }
+
+    private static func key(workspaceRoot: URL, runID: String) -> Key {
+        Key(workspacePath: workspaceRoot.standardizedFileURL.path, runID: runID)
     }
 }
 
@@ -422,6 +493,8 @@ final class ConductorRunController {
                 try Task.checkCancellation()
                 if let manifest = try await store.load(runID: id) {
                     loaded.append(manifest)
+                } else if let history = try await store.manifestlessEvidenceHistory(runID: id) {
+                    loaded.append(history)
                 }
             }
             try Task.checkCancellation()
@@ -536,7 +609,12 @@ final class ConductorRunController {
         upsertRun(manifest)
         ConductorEnsembleEventCenter.shared.runChanged(manifest: manifest)
         guard let store else { return nil }
-        return manifestWrites.enqueue(manifest, to: store)
+        let write = manifestWrites.enqueue(manifest, to: store)
+        ConductorRunInitialManifestBarrier.shared.register(
+            write,
+            workspaceRoot: store.directory.workspaceRoot,
+            runID: manifest.id)
+        return write
     }
 
     /// The write queue's currently in-flight task, if any — the same task
@@ -610,14 +688,6 @@ final class ConductorRunController {
             _ = try await store.directory.seed()
             try Self.requireCurrent(generation, activeGeneration)
 
-            let evidence = try await evidenceService.prepare(
-                directory: store.directory,
-                runID: request.runID,
-                handoffArtifact: request.role.handoffArtifact,
-                prompt: prompt)
-            try Self.requireCurrent(generation, activeGeneration)
-            activeEvidence = evidence
-
             let resolved = try await roleLaunch.resolve(adapter)
             try Task.checkCancellation()
             try Self.requireCurrent(generation, activeGeneration)
@@ -655,11 +725,22 @@ final class ConductorRunController {
                         startedAt: nil,
                         finishedAt: nil)
                 ])
-            manifest = newManifest
-            try await store.save(newManifest)
+            try await store.createInitial(newManifest)
             try Self.requireCurrent(generation, activeGeneration)
+            manifest = newManifest
             upsertRun(newManifest)
             ConductorEnsembleEventCenter.shared.runChanged(manifest: newManifest)
+
+            // `createInitial` publishes the entire run directory with this
+            // manifest already present. Evidence preparation may now create
+            // prompt/handoff/log paths without ever exposing an orphan run.
+            let evidence = try await evidenceService.prepare(
+                directory: store.directory,
+                runID: request.runID,
+                handoffArtifact: request.role.handoffArtifact,
+                prompt: prompt)
+            try Self.requireCurrent(generation, activeGeneration)
+            activeEvidence = evidence
 
             do {
                 try await worktreeService.materialize(workspacePlan)
@@ -769,16 +850,11 @@ final class ConductorRunController {
         do {
             _ = try await mergeGateService.apply(activeWorkspacePlan)
             hasAppliedToWorkspace = true
-            // `completeGate()` mutates and persists the manifest through
-            // `scheduleManifestSave()` directly, NOT through `publish(_:)` —
-            // the one seam that calls `ConductorEnsembleEventCenter.shared
-            // .runChanged`. Stamp `mergedAt` first (so completeGate's own
-            // copy-mutate-store cycle carries it), then explicitly `publish`
-            // once more so the `merged` event actually streams — this is
-            // what completes a coordinator's `await --state merged`.
+            // Stamp `mergedAt` before `completeGate()`: its shared publish
+            // path persists the completed manifest and emits the one merged
+            // event that releases a coordinator's `await --state merged`.
             manifest?.mergedAt = Date()
             await completeGate()
-            if let manifest { await publish(manifest)?.value }
         } catch is CancellationError {
             return
         } catch let error as ConductorMergeGateError {
@@ -790,7 +866,6 @@ final class ConductorRunController {
                 hasAppliedToWorkspace = true
                 manifest?.mergedAt = Date()
                 await completeGate()
-                if let manifest { await publish(manifest)?.value }
             }
             mergeGateError = error.errorDescription
         } catch {
@@ -902,7 +977,11 @@ final class ConductorRunController {
     /// Loads persisted evidence for display and starts no process.
     func showRun(id: String) async throws {
         guard let store else { return }
-        manifest = try await store.load(runID: id)
+        if let loaded = try await store.load(runID: id) {
+            manifest = loaded
+        } else {
+            manifest = try await store.manifestlessEvidenceHistory(runID: id)
+        }
         if let manifest {
             upsertRun(manifest)
         }
@@ -919,58 +998,46 @@ final class ConductorRunController {
 
     private func markAwaitingMergeGate() {
         transition(to: .awaitingMergeGate)
-        updateStep(status: .awaitingGate, finishedAt: Date())
-        scheduleManifestSave()
+        _ = updateStep(status: .awaitingGate, finishedAt: Date())
     }
 
     private func completeGate() async {
         transition(to: .completed)
-        updateStep(status: .completed, finishedAt: Date())
+        let persistenceTask = updateStep(status: .completed, finishedAt: Date())
         activeGeneration = nil
         activeLauncher = nil
         activeSessionID = nil
-        await persistCurrentManifest()
+        await persistenceTask?.value
     }
 
     private func markAborted() {
         transition(to: .aborted)
-        updateStep(status: .aborted, finishedAt: Date())
+        _ = updateStep(status: .aborted, finishedAt: Date())
         activeGeneration = nil
         activeLauncher = nil
         activeSessionID = nil
-        scheduleManifestSave()
     }
 
     private func recordFailure(_ error: ConductorRunError) {
         let reason = error.errorDescription ?? "The run failed."
         transition(to: .failed(reason))
-        updateStep(status: .failed(reason), finishedAt: Date())
+        _ = updateStep(status: .failed(reason), finishedAt: Date())
         activeGeneration = nil
         activeLauncher = nil
         activeSessionID = nil
-        scheduleManifestSave()
     }
 
-    private func updateStep(status: RunStepStatus, finishedAt: Date?) {
-        guard var manifest, !manifest.steps.isEmpty else { return }
+    @discardableResult
+    private func updateStep(
+        status: RunStepStatus,
+        finishedAt: Date?
+    ) -> Task<Void, Never>? {
+        guard var manifest, !manifest.steps.isEmpty else { return nil }
         manifest.steps[0].status = status
         manifest.steps[0].finishedAt = finishedAt
         manifest.updatedAt = Date()
         self.manifest = manifest
-        upsertRun(manifest)
-    }
-
-    @discardableResult
-    private func scheduleManifestSave() -> Task<Void, Never>? {
-        guard let store, let manifest else {
-            return nil
-        }
-        return manifestWrites.enqueue(manifest, to: store)
-    }
-
-    private func persistCurrentManifest() async {
-        let persistenceTask = scheduleManifestSave()
-        await persistenceTask?.value
+        return publish(manifest)
     }
 
     private func upsertRun(_ manifest: ConductorRunManifest) {

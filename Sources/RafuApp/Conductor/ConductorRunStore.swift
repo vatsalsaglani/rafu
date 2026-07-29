@@ -10,6 +10,8 @@ nonisolated enum ConductorRunStoreError: Error, Equatable, LocalizedError, Senda
     /// `manifest.json` exists but this build cannot decode it — including
     /// the deliberate strict failure on an unrecognized `RunStepStatus`.
     case unreadableManifest(runID: String, reason: String)
+    /// A new run must never replace existing evidence for the same id.
+    case runDirectoryAlreadyExists(String)
 
     var errorDescription: String? {
         switch self {
@@ -17,6 +19,8 @@ nonisolated enum ConductorRunStoreError: Error, Equatable, LocalizedError, Senda
             "\"\(id)\" is not a valid run identifier."
         case .unreadableManifest(let runID, let reason):
             "Run \(runID) has an unreadable manifest: \(reason)"
+        case .runDirectoryAlreadyExists(let runID):
+            "Run \(runID) already has saved evidence."
         }
     }
 }
@@ -76,19 +80,39 @@ nonisolated struct ConductorRunStore: Sendable {
         return decoder
     }
 
-    /// Atomically writes `manifest.json`, creating the run directory when
-    /// needed. Re-saving replaces the file whole — a partially written
-    /// manifest is never observable.
+    /// Atomically writes `manifest.json`. The first write publishes a complete
+    /// temporary directory with its manifest already present; later writes
+    /// replace only that file. A run directory is therefore never observable
+    /// without a manifest.
     @concurrent
     func save(_ manifest: ConductorRunManifest) async throws {
         guard Self.isValidRunID(manifest.id) else {
             throw ConductorRunStoreError.invalidRunID(manifest.id)
         }
         let runDirectory = directory.runDirectoryURL(for: manifest.id)
-        try FileManager.default.createDirectory(
-            at: runDirectory, withIntermediateDirectories: true)
         let data = try Self.makeEncoder().encode(manifest)
-        try data.write(to: manifestURL(for: manifest.id), options: .atomic)
+        if FileManager.default.fileExists(atPath: runDirectory.path) {
+            try data.write(to: manifestURL(for: manifest.id), options: .atomic)
+        } else {
+            try writeInitialManifest(data, runID: manifest.id)
+        }
+    }
+
+    /// Publishes the first manifest without replacing an existing evidence
+    /// directory. Run creation uses this stricter operation before it creates
+    /// a prompt, handoff directory, worktree, or child process.
+    @concurrent
+    func createInitial(_ manifest: ConductorRunManifest) async throws {
+        guard Self.isValidRunID(manifest.id) else {
+            throw ConductorRunStoreError.invalidRunID(manifest.id)
+        }
+        guard
+            !FileManager.default.fileExists(
+                atPath: directory.runDirectoryURL(for: manifest.id).path)
+        else {
+            throw ConductorRunStoreError.runDirectoryAlreadyExists(manifest.id)
+        }
+        try writeInitialManifest(try Self.makeEncoder().encode(manifest), runID: manifest.id)
     }
 
     /// `nil` when the run has no manifest yet; THROWS when one exists but
@@ -107,6 +131,33 @@ nonisolated struct ConductorRunStore: Sendable {
             throw ConductorRunStoreError.unreadableManifest(
                 runID: runID, reason: Self.describe(error))
         }
+    }
+
+    /// Returns a synthetic, read-only history record when an older run
+    /// directory has evidence but no manifest. It deliberately does not write
+    /// a replacement manifest: the missing file is itself material evidence.
+    @concurrent
+    func manifestlessEvidenceHistory(runID: String) async throws -> ConductorRunManifest? {
+        guard Self.isValidRunID(runID) else {
+            throw ConductorRunStoreError.invalidRunID(runID)
+        }
+        let runDirectory = directory.runDirectoryURL(for: runID)
+        var isDirectory: ObjCBool = false
+        let manager = FileManager.default
+        guard
+            manager.fileExists(atPath: runDirectory.path, isDirectory: &isDirectory),
+            isDirectory.boolValue,
+            !manager.fileExists(atPath: manifestURL(for: runID).path)
+        else { return nil }
+        let values = try? runDirectory.resourceValues(forKeys: [
+            .creationDateKey,
+            .contentModificationDateKey,
+        ])
+        let evidenceDate =
+            values?.creationDate ?? values?.contentModificationDate ?? .distantPast
+        return ConductorRunRecoveryService.manifestlessEvidenceHistory(
+            runID: runID,
+            evidenceDate: evidenceDate)
     }
 
     /// Every run directory under `.rafu/runs/`, sorted. An absent `runs/`
@@ -143,6 +194,30 @@ nonisolated struct ConductorRunStore: Sendable {
             context.debugDescription
         @unknown default:
             "the manifest could not be decoded"
+        }
+    }
+
+    /// Builds the evidence directory privately, then renames it into place on
+    /// the same volume. The visible run directory always arrives with a whole
+    /// `manifest.json`; a crash can leave only an ignored temporary sibling.
+    private func writeInitialManifest(_ data: Data, runID: String) throws {
+        let manager = FileManager.default
+        try manager.createDirectory(at: directory.runsURL, withIntermediateDirectories: true)
+        let temporaryDirectory = directory.runsURL.appending(
+            path: ".\(runID).initial-\(UUID().uuidString)",
+            directoryHint: .isDirectory)
+        let runDirectory = directory.runDirectoryURL(for: runID)
+        try manager.createDirectory(at: temporaryDirectory, withIntermediateDirectories: false)
+        do {
+            try data.write(
+                to: temporaryDirectory.appending(
+                    path: Self.manifestFileName,
+                    directoryHint: .notDirectory),
+                options: .atomic)
+            try manager.moveItem(at: temporaryDirectory, to: runDirectory)
+        } catch {
+            try? manager.removeItem(at: temporaryDirectory)
+            throw error
         }
     }
 }

@@ -18,6 +18,47 @@ private enum ConductorRunsPanelSection: String, CaseIterable, Identifiable {
     }
 }
 
+/// Content-free Activity-row presentation. Keep the run identifier and every
+/// state symbol/text pair outside the view body so the event feed remains
+/// directly testable without constructing a SwiftUI hierarchy.
+nonisolated enum ConductorActivityPresentation {
+    static func shortRunID(for runID: String) -> String {
+        let trimmed = runID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "Run unavailable" }
+        return "Run \(trimmed.prefix(8))"
+    }
+
+    static func statusSymbol(for state: EnsembleRunState) -> String {
+        switch state {
+        case .pending: "circle.dotted"
+        case .running: "circle.fill"
+        case .awaitingGate: "pause.circle.fill"
+        case .awaitingPlanGate: "doc.text.magnifyingglass"
+        case .awaitingMergeGate: "arrow.triangle.merge"
+        case .completed: "checkmark.circle.fill"
+        case .failed: "xmark.circle.fill"
+        case .aborted: "slash.circle.fill"
+        case .interrupted: "bolt.horizontal.circle.fill"
+        case .merged: "checkmark.seal.fill"
+        }
+    }
+
+    static func statusLabel(for state: EnsembleRunState) -> String {
+        switch state {
+        case .pending: "Pending"
+        case .running: "Running"
+        case .awaitingGate: "Awaiting gate"
+        case .awaitingPlanGate: "Awaiting plan gate"
+        case .awaitingMergeGate: "Awaiting merge gate"
+        case .completed: "Completed"
+        case .failed: "Failed"
+        case .aborted: "Aborted"
+        case .interrupted: "Interrupted"
+        case .merged: "Merged"
+        }
+    }
+}
+
 /// `.runs` navigator panel: C5 run history plus C6's file-backed workflow
 /// library in one segmented view.
 ///
@@ -558,15 +599,26 @@ private struct ConductorActivityRow: View {
                         .foregroundStyle(theme.palette.textSecondary)
                         .lineLimit(1)
                 }
+                RafuChip(text: ConductorActivityPresentation.shortRunID(for: event.runID))
+                    .accessibilityLabel(
+                        "Run identifier \(ConductorActivityPresentation.shortRunID(for: event.runID))"
+                    )
                 Spacer(minLength: 4)
                 Text(event.at, style: .relative)
                     .font(.caption2)
                     .foregroundStyle(theme.palette.textMuted)
             }
-            Text(summary)
-                .font(.caption)
-                .foregroundStyle(theme.palette.textPrimary)
-                .lineLimit(2)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                if let state = event.state {
+                    Image(systemName: ConductorActivityPresentation.statusSymbol(for: state))
+                        .font(.caption)
+                        .accessibilityHidden(true)
+                }
+                Text(summary)
+                    .font(.caption)
+                    .foregroundStyle(theme.palette.textPrimary)
+                    .lineLimit(2)
+            }
             if let openRun {
                 Button("Open Run", action: openRun)
                     .buttonStyle(RafuSecondaryButtonStyle(compact: true))
@@ -574,7 +626,9 @@ private struct ConductorActivityRow: View {
         }
         .padding(.vertical, 3)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(summary)
+        .accessibilityLabel(
+            "\(ConductorActivityPresentation.shortRunID(for: event.runID)), \(summary)"
+        )
     }
 
     private var summary: String {
@@ -587,7 +641,7 @@ private struct ConductorActivityRow: View {
             return "\(identity): \(String(note.prefix(120)))"
         }
         if let state = event.state {
-            return "\(identity) → \(state.activityLabel)"
+            return "\(identity) → \(ConductorActivityPresentation.statusLabel(for: state))"
         }
         return "\(identity) · \(String(event.kind.prefix(48)))"
     }
@@ -596,23 +650,6 @@ private struct ConductorActivityRow: View {
 extension String {
     fileprivate var nilIfEmpty: String? {
         isEmpty ? nil : self
-    }
-}
-
-extension EnsembleRunState {
-    fileprivate var activityLabel: String {
-        switch self {
-        case .pending: "Pending"
-        case .running: "Running"
-        case .awaitingGate: "Awaiting gate"
-        case .awaitingPlanGate: "Awaiting plan gate"
-        case .awaitingMergeGate: "Awaiting merge gate"
-        case .completed: "Completed"
-        case .failed: "Failed"
-        case .aborted: "Aborted"
-        case .interrupted: "Interrupted"
-        case .merged: "Merged"
-        }
     }
 }
 
