@@ -257,8 +257,9 @@ final class WorkspaceTerminalController: Identifiable {
     private var delegateProxy: DelegateProxy?
     @ObservationIgnored
     private var appliedStyleSignature = ""
-    /// Non-`nil` only for a Conductor session whose spec names an
-    /// `outputLogURL` — the login-shell path never constructs one.
+    /// Non-`nil` only for an Ensemble run session whose spec names an
+    /// `outputLogURL` — the login-shell and Agent Terminal paths never
+    /// construct one.
     /// Retained so its consumer `Task` (and the `FileHandle` it owns) stay
     /// alive for the session's lifetime; released once `finish()` has been
     /// called from both process-exit paths below.
@@ -290,6 +291,20 @@ final class WorkspaceTerminalController: Identifiable {
     /// Non-`nil` only for a tokenless interactive Agent Terminal. Ensemble
     /// run terminals and ordinary login shells intentionally return `nil`.
     var agentProvider: ConductorCLIID? { processSpec?.agentProvider }
+
+    /// The existing run-terminal seam: only an Ensemble step names an
+    /// evidence `outputLogURL`. The terminal canvas uses this to omit the
+    /// ordinary shell restart overlay after a completed step; plain shells
+    /// and tokenless Agent Terminals remain restartable.
+    var isEnsembleRunTerminal: Bool { processSpec?.outputLogURL != nil }
+
+    /// The terminal canvas asks this one presentation seam whether its
+    /// ordinary exited-shell overlay applies. A completed Ensemble step is
+    /// evidence, not a reusable shell, so it deliberately has no restart
+    /// control; all other exited terminal sessions keep one.
+    var showsShellExitedOverlay: Bool {
+        TerminalSessionPresentation.isExited(status) && !isEnsembleRunTerminal
+    }
 
     /// Whether this session's live view currently sits in the KEY window —
     /// part of the "not focused" test for bell attention (terminal-manager
@@ -410,6 +425,12 @@ final class WorkspaceTerminalController: Identifiable {
             if let outputLogURL = processSpec.outputLogURL {
                 let capture = ConductorRunOutputCapture(outputLogURL: outputLogURL)
                 outputCapture = capture
+                view.onOutputRender = { [weak capture] slice in
+                    capture?.render(slice) ?? Data(slice)
+                }
+                view.onOutputRenderFinish = { [weak capture] in
+                    capture?.finishRendering() ?? Data()
+                }
                 view.onOutputCapture = { [weak capture] slice in
                     capture?.record(slice)
                 }
@@ -509,6 +530,7 @@ final class WorkspaceTerminalController: Identifiable {
 
     func shutdown() {
         stopQuiescenceTracking()
+        terminalView?.flushRenderedOutput()
         terminalView?.terminate()
         terminalView = nil
         delegateProxy = nil
@@ -571,6 +593,7 @@ final class WorkspaceTerminalController: Identifiable {
     func processDidTerminate(exitCode: Int32?) {
         stopQuiescenceTracking()
         status = .exited(code: exitCode)
+        terminalView?.flushRenderedOutput()
         terminalView = nil
         delegateProxy = nil
         appliedStyleSignature = ""

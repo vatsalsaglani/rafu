@@ -21,7 +21,7 @@ struct EditorTerminalTabContent: View {
             // exited either — testing `isRunning` here would wrongly show
             // "Shell exited" for a belling session. `isExited` is the
             // pure, separately-tested predicate for the actual exit state.
-            if TerminalSessionPresentation.isExited(controller.status) {
+            if controller.showsShellExitedOverlay {
                 shellExitedOverlay
             }
         }
