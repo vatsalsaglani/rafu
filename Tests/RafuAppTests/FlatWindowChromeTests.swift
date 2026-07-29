@@ -72,6 +72,45 @@ struct FlatWindowChromeTests {
         #expect(window.titlebarAppearsTransparent)
     }
 
+    @Test("Resigning key re-applies chrome for the inactive window")
+    func resigningKeyReappliesChrome() {
+        let window = makeWindow()
+        let coordinator = FlatWindowChrome.Coordinator()
+        defer { coordinator.detach() }
+        coordinator.bind(to: window)
+
+        window.titlebarAppearsTransparent = false
+
+        NotificationCenter.default.post(
+            name: NSWindow.didResignKeyNotification,
+            object: window
+        )
+
+        #expect(window.titlebarAppearsTransparent)
+    }
+
+    @Test("Entering full screen reports state and re-applies flat chrome")
+    func fullScreenEntryReportsAndReappliesChrome() {
+        let window = makeWindow()
+        let coordinator = FlatWindowChrome.Coordinator()
+        defer { coordinator.detach() }
+        var reported: Bool?
+        coordinator.onFullScreenChange = { reported = $0 }
+        coordinator.bind(to: window)
+
+        window.titleVisibility = .visible
+        window.titlebarAppearsTransparent = false
+
+        NotificationCenter.default.post(
+            name: NSWindow.didEnterFullScreenNotification,
+            object: window
+        )
+
+        #expect(reported == true)
+        #expect(window.titleVisibility == .hidden)
+        #expect(window.titlebarAppearsTransparent)
+    }
+
     /// The content merge relies on the WINDOW-level safe-area cancellation
     /// (`additionalSafeAreaInsets.top = -base`), not per-view
     /// `.ignoresSafeArea` — split-view panes re-derive the safe area on
