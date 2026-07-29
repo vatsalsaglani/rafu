@@ -399,11 +399,10 @@ Everything else is polish I can chase afterwards.
   and version were confirmed during the Cursor-focused 2026-07-27 pass.
   Cline is also installed under nvm; if either installed CLI reads "not found,"
   that is a regression of the launchd-PATH fix, not a known limitation.
-- **Cursor CLI is authenticated on this Mac as of 2026-07-27**, but Rafu's
-  adapter has drifted from Cursor 2026.07.23. The CLI now supports plan mode
-  and model listing; Rafu still fails `readOnly` closed and still defaults an
-  empty model to the now-invalid `gpt-5`. A Cursor write role using the
-  account-supported `auto` model was verified in a scratch repository. See
+- **Cursor CLI is authenticated on this Mac as of 2026-07-29.** Model
+  discovery and the `auto` write mapping work, but `--mode plan --sandbox
+  enabled` still wrote a repository sentinel in the R5 probe. Rafu therefore
+  fails Cursor `readOnly` roles closed. See
   [`conductor-cli-capability-matrix.md`](../../../references/conductor-cli-capability-matrix.md).
 - **`readOnly` may remain unsupported by an adapter even after its vendor adds
   a plan mode.** Until that mapping is re-probed and implemented, the role
@@ -415,9 +414,9 @@ Everything else is polish I can chase afterwards.
   Dynamic planning, parallel step fan-out, and agent-driven merges are
   analysed in [`orchestration-gap-analysis.md`](orchestration-gap-analysis.md)
   as candidate C8 work.
-- **As of 2026-07-29, only Claude Code supports the complete `readOnly` plus
-  handoff-write contract.** Codex, OpenCode, Cline, Cursor, Gemini, and Kimi
-  read-only roles stop before process spawn with a message that names the
-  unverified vendor limitation. R5 owns the scoped-write probes for Codex,
-  OpenCode, Cline, and Cursor; Gemini and Kimi remain under the unverified
-  runtime limitation above.
+- **As of 2026-07-29, Claude Code, Codex, and OpenCode support the complete
+  `readOnly` plus handoff-write contract.** Cline read-only roles stop before
+  process spawn because headless plan mode needs interactive tool approval.
+  Cursor roles stop before spawn because its plan mode still allowed a
+  repository write in the R5 probe. Gemini and Kimi remain under the
+  unverified runtime limitation above.

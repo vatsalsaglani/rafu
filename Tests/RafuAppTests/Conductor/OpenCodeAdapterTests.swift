@@ -48,7 +48,7 @@ func openCodeRegistryAndModels() async {
     #expect(adapter.supportsModelDiscovery == (discovered != nil))
 }
 
-@Test("OpenCode 1.18.4 recorded fixtures classify only worktree-write as supported")
+@Test("OpenCode 1.18.4 recorded fixtures classify both safe launch modes")
 func openCodeProbeFixtureClassification() async throws {
     let version = try openCodeFixture("version-1.18.4.txt")
     let help = try openCodeFixture("run-help-1.18.4.txt")
@@ -60,7 +60,7 @@ func openCodeProbeFixtureClassification() async throws {
     #expect(classification.probe.installed)
     #expect(classification.probe.executableURL == openCodeExecutable)
     #expect(classification.probe.version == "1.18.4")
-    #expect(classification.supportedAutonomies == [.worktreeWrite])
+    #expect(classification.supportedAutonomies == [.readOnly, .worktreeWrite])
     #expect(classification.hasHeadlessMode)
 }
 
@@ -101,27 +101,28 @@ func openCodeProbeRejectsChurnedHelp() {
     #expect(classification.probe.version?.contains("adapter needs update") == true)
 }
 
-@Test("OpenCode read-only fails without putting the prompt in any argv")
-func openCodeReadOnlyIsUnsupported() {
+@Test("OpenCode read-only receives its prompt and the scoped handoff agent")
+func openCodeReadOnlyUsesScopedHandoffAgent() {
     let hostile = "inspect; rm -rf / and $(whoami) and `id`"
     let adapter = OpenCodeAdapter(executableURL: openCodeExecutable)
+    let workingDirectory = URL(fileURLWithPath: "/tmp/rafu-c3-readonly-worktree")
+    let runDirectory = workingDirectory.appending(path: ".rafu/runs/step-1")
+    let handoffDirectory = runDirectory.appending(path: "handoff")
     let invocation = adapter.invocation(
         prompt: hostile,
         model: "opencode/big-pickle",
         autonomy: .readOnly,
-        workingDirectory: openCodeWorkingDirectory,
-        runDirectory: openCodeRunDirectory,
-        handoffDirectory: openCodeHandoffDirectory)
+        workingDirectory: workingDirectory,
+        runDirectory: runDirectory,
+        handoffDirectory: handoffDirectory)
 
-    #expect(invocation.executableURL.path == "/usr/bin/false")
-    #expect(invocation.arguments.isEmpty)
-    #expect(!invocation.arguments.contains(hostile))
-    #expect(
-        invocation.environment[RafuConductorEnvironment.runDirectory]
-            == openCodeRunDirectory.path)
-    #expect(
-        invocation.environment[RafuConductorEnvironment.handoff]
-            == openCodeHandoffDirectory.path)
+    #expect(adapter.readOnlyHandoffSupport == .supported)
+    #expect(invocation.executableURL == openCodeExecutable)
+    #expect(invocation.arguments.contains("--pure"))
+    #expect(invocation.arguments.contains("rafu-readonly-handoff"))
+    #expect(invocation.arguments.contains(hostile))
+    #expect(!invocation.arguments.contains("--auto"))
+    #expect(invocation.environment["OPENCODE_CONFIG_CONTENT"] != nil)
 }
 
 @Test(

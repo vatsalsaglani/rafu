@@ -40,11 +40,9 @@ func claudeReadOnlyInvocationUsesScopedHandoffPermission() throws {
         invocation.environment[RafuConductorEnvironment.readOnlyHandoffUnsupportedReason] == nil)
 }
 
-@Test("Unprobed adapters declare the read-only handoff contract unsupported")
-func unprobedAdaptersDeclareReadOnlyHandoffUnsupported() {
+@Test("Adapters without a verified read-only handoff mapping stay unsupported")
+func unsupportedAdaptersDeclareReadOnlyHandoffUnsupported() {
     let adapters: [any ConductorCLIAdapter] = [
-        CodexAdapter(executableURL: URL(fileURLWithPath: "/fixture/bin/codex")),
-        OpenCodeAdapter(executableURL: URL(fileURLWithPath: "/fixture/bin/opencode")),
         ClineAdapter(executableURL: URL(fileURLWithPath: "/fixture/bin/cline")),
         CursorAdapter(cachedExecutableURL: URL(fileURLWithPath: "/fixture/bin/cursor-agent")),
         GeminiCLIAdapter(cachedExecutableURL: URL(fileURLWithPath: "/fixture/bin/gemini")),
@@ -64,9 +62,9 @@ func unprobedAdaptersDeclareReadOnlyHandoffUnsupported() {
 @Test("Workspace launcher rejects an unsupported read-only adapter before spawn")
 func workspaceLauncherRejectsUnsupportedReadOnlyBeforeSpawn() {
     let reason =
-        "OpenCode does not yet have a verified read-only mode that permits the required Ensemble handoff write."
+        "Cline does not yet have a verified read-only mode that permits the required Ensemble handoff write."
     let adapter = FakeConductorAdapter(
-        id: .openCode,
+        id: .cline,
         readOnlyHandoffSupport: .unsupported(reason: reason))
     let runDirectory = URL(fileURLWithPath: "/tmp/rafu-readonly-launch/run")
     let handoffDirectory = runDirectory.appending(path: "handoff")
