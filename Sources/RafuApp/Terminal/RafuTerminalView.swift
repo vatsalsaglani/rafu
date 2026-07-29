@@ -42,7 +42,7 @@ final class RafuTerminalView: LocalProcessTerminalView {
     /// Content is never passed — timing and volume only.
     var onOutputActivity: ((Int) -> Void)?
 
-    /// Conductor run-evidence hook (`conductor/C1-single-role-runs.md`): called with the raw pty
+    /// Conductor run-evidence hook (`conductor/C1-single-role-runs.md`): called with the displayed
     /// slice for every read, for a Conductor session's controller to tee
     /// into `.rafu/runs/<id>/logs/output.log`. Distinct from
     /// `onOutputActivity` above — that hook stays count-only, never content,
@@ -51,6 +51,16 @@ final class RafuTerminalView: LocalProcessTerminalView {
     /// Conductor session's controller wires it.
     var onOutputCapture: ((ArraySlice<UInt8>) -> Void)?
 
+    /// Optional display-only byte renderer for an Ensemble run. When absent,
+    /// the exact raw PTY bytes continue into SwiftTerm, so login shells and
+    /// Agent Terminals keep their existing behavior.
+    var onOutputRender: ((ArraySlice<UInt8>) -> Data)?
+
+    /// Supplies a final unterminated rendered line when a process exits.
+    /// Kept separate from `onOutputRender` so line-buffered JSON is never
+    /// lost merely because its final newline raced process termination.
+    var onOutputRenderFinish: (() -> Data)?
+
     /// `LocalProcess` delivers pty reads here (the view is its delegate and
     /// `dataReceived` is `open` — unlike `feed`, which is only `public`).
     /// Tap the byte count for activity tracking, then let SwiftTerm parse
@@ -58,9 +68,23 @@ final class RafuTerminalView: LocalProcessTerminalView {
     nonisolated override func dataReceived(slice: ArraySlice<UInt8>) {
         MainActor.assumeIsolated {
             onOutputActivity?(slice.count)
-            onOutputCapture?(slice)
-            super.dataReceived(slice: slice)
+            let displayed = onOutputRender?(slice) ?? Data(slice)
+            guard !displayed.isEmpty else { return }
+            let displayedSlice = ArraySlice(displayed)
+            onOutputCapture?(displayedSlice)
+            super.dataReceived(slice: displayedSlice)
         }
+    }
+
+    /// Feeds the final line produced by a display renderer through the same
+    /// terminal-and-evidence path as ordinary PTY output. This method never
+    /// participates in process completion; it has no exit callback.
+    func flushRenderedOutput() {
+        let displayed = onOutputRenderFinish?() ?? Data()
+        guard !displayed.isEmpty else { return }
+        let displayedSlice = ArraySlice(displayed)
+        onOutputCapture?(displayedSlice)
+        super.dataReceived(slice: displayedSlice)
     }
 
     /// Parser handlers run synchronously inside `feed` on the main thread —

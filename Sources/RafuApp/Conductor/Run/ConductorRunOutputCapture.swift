@@ -1,6 +1,6 @@
 import Foundation
 
-/// Tees one Conductor run's raw PTY output to
+/// Tees one Conductor run's rendered PTY output to
 /// `.rafu/runs/<id>/logs/output.log` — evidence only, never Rafu's own
 /// logging (AGENTS.md: process/document content is never logged). Bounded to
 /// `byteCap` so a runaway or hostile child cannot grow the run directory
@@ -32,14 +32,41 @@ final class ConductorRunOutputCapture {
 
     private let continuation: AsyncStream<Data>.Continuation
     private let consumerTask: Task<Void, Never>
+    private let renderer: any ConductorRunOutputRendering
     private var bytesWritten = 0
     private var didTruncate = false
 
-    init(outputLogURL: URL) {
+    init(
+        outputLogURL: URL,
+        renderer: (any ConductorRunOutputRendering)? = nil
+    ) {
+        self.renderer = renderer ?? ConductorRunTerminalOutputRenderer()
         let (stream, continuation) = AsyncStream<Data>.makeStream()
         self.continuation = continuation
         consumerTask = Task {
             await Self.drain(stream, into: outputLogURL)
+        }
+    }
+
+    /// Renders the raw PTY bytes before both the terminal and `output.log`
+    /// receive them. This is display/evidence work only: an error falls back
+    /// to the original bytes and is never reported to a run controller.
+    func render(_ slice: ArraySlice<UInt8>) -> Data {
+        do {
+            return try renderer.render(slice)
+        } catch {
+            return Data(slice)
+        }
+    }
+
+    /// Emits a final unterminated line when the child exits. The production
+    /// renderer never throws; an injected renderer failure has no run-state
+    /// path and therefore safely emits no synthetic completion signal.
+    func finishRendering() -> Data {
+        do {
+            return try renderer.finish()
+        } catch {
+            return Data()
         }
     }
 
