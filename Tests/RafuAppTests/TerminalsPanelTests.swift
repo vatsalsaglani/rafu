@@ -267,12 +267,11 @@ func agentLauncherResolvedRowsCarryReasons() throws {
         AgentLauncherModel.headerTitle(rows: rows, isProbing: false) == "Agents (2 of 4 ready)")
 }
 
-@Test("Icon-only cards carry the provider name in the tooltip in every state")
+@Test("Named launch cells retain full provider help in every state")
 func agentLauncherTooltipsAlwaysNameTheProvider() throws {
-    // UX2-03 removed the visible name from the launcher card, so the tooltip
-    // and the accessibility label are the ONLY carriers of the provider's
-    // identity for pointer and VoiceOver users respectively. Neither may ever
-    // reduce to a bare state string.
+    // WP-30 restores a visible short provider name. Tooltip and accessibility
+    // strings still carry the full provider plus readiness/reason, so neither
+    // may ever reduce to a bare state string.
     for row in AgentLauncherModel.probingRows() {
         #expect(row.tooltip.contains(row.displayName))
         #expect(row.tooltip.contains("checking"))
@@ -516,10 +515,11 @@ struct TerminalIdentityGlyphTests {
         #expect(
             panel.contains(
                 #"\(TerminalSessionPresentation.label(row.status)) · \(row.shellName)"#))
-        // The old status glyph must not come back to the well: two competing
-        // signals in one slot is what this change removed.
+        // The status glyph now sits beside status text in the caption, not in
+        // the identity well. This shape+text pair keeps attention and exit
+        // legible without hue.
         #expect(
-            !panel.contains("Image(systemName: TerminalSessionPresentation.symbol(row.status))"))
+            panel.contains("Image(systemName: TerminalSessionPresentation.symbol(row.status))"))
         // And the mark must not ALSO sit beside the name — one row, one mark.
         #expect(!panel.contains("ConductorCLIIcons.icon(for: provider), size: 14"))
     }
