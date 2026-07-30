@@ -10,7 +10,9 @@ struct AIProviderSettingsSection: View {
     var body: some View {
         @Bindable var model = model
 
-        Section {
+        RafuSettingsSection {
+            Text("Commit Message Providers")
+        } content: {
             VStack(alignment: .leading, spacing: 14) {
                 providerToolbar(model: model)
                 Divider()
@@ -18,8 +20,6 @@ struct AIProviderSettingsSection: View {
                 actionRow(model: model)
             }
             .padding(.vertical, 4)
-        } header: {
-            Text("Commit Message Providers")
         } footer: {
             Text(
                 "Keys stay in this Mac’s Keychain. Only explicitly selected diffs are sent when "

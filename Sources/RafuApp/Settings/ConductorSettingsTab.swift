@@ -12,17 +12,26 @@ struct ConductorSettingsSection: View {
     @State private var model = ConductorSettingsModel()
 
     var body: some View {
-        Section {
+        RafuSettingsSection {
+            Text("Agent CLIs")
+        } content: {
             if model.rows.isEmpty {
-                Text("No agent CLIs are available yet.")
-                    .foregroundStyle(.secondary)
+                RafuSettingsRow {
+                    Text("No agent CLIs are available yet.")
+                        .foregroundStyle(.secondary)
+                }
             } else {
-                ForEach(model.rows) { row in
-                    ConductorAdapterRow(row: row, model: model)
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(model.rows.enumerated()), id: \.element.id) { index, row in
+                        if index > 0 {
+                            Divider()
+                        }
+                        RafuSettingsRow {
+                            ConductorAdapterRow(row: row, model: model)
+                        }
+                    }
                 }
             }
-        } header: {
-            Text("Agent CLIs")
         } footer: {
             Text(
                 "Rafu runs the agent CLIs you already have installed, under your own subscriptions. It never stores, reads, or forwards a sign-in token — log in inside each CLI. Nothing runs until you start a run."

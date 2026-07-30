@@ -15,54 +15,76 @@ struct ThemeSettingsSection: View {
     private let service = ThemeFileService()
 
     var body: some View {
-        Section("Theme") {
-            Picker("Active theme", selection: $themeChoice) {
-                Section("Built in") {
-                    ForEach(RafuThemeChoice.allCases) { choice in
-                        Text(choice.title).tag(choice.rawValue)
-                    }
-                }
-                if !userThemes.isEmpty {
-                    Section("Custom") {
-                        ForEach(userThemes) { theme in
-                            Text(theme.name).tag(theme.id)
+        RafuSettingsSection {
+            Text("Theme")
+        } content: {
+            VStack(alignment: .leading, spacing: RafuMetrics.space2) {
+                RafuSettingsRow {
+                    Picker("Active theme", selection: $themeChoice) {
+                        Section("Built in") {
+                            ForEach(RafuThemeChoice.allCases) { choice in
+                                Text(choice.title).tag(choice.rawValue)
+                            }
+                        }
+                        if !userThemes.isEmpty {
+                            Section("Custom") {
+                                ForEach(userThemes) { theme in
+                                    Text(theme.name).tag(theme.id)
+                                }
+                            }
                         }
                     }
                 }
-            }
+                Divider()
 
-            LazyVGrid(columns: [.init(.adaptive(minimum: 142), spacing: 10)], spacing: 10) {
-                ForEach(swatches) { swatch in
-                    ThemeSettingsCard(theme: swatch.theme, selected: themeChoice == swatch.id)
-                        .contentShape(.rect)
-                        .onTapGesture { themeChoice = swatch.id }
+                LazyVGrid(columns: [.init(.adaptive(minimum: 142), spacing: 10)], spacing: 10) {
+                    ForEach(swatches) { swatch in
+                        Button {
+                            themeChoice = swatch.id
+                        } label: {
+                            ThemeSettingsCard(
+                                theme: swatch.theme,
+                                selected: themeChoice == swatch.id
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Use \(swatch.theme.name) theme")
+                        .accessibilityAddTraits(
+                            themeChoice == swatch.id ? .isSelected : []
+                        )
+                        .help("Use \(swatch.theme.name) theme")
+                    }
                 }
-            }
+                Divider()
 
-            HStack {
-                Button("Create Copy…", systemImage: "plus.square.on.square") {
-                    newThemeName = "My Rafu Theme"
-                    isCreating = true
+                RafuSettingsRow {
+                    HStack {
+                        Button("Create Copy…", systemImage: "plus.square.on.square") {
+                            newThemeName = "My Rafu Theme"
+                            isCreating = true
+                        }
+                        Button("Import JSON…", systemImage: "square.and.arrow.down") {
+                            isImporting = true
+                        }
+                        Button("Reload", systemImage: "arrow.clockwise") {
+                            Task { await reloadThemes() }
+                        }
+                        Spacer()
+                        Button("Reveal Theme Folder", systemImage: "folder") {
+                            revealThemeFolder()
+                        }
+                    }
+                    .labelStyle(.iconOnly)
                 }
-                Button("Import JSON…", systemImage: "square.and.arrow.down") {
-                    isImporting = true
-                }
-                Button("Reload", systemImage: "arrow.clockwise") {
-                    Task { await reloadThemes() }
-                }
-                Spacer()
-                Button("Reveal Theme Folder", systemImage: "folder") {
-                    revealThemeFolder()
-                }
-            }
-            .labelStyle(.iconOnly)
 
-            Text(
-                "Create a copy to edit Rafu’s JSON color tokens, or import a validated theme. "
-                    + "Changes take effect after Reload; restarting is not required."
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
+                Text(
+                    "Create a copy to edit Rafu’s JSON color tokens, or import a validated theme. "
+                        + "Changes take effect after Reload; restarting is not required."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .task { await reloadThemes() }
         .fileImporter(
