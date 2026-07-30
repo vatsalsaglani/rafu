@@ -227,6 +227,35 @@ Use the single Rafu Lightning GUI lease or hand off exact deferred states.
 Commit only owned paths, do not push, and remove `.build` after the green
 commit.
 
+## Implementation record
+
+- **Status:** Implemented on `codex/presentation-utility-panels`.
+- The utility host is now headerless and solid, while Search, Source Control,
+  and Ensemble each own one concrete, top-pinned
+  `RafuUtilityPanelHeader`. The sidebar toggle and utility activity rail use
+  the shared rail style without decorative selection animation.
+- Search keeps the query dominant, exposes labelled case/word/regex controls,
+  and places include/exclude fields in a disclosure that cannot collapse while
+  either filter is active. Search, Source Control, and Ensemble use the shared
+  empty-state grammar without inventing actions.
+- `SourceControlPanelView` owns both repository states. Repository context,
+  explicit Git operations, changes/worktrees/history, commit drafting, and
+  repository initialization retain their existing user-action boundaries.
+- Ensemble keeps its Runs/Workflows/Activity modes and actions under one
+  header; New Run uses the attached workbench-tab seam.
+- The branch selector remains a native `.popover`, with bounded geometry,
+  independent current/highlight presentation, middle truncation, and full
+  branch names in help/accessibility text.
+- Focused Search/Git/Runs/dropdown/presentation verification passed: 68 tests,
+  0 failures.
+- The shared Rafu Lightning identity was already running without this lane
+  holding the coordinator GUI lease. The complete utility-width, panel-state,
+  branch-edge, keyboard-only, VoiceOver, rail-state, Indigo/Khadi, contrast,
+  accessibility-text-size, and WP-30 terminal-header matrix is therefore
+  deferred explicitly to the post-WP-30 merge-round lease.
+- No ADR changed, no reusable platform nuance was discovered, and no reference
+  note or reference-index row is intended.
+
 ## Goal-mode start prompt
 
 ```text

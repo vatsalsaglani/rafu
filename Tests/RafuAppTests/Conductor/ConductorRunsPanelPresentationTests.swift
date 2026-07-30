@@ -50,8 +50,30 @@ struct ConductorRunsPanelPresentationTests {
 
         #expect(runCanvas.contains(".onExitCommand(perform: session.closeEnsembleNewRun)"))
         #expect(runCanvas.contains(".frame(maxWidth: 600"))
-        #expect(runCanvas.contains(".accessibilityLabel(\"Close New Ensemble Run\")"))
-        #expect(runCanvas.contains(".help(\"Close New Ensemble Run\")"))
+        #expect(runCanvas.contains("AttachedWorkbenchTab(isSelected: true"))
+        #expect(runCanvas.contains("AttachedWorkbenchTabCloseButton("))
+        #expect(runCanvas.contains("accessibilityLabel: \"Close New Ensemble Run\""))
+        #expect(runCanvas.contains("help: \"Close New Ensemble Run\""))
+    }
+
+    @Test("Runs uses one Ensemble header, three real modes, and shared empty states")
+    func runsPanelHierarchyContract() throws {
+        let root = try repositoryRoot()
+        let runsPanel = try source(
+            "Sources/RafuApp/Views/ConductorRunsPanelView.swift", root: root
+        )
+
+        #expect(runsPanel.components(separatedBy: "RafuUtilityPanelHeader(").count - 1 == 1)
+        #expect(runsPanel.contains("title: \"Ensemble\""))
+        #expect(runsPanel.contains("items: ConductorRunsPanelSection.allCases"))
+        #expect(runsPanel.contains("RafuPanelEmptyState("))
+        #expect(runsPanel.contains(".buttonStyle(RafuProminentButtonStyle())"))
+        #expect(
+            runsPanel.range(
+                of: #""[^"\n]*Conductor[^"\n]*""#,
+                options: .regularExpression
+            ) == nil
+        )
     }
 
     @Test("Runs header icons have labels, tooltips, and menu/palette equivalents")

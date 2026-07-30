@@ -154,58 +154,55 @@ struct ConductorRunsPanelView: View {
     }
 
     private var header: some View {
-        RafuCardHeaderRow {
-            HStack(spacing: 6) {
-                Image(systemName: WorkspaceNavigatorMode.runs.symbolName)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(theme.palette.textSecondary)
-                Text("Ensemble")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(theme.palette.textPrimary)
-            }
-        } trailing: {
-            HStack(spacing: 4) {
-                Button("Graph", systemImage: "point.3.connected.trianglepath.dotted") {
-                    session.showConductorGraph()
-                }
-                .buttonStyle(RafuIconButtonStyle(size: 24))
-                .help("Show Ensemble Graph")
-                .accessibilityLabel("Show Ensemble Graph")
-                .disabled(session.rootURL == nil)
-                if section == .workflows {
-                    Menu("New from Template", systemImage: "doc.badge.plus") {
-                        ForEach(ConductorBundledTemplateCatalog.templates) { template in
-                            Menu(template.displayName) {
-                                Button("Repository") {
-                                    instantiate(template: template, scope: .repository)
-                                }
-                                Button("User") {
-                                    instantiate(template: template, scope: .userGlobal)
+        RafuUtilityPanelHeader(
+            icon: WorkspaceNavigatorMode.runs.symbolName,
+            title: "Ensemble",
+            closeAccessibilityLabel: "Close Ensemble",
+            onClose: { session.navigatorMode = .files },
+            actions: {
+                HStack(spacing: 6) {
+                    Button("Graph", systemImage: "point.3.connected.trianglepath.dotted") {
+                        session.showConductorGraph()
+                    }
+                    .buttonStyle(RafuIconButtonStyle(size: 24))
+                    .help("Show Ensemble Graph")
+                    .accessibilityLabel("Show Ensemble Graph")
+                    .disabled(session.rootURL == nil)
+                    if section == .workflows {
+                        Menu("New from Template", systemImage: "doc.badge.plus") {
+                            ForEach(ConductorBundledTemplateCatalog.templates) { template in
+                                Menu(template.displayName) {
+                                    Button("Repository") {
+                                        instantiate(template: template, scope: .repository)
+                                    }
+                                    Button("User") {
+                                        instantiate(template: template, scope: .userGlobal)
+                                    }
                                 }
                             }
                         }
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+                        .help("New from Template")
+                        .disabled(libraryModel.isMutating || session.rootURL == nil)
                     }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    .help("New from Template")
-                    .disabled(libraryModel.isMutating || session.rootURL == nil)
+                    Button("New Ensemble…", systemImage: "circle.hexagongrid") {
+                        session.showEnsembleStart()
+                    }
+                    .buttonStyle(RafuIconButtonStyle(size: 24))
+                    .help("New Ensemble…")
+                    .accessibilityLabel("New Ensemble")
+                    .disabled(session.rootURL == nil)
+                    Button("New Run…", systemImage: "plus") {
+                        session.showEnsembleNewRun()
+                    }
+                    .buttonStyle(RafuIconButtonStyle(size: 24))
+                    .help("New Run…")
+                    .accessibilityLabel("New Ensemble Run")
+                    .disabled(!canStartNewRun)
                 }
-                Button("New Ensemble…", systemImage: "circle.hexagongrid") {
-                    session.showEnsembleStart()
-                }
-                .buttonStyle(RafuIconButtonStyle(size: 24))
-                .help("New Ensemble…")
-                .accessibilityLabel("New Ensemble")
-                .disabled(session.rootURL == nil)
-                Button("New Run…", systemImage: "plus") {
-                    session.showEnsembleNewRun()
-                }
-                .buttonStyle(RafuIconButtonStyle(size: 24))
-                .help("New Run…")
-                .accessibilityLabel("New Ensemble Run")
-                .disabled(!canStartNewRun)
             }
-        }
+        )
     }
 
     @ViewBuilder
@@ -217,30 +214,29 @@ struct ConductorRunsPanelView: View {
         attributionByRunID: [String: String]
     ) -> some View {
         if let error = controller.runsLoadError {
-            ContentUnavailableView {
-                Label("Unable to Load Runs", systemImage: "exclamationmark.triangle")
-            } description: {
-                Text(error)
-            } actions: {
+            RafuPanelEmptyState(
+                icon: "exclamationmark.triangle",
+                title: "Unable to Load Runs",
+                message: error
+            ) {
                 Button("Try Again") {
                     Task { await controller.reloadRuns() }
                 }
+                .buttonStyle(RafuSecondaryButtonStyle())
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if rows.isEmpty {
-            ContentUnavailableView {
-                Label("No Runs Yet", systemImage: WorkspaceNavigatorMode.runs.symbolName)
-            } description: {
-                Text(
+            RafuPanelEmptyState(
+                icon: WorkspaceNavigatorMode.runs.symbolName,
+                title: "No Runs Yet",
+                message:
                     "Ensemble runs appear here once a run has been started. Rafu never starts one on its own."
-                )
-            } actions: {
+            ) {
                 Button("New Run…", systemImage: "plus") {
                     session.showEnsembleNewRun()
                 }
+                .buttonStyle(RafuProminentButtonStyle())
                 .disabled(!canStartNewRun)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             List(selection: runSelection) {
                 if !active.isEmpty {
@@ -278,12 +274,12 @@ struct ConductorRunsPanelView: View {
         let manifestsByID = Dictionary(
             uniqueKeysWithValues: session.conductorRuns.map { ($0.id, $0) })
         if activityEvents.isEmpty {
-            ContentUnavailableView {
-                Label("No Run Activity", systemImage: "waveform.path.ecg")
-            } description: {
-                Text("Bounded Ensemble lifecycle events appear here while this workspace is open.")
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            RafuPanelEmptyState(
+                icon: "waveform.path.ecg",
+                title: "No Run Activity",
+                message:
+                    "Bounded Ensemble lifecycle events appear here while this workspace is open."
+            )
         } else {
             List(activityEvents, id: \.cursor) { event in
                 let manifest = manifestsByID[event.runID]
@@ -306,23 +302,23 @@ struct ConductorRunsPanelView: View {
             ProgressView("Reading workflow files…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let error = libraryModel.errorMessage, libraryModel.workflows.isEmpty {
-            ContentUnavailableView {
-                Label("Unable to Load Workflows", systemImage: "exclamationmark.triangle")
-            } description: {
-                Text(error)
-            } actions: {
+            RafuPanelEmptyState(
+                icon: "exclamationmark.triangle",
+                title: "Unable to Load Workflows",
+                message: error
+            ) {
                 Button("Try Again") {
                     Task { await libraryModel.load(workspaceRoot: session.rootURL) }
                 }
+                .buttonStyle(RafuSecondaryButtonStyle())
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if libraryModel.workflows.isEmpty {
-            ContentUnavailableView {
-                Label("No Workflows Yet", systemImage: "list.bullet.rectangle")
-            } description: {
-                Text("Create an Ensemble workflow from a bundled template or add a Markdown file.")
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            RafuPanelEmptyState(
+                icon: "list.bullet.rectangle",
+                title: "No Workflows Yet",
+                message:
+                    "Create an Ensemble workflow from a bundled template or add a Markdown file."
+            )
         } else {
             VStack(spacing: 0) {
                 if let error = libraryModel.errorMessage {
@@ -729,7 +725,6 @@ struct ConductorNewRunCanvas: View {
     var body: some View {
         VStack(spacing: 0) {
             tabStrip
-            Divider().overlay(theme.palette.borderSubtle)
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("New Ensemble Run")
@@ -806,39 +801,44 @@ struct ConductorNewRunCanvas: View {
     }
 
     private var tabStrip: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "plus")
-                .font(.system(size: 11))
-                .foregroundStyle(theme.palette.info)
-                .accessibilityHidden(true)
-            Text("New Ensemble Run")
-                .lineLimit(1)
-                .foregroundStyle(theme.palette.textPrimary)
-            Button(
-                "Close New Ensemble Run",
-                systemImage: "xmark",
-                action: session.closeEnsembleNewRun
-            )
-            .buttonStyle(RafuIconButtonStyle(size: 18, iconSize: 9))
-            .help("Close New Ensemble Run")
-            .accessibilityLabel("Close New Ensemble Run")
+        HStack(alignment: .bottom, spacing: 0) {
+            AttachedWorkbenchTab(isSelected: true, usesDocumentWidth: true) {
+                HStack(spacing: 7) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.palette.info)
+                        .accessibilityHidden(true)
+                    Text("New Ensemble Run")
+                        .lineLimit(1)
+                    Spacer(minLength: RafuMetrics.space1)
+                    AttachedWorkbenchTabCloseButton(
+                        accessibilityLabel: "Close New Ensemble Run",
+                        help: "Close New Ensemble Run",
+                        action: session.closeEnsembleNewRun
+                    )
+                }
+            }
             Spacer()
         }
-        .font(.callout)
-        .padding(.horizontal, 10)
-        .frame(height: RafuMetrics.tabBarHeight)
+        .frame(minHeight: RafuMetrics.tabBarHeight, alignment: .bottom)
         .background(theme.palette.tabBarBackground)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(theme.palette.borderSubtle)
+                .frame(height: RafuMetrics.hairline)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
     }
 
     @ViewBuilder
     private var singleRoleForm: some View {
         if model.agents.isEmpty, model.errorMessage == nil {
-            ContentUnavailableView {
-                Label("No Agent Files", systemImage: "person.crop.rectangle.stack")
-            } description: {
-                Text("Add a Markdown role under .rafu/agents/ to start a run.")
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            RafuPanelEmptyState(
+                icon: "person.crop.rectangle.stack",
+                title: "No Agent Files",
+                message: "Add a Markdown role under .rafu/agents/ to start a run."
+            )
         } else {
             Form {
                 Picker("Agent file", selection: $model.selectedAgentID) {
@@ -887,14 +887,12 @@ struct ConductorNewRunCanvas: View {
     @ViewBuilder
     private var workflowForm: some View {
         if workflowModel.workflows.isEmpty, workflowModel.errorMessage == nil {
-            ContentUnavailableView {
-                Label("No Workflow Files", systemImage: "list.bullet.rectangle")
-            } description: {
-                Text(
+            RafuPanelEmptyState(
+                icon: "list.bullet.rectangle",
+                title: "No Workflow Files",
+                message:
                     "Add a repository or user Ensemble workflow, or create one from the Workflows library."
-                )
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            )
         } else {
             Form {
                 Picker("Workflow file", selection: selectedWorkflowBinding) {
