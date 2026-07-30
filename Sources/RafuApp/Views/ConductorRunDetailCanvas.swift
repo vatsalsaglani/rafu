@@ -9,7 +9,6 @@ import SwiftUI
 struct ConductorRunDetailCanvas: View {
     @Environment(\.rafuTheme) private var theme
     @Bindable var session: WorkspaceSession
-    @State private var isHoveringCloseTab = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -58,32 +57,25 @@ struct ConductorRunDetailCanvas: View {
 
     private var tabStrip: some View {
         HStack(spacing: 0) {
-            HStack(spacing: 7) {
-                Image(systemName: WorkspaceNavigatorMode.runs.symbolName)
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.palette.info)
-                    .accessibilityHidden(true)
-                Text(manifest.map { "Run • \($0.workflowName)" } ?? "Run")
-                    .lineLimit(1)
-                    .foregroundStyle(theme.palette.textPrimary)
-                Button("Close Run", systemImage: "xmark", action: session.closeConductorRunDetail)
-                    .buttonStyle(RafuIconButtonStyle(size: 18, iconSize: 9))
-                    .opacity(isHoveringCloseTab ? 1 : 0.75)
-                    .accessibilityHint("Closes the Ensemble run detail")
+            AttachedWorkbenchTab(isSelected: true) {
+                HStack(spacing: 6) {
+                    Image(systemName: WorkspaceNavigatorMode.runs.symbolName)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.palette.info)
+                        .accessibilityHidden(true)
+                    Text(manifest.map { "Run • \($0.workflowName)" } ?? "Run")
+                        .lineLimit(1)
+                    AttachedWorkbenchTabCloseButton(
+                        accessibilityLabel: "Close Run",
+                        help: "Close Ensemble run detail",
+                        action: session.closeConductorRunDetail
+                    )
+                }
+                .font(.callout)
             }
-            .font(.callout)
-            .padding(.horizontal, 10)
-            .frame(height: RafuMetrics.tabBarHeight)
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(theme.palette.accent).frame(height: 2)
-            }
-            .overlay(alignment: .trailing) {
-                Divider().frame(height: 18).overlay(theme.palette.borderSubtle)
-            }
-            .onHover { isHoveringCloseTab = $0 }
-            Spacer()
+            Spacer(minLength: 0)
         }
-        .frame(height: RafuMetrics.tabBarHeight)
+        .frame(minHeight: RafuMetrics.tabBarHeight)
         .background(theme.palette.tabBarBackground)
     }
 }

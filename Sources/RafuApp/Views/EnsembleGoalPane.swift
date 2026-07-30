@@ -47,6 +47,19 @@ struct EnsembleGoalPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusEditorGroup, style: .continuous)
+                .fill(theme.palette.editorBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusEditorGroup, style: .continuous)
+                .strokeBorder(
+                    isEditorFocused ? theme.palette.focusRing : theme.palette.borderSubtle,
+                    lineWidth: RafuMetrics.hairline
+                )
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        )
     }
 
     private var paneHeader: some View {
