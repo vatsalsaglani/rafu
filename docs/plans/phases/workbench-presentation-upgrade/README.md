@@ -2,10 +2,20 @@
 
 ## Status
 
-Planned on 2026-07-29. This is the execution contract for
+Originally planned on 2026-07-29. WP-00 through WP-60 are implemented and
+merged at integration commit
+`f1a276720fcf68b940da4927522fcfbf5e23cde0`. A hands-on review of that build on
+2026-07-30 produced eight bounded follow-ups in
+[`workbench-presentation-follow-ups.md`](../../../issues/workbench-presentation-follow-ups.md).
+WP-71 through WP-74 are the correction wave and all four can run concurrently
+from one exact follow-up plan commit. WP-90 remains serial and now runs only
+after those four corrections are merged.
+
+This is the execution contract for
 [`workbench-presentation-upgrade.md`](../workbench-presentation-upgrade.md).
 It splits that design into one contract-first foundation, six implementation
-plans that can run concurrently from the same foundation commit, and one final
+plans that ran concurrently from the same foundation commit, four follow-up
+plans that can run concurrently from the integrated result, and one final
 integration/visual-QA plan.
 
 This folder does not broaden the parent phase. In particular, it adds no
@@ -30,6 +40,12 @@ flowchart LR
     U["WP-40<br/>utility panels"]
     P["WP-50<br/>Settings"]
     N["WP-60<br/>Ensemble"]
+    M["Merged original wave<br/>f1a2767"]
+    A2["Follow-up plan commit<br/>one exact base SHA"]
+    E1["WP-71<br/>editor interactions"]
+    C1["WP-72<br/>chrome lifecycle"]
+    R1["WP-73<br/>responsive navigation"]
+    T1["WP-74<br/>terminal hierarchy/picker"]
     Q["WP-90<br/>integration and visual QA"]
 
     A --> F
@@ -39,12 +55,21 @@ flowchart LR
     F --> U
     F --> P
     F --> N
-    S --> Q
-    E --> Q
-    T --> Q
-    U --> Q
-    P --> Q
-    N --> Q
+    S --> M
+    E --> M
+    T --> M
+    U --> M
+    P --> M
+    N --> M
+    M --> A2
+    A2 --> E1
+    A2 --> C1
+    A2 --> R1
+    A2 --> T1
+    E1 --> Q
+    C1 --> Q
+    R1 --> Q
+    T1 --> Q
 ```
 
 WP-10 through WP-60 have no source or test path overlap. They may execute at
@@ -62,12 +87,16 @@ coordinator can attribute a regression to one commit.
 | [WP-40 Utility panels](WP-40-utility-panels.md) | `codex/presentation-utility-panels` | 1, parallel | `gpt-5.6-sol` high | rails, Search, Source Control, branch popover, Runs panel, status bar |
 | [WP-50 Settings](WP-50-settings.md) | `codex/presentation-settings` | 1, parallel | `gpt-5.6-terra` xhigh | adaptive settings navigation and section hierarchy |
 | [WP-60 Ensemble](WP-60-ensemble.md) | `codex/presentation-ensemble` | 1, parallel | `gpt-5.6-terra` xhigh | goal-first composer, one CLI/model representation, run canvases |
-| [WP-90 Integration and QA](WP-90-integration-qa.md) | `codex/presentation-integration-qa` | 2, serial | `gpt-5.6-sol` high | integrated tests, visual/accessibility matrix, references and indexes |
+| [WP-71 Editor interactions](WP-71-editor-interactions.md) | `codex/presentation-editor-interactions` | follow-up 1, parallel | `gpt-5.6-sol` high | inactive tab visibility and Find first-responder routing |
+| [WP-72 Window chrome lifecycle](WP-72-window-chrome-lifecycle.md) | `codex/presentation-window-chrome-lifecycle` | follow-up 1, parallel | `gpt-5.6-sol` high | titlebar/safe-area invariant across split and close topology changes |
+| [WP-73 Responsive navigation](WP-73-responsive-navigation.md) | `codex/presentation-responsive-navigation` | follow-up 1, parallel | `gpt-5.6-terra` xhigh | full-width Source Control modes and compact Settings hierarchy |
+| [WP-74 Terminal hierarchy and picker](WP-74-terminal-hierarchy-picker.md) | `codex/presentation-terminal-hierarchy-picker` | follow-up 1, parallel | `gpt-5.6-sol` high | terminal perimeter hierarchy and Terminal Manager shell picker |
+| [WP-90 Integration and QA](WP-90-integration-qa.md) | `codex/presentation-integration-qa` | follow-up 2, serial | `gpt-5.6-sol` high | integrated tests, visual/accessibility matrix, references and indexes |
 
 The model entries are recommendations, not source-of-truth decisions. Use
 `gpt-5.6-sol` high where correctness crosses window, responder, editor,
 terminal, Git, or integration boundaries. Use `gpt-5.6-terra` xhigh for the
-two bounded, fully specified SwiftUI hierarchy lanes.
+bounded, fully specified SwiftUI hierarchy lanes.
 
 ## Branch and worktree procedure
 
@@ -152,18 +181,69 @@ parallel tests. After each pair, run the staged Rafu Lightning verification and
 the pair's focused manual checks. Run only one SwiftPM command and one staged
 app verification at a time.
 
-### 4. Run WP-90 from the merged Wave 1 SHA
+### 4. Create all four follow-up worktrees from one exact plan commit
 
-Create a final worktree from the exact post-Wave-1 integration commit:
+The correction plans and issue ledger are committed on
+`codex/workbench-presentation-followup-plans`. Record that immutable commit as
+`<FOLLOWUP_BASE_SHA>`:
+
+```bash
+git rev-parse codex/workbench-presentation-followup-plans
+```
+
+Confirm it descends from
+`f1a276720fcf68b940da4927522fcfbf5e23cde0`, then create all four worktrees
+from that exact SHA:
+
+```bash
+git worktree add ../rafu-presentation-editor-followup \
+  -b codex/presentation-editor-interactions <FOLLOWUP_BASE_SHA>
+git worktree add ../rafu-presentation-chrome-followup \
+  -b codex/presentation-window-chrome-lifecycle <FOLLOWUP_BASE_SHA>
+git worktree add ../rafu-presentation-navigation-followup \
+  -b codex/presentation-responsive-navigation <FOLLOWUP_BASE_SHA>
+git worktree add ../rafu-presentation-terminal-followup \
+  -b codex/presentation-terminal-hierarchy-picker <FOLLOWUP_BASE_SHA>
+```
+
+Before fan-out, check disk capacity for four SwiftPM caches and confirm the
+shared staged-app GUI lease is free. Paste the complete Goal Mode prompt from
+each matching plan. Replace `<FOLLOWUP_BASE_SHA>` in every prompt with the same
+recorded SHA.
+
+### 5. Merge the follow-up wave serially
+
+The four agents run concurrently, but the coordinator merges one local commit
+at a time:
+
+1. WP-71 Editor interactions.
+2. WP-72 Window chrome lifecycle.
+3. WP-73 Responsive navigation.
+4. WP-74 Terminal hierarchy and picker.
+
+The order is attribution-friendly rather than conflict-driven. These lanes
+have no intended production, test, or new-file overlap.
+
+Before each merge, compare the lane to `<FOLLOWUP_BASE_SHA>`, verify every
+changed path against the table below, read deferred checks, and reject shared
+or foreign paths. After each merge run lint, build, and the parallel suite.
+After the pair WP-71/WP-72 and again after WP-73/WP-74, run staged Rafu
+Lightning and the combined manual checks. After all four, run both parallel and
+serial suites uncontended and record the result as `<POST_FOLLOWUP_SHA>`.
+
+### 6. Run WP-90 from the merged follow-up SHA
+
+Create the final worktree only after all four commits are ancestors of the
+integration state:
 
 ```bash
 git worktree add ../rafu-presentation-integration \
-  -b codex/presentation-integration-qa <POST_WAVE_1_SHA>
+  -b codex/presentation-integration-qa <POST_FOLLOWUP_SHA>
 ```
 
 WP-90 owns cross-surface corrections, the complete screenshot/accessibility
-matrix, both test modes, and documentation close-out. Merge it only after its
-full gate is green.
+matrix, explicit verification of WBP-001 through WBP-008, both test modes, and
+documentation close-out. Merge it only after its full gate is green.
 
 All coordinator merges described here are local. Do not push, open a PR,
 publish, or release without separate user authorization.
@@ -211,6 +291,48 @@ dependency instead of editing the file.
 
 Each plan contains the absolute repository-relative paths and its exclusive test
 files. No two Wave 1 plans own the same path.
+
+### Follow-up Wave 1 exclusive ownership
+
+| Plan | Issues | Exclusively owned production paths | Exclusively owned existing test paths |
+|---|---|---|---|
+| WP-71 | WBP-001, WBP-008 | `EditorCanvasView.swift`, `DocumentFind.swift`, `CodeEditorView.swift`, `RafuTextView.swift`, and the document-Find methods only in `WorkspaceSession.swift` | `EditorFindTests.swift` |
+| WP-72 | WBP-004, WBP-007 | `FlatWindowChrome.swift`, `WorkspaceWindowView.swift` | `FlatWindowChromeTests.swift` |
+| WP-73 | WBP-002, WBP-003 | `GitInspectorView.swift`, `RafuSettingsView.swift`, `SettingsPaneNavigation.swift` | `UtilityPanelPresentationTests.swift`, `SettingsPresentationTests.swift` |
+| WP-74 | WBP-005, WBP-006 | the terminal-border resolver/rendering only in `RafuWorkbenchStyles.swift`, `WorkspaceTerminalsPanelView.swift`, new `TerminalShellPickerView.swift` | terminal-border contracts only in `RafuWorkbenchStyleContractTests.swift`, `matchingIdentityKeepsNeutralAndFocusedSignals` only in `EditorTabAndGroupPresentationTests.swift`, `TerminalManagerPresentationTests.swift` |
+
+The new test files are also exclusive:
+
+- WP-71:
+  `EditorTabVisibilityPresentationTests.swift` and
+  `EditorFindFocusRoutingTests.swift`;
+- WP-72: `WindowChromeTopologyLifecycleTests.swift`;
+- WP-73: `ResponsiveNavigationPresentationTests.swift`; and
+- WP-74: `TerminalShellPickerPresentationTests.swift`.
+
+The narrowly qualified shared-file ownership in WP-71 and WP-74 does not
+overlap: WP-71 may edit only document-Find routing in `WorkspaceSession.swift`;
+WP-74 cannot edit that file. WP-74 may edit only the terminal-border portion of
+`RafuWorkbenchStyles.swift` and one named terminal-border test in
+`EditorTabAndGroupPresentationTests.swift`; WP-71 consumes that existing test
+file read-only and places new tab-visibility coverage in its dedicated file.
+Every other follow-up lane treats both qualified files as frozen.
+
+A textual conflict among WP-71 through WP-74 means a lane exceeded ownership
+or started from the wrong SHA. Do not resolve it by choosing one side.
+
+Follow-up lanes also freeze:
+
+- `Package.swift`, `Package.resolved`, `AGENTS.md`, and `CLAUDE.md`;
+- all theme JSON and `RafuTheme.swift`;
+- `RafuMetrics.swift` and `RafuControlStyles.swift`;
+- shared plan/reference/decision indexes;
+- the parent phase document;
+- another follow-up lane's plan, source, tests, or proposed new file.
+
+Each lane may update only its own plan implementation record and may add one
+uniquely named factual reference note when the standing documentation rule
+requires it. WP-90 owns shared status/index close-out.
 
 ### Integration-owned paths
 
@@ -263,7 +385,7 @@ Nothing modifies a file after `./script/test.sh`. If anything does, repeat the
 affected sequence. The lane stages only owned paths and creates one intentional
 local commit.
 
-The six worktrees share one machine and one staged app identity:
+All implementation worktrees share one machine and one staged app identity:
 
 - never start a second SwiftPM command in the same worktree while its
   `.build/.lock` is held;
@@ -282,8 +404,9 @@ test modes after the final merge.
 
 Before every merge:
 
-1. Compare the lane against `<FOUNDATION_SHA>` and verify every changed path is
-   owned by that lane.
+1. Compare an original Wave 1 lane against `<FOUNDATION_SHA>` or a follow-up
+   lane against `<FOLLOWUP_BASE_SHA>`, and verify every changed path is owned by
+   that lane.
 2. Reject unplanned shared-file changes; do not resolve them silently.
 3. Read the lane handoff and its deferred manual checks.
 4. Merge without squashing unless the user chooses otherwise.
@@ -298,15 +421,18 @@ choosing one side by intuition.
 The set is complete only when:
 
 1. ADR 0022 is Accepted and its narrowed supersession of ADR 0012 is indexed.
-2. WP-00 and all six Wave 1 branches are merged from the correct base.
-3. `git diff` confirms no hard-coded presentation color or new theme key.
-4. The exact parent-plan automated and manual matrices are complete, including
+2. WP-00, all six original Wave 1 branches, and all four follow-up branches are
+   merged from their correct immutable bases.
+3. WBP-001 through WBP-008 have passing automated regressions and completed
+   manual evidence.
+4. `git diff` confirms no hard-coded presentation color or new theme key.
+5. The exact parent-plan automated and manual matrices are complete, including
    Indigo, Khadi, GitHub Light, the converged-surface fixture, 1×/2×, two
    windows, larger text, VoiceOver, Full Keyboard Access, Increase Contrast,
    Reduce Transparency, and Reduce Motion.
-5. Format, build, parallel tests, serial tests, and staged Rafu Lightning launch
+6. Format, build, parallel tests, serial tests, and staged Rafu Lightning launch
    are green on the integrated tree.
-6. `ui-design-language.md`, `settings-surface.md`, the parent phase, active
+7. `ui-design-language.md`, `settings-surface.md`, the parent phase, active
    workbench phase, and shared indexes describe the implemented state.
-7. Every worktree handoff names its commit, paths, evidence, deferred work, and
+8. Every worktree handoff names its commit, paths, evidence, deferred work, and
    any reusable nuance.
