@@ -4,8 +4,8 @@ import CoreGraphics
 /// U0). These are product-identity values — deliberately code-side, not
 /// theme-JSON, so shape stays consistent across every theme while color stays
 /// the theme's to own. Corner styles are always `.continuous`.
-enum RafuMetrics {
-    // Corner radii, one scale across the app.
+nonisolated enum RafuMetrics {
+    // Existing overlay/control radii.
     /// Panels, overlays, embedded content cards (command palette, peek,
     /// code blocks, composer).
     static let radiusPanel: CGFloat = 12
@@ -15,6 +15,24 @@ enum RafuMetrics {
     static let radiusField: CGFloat = 8
     /// Capsule chips/badges/kbd hints.
     static let radiusChip: CGFloat = 999
+
+    // Compact semantic workbench tier (ADR 0022). These values describe
+    // structure, not theme color, and deliberately leave radiusPanel intact.
+    static let workbenchInset: CGFloat = 4
+    static let editorGroupGapTarget: CGFloat = 4
+    static let radiusWorkbenchDeck: CGFloat = 6
+    static let radiusEditorGroup: CGFloat = 5
+    static let radiusAttachedTab: CGFloat = 4
+    static let radiusDenseSelection: CGFloat = 4
+    static let radiusDenseCard: CGFloat = 6
+    static let radiusWorkbenchField: CGFloat = 5
+    static let radiusTransientPopover: CGFloat = 8
+    static let utilityBodyInset: CGFloat = 8
+    static let settingsSectionInset: CGFloat = 14
+    static let settingsRowMinHeight: CGFloat = 36
+    static let settingsSectionGap: CGFloat = 28
+    static let terminalBorderWidth: CGFloat = 1
+    static let focusedTerminalBorderWidth: CGFloat = 2
 
     // Spacing grid.
     static let space1: CGFloat = 4

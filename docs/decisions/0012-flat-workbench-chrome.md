@@ -87,6 +87,14 @@ and accessibility-safe, or if user testing shows the flush-panel base reads as
 too plain versus a measured card alternative, revisit the base-composition
 choice (D1 in the phase plan).
 
+**Proposed revisit (2026-07-29):** new user-supplied reference and Rafu
+screenshots activated the second trigger above. [ADR 0022](0022-recessed-workbench-deck.md)
+proposes one narrowly recessed working deck, compact workbench radii, attached
+tabs, and bounded editor/terminal groups while preserving this ADR's theme
+authority, `HSplitView`, opaque flat surfaces, accessibility, and no-Liquid-Glass
+rules. ADR 0012 remains the implemented decision until ADR 0022 is accepted and
+the successor phase lands.
+
 **Amendment (2026-07-19):** `NavigationSplitView` was replaced with an
 AppKit-backed `HSplitView` in `WorkspaceWindowView`. On macOS 26,
 `NavigationSplitView` floats its sidebar as an inset, rounded, elevated

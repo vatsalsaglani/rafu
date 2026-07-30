@@ -40,14 +40,14 @@
     "selection": "#E7E0CE",
     "hover": "#EFE9DB",
     "borderSubtle": "#E3DCCB",
-    "borderStrong": "#CFC6B0",
+    "borderStrong": "#5D6474",
     "textPrimary": "#2B2F3A",
     "textSecondary": "#5D6474",
     "textMuted": "#8A90A0",
     "accent": "#A2701F",
     "accentHover": "#8A5D14",
     "onAccent": "#FFF9EE",
-    "focusRing": "#A2701F55",
+    "focusRing": "#A2701F",
     "error": "#B3362E",
     "warning": "#8F6A10",
     "info": "#3557B7",
@@ -117,4 +117,3 @@
     "markup.list": { "color": "#55617A" }
   }
 }
-

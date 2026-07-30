@@ -91,6 +91,129 @@ struct RafuIconButtonStyle: ButtonStyle {
     }
 }
 
+/// Compact activity-rail button with a close-fit selected shape and a
+/// deck-facing bar. Selection, hover, press, disabled, inactive-window, badge,
+/// tooltip, and accessibility states remain separate and theme-owned.
+struct RafuRailButtonStyle: ButtonStyle {
+    var isSelected = false
+    var deckFacingEdge: HorizontalEdge = .trailing
+    var tooltip: String
+    var badge: Int? = nil
+
+    func makeBody(configuration: Configuration) -> some View {
+        StyleBody(
+            configuration: configuration,
+            isSelected: isSelected,
+            deckFacingEdge: deckFacingEdge,
+            tooltip: tooltip,
+            badge: badge
+        )
+    }
+
+    private struct StyleBody: View {
+        let configuration: Configuration
+        let isSelected: Bool
+        let deckFacingEdge: HorizontalEdge
+        let tooltip: String
+        let badge: Int?
+
+        @Environment(\.rafuTheme) private var theme
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.controlActiveState) private var controlActiveState
+        @State private var isHovering = false
+
+        var body: some View {
+            configuration.label
+                .labelStyle(.iconOnly)
+                .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                .foregroundStyle(foreground)
+                .frame(width: 30, height: 30)
+                .background {
+                    RoundedRectangle(
+                        cornerRadius: RafuMetrics.radiusDenseSelection,
+                        style: .continuous
+                    )
+                    .fill(background)
+                }
+                .overlay {
+                    RoundedRectangle(
+                        cornerRadius: RafuMetrics.radiusDenseSelection,
+                        style: .continuous
+                    )
+                    .strokeBorder(boundary, lineWidth: RafuMetrics.hairline)
+                }
+                .overlay(alignment: deckFacingEdge == .leading ? .leading : .trailing) {
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 1, style: .continuous)
+                            .fill(selectedAccent)
+                            .frame(width: 2, height: 16)
+                            .padding(.vertical, 7)
+                    }
+                }
+                .overlay(alignment: .topTrailing) {
+                    if let badge, badge > 0 {
+                        Text(badge > 99 ? "99+" : "\(badge)")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(theme.palette.appBackground)
+                            .padding(.horizontal, 3)
+                            .frame(minWidth: 12, minHeight: 12)
+                            .background(Capsule().fill(theme.palette.warning))
+                            .offset(x: 3, y: -3)
+                    }
+                }
+                .contentShape(
+                    RoundedRectangle(
+                        cornerRadius: RafuMetrics.radiusDenseSelection,
+                        style: .continuous
+                    )
+                )
+                .onHover { isHovering = $0 }
+                .help(tooltip)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .accessibilityValue(accessibilityValue)
+        }
+
+        private var isInactiveWindow: Bool {
+            controlActiveState == .inactive
+        }
+
+        private var foreground: Color {
+            guard isEnabled else { return theme.palette.textMuted }
+            if isSelected {
+                return isInactiveWindow ? theme.palette.textPrimary : theme.palette.accent
+            }
+            if configuration.isPressed || isHovering { return theme.palette.textPrimary }
+            return theme.palette.textSecondary
+        }
+
+        private var background: Color {
+            if configuration.isPressed { return theme.palette.selection }
+            if isSelected {
+                return isInactiveWindow ? theme.palette.selection : theme.palette.accentSoft
+            }
+            if isHovering { return theme.palette.hover }
+            return .clear
+        }
+
+        private var boundary: Color {
+            if isSelected { return theme.palette.borderStrong }
+            if configuration.isPressed { return theme.palette.borderSubtle }
+            return .clear
+        }
+
+        private var selectedAccent: Color {
+            isInactiveWindow ? theme.palette.borderStrong : theme.palette.accent
+        }
+
+        private var accessibilityValue: String {
+            let selection = isSelected ? "Selected" : ""
+            guard let badge, badge > 0 else { return selection }
+            let badgeValue = "\(badge) notification\(badge == 1 ? "" : "s")"
+            return selection.isEmpty ? badgeValue : "\(selection), \(badgeValue)"
+        }
+    }
+}
+
 /// Filled accent button (Commit, Save, primary sheet actions).
 struct RafuProminentButtonStyle: ButtonStyle {
     var compact: Bool = false

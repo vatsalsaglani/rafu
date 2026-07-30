@@ -673,44 +673,14 @@ struct EnsembleStartCanvasTests {
         #expect(session.terminal.selectedID == terminal.id)
     }
 
-    @Test("Every entry point uses the canvas seams and no Ensemble sheet is presented")
-    func entryPointsUseCanvasSeams() throws {
-        let root = try repositoryRoot()
-        let commands = try source("Sources/RafuApp/App/RafuAppCommands.swift", root: root)
-        let palette = try source("Sources/RafuApp/Views/CommandPaletteView.swift", root: root)
-        let runsPanel = try source(
-            "Sources/RafuApp/Views/ConductorRunsPanelView.swift", root: root)
-        let presentations = try source(
-            "Sources/RafuApp/Views/WorkspaceWindowView.swift", root: root)
-
-        #expect(commands.contains("workspaceSession?.showEnsembleStart()"))
-        #expect(commands.contains(".keyboardShortcut(\"e\", modifiers: [.command, .shift])"))
-        #expect(palette.contains("session.showEnsembleStart()"))
-        #expect(runsPanel.contains("session.showEnsembleStart()"))
-
-        #expect(commands.contains("workspaceSession?.showEnsembleNewRun()"))
-        #expect(palette.contains("session.showEnsembleNewRun()"))
-        #expect(runsPanel.contains("session.showEnsembleNewRun()"))
-
-        #expect(!presentations.contains("EnsembleStart"))
-        #expect(!runsPanel.contains(".sheet("))
-        #expect(
-            !FileManager.default.fileExists(
-                atPath: root.appending(path: "Sources/RafuApp/Views/EnsembleStartSheet.swift").path)
-        )
-    }
-
     /// UX2-02 moved the New Ensemble canvas off the centered 600 pt measure
-    /// onto a full-width two-column layout, so its half of this contract now
-    /// asserts the ABSENCE of the clamp plus the presence of the split. The
-    /// New Run canvas is untouched and keeps the original assertion.
-    @Test("Creation canvases expose close and Esc; New Ensemble is full width")
+    /// onto a full-width two-column layout. The Runs-owned New Run half lives
+    /// in `ConductorRunsPanelPresentationTests`.
+    @Test("New Ensemble exposes close and Esc and remains full width")
     func canvasCloseAndWidthContract() throws {
         let root = try repositoryRoot()
         let startCanvas = try source(
             "Sources/RafuApp/Views/EnsembleStartCanvas.swift", root: root)
-        let runCanvas = try source(
-            "Sources/RafuApp/Views/ConductorRunsPanelView.swift", root: root)
 
         #expect(startCanvas.contains(".onExitCommand(perform: session.closeEnsembleStart)"))
         #expect(!startCanvas.contains(".frame(maxWidth: 600"))
@@ -718,11 +688,6 @@ struct EnsembleStartCanvasTests {
         #expect(startCanvas.contains("EnsembleGoalPane(text: $model.goal)"))
         #expect(startCanvas.contains(".accessibilityLabel(\"Close New Ensemble\")"))
         #expect(startCanvas.contains(".help(\"Close New Ensemble\")"))
-
-        #expect(runCanvas.contains(".onExitCommand(perform: session.closeEnsembleNewRun)"))
-        #expect(runCanvas.contains(".frame(maxWidth: 600"))
-        #expect(runCanvas.contains(".accessibilityLabel(\"Close New Ensemble Run\")"))
-        #expect(runCanvas.contains(".help(\"Close New Ensemble Run\")"))
     }
 
     @Test("The guided door splits 3/12 to 9/12, clamped so neither column collapses")
@@ -840,32 +805,6 @@ struct EnsembleStartCanvasTests {
         // both directions must be named for VoiceOver.
         #expect(pane.contains("\"Edit goal as Markdown\""))
         #expect(pane.contains("\"Preview rendered goal\""))
-    }
-
-    @Test("Runs header icons have labels, tooltips, and menu/palette equivalents")
-    func runsHeaderIconContract() throws {
-        let root = try repositoryRoot()
-        let runsPanel = try source(
-            "Sources/RafuApp/Views/ConductorRunsPanelView.swift", root: root)
-        let commands = try source("Sources/RafuApp/App/RafuAppCommands.swift", root: root)
-        let palette = try source("Sources/RafuApp/Views/CommandPaletteView.swift", root: root)
-
-        #expect(
-            runsPanel.components(separatedBy: ".buttonStyle(RafuIconButtonStyle(size: 24))")
-                .count - 1 >= 3)
-        #expect(runsPanel.contains(".help(\"Show Ensemble Graph\")"))
-        #expect(runsPanel.contains(".accessibilityLabel(\"Show Ensemble Graph\")"))
-        #expect(runsPanel.contains(".help(\"New Ensemble…\")"))
-        #expect(runsPanel.contains(".accessibilityLabel(\"New Ensemble\")"))
-        #expect(runsPanel.contains(".help(\"New Run…\")"))
-        #expect(runsPanel.contains(".accessibilityLabel(\"New Ensemble Run\")"))
-
-        #expect(commands.contains("workspaceSession?.showConductorGraph()"))
-        #expect(palette.contains("session.showConductorGraph()"))
-        #expect(commands.contains("workspaceSession?.showEnsembleStart()"))
-        #expect(palette.contains("session.showEnsembleStart()"))
-        #expect(commands.contains("workspaceSession?.showEnsembleNewRun()"))
-        #expect(palette.contains("session.showEnsembleNewRun()"))
     }
 
     private func repositoryRoot(file: StaticString = #filePath) throws -> URL {

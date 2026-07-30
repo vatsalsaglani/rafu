@@ -4,8 +4,8 @@
   "ui": {
     "appBackground": "#191919", "editorBackground": "#202020",
     "elevatedBackground": "#2C2C2C", "textPrimary": "#EBEBEB",
-    "textSecondary": "#9B9B9B", "accent": "#529CCA",
-    "borderSubtle": "#373737", "selection": "#2F4B5B"
+    "textSecondary": "#9B9B9B", "accent": "#529CCA", "focusRing": "#529CCA",
+    "borderSubtle": "#373737", "borderStrong": "#9B9B9B", "selection": "#2F4B5B"
   },
   "editor": {
     "background": "#202020", "foreground": "#EBEBEB", "cursor": "#529CCA",

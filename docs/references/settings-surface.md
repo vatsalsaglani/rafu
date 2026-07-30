@@ -6,6 +6,15 @@
 - **Last verified:** Swift 6.2 language mode (Swift 6.3.3, Xcode 26.6),
   macOS 26.5.2, on 2026-07-26 (UX-02; pane strip and full-width canvas, UX2-01).
 
+**Proposed successor:** the Settings section of
+[`workbench-presentation-upgrade.md`](../plans/phases/workbench-presentation-upgrade.md)
+proposes compact adaptive category navigation and a bounded, left-aligned
+content region, with theme-owned compact section containers around unchanged
+native controls. Until ADR 0022 is accepted and that work is implemented, the
+pane-strip, full-width, grouped-Form, routing, and lifetime rules below describe
+the verified surface. The successor must preserve the routing and pane-lifetime
+rules.
+
 ## Rule or observed behavior
 
 Rafu has one seven-pane `RafuSettingsView` and two hosts:

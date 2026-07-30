@@ -41,6 +41,39 @@ struct EditorThemeColorApplicationTests {
     }
 }
 
+/// Editor-owned source contract moved out of the terminal-manager suite so the
+/// presentation lanes can evolve their disjoint files without cross-editing.
+@Suite("Editor terminal tab identity")
+struct EditorTerminalTabIdentityTests {
+    @Test("The editor terminal tab wears the vendor mark, falling back to the shell glyph")
+    func editorTabShowsVendorMark() throws {
+        let canvas = try Self.source("Sources/RafuApp/Views/EditorCanvasView.swift")
+
+        #expect(canvas.contains("if let provider = controller.agentProvider {"))
+        #expect(
+            canvas.contains("FileIconView(icon: ConductorCLIIcons.icon(for: provider), size: 12)"))
+        // The glyph stays for login shells rather than being deleted outright.
+        #expect(canvas.contains(#"Image(systemName: "terminal")"#))
+    }
+
+    private static func source(_ path: String, file: StaticString = #filePath) throws -> String {
+        var directory = URL(fileURLWithPath: "\(file)").deletingLastPathComponent()
+        while directory.path != "/" {
+            if FileManager.default.fileExists(
+                atPath: directory.appending(path: "Package.swift").path
+            ) {
+                return try String(contentsOf: directory.appending(path: path), encoding: .utf8)
+            }
+            directory = directory.deletingLastPathComponent()
+        }
+        throw EditorTerminalTabIdentityError.repositoryRootNotFound
+    }
+
+    private enum EditorTerminalTabIdentityError: Error {
+        case repositoryRootNotFound
+    }
+}
+
 /// Editing paths must leave every selected range inside the buffer. An
 /// out-of-bounds selection is what AppKit's font-panel update enumerates over,
 /// so this is the invariant behind the reported crash.
