@@ -56,6 +56,20 @@ struct EditorTerminalTabIdentityTests {
         #expect(canvas.contains(#"Image(systemName: "terminal")"#))
     }
 
+    @Test("One palette resolution feeds the terminal tab marker and complete live tile")
+    func terminalIdentityResolutionIsShared() throws {
+        let canvas = try Self.source("Sources/RafuApp/Views/EditorCanvasView.swift")
+
+        #expect(
+            canvas.components(separatedBy: "theme.palette.color(for: sessionColor)").count - 1
+                == 1
+        )
+        #expect(canvas.contains("let terminalIdentities = terminalIdentityPresentations"))
+        #expect(canvas.contains("terminalIdentities: terminalIdentities"))
+        #expect(canvas.contains("terminalIdentityColor: selectedTerminalIdentity?.color"))
+        #expect(canvas.contains(".fill(identity.color)"))
+    }
+
     private static func source(_ path: String, file: StaticString = #filePath) throws -> String {
         var directory = URL(fileURLWithPath: "\(file)").deletingLastPathComponent()
         while directory.path != "/" {

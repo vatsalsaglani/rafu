@@ -196,6 +196,39 @@ Run staged Rafu Lightning only with the GUI lease; otherwise hand off the exact
 deferred matrix. Commit only owned paths, do not push, and remove `.build` after
 the green commit.
 
+## Implementation record
+
+Implemented on `codex/presentation-editor-tabs` from foundation
+`112ba7de32c52c366de04d58a8d10e92988455db`:
+
+- every editor-owned document, terminal, diff, and standalone-blame tab now
+  consumes the shared attached-tab cap and close affordance while the
+  full-width shelf owns the inert selected-cap seam;
+- recursive `HSplitView`/`VSplitView` topology is unchanged, with the first
+  leaf adding only the divider-aware remainder needed for a total 4 pt visual
+  band;
+- one `EditorGroupSurface` frames tab plus content, and a selected terminal's
+  existing session color is resolved once and shared by its leading marker
+  and complete group perimeter;
+- the TextKit and SwiftTerm hosts remain unmasked and unclipped, with no
+  terminal-body or terminal-lifetime changes;
+- `EditorTabAndGroupPresentationTests` pins attached geometry, seam behavior,
+  topology, host boundaries, terminal identity/focus fallback, preserved
+  drag/overflow/Markdown contracts, accessibility labels, and immediate tab
+  chrome. The focused WP-20 filter passed 73 tests.
+
+The single Rafu Lightning GUI lease was unavailable because the primary
+checkout already had Lightning running. The complete manual matrix in
+“Acceptance and manual evidence” is therefore deferred to the merge-round GUI
+lease, including the 1×/2× and 4 pt measurements; all named layouts and tab
+states; 1,200 pt minimum leaf/cell sizes; Indigo, Khadi, converged fixture,
+Increase Contrast, inactive-window, VoiceOver, and accessibility-text checks;
+and live-terminal type, scroll, select, drag, split, hide, reveal, close, and
+no-respawn/lifetime verification.
+
+No reusable platform nuance beyond the existing required references was
+discovered, so this work adds no ADR, reference note, or reference-index row.
+
 ## Goal-mode start prompt
 
 ```text

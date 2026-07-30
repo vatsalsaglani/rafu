@@ -80,38 +80,67 @@ struct EditorCanvasView: View {
     }
 }
 
+nonisolated enum EditorGroupSplitPresentation {
+    /// `HSplitView`/`VSplitView` already contribute their native divider to
+    /// the visible band between leaves. Add only the remainder on the first
+    /// leaf so the complete edge-to-edge band stays at the semantic target.
+    static func compensatingInset(nativeDividerWidth: CGFloat) -> CGFloat {
+        max(0, RafuMetrics.editorGroupGapTarget - nativeDividerWidth)
+    }
+}
+
+private struct EditorTerminalIdentityPresentation {
+    let color: Color
+    let matchesEditorBackground: Bool
+}
+
 private struct EditorLayoutTreeView: View {
+    @Environment(\.rafuTheme) private var theme
+
     let node: EditorLayoutNode
     @Bindable var session: WorkspaceSession
 
     var body: some View {
         renderedNode
+            .background(theme.palette.appBackground)
     }
 
     private var renderedNode: AnyView {
+        let compensatingInset = EditorGroupSplitPresentation.compensatingInset(
+            nativeDividerWidth: RafuMetrics.hairline
+        )
         switch node {
         case .group(let group):
-            AnyView(EditorGroupView(group: group, session: session))
+            return AnyView(EditorGroupView(group: group, session: session))
         case .split(_, let axis, _, let first, let second):
             switch axis {
             case .horizontal:
-                AnyView(
+                return AnyView(
                     HSplitView {
-                        EditorLayoutTreeView(node: first, session: session).frame(minWidth: 220)
+                        EditorLayoutTreeView(node: first, session: session)
+                            .frame(minWidth: 220)
+                            .padding(.trailing, compensatingInset)
                         EditorLayoutTreeView(node: second, session: session).frame(minWidth: 220)
-                    })
+                    }
+                    .background(theme.palette.appBackground)
+                )
             case .vertical:
-                AnyView(
+                return AnyView(
                     VSplitView {
-                        EditorLayoutTreeView(node: first, session: session).frame(minHeight: 150)
+                        EditorLayoutTreeView(node: first, session: session)
+                            .frame(minHeight: 150)
+                            .padding(.bottom, compensatingInset)
                         EditorLayoutTreeView(node: second, session: session).frame(minHeight: 150)
-                    })
+                    }
+                    .background(theme.palette.appBackground)
+                )
             }
         }
     }
 }
 
 private struct EditorGroupView: View {
+    @Environment(\.rafuTheme) private var theme
     @State private var hoveredDropEdge: EditorSplitEdge?
     @State private var isDropTargeted = false
 
@@ -119,132 +148,132 @@ private struct EditorGroupView: View {
     @Bindable var session: WorkspaceSession
 
     var body: some View {
-        VStack(spacing: 0) {
-            // The tab strip owns its own drop target
-            // (`TabStripReorderDropDelegate`, wired up inside
-            // `EditorGroupTabBar` below), and the group's own split/move
-            // `.onDrop` — attached further down, only to the body BELOW this
-            // tab bar — deliberately excludes the tab bar's frame. Before
-            // this split, a single group-wide `.onDrop` covered the tab bar
-            // too, and its edge-band geometry always classified any point
-            // within the tab bar's height as the "top" split edge, so every
-            // tab-bar drop resolved as a top split instead of a reorder.
-            EditorGroupTabBar(group: group, session: session)
-            Divider()
-            GeometryReader { proxy in
-                VStack(spacing: 0) {
-                    if let document = selectedDocument {
-                        EditorBreadcrumbView(session: session, document: document)
-                    }
-                    if isFindPresented, let document = selectedDocument {
-                        DocumentFindBar(
-                            state: session.findState(for: document),
-                            showsReplace: $session.isDocumentReplacePresented,
-                            close: session.dismissDocumentFind
-                        )
-                        Divider()
-                    }
-                    if let terminalController = selectedTerminalController {
-                        // Issue #4: a terminal tab's content replaces the
-                        // document ZStack entirely while selected — only one
-                        // terminal is ever mounted at a time per group, since
-                        // `WorkspaceTerminalController.makeOrReuseView` reuses
-                        // the same live `LocalProcessTerminalView` (and its
-                        // scrollback) across remounts, unlike a document's
-                        // bounded-working-set hibernation.
-                        EditorTerminalTabContent(controller: terminalController)
-                    } else if loadedDocuments.isEmpty {
-                        ContentUnavailableView(
-                            "Empty Editor Group",
-                            systemImage: "rectangle.split.2x1",
-                            description: Text("Drag a tab here or open a file from the sidebar.")
-                        )
-                    } else {
-                        // The bounded working set: every LOADED document in
-                        // this group stays mounted so TextKit keeps owning
-                        // its live text (dirty non-visible buffers included —
-                        // the data-safety invariant). Only the selected
-                        // editor is visible and interactive; the rest are
-                        // inert (invisible, no hit testing, no
-                        // first-responder path, accessibility hidden, no drop
-                        // forwarding) but mounted. Hibernated documents are
-                        // omitted entirely and remount from disk on
-                        // reselection.
-                        ZStack {
-                            ForEach(loadedDocuments) { document in
-                                let isActive = document.id == selectedDocument?.id
-                                EditorDocumentView(
-                                    document: document,
-                                    findState: session.findState(for: document),
-                                    gitLineChangesProvider: { [weak session, weak document] in
-                                        guard let session, let document else { return nil }
-                                        return await session.gutterLineChanges(for: document)
-                                    },
-                                    requestGitRefresh: { [weak session] in
-                                        guard let session else { return }
-                                        Task { await session.refreshGit() }
-                                    },
-                                    dropForwarding: isActive ? dropForwarding : nil,
-                                    navigate: { [weak session] kind in
-                                        session?.navigate(kind: kind)
-                                    },
-                                    hover: { [weak session, weak document] offset in
-                                        guard let session, let document else { return nil }
-                                        return await session.hoverInfo(
-                                            at: document.url, utf16Offset: offset)
-                                    },
-                                    inlineBlameEnabled: session.isInlineBlameEnabled,
-                                    inlineBlameProvider: { [weak session, weak document] in
-                                        guard let session, let document else { return nil }
-                                        return await session.inlineBlame(for: document)
-                                    },
-                                    fileBlameAnnotationsEnabled: session
-                                        .isFileBlameAnnotationsEnabled,
-                                    fileBlameAnnotationsProvider: {
-                                        [weak session, weak document] in
-                                        guard let session, let document else { return nil }
-                                        return await session.fileBlameAnnotations(for: document)
-                                    },
-                                    aiCompletionEnabled: session.isAICompletionEnabled,
-                                    aiCompletionProvider: {
-                                        [weak session, weak document] prefix, suffix in
-                                        guard let session, let document else { return nil }
-                                        return await session.inlineCompletion(
-                                            prefix: prefix, suffix: suffix,
-                                            fileName: document.displayName)
-                                    },
-                                    gitPeekActions: gitPeekActions(for: document)
-                                )
-                                .id(document.id)
-                                .opacity(isActive ? 1 : 0)
-                                .allowsHitTesting(isActive)
-                                .accessibilityHidden(!isActive)
+        let terminalIdentities = terminalIdentityPresentations
+        let selectedTerminalIdentity = selectedTerminalController.flatMap {
+            terminalIdentities[$0.id]
+        }
+
+        return EditorGroupSurface(
+            isFocused: session.isFocusedGroup(group.id),
+            terminalIdentityColor: selectedTerminalIdentity?.color,
+            identityMatchesEditorBackground:
+                selectedTerminalIdentity?.matchesEditorBackground == true
+        ) {
+            VStack(spacing: 0) {
+                // The tab strip owns its own drop target
+                // (`TabStripReorderDropDelegate`, wired up inside
+                // `EditorGroupTabBar` below), and the group's own split/move
+                // `.onDrop` — attached further down, only to the body BELOW
+                // this tab bar — deliberately excludes the tab bar's frame.
+                EditorGroupTabBar(
+                    group: group,
+                    terminalIdentities: terminalIdentities,
+                    session: session
+                )
+                GeometryReader { proxy in
+                    VStack(spacing: 0) {
+                        if let document = selectedDocument {
+                            EditorBreadcrumbView(session: session, document: document)
+                        }
+                        if isFindPresented, let document = selectedDocument {
+                            DocumentFindBar(
+                                state: session.findState(for: document),
+                                showsReplace: $session.isDocumentReplacePresented,
+                                close: session.dismissDocumentFind
+                            )
+                            Divider()
+                        }
+                        if let terminalController = selectedTerminalController {
+                            // The shared group surface owns the only complete
+                            // perimeter. This body-only host remains unmasked
+                            // and keeps its live SwiftTerm view and responder
+                            // identity across tab moves and remounts.
+                            EditorTerminalTabContent(controller: terminalController)
+                        } else if loadedDocuments.isEmpty {
+                            ContentUnavailableView(
+                                "Empty Editor Group",
+                                systemImage: "rectangle.split.2x1",
+                                description: Text(
+                                    "Drag a tab here or open a file from the sidebar.")
+                            )
+                        } else {
+                            // The bounded working set: every LOADED document in
+                            // this group stays mounted so TextKit keeps owning
+                            // its live text. Only the selected editor is visible
+                            // and interactive; inactive documents stay mounted.
+                            ZStack {
+                                ForEach(loadedDocuments) { document in
+                                    let isActive = document.id == selectedDocument?.id
+                                    EditorDocumentView(
+                                        document: document,
+                                        findState: session.findState(for: document),
+                                        gitLineChangesProvider: {
+                                            [weak session, weak document] in
+                                            guard let session, let document else { return nil }
+                                            return await session.gutterLineChanges(for: document)
+                                        },
+                                        requestGitRefresh: { [weak session] in
+                                            guard let session else { return }
+                                            Task { await session.refreshGit() }
+                                        },
+                                        dropForwarding: isActive ? dropForwarding : nil,
+                                        navigate: { [weak session] kind in
+                                            session?.navigate(kind: kind)
+                                        },
+                                        hover: { [weak session, weak document] offset in
+                                            guard let session, let document else { return nil }
+                                            return await session.hoverInfo(
+                                                at: document.url, utf16Offset: offset)
+                                        },
+                                        inlineBlameEnabled: session.isInlineBlameEnabled,
+                                        inlineBlameProvider: {
+                                            [weak session, weak document] in
+                                            guard let session, let document else { return nil }
+                                            return await session.inlineBlame(for: document)
+                                        },
+                                        fileBlameAnnotationsEnabled: session
+                                            .isFileBlameAnnotationsEnabled,
+                                        fileBlameAnnotationsProvider: {
+                                            [weak session, weak document] in
+                                            guard let session, let document else { return nil }
+                                            return await session.fileBlameAnnotations(for: document)
+                                        },
+                                        aiCompletionEnabled: session.isAICompletionEnabled,
+                                        aiCompletionProvider: {
+                                            [weak session, weak document] prefix, suffix in
+                                            guard let session, let document else { return nil }
+                                            return await session.inlineCompletion(
+                                                prefix: prefix, suffix: suffix,
+                                                fileName: document.displayName)
+                                        },
+                                        gitPeekActions: gitPeekActions(for: document)
+                                    )
+                                    .id(document.id)
+                                    .opacity(isActive ? 1 : 0)
+                                    .allowsHitTesting(isActive)
+                                    .accessibilityHidden(!isActive)
+                                }
                             }
                         }
                     }
-                }
-                .overlay {
-                    if isDropTargeted {
-                        EditorSplitPreviewOverlay(edge: hoveredDropEdge)
+                    .overlay {
+                        if isDropTargeted {
+                            EditorSplitPreviewOverlay(edge: hoveredDropEdge)
+                        }
                     }
-                }
-                // `.fileURL` is registered alongside the internal drag type
-                // so Finder (or any external) file drags get the same split
-                // preview and drop handling over surfaces the text view's
-                // AppKit forwarding cannot reach — terminal tabs,
-                // image/video previews, and other non-text content. Over
-                // the text editor the deeper `EditorDropForwardingScrollView`
-                // still wins, exactly as before.
-                .onDrop(
-                    of: [.rafuEditorDrag, .fileURL],
-                    delegate: EditorDropDelegate(
-                        groupID: group.id,
-                        size: proxy.size,
-                        hoveredEdge: $hoveredDropEdge,
-                        isTargeted: $isDropTargeted,
-                        session: session
+                    // Finder/external files retain the same body-only drop
+                    // target; the tab strip remains structurally excluded.
+                    .onDrop(
+                        of: [.rafuEditorDrag, .fileURL],
+                        delegate: EditorDropDelegate(
+                            groupID: group.id,
+                            size: proxy.size,
+                            hoveredEdge: $hoveredDropEdge,
+                            isTargeted: $isDropTargeted,
+                            session: session
+                        )
                     )
-                )
+                }
             }
         }
     }
@@ -265,6 +294,26 @@ private struct EditorGroupView: View {
     private var selectedTerminalController: WorkspaceTerminalController? {
         guard case .terminal(let sessionID) = selectedTab?.resource else { return nil }
         return session.terminal.sessions.first { $0.id == sessionID }
+    }
+
+    /// Resolves every visible terminal color once for this group render. The
+    /// selected entry is reused by both its tab marker and the complete live
+    /// group perimeter, so the two cues cannot drift in precedence or theme.
+    private var terminalIdentityPresentations: [UUID: EditorTerminalIdentityPresentation] {
+        var presentations: [UUID: EditorTerminalIdentityPresentation] = [:]
+        for tab in group.tabs {
+            guard case .terminal(let sessionID) = tab.resource,
+                let controller = session.terminal.sessions.first(where: { $0.id == sessionID }),
+                let sessionColor = controller.sessionColor
+            else { continue }
+            let color = theme.palette.color(for: sessionColor)
+            presentations[sessionID] = EditorTerminalIdentityPresentation(
+                color: color,
+                matchesEditorBackground:
+                    color.rafuHexString == theme.palette.editorBackground.rafuHexString
+            )
+        }
+        return presentations
     }
 
     /// This group's documents whose editor should stay mounted. The selected
@@ -536,6 +585,67 @@ private struct TabStripFramePreferenceKey: PreferenceKey {
 
     static func reduce(value: inout [EditorTabID: CGRect], nextValue: () -> [EditorTabID: CGRect]) {
         value.merge(nextValue()) { _, next in next }
+    }
+}
+
+/// The selected attached cap publishes its bounds to the shelf. Resolving the
+/// anchor at the shelf (rather than copying the drag-coordinate CGRect) keeps
+/// the seam mask aligned while the horizontal tab strip scrolls.
+private struct SelectedEditorTabBoundsPreferenceKey: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>? = nil
+
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
+    }
+}
+
+/// Full-width owner of the tab/content seam. The selected cap contributes an
+/// anchor only; this shelf paints the one-point mask without changing either
+/// the cap's captured drag frame or the shelf's scaled layout height.
+private struct EditorTabShelf<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    @Environment(\.rafuTheme) private var theme
+    @ScaledMetric(relativeTo: .body) private var scaledHeight = RafuMetrics.tabBarHeight
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .frame(
+                maxWidth: .infinity,
+                minHeight: WorkbenchTextHeightPolicy.attachedTabHeight(for: scaledHeight),
+                maxHeight: WorkbenchTextHeightPolicy.attachedTabHeight(for: scaledHeight)
+            )
+            .background(theme.palette.tabBarBackground)
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(theme.palette.borderSubtle)
+                    .frame(height: RafuMetrics.hairline)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+            .overlayPreferenceValue(SelectedEditorTabBoundsPreferenceKey.self) { anchor in
+                GeometryReader { proxy in
+                    if let anchor {
+                        let selectedFrame = proxy[anchor]
+                        Rectangle()
+                            .fill(theme.palette.tabActiveBackground)
+                            .frame(
+                                width: selectedFrame.width,
+                                height: RafuMetrics.hairline
+                            )
+                            .position(
+                                x: selectedFrame.midX,
+                                y: proxy.size.height - (RafuMetrics.hairline / 2)
+                            )
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+                }
+            }
     }
 }
 
@@ -894,75 +1004,69 @@ private struct EditorGroupTabBar: View {
     @State private var hoveredInsertionIndex: Int?
 
     let group: EditorGroupState
+    let terminalIdentities: [UUID: EditorTerminalIdentityPresentation]
     @Bindable var session: WorkspaceSession
 
     var body: some View {
-        HStack(spacing: 0) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 0) {
-                    ForEach(group.tabs) { tab in
-                        tabRow(for: tab)
-                            .background {
-                                GeometryReader { proxy in
-                                    Color.clear.preference(
-                                        key: TabStripFramePreferenceKey.self,
-                                        value: [
-                                            tab.id: proxy.frame(
-                                                in: .named(Self.coordinateSpaceName))
-                                        ]
-                                    )
+        EditorTabShelf {
+            HStack(spacing: 0) {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 0) {
+                        ForEach(group.tabs) { tab in
+                            tabRow(for: tab)
+                                .background {
+                                    GeometryReader { proxy in
+                                        Color.clear.preference(
+                                            key: TabStripFramePreferenceKey.self,
+                                            value: [
+                                                tab.id: proxy.frame(
+                                                    in: .named(Self.coordinateSpaceName))
+                                            ]
+                                        )
+                                    }
                                 }
-                            }
-                    }
-                }
-                .coordinateSpace(.named(Self.coordinateSpaceName))
-                // Forces the enclosing NSScrollView's legacy scroller off —
-                // `.scrollIndicators(.hidden)` alone does not do this under
-                // System Settings → Appearance → "Show scroll bars: Always"
-                // (see docs/references/scrollview-legacy-scroller-always-setting.md).
-                .background(ScrollerHidingConfigurator())
-                .onPreferenceChange(TabStripFramePreferenceKey.self) { tabFrames = $0 }
-                .overlay(alignment: .topLeading) { insertionIndicator }
-                // A dedicated reorder target scoped to the strip itself, one
-                // level DEEPER than the group's split/move `.onDrop`, which
-                // now only spans the body below the tab bar (see
-                // `EditorGroupView.body`) — so a tab-bar drop never has a
-                // chance to resolve as a split in the first place instead of
-                // relying on cross-target hit-test priority.
-                .onDrop(
-                    of: [.rafuEditorDrag],
-                    delegate: TabStripReorderDropDelegate(
-                        groupID: group.id,
-                        orderedTabIDs: group.tabs.map(\.id),
-                        tabFrames: tabFrames,
-                        reduceMotion: reduceMotion,
-                        hoveredInsertionIndex: $hoveredInsertionIndex,
-                        session: session
-                    )
-                )
-            }
-            .scrollIndicators(.hidden)
-            if let document = selectedDocument, document.supportsPresentationModes {
-                Divider().frame(height: 20)
-                MarkdownModeControl(
-                    mode: Binding(
-                        get: { document.markdownMode },
-                        set: {
-                            document.markdownMode = $0
-                            UserDefaults.standard.set(
-                                $0.rawValue, forKey: "markdownDefaultMode")
                         }
+                    }
+                    .coordinateSpace(.named(Self.coordinateSpaceName))
+                    // Forces the enclosing NSScrollView's legacy scroller off
+                    // even when System Settings requests always-visible bars.
+                    .background(ScrollerHidingConfigurator())
+                    .onPreferenceChange(TabStripFramePreferenceKey.self) { tabFrames = $0 }
+                    .overlay(alignment: .topLeading) { insertionIndicator }
+                    // The structurally scoped reorder target remains below
+                    // the group's body split/move target.
+                    .onDrop(
+                        of: [.rafuEditorDrag],
+                        delegate: TabStripReorderDropDelegate(
+                            groupID: group.id,
+                            orderedTabIDs: group.tabs.map(\.id),
+                            tabFrames: tabFrames,
+                            reduceMotion: reduceMotion,
+                            hoveredInsertionIndex: $hoveredInsertionIndex,
+                            session: session
+                        )
                     )
-                )
-                .padding(.horizontal, 6)
-            }
-            if group.tabs.count > 1 {
-                overflowTabMenu
+                }
+                .scrollIndicators(.hidden)
+                if let document = selectedDocument, document.supportsPresentationModes {
+                    Divider().frame(height: 20)
+                    MarkdownModeControl(
+                        mode: Binding(
+                            get: { document.markdownMode },
+                            set: {
+                                document.markdownMode = $0
+                                UserDefaults.standard.set(
+                                    $0.rawValue, forKey: "markdownDefaultMode")
+                            }
+                        )
+                    )
+                    .padding(.horizontal, 6)
+                }
+                if group.tabs.count > 1 {
+                    overflowTabMenu
+                }
             }
         }
-        .frame(height: RafuMetrics.tabBarHeight)
-        .background(theme.palette.tabBarBackground)
-        .overlay(alignment: .bottom) { Divider().overlay(theme.palette.borderSubtle) }
     }
 
     private var selectedDocument: EditorDocument? {
@@ -987,16 +1091,17 @@ private struct EditorGroupTabBar: View {
             }
         case .terminal(let sessionID):
             // Issue #4: same tab chrome as a file tab (icon, label, close
-            // button, selected underline) — just backed by a live terminal
-            // session instead of an `EditorDocument`. Reordered as a peer of
-            // file tabs (ADR 0014): the frame-capture `ForEach` above treats
-            // every row identically, and reordering never touches park/close
-            // semantics.
+            // button, attached selected cap) — just backed by a live
+            // terminal session instead of an `EditorDocument`. Reordered as
+            // a peer of file tabs (ADR 0014): the frame-capture `ForEach`
+            // above treats every row identically, and reordering never
+            // touches park/close semantics.
             if let controller = session.terminal.sessions.first(where: { $0.id == sessionID }) {
                 EditorTerminalTabItem(
                     tabID: tab.id,
                     groupID: group.id,
                     controller: controller,
+                    identity: terminalIdentities[sessionID],
                     isSelected: tab.id == group.selectedTabID,
                     session: session
                 )
@@ -1093,8 +1198,9 @@ private struct EditorGroupTabBar: View {
     }
 }
 
-/// Dashed accent line marking the active tab — Rafu's stitched seam motif.
-private struct StitchedUnderline: View {
+/// Secondary stitched motif on the selected cap's top edge. The attached fill
+/// and open-bottom outline remain the primary grayscale selection signal.
+private struct StitchedAccentEdge: View {
     let color: Color
 
     var body: some View {
@@ -1112,24 +1218,22 @@ private struct StitchedUnderline: View {
 }
 
 private struct GitStandaloneDiffCanvas: View {
-    @Environment(\.rafuTheme) private var theme
     let openDiff: GitOpenDiff
     @Bindable var session: WorkspaceSession
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                GitDiffTabItem(
-                    openDiff: openDiff,
-                    isSelected: true,
-                    select: session.selectGitDiff,
-                    close: session.closeGitDiff
-                )
-                Spacer()
+            EditorTabShelf {
+                HStack(spacing: 0) {
+                    GitDiffTabItem(
+                        openDiff: openDiff,
+                        isSelected: true,
+                        select: session.selectGitDiff,
+                        close: session.closeGitDiff
+                    )
+                    Spacer()
+                }
             }
-            .frame(height: RafuMetrics.tabBarHeight)
-            .background(theme.palette.tabBarBackground)
-            Divider().overlay(theme.palette.borderSubtle)
             GitSideBySideDiffView(openDiff: openDiff, session: session)
         }
     }
@@ -1145,33 +1249,38 @@ private struct GitStandaloneBlameCanvas: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                HStack(spacing: 7) {
-                    Image(systemName: "person.text.rectangle")
-                        .font(.system(size: 11))
-                        .foregroundStyle(theme.palette.info)
-                    Text("Blame • \(fileName)")
-                        .lineLimit(1)
-                        .foregroundStyle(theme.palette.textPrimary)
-                    Button("Close Blame", systemImage: "xmark", action: close)
-                        .buttonStyle(RafuIconButtonStyle(size: 18, iconSize: 9))
-                        .opacity(isHoveringTab ? 1 : 0.75)
+            EditorTabShelf {
+                HStack(spacing: 0) {
+                    AttachedWorkbenchTab(isSelected: true, usesDocumentWidth: true) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "person.text.rectangle")
+                                .font(.system(size: 11))
+                                .foregroundStyle(theme.palette.info)
+                                .accessibilityHidden(true)
+                            Text("Blame • \(fileName)")
+                                .lineLimit(1)
+                                .help("Blame • \(fileName)")
+                            AttachedWorkbenchTabCloseButton(
+                                accessibilityLabel: "Close Blame • \(fileName)",
+                                help: "Close Blame • \(fileName)",
+                                action: close
+                            )
+                            .opacity(isHoveringTab ? 1 : 0.75)
+                        }
+                    }
+                    .overlay(alignment: .top) {
+                        StitchedAccentEdge(color: theme.palette.accent)
+                    }
+                    .anchorPreference(
+                        key: SelectedEditorTabBoundsPreferenceKey.self,
+                        value: .bounds
+                    ) { $0 }
+                    .help("Blame • \(fileName)")
+                    .accessibilityLabel("Blame • \(fileName)")
+                    Spacer()
                 }
-                .font(.callout)
-                .padding(.horizontal, 10)
-                .frame(height: RafuMetrics.tabBarHeight)
-                .overlay(alignment: .bottom) {
-                    StitchedUnderline(color: theme.palette.accent)
-                }
-                .overlay(alignment: .trailing) {
-                    Divider().frame(height: 18).overlay(theme.palette.borderSubtle)
-                }
-                .onHover { isHoveringTab = $0 }
-                Spacer()
             }
-            .frame(height: RafuMetrics.tabBarHeight)
-            .background(theme.palette.tabBarBackground)
-            Divider().overlay(theme.palette.borderSubtle)
+            .onHover { isHoveringTab = $0 }
             blameHeader
             Divider().overlay(theme.palette.borderSubtle)
             if blame.lines.isEmpty {
@@ -1337,34 +1446,49 @@ private struct GitDiffTabItem: View {
     let close: () -> Void
 
     var body: some View {
-        HStack(spacing: 7) {
-            Button(action: select) {
-                HStack(spacing: 7) {
-                    Image(systemName: "arrow.left.arrow.right")
-                        .font(.system(size: 11))
-                        .foregroundStyle(theme.palette.info)
-                    Text(openDiff.title)
-                        .lineLimit(1)
-                        .foregroundStyle(theme.palette.textPrimary)
+        AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true) {
+            HStack(spacing: 6) {
+                Button(action: select) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.left.arrow.right")
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.palette.info)
+                            .accessibilityHidden(true)
+                        Text(openDiff.title)
+                            .lineLimit(1)
+                            .help(openDiff.title)
+                    }
+                    .contentShape(.rect)
                 }
-                .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            Button("Close", systemImage: "xmark", action: close)
-                .buttonStyle(RafuIconButtonStyle(size: 18, iconSize: 9))
+                .buttonStyle(.plain)
+                .accessibilityLabel(openDiff.title)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                AttachedWorkbenchTabCloseButton(
+                    accessibilityLabel: "Close \(openDiff.title)",
+                    help: "Close \(openDiff.title)",
+                    action: close
+                )
                 .opacity(isHovering || isSelected ? 1 : 0)
+            }
         }
-        .font(.callout)
-        .padding(.horizontal, 10)
-        .frame(height: RafuMetrics.tabBarHeight)
-        .overlay(alignment: .bottom) {
-            if isSelected { StitchedUnderline(color: theme.palette.accent) }
+        .background {
+            if isHovering && !isSelected {
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusAttachedTab, style: .continuous)
+                    .fill(theme.palette.hover.opacity(0.6))
+            }
         }
-        .overlay(alignment: .trailing) {
-            Divider().frame(height: 18).overlay(theme.palette.borderSubtle)
+        .overlay(alignment: .top) {
+            if isSelected {
+                StitchedAccentEdge(color: theme.palette.accent)
+            }
         }
+        .anchorPreference(
+            key: SelectedEditorTabBoundsPreferenceKey.self,
+            value: .bounds
+        ) { isSelected ? $0 : nil }
         .onHover { isHovering = $0 }
-        .help(openDiff.subtitle)
+        .help(openDiff.title)
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -1840,49 +1964,59 @@ private struct EditorTabItem: View {
 
     var body: some View {
         let icon = FileIconProvider.fileIcon(named: document.displayName)
-        HStack(spacing: 7) {
-            Button {
-                session.selectEditorTab(tabID, in: groupID)
-            } label: {
-                HStack(spacing: 7) {
-                    FileIconView(icon: icon, size: 11)
-                    Text(document.displayName)
-                        .lineLimit(1)
-                        .foregroundStyle(
-                            isSelected
-                                ? theme.palette.textPrimary
-                                : theme.palette.textSecondary
-                        )
-                    if document.isDirty {
-                        Circle().fill(theme.palette.accent).frame(width: 6, height: 6)
-                            .accessibilityLabel("Unsaved changes")
+        AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true) {
+            HStack(spacing: 6) {
+                Button {
+                    session.selectEditorTab(tabID, in: groupID)
+                } label: {
+                    HStack(spacing: 6) {
+                        FileIconView(icon: icon, size: 11)
+                        Text(document.displayName)
+                            .lineLimit(1)
+                            .help(document.displayName)
+                        if document.isDirty {
+                            Circle()
+                                .fill(theme.palette.accent)
+                                .frame(width: 6, height: 6)
+                                .accessibilityHidden(true)
+                        }
                     }
+                    .contentShape(.rect)
                 }
-                .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
+                .buttonStyle(.plain)
+                .accessibilityLabel(document.displayName)
+                .accessibilityValue(documentTabAccessibilityValue)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
 
-            Button("Close", systemImage: "xmark") { session.requestClose(document) }
-                .buttonStyle(RafuIconButtonStyle(size: 18, iconSize: 9))
+                AttachedWorkbenchTabCloseButton(
+                    accessibilityLabel: "Close \(document.displayName)",
+                    help: "Close \(document.displayName)"
+                ) {
+                    session.requestClose(document)
+                }
                 .opacity(isHovering || isSelected ? 1 : 0)
-                .help("Close \(document.displayName)")
-        }
-        .font(.callout)
-        .padding(.horizontal, 10)
-        .frame(height: RafuMetrics.tabBarHeight)
-        .background {
-            if isHovering {
-                theme.palette.hover.opacity(0.6)
-            } else {
-                Color.clear
             }
         }
-        .overlay(alignment: .bottom) {
-            if isSelected { StitchedUnderline(color: theme.palette.accent) }
+        .background {
+            if isHovering && !isSelected {
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusAttachedTab, style: .continuous)
+                    .fill(theme.palette.hover.opacity(0.6))
+            }
+        }
+        .overlay(alignment: .top) {
+            if isSelected {
+                StitchedAccentEdge(color: theme.palette.accent)
+            }
         }
         .overlay(alignment: .trailing) {
-            Divider().frame(height: 18).overlay(theme.palette.borderSubtle)
+            if !isSelected {
+                Divider().frame(height: 18).overlay(theme.palette.borderSubtle)
+            }
         }
+        .anchorPreference(
+            key: SelectedEditorTabBoundsPreferenceKey.self,
+            value: .bounds
+        ) { isSelected ? $0 : nil }
         .onHover { isHovering = $0 }
         .onDrag { session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString)) }
         .contextMenu {
@@ -1901,13 +2035,23 @@ private struct EditorTabItem: View {
             Divider()
             Button("Close") { session.requestClose(document) }
         }
+        .help(document.displayName)
         .accessibilityElement(children: .contain)
+    }
+
+    private var documentTabAccessibilityValue: String {
+        [
+            isSelected ? "Selected" : nil,
+            document.isDirty ? "Unsaved changes" : nil,
+        ]
+        .compactMap(\.self)
+        .joined(separator: ", ")
     }
 }
 
 /// Issue #4: a terminal tab, presented with the EXACT SAME chrome as
-/// `EditorTabItem` (icon, label, close button, hover, selected underline,
-/// trailing divider, drag/split context menu) — just backed by a live
+/// `EditorTabItem` (icon, label, close button, hover, attached selected cap,
+/// drag/split context menu) — just backed by a live
 /// `WorkspaceTerminalController` instead of an `EditorDocument`. This tab's
 /// own ✕/context-menu "Close" always terminates the shell
 /// (`session.closeTerminalTab`); there is no dirty-state confirmation, since
@@ -1921,86 +2065,88 @@ private struct EditorTerminalTabItem: View {
     let tabID: EditorTabID
     let groupID: EditorGroupID
     @Bindable var controller: WorkspaceTerminalController
+    let identity: EditorTerminalIdentityPresentation?
     let isSelected: Bool
     @Bindable var session: WorkspaceSession
 
     var body: some View {
-        HStack(spacing: 7) {
-            Button {
-                session.selectEditorTab(tabID, in: groupID)
-            } label: {
-                HStack(spacing: 7) {
-                    // An agent terminal shows its VENDOR mark; the generic
-                    // terminal glyph is the fallback for a login shell. Five
-                    // agent tabs all wearing the same glyph made the strip
-                    // unreadable at a glance — the name was the only thing
-                    // telling them apart, and it truncates at 20 characters.
-                    // The mark is never the sole carrier: the label sits
-                    // beside it, so this is identity at a glance, not meaning
-                    // by icon.
-                    if let provider = controller.agentProvider {
-                        FileIconView(icon: ConductorCLIIcons.icon(for: provider), size: 12)
-                            .accessibilityHidden(true)
-                    } else {
-                        Image(systemName: "terminal")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(theme.palette.accent)
+        let title = TerminalSessionPresentation.tabLabel(controller.displayName)
+        AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true) {
+            HStack(spacing: 6) {
+                Button {
+                    session.selectEditorTab(tabID, in: groupID)
+                } label: {
+                    HStack(spacing: 6) {
+                        // An agent terminal shows its VENDOR mark; the generic
+                        // terminal glyph remains the login-shell fallback.
+                        if let provider = controller.agentProvider {
+                            FileIconView(icon: ConductorCLIIcons.icon(for: provider), size: 12)
+                                .accessibilityHidden(true)
+                        } else {
+                            Image(systemName: "terminal")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(theme.palette.accent)
+                                .accessibilityHidden(true)
+                        }
+                        Text(title)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .help(title)
+                        // Exited remains textual in accessibility and in the
+                        // content overlay; the dot is only a redundant cue.
+                        if TerminalSessionPresentation.isExited(controller.status) {
+                            Circle()
+                                .fill(theme.palette.textMuted)
+                                .frame(width: 6, height: 6)
+                                .accessibilityHidden(true)
+                        }
                     }
-                    Text(TerminalSessionPresentation.tabLabel(controller.displayName))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .foregroundStyle(
-                            isSelected
-                                ? theme.palette.textPrimary
-                                : theme.palette.textSecondary
-                        )
-                    // Never communicated by color alone: the running/stopped
-                    // dot pairs with the "Shell exited" content overlay text.
-                    // `.bell` is not exited (terminal-manager.md T-E
-                    // regression guard — see `EditorTerminalTabContent`'s
-                    // identical note), so this uses the same separately
-                    // tested `isExited` predicate rather than `!isRunning`.
-                    if TerminalSessionPresentation.isExited(controller.status) {
-                        Circle().fill(theme.palette.textMuted).frame(width: 6, height: 6)
-                            .accessibilityLabel("Shell exited")
-                    }
+                    .contentShape(.rect)
                 }
-                .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
+                .buttonStyle(.plain)
+                .accessibilityLabel(title)
+                .accessibilityValue(terminalTabAccessibilityValue)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
 
-            Button("Close", systemImage: "xmark") { session.closeTerminalTab(tabID) }
-                .buttonStyle(RafuIconButtonStyle(size: 18, iconSize: 9))
+                AttachedWorkbenchTabCloseButton(
+                    accessibilityLabel: "Close \(title)",
+                    help: "Close \(title)"
+                ) {
+                    session.closeTerminalTab(tabID)
+                }
                 .opacity(isHovering || isSelected ? 1 : 0)
-                .help("Close \(controller.displayName)")
-        }
-        .font(.callout)
-        .padding(.horizontal, 10)
-        .frame(height: RafuMetrics.tabBarHeight)
-        .background {
-            if isHovering {
-                theme.palette.hover.opacity(0.6)
-            } else {
-                Color.clear
             }
         }
-        .overlay(alignment: .bottom) {
-            if isSelected { StitchedUnderline(color: theme.palette.accent) }
+        .background {
+            if isHovering && !isSelected {
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusAttachedTab, style: .continuous)
+                    .fill(theme.palette.hover.opacity(0.6))
+            }
+        }
+        .overlay(alignment: .top) {
+            if isSelected {
+                StitchedAccentEdge(color: theme.palette.accent)
+            }
         }
         .overlay(alignment: .trailing) {
-            Divider().frame(height: 18).overlay(theme.palette.borderSubtle)
+            if !isSelected {
+                Divider().frame(height: 18).overlay(theme.palette.borderSubtle)
+            }
         }
         .overlay(alignment: .leading) {
-            // Color TAG (terminal-manager.md T-D) — correlates this tab
-            // with its panel row's dot. Never the only signal: paired with
-            // the label/icon/dot text as always.
-            if let sessionColor = controller.sessionColor {
+            // This exact resolved identity value also surrounds the selected
+            // live tile; it has no independent precedence or fallback.
+            if let identity {
                 Rectangle()
-                    .fill(theme.palette.color(for: sessionColor))
+                    .fill(identity.color)
                     .frame(width: 2)
                     .accessibilityHidden(true)
             }
         }
+        .anchorPreference(
+            key: SelectedEditorTabBoundsPreferenceKey.self,
+            value: .bounds
+        ) { isSelected ? $0 : nil }
         .onHover { isHovering = $0 }
         .onDrag { session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString)) }
         .contextMenu {
@@ -2022,7 +2168,16 @@ private struct EditorTerminalTabItem: View {
             Button("Close") { session.closeTerminalTab(tabID) }
         }
         .accessibilityElement(children: .contain)
-        .help(controller.currentDirectoryPath ?? controller.startingDirectory)
+        .help("\(title)\n\(controller.currentDirectoryPath ?? controller.startingDirectory)")
+    }
+
+    private var terminalTabAccessibilityValue: String {
+        [
+            isSelected ? "Selected" : nil,
+            TerminalSessionPresentation.isExited(controller.status) ? "Shell exited" : nil,
+        ]
+        .compactMap(\.self)
+        .joined(separator: ", ")
     }
 }
 
