@@ -89,18 +89,24 @@ struct WorkspaceWindowView: View {
                         // priority. Issue #4: the terminal presents as an
                         // editor tab inside `editorCanvas` now, not a
                         // separate docked panel here.
-                        HSplitView {
-                            editorCanvas
-                                .frame(minWidth: 480, minHeight: 220)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .layoutPriority(1)
-                            if session.descriptor != nil, session.navigatorMode != .files {
-                                WorkspaceUtilityPanelView(session: session)
-                                    .frame(minWidth: 250, idealWidth: 310, maxWidth: 460)
-                                    .frame(maxHeight: .infinity)
+                        WorkbenchDeckSurface {
+                            HSplitView {
+                                editorCanvas
+                                    .frame(minWidth: 480, minHeight: 220)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .layoutPriority(1)
+                                if session.descriptor != nil, session.navigatorMode != .files {
+                                    WorkspaceUtilityPanelView(session: session)
+                                        .frame(minWidth: 250, idealWidth: 310, maxWidth: 460)
+                                        .frame(maxHeight: .infinity)
+                                }
                             }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .layoutPriority(1)
                         }
+                        .padding(RafuMetrics.workbenchInset)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(theme.palette.appBackground)
                         .layoutPriority(1)
                         Divider().overlay(theme.palette.borderSubtle)
                         WorkspaceUtilityRail(session: session)

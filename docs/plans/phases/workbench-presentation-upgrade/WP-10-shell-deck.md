@@ -2,7 +2,8 @@
 
 ## Status and execution slot
 
-- **Status:** Planned.
+- **Status:** Implemented on `codex/presentation-shell-deck` (2026-07-29);
+  staged-app/manual shell evidence deferred to the coordinator merge round.
 - **Wave:** 1; runs in parallel with WP-20 through WP-60.
 - **Suggested branch:** `codex/presentation-shell-deck`.
 - **Recommended model:** `gpt-5.6-sol` with high reasoning.
@@ -180,6 +181,28 @@ round. Nothing modifies a file after the final parallel test.
 Commit only owned paths, do not push, and remove this worktree's `.build` after
 the green commit. The handoff must state whether `FlatWindowChrome.swift`
 changed and why.
+
+## Implementation record
+
+- Wrapped the existing inner editor/optional-utility `HSplitView` in exactly
+  one shared `WorkbenchDeckSurface`, with the semantic 4 pt inset outside the
+  surface and `appBackground` exposed behind it.
+- Kept Files, both activity rails, and the status bar outside the deck. The
+  native split views retain their existing width bounds, fill constraints,
+  layout priorities, and unmodified content.
+- Added focused source/composition coverage for deck ownership, rear-plane
+  ordering, external inset, flat Files presentation, splitter geometry, and
+  the absence of masks, clips, shadows, blur, and material. Extended the
+  existing window-chrome suite for inactive and full-screen-entry
+  reapplication.
+- The single Rafu Lightning GUI lease was unavailable because another staged
+  `RafuLightning` process was already running. No staged app was stopped or
+  replaced. The top-band capture and the complete manual shell matrix remain
+  explicit coordinator merge-round checks; `FlatWindowChrome.swift` and
+  `WorkspaceSidebarView.swift` remain byte-identical to the foundation.
+- No reusable platform nuance or durable decision beyond the accepted ADRs was
+  discovered, so no reference note, ADR update, or intended reference-index
+  row is required.
 
 ## Goal-mode start prompt
 
