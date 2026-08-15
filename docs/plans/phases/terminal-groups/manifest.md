@@ -10,9 +10,9 @@ does not create, replace, or rebase the branch.
 flowchart LR
     D["TG-00<br/>Complete"]
     C["TG-10<br/>Complete"]
-    R["TG-20<br/>Ready"]
-    V["TG-21<br/>Ready"]
-    S["TG-22<br/>Ready"]
+    R["TG-20<br/>In progress"]
+    V["TG-21<br/>In progress"]
+    S["TG-22<br/>In progress"]
     W["TG-30<br/>Blocked"]
     M["TG-40<br/>Blocked"]
     K["TG-41<br/>Blocked"]
@@ -40,9 +40,9 @@ flowchart LR
 |---|---|---|---|---|---|
 | [TG-00](TG-00-decision.md) | — | Terra | `terminal-groups/tg-00-decision` | Complete | `5cece853c12c9ada8100303a36b3d4a335980e59` |
 | [TG-10](TG-10-source-contracts.md) | TG-00 | Terra | `terminal-groups/tg-10-contracts` | Complete | `85197f0b8bed654570c977fd982a247236dc171f` |
-| [TG-20](TG-20-runtime.md) | TG-10 | Terra | `terminal-groups/tg-20-runtime` | Ready | — |
-| [TG-21](TG-21-renderer-focus.md) | TG-10 | Terra | `terminal-groups/tg-21-renderer-focus` | Ready | — |
-| [TG-22](TG-22-persistence.md) | TG-10 | Terra | `terminal-groups/tg-22-persistence` | Ready | — |
+| [TG-20](TG-20-runtime.md) | TG-10 | Terra | `terminal-groups/tg-20-runtime` | In progress | — |
+| [TG-21](TG-21-renderer-focus.md) | TG-10 | Terra | `terminal-groups/tg-21-renderer-focus` | In progress | — |
+| [TG-22](TG-22-persistence.md) | TG-10 | Terra | `terminal-groups/tg-22-persistence` | In progress | — |
 | [TG-30](TG-30-workspace-integration.md) | TG-20, TG-21, TG-22 | Terra | `terminal-groups/tg-30-workspace-integration` | Blocked | — |
 | [TG-40](TG-40-manager-switcher.md) | TG-30 | Terra | `terminal-groups/tg-40-manager-switcher` | Blocked | — |
 | [TG-41](TG-41-commands-save-ui.md) | TG-30 | Terra | `terminal-groups/tg-41-commands-save-ui` | Blocked | — |
