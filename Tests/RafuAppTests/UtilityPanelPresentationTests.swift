@@ -101,6 +101,25 @@ struct UtilityPanelPresentationTests {
         #expect(inspector.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
     }
 
+    @Test("Source Control modes fill the utility width and expose the selected section")
+    func sourceControlSegmentedNavigationContract() throws {
+        let source = try Self.source("Sources/RafuApp/Views/GitInspectorView.swift")
+        let controls = try Self.source("Sources/RafuApp/Support/RafuControlStyles.swift")
+
+        #expect(source.contains("items: GitInspectorSection.allCases"))
+        #expect(source.contains("selection: $session.gitInspectorSection"))
+        #expect(source.contains("fillsWidth: true"))
+        #expect(source.contains(".accessibilityLabel(\"Source Control section\")"))
+        #expect(source.contains(".accessibilityValue(session.gitInspectorSection.title)"))
+        #expect(
+            controls.components(separatedBy: ".frame(maxWidth: fillsWidth ? .infinity : nil)")
+                .count - 1 >= 2
+        )
+        #expect(
+            GitInspectorSection.allCases == [.changes, .worktrees, .history]
+        )
+    }
+
     @Test("Branch picker remains native, bounded, and exposes full names")
     func branchPopoverSourceContract() throws {
         let dropdown = try Self.source(

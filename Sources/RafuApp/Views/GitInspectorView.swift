@@ -247,8 +247,11 @@ struct GitInspectorView: View {
             RafuSegmentedPicker(
                 items: GitInspectorSection.allCases,
                 selection: $session.gitInspectorSection,
+                fillsWidth: true,
                 title: \.title
             )
+            .accessibilityLabel("Source Control section")
+            .accessibilityValue(session.gitInspectorSection.title)
             .padding(.horizontal, RafuMetrics.utilityBodyInset)
             .padding(.vertical, RafuMetrics.space2)
             .frame(maxWidth: .infinity, alignment: .leading)

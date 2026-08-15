@@ -34,12 +34,7 @@ struct RafuSettingsView: View {
 
     @ViewBuilder
     private func adaptiveSettingsLayout(isCompact: Bool) -> some View {
-        VStack(spacing: isCompact ? SettingsPresentationLayout.navigationPageGap : 0) {
-            if isCompact {
-                SettingsPaneNavigation(selection: $pane, variant: .compact)
-                    .frame(maxWidth: SettingsPresentationLayout.pageMaximumWidth)
-            }
-
+        VStack(spacing: 0) {
             HStack(
                 alignment: .top,
                 spacing: isCompact ? 0 : SettingsPresentationLayout.navigationPageGap
@@ -47,7 +42,7 @@ struct RafuSettingsView: View {
                 if !isCompact {
                     SettingsPaneNavigation(selection: $pane, variant: .regular)
                 }
-                pageColumn
+                pageColumn(isCompact: isCompact)
             }
             .frame(
                 maxWidth: isCompact
@@ -62,9 +57,9 @@ struct RafuSettingsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    private var pageColumn: some View {
+    private func pageColumn(isCompact: Bool) -> some View {
         VStack(alignment: .leading, spacing: 24) {
-            SettingsPageHeader(pane: pane)
+            pageIdentity(isCompact: isCompact)
             paneContent
         }
         .frame(
@@ -72,6 +67,21 @@ struct RafuSettingsView: View {
             maxHeight: .infinity,
             alignment: .topLeading
         )
+    }
+
+    /// Compact category navigation belongs to the page hierarchy. The retained
+    /// pane host stays below this identity block, outside the layout variant,
+    /// so resizing never recreates visited panes or restarts their work.
+    @ViewBuilder
+    private func pageIdentity(isCompact: Bool) -> some View {
+        if isCompact {
+            VStack(alignment: .leading, spacing: SettingsPresentationLayout.navigationPageGap) {
+                SettingsPaneNavigation(selection: $pane, variant: .compact)
+                SettingsPageHeader(pane: pane)
+            }
+        } else {
+            SettingsPageHeader(pane: pane)
+        }
     }
 
     /// This is intentionally one retained ZStack host outside the navigation

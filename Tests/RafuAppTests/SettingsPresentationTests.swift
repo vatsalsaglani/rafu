@@ -22,13 +22,17 @@ struct SettingsPresentationTests {
         #expect(SettingsPresentationLayout.navigationBreakpoint == 812)
     }
 
-    @Test("Compact navigation keeps every category reachable without horizontal scrolling")
-    func compactNavigationIsAnUnscrollingMenu() throws {
+    @Test("Compact navigation keeps every category reachable in an in-flow disclosure")
+    func compactNavigationIsAnInFlowDisclosure() throws {
         let source = try Self.source("Sources/RafuApp/Settings/SettingsPaneNavigation.swift")
         #expect(source.contains("case .compact:"))
-        #expect(source.contains("Menu {"))
+        #expect(source.contains("@State private var isCompactNavigationExpanded = false"))
+        #expect(source.contains("if isCompactNavigationExpanded"))
         #expect(source.contains("ForEach(SettingsPane.allCases)"))
-        #expect(source.contains("Button {"))
+        #expect(source.contains("Button(action:"))
+        #expect(source.contains(".onExitCommand(perform: collapseCompactNavigation)"))
+        #expect(!source.contains("Menu {"))
+        #expect(!source.contains(".popover("))
         #expect(!source.contains("ScrollView(.horizontal)"))
     }
 
@@ -53,7 +57,7 @@ struct SettingsPresentationTests {
 
         let navigation = try #require(source.range(of: "adaptiveSettingsLayout"))
         let navigationTail = source[navigation.lowerBound...]
-        let pageColumn = try #require(navigationTail.range(of: "pageColumn"))
+        let pageColumn = try #require(navigationTail.range(of: "pageColumn(isCompact: isCompact)"))
         let paneHost = try #require(source.range(of: "private var paneContent"))
         #expect(pageColumn.lowerBound < paneHost.lowerBound)
     }
