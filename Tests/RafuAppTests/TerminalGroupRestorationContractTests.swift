@@ -38,6 +38,28 @@ private func terminalGroupRestorationRecord() throws -> TerminalGroupOpenTabRest
     )
 }
 
+private func savedTerminalGroupRecord() throws -> SavedTerminalGroupRecord {
+    let paneID = SavedTerminalPaneID()
+    return try SavedTerminalGroupRecord(
+        id: SavedTerminalGroupID(),
+        name: try #require(TerminalGroupName("Saved group")),
+        root: .pane(paneID),
+        focusedPaneID: paneID,
+        panes: [
+            try SavedTerminalPaneRecord(
+                id: paneID,
+                explicitUserName: try explicitPaneName("Saved pane"),
+                themeColor: .accent,
+                kind: .ordinaryShell,
+                launchProfile: TerminalPaneLaunchProfile(
+                    shell: .preferredShell,
+                    startingFolder: .root
+                )
+            )
+        ]
+    )
+}
+
 private func restorableWorkspaceJSON() throws -> [String: Any] {
     let workspace = RestorableWorkspace(
         bookmark: Data([1, 2, 3]),
@@ -151,4 +173,110 @@ func savedLayoutEnvelopeIsVersionedAndWorkspaceOpaque() throws {
             groups: [:]
         )
     }
+}
+
+@Test("Saved-layout writes and deletes return typed atomic IDs")
+func savedLayoutStoreRequestsAndResultsRetainMutationIDs() throws {
+    let workspaceKey = TerminalGroupWorkspaceKey(
+        standardizedRoot: URL(fileURLWithPath: "/private/workspace", isDirectory: true)
+    )
+    let record = try savedTerminalGroupRecord()
+    let firstSave = try TerminalGroupSavedLayoutSaveRequest(
+        workspaceKey: workspaceKey,
+        operation: .firstSave,
+        group: record
+    )
+    let saveAs = try TerminalGroupSavedLayoutSaveRequest(
+        workspaceKey: workspaceKey,
+        operation: .saveAs,
+        group: record
+    )
+    let save = try TerminalGroupSavedLayoutSaveRequest(
+        workspaceKey: workspaceKey,
+        operation: .save(existingID: record.id),
+        group: record
+    )
+    let saveResult = TerminalGroupSavedLayoutSaveResult(
+        savedLayoutID: record.id,
+        disposition: .created
+    )
+    let deleteRequest = TerminalGroupSavedLayoutDeleteRequest(
+        workspaceKey: workspaceKey,
+        savedLayoutID: record.id
+    )
+    let deleteResult = TerminalGroupSavedLayoutDeleteResult(removedSavedLayoutID: record.id)
+
+    #expect(firstSave.operation == .firstSave)
+    #expect(saveAs.operation == .saveAs)
+    #expect(save.operation == .save(existingID: record.id))
+    #expect(saveResult.savedLayoutID == record.id)
+    #expect(deleteRequest.savedLayoutID == record.id)
+    #expect(deleteResult.removedSavedLayoutID == record.id)
+    let mismatchedRecord = try savedTerminalGroupRecord()
+    #expect(
+        throws: TerminalGroupRestorationError.savedLayoutUpdateIDMismatch(
+            expected: record.id,
+            actual: mismatchedRecord.id
+        )
+    ) {
+        _ = try TerminalGroupSavedLayoutSaveRequest(
+            workspaceKey: workspaceKey,
+            operation: .save(existingID: record.id),
+            group: mismatchedRecord
+        )
+    }
+}
+
+@Test("Saved-layout envelopes cap reusable records at 32")
+func savedLayoutEnvelopeUsesThirtyTwoRecordBound() throws {
+    let workspaceKey = TerminalGroupWorkspaceKey(
+        standardizedRoot: URL(fileURLWithPath: "/private/workspace", isDirectory: true)
+    )
+    var groups: [SavedTerminalGroupID: SavedTerminalGroupRecord] = [:]
+    for _ in 0..<TerminalGroupSavedLayoutEnvelope.maximumSavedLayouts {
+        let record = try savedTerminalGroupRecord()
+        groups[record.id] = record
+    }
+    _ = try TerminalGroupSavedLayoutEnvelope(workspaceKey: workspaceKey, groups: groups)
+
+    let overflow = try savedTerminalGroupRecord()
+    groups[overflow.id] = overflow
+    #expect(throws: TerminalGroupRestorationError.invalidSavedGroup) {
+        _ = try TerminalGroupSavedLayoutEnvelope(workspaceKey: workspaceKey, groups: groups)
+    }
+}
+
+@Test("Terminal Group restoration stops after a bounded malformed-record scan")
+func terminalGroupRestorationBoundsMalformedRecordInspection() throws {
+    let record = try terminalGroupRestorationRecord()
+    let restoration = try TerminalGroupWorkspaceRestoration(openGroups: [record])
+    let restorationData = try JSONEncoder().encode(restoration)
+    var restorationJSON = try #require(
+        JSONSerialization.jsonObject(with: restorationData) as? [String: Any]
+    )
+    let validRecord = try #require(
+        (restorationJSON["openGroups"] as? [[String: Any]])?.first
+    )
+    var records = Array(
+        repeating: ["groupID": 42] as [String: Any],
+        count: TerminalGroupWorkspaceRestoration.maximumRecordsToInspect
+    )
+    records.append(validRecord)
+    restorationJSON["openGroups"] = records
+
+    var workspaceJSON = try restorableWorkspaceJSON()
+    workspaceJSON["terminalGroupRestoration"] = restorationJSON
+    let decoded = try JSONDecoder().decode(
+        RestorableWorkspace.self,
+        from: JSONSerialization.data(withJSONObject: workspaceJSON)
+    )
+
+    #expect(decoded.terminalGroupRestoration?.openGroups.isEmpty == true)
+    #expect(
+        decoded.terminalGroupRestoration?.diagnostics.count
+            == TerminalGroupWorkspaceRestoration.maximumDiagnostics)
+    #expect(
+        decoded.terminalGroupRestoration?.diagnostics.allSatisfy {
+            $0 == .malformedTerminalGroupRecord
+        } == true)
 }

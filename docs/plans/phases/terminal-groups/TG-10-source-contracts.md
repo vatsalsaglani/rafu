@@ -123,6 +123,9 @@ Each wraps a UUID and provides a default UUID initializer. Runtime IDs, saved
 record IDs, and live session UUIDs are different domains and are not
 interchangeable.
 
+Group and pane names are trimmed and limited to 80 Unicode scalar values.
+`TerminalReportedTitle` remains a separate bounded live-only value.
+
 Define:
 
 - `TerminalGroupSplitPlacement { right, down }`;
@@ -207,6 +210,10 @@ process spec, define reserve, consume, and cancel operations. A reservation is
 manager-scoped, single-use, generation-checked, and carries no executable,
 environment, token, or process spec.
 
+Freeze these operations in `TerminalGroupCapacityReserving` as
+`reserveLiveSessionCapacity`, `consumeLiveSessionCapacity`, and
+`cancelLiveSessionCapacity`. TG-20 implements the window-scoped seam.
+
 ### C4. Command and effect boundary
 
 Define one `TerminalGroupCommand` family for:
@@ -280,6 +287,11 @@ stream returns and immediately yields that workspace's current revision. This
 closes the initial-list subscription gap. Tests and `WorkspaceSession` must be
 able to inject a store. TG-22 supplies the concrete Application Support actor.
 
+Freeze each atomic mutation with a request and result value. A save request
+identifies First Save, Save, or Save As and returns the saved-layout ID plus a
+created or updated disposition. A delete request returns the removed
+saved-layout ID. A saved-layout envelope stores at most 32 reusable records.
+
 ### C6. Editor resource migration
 
 Add `EditorTabResource.terminalGroup(groupID:)`. It is restorable only when a
@@ -337,6 +349,7 @@ of the existing workspace, file tabs, editor groups, or selection. Within a
 valid field, decode records through a tolerant per-record boundary. One
 malformed record produces a bounded record diagnostic and is omitted while
 valid sibling records and all nonterminal workspace data survive.
+Inspect no more than 40 records and retain no more than 16 diagnostics.
 
 Do not start, resolve, or register a process during encode or decode.
 
@@ -397,13 +410,17 @@ Terminal Group creation route, process start, store I/O, or automatic command.
 - Added separate runtime and saved IDs, bounded names/paths, split vocabulary,
   normalized recursive trees, snapshot validation, safe ordinary-shell launch
   profiles, runtime-only launch requests, capacity reservations, close tokens,
-  commands, and effects.
+  commands, and effects. Group and pane names use an 80-Unicode-scalar bound.
+  Unavailable Agent and Ensemble panes reject a live session, non-unavailable
+  status, shell launch profile, or restartable start availability.
 - Added versioned saved-layout and inert open-tab records. Named-layout opens
   create fresh runtime group, pane, and split IDs. The saved codec persists an
   explicit pane name only and has no output, OSC title, process, provider,
   environment, token, credential, or session field.
-- Added the injected `TerminalGroupSavedLayoutStoring` protocol contract. TG-22
-  owns the Application Support actor and newest-one change-stream implementation.
+- Added the injected `TerminalGroupSavedLayoutStoring` protocol contract. Its
+  typed atomic save request/result supports First Save, Save, and Save As. Its
+  typed delete request/result returns the removed layout ID. TG-22 owns the
+  Application Support actor and newest-one change-stream implementation.
 - Added the Terminal Group editor-resource and switcher-destination identities.
   Existing terminal routing remains unchanged. The central call-site branches
   are compile shims only: inactive group resources select no document, restore
@@ -411,15 +428,21 @@ Terminal Group creation route, process start, store I/O, or automatic command.
 - Added tolerant `RestorableWorkspace` decoding for the optional group field.
   A missing, malformed, unsupported, or malformed sibling group record leaves
   existing workspace, file-tab, and editor-layout data intact and produces only
-  a bounded diagnostic.
+  a bounded diagnostic. The decoder inspects at most 40 group records and
+  stores at most 16 diagnostics.
 - Added `TerminalGroupContractTests` and
   `TerminalGroupRestorationContractTests`, and extended `EditorLayoutTests` for
   group-resource and legacy-terminal compatibility. The pre-final focused
-  `TerminalGroup` filter passed 13 tests. The final format, build, regression,
+  `TerminalGroup` filter passed 18 tests. The final format, build, regression,
   and full parallel verification sequence follows this record.
 
 No reusable reference note was created. The Swift 6.2 isolation and Codable
 facts used by this lane were already covered by the required project references.
+
+Follow-up contract review corrections add the TG-20 reserve, consume, and
+cancel capacity seam. The seam remains a contract only. It starts no process
+and reserves no live capacity in TG-10. Saved-layout envelopes now allow at
+most 32 records.
 
 ## Goal Mode start prompt
 

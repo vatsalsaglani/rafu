@@ -207,7 +207,7 @@ nonisolated struct SavedTerminalGroupRecord: Codable, Equatable, Sendable {
 /// templates, so they contain only saved-record identities.
 nonisolated struct TerminalGroupSavedLayoutEnvelope: Codable, Equatable, Sendable {
     static let currentSchemaVersion = 1
-    static let maximumSavedLayouts = 128
+    static let maximumSavedLayouts = 32
 
     let schemaVersion: Int
     let workspaceKey: TerminalGroupWorkspaceKey
@@ -380,6 +380,7 @@ nonisolated enum TerminalGroupRestorationDiagnostic: Equatable, Sendable {
     case malformedTerminalGroupField
     case unsupportedTerminalGroupSchema(Int)
     case malformedTerminalGroupRecord
+    case terminalGroupRecordLimitExceeded
 }
 
 /// The optional field embedded in `RestorableWorkspace`. The decoder tolerates
@@ -389,6 +390,7 @@ nonisolated struct TerminalGroupWorkspaceRestoration: Codable, Equatable, Sendab
     static let currentSchemaVersion = 1
     static let maximumOpenGroups = 24
     static let maximumDiagnostics = 16
+    static let maximumRecordsToInspect = maximumOpenGroups + maximumDiagnostics
 
     let schemaVersion: Int
     let openGroups: [TerminalGroupOpenTabRestorationRecord]
@@ -418,6 +420,14 @@ nonisolated struct TerminalGroupWorkspaceRestoration: Codable, Equatable, Sendab
         self.diagnostics = Array(diagnostics.prefix(Self.maximumDiagnostics))
     }
 
+    private static func appendBoundedDiagnostic(
+        _ diagnostic: TerminalGroupRestorationDiagnostic,
+        to diagnostics: inout [TerminalGroupRestorationDiagnostic]
+    ) {
+        guard diagnostics.count < maximumDiagnostics else { return }
+        diagnostics.append(diagnostic)
+    }
+
     private enum CodingKeys: String, CodingKey {
         case schemaVersion
         case openGroups
@@ -433,17 +443,24 @@ nonisolated struct TerminalGroupWorkspaceRestoration: Codable, Equatable, Sendab
         var records = try container.nestedUnkeyedContainer(forKey: .openGroups)
         var openGroups: [TerminalGroupOpenTabRestorationRecord] = []
         var diagnostics: [TerminalGroupRestorationDiagnostic] = []
-        while !records.isAtEnd {
-            let recordDecoder = try records.superDecoder()
+        var inspectedRecordCount = 0
+        while !records.isAtEnd, inspectedRecordCount < Self.maximumRecordsToInspect {
+            inspectedRecordCount += 1
             do {
+                let recordDecoder = try records.superDecoder()
                 let record = try TerminalGroupOpenTabRestorationRecord(from: recordDecoder)
                 guard openGroups.count < Self.maximumOpenGroups else {
-                    throw TerminalGroupRestorationError.tooManyOpenGroups(openGroups.count + 1)
+                    Self.appendBoundedDiagnostic(
+                        .terminalGroupRecordLimitExceeded, to: &diagnostics)
+                    continue
                 }
                 openGroups.append(record)
             } catch {
-                diagnostics.append(.malformedTerminalGroupRecord)
+                Self.appendBoundedDiagnostic(.malformedTerminalGroupRecord, to: &diagnostics)
             }
+        }
+        if !records.isAtEnd {
+            Self.appendBoundedDiagnostic(.terminalGroupRecordLimitExceeded, to: &diagnostics)
         }
         guard Set(openGroups.map(\.groupID)).count == openGroups.count else {
             throw TerminalGroupRestorationError.duplicateOpenGroup
@@ -469,6 +486,10 @@ nonisolated enum TerminalGroupRestorationError: Error, Equatable, Sendable {
     case invalidOpenPane(TerminalPaneID)
     case tooManyOpenGroups(Int)
     case duplicateOpenGroup
+    case savedLayoutUpdateIDMismatch(
+        expected: SavedTerminalGroupID,
+        actual: SavedTerminalGroupID
+    )
 }
 
 // MARK: - Pure template instantiation
@@ -527,6 +548,56 @@ nonisolated struct TerminalGroupSavedLayoutStoreChange: Equatable, Sendable {
     let revision: UInt64
 }
 
+/// One atomic saved-layout write. First Save and Save As create one saved
+/// record and return its ID. Save requires the submitted record to retain the
+/// existing ID, so it cannot update another saved layout by mistake.
+nonisolated enum TerminalGroupSavedLayoutSaveOperation: Equatable, Sendable {
+    case firstSave
+    case save(existingID: SavedTerminalGroupID)
+    case saveAs
+}
+
+nonisolated struct TerminalGroupSavedLayoutSaveRequest: Equatable, Sendable {
+    let workspaceKey: TerminalGroupWorkspaceKey
+    let operation: TerminalGroupSavedLayoutSaveOperation
+    let group: SavedTerminalGroupRecord
+
+    init(
+        workspaceKey: TerminalGroupWorkspaceKey,
+        operation: TerminalGroupSavedLayoutSaveOperation,
+        group: SavedTerminalGroupRecord
+    ) throws {
+        if case .save(let existingID) = operation, existingID != group.id {
+            throw TerminalGroupRestorationError.savedLayoutUpdateIDMismatch(
+                expected: existingID,
+                actual: group.id
+            )
+        }
+        self.workspaceKey = workspaceKey
+        self.operation = operation
+        self.group = group
+    }
+}
+
+nonisolated enum TerminalGroupSavedLayoutSaveDisposition: Equatable, Sendable {
+    case created
+    case updated
+}
+
+nonisolated struct TerminalGroupSavedLayoutSaveResult: Equatable, Sendable {
+    let savedLayoutID: SavedTerminalGroupID
+    let disposition: TerminalGroupSavedLayoutSaveDisposition
+}
+
+nonisolated struct TerminalGroupSavedLayoutDeleteRequest: Equatable, Sendable {
+    let workspaceKey: TerminalGroupWorkspaceKey
+    let savedLayoutID: SavedTerminalGroupID
+}
+
+nonisolated struct TerminalGroupSavedLayoutDeleteResult: Equatable, Sendable {
+    let removedSavedLayoutID: SavedTerminalGroupID
+}
+
 /// TG-22 provides the Application Support actor. Its implementation must
 /// register a subscriber before returning this bounded newest-one stream and
 /// yield the current revision immediately, which closes the initial
@@ -535,11 +606,12 @@ nonisolated protocol TerminalGroupSavedLayoutStoring: Sendable {
     func loadSavedLayouts(
         for workspaceKey: TerminalGroupWorkspaceKey
     ) async throws -> TerminalGroupSavedLayoutEnvelope
-    func saveSavedLayouts(_ envelope: TerminalGroupSavedLayoutEnvelope) async throws
+    func saveSavedLayout(
+        _ request: TerminalGroupSavedLayoutSaveRequest
+    ) async throws -> TerminalGroupSavedLayoutSaveResult
     func deleteSavedLayout(
-        _ id: SavedTerminalGroupID,
-        for workspaceKey: TerminalGroupWorkspaceKey
-    ) async throws
+        _ request: TerminalGroupSavedLayoutDeleteRequest
+    ) async throws -> TerminalGroupSavedLayoutDeleteResult
     func listSavedLayouts(
         for workspaceKey: TerminalGroupWorkspaceKey
     ) async throws -> [SavedTerminalGroupRecord]

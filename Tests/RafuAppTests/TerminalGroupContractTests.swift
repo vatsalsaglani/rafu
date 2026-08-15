@@ -7,6 +7,30 @@ private enum TerminalGroupContractTestError: Error {
     case invalidTestValue
 }
 
+private nonisolated struct TerminalGroupCapacityReservationProbe: TerminalGroupCapacityReserving {
+    func reserveLiveSessionCapacity(
+        _ requestedLiveSessionCount: Int
+    ) throws -> TerminalGroupCapacityReservation {
+        guard
+            let reservation = TerminalGroupCapacityReservation(
+                generation: 1,
+                reservedLiveSessionCount: requestedLiveSessionCount
+            )
+        else {
+            throw TerminalGroupContractTestError.invalidTestValue
+        }
+        return reservation
+    }
+
+    func consumeLiveSessionCapacity(
+        _: TerminalGroupCapacityReservation
+    ) throws {}
+
+    func cancelLiveSessionCapacity(
+        _: TerminalGroupCapacityReservation
+    ) throws {}
+}
+
 private func paneName(_ value: String) throws -> TerminalPaneName {
     guard let name = TerminalPaneName(value) else {
         throw TerminalGroupContractTestError.invalidTestValue
@@ -66,7 +90,7 @@ func terminalGroupSnapshotValidatesTreeAndBounds() throws {
     let title = try reportedTitle("OSC title")
     let profile = TerminalPaneLaunchProfile(shell: .preferredShell, startingFolder: .root)
     let panes = [
-        TerminalPaneSnapshot(
+        try TerminalPaneSnapshot(
             id: firstPaneID,
             sessionID: nil,
             explicitUserName: firstPaneName,
@@ -77,7 +101,7 @@ func terminalGroupSnapshotValidatesTreeAndBounds() throws {
             launchProfile: profile,
             startAvailability: .available
         ),
-        TerminalPaneSnapshot(
+        try TerminalPaneSnapshot(
             id: secondPaneID,
             sessionID: nil,
             explicitUserName: nil,
@@ -154,7 +178,7 @@ func terminalGroupSnapshotValidatesTreeAndBounds() throws {
 
     let sharedSessionID = UUID()
     var duplicateSessionPanes = panes
-    duplicateSessionPanes[0] = TerminalPaneSnapshot(
+    duplicateSessionPanes[0] = try TerminalPaneSnapshot(
         id: firstPaneID,
         sessionID: sharedSessionID,
         explicitUserName: nil,
@@ -165,7 +189,7 @@ func terminalGroupSnapshotValidatesTreeAndBounds() throws {
         launchProfile: profile,
         startAvailability: .available
     )
-    duplicateSessionPanes[1] = TerminalPaneSnapshot(
+    duplicateSessionPanes[1] = try TerminalPaneSnapshot(
         id: secondPaneID,
         sessionID: sharedSessionID,
         explicitUserName: nil,
@@ -227,6 +251,83 @@ func terminalGroupLaunchProfileEncodingIsSafe() throws {
     #expect(TerminalPaneShellChoice(approvedShellPath: "zsh") == nil)
 }
 
+@Test("Terminal Group group and pane names use an 80 Unicode-scalar bound")
+func terminalGroupNamesUseUnicodeScalarBounds() {
+    let eightyScalars = String(repeating: "🙂", count: 80)
+    let eightyOneScalars = String(repeating: "🙂", count: 81)
+
+    #expect(eightyScalars.unicodeScalars.count == 80)
+    #expect(eightyScalars.utf8.count > 80)
+    #expect(TerminalGroupName(eightyScalars) != nil)
+    #expect(TerminalPaneName(eightyScalars) != nil)
+    #expect(TerminalGroupName(eightyOneScalars) == nil)
+    #expect(TerminalPaneName(eightyOneScalars) == nil)
+}
+
+@Test("Unavailable Terminal Group panes reject live and restartable state")
+func unavailableTerminalGroupPaneStatesAreRejected() throws {
+    let paneID = TerminalPaneID()
+    let profile = TerminalPaneLaunchProfile(shell: .preferredShell, startingFolder: .root)
+
+    #expect(throws: TerminalPaneSnapshotError.unavailablePaneHasLiveSession(paneID)) {
+        _ = try TerminalPaneSnapshot(
+            id: paneID,
+            sessionID: UUID(),
+            explicitUserName: nil,
+            reportedTitle: nil,
+            runtimeKind: .unavailableAgentTerminal,
+            themeColor: nil,
+            status: .unavailable,
+            launchProfile: nil,
+            startAvailability: .unavailable
+        )
+    }
+    #expect(throws: TerminalPaneSnapshotError.unavailablePaneHasInvalidStatus(paneID, .stopped)) {
+        _ = try TerminalPaneSnapshot(
+            id: paneID,
+            sessionID: nil,
+            explicitUserName: nil,
+            reportedTitle: nil,
+            runtimeKind: .unavailableEnsemble,
+            themeColor: nil,
+            status: .stopped,
+            launchProfile: nil,
+            startAvailability: .unavailable
+        )
+    }
+    #expect(throws: TerminalPaneSnapshotError.unavailablePaneHasLaunchProfile(paneID)) {
+        _ = try TerminalPaneSnapshot(
+            id: paneID,
+            sessionID: nil,
+            explicitUserName: nil,
+            reportedTitle: nil,
+            runtimeKind: .unavailableAgentTerminal,
+            themeColor: nil,
+            status: .unavailable,
+            launchProfile: profile,
+            startAvailability: .unavailable
+        )
+    }
+    #expect(
+        throws: TerminalPaneSnapshotError.unavailablePaneHasInvalidStartAvailability(
+            paneID,
+            .available
+        )
+    ) {
+        _ = try TerminalPaneSnapshot(
+            id: paneID,
+            sessionID: nil,
+            explicitUserName: nil,
+            reportedTitle: nil,
+            runtimeKind: .unavailableEnsemble,
+            themeColor: nil,
+            status: .unavailable,
+            launchProfile: nil,
+            startAvailability: .available
+        )
+    }
+}
+
 @Test("Capacity reservations and close tokens are bounded generation-checked values")
 func terminalGroupCapacityAndCloseTokensAreBounded() throws {
     let reservation = try #require(
@@ -253,6 +354,11 @@ func terminalGroupCapacityAndCloseTokensAreBounded() throws {
             liveProcessCount: 1,
             generation: 4
         ) == nil)
+
+    let reserver: any TerminalGroupCapacityReserving = TerminalGroupCapacityReservationProbe()
+    let reserved = try reserver.reserveLiveSessionCapacity(1)
+    try reserver.consumeLiveSessionCapacity(reserved)
+    try reserver.cancelLiveSessionCapacity(reserved)
 }
 
 @Test("Named saved layouts re-key every runtime identity when opened")

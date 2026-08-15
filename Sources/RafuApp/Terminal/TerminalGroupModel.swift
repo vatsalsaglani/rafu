@@ -64,13 +64,14 @@ nonisolated struct TerminalGroupCapacityReservationID: RawRepresentable, Hashabl
 // MARK: - Bounded text and paths
 
 nonisolated struct TerminalGroupName: RawRepresentable, Codable, Hashable, Sendable {
-    static let maximumUTF8Length = 160
+    static let maximumUnicodeScalarCount = 80
 
     let rawValue: String
 
     init?(_ value: String) {
         let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty, normalized.utf8.count <= Self.maximumUTF8Length else {
+        guard !normalized.isEmpty, normalized.unicodeScalars.count <= Self.maximumUnicodeScalarCount
+        else {
             return nil
         }
         rawValue = normalized
@@ -98,13 +99,14 @@ nonisolated struct TerminalGroupName: RawRepresentable, Codable, Hashable, Senda
 }
 
 nonisolated struct TerminalPaneName: RawRepresentable, Codable, Hashable, Sendable {
-    static let maximumUTF8Length = 160
+    static let maximumUnicodeScalarCount = 80
 
     let rawValue: String
 
     init?(_ value: String) {
         let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty, normalized.utf8.count <= Self.maximumUTF8Length else {
+        guard !normalized.isEmpty, normalized.unicodeScalars.count <= Self.maximumUnicodeScalarCount
+        else {
             return nil
         }
         rawValue = normalized
@@ -358,6 +360,59 @@ nonisolated struct TerminalPaneSnapshot: Equatable, Sendable {
     let status: TerminalPaneStatus
     let launchProfile: TerminalPaneLaunchProfile?
     let startAvailability: TerminalPaneStartAvailability
+
+    init(
+        id: TerminalPaneID,
+        sessionID: UUID?,
+        explicitUserName: TerminalPaneName?,
+        reportedTitle: TerminalReportedTitle?,
+        runtimeKind: TerminalPaneRuntimeKind,
+        themeColor: TerminalPaneThemeColor?,
+        status: TerminalPaneStatus,
+        launchProfile: TerminalPaneLaunchProfile?,
+        startAvailability: TerminalPaneStartAvailability
+    ) throws {
+        switch runtimeKind {
+        case .unavailableAgentTerminal, .unavailableEnsemble:
+            if sessionID != nil {
+                throw TerminalPaneSnapshotError.unavailablePaneHasLiveSession(id)
+            }
+            guard status == .unavailable else {
+                throw TerminalPaneSnapshotError.unavailablePaneHasInvalidStatus(id, status)
+            }
+            if launchProfile != nil {
+                throw TerminalPaneSnapshotError.unavailablePaneHasLaunchProfile(id)
+            }
+            guard startAvailability == .unavailable else {
+                throw TerminalPaneSnapshotError.unavailablePaneHasInvalidStartAvailability(
+                    id,
+                    startAvailability
+                )
+            }
+        case .ordinaryShell, .directAgentTerminal, .ensembleRole, .ensembleCoordinator:
+            break
+        }
+
+        self.id = id
+        self.sessionID = sessionID
+        self.explicitUserName = explicitUserName
+        self.reportedTitle = reportedTitle
+        self.runtimeKind = runtimeKind
+        self.themeColor = themeColor
+        self.status = status
+        self.launchProfile = launchProfile
+        self.startAvailability = startAvailability
+    }
+}
+
+nonisolated enum TerminalPaneSnapshotError: Error, Equatable, Sendable {
+    case unavailablePaneHasLiveSession(TerminalPaneID)
+    case unavailablePaneHasInvalidStatus(TerminalPaneID, TerminalPaneStatus)
+    case unavailablePaneHasLaunchProfile(TerminalPaneID)
+    case unavailablePaneHasInvalidStartAvailability(
+        TerminalPaneID,
+        TerminalPaneStartAvailability
+    )
 }
 
 nonisolated enum TerminalGroupSnapshotError: Error, Equatable, Sendable {
@@ -495,6 +550,21 @@ nonisolated struct TerminalGroupCapacityReservation: Equatable, Sendable {
         self.generation = generation
         self.reservedLiveSessionCount = reservedLiveSessionCount
     }
+}
+
+/// TG-20 implements this window-scoped seam on the Terminal Group aggregate.
+/// A reservation is manager-owned, generation-checked, and single-use. It
+/// holds capacity only; it cannot carry a process specification or credential.
+nonisolated protocol TerminalGroupCapacityReserving: Sendable {
+    func reserveLiveSessionCapacity(
+        _ requestedLiveSessionCount: Int
+    ) throws -> TerminalGroupCapacityReservation
+    func consumeLiveSessionCapacity(
+        _ reservation: TerminalGroupCapacityReservation
+    ) throws
+    func cancelLiveSessionCapacity(
+        _ reservation: TerminalGroupCapacityReservation
+    ) throws
 }
 
 nonisolated enum TerminalGroupCloseTarget: Equatable, Sendable {
