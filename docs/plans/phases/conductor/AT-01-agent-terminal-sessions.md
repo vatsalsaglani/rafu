@@ -101,9 +101,10 @@ ADR 0018: no token, no grant, no manifests, no capture, no graph
 presence; auth fully delegated, unchanged). Rules: argv arrays only;
 environment is exactly `PATH` (curated + the adapter's probed directory
 prepended when discovery found the CLI off the curated path) — no
-`RAFU_*` keys ever; sessions register as `.agentTerminal`; never
-restored (ADR 0014); the launchable roster is the adapter registry's
-probe result, degrading honestly. Naming note: `AgentTerminal*` internal
+`RAFU_*` keys ever; sessions register as `.agentTerminal`; a saved Terminal
+Group restores an Agent Terminal only as an inert unavailable placeholder with
+no launch profile or capability data (ADR 0023); the launchable roster is the
+adapter registry's probe result, degrading honestly. Naming note: `AgentTerminal*` internal
 prefix, "Agent Terminal" user-visible.
 
 ### Launch service (`AgentTerminalLaunchService.swift`)
@@ -318,8 +319,10 @@ func openAgentTerminal(spec: TerminalProcessSpec)
 
 - Exit: the vendor CLI exiting behaves exactly like a shell exiting
   (existing status/bell pipeline; no special-casing).
-- No restoration (ADR 0014) — nothing to do, but a test proves the tab
-  resource is non-restorable like other terminals.
+- A saved Terminal Group restores an Agent Terminal only as the inert
+  unavailable placeholder from ADR 0023. It saves no launch descriptor,
+  executable, arguments, model, environment, credential, token, or Ensemble
+  capability. Outside a saved group, no live Agent Terminal restores.
 - No decorative motion; sheet and menu obey Reduce Motion by default.
 - A second agent terminal for the same CLI is fine (sessions are
   independent); no artificial cap beyond the existing terminal limits.
@@ -431,7 +434,8 @@ are used only where YOUR probe table records a verified shape —
 unverified CLIs launch bare with the reason shown, never guessed flags;
 disabled agents stay visible with stated reasons (text, not tooltip- or
 color-only); sessions register as .agentTerminal rendering "Agent
-Terminal" (never "Ensemble Agent"); terminals are never restored; icons
+  Terminal" (never "Ensemble Agent"); a saved Terminal Group uses only the
+  inert unavailable Agent Terminal placeholder; icons
 are the REAL vendor marks vendored from the pinned lobe-icons version in
 the plan (never hand-drawn placeholders, never re-drawn or restyled
 marks beyond scaling and monochrome tinting, never used as Rafu's own

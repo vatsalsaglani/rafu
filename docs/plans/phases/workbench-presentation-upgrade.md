@@ -576,7 +576,15 @@ focus, caret movement, or typing. Existing short hover feedback may remain.
    selection remains. Running/exited status, attention, and session color remain
    separate signals.
 
-**Deferred adjacent workstream — terminal layout commands**
+**Terminal Groups supersession — terminal layout behavior**
+
+ADR 0023 and [`terminal-groups.md`](terminal-groups.md) now own compound
+Terminal Group topology, pane creation, directional focus, and layout saving.
+This presentation phase remains visual-only. The historical layout-command
+discussion below does not define current terminal behavior or this phase’s
+acceptance gate.
+
+**Historical deferred adjacent workstream — terminal layout commands**
 
 The current recursive topology already produces single, side-by-side, stacked,
 2×2, and 1+2 arrangements. This phase frames and verifies those existing

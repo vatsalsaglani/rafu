@@ -2,7 +2,7 @@
 
 ## Status and execution slot
 
-- **Status:** Planned.
+- **Status:** Implemented on lane; awaiting authorized merge.
 - **Wave:** 0; serial prerequisite for all source plans.
 - **Branch:** `terminal-groups/tg-00-decision`.
 - **Required base:** exact `<PLAN_SHA>` from the committed plan set.
@@ -251,7 +251,28 @@ section.
 
 ## Implementation record
 
-To be completed by the TG-00 implementor before the final gate.
+- **Decision delivered:** ADR 0023 is Accepted. It defines Terminal Groups,
+  safe saved layouts, bounded panes and sessions, contextual shortcuts, and
+  inert restoration. It retains explicit user start, lazy bounded terminals,
+  no automatic command execution, and no process restoration.
+- **Guidance reconciled:** ADR 0004, ADR 0014, ADR 0018, ADR 0021, the active
+  workbench contract, the canonical plan, the affected terminal plans, the
+  Agent Terminal plan, and both required indexes now point to ADR 0023 or mark
+  predecessor behavior as historical.
+- **Consistency checks (2026-08-16):** all new relative-link targets resolve;
+  `docs/decisions/README.md` has one Accepted ADR 0023 row; the affected active
+  guidance has no terminal-split non-goal or positive live-process-restoration
+  statement; Agent Terminal and Ensemble wording retains their no-profile and
+  no-capability limits; shortcut statements agree; and all source-contract
+  plans use `docs/decisions/0023-terminal-groups-and-saved-layouts.md`.
+- **Security review:** this documentation-only lane approves metadata only.
+  It does not approve process persistence, shell injection, automatic command
+  execution, Agent Terminal launch-profile persistence, Ensemble capability
+  persistence, credential storage, or a new terminal engine.
+- **Final sequence:** the required formatter, build, and parallel-test order
+  follows this record. No tracked file may change after the parallel suite.
+- **Next dependency:** the merge owner must obtain authorization to merge this
+  lane to primary `main`; TG-10 then starts from that exact merge commit.
 
 ## Goal Mode start prompt
 

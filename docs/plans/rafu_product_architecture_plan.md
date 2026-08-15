@@ -138,11 +138,11 @@ Rejected and reassigned concepts: a woven gold hash (too close to a hashtag and 
 | Icons | SF Symbols plus a small bundled filename/extension mapping |
 | Markdown | Edit and native preview by default: Edit / Split / Preview per document, GFM subset, no per-document WebView |
 | Theming | JSON theme files (fonts, UI colors, editor colors, Git colors, syntax); bundled Indigo (dark) and Khadi (light); user themes folder |
+| Terminal Groups | One editor tab with bounded recursive terminal panes and inert workspace-local saved layouts; explicit user start only, no automatic command execution, and no process restoration (ADR 0023) |
 
 ### 3.2 Explicit non-goals for the initial product
 
 - Extension marketplace or third-party plugin runtime
-- Embedded terminal
 - Debugger
 - Collaboration
 - AI chat, inline generation, or autonomous agents
@@ -160,7 +160,7 @@ Only after the core product is stable:
 
 - A small number of optional built-in language servers, disabled by default
 - Hunk staging
-- Remote terminal handoff to Terminal/iTerm rather than an embedded terminal
+- Remote terminal profiles and handoff to Terminal/iTerm
 - Remote port-forward management
 - Read-only Git history and blame
 - Built-in formatting for selected languages
@@ -1700,7 +1700,6 @@ Both bundled themes render correctly and track the system appearance; a user the
 - Split panes
 - Multiple cursors
 - Language servers
-- Embedded terminal
 
 The architecture for these features exists, but the release remains focused.
 

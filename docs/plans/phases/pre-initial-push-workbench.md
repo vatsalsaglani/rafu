@@ -2,10 +2,11 @@
 
 ## Status
 
-Implemented; awaiting the user's hands-on acceptance and first commit. This
+In Progress. The earlier workbench baseline is implemented, but acceptance
+items 7, 22, and 23 remain open until the Terminal Groups set completes. This
 supersedes the narrower pre-first-commit vertical-slice brief. The repository
-remains uncommitted until the user completes that pass and creates the commit
-from Rafu.
+remains uncommitted until the user completes the hands-on pass and creates the
+commit from Rafu.
 
 ## Product outcome
 
@@ -25,8 +26,9 @@ and explicit AI-assisted commit drafting.
 5. No compressed principal-toolbar file icon remains.
 6. Source Control provides Changes and History plus branch selection/creation,
    checkout, merge, fetch, pull, push, upstream/divergence, progress, and errors.
-7. Saved workspace bookmarks, windows, tabs, selection, navigator state, and split
-   topology restore safely; stale access asks for reauthorization.
+7. Saved workspace bookmarks, windows, document tabs, selection, navigator state,
+   and split topology restore safely; Terminal Group metadata restores inertly and
+   starts no process; stale access asks for reauthorization.
 8. Markdown uses a maintained native parser/renderer with GFM tables, theme JSON
    colors, and native Mermaid fenced-block rendering.
 9. `Command-F` provides find/replace, regex, case, whole-word, next/previous,
@@ -57,9 +59,16 @@ and explicit AI-assisted commit drafting.
 21. An optional low-frequency status item reports honest process resident memory,
     not fictional per-window memory.
 22. `Control-Tab` presents a window-scoped switcher spanning open editor tabs
-    and terminal sessions (including parked sessions without duplicating shown
-    terminals); `Control-Shift-Tab` reverses, Left/Right browse, Control release
-    or Return commits, and Escape cancels without changing selection.
+    and Terminal Groups, with each group listed once even when it has several
+    panes or is parked; `Control-Shift-Tab` reverses, Left/Right browse, Control
+    release or Return commits, and Escape cancels without changing selection.
+23. A Terminal Group is one named compound editor tab. `Command-T` opens a group
+    or splits right by context; `Shift-Command-T` splits down only in a group;
+    directional focus, rename, Save, Save As, inert zero-process restoration,
+    always-new `Control-Shift-backtick`, and group-level `Control-backtick`
+    park/MRU/create behavior are available through visible, menu, keyboard, and
+    accessibility paths. The six-pane group, 24-retained-pane window, and
+    six-live-session window limits are separate.
 
 ## Architecture locks
 
@@ -80,7 +89,7 @@ and explicit AI-assisted commit drafting.
 - Strict format/build/test and staged `.app` bundle: complete on 2026-07-13.
 - Automated coverage: 53 Swift Testing checks passing on 2026-07-13.
 - Focused service/model tests for every destructive or stateful operation.
-- User hands-on pass for all 21 acceptance items without Computer Use automation:
+- User hands-on pass for all 23 acceptance items without Computer Use automation:
   pending; deliberately left to the user.
 - First repository commit created by the user from Rafu only.
 
@@ -111,7 +120,7 @@ docs each cluster of fixes touches, and
 [`searchable-dropdown-component.md`](../../references/searchable-dropdown-component.md), and
 [`markdown-local-image-preview.md`](../../references/markdown-local-image-preview.md)
 for the new engineering references this batch produced. The user's
-hands-on acceptance pass for the 21 acceptance items above remains
+hands-on acceptance pass for the 23 acceptance items above remains
 pending.
 
 ### 2026-07-19 (continued): Flat HSplitView, gutter tiling fix, GitHub/AI features

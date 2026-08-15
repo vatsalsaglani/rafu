@@ -7,6 +7,27 @@ documentation pass). Verified: 956 tests passing in both `swift test` and
 2026-07-21 against `main` plus the uncommitted diff-highlighting and
 window-chrome work (baseline 888 tests, 0 warnings).
 
+## Terminal Groups supersession (2026-08-16)
+
+ADR 0023 and [`terminal-groups.md`](terminal-groups.md) are the current
+normative contract for compound terminal tabs. The one-session-per-tab,
+session-level park/MRU, placeholder-restoration, one-session tab-close, and
+unbounded-exited-session statements below are historical compatibility
+guidance, not current behavior.
+
+The Terminal Manager remains the session-discovery, shell-choice, identity,
+attention, and Resources surface. Terminal Group ownership now defines the
+group-level `Control-backtick` park/MRU/create route; `Control-Shift-backtick`
+new-group route; contextual `Command-T` and group-only `Shift-Command-T`
+routes; directional pane focus; and pane/group close. Group close must prepare,
+clean up, and finalize every affected child session after it revalidates the
+live-process count. Exited panes count toward the 24-retained-pane limit.
+
+**Set Pane Starting Folder…** is the narrow exception to this plan’s old
+workspace-root/profile rule. It stores only a user-selected in-workspace future
+start folder, never sends `cd` to a live shell, and never persists an
+OSC-observed working directory. OSC working-directory display remains live-only.
+
 ## Per-stage outcome
 
 - **T-A (hide vs. close):** shipped as planned. ⌃` parks the focused
@@ -321,9 +342,9 @@ protocol seam over the notification center to keep tests headless).
 - tmux/persistent sessions across app relaunch; SSH terminals (later
   phase); Warp-style command blocks; command palette injection into
   shells; per-command exit-code tracking (requires shell-integration
-  scripts — revisit only with an explicit opt-in install flow); splitting
-  terminals inside one tab; profile system beyond shell choice (env vars,
-  args, ssh targets).
+  scripts — revisit only with an explicit opt-in install flow); profile
+  system beyond shell choice (env vars, args, ssh targets). Terminal Group
+  splits and saved layouts are defined by ADR 0023, not this historical plan.
 
 ## Sequencing and sizing
 

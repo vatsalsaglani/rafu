@@ -73,3 +73,27 @@ Alternatives considered:
   user's own typed notification reply into the session's pty. Neither
   capability lets Rafu compose, infer, or auto-execute a command; both are
   scoped and justified in the new ADR 0016.
+
+## 2026-08-16 amendment: Terminal Groups
+
+ADR 0023 supersedes the following terminal details while preserving this ADR’s
+lazy spawn, bounded scrollback, explicit user start, no-task-runner,
+no-automatic-command-execution, per-window ownership, and teardown rules:
+
+- A new shell starts in the selected in-workspace file’s directory, or the
+  workspace root when there is no such file. A user can set an in-workspace
+  future-start folder for a pane. Rafu never sends `cd` to a live shell and
+  never persists an observed live working directory.
+- The terminal presentation is one Terminal Group editor tab with one or more
+  terminal panes, not a bottom panel or one controller per panel tab. Each
+  live pane keeps one controller, PTY, and SwiftTerm view.
+- `Control-backtick` now parks the selected group, otherwise reveals the most
+  recently parked group, and creates a group only when none is parked.
+  `Control-Shift-backtick` always creates a new one-pane group.
+- Pane and group close are coordinated lifecycle operations. Closing a pane
+  ends only that pane’s session; closing a group counts and confirms its live
+  processes, then ends all its live child sessions. A naturally exited pane
+  remains available for Restart or Close.
+
+Saved layouts and restoration are governed only by ADR 0023. They are inert
+metadata and never restore a process.

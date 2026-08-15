@@ -4,15 +4,12 @@
 
 Planned (2026-07-18). Direction brief only — no implementation started.
 
-**2026-07-19 update:** increment T1's core placement change (terminal
-sessions presented as first-class editor tabs) landed narrower than this
-brief as part of the 15-item `docs/issues/issues_ui.md` fix batch (issue
-#4; 789 tests, 0 warnings, lint clean) — see
-[ADR 0014](../../decisions/0014-terminal-as-editor-tab.md). Terminal tabs
-are ephemeral (not restored across relaunch), which is narrower than T2's
-placeholder-restoration design below; T2 (full lifecycle policy), T3
-(agent-workflow polish), and T4 (docs/measurement close-out) remain
-planned. TD1–TD4 below are still open.
+**2026-08-16 update:** this document is a historical predecessor for terminal
+layout. ADR 0023 and
+[`terminal-groups.md`](terminal-groups.md) now own the current compound-tab,
+restoration, capacity, close, and shortcut rules. T1 remains useful placement
+history. T2 restoration and the six-session choice are resolved by ADR 0023;
+the old per-session statements below are not current normative guidance.
 Sibling to [`ui-flat-modern-refresh.md`](ui-flat-modern-refresh.md) (adopts
 its design language) and to
 [`git-experience-and-worktrees.md`](git-experience-and-worktrees.md)
@@ -32,6 +29,19 @@ beside terminal coding agents" — this brings the agent inside.
 Explicitly unchanged: Rafu never runs agent/task commands itself, no task
 runners, no auto-execution, no PTY protocol parsing beyond what SwiftTerm
 already does. The user types; Rafu hosts.
+
+## Terminal Groups supersession (2026-08-16)
+
+One Terminal Group is now one editor tab with a recursive pane tree. The
+one-session-per-tab, session-level park/MRU, placeholder-restoration, and
+one-session tab-close text in this historical plan is superseded by ADR 0023.
+New presentation uses a group resource. Legacy terminal-resource decoding stays
+compatible and cannot clear the complete restoration payload on a decode error.
+
+Only ordinary shells restart from a saved group. Agent Terminal and Ensemble
+panes restore only as inert unavailable placeholders with no launch descriptor
+or capability data. The group owns prepare, cleanup, and finalize close work;
+workspace switch, window close, and app quit still end live sessions.
 
 ## Existing assets to build on (verified)
 
@@ -127,17 +137,20 @@ task runners, no automatic command execution, per-window ownership).
 Records the 6-session cap, hibernation exemption, close/restoration
 semantics.
 
-## Open decisions (user)
+## Resolved decisions
 
-- **TD1** Shortcut for "New Terminal Tab": ⌃⇧T (recommended — sits beside
-  the existing ⌃` panel toggle and ⌃⇧` new-panel-tab; ⌘T stays untouched
-  for a future file-tab reopen) vs ⌘⇧T vs menu/palette-only.
-- **TD2** Cap value: 6 sessions/window (recommended) vs 4 vs 8.
-- **TD3** Quit confirmation when any terminal has a foreground process:
-  yes (recommended — an agent mid-task is exactly the thing not to kill
-  silently) vs rely on window-close confirmation only.
-- **TD4** Placeholder restoration (recommended) vs not restoring terminal
-  tabs at all.
+- **TD1:** `Command-T` creates a group outside a Terminal Group and performs
+  Split Right inside one. `Shift-Command-T` performs Split Down only in a
+  group. `Control-Shift-backtick` always creates a new one-pane group.
+- **TD2:** the window limit is six live sessions across shell, Agent Terminal,
+  and Ensemble paths. It is separate from the six-pane group limit and the
+  24-retained-pane window limit.
+- **TD3:** group close confirms the actual live-process count, then uses the
+  ADR 0023 prepare, cleanup, and finalize lifecycle. A stale confirmation does
+  not mutate a group.
+- **TD4:** saved layouts and window restoration create inert metadata only.
+  They start zero processes. Ordinary shells are restartable; Agent Terminal
+  and Ensemble panes are fixed unavailable placeholders.
 
 ## Verification contract
 
