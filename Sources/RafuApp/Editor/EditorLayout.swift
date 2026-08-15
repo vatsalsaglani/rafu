@@ -32,6 +32,10 @@ nonisolated enum EditorTabResource: Codable, Equatable, Sendable {
     /// `sessionID` rather than an `EditorDocument`. Never restorable — see
     /// `isRestorable`.
     case terminal(sessionID: UUID)
+    /// One compound Terminal Group tab. TG-10 adds only its identity and
+    /// codec contract. TG-30 supplies its workspace restoration behavior;
+    /// until then `isRestorable` deliberately remains false.
+    case terminalGroup(groupID: TerminalGroupID)
 
     /// Whether this resource is meaningful across a relaunch. Only an
     /// on-disk file tab is: a terminal tab's `sessionID` references a shell
@@ -44,6 +48,33 @@ nonisolated enum EditorTabResource: Codable, Equatable, Sendable {
         if case .file = self { return true }
         return false
     }
+
+    /// Pure restoration classification for TG-30. This does not look up a
+    /// store: callers provide the already-decoded safe workspace envelope and
+    /// can retain a group resource only when its matching inert record exists.
+    func restorationClassification(
+        terminalGroups: TerminalGroupWorkspaceRestoration?
+    ) -> EditorTabResourceRestorationClassification {
+        switch self {
+        case .file:
+            .file
+        case .terminalGroup(let groupID):
+            if terminalGroups?.openGroups.contains(where: { $0.groupID == groupID }) == true {
+                .terminalGroupRecord(groupID)
+            } else {
+                .missingTerminalGroupRecord(groupID)
+            }
+        case .restorable, .terminal:
+            .notRestorable
+        }
+    }
+}
+
+nonisolated enum EditorTabResourceRestorationClassification: Equatable, Sendable {
+    case file
+    case terminalGroupRecord(TerminalGroupID)
+    case missingTerminalGroupRecord(TerminalGroupID)
+    case notRestorable
 }
 
 nonisolated struct EditorTabState: Codable, Equatable, Identifiable, Sendable {

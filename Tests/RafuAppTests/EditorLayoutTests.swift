@@ -176,6 +176,31 @@ func terminalTabResourceCodableRoundTrip() throws {
     #expect(decodedID == sessionID)
 }
 
+@Test("A Terminal Group resource round-trips and remains inactive without a matching record")
+func terminalGroupResourceCodableRoundTrip() throws {
+    let groupID = TerminalGroupID()
+    let resource = EditorTabResource.terminalGroup(groupID: groupID)
+
+    let decoded = try JSONDecoder().decode(
+        EditorTabResource.self, from: JSONEncoder().encode(resource))
+
+    #expect(decoded == resource)
+    #expect(!decoded.isRestorable)
+    #expect(
+        decoded.restorationClassification(terminalGroups: nil)
+            == .missingTerminalGroupRecord(groupID))
+}
+
+@Test("Legacy terminal resources remain decodable beside Terminal Group resources")
+func legacyTerminalResourceDecodesBesideTerminalGroupResource() throws {
+    let legacy = EditorTabResource.terminal(sessionID: UUID())
+    let decoded = try JSONDecoder().decode(
+        EditorTabResource.self, from: JSONEncoder().encode(legacy))
+
+    #expect(decoded == legacy)
+    #expect(decoded.restorationClassification(terminalGroups: nil) == .notRestorable)
+}
+
 @Test("Editor layout restoration rejects unknown schema versions")
 func editorLayoutRejectsUnknownSchema() {
     let layout = EditorLayoutState()
