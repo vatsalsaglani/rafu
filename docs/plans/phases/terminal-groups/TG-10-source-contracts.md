@@ -2,7 +2,7 @@
 
 ## Status and execution slot
 
-- **Status:** Implemented on lane; awaiting authorized merge.
+- **Status:** Complete; merged to primary `main`.
 - **Wave:** 1; serial source prerequisite.
 - **Branch:** `terminal-groups/tg-10-contracts`.
 - **Required base:** exact `<TG00_MERGED_SHA>`.

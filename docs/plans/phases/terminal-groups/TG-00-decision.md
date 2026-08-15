@@ -2,7 +2,7 @@
 
 ## Status and execution slot
 
-- **Status:** Implemented on lane; awaiting authorized merge.
+- **Status:** Complete; merged to primary `main`.
 - **Wave:** 0; serial prerequisite for all source plans.
 - **Branch:** `terminal-groups/tg-00-decision`.
 - **Required base:** exact `<PLAN_SHA>` from the committed plan set.

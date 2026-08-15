@@ -2,8 +2,11 @@
 
 ## Status
 
-Active on 2026-08-16 after ADR 0023 acceptance. TG-00 is complete on its lane;
-TG-10 is the next dependency after an authorized merge to primary `main`.
+Active on 2026-08-16 after ADR 0023 acceptance. TG-00 and TG-10 are complete
+and merged to primary `main`. Wave 2 is ready from the exact TG-10 merge.
+
+The live lane state, worker assignment, branch, and approved SHA are in
+[`manifest.md`](manifest.md).
 
 This directory decomposes
 [`../terminal-groups.md`](../terminal-groups.md) into two serial foundation
