@@ -2471,7 +2471,9 @@ final class WorkspaceSession {
         guard let selectedDocument else { return }
         isDocumentFindPresented = true
         isDocumentReplacePresented = includeReplace
-        findState(for: selectedDocument).activate()
+        let state = findState(for: selectedDocument)
+        state.activate()
+        state.requestQueryFocus()
     }
 
     func dismissDocumentFind() {

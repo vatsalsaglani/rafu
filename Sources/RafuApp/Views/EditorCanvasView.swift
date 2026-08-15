@@ -207,6 +207,15 @@ private struct EditorGroupView: View {
                                     EditorDocumentView(
                                         document: document,
                                         findState: session.findState(for: document),
+                                        requestFind: { [weak session, weak document] in
+                                            guard let session, let document,
+                                                let tab = group.tabs.first(where: {
+                                                    $0.resource == .file(document.url)
+                                                })
+                                            else { return }
+                                            session.selectEditorTab(tab.id, in: group.id)
+                                            session.showDocumentFind()
+                                        },
                                         gitLineChangesProvider: {
                                             [weak session, weak document] in
                                             guard let session, let document else { return nil }
@@ -1971,19 +1980,30 @@ private struct EditorTabItem: View {
                 } label: {
                     HStack(spacing: 6) {
                         FileIconView(icon: icon, size: 11)
+                            .fixedSize()
                         Text(document.displayName)
                             .lineLimit(1)
+                            .foregroundStyle(
+                                isSelected
+                                    ? theme.palette.textPrimary : theme.palette.textSecondary
+                            )
+                            .layoutPriority(1)
                             .help(document.displayName)
                         if document.isDirty {
                             Circle()
                                 .fill(theme.palette.accent)
                                 .frame(width: 6, height: 6)
+                                .fixedSize()
                                 .accessibilityHidden(true)
                         }
                     }
                     .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
+                .foregroundStyle(
+                    isSelected ? theme.palette.textPrimary : theme.palette.textSecondary
+                )
+                .layoutPriority(1)
                 .accessibilityLabel(document.displayName)
                 .accessibilityValue(documentTabAccessibilityValue)
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -1994,9 +2014,11 @@ private struct EditorTabItem: View {
                 ) {
                     session.requestClose(document)
                 }
+                .fixedSize()
                 .opacity(isHovering || isSelected ? 1 : 0)
             }
         }
+        .fixedSize(horizontal: true, vertical: false)
         .background {
             if isHovering && !isSelected {
                 RoundedRectangle(cornerRadius: RafuMetrics.radiusAttachedTab, style: .continuous)
@@ -2010,7 +2032,9 @@ private struct EditorTabItem: View {
         }
         .overlay(alignment: .trailing) {
             if !isSelected {
-                Divider().frame(height: 18).overlay(theme.palette.borderSubtle)
+                Divider()
+                    .frame(width: RafuMetrics.hairline, height: 18)
+                    .overlay(theme.palette.borderSubtle)
             }
         }
         .anchorPreference(
@@ -2081,16 +2105,23 @@ private struct EditorTerminalTabItem: View {
                         // terminal glyph remains the login-shell fallback.
                         if let provider = controller.agentProvider {
                             FileIconView(icon: ConductorCLIIcons.icon(for: provider), size: 12)
+                                .fixedSize()
                                 .accessibilityHidden(true)
                         } else {
                             Image(systemName: "terminal")
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(theme.palette.accent)
+                                .fixedSize()
                                 .accessibilityHidden(true)
                         }
                         Text(title)
                             .lineLimit(1)
                             .truncationMode(.middle)
+                            .foregroundStyle(
+                                isSelected
+                                    ? theme.palette.textPrimary : theme.palette.textSecondary
+                            )
+                            .layoutPriority(1)
                             .help(title)
                         // Exited remains textual in accessibility and in the
                         // content overlay; the dot is only a redundant cue.
@@ -2098,12 +2129,17 @@ private struct EditorTerminalTabItem: View {
                             Circle()
                                 .fill(theme.palette.textMuted)
                                 .frame(width: 6, height: 6)
+                                .fixedSize()
                                 .accessibilityHidden(true)
                         }
                     }
                     .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
+                .foregroundStyle(
+                    isSelected ? theme.palette.textPrimary : theme.palette.textSecondary
+                )
+                .layoutPriority(1)
                 .accessibilityLabel(title)
                 .accessibilityValue(terminalTabAccessibilityValue)
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -2114,9 +2150,11 @@ private struct EditorTerminalTabItem: View {
                 ) {
                     session.closeTerminalTab(tabID)
                 }
+                .fixedSize()
                 .opacity(isHovering || isSelected ? 1 : 0)
             }
         }
+        .fixedSize(horizontal: true, vertical: false)
         .background {
             if isHovering && !isSelected {
                 RoundedRectangle(cornerRadius: RafuMetrics.radiusAttachedTab, style: .continuous)
@@ -2130,7 +2168,9 @@ private struct EditorTerminalTabItem: View {
         }
         .overlay(alignment: .trailing) {
             if !isSelected {
-                Divider().frame(height: 18).overlay(theme.palette.borderSubtle)
+                Divider()
+                    .frame(width: RafuMetrics.hairline, height: 18)
+                    .overlay(theme.palette.borderSubtle)
             }
         }
         .overlay(alignment: .leading) {
@@ -2185,6 +2225,7 @@ private struct EditorDocumentView: View {
     @Environment(\.rafuTheme) private var theme
     @Bindable var document: EditorDocument
     let findState: DocumentFindState
+    var requestFind: (@MainActor () -> Void)? = nil
     let gitLineChangesProvider: (@MainActor () async -> GitGutterLineChanges?)?
     var requestGitRefresh: (@MainActor () -> Void)? = nil
     var dropForwarding: EditorDropForwarding? = nil
@@ -2213,6 +2254,7 @@ private struct EditorDocumentView: View {
                         document: document,
                         findState: findState,
                         theme: theme,
+                        requestFind: requestFind,
                         gitLineChangesProvider: gitLineChangesProvider,
                         requestGitRefresh: requestGitRefresh,
                         dropForwarding: dropForwarding,
@@ -2231,6 +2273,7 @@ private struct EditorDocumentView: View {
                         document: document,
                         theme: theme,
                         findState: findState,
+                        requestFind: requestFind,
                         gitLineChangesProvider: gitLineChangesProvider,
                         requestGitRefresh: requestGitRefresh,
                         dropForwarding: dropForwarding,
@@ -2314,6 +2357,7 @@ private struct MarkdownEditorPresentation: View {
     @Bindable var document: EditorDocument
     let findState: DocumentFindState
     let theme: RafuTheme
+    var requestFind: (@MainActor () -> Void)? = nil
     let gitLineChangesProvider: (@MainActor () async -> GitGutterLineChanges?)?
     var requestGitRefresh: (@MainActor () -> Void)? = nil
     var dropForwarding: EditorDropForwarding? = nil
@@ -2347,6 +2391,7 @@ private struct MarkdownEditorPresentation: View {
             document: document,
             theme: theme,
             findState: findState,
+            requestFind: requestFind,
             gitLineChangesProvider: gitLineChangesProvider,
             requestGitRefresh: requestGitRefresh,
             dropForwarding: dropForwarding,
@@ -2394,6 +2439,10 @@ private struct DocumentFindBar: View {
                     .textFieldStyle(.roundedBorder)
                     .focused($focusedField, equals: .query)
                     .onSubmit { state.findNext() }
+                    .onChange(of: state.queryFocusRequest, initial: true) { _, request in
+                        guard request > 0 else { return }
+                        focusedField = .query
+                    }
                 Text(matchSummary).font(.caption.monospacedDigit())
                     .foregroundStyle(theme.palette.textSecondary)
                     .frame(minWidth: 48)
@@ -2438,6 +2487,10 @@ private struct DocumentFindBar: View {
         .padding(.vertical, 6)
         .background(theme.palette.elevatedBackground.opacity(0.65))
         .defaultFocus($focusedField, .query)
+        .onExitCommand {
+            state.focusEditor()
+            close()
+        }
     }
 
     private var matchSummary: String {

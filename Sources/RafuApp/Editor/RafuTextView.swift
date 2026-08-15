@@ -220,6 +220,11 @@ final class RafuTextView: NSTextView {
     /// `presentPeekPopover(_:atLine:)`. `nil` disables blame hover.
     var blameHoverAction: (@MainActor () -> Void)?
 
+    /// The supported editor-local Control-F route. Command-F remains owned
+    /// by the app command system; other control key bindings stay with
+    /// `NSTextView` through `super.keyDown(with:)`.
+    var findAction: (@MainActor () -> Void)?
+
     private var peekPopover: NSPopover?
     private var peekClipObserver: NSObjectProtocol?
     private var blameHoverDebounceTask: Task<Void, Never>?
@@ -378,6 +383,10 @@ final class RafuTextView: NSTextView {
         // before the edit/command is processed.
         dismissHover()
         closePeekPopover()
+        if Self.isExactControlFind(event), let findAction {
+            findAction()
+            return
+        }
         // AI completion ghost: Tab accepts the full suggestion through the
         // normal insertText path (undo, delegates, syntax all see it);
         // Escape dismisses the ghost without touching multi-caret state.
@@ -423,6 +432,14 @@ final class RafuTextView: NSTextView {
             return
         }
         super.keyDown(with: event)
+    }
+
+    static func isExactControlFind(_ event: NSEvent) -> Bool {
+        let semanticModifiers = event.modifierFlags.intersection([
+            .command, .option, .control, .shift,
+        ])
+        return semanticModifiers == .control
+            && event.charactersIgnoringModifiers?.lowercased() == "f"
     }
 
     // MARK: - Multi-caret ownership

@@ -249,9 +249,59 @@ new reusable nuances, and the WP-90 dependency.
 
 ## Implementation record
 
-Pending. The implementor replaces this paragraph with the delivered behavior,
-local commit SHA, exact verification evidence, deferred manual states,
-warnings, and documentation-nuance classification before the final lane gate.
+Implemented on 2026-08-15 from local `main` at
+`07c1fc5642ef331cf3c29530d5d6f36ad4ee9b08`. Before the final gate, the
+branch moved to integrated local `main` at
+`71dbfda0ff3e62aba28de1539b687b4fd3b14c11`, after WP-72, WP-73, and WP-74
+landed. Those commits changed no WP-71-owned path.
+
+- **Diagnosis:** the editor model retained all three tab IDs and file
+  resources. The row and title layouts also retained their widths. The
+  inactive tab's trailing `Divider` had only a height constraint, so its
+  opaque color overlay received the full tab width and painted over the icon,
+  title, state, and close label. The selected branch omitted that separator,
+  which made the fault look like missing inactive tabs.
+- **Delivered:** file and terminal separators now have an explicit hairline
+  width. Their real Button labels resolve active/inactive theme colors at the
+  label, and icons, state dots, titles, close controls, and bounded tab caps
+  have stable intrinsic priorities. The existing horizontal scroll, named
+  coordinate space, drag-frame preferences, reorder/split targets, shelf seam,
+  and shared `AttachedWorkbenchTab` remain unchanged.
+- **Find routing:** `DocumentFindState` owns a monotonic query-focus request.
+  Every `WorkspaceSession.showDocumentFind` call advances it. The installed
+  query field consumes both initial and repeated requests through private
+  `@FocusState`. Exact Control-F travels only through the live
+  `RafuTextView`/`CodeEditorView` bridge; Command-F stays in
+  `RafuAppCommands`. Escape restores the editor first responder and keeps the
+  query.
+- **Focused evidence:** the combined WP-71 filter passed 12 tests in 2 suites
+  in 2.087 seconds. It renders and reads the real SwiftUI output for one,
+  three, long, true-overflow, dirty, exited, and mixed file/terminal tabs in
+  Indigo and Khadi. It also covers both shortcuts, initial/repeated focus,
+  immediate typing, Escape, split targeting, and two-window state isolation.
+- **Read-only regressions:** the named Find, tab/group, drag/drop, layout,
+  switcher, theme, text-editing, and multi-caret filter passed 140 tests in 5
+  suites in 3.958 seconds.
+- **GUI evidence deferred:** the shared lease was not free. PID 59525 was an
+  existing Rafu Lightning process from another checkout. This lane did not
+  stop or replace it. Staged-app checks for hover, pressed, inactive-window,
+  live drag/reorder/split, both shortcuts in two real windows, unrelated text
+  fields, imported JSON themes, Increase Contrast, larger text, Full Keyboard
+  Access, VoiceOver, and physical 1x/2x displays remain for WP-90.
+- **Warnings:** no WP-71 source warning remains. The focused build reported
+  only existing repository warnings: the unhandled
+  `workbench-converged-surfaces.json` fixture and the non-optional nil
+  coalescing expression in `ProcessAttributionTests`.
+- **Reusable nuance:**
+  `docs/references/swiftui-macos-runtime-render-and-focus-tests.md` records the
+  verified macOS SwiftUI separator behavior and the parallel AppKit hosted-
+  window teardown rule. WP-90 must add the reference-index row
+  `SwiftUI macOS runtime render and focus tests | Prevent opaque overlay occlusion and animated hosted-window teardown races`.
+- **Commit:** the exact local commit SHA is reported in the handoff because a
+  Git commit cannot contain its own final object ID.
+
+The canonical format, build, parallel-test, and diff checks run after this
+record. No tracked file changes are permitted after that parallel suite.
 
 ## Goal Mode start prompt
 
