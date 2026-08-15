@@ -4,6 +4,38 @@ The primary coordinator creates each branch and worktree at the exact required
 base before dispatch. A worker switches to the listed existing branch. A worker
 does not create, replace, or rebase the branch.
 
+## Execution order
+
+```mermaid
+flowchart LR
+    D["TG-00<br/>Complete"]
+    C["TG-10<br/>Complete"]
+    R["TG-20<br/>Ready"]
+    V["TG-21<br/>Ready"]
+    S["TG-22<br/>Ready"]
+    W["TG-30<br/>Blocked"]
+    M["TG-40<br/>Blocked"]
+    K["TG-41<br/>Blocked"]
+    A["TG-42<br/>Blocked"]
+    Q["TG-90<br/>Blocked"]
+
+    D --> C
+    C --> R
+    C --> V
+    C --> S
+    R --> W
+    V --> W
+    S --> W
+    W --> M
+    W --> K
+    W --> A
+    M --> Q
+    K --> Q
+    A --> Q
+```
+
+## Lane state
+
 | Plan | Depends on | Worker | Branch | Status | Approved SHA |
 |---|---|---|---|---|---|
 | [TG-00](TG-00-decision.md) | — | Terra | `terminal-groups/tg-00-decision` | Complete | `5cece853c12c9ada8100303a36b3d4a335980e59` |
