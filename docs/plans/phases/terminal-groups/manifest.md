@@ -12,7 +12,7 @@ flowchart LR
     C["TG-10<br/>Complete"]
     R["TG-20<br/>In progress"]
     V["TG-21<br/>In progress"]
-    S["TG-22<br/>In progress"]
+    S["TG-22<br/>Complete"]
     W["TG-30<br/>Blocked"]
     M["TG-40<br/>Blocked"]
     K["TG-41<br/>Blocked"]
@@ -42,7 +42,7 @@ flowchart LR
 | [TG-10](TG-10-source-contracts.md) | TG-00 | Terra | `terminal-groups/tg-10-contracts` | Complete | `85197f0b8bed654570c977fd982a247236dc171f` |
 | [TG-20](TG-20-runtime.md) | TG-10 | Terra | `terminal-groups/tg-20-runtime` | In progress | — |
 | [TG-21](TG-21-renderer-focus.md) | TG-10 | Terra | `terminal-groups/tg-21-renderer-focus` | In progress | — |
-| [TG-22](TG-22-persistence.md) | TG-10 | Terra | `terminal-groups/tg-22-persistence` | In progress | — |
+| [TG-22](TG-22-persistence.md) | TG-10 | Terra | `terminal-groups/tg-22-persistence` | Complete | `70580d2152401e53223b4d7ee86a2eaebf519326` |
 | [TG-30](TG-30-workspace-integration.md) | TG-20, TG-21, TG-22 | Terra | `terminal-groups/tg-30-workspace-integration` | Blocked | — |
 | [TG-40](TG-40-manager-switcher.md) | TG-30 | Terra | `terminal-groups/tg-40-manager-switcher` | Blocked | — |
 | [TG-41](TG-41-commands-save-ui.md) | TG-30 | Terra | `terminal-groups/tg-41-commands-save-ui` | Blocked | — |
@@ -52,7 +52,8 @@ flowchart LR
 `Approved SHA` is the final lane commit that the primary coordinator approved.
 TG-00 is on `main` through merge commit
 `ea8ec9910d1b6c380feeb6bbc96febbd162ecfdf`. TG-10 is on `main` through merge
-commit `b52f9c8153822911505fd5d7d211ac30288c7b3f`.
+commit `b52f9c8153822911505fd5d7d211ac30288c7b3f`. TG-22 is on `main` through merge
+commit `593379d6affe57794868f0869df70b3cd6af90e4`.
 
 `Ready` means that all dependencies are complete and the local branch exists.
 `Blocked` means that one or more dependencies are not complete. The primary
