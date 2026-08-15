@@ -210,9 +210,11 @@ process spec, define reserve, consume, and cancel operations. A reservation is
 manager-scoped, single-use, generation-checked, and carries no executable,
 environment, token, or process spec.
 
-Freeze these operations in `TerminalGroupCapacityReserving` as
-`reserveLiveSessionCapacity`, `consumeLiveSessionCapacity`, and
-`cancelLiveSessionCapacity`. TG-20 implements the window-scoped seam.
+Freeze these operations in the MainActor-isolated
+`TerminalGroupCapacityReserving` protocol as `reserveLiveSessionCapacity`,
+`consumeLiveSessionCapacity`, and `cancelLiveSessionCapacity`. TG-20 implements
+the window-scoped seam and can mutate manager-owned capacity state without a
+cross-actor escape.
 
 ### C4. Command and effect boundary
 
@@ -440,9 +442,10 @@ No reusable reference note was created. The Swift 6.2 isolation and Codable
 facts used by this lane were already covered by the required project references.
 
 Follow-up contract review corrections add the TG-20 reserve, consume, and
-cancel capacity seam. The seam remains a contract only. It starts no process
-and reserves no live capacity in TG-10. Saved-layout envelopes now allow at
-most 32 records.
+cancel capacity seam. The seam is MainActor-isolated because TG-20 implements
+it on the window-scoped terminal manager. It remains a contract only. It starts
+no process and reserves no live capacity in TG-10. Saved-layout envelopes now
+allow at most 32 records.
 
 ## Goal Mode start prompt
 

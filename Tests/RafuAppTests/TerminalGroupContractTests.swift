@@ -7,7 +7,10 @@ private enum TerminalGroupContractTestError: Error {
     case invalidTestValue
 }
 
-private nonisolated struct TerminalGroupCapacityReservationProbe: TerminalGroupCapacityReserving {
+@MainActor
+private final class TerminalGroupCapacityReservationProbe: TerminalGroupCapacityReserving {
+    private(set) var activeReservationIDs: Set<TerminalGroupCapacityReservationID> = []
+
     func reserveLiveSessionCapacity(
         _ requestedLiveSessionCount: Int
     ) throws -> TerminalGroupCapacityReservation {
@@ -19,16 +22,25 @@ private nonisolated struct TerminalGroupCapacityReservationProbe: TerminalGroupC
         else {
             throw TerminalGroupContractTestError.invalidTestValue
         }
+        activeReservationIDs.insert(reservation.id)
         return reservation
     }
 
     func consumeLiveSessionCapacity(
-        _: TerminalGroupCapacityReservation
-    ) throws {}
+        _ reservation: TerminalGroupCapacityReservation
+    ) throws {
+        guard activeReservationIDs.remove(reservation.id) != nil else {
+            throw TerminalGroupContractTestError.invalidTestValue
+        }
+    }
 
     func cancelLiveSessionCapacity(
-        _: TerminalGroupCapacityReservation
-    ) throws {}
+        _ reservation: TerminalGroupCapacityReservation
+    ) throws {
+        guard activeReservationIDs.remove(reservation.id) != nil else {
+            throw TerminalGroupContractTestError.invalidTestValue
+        }
+    }
 }
 
 private func paneName(_ value: String) throws -> TerminalPaneName {
@@ -328,6 +340,7 @@ func unavailableTerminalGroupPaneStatesAreRejected() throws {
     }
 }
 
+@MainActor
 @Test("Capacity reservations and close tokens are bounded generation-checked values")
 func terminalGroupCapacityAndCloseTokensAreBounded() throws {
     let reservation = try #require(
@@ -355,10 +368,17 @@ func terminalGroupCapacityAndCloseTokensAreBounded() throws {
             generation: 4
         ) == nil)
 
-    let reserver: any TerminalGroupCapacityReserving = TerminalGroupCapacityReservationProbe()
-    let reserved = try reserver.reserveLiveSessionCapacity(1)
-    try reserver.consumeLiveSessionCapacity(reserved)
-    try reserver.cancelLiveSessionCapacity(reserved)
+    let probe = TerminalGroupCapacityReservationProbe()
+    let reserver: any TerminalGroupCapacityReserving = probe
+    let consumedReservation = try reserver.reserveLiveSessionCapacity(1)
+    #expect(probe.activeReservationIDs == [consumedReservation.id])
+    try reserver.consumeLiveSessionCapacity(consumedReservation)
+    #expect(probe.activeReservationIDs.isEmpty)
+
+    let cancelledReservation = try reserver.reserveLiveSessionCapacity(1)
+    #expect(probe.activeReservationIDs == [cancelledReservation.id])
+    try reserver.cancelLiveSessionCapacity(cancelledReservation)
+    #expect(probe.activeReservationIDs.isEmpty)
 }
 
 @Test("Named saved layouts re-key every runtime identity when opened")

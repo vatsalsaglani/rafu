@@ -555,7 +555,8 @@ nonisolated struct TerminalGroupCapacityReservation: Equatable, Sendable {
 /// TG-20 implements this window-scoped seam on the Terminal Group aggregate.
 /// A reservation is manager-owned, generation-checked, and single-use. It
 /// holds capacity only; it cannot carry a process specification or credential.
-nonisolated protocol TerminalGroupCapacityReserving: Sendable {
+@MainActor
+protocol TerminalGroupCapacityReserving: Sendable {
     func reserveLiveSessionCapacity(
         _ requestedLiveSessionCount: Int
     ) throws -> TerminalGroupCapacityReservation
