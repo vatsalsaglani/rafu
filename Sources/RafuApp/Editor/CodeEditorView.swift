@@ -35,6 +35,7 @@ struct CodeEditorView: NSViewRepresentable {
     let document: EditorDocument
     let theme: RafuTheme
     let findState: DocumentFindState?
+    let requestFind: (@MainActor () -> Void)?
     let gitLineChangesProvider: (@MainActor () async -> GitGutterLineChanges?)?
     /// Invoked after a successful save so the workspace can refresh Git state
     /// (sidebar badges, Source Control panel). Rafu's FSEvents watcher ignores
@@ -65,6 +66,7 @@ struct CodeEditorView: NSViewRepresentable {
         document: EditorDocument,
         theme: RafuTheme,
         findState: DocumentFindState? = nil,
+        requestFind: (@MainActor () -> Void)? = nil,
         gitLineChangesProvider: (@MainActor () async -> GitGutterLineChanges?)? = nil,
         requestGitRefresh: (@MainActor () -> Void)? = nil,
         dropForwarding: EditorDropForwarding? = nil,
@@ -81,6 +83,7 @@ struct CodeEditorView: NSViewRepresentable {
         self.document = document
         self.theme = theme
         self.findState = findState
+        self.requestFind = requestFind
         self.gitLineChangesProvider = gitLineChangesProvider
         self.requestGitRefresh = requestGitRefresh
         self.dropForwarding = dropForwarding
@@ -126,6 +129,7 @@ struct CodeEditorView: NSViewRepresentable {
         textView.navigateAction = navigate
         textView.hoverAction = hover
         textView.hoverTheme = theme
+        textView.findAction = requestFind
         scrollView.documentView = textView
         context.coordinator.applyEditorColors(theme, to: textView, scrollView: scrollView)
 
@@ -224,6 +228,7 @@ struct CodeEditorView: NSViewRepresentable {
         textView.navigateAction = navigate
         textView.hoverAction = hover
         textView.hoverTheme = theme
+        textView.findAction = requestFind
     }
 
     static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
@@ -254,6 +259,7 @@ struct CodeEditorView: NSViewRepresentable {
         coordinator.textView?.navigateAction = nil
         coordinator.textView?.hoverAction = nil
         coordinator.textView?.hoverTheme = nil
+        coordinator.textView?.findAction = nil
         coordinator.textView?.blameHoverAction = nil
         coordinator.gutterRuler?.peekAction = nil
         coordinator.document.saveAction = nil

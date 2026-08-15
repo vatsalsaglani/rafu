@@ -94,6 +94,11 @@ protocol DocumentFindControlling: AnyObject {
     func replaceCurrent(using state: DocumentFindState)
     func replaceAll(using state: DocumentFindState)
     func select(_ range: NSRange)
+    func focusEditor()
+}
+
+extension DocumentFindControlling {
+    func focusEditor() {}
 }
 
 @Observable
@@ -113,6 +118,9 @@ final class DocumentFindState {
     /// match highlighting is strictly gated on this flag because `refresh()`
     /// also runs on every text change while the bar is closed.
     private(set) var isActive = false
+    /// A presentation edge, not a Boolean state. Every Find command advances
+    /// the value so a bar that is already visible can focus its query again.
+    private(set) var queryFocusRequest = 0
 
     @ObservationIgnored
     private weak var controller: (any DocumentFindControlling)?
@@ -138,6 +146,14 @@ final class DocumentFindState {
 
     func refresh() {
         controller?.refresh(using: self)
+    }
+
+    func requestQueryFocus() {
+        queryFocusRequest += 1
+    }
+
+    func focusEditor() {
+        controller?.focusEditor()
     }
 
     func activate() {
@@ -321,6 +337,11 @@ final class NSTextViewFindController: DocumentFindControlling {
     func select(_ range: NSRange) {
         guard let textView, NSMaxRange(range) <= textView.string.utf16.count else { return }
         select(range, in: textView)
+    }
+
+    func focusEditor() {
+        guard let textView else { return }
+        textView.window?.makeFirstResponder(textView)
     }
 
     func clearHighlights() {
