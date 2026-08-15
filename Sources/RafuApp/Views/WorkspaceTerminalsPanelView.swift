@@ -27,6 +27,7 @@ struct WorkspaceTerminalsPanelView: View {
     /// Bumped by the launcher's explicit "Check Again": the probe spawns real
     /// CLIs, so it runs once per `.task` identity and never per render.
     @State private var agentProbeToken = 0
+    @State private var isShellPickerPresented = false
 
     var body: some View {
         // Derived ONCE per body evaluation, never per-row inside a `ForEach`
@@ -101,38 +102,39 @@ struct WorkspaceTerminalsPanelView: View {
                     count == 1 ? "1 terminal session" : "\(count) terminal sessions")
             },
             actions: {
-                // Shell choices only. Agent identity deliberately does NOT live in
-                // this menu: SwiftUI bridges menu content to `NSMenuItem`, which
-                // draws its image at the image's own size, so the vendored `1em`
-                // SVGs rendered as 1×1-pt dots here while the same `FileIconView`
-                // drew correctly in the launcher. See
-                // `docs/references/agent-terminals.md`.
-                Menu {
-                    Button("New Terminal", systemImage: "terminal") {
+                HStack(spacing: RafuMetrics.space1) {
+                    Button {
                         session.newTerminalTab()
+                    } label: {
+                        Label("New Terminal", systemImage: "plus")
+                            .labelStyle(.iconOnly)
                     }
+                    .buttonStyle(RafuIconButtonStyle(size: 24))
+                    .help("New Terminal")
+                    .accessibilityLabel("New Terminal")
 
-                    // Shown only when the catalog has ≥2 discovered shells
-                    // (terminal-manager.md T-C) — a single-shell machine has
-                    // nothing to choose between.
                     if session.availableTerminalShells.count >= 2 {
-                        Menu("New Terminal With Shell") {
-                            ForEach(session.availableTerminalShells) { shell in
-                                Button("\(shell.name) — \(shell.path)") {
+                        Button {
+                            isShellPickerPresented = true
+                        } label: {
+                            Label("Choose Terminal Shell", systemImage: "chevron.down")
+                                .labelStyle(.iconOnly)
+                        }
+                        .buttonStyle(RafuIconButtonStyle(size: 24))
+                        .help("Choose Terminal Shell")
+                        .accessibilityLabel("Choose Terminal Shell")
+                        .popover(isPresented: $isShellPickerPresented, arrowEdge: .bottom) {
+                            TerminalShellPickerView(
+                                shells: session.availableTerminalShells,
+                                onSelect: { shell in
                                     session.newTerminalTab(shell: shell)
-                                }
-                            }
+                                    isShellPickerPresented = false
+                                },
+                                onCancel: { isShellPickerPresented = false }
+                            )
                         }
                     }
-                } label: {
-                    Label("New Terminal", systemImage: "plus")
                 }
-                .labelStyle(.iconOnly)
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("New Terminal")
-                .accessibilityLabel("New Terminal")
             }
         )
     }

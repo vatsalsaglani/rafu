@@ -2,7 +2,8 @@
 
 ## Status and execution slot
 
-- **Status:** Planned on 2026-07-30.
+- **Status:** Implementation complete on 2026-08-15 with user-approved gate
+  deviations recorded below.
 - **Wave:** Follow-up Wave 1; parallel with WP-71, WP-72, and WP-73.
 - **Suggested branch:** `codex/presentation-terminal-hierarchy-picker`.
 - **Recommended model:** `gpt-5.6-sol` with high reasoning.
@@ -281,10 +282,85 @@ warnings, deferred hardware states, any reference note, and WP-90 dependency.
 
 ## Implementation record
 
-Pending. The implementor replaces this paragraph with the delivered resolver
-and picker behavior, local commit SHA, exact verification evidence, deferred
-manual states, warnings, and documentation-nuance classification before the
-final lane gate.
+Implemented on `codex/presentation-terminal-hierarchy-picker` from exact base
+`07c1fc5642ef331cf3c29530d5d6f36ad4ee9b08`.
+
+The pure terminal resolver now returns three ordered layers: neutral
+structure, theme emphasis, and optional identity. An assigned identity uses a
+2-point ring at a 1-point inset. Editor focus, manager current state, and
+manager attention use a separate 1-point outer edge and draw before identity.
+An unassigned focused editor keeps its 2-point focus edge. Manager current and
+attention edges stay 1 point. The resolver keeps the current-row fill,
+background-matching fallback, and normal/Increase Contrast neutral roles. A
+36-case matrix covers three identity states, six contexts, and two contrast
+states, including exact widths, insets, roles, draw order, and non-overlap.
+
+The Terminal Manager header now has a direct plus button that calls
+`session.newTerminalTab()` once. A separate shell chooser appears only when
+the catalog has at least two shells. It presents the value-driven
+`TerminalShellPickerView`; only pointer or Return selection passes the exact
+input `TerminalShell` to `session.newTerminalTab(shell:)`, then dismisses.
+Open, focus movement, Home/End, and Escape have no process authority. The
+picker uses shell-path identity, default-first initial focus, bounded scalable
+geometry, a primary name, a middle-truncated exact path with full help and
+accessibility text, and a `Default` chip. Shell catalog, ordering, default
+calculation, process, lifetime, app-menu, and agent-terminal code are
+unchanged.
+
+Verification evidence before the final integration gate:
+
+- `./script/format.sh --fix` and `./script/format.sh --lint`: passed.
+- `./script/build.sh`: passed in 77.32 seconds.
+- Focused style, picker, panel, identity, attention, editor-tab, shell-catalog,
+  quiescence, agent-terminal, and run-terminal command: 151 tests in 7 suites
+  passed in 2.668 seconds.
+- `./script/build_and_run.sh --package`: passed and staged
+  `dist/Rafu Lightning.app` version 0.1.0 without launching it.
+- Full parallel suite: 1,906 tests in 103 suites completed with one failure.
+  `ConductorRunsPanelPresentationTests/runsPanelHierarchyContract` also fails
+  alone because its regular expression matches unchanged internal
+  `ConductorActivityPresentation` symbol interpolation in
+  `ConductorRunsPanelView.swift`. Both files equal the exact base and are
+  outside this lane. The repository test rule requires stop-and-report instead
+  of an edit to this integration-owned test.
+- The build and package commands each reported the existing one-file SwiftPM
+  resource warning for
+  `Tests/RafuAppTests/Fixtures/workbench-converged-surfaces.json`.
+
+Rafu Lightning was already running from another checkout, so the shared GUI
+state was not available. Launch, split-terminal, identity similarity,
+background match, focus/current/attention, active/inactive window,
+Increase Contrast, 1x/2x, one/two/eight shell, full keyboard, VoiceOver,
+largest text, bundled-theme, and imported-theme checks remain deferred.
+
+On 2026-08-15, the user explicitly directed a local commit with these two
+deviations recorded:
+
+1. The full parallel suite is not green because of the unchanged,
+   integration-owned Ensemble source-contract failure described above. This
+   lane does not change or weaken that test.
+2. Interactive and hardware-dependent Rafu Lightning checks are deferred
+   because another checkout owns the active app process and shared GUI state.
+
+The local commit is this lane's single intentional commit; its exact SHA is in
+the final handoff. The dedicated worktree `.build` cache is removed after that
+commit as required.
+
+Implementation proved a reusable deployment-availability nuance. Direct
+`collection.enumerated()` use as a SwiftUI `ForEach` random-access collection
+requires macOS 26 even with the Swift 6.3.3 toolchain. The bounded shell list
+therefore uses `Array(shells.enumerated())` while shell path remains the row
+identity. The evidence is in
+`docs/references/swift-enumerated-collection-availability.md`. WP-90 should add
+this reference-index row:
+
+```markdown
+- [`swift-enumerated-collection-availability.md`](swift-enumerated-collection-availability.md) — Apple deployment availability for direct `enumerated()` collection use in SwiftUI and the bounded-array fallback.
+```
+
+WP-90 remains the next integration dependency. Integration must first correct
+the unrelated Ensemble contract failure and complete the deferred Rafu
+Lightning interaction matrix.
 
 ## Goal Mode start prompt
 

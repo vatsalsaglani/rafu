@@ -126,10 +126,16 @@ struct EditorTabAndGroupPresentationTests {
         #expect(resting.neutralStructure == .borderSubtle)
         #expect(resting.neutralWidth == 1)
         #expect(resting.showsIdentityAccent)
+        #expect(resting.identityWidth == 2)
+        #expect(resting.identityInset == 1)
         #expect(focused.neutralStructure == .borderStrong)
         #expect(focused.emphasis == .editorFocus)
-        #expect(focused.emphasisWidth == 2)
+        #expect(focused.emphasisWidth == 1)
         #expect(focused.showsIdentityAccent)
+        #expect(focused.identityWidth == 2)
+        #expect(focused.identityInset == 1)
+        #expect(focused.identityAndEmphasisDoNotOverlap)
+        #expect(focused.drawOrder == [.neutralStructure, .emphasis, .identity])
     }
 
     @Test("Drag frames, drop scoping, overflow, and Markdown controls remain in place")

@@ -276,6 +276,12 @@ nonisolated enum TerminalSurfaceContrast: Equatable, Sendable {
 }
 
 nonisolated struct TerminalSurfaceBorderResolution: Equatable, Sendable {
+    nonisolated enum Layer: Equatable, Sendable {
+        case neutralStructure
+        case emphasis
+        case identity
+    }
+
     nonisolated enum Emphasis: Equatable, Sendable {
         case none
         case editorFocus
@@ -296,7 +302,14 @@ nonisolated struct TerminalSurfaceBorderResolution: Equatable, Sendable {
     let emphasis: Emphasis
     let emphasisRole: WorkbenchPaletteRole
     let emphasisWidth: CGFloat
+    let emphasisInset: CGFloat
+    let drawOrder: [Layer]
     let rowFill: RowFill
+
+    var identityAndEmphasisDoNotOverlap: Bool {
+        guard showsIdentityAccent, emphasis != .none else { return true }
+        return identityInset >= emphasisInset + emphasisWidth
+    }
 }
 
 /// Context-aware terminal perimeter contract shared by editor groups and
@@ -323,19 +336,29 @@ nonisolated struct TerminalSurfaceBorderStyle {
         let hasIdentity = identity != .none
         switch context {
         case .editorGroup(let isFocused):
-            let emphasisWidth =
-                isFocused ? RafuMetrics.focusedTerminalBorderWidth : 0
+            let emphasisWidth: CGFloat =
+                if isFocused {
+                    hasIdentity
+                        ? RafuMetrics.terminalBorderWidth
+                        : RafuMetrics.focusedTerminalBorderWidth
+                } else {
+                    0
+                }
             return TerminalSurfaceBorderResolution(
                 neutralStructure: isFocused || contrast == .increased
                     ? .borderStrong
                     : .borderSubtle,
                 neutralWidth: RafuMetrics.terminalBorderWidth,
                 showsIdentityAccent: hasIdentity,
-                identityWidth: RafuMetrics.terminalBorderWidth,
-                identityInset: max(RafuMetrics.terminalBorderWidth, emphasisWidth),
+                identityWidth: hasIdentity ? RafuMetrics.focusedTerminalBorderWidth : 0,
+                identityInset: hasIdentity ? RafuMetrics.terminalBorderWidth : 0,
                 emphasis: isFocused ? .editorFocus : .none,
                 emphasisRole: isFocused ? .focusRing : .clear,
                 emphasisWidth: emphasisWidth,
+                emphasisInset: 0,
+                drawOrder: hasIdentity
+                    ? [.neutralStructure, .emphasis, .identity]
+                    : [.neutralStructure, .emphasis],
                 rowFill: .none
             )
         case .managerRow(let isCurrent, let needsAttention):
@@ -349,11 +372,15 @@ nonisolated struct TerminalSurfaceBorderStyle {
                     : .borderSubtle,
                 neutralWidth: RafuMetrics.terminalBorderWidth,
                 showsIdentityAccent: hasIdentity,
-                identityWidth: RafuMetrics.terminalBorderWidth,
-                identityInset: max(RafuMetrics.terminalBorderWidth, emphasisWidth),
+                identityWidth: hasIdentity ? RafuMetrics.focusedTerminalBorderWidth : 0,
+                identityInset: hasIdentity ? RafuMetrics.terminalBorderWidth : 0,
                 emphasis: emphasis,
                 emphasisRole: needsAttention ? .warning : (isCurrent ? .focusRing : .clear),
                 emphasisWidth: emphasisWidth,
+                emphasisInset: 0,
+                drawOrder: hasIdentity
+                    ? [.neutralStructure, .emphasis, .identity]
+                    : [.neutralStructure, .emphasis],
                 rowFill: isCurrent ? .current : .none
             )
         }
@@ -402,6 +429,19 @@ private struct TerminalSurfaceBorderModifier: ViewModifier {
                     )
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
+                if resolution.emphasis != .none {
+                    RoundedRectangle(
+                        cornerRadius: max(0, radius - resolution.emphasisInset),
+                        style: .continuous
+                    )
+                    .strokeBorder(
+                        theme.palette.workbenchColor(for: resolution.emphasisRole),
+                        lineWidth: resolution.emphasisWidth
+                    )
+                    .padding(resolution.emphasisInset)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                }
                 if resolution.showsIdentityAccent, let identityColor {
                     RoundedRectangle(
                         cornerRadius: max(0, radius - resolution.identityInset),
@@ -411,15 +451,6 @@ private struct TerminalSurfaceBorderModifier: ViewModifier {
                     .padding(resolution.identityInset)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
-                }
-                if resolution.emphasis != .none {
-                    RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .strokeBorder(
-                            theme.palette.workbenchColor(for: resolution.emphasisRole),
-                            lineWidth: resolution.emphasisWidth
-                        )
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
                 }
             }
     }

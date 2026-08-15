@@ -153,6 +153,10 @@ func managerPresentationInputsStaySeparate() {
     #expect(attentionWithMatchingIdentity.rowFill == .none)
     #expect(attentionWithMatchingIdentity.showsIdentityAccent)
     #expect(attentionWithMatchingIdentity.neutralWidth == 1)
+    #expect(attentionWithMatchingIdentity.identityWidth == 2)
+    #expect(attentionWithMatchingIdentity.identityInset == 1)
+    #expect(attentionWithMatchingIdentity.emphasisWidth == 1)
+    #expect(attentionWithMatchingIdentity.identityAndEmphasisDoNotOverlap)
 }
 
 @Suite("Terminal manager source contract")
@@ -169,6 +173,24 @@ struct TerminalManagerSourceContractTests {
         #expect(panel.contains("LazyVStack(spacing: 6)"))
         #expect(panel.contains("base: 48"))
         #expect(panel.contains("RafuPanelEmptyState("))
+    }
+
+    @Test("The header keeps one direct default action and adds a two-shell picker affordance")
+    func headerUsesSplitTerminalAction() throws {
+        let panel = try Self.source("Sources/RafuApp/Views/WorkspaceTerminalsPanelView.swift")
+        let header = try Self.section(
+            named: "private func header(count: Int) -> some View",
+            until: "/// The launcher's only path to a spawn",
+            in: panel
+        )
+
+        #expect(header.components(separatedBy: "session.newTerminalTab()").count - 1 == 1)
+        #expect(header.contains("if session.availableTerminalShells.count >= 2"))
+        #expect(header.contains(#"Label("Choose Terminal Shell", systemImage: "chevron.down")"#))
+        #expect(header.contains("TerminalShellPickerView("))
+        #expect(header.contains("session.newTerminalTab(shell: shell)"))
+        #expect(header.contains("isShellPickerPresented = false"))
+        #expect(!header.contains("Menu(\"New Terminal With Shell\")"))
     }
 
     @Test("Launcher help and accessibility carry provider readiness and unavailable reasons")
@@ -220,6 +242,15 @@ struct TerminalManagerSourceContractTests {
             directory = directory.deletingLastPathComponent()
         }
         throw TerminalManagerSourceContractError.repositoryRootNotFound
+    }
+
+    private static func section(named start: String, until end: String, in source: String) throws
+        -> String
+    {
+        let startRange = try #require(source.range(of: start))
+        let tail = source[startRange.lowerBound...]
+        let endRange = try #require(tail.range(of: end))
+        return String(tail[..<endRange.lowerBound])
     }
 
     private enum TerminalManagerSourceContractError: Error {

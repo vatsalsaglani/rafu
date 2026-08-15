@@ -78,7 +78,7 @@ struct RafuWorkbenchStyleContractTests {
         #expect(WorkbenchTextHeightPolicy.attachedTabCloseTarget(for: 34) == 28)
     }
 
-    @Test("Terminal editor focus strengthens structure and reserves identity geometry")
+    @Test("Assigned identity stays dominant while editor focus uses a separate outer edge")
     func editorTerminalBorderPrecedence() throws {
         let resting = TerminalSurfaceBorderStyle.resolve(
             context: .editorGroup(isFocused: false),
@@ -88,9 +88,11 @@ struct RafuWorkbenchStyleContractTests {
         #expect(resting.neutralStructure == .borderSubtle)
         #expect(resting.neutralWidth == 1)
         #expect(resting.showsIdentityAccent)
-        #expect(resting.identityWidth == 1)
+        #expect(resting.identityWidth == 2)
         #expect(resting.identityInset == 1)
         #expect(resting.emphasis == .none)
+        #expect(resting.emphasisWidth == 0)
+        #expect(resting.drawOrder == [.neutralStructure, .emphasis, .identity])
         #expect(resting.rowFill == .none)
 
         let focused = TerminalSurfaceBorderStyle.resolve(
@@ -102,10 +104,13 @@ struct RafuWorkbenchStyleContractTests {
         #expect(focused.showsIdentityAccent)
         #expect(focused.emphasis == .editorFocus)
         #expect(focused.emphasisRole == .focusRing)
-        #expect(focused.emphasisWidth == 2)
-        #expect(focused.identityInset == 2)
-        #expect(focused.identityInset >= focused.emphasisWidth)
-        #expect(focused.identityInset > resting.identityInset)
+        #expect(focused.emphasisWidth == 1)
+        #expect(focused.emphasisInset == 0)
+        #expect(focused.identityWidth == 2)
+        #expect(focused.identityInset == 1)
+        #expect(focused.identityAndEmphasisDoNotOverlap)
+        #expect(focused.drawOrder == [.neutralStructure, .emphasis, .identity])
+        #expect(focused.identityInset == resting.identityInset)
         #expect(focused.rowFill == .none)
 
         let source = try Self.workbenchStyleSource()
@@ -115,7 +120,84 @@ struct RafuWorkbenchStyleContractTests {
             )
         )
         #expect(source.contains(".padding(resolution.identityInset)"))
-        #expect(!source.contains(".padding(resolution.neutralWidth)"))
+        #expect(source.contains(".padding(resolution.emphasisInset)"))
+        let emphasisLayer = try #require(source.range(of: "if resolution.emphasis != .none"))
+        let identityLayer = try #require(
+            source.range(of: "if resolution.showsIdentityAccent, let identityColor")
+        )
+        #expect(emphasisLayer.lowerBound < identityLayer.lowerBound)
+    }
+
+    @Test("Terminal resolver geometry matrix preserves every signal and contrast state")
+    func terminalResolverGeometryMatrix() {
+        let identities: [TerminalSurfaceIdentity] = [
+            .none,
+            .assigned(matchesEditorBackground: false),
+            .assigned(matchesEditorBackground: true),
+        ]
+        let contexts: [TerminalSurfaceBorderStyle.Context] = [
+            .editorGroup(isFocused: false),
+            .editorGroup(isFocused: true),
+            .managerRow(isCurrent: false, needsAttention: false),
+            .managerRow(isCurrent: true, needsAttention: false),
+            .managerRow(isCurrent: false, needsAttention: true),
+            .managerRow(isCurrent: true, needsAttention: true),
+        ]
+        let contrasts: [TerminalSurfaceContrast] = [.normal, .increased]
+
+        for identity in identities {
+            for context in contexts {
+                for contrast in contrasts {
+                    let resolution = TerminalSurfaceBorderStyle.resolve(
+                        context: context,
+                        identity: identity,
+                        contrast: contrast
+                    )
+                    let hasIdentity = identity != .none
+                    #expect(resolution.neutralWidth == 1)
+                    #expect(resolution.showsIdentityAccent == hasIdentity)
+                    #expect(resolution.identityWidth == (hasIdentity ? 2 : 0))
+                    #expect(resolution.identityInset == (hasIdentity ? 1 : 0))
+                    #expect(resolution.emphasisInset == 0)
+                    #expect(resolution.identityAndEmphasisDoNotOverlap)
+                    #expect(
+                        resolution.drawOrder
+                            == (hasIdentity
+                                ? [.neutralStructure, .emphasis, .identity]
+                                : [.neutralStructure, .emphasis])
+                    )
+
+                    let expectsStrongNeutral: Bool =
+                        switch context {
+                        case .editorGroup(let isFocused):
+                            isFocused || contrast == .increased
+                        case .managerRow(let isCurrent, let needsAttention):
+                            isCurrent || needsAttention || contrast == .increased
+                        }
+                    #expect(
+                        resolution.neutralStructure
+                            == (expectsStrongNeutral ? .borderStrong : .borderSubtle)
+                    )
+
+                    switch context {
+                    case .editorGroup(let isFocused):
+                        #expect(resolution.rowFill == .none)
+                        #expect(resolution.emphasis == (isFocused ? .editorFocus : .none))
+                        #expect(
+                            resolution.emphasisWidth
+                                == (isFocused ? (hasIdentity ? 1 : 2) : 0)
+                        )
+                    case .managerRow(let isCurrent, let needsAttention):
+                        let expectedEmphasis: TerminalSurfaceBorderResolution.Emphasis =
+                            needsAttention
+                            ? .managerAttention : (isCurrent ? .managerCurrent : .none)
+                        #expect(resolution.emphasis == expectedEmphasis)
+                        #expect(resolution.emphasisWidth == (expectedEmphasis == .none ? 0 : 1))
+                        #expect(resolution.rowFill == (isCurrent ? .current : .none))
+                    }
+                }
+            }
+        }
     }
 
     @Test("Increase Contrast promotes resting terminal structure without inventing emphasis")
@@ -180,6 +262,10 @@ struct RafuWorkbenchStyleContractTests {
         #expect(attention.showsIdentityAccent)
         #expect(attention.emphasis == .managerAttention)
         #expect(attention.emphasisRole == .warning)
+        #expect(attention.identityWidth == 2)
+        #expect(attention.identityInset == 1)
+        #expect(attention.emphasisWidth == 1)
+        #expect(attention.identityAndEmphasisDoNotOverlap)
         #expect(attention.rowFill == .none)
 
         let currentAttention = TerminalSurfaceBorderStyle.resolve(
