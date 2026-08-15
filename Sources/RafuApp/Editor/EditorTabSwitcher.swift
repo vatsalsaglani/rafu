@@ -24,6 +24,9 @@ nonisolated enum EditorTabSwitcherDirection: Equatable, Sendable {
 nonisolated enum EditorTabSwitcherDestination: Hashable, Sendable {
     case editorTab(tabID: EditorTabID, groupID: EditorGroupID)
     case terminal(sessionID: UUID)
+    /// Additive identity only. TG-30 creates candidates and activation
+    /// behavior; TG-10 must not select a group or start a process.
+    case terminalGroup(groupID: TerminalGroupID)
 }
 
 nonisolated struct EditorTabSwitcherCandidate: Equatable, Identifiable, Sendable {

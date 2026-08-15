@@ -2,7 +2,7 @@
 
 ## Status and execution slot
 
-- **Status:** Planned.
+- **Status:** Implemented on lane; awaiting authorized merge.
 - **Wave:** 1; serial source prerequisite.
 - **Branch:** `terminal-groups/tg-10-contracts`.
 - **Required base:** exact `<TG00_MERGED_SHA>`.
@@ -391,7 +391,35 @@ commit message, commit SHA, next dependency, and **Deviations**.
 
 ## Implementation record
 
-To be completed by the TG-10 implementor before the final gate.
+Implemented C1 through C7 on `terminal-groups/tg-10-contracts` without a
+Terminal Group creation route, process start, store I/O, or automatic command.
+
+- Added separate runtime and saved IDs, bounded names/paths, split vocabulary,
+  normalized recursive trees, snapshot validation, safe ordinary-shell launch
+  profiles, runtime-only launch requests, capacity reservations, close tokens,
+  commands, and effects.
+- Added versioned saved-layout and inert open-tab records. Named-layout opens
+  create fresh runtime group, pane, and split IDs. The saved codec persists an
+  explicit pane name only and has no output, OSC title, process, provider,
+  environment, token, credential, or session field.
+- Added the injected `TerminalGroupSavedLayoutStoring` protocol contract. TG-22
+  owns the Application Support actor and newest-one change-stream implementation.
+- Added the Terminal Group editor-resource and switcher-destination identities.
+  Existing terminal routing remains unchanged. The central call-site branches
+  are compile shims only: inactive group resources select no document, restore
+  as no active tab, and display a non-actionable unavailable placeholder.
+- Added tolerant `RestorableWorkspace` decoding for the optional group field.
+  A missing, malformed, unsupported, or malformed sibling group record leaves
+  existing workspace, file-tab, and editor-layout data intact and produces only
+  a bounded diagnostic.
+- Added `TerminalGroupContractTests` and
+  `TerminalGroupRestorationContractTests`, and extended `EditorLayoutTests` for
+  group-resource and legacy-terminal compatibility. The pre-final focused
+  `TerminalGroup` filter passed 13 tests. The final format, build, regression,
+  and full parallel verification sequence follows this record.
+
+No reusable reference note was created. The Swift 6.2 isolation and Codable
+facts used by this lane were already covered by the required project references.
 
 ## Goal Mode start prompt
 

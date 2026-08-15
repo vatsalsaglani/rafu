@@ -189,6 +189,17 @@ private struct EditorGroupView: View {
                             // and keeps its live SwiftTerm view and responder
                             // identity across tab moves and remounts.
                             EditorTerminalTabContent(controller: terminalController)
+                        } else if selectedTerminalGroupID != nil {
+                            // TG-10 restoration shim: a decoded group resource
+                            // has no runtime aggregate yet. This deliberately
+                            // offers no action that could construct a controller
+                            // or start a process; TG-30 replaces it.
+                            ContentUnavailableView(
+                                "Terminal Group Unavailable",
+                                systemImage: "rectangle.3.group",
+                                description: Text(
+                                    "Terminal Group restoration is not available yet.")
+                            )
                         } else if loadedDocuments.isEmpty {
                             ContentUnavailableView(
                                 "Empty Editor Group",
@@ -303,6 +314,11 @@ private struct EditorGroupView: View {
     private var selectedTerminalController: WorkspaceTerminalController? {
         guard case .terminal(let sessionID) = selectedTab?.resource else { return nil }
         return session.terminal.sessions.first { $0.id == sessionID }
+    }
+
+    private var selectedTerminalGroupID: TerminalGroupID? {
+        guard case .terminalGroup(let groupID) = selectedTab?.resource else { return nil }
+        return groupID
     }
 
     /// Resolves every visible terminal color once for this group render. The
@@ -1115,6 +1131,15 @@ private struct EditorGroupTabBar: View {
                     session: session
                 )
             }
+        case .terminalGroup:
+            Button {
+                session.selectEditorTab(tab.id, in: group.id)
+            } label: {
+                Label("Terminal Group", systemImage: "rectangle.3.group")
+                    .lineLimit(1)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Terminal Group")
         case .restorable:
             EmptyView()
         }
@@ -1188,6 +1213,8 @@ private struct EditorGroupTabBar: View {
                 overflowTabMenuButton(
                     title: TerminalSessionPresentation.tabLabel(controller.displayName), tab: tab)
             }
+        case .terminalGroup:
+            overflowTabMenuButton(title: "Terminal Group", tab: tab)
         case .restorable:
             EmptyView()
         }

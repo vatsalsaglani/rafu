@@ -215,6 +215,12 @@ struct EditorTabSwitcherOverlay: View {
                     detail: editorDetail(groupID: groupID, suffix: "Terminal"),
                     symbolName: "terminal"
                 )
+            case .terminalGroup:
+                return Presentation(
+                    title: "Terminal Group",
+                    detail: editorDetail(groupID: groupID, suffix: "Terminal Group"),
+                    symbolName: "rectangle.3.group"
+                )
             }
 
         case .terminal(let sessionID):
@@ -232,6 +238,15 @@ struct EditorTabSwitcherOverlay: View {
                 detail: terminalDetail(controller.status, isPresented: isPresented),
                 fileIcon: EditorTabSwitcherAgentIdentity.icon(for: controller.agentProvider),
                 symbolName: terminalSymbol(controller.status)
+            )
+
+        case .terminalGroup:
+            // TG-10 adds destination identity only. No current candidate can
+            // produce this branch; TG-40 owns final group presentation.
+            return Presentation(
+                title: "Terminal Group",
+                detail: "Unavailable",
+                symbolName: "rectangle.3.group"
             )
         }
     }

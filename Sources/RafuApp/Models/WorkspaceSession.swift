@@ -2385,7 +2385,7 @@ final class WorkspaceSession {
             requestClose(document)
         case .terminal:
             closeTerminalTab(tab.id)
-        case .restorable:
+        case .restorable, .terminalGroup:
             _ = editorLayout.closeTab(tab.id)
             synchronizeSelectionFromLayout()
             persistWorkspaceState()
@@ -2540,7 +2540,7 @@ final class WorkspaceSession {
                 case .terminal(let sessionID):
                     guard terminalSessionIDs.contains(sessionID) else { continue }
                     destination = .terminal(sessionID: sessionID)
-                case .file, .restorable:
+                case .file, .restorable, .terminalGroup:
                     destination = .editorTab(tabID: tab.id, groupID: groupID)
                 }
                 candidates.append(EditorTabSwitcherCandidate(destination: destination))
@@ -2620,6 +2620,9 @@ final class WorkspaceSession {
             selectEditorTab(tabID, in: groupID)
         case .terminal(let sessionID):
             revealTerminalSession(sessionID)
+        case .terminalGroup:
+            // TG-10 identity shim only. TG-30 owns Terminal Group selection.
+            return
         }
     }
 
@@ -2642,7 +2645,7 @@ final class WorkspaceSession {
             // `synchronizeSelectionFromLayout` and `revealTerminalSession`
             // for the other two.
             terminal.sessions.first(where: { $0.id == sessionID })?.clearAttention()
-        case .restorable:
+        case .restorable, .terminalGroup:
             selectedDocumentID = nil
             selectedTreePath = nil
         }
