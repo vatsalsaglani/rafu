@@ -2,15 +2,16 @@
 
 ## Status
 
-Proposed on 2026-08-15. This document defines product scope and acceptance.
-The worktree execution contract is in
+In Progress on 2026-08-16 after ADR 0023 acceptance. This document defines
+product scope and acceptance. TG-00 is complete on its lane; TG-10 is next
+after an authorized merge. The worktree execution contract is in
 [`terminal-groups/README.md`](terminal-groups/README.md).
 
 The user asked for one terminal group to appear as one editor tab, with more
 terminal panes added by keyboard, directional pane focus, a group name, and a
 safe saved layout. This direction reverses the v1 non-goal for terminal splits
-in [`terminal-manager.md`](terminal-manager.md). TG-00 must record the reversal
-in ADR 0023 before source work starts.
+in [`terminal-manager.md`](terminal-manager.md). TG-00 records the reversal in
+ADR 0023 before source work starts.
 
 ## Product outcome
 

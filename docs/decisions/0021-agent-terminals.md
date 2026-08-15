@@ -99,6 +99,17 @@ host environment, capturing their output, granting Ensemble capability after
 spawn, adding an unverified vendor argument, or changing the icon source or
 use beyond nominative identification.
 
+## Amendment (2026-08-16): Terminal Group placeholder
+
+An Agent Terminal can be a live pane in a Terminal Group under ADR 0023. Its
+saved form is only an inert unavailable placeholder. It has no executable,
+arguments, model, environment, provider identity, credential, token, launch
+descriptor, captured output, or Ensemble capability. The fixed unavailable
+message is derived from the saved pane kind. This does not permit a saved Agent
+Terminal launch profile or change its tokenless interactive boundary.
+
+- [ADR 0023](0023-terminal-groups-and-saved-layouts.md)
+
 ## Related
 
 - [ADR 0004](0004-embedded-terminal.md)

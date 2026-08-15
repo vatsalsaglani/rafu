@@ -97,9 +97,10 @@ Alternatives considered:
   protocol — adapters stay small and survive vendor flag churn.
 - **Runs are repo data, not app state.** Each run persists under
   `.rafu/runs/<id>/` (manifest, per-step artifacts, patches, captured logs),
-  gitignored by default with a user choice to commit. Window restoration
-  (UserDefaults) is untouched; live role terminals are never restored,
-  consistent with ADR 0004/0014.
+  gitignored by default with a user choice to commit. At this decision’s
+  original scope, window restoration (UserDefaults) was untouched. ADR 0023
+  now permits inert Terminal Group metadata, but live role terminals are never
+  restored and no run data or Ensemble capability enters that schema.
 - **Rafu creates worktrees; models never do.** A mutating role runs in a
   Rafu-created worktree (`rafu/run-<id>`) via the existing `GitService`
   worktree path; read-only roles run against the checkout under the
@@ -217,3 +218,18 @@ credentials, and leaves merge-back behind an explicit human gate.
 coordinators; token persistence across app relaunch; or distribution of any
 coordinator skill through a marketplace. Each requires revisiting this
 amendment.
+
+## Amendment (2026-08-16): Terminal Group restoration and capacity
+
+ADR 0023 changes the terminal presentation and restoration schema, not the
+Ensemble trust boundary. Workspace restoration may now contain inert Terminal
+Group metadata. It does not restore a live role session, its PTY, captured
+output, environment, token, grant, manifest, launch descriptor, or Ensemble
+capability. An Ensemble pane can restore only as the fixed unavailable
+placeholder defined by ADR 0023.
+
+The per-window six-live-session limit includes ordinary shells, Agent
+Terminals, Ensemble coordinator terminals, and Ensemble role terminals.
+This is a shared capacity limit, not a capability grant. The delegated-auth,
+file-handoff, Rafu-created-worktree, and explicit merge-back rules in this ADR
+are unchanged.

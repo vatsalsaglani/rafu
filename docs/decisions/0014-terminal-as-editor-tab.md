@@ -89,6 +89,21 @@ rather than silently changing behavior against this record.
   sessions). ADR 0004 carries the parallel amendment for the terminal
   engine's non-goal boundary.
 
+## Superseded terminal-layout guidance (2026-08-16)
+
+ADR 0023 supersedes this ADR’s one-session-per-terminal-tab presentation,
+session-level parking, non-restoration rule, and one-session tab-close rule.
+A Terminal Group is now one editor tab with one or more panes. Group parking,
+group MRU reveal, group-create fallback, pane close, and group close use ADR
+0023.
+
+`EditorTabResource.terminal(sessionID:)` remains decodable during migration.
+A failure to decode a legacy terminal resource must not clear the complete
+workspace-restoration payload. New saved layouts and window restoration are
+inert metadata only: they start no process. Agent Terminal and Ensemble panes
+restore only as fixed unavailable placeholders with no launch descriptor or
+capability data.
+
 ## Related plan, reference, and implementation paths
 
 - Plan: [`editor-terminal-tabs.md`](../plans/phases/editor-terminal-tabs.md)

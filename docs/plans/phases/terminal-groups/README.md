@@ -2,9 +2,8 @@
 
 ## Status
 
-Proposed on 2026-08-15. This plan set is ready for local execution after the
-user reviews it and commits it. No Terminal Groups source work starts from an
-uncommitted plan set.
+Active on 2026-08-16 after ADR 0023 acceptance. TG-00 is complete on its lane;
+TG-10 is the next dependency after an authorized merge to primary `main`.
 
 This directory decomposes
 [`../terminal-groups.md`](../terminal-groups.md) into two serial foundation
