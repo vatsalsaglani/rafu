@@ -595,9 +595,9 @@ private struct ConductorActivityRow: View {
                         .foregroundStyle(theme.palette.textSecondary)
                         .lineLimit(1)
                 }
-                RafuChip(text: ConductorActivityPresentation.shortRunID(for: event.runID))
+                RafuChip(text: shortRunID)
                     .accessibilityLabel(
-                        "Run identifier \(ConductorActivityPresentation.shortRunID(for: event.runID))"
+                        "Run identifier \(shortRunID)"
                     )
                 Spacer(minLength: 4)
                 Text(event.at, style: .relative)
@@ -623,8 +623,12 @@ private struct ConductorActivityRow: View {
         .padding(.vertical, 3)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
-            "\(ConductorActivityPresentation.shortRunID(for: event.runID)), \(summary)"
+            "\(shortRunID), \(summary)"
         )
+    }
+
+    private var shortRunID: String {
+        ConductorActivityPresentation.shortRunID(for: event.runID)
     }
 
     private var summary: String {
@@ -637,7 +641,8 @@ private struct ConductorActivityRow: View {
             return "\(identity): \(String(note.prefix(120)))"
         }
         if let state = event.state {
-            return "\(identity) → \(ConductorActivityPresentation.statusLabel(for: state))"
+            let status = ConductorActivityPresentation.statusLabel(for: state)
+            return "\(identity) → \(status)"
         }
         return "\(identity) · \(String(event.kind.prefix(48)))"
     }

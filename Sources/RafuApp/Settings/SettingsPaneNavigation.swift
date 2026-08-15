@@ -85,6 +85,7 @@ struct SettingsPaneNavigation: View {
     let variant: Variant
 
     @Environment(\.rafuTheme) private var theme
+    @State private var isCompactNavigationExpanded = false
 
     var body: some View {
         Group {
@@ -104,38 +105,84 @@ struct SettingsPaneNavigation: View {
                     width: SettingsPresentationLayout.regularNavigationWidth, alignment: .topLeading
                 )
             case .compact:
-                Menu {
-                    ForEach(SettingsPane.allCases) { pane in
-                        Button {
-                            selection = pane
-                        } label: {
-                            Label(pane.title, systemImage: pane.systemImage)
-                        }
-                        .accessibilityLabel(pane.title)
-                        .accessibilityAddTraits(pane == selection ? .isSelected : [])
-                        .help(pane.title)
-                    }
-                } label: {
-                    Label(selection.title, systemImage: selection.systemImage)
-                        .font(.callout.weight(.medium))
-                        .foregroundStyle(theme.palette.textPrimary)
-                        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-                        .padding(.horizontal, RafuMetrics.space2)
-                        .background(
-                            theme.palette.accentSoft,
-                            in: .rect(cornerRadius: RafuMetrics.radiusDenseSelection)
-                        )
-                }
-                .menuStyle(.borderlessButton)
-                .accessibilityLabel("Settings category: \(selection.title)")
-                .help("Choose a Settings category")
-                .padding(.horizontal, RafuMetrics.space2)
-                .padding(.vertical, RafuMetrics.space1)
+                compactNavigation
             }
         }
         .background(theme.palette.tabBarBackground)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Settings categories")
+        .onChange(of: variant) { _, newVariant in
+            if newVariant == .regular {
+                isCompactNavigationExpanded = false
+            }
+        }
+    }
+
+    private var compactNavigation: some View {
+        VStack(alignment: .leading, spacing: RafuMetrics.space1) {
+            Button(action: toggleCompactNavigation) {
+                HStack(alignment: .firstTextBaseline, spacing: RafuMetrics.space2) {
+                    Image(systemName: selection.systemImage)
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 14)
+                    Text(selection.title)
+                        .font(.callout.weight(.medium))
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .layoutPriority(1)
+                    Spacer(minLength: RafuMetrics.space2)
+                    Image(systemName: isCompactNavigationExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .frame(width: 12)
+                }
+                .foregroundStyle(theme.palette.textPrimary)
+                .padding(.horizontal, RafuMetrics.space2)
+                .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                .background(
+                    theme.palette.accentSoft,
+                    in: .rect(cornerRadius: RafuMetrics.radiusDenseSelection)
+                )
+                .contentShape(.rect(cornerRadius: RafuMetrics.radiusDenseSelection))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Settings category")
+            .accessibilityValue(selection.title)
+            .accessibilityAddTraits(.isSelected)
+            .accessibilityHint(
+                isCompactNavigationExpanded
+                    ? "Collapses the Settings category list"
+                    : "Expands the Settings category list"
+            )
+            .help("Choose a Settings category")
+
+            if isCompactNavigationExpanded {
+                VStack(alignment: .leading, spacing: RafuMetrics.space1) {
+                    ForEach(SettingsPane.allCases) { pane in
+                        SettingsPaneNavigationItem(
+                            pane: pane,
+                            isSelected: pane == selection,
+                            select: { selectCompactPane(pane) }
+                        )
+                    }
+                }
+            }
+        }
+        .padding(RafuMetrics.space2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onExitCommand(perform: collapseCompactNavigation)
+    }
+
+    private func toggleCompactNavigation() {
+        isCompactNavigationExpanded.toggle()
+    }
+
+    private func selectCompactPane(_ pane: SettingsPane) {
+        selection = pane
+        isCompactNavigationExpanded = false
+    }
+
+    private func collapseCompactNavigation() {
+        isCompactNavigationExpanded = false
     }
 }
 
@@ -155,6 +202,8 @@ private struct SettingsPaneNavigationItem: View {
                 Text(pane.title)
                     .font(.callout.weight(isSelected ? .semibold : .regular))
                     .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
                 Spacer(minLength: 0)
             }
             .foregroundStyle(foreground)

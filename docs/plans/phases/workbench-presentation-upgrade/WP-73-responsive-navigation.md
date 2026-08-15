@@ -226,10 +226,44 @@ and WP-90 dependency.
 
 ## Implementation record
 
-Pending. The implementor replaces this paragraph with the delivered
-composition, local commit SHA, exact verification evidence, deferred manual
-states, warnings, and documentation-nuance classification before the final lane
-gate.
+Implemented on the local `codex/presentation-responsive-navigation` branch,
+created from local `main` at `07c1fc5642ef331cf3c29530d5d6f36ad4ee9b08`.
+
+- Source Control now uses the shared `RafuSegmentedPicker` with `fillsWidth:
+  true`. Changes, Worktrees, and History use equal available widths. The
+  picker has a Source Control section accessibility label and the selected
+  section as its accessibility value.
+- At widths of 812 points and greater, Settings keeps its regular rail and
+  page layout. Below 812 points, category navigation is inside the page
+  column, immediately before the page header. The retained `paneContent` host
+  remains outside both layout variants.
+- The compact category control is an in-flow full-width disclosure. Its
+  collapsed row shows the current category. Its expanded list contains the
+  seven existing full-width category buttons in the original order. Selection,
+  Escape, and a return to the regular layout collapse the disclosure. Category
+  names wrap vertically at large text sizes; the control does not use a Menu,
+  overlay, or horizontal scroll.
+- Focused presentation, Settings retention, themed-control, Git, and
+  Ensemble comparator checks passed before the final lane sequence. The
+  focused navigation run passed 19 tests in 3 suites. The Settings retention
+  run passed 196 tests in 7 suites. The themed-control run passed 2 tests in 1
+  suite. The Git and utility-panel run passed 84 tests in 9 suites.
+- The first full parallel run exposed a pre-existing Ensemble Runs source
+  contract failure in the base revision. With explicit user authorization, the
+  minimal scope exception moves internal helper calls outside localized string
+  interpolation. It preserves the rendered text and restores the existing
+  naming contract without changing the comparator test.
+- No reusable platform, SDK, toolchain, lifecycle, concurrency, security, or
+  performance nuance was found. No reference note or WP-90 reference-index row
+  is required.
+
+The shared GUI lease was not available because another Rafu Lightning process
+was active. Final staged-app checks therefore remain deferred for the exact
+visual matrix in this work package: Source Control at minimum, ideal, and
+maximum widths in every Git state; every Settings pane during continuous
+792–832 point resizing and stateful edits across 811/812; native Settings
+fallback; themes, contrast, large and localized text; Full Keyboard Access;
+VoiceOver; inactive windows; and available 1x and 2x displays.
 
 ## Goal Mode start prompt
 
