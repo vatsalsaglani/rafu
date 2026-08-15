@@ -35,6 +35,7 @@ struct WorkspaceWindowView: View {
         .background(
             FlatWindowChrome(
                 titleBarColor: NSColor(theme.palette.sidebarBackground),
+                topologyToken: windowChromeTopologyToken,
                 hidesTrafficLights: !trafficLightsRevealed && !isWindowFullScreen,
                 onFullScreenChange: { isFullScreen in
                     isWindowFullScreen = isFullScreen
@@ -128,6 +129,54 @@ struct WorkspaceWindowView: View {
             session: session,
             openFolder: session.requestOpenFolder
         )
+    }
+
+    /// A bounded identity snapshot for the one window-level AppKit bridge.
+    /// Fractions, document text, terminal output, and other high-frequency
+    /// state are deliberately absent: only hosting topology, selected canvas,
+    /// and the logical navigation title can request a chrome reapply.
+    private var windowChromeTopologyToken: FlatWindowChrome.TopologyToken {
+        let layout = session.editorLayout
+        return FlatWindowChrome.TopologyToken(
+            editorNodes: Self.chromeEditorNodes(in: layout.root),
+            focusedGroupID: layout.focusedGroupID.rawValue,
+            canvasIdentity: windowChromeCanvasIdentity,
+            windowTitleIdentity: session.windowTitle
+        )
+    }
+
+    private var windowChromeCanvasIdentity: String {
+        switch EditorCanvasRoute.resolve(EditorCanvasRoute.Inputs(session: session)) {
+        case .welcome: "welcome"
+        case .empty: "empty"
+        case .blame: "blame:\(session.selectedDocumentID?.uuidString ?? "none")"
+        case .standaloneDiff: "diff:\(session.gitOpenDiff?.id ?? "none")"
+        case .graph: "ensemble-graph"
+        case .runDetail: "run-detail:\(session.conductorRunCanvasID ?? "none")"
+        case .ensembleStart: "ensemble-start"
+        case .ensembleNewRun: "ensemble-new-run"
+        case .settings: "settings"
+        case .editor: "editor:\(session.selectedDocumentID?.uuidString ?? "none")"
+        }
+    }
+
+    private static func chromeEditorNodes(
+        in node: EditorLayoutNode
+    ) -> [FlatWindowChrome.TopologyToken.EditorNode] {
+        switch node {
+        case .group(let group):
+            return [
+                .group(
+                    id: group.id.rawValue,
+                    tabIDs: group.tabs.map(\.id.rawValue),
+                    selectedTabID: group.selectedTabID?.rawValue
+                )
+            ]
+        case .split(let id, let axis, _, let first, let second):
+            return [.split(id: id.rawValue, axis: axis.rawValue)]
+                + chromeEditorNodes(in: first)
+                + chromeEditorNodes(in: second)
+        }
     }
 }
 

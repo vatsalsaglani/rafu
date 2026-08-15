@@ -252,10 +252,67 @@ note, deferred hardware states, and WP-90 dependency.
 
 ## Implementation record
 
-Pending. The implementor replaces this paragraph with the root cause, delivered
-invariant, local commit SHA, exact verification evidence, deferred manual
-states, warnings, and documentation-nuance classification before the final lane
-gate.
+Prepared on 2026-08-15 from exact base
+`07c1fc5642ef331cf3c29530d5d6f36ad4ee9b08` on
+`codex/presentation-window-chrome-lifecycle`. The existing bridge applied flat
+chrome when it first attached and scheduled late repairs only for window
+notifications. An editor topology transaction could run the representable
+update first, then replace the current hosting content and restore stock window
+values. No later topology input existed, so split and close transactions could
+leave the new content view with stock title visibility, transparency,
+separator, movement, style-mask, and safe-area state until an unrelated window
+notification arrived.
+
+The change adds one bounded, value-semantic topology token. It contains only
+split/group/tab selection identity, the selected canvas identity, and the
+logical window title. One main-actor scheduler now handles attach, changed
+topology, configuration, and the existing full-screen/key/main notifications.
+It applies at once, replaces older delayed work with the three verified
+0.05/0.3/1.0-second passes, and cancels stale work on detach or window
+replacement. Every pass reads the current content/frame hierarchy and restores
+the full flat-chrome invariant. It does not add polling, a repeating timer,
+feature-specific close callbacks, or an overlay.
+
+The new headless regression records the proved reset order: the topology input
+is applied, AppKit hosting content is then replaced and stock values are
+restored, and the bounded post-transaction pass repairs the replacement view.
+The replacement kept the existing frame view in the headless case. After the
+repair, its measured top safe-area relation was a 32-point base inset, a
+-32-point additional inset, and a zero effective inset. The test also verifies
+style mask, hidden/transparent title, separator, `isMovable`, themed fallback,
+standard buttons, backdrop scrubbing, coalescing, notification routing, and
+detach/window-replacement cancellation.
+
+Verification before the final lane gate:
+
+- Focused chrome/topology: 18 tests in 2 suites passed in 0.766 seconds.
+- Deck/layout/drag: 38 tests passed in 0.026 seconds.
+- File close and dirty confirmation: 4 tests passed in 0.025 seconds.
+- Terminal editor-tab and teardown: 18 tests passed in 0.020 seconds.
+- Restoration: 6 tests passed in 0.008 seconds.
+- Pre-final parallel suite: WP-72 suites passed, but the full run failed with
+  1 issue across 1,903 tests in 103 suites. The isolated read-only
+  `ConductorRunsPanelPresentationTests` run failed with the same 1 issue across
+  4 tests. Its source-contract assertion rejects an existing user-visible
+  string in `ConductorRunsPanelView.swift`; the exact same string is present at
+  the required base SHA. WP-72 owns neither that source nor that test, so the
+  integration-owned failure stops the final lane gate.
+
+The initial cold focused compile emitted three warning diagnostics from two
+pre-existing read-only causes: one unhandled fixture warning and one redundant
+nil-coalescing warning reported in both source and macro expansion. No warning
+points at a WP-72 path.
+
+The shared GUI lease was unavailable because the primary checkout's Rafu
+Lightning process was running. Therefore the staged manual matrix, flash
+observation, 1x/2x display checks, theme/imported-theme checks, contrast and
+transparency checks, and final `build_and_run.sh --verify` remain deferred. No
+green-gate commit exists. On 2026-08-15, the user explicitly authorized one
+local checkpoint commit despite the read-only full-suite blocker; its exact SHA
+is reported in the handoff because a commit cannot contain its own SHA. The
+reusable headless AppKit test facts are recorded in
+`docs/references/headless-nswindow-fullscreen-transition-tests.md`; WP-90 must
+add that note to the shared reference index.
 
 ## Goal Mode start prompt
 
