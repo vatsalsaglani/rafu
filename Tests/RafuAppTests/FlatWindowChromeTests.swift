@@ -200,6 +200,25 @@ struct FlatWindowChromeTests {
         #expect(!FlatWindowChrome.isTitlebarBackdropClassName("_NSThemeCloseWidget"))
     }
 
+    @Test("Binding scrubs a constructible titlebar decoration without removing controls")
+    func bindingScrubsConstructibleBackdrop() throws {
+        let window = makeWindow()
+        let frameView = try #require(window.contentView?.superview)
+        let titlebarContainer = TestTitlebarContainerView()
+        let decoration = TestTitlebarDecorationView()
+        titlebarContainer.addSubview(decoration)
+        frameView.addSubview(titlebarContainer)
+        let closeButton = try #require(window.standardWindowButton(.closeButton))
+        let coordinator = FlatWindowChrome.Coordinator()
+        defer { coordinator.detach() }
+
+        coordinator.bind(to: window)
+
+        #expect(decoration.isHidden)
+        #expect(decoration.alphaValue == 0)
+        #expect(closeButton.superview != nil)
+    }
+
     @Test("Detaching stops re-applying so a closed window is not retained")
     func detachStopsReapplying() {
         let window = makeWindow()
@@ -216,3 +235,6 @@ struct FlatWindowChromeTests {
         #expect(!window.titlebarAppearsTransparent)
     }
 }
+
+private final class TestTitlebarContainerView: NSView {}
+private final class TestTitlebarDecorationView: NSView {}
