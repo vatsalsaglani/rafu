@@ -2,7 +2,7 @@
 
 ## Status and execution slot
 
-- **Status:** Planned.
+- **Status:** Implemented on lane; awaiting authorized merge.
 - **Wave:** 2; parallel with TG-20 and TG-21.
 - **Branch:** `terminal-groups/tg-22-persistence`.
 - **Required base:** exact `<TG10_MERGED_SHA>`.
@@ -266,7 +266,29 @@ branch, commit message, SHA, next dependency, and **Deviations**.
 
 ## Implementation record
 
-To be completed by the TG-22 implementor before the final gate.
+Implemented on `terminal-groups/tg-22-persistence` from
+`b52f9c8153822911505fd5d7d211ac30288c7b3f`.
+
+- Added a pure codec that maps runtime metadata to safe saved records and
+  restores named layouts with new runtime identities or one open-tab instance
+  with its existing identities. It never creates a process, controller,
+  `TerminalProcessSpec`, or Process Resources registration.
+- Added the one-actor Application Support store. It uses
+  `<identity root>/terminal-group-layouts.json`, deterministic sorted JSON,
+  atomic writes, SHA-256 workspace digest map keys, a 256 KiB file bound, and
+  newest-one workspace revision streams.
+- The approved JSON keys are `_0`, `axis`, `explicitUserName`, `first`,
+  `focusedPaneID`, `fraction`, `groups`, `id`, `kind`, `launchProfile`,
+  `name`, `pane`, `panes`, `rawValue`, `root`, `schemaVersion`, `second`,
+  `shell`, `split`, `startingFolder`, `themeColor`, `workspaceKey`, and
+  `workspaces`. `first`, `fraction`, `second`, and `split` are the inert
+  saved-layout tree fields from TG-10, not runtime or capability data. The
+  security tests inspect this set and prohibited process, capability,
+  credential, OSC-title, and absolute-root sentinels.
+- Tests inject temporary base directories. They do not touch real Application
+  Support. Release and Rafu Lightning use separate injected state roots.
+- The final worker gate is format, build, focused read-only regressions, and
+  the full parallel suite. The commit handoff records its exact result.
 
 ## Goal Mode start prompt
 
