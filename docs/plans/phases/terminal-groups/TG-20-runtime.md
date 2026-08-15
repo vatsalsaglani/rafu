@@ -2,7 +2,7 @@
 
 ## Status and execution slot
 
-- **Status:** Planned.
+- **Status:** Implemented on lane; awaiting authorized merge.
 - **Wave:** 2; parallel with TG-21 and TG-22.
 - **Branch:** `terminal-groups/tg-20-runtime`.
 - **Required base:** exact `<TG10_MERGED_SHA>`.
@@ -278,7 +278,23 @@ commit message, SHA, next dependency, and **Deviations**.
 
 ## Implementation record
 
-To be completed by the TG-20 implementor before the final gate.
+Implemented on `terminal-groups/tg-20-runtime` from base
+`b52f9c8153822911505fd5d7d211ac30288c7b3f`.
+
+- Added `TerminalGroupRuntime`, a value-only reducer for bounded group trees,
+  focus geometry, split collapse, saved-layout association, group parking,
+  close-token validation, and retained-pane checks. It owns no view,
+  controller, process, store, or process start.
+- Made `WorkspaceTerminalManager` the aggregate entry point for group
+  mutations, snapshots, group/pane/session lookup, and one manager-bound
+  capacity-reservation seam. Existing `newSession`, `close`, and `notePark`
+  stay as documented legacy adapters for TG-30/TG-42 migration.
+- Added headless reducer, lifecycle, and capacity tests. They do not mount a
+  SwiftTerm view or start a shell.
+- The aggregate does not call WorkspaceSession or Ensemble cleanup. Its close
+  effect returns stable session IDs to the future caller-owned cleanup path.
+- No reusable platform fact required a new reference note: this lane adds no
+  new callback, actor, async stream, process-I/O, or teardown mechanism.
 
 ## Goal Mode start prompt
 
