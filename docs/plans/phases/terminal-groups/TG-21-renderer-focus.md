@@ -2,7 +2,7 @@
 
 ## Status and execution slot
 
-- **Status:** Planned.
+- **Status:** Implemented on lane; awaiting authorized merge.
 - **Wave:** 2; parallel with TG-20 and TG-22.
 - **Branch:** `terminal-groups/tg-21-renderer-focus`.
 - **Required base:** exact `<TG10_MERGED_SHA>`.
@@ -237,7 +237,28 @@ branch, commit message, SHA, next dependency, and **Deviations**.
 
 ## Implementation record
 
-To be completed by the TG-21 implementor before the final gate.
+Implemented on `terminal-groups/tg-21-renderer-focus` from
+`b52f9c8153822911505fd5d7d211ac30288c7b3f`.
+
+- Added a snapshot-only recursive `TerminalGroupView` with stable pane and
+  split identities, typed outward actions, accessible pane headers, fixed
+  unavailable messages, and no workspace or process ownership.
+- Added `TerminalGroupSplitView`, a narrow `NSSplitView` bridge. It maps
+  columns to side-by-side panes and rows to stacked panes, keeps the saved
+  fraction separate from temporary minimum-size clamping, constrains real
+  divider drags to usable pane minimums, ignores snapshot application during
+  active tracking, and reports only a changed user divider drag.
+- Extended the existing terminal host with pane-aware focus inputs. Only a
+  focused leaf requests first responder. `RafuTerminalView` reports a
+  successful pointer responder change through a weak callback, and the host
+  clears that callback only for its own host when dismantled; queued focus
+  requests are invalidated on unfocus or teardown. The existing
+  single-terminal call remains source-compatible.
+- Added headless presentation, split, and focus source-contract tests. GUI
+  integration remains deferred to TG-30 because this lane has no production
+  call site.
+- No reusable reference note was required: the bridge follows the existing
+  AppKit and focus-boundary references without a new platform finding.
 
 ## Goal Mode start prompt
 

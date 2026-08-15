@@ -17,6 +17,26 @@ import SwiftTerm
 final class RafuTerminalView: LocalProcessTerminalView {
     var onBell: (() -> Void)?
 
+    /// A narrow responder-chain seam for Terminal Groups. The callback is
+    /// installed with a weak coordinator capture and cleared when its host is
+    /// dismantled, so the AppKit view never becomes a focus-state owner.
+    var onDidBecomeFirstResponder: (() -> Void)?
+    private weak var firstResponderCallbackOwner: AnyObject?
+
+    func setFirstResponderCallback(owner: AnyObject, callback: @escaping () -> Void) {
+        firstResponderCallbackOwner = owner
+        onDidBecomeFirstResponder = callback
+    }
+
+    /// Clears the focus callback only when this host still owns it. A reused
+    /// terminal view can be mounted by a newer host before the stale one
+    /// dismantles.
+    func clearFirstResponderCallback(owner: AnyObject) {
+        guard firstResponderCallbackOwner === owner else { return }
+        firstResponderCallbackOwner = nil
+        onDidBecomeFirstResponder = nil
+    }
+
     /// Fired for terminal NOTIFICATION escapes — the signals agent CLIs
     /// actually emit when a turn finishes or input is needed, which plain
     /// BEL detection missed entirely:
@@ -130,6 +150,17 @@ final class RafuTerminalView: LocalProcessTerminalView {
             super.bell(source: getTerminal())
             onBell?()
         }
+    }
+
+    /// SwiftTerm does not leave `becomeFirstResponder()` open for a client
+    /// subclass, and its pointer implementation does not request window
+    /// focus. Preserve that handling, then make the terminal first responder
+    /// and report only a successful pointer-driven responder change.
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        guard let window, window.firstResponder !== self else { return }
+        guard window.makeFirstResponder(self) else { return }
+        onDidBecomeFirstResponder?()
     }
 
     /// Bounded, privacy-conscious read of the last non-empty lines on

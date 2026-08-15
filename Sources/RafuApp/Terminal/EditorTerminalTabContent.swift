@@ -53,20 +53,94 @@ struct EditorTerminalTabContent: View {
     }
 }
 
-private struct TerminalHostView: NSViewRepresentable {
+/// SwiftTerm's small SwiftUI hosting boundary. The default arguments preserve
+/// the existing one-terminal editor-tab behaviour; Terminal Groups supply a
+/// pane identity and opt in to the single focused-leaf responder bridge.
+struct TerminalHostView: NSViewRepresentable {
     let controller: WorkspaceTerminalController
     let theme: RafuTheme
+    var paneID: TerminalPaneID?
+    var isFocusedPane = true
+    var requestFocusToken: UInt64 = 0
+    var onDidBecomeFirstResponder: ((TerminalPaneID) -> Void)?
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
 
     func makeNSView(context: Context) -> LocalProcessTerminalView {
         let view = controller.makeOrReuseView(theme: theme)
-        DispatchQueue.main.async { [weak view] in
-            guard let view else { return }
-            view.window?.makeFirstResponder(view)
-        }
+        configureFocusCallback(on: view, coordinator: context.coordinator)
+        requestFocusIfNeeded(on: view, coordinator: context.coordinator)
         return view
     }
 
     func updateNSView(_ nsView: LocalProcessTerminalView, context: Context) {
         controller.applyTheme(theme, to: nsView)
+        configureFocusCallback(on: nsView, coordinator: context.coordinator)
+        requestFocusIfNeeded(on: nsView, coordinator: context.coordinator)
+    }
+
+    static func dismantleNSView(_ nsView: LocalProcessTerminalView, coordinator: Coordinator) {
+        coordinator.invalidatePendingFocusRequest()
+        (nsView as? RafuTerminalView)?.clearFirstResponderCallback(owner: coordinator)
+        coordinator.paneID = nil
+        coordinator.onDidBecomeFirstResponder = nil
+    }
+
+    private func configureFocusCallback(
+        on view: LocalProcessTerminalView,
+        coordinator: Coordinator
+    ) {
+        coordinator.onDidBecomeFirstResponder = onDidBecomeFirstResponder
+        coordinator.paneID = paneID
+        (view as? RafuTerminalView)?.setFirstResponderCallback(owner: coordinator) {
+            [weak coordinator] in
+            guard let paneID = coordinator?.paneID else { return }
+            coordinator?.onDidBecomeFirstResponder?(paneID)
+        }
+    }
+
+    private func requestFocusIfNeeded(on view: LocalProcessTerminalView, coordinator: Coordinator) {
+        guard coordinator.allowsFocusRequest(isFocusedPane) else { return }
+        guard coordinator.lastRequestedFocusToken != requestFocusToken else {
+            return
+        }
+        coordinator.lastRequestedFocusToken = requestFocusToken
+        coordinator.focusRequestGeneration &+= 1
+        let token = requestFocusToken
+        let generation = coordinator.focusRequestGeneration
+        DispatchQueue.main.async { [weak coordinator, weak view] in
+            guard
+                let coordinator,
+                token == coordinator.lastRequestedFocusToken,
+                generation == coordinator.focusRequestGeneration,
+                let view
+            else { return }
+            view.window?.makeFirstResponder(view)
+        }
+    }
+
+    final class Coordinator {
+        var paneID: TerminalPaneID?
+        var onDidBecomeFirstResponder: ((TerminalPaneID) -> Void)?
+        var lastRequestedFocusToken: UInt64?
+        var focusRequestGeneration: UInt64 = 0
+
+        func invalidatePendingFocusRequest() {
+            focusRequestGeneration &+= 1
+            lastRequestedFocusToken = nil
+        }
+
+        /// A view update can revoke focus after the request was queued but
+        /// before the main queue executes it. Treat that as invalidation, not
+        /// as a passive no-op.
+        func allowsFocusRequest(_ isFocusedPane: Bool) -> Bool {
+            guard isFocusedPane else {
+                invalidatePendingFocusRequest()
+                return false
+            }
+            return true
+        }
     }
 }
