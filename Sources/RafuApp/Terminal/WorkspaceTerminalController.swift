@@ -195,6 +195,37 @@ final class WorkspaceTerminalManager {
         return inserted
     }
 
+    /// Wraps one existing legacy controller in a one-pane Terminal Group.
+    /// This transaction changes only immutable group membership. It neither
+    /// constructs nor starts a controller, and it preserves its UUID, status,
+    /// callbacks, selected identity, lazy view, and process registration.
+    @discardableResult
+    func adoptUngroupedSession(_ sessionID: UUID) throws -> TerminalGroupSnapshot {
+        guard let controller = sessions.first(where: { $0.id == sessionID }),
+            groupRuntime.groupAndPane(containing: sessionID) == nil
+        else { throw TerminalGroupValidationError.unsupportedPaneStart }
+
+        // Adoption reclassifies one already-owned session. It must never turn
+        // a legacy capacity overflow into a grouped live-session overflow.
+        let committedLive = ungroupedLiveSessionCount + groupRuntime.liveSessionCount
+        let accountedLive = committedLive + reservedLiveSessionCount
+        guard accountedLive <= TerminalGroupSnapshot.maximumPanesPerGroup else {
+            throw TerminalGroupCapacityError.liveSessionLimitExceeded(
+                current: accountedLive, requested: 0)
+        }
+
+        let pane = try adoptedPane(for: controller)
+        var proposedRuntime = groupRuntime
+        let groupID = try proposedRuntime.adoptUngroupedSession(
+            sessionID: sessionID, pane: pane)
+        guard let group = proposedRuntime.snapshot(groupID: groupID) else {
+            throw TerminalGroupValidationError.groupNotFound(groupID)
+        }
+        groupRuntime = proposedRuntime
+        noteTerminalGroupMutation()
+        return group
+    }
+
     /// Applies UI rename rules before the frozen command form is available:
     /// whitespace is trimmed and an empty entry restores a bounded default.
     func renameTerminalGroup(_ groupID: TerminalGroupID, rawName: String) throws {
@@ -652,6 +683,55 @@ final class WorkspaceTerminalManager {
         }
     }
 
+    /// Produces the only group-safe projection of a legacy controller. The
+    /// manager keeps classification metadata private and never returns launch
+    /// argv, environment, output, credentials, or process payload to a
+    /// workspace caller. Ordinary legacy shells stay nonrestartable because
+    /// this aggregate has no workspace-root authority to convert an absolute
+    /// starting directory into a safe relative launch profile.
+    private func adoptedPane(for controller: WorkspaceTerminalController) throws
+        -> TerminalPaneSnapshot
+    {
+        let runtimeKind: TerminalPaneRuntimeKind
+        if let provider = controller.agentProvider {
+            runtimeKind = .directAgentTerminal(provider: provider)
+        } else if controller.isEnsembleRunTerminal {
+            runtimeKind = .ensembleRole
+        } else if controller.isEnsembleCoordinatorTerminal {
+            runtimeKind = .ensembleCoordinator
+        } else if controller.isOrdinaryShellTerminal {
+            runtimeKind = .ordinaryShell
+        } else {
+            throw TerminalGroupValidationError.unsupportedPaneStart
+        }
+
+        let explicitUserName: TerminalPaneName?
+        if let userName = controller.userName {
+            guard let parsed = TerminalPaneName(userName) else {
+                throw TerminalGroupValidationError.unsupportedPaneStart
+            }
+            explicitUserName = parsed
+        } else {
+            explicitUserName = nil
+        }
+        let reportedTitle: TerminalReportedTitle?
+        if let title = controller.reportedTitle {
+            guard let parsed = TerminalReportedTitle(title) else {
+                throw TerminalGroupValidationError.unsupportedPaneStart
+            }
+            reportedTitle = parsed
+        } else {
+            reportedTitle = nil
+        }
+
+        return try TerminalPaneSnapshot(
+            id: TerminalPaneID(), sessionID: controller.id,
+            explicitUserName: explicitUserName, reportedTitle: reportedTitle,
+            runtimeKind: runtimeKind, themeColor: controller.terminalPaneThemeColor,
+            status: controller.terminalPaneStatus, launchProfile: nil,
+            startAvailability: .notRestartable)
+    }
+
     private func validatePreflight(
         requested: Int,
         consuming reservation: TerminalGroupCapacityReservation?
@@ -957,6 +1037,40 @@ final class WorkspaceTerminalController: Identifiable {
     /// ordinary shell restart overlay after a completed step; plain shells
     /// and tokenless Agent Terminals remain restartable.
     var isEnsembleRunTerminal: Bool { processSpec?.outputLogURL != nil }
+
+    /// Internal classification only. It does not expose process input to the
+    /// workspace layer; the manager uses it when it adopts a legacy session.
+    var isEnsembleCoordinatorTerminal: Bool {
+        guard let processSpec, processSpec.outputLogURL == nil,
+            processSpec.agentProvider == nil
+        else { return false }
+        return processSpec.roleBadge == "Coordinator"
+            && processSpec.environment["RAFU_ENSEMBLE_TOKEN"] != nil
+    }
+
+    /// A nil process specification is the existing login-shell path. A spec
+    /// with neither Agent nor Ensemble metadata is not adopted as a group,
+    /// because its classification would not be truthful.
+    var isOrdinaryShellTerminal: Bool { processSpec == nil }
+
+    var terminalPaneStatus: TerminalPaneStatus {
+        switch status {
+        case .idle, .running, .bell: .live
+        case .exited: .exited
+        }
+    }
+
+    var terminalPaneThemeColor: TerminalPaneThemeColor? {
+        switch sessionColor {
+        case .accent: .accent
+        case .info: .info
+        case .success: .success
+        case .warning: .warning
+        case .error: .error
+        case .muted: .muted
+        case .custom, .none: nil
+        }
+    }
 
     /// The terminal canvas asks this one presentation seam whether its
     /// ordinary exited-shell overlay applies. A completed Ensemble step is

@@ -347,3 +347,211 @@ func terminalGroupGenericManagerStartCommandsRejectDirectly() throws {
     #expect(manager.terminalGroup(groupID) == before)
     #expect(manager.terminalGroupRevision == revision)
 }
+
+@MainActor
+@Test("Legacy shell adoption preserves one live controller without construction or restart")
+func terminalGroupAdoptsLegacyShellWithoutControllerMutation() throws {
+    let manager = WorkspaceTerminalManager()
+    let shell = TerminalShell(path: "/bin/zsh", name: "Default (zsh)", isDefault: true)
+    var factoryCalls = 0
+    var forwardedExitCount = 0
+    manager.sessionDidExit = { _, _ in forwardedExitCount += 1 }
+    let controller = manager.newSession(startingDirectory: "/tmp", shell: shell)
+    controller.markRunningForTesting()
+    controller.sessionColor = .warning
+    let selectedID = manager.selectedID
+    let originalExit = controller.onExit
+    var preservedExitCount = 0
+    controller.onExit = { sessionID, code in
+        preservedExitCount += 1
+        originalExit?(sessionID, code)
+    }
+    manager.terminalGroupControllerFactory = { _, _ in
+        factoryCalls += 1
+        throw TerminalGroupValidationError.unsupportedPaneStart
+    }
+
+    let group = try manager.adoptUngroupedSession(controller.id)
+    let pane = try #require(group.panes.first)
+    #expect(group.root == .pane(pane.id))
+    #expect(pane.sessionID == controller.id)
+    #expect(pane.runtimeKind == .ordinaryShell)
+    #expect(pane.status == .live)
+    #expect(pane.startAvailability == .notRestartable)
+    #expect(pane.themeColor == .warning)
+    #expect(manager.terminalController(for: pane.id) === controller)
+    #expect(manager.sessions.count == 1)
+    #expect(manager.selectedID == selectedID)
+    #expect(controller.status == .running)
+    #expect(factoryCalls == 0)
+
+    controller.processDidTerminate(exitCode: 9)
+    #expect(preservedExitCount == 1)
+    #expect(forwardedExitCount == 1)
+    #expect(manager.terminalGroup(group.id)?.panes.first?.status == .exited)
+
+    let token = try closeToken(manager.perform(.prepareClose(.group(group.id))))
+    _ = try manager.perform(.finalizeClose(token))
+    #expect(manager.sessions.isEmpty)
+    #expect(controller.status == .exited(code: nil))
+}
+
+@MainActor
+@Test("Legacy classified sessions adopt into truthful nonrestartable panes")
+func terminalGroupAdoptsClassifiedLegacySessions() throws {
+    let manager = WorkspaceTerminalManager()
+    let agent = manager.newSession(
+        spec: TerminalProcessSpec(
+            executableURL: URL(fileURLWithPath: "/bin/echo"), arguments: [],
+            currentDirectoryPath: "/tmp", environment: [:], roleBadge: "Codex",
+            agentProvider: .codex))
+    let role = manager.newSession(
+        spec: TerminalProcessSpec(
+            executableURL: URL(fileURLWithPath: "/bin/echo"), arguments: [],
+            currentDirectoryPath: "/tmp", environment: [:], roleBadge: "Implementor",
+            outputLogURL: URL(fileURLWithPath: "/tmp/output.log")))
+    let coordinator = manager.newSession(
+        spec: TerminalProcessSpec(
+            executableURL: URL(fileURLWithPath: "/bin/echo"), arguments: [],
+            currentDirectoryPath: "/tmp", environment: ["RAFU_ENSEMBLE_TOKEN": "opaque"],
+            roleBadge: "Coordinator"))
+
+    let agentGroup = try manager.adoptUngroupedSession(agent.id)
+    let roleGroup = try manager.adoptUngroupedSession(role.id)
+    let coordinatorGroup = try manager.adoptUngroupedSession(coordinator.id)
+    #expect(agentGroup.panes.first?.runtimeKind == .directAgentTerminal(provider: .codex))
+    #expect(roleGroup.panes.first?.runtimeKind == .ensembleRole)
+    #expect(coordinatorGroup.panes.first?.runtimeKind == .ensembleCoordinator)
+    #expect(
+        [agentGroup, roleGroup, coordinatorGroup].allSatisfy {
+            $0.panes.first?.startAvailability == .notRestartable
+                && $0.panes.first?.launchProfile == nil
+        })
+    #expect(manager.sessions.count == 3)
+}
+
+@MainActor
+@Test("Legacy adoption rejects unknown, grouped, and live-over-capacity sessions without mutation")
+func terminalGroupAdoptionRejectionsAreAtomic() throws {
+    let manager = WorkspaceTerminalManager()
+    let shell = TerminalShell(path: "/bin/zsh", name: "Default (zsh)", isDefault: true)
+    let legacy = manager.newSession(startingDirectory: "/tmp", shell: shell)
+    let sessionsBeforeUnknown = manager.sessions
+    #expect(throws: TerminalGroupValidationError.unsupportedPaneStart) {
+        try manager.adoptUngroupedSession(UUID())
+    }
+    #expect(manager.terminalGroups.isEmpty)
+    #expect(manager.sessions.map(\.id) == sessionsBeforeUnknown.map(\.id))
+
+    let group = try manager.adoptUngroupedSession(legacy.id)
+    let revision = manager.terminalGroupRevision
+    #expect(throws: TerminalGroupValidationError.unsupportedPaneStart) {
+        try manager.adoptUngroupedSession(legacy.id)
+    }
+    #expect(manager.terminalGroup(group.id) == group)
+    #expect(manager.terminalGroupRevision == revision)
+
+    let unknownSpec = manager.newSession(
+        spec: TerminalProcessSpec(
+            executableURL: URL(fileURLWithPath: "/bin/echo"), arguments: [],
+            currentDirectoryPath: "/tmp", environment: [:], roleBadge: "Unknown"))
+    let groupsBeforeMetadataFailure = manager.terminalGroups
+    #expect(throws: TerminalGroupValidationError.unsupportedPaneStart) {
+        try manager.adoptUngroupedSession(unknownSpec.id)
+    }
+    #expect(manager.terminalGroups == groupsBeforeMetadataFailure)
+    #expect(manager.terminalController(sessionID: unknownSpec.id) === unknownSpec)
+
+    let overflow = WorkspaceTerminalManager()
+    for _ in 0..<7 {
+        _ = overflow.newSession(startingDirectory: "/tmp", shell: shell)
+    }
+    let candidate = try #require(overflow.sessions.first)
+    let overflowSessions = overflow.sessions.map(\.id)
+    #expect(throws: TerminalGroupCapacityError.liveSessionLimitExceeded(current: 7, requested: 0)) {
+        try overflow.adoptUngroupedSession(candidate.id)
+    }
+    #expect(overflow.terminalGroups.isEmpty)
+    #expect(overflow.sessions.map(\.id) == overflowSessions)
+    #expect(candidate.status == .idle)
+}
+
+@MainActor
+@Test("Legacy adoption rejects the retained-pane boundary without mutation")
+func terminalGroupAdoptionRetainedCapacityIsAtomic() throws {
+    let manager = WorkspaceTerminalManager()
+    for _ in 0..<TerminalGroupSnapshot.maximumRetainedPanesPerWindow {
+        _ = try manager.perform(.createGroup(name: nil))
+    }
+    let shell = TerminalShell(path: "/bin/zsh", name: "Default (zsh)", isDefault: true)
+    let legacy = manager.newSession(startingDirectory: "/tmp", shell: shell)
+    let groupsBefore = manager.terminalGroups
+    let revision = manager.terminalGroupRevision
+
+    #expect(
+        throws: TerminalGroupCapacityError.retainedPaneLimitExceeded(
+            current: TerminalGroupSnapshot.maximumRetainedPanesPerWindow, requested: 1)
+    ) {
+        try manager.adoptUngroupedSession(legacy.id)
+    }
+    #expect(manager.terminalGroups == groupsBefore)
+    #expect(manager.terminalGroupRevision == revision)
+    #expect(manager.terminalController(sessionID: legacy.id) === legacy)
+}
+
+@MainActor
+@Test("Legacy adoption keeps a prior reservation and controller state on capacity rejection")
+func terminalGroupAdoptionRejectsReservedCapacityOverflowAtomically() throws {
+    let manager = WorkspaceTerminalManager()
+    let shell = TerminalShell(path: "/bin/zsh", name: "Default (zsh)", isDefault: true)
+    let profile = TerminalPaneLaunchProfile(shell: .preferredShell, startingFolder: .root)
+    let instantiation = TerminalGroupControllerInstantiation.ordinaryShell(
+        startingDirectory: "/tmp", shell: shell, profile: profile)
+    for _ in 0..<5 {
+        _ = try manager.createLiveGroup(instantiation: instantiation)
+    }
+    let reservation = try manager.reserveLiveSessionCapacity(1)
+    let legacy = manager.newSession(startingDirectory: "/tmp", shell: shell)
+    let originalExit = legacy.onExit
+    var preservedExitCount = 0
+    var managerExitCount = 0
+    manager.sessionDidExit = { _, _ in managerExitCount += 1 }
+    legacy.onExit = { sessionID, code in
+        preservedExitCount += 1
+        originalExit?(sessionID, code)
+    }
+    let groupsBefore = manager.terminalGroups
+    let sessionIDsBefore = manager.sessions.map(\.id)
+    let revision = manager.terminalGroupRevision
+    let selectedID = manager.selectedID
+
+    #expect(throws: TerminalGroupCapacityError.liveSessionLimitExceeded(current: 7, requested: 0)) {
+        try manager.adoptUngroupedSession(legacy.id)
+    }
+    #expect(manager.terminalGroups == groupsBefore)
+    #expect(manager.sessions.map(\.id) == sessionIDsBefore)
+    #expect(manager.terminalGroupRevision == revision)
+    #expect(manager.selectedID == selectedID)
+    #expect(legacy.status == .idle)
+    #expect(manager.terminalGroupAndPane(containing: legacy.id) == nil)
+
+    legacy.processDidTerminate(exitCode: 0)
+    #expect(preservedExitCount == 1)
+    #expect(managerExitCount == 1)
+    try manager.cancelLiveSessionCapacity(reservation)
+}
+
+@MainActor
+@Test("Exited legacy adoption adds retained identity but consumes no live capacity")
+func terminalGroupAdoptsExitedLegacySessionWithoutLiveSlot() throws {
+    let manager = WorkspaceTerminalManager()
+    let shell = TerminalShell(path: "/bin/zsh", name: "Default (zsh)", isDefault: true)
+    let controller = manager.newSession(startingDirectory: "/tmp", shell: shell)
+    controller.processDidTerminate(exitCode: 0)
+
+    let group = try manager.adoptUngroupedSession(controller.id)
+    #expect(group.panes.first?.sessionID == controller.id)
+    #expect(group.panes.first?.status == .exited)
+    let reservation = try manager.reserveLiveSessionCapacity(6)
+    try manager.cancelLiveSessionCapacity(reservation)
+}

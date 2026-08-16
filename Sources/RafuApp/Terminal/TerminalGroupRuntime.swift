@@ -170,6 +170,31 @@ nonisolated struct TerminalGroupRuntime: Sendable {
         return groupID
     }
 
+    /// Adopts a manager-owned legacy controller into one new group. This is
+    /// membership-only: the manager retains the controller and this reducer
+    /// receives only its already-classified immutable pane projection.
+    mutating func adoptUngroupedSession(
+        sessionID: UUID,
+        pane: TerminalPaneSnapshot
+    ) throws -> TerminalGroupID {
+        try requireRetainedCapacity(1)
+        guard pane.sessionID == sessionID,
+            pane.status == .live || pane.status == .exited,
+            groupID(containing: pane.id) == nil,
+            groupAndPane(containing: sessionID) == nil
+        else { throw TerminalGroupValidationError.unsupportedPaneStart }
+        if pane.status == .live { try requireLiveCapacity(1) }
+
+        let groupID = TerminalGroupID()
+        let groupName = defaultName()
+        groups[groupID] = try TerminalGroupSnapshot(
+            id: groupID, name: groupName, root: .pane(pane.id), focusedPaneID: pane.id,
+            savedLayoutID: nil, panes: [pane], retainedPaneCount: retainedPaneCount + 1)
+        nextDefaultNameNumber += 1
+        advanceGeneration()
+        return groupID
+    }
+
     mutating func bindLazyController(
         sessionID: UUID,
         to paneID: TerminalPaneID
