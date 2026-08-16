@@ -10,10 +10,10 @@ does not create, replace, or rebase the branch.
 flowchart LR
     D["TG-00<br/>Complete"]
     C["TG-10<br/>Complete"]
-    R["TG-20<br/>Correction in progress"]
+    R["TG-20<br/>Complete"]
     V["TG-21<br/>Complete"]
     S["TG-22<br/>Complete"]
-    W["TG-30<br/>Blocked"]
+    W["TG-30<br/>Ready"]
     M["TG-40<br/>Blocked"]
     K["TG-41<br/>Blocked"]
     A["TG-42<br/>Blocked"]
@@ -40,10 +40,10 @@ flowchart LR
 |---|---|---|---|---|---|
 | [TG-00](TG-00-decision.md) | — | Terra | `terminal-groups/tg-00-decision` | Complete | `5cece853c12c9ada8100303a36b3d4a335980e59` |
 | [TG-10](TG-10-source-contracts.md) | TG-00 | Terra | `terminal-groups/tg-10-contracts` | Complete | `85197f0b8bed654570c977fd982a247236dc171f` |
-| [TG-20](TG-20-runtime.md) | TG-10 | Terra | `terminal-groups/tg-20-runtime` | Correction in progress | `0b66f294748ba4cb3c32d43991e2fa53adfe9e46` |
+| [TG-20](TG-20-runtime.md) | TG-10 | Terra | `terminal-groups/tg-20-runtime` | Complete | `306b7ce0f59a80b3d6b37458679c2f4caa037f65` |
 | [TG-21](TG-21-renderer-focus.md) | TG-10 | Terra | `terminal-groups/tg-21-renderer-focus` | Complete | `aa02dcbec6f4bc56f291473867952b8e85444d95` |
 | [TG-22](TG-22-persistence.md) | TG-10 | Terra | `terminal-groups/tg-22-persistence` | Complete | `70580d2152401e53223b4d7ee86a2eaebf519326` |
-| [TG-30](TG-30-workspace-integration.md) | TG-20, TG-21, TG-22 | Terra | `terminal-groups/tg-30-workspace-integration` | Blocked | — |
+| [TG-30](TG-30-workspace-integration.md) | TG-20, TG-21, TG-22 | Terra | `terminal-groups/tg-30-workspace-integration` | Ready | — |
 | [TG-40](TG-40-manager-switcher.md) | TG-30 | Terra | `terminal-groups/tg-40-manager-switcher` | Blocked | — |
 | [TG-41](TG-41-commands-save-ui.md) | TG-30 | Terra | `terminal-groups/tg-41-commands-save-ui` | Blocked | — |
 | [TG-42](TG-42-agent-ensemble.md) | TG-30 | Terra | `terminal-groups/tg-42-agent-ensemble` | Blocked | — |
@@ -55,7 +55,8 @@ TG-00 is on `main` through merge commit
 commit `b52f9c8153822911505fd5d7d211ac30288c7b3f`. TG-22 is on `main` through merge
 commit `593379d6affe57794868f0869df70b3cd6af90e4`. TG-21 is on `main` through merge
 commit `140e42b2e1f09e7c5c33fb983f70c687d1b2d902`. TG-20 is on `main` through merge
-commit `30902b47d874a1f7f2adbb538a03f93f00353b27`.
+commit `30902b47d874a1f7f2adbb538a03f93f00353b27`; its TG-30 adoption correction is
+on `main` through merge commit `57ab67911329dd8b1afc04fe993eb51b3d07bc80`.
 
 `Ready` means that all dependencies are complete and the local branch exists.
 `Blocked` means that one or more dependencies are not complete. The primary
