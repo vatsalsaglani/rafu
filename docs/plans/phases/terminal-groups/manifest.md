@@ -14,7 +14,7 @@ flowchart LR
     V["TG-21<br/>Complete"]
     S["TG-22<br/>Complete"]
     W["TG-30<br/>Complete"]
-    M["TG-40<br/>In progress"]
+    M["TG-40<br/>Complete"]
     K["TG-41<br/>In progress"]
     A["TG-42<br/>Complete"]
     Q["TG-90<br/>Blocked"]
@@ -44,7 +44,7 @@ flowchart LR
 | [TG-21](TG-21-renderer-focus.md) | TG-10 | Terra | `terminal-groups/tg-21-renderer-focus` | Complete | `aa02dcbec6f4bc56f291473867952b8e85444d95` |
 | [TG-22](TG-22-persistence.md) | TG-10 | Terra | `terminal-groups/tg-22-persistence` | Complete | `70580d2152401e53223b4d7ee86a2eaebf519326` |
 | [TG-30](TG-30-workspace-integration.md) | TG-20, TG-21, TG-22 | Terra | `terminal-groups/tg-30-workspace-integration` | Complete | `02bc5fca3dc61d311625ca08e82211aef86516ed` |
-| [TG-40](TG-40-manager-switcher.md) | TG-30 | Terra | `terminal-groups/tg-40-manager-switcher` | In progress | — |
+| [TG-40](TG-40-manager-switcher.md) | TG-30 | Terra | `terminal-groups/tg-40-manager-switcher` | Complete | `ed1585b0c9318c4e1b338cd3d366aabefb1e9ba7` |
 | [TG-41](TG-41-commands-save-ui.md) | TG-30 | Terra | `terminal-groups/tg-41-commands-save-ui` | In progress | — |
 | [TG-42](TG-42-agent-ensemble.md) | TG-30 | Terra | `terminal-groups/tg-42-agent-ensemble` | Complete | `a908e85b355182017c2951317a2994282dc23a0f` |
 | [TG-90](TG-90-integration-qa.md) | TG-40, TG-41, TG-42 | Terra | `terminal-groups/tg-90-integration-qa` | Blocked | — |
@@ -61,6 +61,8 @@ TG-30 is on `main` through merge commit
 `a141ee773ab650817802e10dc928530d5015c335`; its integration-test correction is
 on `main` at `7bb2488ab17b3e09614e3a5dc69db2030140aab3`. TG-42 is on `main` through
 merge commit `fc65d7aab03477a7247bd7cb3e0003c9d8e3bf59`.
+TG-40 is on `main` through merge commit
+`d1c373d23d3428a499082ee2bdbe9ff748194688`.
 
 `Ready` means that all dependencies are complete and the local branch exists.
 `In progress` means that the branch has an active isolated Worktree worker.
