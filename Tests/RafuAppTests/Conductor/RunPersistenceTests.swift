@@ -264,7 +264,9 @@ func newRunModelBuildsRequest() async throws {
     let root = try makeRunPersistenceRoot()
     defer { try? FileManager.default.removeItem(at: root) }
     try writeAgent(named: "advisor.md", name: "Advisor", to: root)
-    let model = ConductorNewRunModel()
+    let model = ConductorNewRunModel(
+        adapters: [ReadySingleRoleFixtureAdapter(id: .claudeCode)]
+    )
 
     await model.load(workspaceRoot: root)
     model.taskPrompt = "  Review the persistence boundary.  \n"

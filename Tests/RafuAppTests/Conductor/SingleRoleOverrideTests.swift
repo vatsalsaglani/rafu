@@ -6,7 +6,7 @@ import Testing
 /// The New Run model needs an authenticated provider to make its availability
 /// gate executable. The run itself still uses `FakeConductorAdapter`, so the
 /// manifest path stays on the suite's established fake-launcher seam.
-nonisolated private struct ReadySingleRoleFixtureAdapter: ConductorCLIAdapter {
+nonisolated struct ReadySingleRoleFixtureAdapter: ConductorCLIAdapter {
     let id: ConductorCLIID
     let defaultEnabled = true
     let supportsModelDiscovery = false
