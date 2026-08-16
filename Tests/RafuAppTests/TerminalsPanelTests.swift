@@ -390,15 +390,19 @@ func revealParkedInsertsAndSelectsOneTab() throws {
     let session = WorkspaceSession()
     session.newTerminalTab()
     let controller = try #require(session.terminal.sessions.first)
+    let terminalGroupID = try #require(
+        session.terminal.terminalGroupAndPane(containing: controller.id)?.0)
     session.hideTerminalSession(controller.id)
-    #expect(session.parkedTerminalSessions.count == 1)
+    #expect(session.parkedTerminalGroupIDs == [terminalGroupID])
 
     session.revealTerminalSession(controller.id)
 
     let group = session.editorLayout.group(id: session.editorLayout.focusedGroupID)
     #expect(group?.tabs.count == 1)
     #expect(group?.selectedTabID == group?.tabs.first?.id)
-    #expect(session.parkedTerminalSessions.isEmpty)
+    #expect(group?.tabs.first?.resource == .terminalGroup(groupID: terminalGroupID))
+    #expect(session.parkedTerminalGroupIDs.isEmpty)
+    #expect(session.terminal.sessions.first?.id == controller.id)
 }
 
 // MARK: - D: hide/close
@@ -409,12 +413,16 @@ func hideTerminalSessionParksPresentedSession() throws {
     let session = WorkspaceSession()
     session.newTerminalTab()
     let controller = try #require(session.terminal.sessions.first)
+    let terminalGroupID = try #require(
+        session.terminal.terminalGroupAndPane(containing: controller.id)?.0)
 
     session.hideTerminalSession(controller.id)
 
     #expect(!session.hasAnyEditorTabs)
     #expect(session.terminal.sessions.count == 1)
-    #expect(session.parkedTerminalSessions.first?.id == controller.id)
+    #expect(session.parkedTerminalGroupIDs == [terminalGroupID])
+    #expect(
+        session.terminal.terminalGroup(terminalGroupID)?.panes.first?.sessionID == controller.id)
 }
 
 @MainActor
@@ -423,14 +431,16 @@ func hideTerminalSessionNoOpsForParkedOrUnknown() throws {
     let session = WorkspaceSession()
     session.newTerminalTab()
     let controller = try #require(session.terminal.sessions.first)
+    let terminalGroupID = try #require(
+        session.terminal.terminalGroupAndPane(containing: controller.id)?.0)
     session.hideTerminalSession(controller.id)
-    #expect(session.parkedTerminalSessions.count == 1)
+    #expect(session.parkedTerminalGroupIDs == [terminalGroupID])
 
     session.hideTerminalSession(controller.id)
-    #expect(session.parkedTerminalSessions.count == 1)
+    #expect(session.parkedTerminalGroupIDs == [terminalGroupID])
 
     session.hideTerminalSession(UUID())
-    #expect(session.parkedTerminalSessions.count == 1)
+    #expect(session.parkedTerminalGroupIDs == [terminalGroupID])
 }
 
 @MainActor

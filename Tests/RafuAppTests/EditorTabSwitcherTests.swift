@@ -61,18 +61,19 @@ func editorTabSwitcherIncludesTabsAndParkedTerminals() throws {
     let presentedController = try #require(session.terminal.sessions.first)
     session.newTerminalTab()
     let parkedController = try #require(session.terminal.sessions.last)
-    let parkedTab = try #require(
-        session.editorLayout.tab(matching: .terminal(sessionID: parkedController.id))
-    )
-    session.hideTerminalTab(parkedTab.id)
+    let presentedGroupID = try #require(
+        session.terminal.terminalGroupAndPane(containing: presentedController.id)?.0)
+    let parkedGroupID = try #require(
+        session.terminal.terminalGroupAndPane(containing: parkedController.id)?.0)
+    session.hideTerminalGroup(parkedGroupID)
 
     let destinations = session.editorTabSwitcherCandidates.map(\.destination)
     #expect(
         destinations
             == [
                 .editorTab(tabID: fileTab.id, groupID: session.editorLayout.focusedGroupID),
-                .terminal(sessionID: presentedController.id),
-                .terminal(sessionID: parkedController.id),
+                .terminalGroup(groupID: presentedGroupID),
+                .terminalGroup(groupID: parkedGroupID),
             ])
     #expect(Set(destinations).count == destinations.count)
     #expect(session.canCycleEditorTabs)
@@ -97,10 +98,9 @@ func editorTabSwitcherCommitsParkedTerminal() throws {
 
     session.newTerminalTab()
     let controller = try #require(session.terminal.sessions.first)
-    let terminalTab = try #require(
-        session.editorLayout.tab(matching: .terminal(sessionID: controller.id))
-    )
-    session.hideTerminalTab(terminalTab.id)
+    let terminalGroupID = try #require(
+        session.terminal.terminalGroupAndPane(containing: controller.id)?.0)
+    session.hideTerminalGroup(terminalGroupID)
 
     let groupID = session.editorLayout.focusedGroupID
     #expect(session.editorLayout.group(id: groupID)?.selectedTabID == fileTab.id)
@@ -109,7 +109,7 @@ func editorTabSwitcherCommitsParkedTerminal() throws {
 
     #expect(
         session.editorTabSwitcherState?.selectedCandidate.destination
-            == .terminal(sessionID: controller.id)
+            == .terminalGroup(groupID: terminalGroupID)
     )
     // Browsing the overlay does not churn editor selection or persistence.
     #expect(session.editorLayout.group(id: groupID)?.selectedTabID == fileTab.id)
@@ -122,7 +122,7 @@ func editorTabSwitcherCommitsParkedTerminal() throws {
             $0.id == session.editorLayout.group(id: groupID)?.selectedTabID
         })
     )
-    #expect(selectedTab.resource == .terminal(sessionID: controller.id))
+    #expect(selectedTab.resource == .terminalGroup(groupID: terminalGroupID))
     #expect(session.parkedTerminalSessions.isEmpty)
 }
 

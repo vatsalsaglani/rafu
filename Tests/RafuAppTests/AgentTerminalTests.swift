@@ -216,8 +216,8 @@ func openAgentTerminalCreatesAndRevealsSession() throws {
     #expect(controller.agentProvider == .codex)
     #expect(controller.displayName == "Codex")
     #expect(workspace.terminal.selectedID == controller.id)
-    #expect(
-        workspace.editorLayout.tab(matching: .terminal(sessionID: controller.id))
-            != nil)
-    #expect(!EditorTabResource.terminal(sessionID: controller.id).isRestorable)
+    let groupID = try #require(
+        workspace.terminal.terminalGroupAndPane(containing: controller.id)?.0)
+    #expect(workspace.editorLayout.tab(matching: .terminalGroup(groupID: groupID)) != nil)
+    #expect(!EditorTabResource.terminalGroup(groupID: groupID).isRestorable)
 }

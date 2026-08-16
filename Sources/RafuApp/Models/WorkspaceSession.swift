@@ -54,6 +54,13 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
 @Observable
 @MainActor
 final class WorkspaceSession {
+    struct TerminalGroupSaveRequest: Identifiable, Equatable {
+        enum Kind: Equatable { case firstSave, saveAs }
+        let id: TerminalGroupID
+        let kind: Kind
+        var proposedName: String
+    }
+
     struct FileCreationRequest {
         let parentURL: URL
         let isDirectory: Bool
@@ -376,6 +383,21 @@ final class WorkspaceSession {
         }
     }
 
+    /// Single terminal teardown funnel for workspace replacement, window
+    /// close, and app termination. It is intentionally idempotent: callbacks
+    /// and controllers are both removed before a second path can observe them.
+    func teardownTerminalGroups() {
+        guard !didTeardownTerminalGroups else { return }
+        didTeardownTerminalGroups = true
+        endTerminalGroupLibrary()
+        cleanupTerminalSessions(terminal.sessions.map(\.id))
+        endAllCoordinatorSessions()
+        drainTerminalLifecycleCallbacks()
+        terminal.shutdownAll()
+        pendingTerminalGroupClose = nil
+        pendingTerminalGroupSaveRequest = nil
+    }
+
     let workspaceSearch = WorkspaceSearchModel()
 
     @ObservationIgnored
@@ -645,6 +667,31 @@ final class WorkspaceSession {
     @ObservationIgnored
     let terminal = WorkspaceTerminalManager()
 
+    // Terminal Groups are owned by this window session. The saved-layout
+    // actor is process-wide, but its result is always guarded by this
+    // session's workspace generation before it reaches visible state.
+    private(set) var savedTerminalGroups: [SavedTerminalGroupRecord] = []
+    private(set) var terminalGroupStoreError: String?
+    private(set) var terminalGroupRestorationError: String?
+    private(set) var pendingTerminalGroupClose: TerminalGroupCloseToken?
+    private(set) var terminalGroupClosePresentationRevision: UInt64 = 0
+    @ObservationIgnored var terminalGroupCloseRepreparedForTesting: (@MainActor () -> Void)?
+    private(set) var pendingTerminalGroupSaveRequest: TerminalGroupSaveRequest?
+    private(set) var terminalGroupFocusRequest = UInt64(0)
+    @ObservationIgnored private var terminalGroupStoreTask: Task<Void, Never>?
+    @ObservationIgnored private var terminalGroupChangeTask: Task<Void, Never>?
+    @ObservationIgnored private var terminalGroupWorkspaceGeneration: UInt64 = 0
+    @ObservationIgnored private var terminalGroupListEpoch: UInt64 = 0
+    @ObservationIgnored private var terminalGroupMutationEpoch: UInt64 = 0
+    @ObservationIgnored private var terminalGroupMutationTask: Task<Void, Never>?
+    @ObservationIgnored var terminalGroupListFinishedForTesting: (@MainActor (UInt64) -> Void)?
+    /// Test and app-identity injection seam. `nil` resolves the one shared
+    /// actor, while a supplied actor gives every operation in this window the
+    /// same isolated authority without touching developer Application Support.
+    @ObservationIgnored var terminalGroupSavedLayoutStore: (any TerminalGroupSavedLayoutStoring)?
+    @ObservationIgnored private var terminalLifecycleCallbacks: [UUID: @MainActor () -> Void] = [:]
+    @ObservationIgnored private var didTeardownTerminalGroups = false
+
     @ObservationIgnored
     private let shellCatalog = TerminalShellCatalog()
     @ObservationIgnored
@@ -753,6 +800,37 @@ final class WorkspaceSession {
     /// NC-B).
     private func terminalSessionDidExit(_ sessionID: UUID, exitCode: Int32?) {
         NotchCompanionModel.shared.refreshEditorRows()
+        // The manager has already applied its shared exit state. A
+        // classified owner observes natural exit exactly once afterwards.
+        consumeTerminalLifecycleCallback(for: sessionID)
+    }
+
+    private func consumeTerminalLifecycleCallback(for sessionID: UUID) {
+        let callback = terminalLifecycleCallbacks.removeValue(forKey: sessionID)
+        callback?()
+    }
+
+    private func drainTerminalLifecycleCallbacks(for sessionIDs: [UUID]? = nil) {
+        let ids: [UUID]
+        if let sessionIDs {
+            // Close tokens already carry stable pane-tree order.
+            ids = sessionIDs
+        } else {
+            let liveOrder = terminal.sessions.map(\.id)
+            let remaining = Set(terminalLifecycleCallbacks.keys).subtracting(liveOrder)
+                .sorted { $0.uuidString < $1.uuidString }
+            ids = liveOrder + remaining
+        }
+        for sessionID in ids { consumeTerminalLifecycleCallback(for: sessionID) }
+    }
+
+    /// Shared close and teardown cleanup. A caller that passes a close token
+    /// preserves its pane-tree order; teardown passes manager session order.
+    private func cleanupTerminalSessions(_ sessionIDs: [UUID]) {
+        for sessionID in sessionIDs {
+            endCoordinatorSession(for: sessionID)
+            consumeTerminalLifecycleCallback(for: sessionID)
+        }
     }
 
     /// The terminal session id backing the FOCUSED group's selected tab,
@@ -763,10 +841,15 @@ final class WorkspaceSession {
     private var focusedTerminalSessionID: UUID? {
         guard let group = editorLayout.group(id: editorLayout.focusedGroupID),
             let selectedTabID = group.selectedTabID,
-            let tab = group.tabs.first(where: { $0.id == selectedTabID }),
-            case .terminal(let sessionID) = tab.resource
+            let tab = group.tabs.first(where: { $0.id == selectedTabID })
         else { return nil }
-        return sessionID
+        switch tab.resource {
+        case .terminal(let sessionID): return sessionID
+        case .terminalGroup(let groupID):
+            guard let paneID = terminal.terminalGroup(groupID)?.focusedPaneID else { return nil }
+            return terminal.terminalController(for: paneID)?.id
+        case .file, .restorable: return nil
+        }
     }
 
     /// The one terminal row that may present as current in the terminal
@@ -784,6 +867,54 @@ final class WorkspaceSession {
         else { return nil }
         return sessionID
     }
+
+    /// Frozen Wave 4 presentation seam. A group appears once in the editor
+    /// layout; panes remain internal to that resource.
+    var selectedTerminalGroupID: TerminalGroupID? {
+        guard let group = editorLayout.group(id: editorLayout.focusedGroupID),
+            let tabID = group.selectedTabID,
+            let tab = group.tabs.first(where: { $0.id == tabID }),
+            case .terminalGroup(let groupID) = tab.resource
+        else { return nil }
+        return groupID
+    }
+
+    var focusedTerminalPaneID: TerminalPaneID? {
+        selectedTerminalGroupID.flatMap { terminal.terminalGroup($0)?.focusedPaneID }
+    }
+
+    var focusedTerminalSession: WorkspaceTerminalController? {
+        guard let paneID = focusedTerminalPaneID else { return nil }
+        return terminal.terminalController(for: paneID)
+    }
+
+    var presentedTerminalGroupIDs: Set<TerminalGroupID> {
+        Set(
+            editorLayout.groupIDs.flatMap { editorGroupID in
+                editorLayout.group(id: editorGroupID)?.tabs.compactMap { tab in
+                    guard case .terminalGroup(let groupID) = tab.resource else { return nil }
+                    return groupID
+                } ?? []
+            })
+    }
+
+    var parkedTerminalGroupIDs: [TerminalGroupID] { terminal.parkedTerminalGroupIDs }
+    /// Grouped snapshots count one committed slot each. The two temporary
+    /// Ensemble compatibility callers can still own an ungrouped controller
+    /// during this migration, so include only those controller IDs here.
+    var liveTerminalSessionCount: Int {
+        let grouped = terminal.terminalGroups.flatMap(\.panes).filter { $0.status == .live }.count
+        let legacy = terminal.sessions.count { controller in
+            guard terminal.terminalGroupAndPane(containing: controller.id) == nil else {
+                return false
+            }
+            guard case .exited = controller.status else { return true }
+            return false
+        }
+        return grouped + legacy
+    }
+    var retainedTerminalPaneCount: Int { terminal.retainedTerminalPaneCount }
+    var isTerminalGroupStoreMutationInFlight: Bool { terminalGroupMutationTask != nil }
 
     /// Routes a BEL (terminal-manager.md T-E) to attention state and,
     /// opt-in, a system notification. "Not focused" = the session's tab is
@@ -1035,8 +1166,12 @@ final class WorkspaceSession {
     /// switches. `closeTerminalTab(_:)` is the one that also terminates the
     /// shell.
     func toggleTerminal() {
-        if let selectedTerminalTabID {
+        if let selectedTerminalGroupID {
+            hideTerminalGroup(selectedTerminalGroupID)
+        } else if let selectedTerminalTabID {
             hideTerminalTab(selectedTerminalTabID)
+        } else if let parked = parkedTerminalGroupIDs.first {
+            revealTerminalGroup(parked)
         } else if let parked = parkedTerminalSessions.first {
             revealTerminalSession(parked.id)
         } else {
@@ -1054,21 +1189,319 @@ final class WorkspaceSession {
         return tab.id
     }
 
-    /// Opens a new terminal tab starting in the active file's directory,
-    /// falling back to the workspace root, then the user's home. Spawns a
-    /// fresh `WorkspaceTerminalController` (lazy, per ADR 0004) with the
-    /// preferred shell — or `shell` when one is explicitly chosen
-    /// (terminal-manager.md T-C, recorded as the new preferred shell) — and
-    /// reveals it in the focused editor group.
-    func newTerminalTab(shell: TerminalShell? = nil) {
+    /// Creates one lazy ordinary-shell pane in one compound outer editor tab.
+    /// The profile holds a normalized workspace-relative path; it never reads
+    /// a shell's live working directory.
+    func newTerminalGroup(shell: TerminalShell? = nil) {
         installTerminalHandlersIfNeeded()
+        // Unit-level and migration callers can create a session before a
+        // workspace descriptor exists. Keep their historical home-directory
+        // fallback while still making the runtime an ordinary Terminal Group.
+        let rootURL = rootURL ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        let folder = terminalFolder(for: preferredTerminalDirectory()) ?? .root
         let resolvedShell = shell ?? preferredTerminalShell()
-        if let shell {
-            preferredShellStore.record(shell)
+        if let shell { preferredShellStore.record(shell) }
+        let profile = TerminalPaneLaunchProfile(
+            shell: TerminalPaneShellChoice(approvedShellPath: resolvedShell.path)
+                ?? .preferredShell,
+            startingFolder: folder)
+        do {
+            let group = try terminal.createLiveGroup(
+                instantiation: .ordinaryShell(
+                    startingDirectory: resolvedTerminalDirectory(folder, rootURL: rootURL),
+                    shell: resolvedShell,
+                    profile: profile))
+            revealTerminalGroup(group.id)
+        } catch {
+            presentTerminalGroupError(error.localizedDescription)
         }
-        let controller = terminal.newSession(
-            startingDirectory: preferredTerminalDirectory(), shell: resolvedShell)
-        revealTerminalSession(controller.id)
+    }
+
+    /// Source-compatible entry point that creates a one-pane Terminal Group.
+    func newTerminalTab(shell: TerminalShell? = nil) {
+        newTerminalGroup(shell: shell)
+    }
+
+    func splitFocusedTerminalPane(_ placement: TerminalGroupSplitPlacement) {
+        guard let groupID = selectedTerminalGroupID,
+            let group = terminal.terminalGroup(groupID),
+            let focused = group.panes.first(where: { $0.id == group.focusedPaneID }),
+            let rootURL
+        else { return }
+        let profile =
+            focused.launchProfile
+            ?? TerminalPaneLaunchProfile(
+                shell: .preferredShell, startingFolder: .root)
+        guard
+            terminalFolder(for: resolvedTerminalDirectory(profile.startingFolder, rootURL: rootURL))
+                != nil,
+            let shell = resolvedShell(for: profile.shell)
+        else {
+            presentTerminalGroupError("The saved terminal profile is no longer available.")
+            return
+        }
+        do {
+            _ = try terminal.splitFocusedPane(
+                in: groupID, placement: placement,
+                instantiation: .ordinaryShell(
+                    startingDirectory: resolvedTerminalDirectory(
+                        profile.startingFolder, rootURL: rootURL),
+                    shell: shell, profile: profile))
+            if let newPaneID = terminal.terminalGroup(groupID)?.focusedPaneID {
+                focusTerminalPane(newPaneID, in: groupID)
+            }
+            persistWorkspaceState()
+        } catch { presentTerminalGroupError(error.localizedDescription) }
+    }
+
+    func focusTerminalPane(_ paneID: TerminalPaneID, in groupID: TerminalGroupID) {
+        do {
+            _ = try terminal.perform(.focusPane(groupID: groupID, paneID: paneID))
+            terminal.selectedID = terminal.terminalController(for: paneID)?.id
+            terminal.terminalController(for: paneID)?.clearAttention()
+            terminalGroupFocusRequest &+= 1
+        } catch { presentTerminalGroupError(error.localizedDescription) }
+    }
+
+    func focusTerminalPane(_ direction: TerminalPaneFocusDirection) {
+        guard let groupID = selectedTerminalGroupID else { return }
+        do {
+            _ = try terminal.perform(.focusDirection(groupID: groupID, direction: direction))
+            if let paneID = terminal.terminalGroup(groupID)?.focusedPaneID {
+                focusTerminalPane(paneID, in: groupID)
+            }
+        } catch { presentTerminalGroupError(error.localizedDescription) }
+    }
+
+    func renameTerminalGroup(_ groupID: TerminalGroupID, to rawName: String) {
+        do {
+            try terminal.renameTerminalGroup(groupID, rawName: rawName)
+            persistWorkspaceState()
+        } catch { presentTerminalGroupError(error.localizedDescription) }
+    }
+
+    func setTerminalPaneStartingFolder(_ paneID: TerminalPaneID, to directory: URL) {
+        guard let folder = terminalFolder(for: directory.path) else {
+            presentTerminalGroupError(
+                "The Terminal Group folder must be a readable directory inside this workspace.")
+            return
+        }
+        do {
+            _ = try terminal.perform(.setPaneStartingFolder(paneID: paneID, folder: folder))
+            persistWorkspaceState()
+        } catch { presentTerminalGroupError(error.localizedDescription) }
+    }
+
+    func setTerminalDividerFraction(_ splitID: TerminalGroupSplitID, to fraction: Double) {
+        do {
+            _ = try terminal.perform(.setDividerFraction(splitID: splitID, fraction: fraction))
+            persistWorkspaceState()
+        } catch { presentTerminalGroupError(error.localizedDescription) }
+    }
+
+    func performTerminalGroupViewAction(_ action: TerminalGroupViewAction) {
+        switch action {
+        case .focus(let paneID):
+            guard let groupID = terminal.terminalGroup(containing: paneID) else { return }
+            focusTerminalPane(paneID, in: groupID)
+        case .setDividerFraction(let splitID, let fraction):
+            setTerminalDividerFraction(splitID, to: fraction)
+        case .close(let paneID): closeTerminalPane(paneID)
+        case .restart(let paneID): restartTerminalPane(paneID)
+        case .start(let paneID): startTerminalPane(paneID)
+        }
+    }
+
+    func startTerminalPane(_ paneID: TerminalPaneID) {
+        guard let groupID = terminal.terminalGroup(containing: paneID),
+            let pane = terminal.terminalGroup(groupID)?.panes.first(where: { $0.id == paneID }),
+            let profile = pane.launchProfile,
+            let rootURL,
+            terminalFolder(for: resolvedTerminalDirectory(profile.startingFolder, rootURL: rootURL))
+                != nil,
+            let shell = resolvedShell(for: profile.shell)
+        else {
+            presentTerminalGroupError("The saved terminal folder is no longer available.")
+            return
+        }
+        do {
+            // The ordinary-shell transaction validates and reserves live
+            // capacity atomically. TG-20 reservations are process-only.
+            _ = try terminal.startPane(
+                paneID,
+                instantiation: .ordinaryShell(
+                    startingDirectory: resolvedTerminalDirectory(
+                        profile.startingFolder, rootURL: rootURL),
+                    shell: shell, profile: profile))
+            revealTerminalGroup(groupID)
+            terminalGroupFocusRequest &+= 1
+        } catch { presentTerminalGroupError(error.localizedDescription) }
+    }
+
+    func restartTerminalPane(_ paneID: TerminalPaneID) {
+        guard let groupID = terminal.terminalGroup(containing: paneID),
+            let pane = terminal.terminalGroup(groupID)?.panes.first(where: { $0.id == paneID }),
+            let profile = pane.launchProfile,
+            let rootURL,
+            terminalFolder(for: resolvedTerminalDirectory(profile.startingFolder, rootURL: rootURL))
+                != nil,
+            resolvedShell(for: profile.shell) != nil
+        else {
+            presentTerminalGroupError("The saved terminal profile is no longer available.")
+            return
+        }
+        do {
+            try terminal.restartExitedPane(paneID)
+            terminalGroupFocusRequest &+= 1
+        } catch { presentTerminalGroupError(error.localizedDescription) }
+    }
+
+    /// Starts the stopped ordinary-shell panes only after folder, shell, and
+    /// capacity preflight for every target. Individual external process
+    /// startup remains non-transactional after this manager transaction.
+    func startAllRestartableTerminalPanes(in groupID: TerminalGroupID) {
+        guard let snapshot = terminal.terminalGroup(groupID), let rootURL else { return }
+        let restartable = snapshot.panes.filter {
+            $0.startAvailability == .available && ($0.status == .stopped || $0.status == .exited)
+        }
+        guard !restartable.isEmpty else { return }
+        var instantiations: [TerminalPaneID: TerminalGroupControllerInstantiation] = [:]
+        for pane in restartable {
+            guard let profile = pane.launchProfile,
+                terminalFolder(
+                    for: resolvedTerminalDirectory(profile.startingFolder, rootURL: rootURL))
+                    != nil,
+                let shell = resolvedShell(for: profile.shell)
+            else {
+                presentTerminalGroupError("A saved terminal profile is no longer available.")
+                return
+            }
+            if pane.status == .stopped {
+                instantiations[pane.id] = .ordinaryShell(
+                    startingDirectory: resolvedTerminalDirectory(
+                        profile.startingFolder, rootURL: rootURL),
+                    shell: shell, profile: profile)
+            }
+        }
+        do {
+            _ = try terminal.startAllRestartablePanes(
+                in: groupID, instantiations: instantiations)
+            revealTerminalGroup(groupID)
+            terminalGroupFocusRequest &+= 1
+        } catch { presentTerminalGroupError(error.localizedDescription) }
+    }
+
+    func closeTerminalPane(_ paneID: TerminalPaneID) {
+        guard let groupID = terminal.terminalGroup(containing: paneID),
+            let snapshot = terminal.terminalGroup(groupID)
+        else { return }
+        // The last pane closes the complete outer resource. This preserves
+        // one group-level live-process confirmation rather than silently
+        // treating a terminal tab close as a pane-only operation.
+        if snapshot.panes.count == 1 {
+            requestTerminalGroupClose(.group(groupID), requiresConfirmation: true)
+        } else {
+            requestTerminalGroupClose(.pane(paneID), requiresConfirmation: false)
+        }
+    }
+
+    func requestTerminalGroupClose(_ groupID: TerminalGroupID) {
+        requestTerminalGroupClose(.group(groupID), requiresConfirmation: true)
+    }
+
+    func cancelTerminalGroupClose() { pendingTerminalGroupClose = nil }
+
+    func confirmTerminalGroupClose() {
+        guard let pending = pendingTerminalGroupClose else { return }
+        do {
+            let affectedGroupID: TerminalGroupID? =
+                switch pending.target {
+                case .group(let groupID): groupID
+                case .pane(let paneID): terminal.terminalGroup(containing: paneID)
+                }
+            let effect = try terminal.perform(.prepareClose(pending.target))
+            guard case .requestCloseConfirmation(let fresh) = effect, fresh == pending else {
+                if case .requestCloseConfirmation(let fresh) = effect {
+                    pendingTerminalGroupClose = nil
+                    Task { @MainActor [weak self] in
+                        await Task.yield()
+                        guard let self, self.pendingTerminalGroupClose == nil else { return }
+                        self.pendingTerminalGroupClose = fresh
+                        self.terminalGroupClosePresentationRevision &+= 1
+                        self.terminalGroupCloseRepreparedForTesting?()
+                    }
+                }
+                return
+            }
+            cleanupTerminalSessions(fresh.affectedSessionIDs)
+            _ = try terminal.perform(.finalizeClose(fresh))
+            if let affectedGroupID, terminal.terminalGroup(affectedGroupID) == nil {
+                removeTerminalGroupTab(affectedGroupID)
+            }
+            synchronizeSelectionFromLayout()
+            pendingTerminalGroupClose = nil
+            persistWorkspaceState()
+        } catch {
+            pendingTerminalGroupClose = nil
+            presentTerminalGroupError(error.localizedDescription)
+        }
+    }
+
+    private func requestTerminalGroupClose(
+        _ target: TerminalGroupCloseTarget, requiresConfirmation: Bool
+    ) {
+        do {
+            let effect = try terminal.perform(.prepareClose(target))
+            guard case .requestCloseConfirmation(let token) = effect else { return }
+            if requiresConfirmation && token.liveProcessCount > 0 {
+                pendingTerminalGroupClose = token
+            } else {
+                pendingTerminalGroupClose = token
+                confirmTerminalGroupClose()
+            }
+        } catch { presentTerminalGroupError(error.localizedDescription) }
+    }
+
+    func hideTerminalGroup(_ groupID: TerminalGroupID) {
+        do {
+            _ = try terminal.perform(.parkGroup(groupID))
+            removeTerminalGroupTab(groupID)
+            synchronizeSelectionFromLayout()
+            persistWorkspaceState()
+        } catch { presentTerminalGroupError(error.localizedDescription) }
+    }
+
+    func revealTerminalGroup(_ groupID: TerminalGroupID) {
+        guard terminal.terminalGroup(groupID) != nil else { return }
+        do { _ = try terminal.perform(.revealGroup(groupID)) } catch {
+            presentTerminalGroupError(error.localizedDescription)
+            return
+        }
+        // Terminal Groups occupy the same editor canvas slot as run detail,
+        // graph, Ensemble creation, and Settings. Keep the Runs selection so
+        // the panel remains stable while a terminal replaces its canvas.
+        conductorRunCanvasID = nil
+        conductorGraphVisible = false
+        if !ensembleStartLaunchInProgress {
+            ensembleStartCanvasVisible = false
+        }
+        ensembleNewRunCanvasVisible = false
+        settingsVisible = false
+        if let tab = editorLayout.tab(matching: .terminalGroup(groupID: groupID)),
+            let editorGroupID = editorLayout.group(containing: tab.id)?.id
+        {
+            editorLayout.select(tab.id, in: editorGroupID)
+        } else {
+            let tab = EditorTabState(resource: .terminalGroup(groupID: groupID))
+            editorLayout.insert(tab, in: editorLayout.focusedGroupID)
+            editorLayout.select(tab.id, in: editorLayout.focusedGroupID)
+        }
+        selectedDocumentID = nil
+        selectedTreePath = nil
+        if let paneID = terminal.terminalGroup(groupID)?.focusedPaneID {
+            focusTerminalPane(paneID, in: groupID)
+        }
+        persistWorkspaceState()
     }
 
     /// Hides one terminal tab: removes it from the editor layout but leaves
@@ -1118,6 +1551,10 @@ final class WorkspaceSession {
     /// for an unknown session id.
     func closeTerminalSession(_ sessionID: UUID) {
         guard terminal.sessions.contains(where: { $0.id == sessionID }) else { return }
+        if let (_, paneID) = terminal.terminalGroupAndPane(containing: sessionID) {
+            closeTerminalPane(paneID)
+            return
+        }
         if let tab = editorLayout.tab(matching: .terminal(sessionID: sessionID)) {
             _ = editorLayout.closeTab(tab.id)
         }
@@ -1132,6 +1569,10 @@ final class WorkspaceSession {
     /// terminals panel, which knows session ids and not `EditorTabID`s. A
     /// no-op for an unknown or already-parked session.
     func hideTerminalSession(_ sessionID: UUID) {
+        if let (groupID, _) = terminal.terminalGroupAndPane(containing: sessionID) {
+            hideTerminalGroup(groupID)
+            return
+        }
         guard let tab = editorLayout.tab(matching: .terminal(sessionID: sessionID)) else { return }
         hideTerminalTab(tab.id)
     }
@@ -1145,8 +1586,78 @@ final class WorkspaceSession {
 
     func openAgentTerminal(spec: TerminalProcessSpec) {
         installTerminalHandlersIfNeeded()
-        let controller = terminal.newSession(spec: spec)
-        revealTerminalSession(controller.id)
+        guard let provider = spec.agentProvider else {
+            presentTerminalGroupError("The Agent Terminal did not include a provider identity.")
+            return
+        }
+        do {
+            _ = try insertClassifiedTerminalSession(
+                spec: spec, kind: .directAgentTerminal(provider: provider), lifecycle: {})
+        } catch { presentTerminalGroupError(error.localizedDescription) }
+    }
+
+    /// Frozen TG-42 insertion boundary. Capacity fails before a controller is
+    /// returned, and the caller never receives manager/tree mutation access.
+    @discardableResult
+    func insertClassifiedTerminalSession(
+        spec: TerminalProcessSpec,
+        kind: TerminalPaneRuntimeKind,
+        lifecycle: @escaping @MainActor () -> Void,
+        reservation suppliedReservation: TerminalGroupCapacityReservation? = nil
+    ) throws -> UUID {
+        installTerminalHandlersIfNeeded()
+        let reservation = try suppliedReservation ?? terminal.reserveLiveSessionCapacity(1)
+        let group: TerminalGroupSnapshot
+        do {
+            group = try terminal.createLiveGroup(
+                instantiation: .process(spec: spec, kind: kind), reservation: reservation)
+            // Internal direct-Agent reservations are fully acknowledged here.
+            // A coordinator-provided reservation remains committed until that
+            // caller explicitly consumes it through the frozen wrapper.
+            if suppliedReservation == nil { try terminal.consumeLiveSessionCapacity(reservation) }
+        } catch {
+            try? terminal.cancelLiveSessionCapacity(reservation)
+            throw error
+        }
+        guard let sessionID = group.panes.first?.sessionID else {
+            throw TerminalGroupValidationError.unsupportedPaneStart
+        }
+        terminalLifecycleCallbacks[sessionID] = lifecycle
+        revealTerminalGroup(group.id)
+        return sessionID
+    }
+
+    /// The owner already performed its run-state transition. Remove the
+    /// callback and close the classified pane without invoking it again.
+    func ownerHandledTerminalLifecycleClose(_ sessionID: UUID) {
+        terminalLifecycleCallbacks.removeValue(forKey: sessionID)
+        guard let (groupID, paneID) = terminal.terminalGroupAndPane(containing: sessionID) else {
+            return
+        }
+        let target: TerminalGroupCloseTarget =
+            terminal.terminalGroup(groupID)?.panes.count == 1 ? .group(groupID) : .pane(paneID)
+        do {
+            let effect = try terminal.perform(.prepareClose(target))
+            guard case .requestCloseConfirmation(let token) = effect else { return }
+            _ = try terminal.perform(.finalizeClose(token))
+            if terminal.terminalGroup(groupID) == nil { removeTerminalGroupTab(groupID) }
+            synchronizeSelectionFromLayout()
+            persistWorkspaceState()
+        } catch { presentTerminalGroupError(error.localizedDescription) }
+    }
+
+    func reserveTerminalLiveSessionCapacity(_ count: Int) throws -> TerminalGroupCapacityReservation
+    {
+        try terminal.reserveLiveSessionCapacity(count)
+    }
+
+    func consumeTerminalLiveSessionCapacity(_ reservation: TerminalGroupCapacityReservation) throws
+    {
+        try terminal.consumeLiveSessionCapacity(reservation)
+    }
+
+    func cancelTerminalLiveSessionCapacity(_ reservation: TerminalGroupCapacityReservation) throws {
+        try terminal.cancelLiveSessionCapacity(reservation)
     }
 
     /// Reveals a terminal session as a tab: selects its existing tab if it
@@ -1157,35 +1668,19 @@ final class WorkspaceSession {
     /// unknown session id.
     func revealTerminalSession(_ sessionID: UUID) {
         guard terminal.sessions.contains(where: { $0.id == sessionID }) else { return }
-        if let existingTab = editorLayout.tab(matching: .terminal(sessionID: sessionID)),
-            let groupID = editorLayout.group(containing: existingTab.id)?.id
-        {
-            editorLayout.select(existingTab.id, in: groupID)
-        } else {
-            let groupID = editorLayout.focusedGroupID
-            let tab = EditorTabState(resource: .terminal(sessionID: sessionID))
-            editorLayout.insert(tab, in: groupID)
-            editorLayout.select(tab.id, in: groupID)
+        if let (groupID, _) = terminal.terminalGroupAndPane(containing: sessionID) {
+            revealTerminalGroup(groupID)
+            return
         }
-        selectedDocumentID = nil
-        selectedTreePath = nil
-        terminal.selectedID = sessionID
-        // A live step's terminal must REPLACE the run-detail canvas, not sit
-        // behind it (C5) — the panel selection (`selectedConductorRunID`)
-        // is untouched, only the canvas visibility clears.
-        conductorRunCanvasID = nil
-        conductorGraphVisible = false
-        if !ensembleStartLaunchInProgress {
-            ensembleStartCanvasVisible = false
+        // Old restoration and Ensemble callers can still reach a legacy
+        // controller. Adopt it atomically before it becomes visible so a
+        // session UUID and its process remain continuous through migration.
+        do {
+            let group = try terminal.adoptUngroupedSession(sessionID)
+            revealTerminalGroup(group.id)
+        } catch {
+            presentTerminalGroupError(error.localizedDescription)
         }
-        ensembleNewRunCanvasVisible = false
-        settingsVisible = false
-        // Revealing (unlike a plain layout selection change) doesn't route
-        // through `selectEditorTab`/`synchronizeSelectionFromLayout`, so
-        // this is the third bell-clear hook (terminal-manager.md T-E):
-        // revealing a parked, belling session must clear its attention too.
-        terminal.sessions.first(where: { $0.id == sessionID })?.clearAttention()
-        persistWorkspaceState()
     }
 
     private func preferredTerminalDirectory() -> String {
@@ -1198,6 +1693,379 @@ final class WorkspaceSession {
             }
         }
         return rootURL?.path ?? NSHomeDirectory()
+    }
+
+    private func terminalFolder(for path: String) -> TerminalWorkspaceRelativePath? {
+        guard let rootURL else { return nil }
+        let root = rootURL.resolvingSymlinksInPath().standardizedFileURL
+        let candidate = URL(fileURLWithPath: path, isDirectory: true)
+            .resolvingSymlinksInPath().standardizedFileURL
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
+            isDirectory.boolValue,
+            FileManager.default.isReadableFile(atPath: candidate.path)
+        else { return nil }
+        let rootPath = root.path
+        let candidatePath = candidate.path
+        guard candidatePath == rootPath || candidatePath.hasPrefix(rootPath + "/") else {
+            return nil
+        }
+        let relative = String(candidatePath.dropFirst(rootPath.count))
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return TerminalWorkspaceRelativePath(relative)
+    }
+
+    private func resolvedTerminalDirectory(
+        _ folder: TerminalWorkspaceRelativePath, rootURL: URL
+    ) -> String {
+        rootURL.appending(path: folder.rawValue).standardizedFileURL.path
+    }
+
+    private func resolvedShell(for choice: TerminalPaneShellChoice) -> TerminalShell? {
+        switch choice {
+        case .preferredShell: preferredTerminalShell()
+        case .approvedShellPath(let path):
+            availableTerminalShells.first(where: { $0.path == path })
+        }
+    }
+
+    private func removeTerminalGroupTab(for target: TerminalGroupCloseTarget) {
+        let groupID: TerminalGroupID?
+        switch target {
+        case .group(let value): groupID = value
+        case .pane(let paneID): groupID = terminal.terminalGroup(containing: paneID)
+        }
+        guard let groupID,
+            let tab = editorLayout.tab(matching: .terminalGroup(groupID: groupID))
+        else { return }
+        _ = editorLayout.closeTab(tab.id)
+    }
+
+    private func removeTerminalGroupTab(_ groupID: TerminalGroupID) {
+        guard let tab = editorLayout.tab(matching: .terminalGroup(groupID: groupID)) else { return }
+        _ = editorLayout.closeTab(tab.id)
+    }
+
+    private func presentTerminalGroupError(_ message: String) {
+        openFolderErrorTitle = "Terminal Group"
+        openFolderErrorMessage = String(decoding: message.utf8.prefix(512), as: UTF8.self)
+        isOpenFolderErrorPresented = true
+    }
+
+    // MARK: - Saved Terminal Group library
+
+    private func resolvedTerminalGroupSavedLayoutStore() async
+        -> any TerminalGroupSavedLayoutStoring
+    {
+        if let terminalGroupSavedLayoutStore { return terminalGroupSavedLayoutStore }
+        return await TerminalGroupSavedLayoutStore.shared()
+    }
+
+    private func beginTerminalGroupLibrary(for rootURL: URL) {
+        endTerminalGroupLibrary()
+        terminalGroupWorkspaceGeneration &+= 1
+        if terminalGroupWorkspaceGeneration == 0 { terminalGroupWorkspaceGeneration = 1 }
+        let generation = terminalGroupWorkspaceGeneration
+        let key = TerminalGroupWorkspaceKey(
+            standardizedRoot: rootURL.resolvingSymlinksInPath().standardizedFileURL)
+        let injectedStore = terminalGroupSavedLayoutStore
+        // Subscribe before requesting the first list. The actor yields its
+        // current revision before returning the stream, which seals the
+        // subscribe/list mutation race between workspace windows.
+        terminalGroupChangeTask = Task { [weak self, injectedStore] in
+            let store: any TerminalGroupSavedLayoutStoring
+            if let injectedStore {
+                store = injectedStore
+            } else {
+                store = await TerminalGroupSavedLayoutStore.shared()
+            }
+            let changes = await store.changes(for: key)
+            // `changes` returns only after it registered the continuation.
+            // Its current revision is the first element, so this first list
+            // cannot race ahead of subscription registration.
+            for await _ in changes {
+                guard !Task.isCancelled, let self,
+                    self.terminalGroupWorkspaceGeneration == generation
+                else { return }
+                self.loadTerminalGroupLibrary(key: key, generation: generation)
+            }
+        }
+    }
+
+    // MARK: - Terminal Group integration-test synchronization
+
+    /// Starts the same per-window library binding used by workspace open.
+    /// This deliberately exposes no manager mutation: integration tests only
+    /// use it to inject an isolated saved-layout actor and await its stream.
+    func beginTerminalGroupLibraryForTesting() {
+        guard let rootURL else { return }
+        beginTerminalGroupLibrary(for: rootURL)
+    }
+
+    /// Waits for the current list or mutation operation, if one exists. The
+    /// long-lived change subscription is intentionally not awaited here.
+    func waitForTerminalGroupStoreOperationForTesting() async {
+        await terminalGroupStoreTask?.value
+        await terminalGroupMutationTask?.value
+    }
+
+    /// Exercises the restoration insertion boundary without bookmark or file
+    /// watcher setup. Production restoration still calls the private method.
+    func restoreTerminalGroupInstancesForTesting(
+        _ restoration: TerminalGroupWorkspaceRestoration
+    ) async {
+        guard let rootURL else { return }
+        await restoreTerminalGroupInstances(restoration, rootURL: rootURL)
+    }
+
+    /// Read-only persistence seam for the two-window detachment regression.
+    /// It returns the same inert envelope that normal workspace persistence
+    /// would encode and cannot modify the live editor layout.
+    func terminalGroupWorkspaceRestorationForTesting() -> TerminalGroupWorkspaceRestoration? {
+        terminalGroupWorkspaceRestoration()
+    }
+
+    /// Exercises layout repair after inert-group insertion without bookmark
+    /// or file-watcher setup. It is read-only outside the session layout.
+    func restoreEditorLayoutForTesting(
+        _ restoration: EditorLayoutRestoration,
+        terminalGroups: TerminalGroupWorkspaceRestoration,
+        rootURL: URL
+    ) {
+        restoreEditorLayout(
+            restoration, terminalGroups: terminalGroups,
+            from: rootURL.path, to: rootURL)
+        synchronizeSelectionFromLayout()
+    }
+
+    private func endTerminalGroupLibrary() {
+        terminalGroupWorkspaceGeneration &+= 1
+        if terminalGroupWorkspaceGeneration == 0 { terminalGroupWorkspaceGeneration = 1 }
+        terminalGroupStoreTask?.cancel()
+        terminalGroupStoreTask = nil
+        terminalGroupChangeTask?.cancel()
+        terminalGroupChangeTask = nil
+        terminalGroupMutationTask?.cancel()
+        terminalGroupMutationTask = nil
+        terminalGroupMutationEpoch &+= 1
+        savedTerminalGroups = []
+        terminalGroupStoreError = nil
+        terminalGroupRestorationError = nil
+    }
+
+    private func loadTerminalGroupLibrary(
+        key: TerminalGroupWorkspaceKey, generation: UInt64
+    ) {
+        terminalGroupStoreTask?.cancel()
+        terminalGroupListEpoch &+= 1
+        let epoch = terminalGroupListEpoch
+        terminalGroupStoreTask = Task { [weak self] in
+            do {
+                guard let self else { return }
+                let store = await self.resolvedTerminalGroupSavedLayoutStore()
+                let records = try await store.listSavedLayouts(for: key)
+                guard !Task.isCancelled,
+                    self.terminalGroupWorkspaceGeneration == generation,
+                    self.terminalGroupListEpoch == epoch
+                else {
+                    self.terminalGroupListFinishedForTesting?(epoch)
+                    return
+                }
+                self.savedTerminalGroups = records
+                self.terminalGroupStoreError = self.terminalGroupRestorationError
+                let existing = Set(records.map(\.id))
+                var detachedSavedLayout = false
+                for snapshot in self.terminal.terminalGroups {
+                    if let savedID = snapshot.savedLayoutID, !existing.contains(savedID) {
+                        if (try? self.terminal.perform(.detachDeletedSavedLayout(savedID))) != nil {
+                            detachedSavedLayout = true
+                        }
+                    }
+                }
+                if detachedSavedLayout { self.persistWorkspaceState() }
+                self.terminalGroupListFinishedForTesting?(epoch)
+            } catch {
+                guard let self else { return }
+                guard !Task.isCancelled,
+                    self.terminalGroupWorkspaceGeneration == generation,
+                    self.terminalGroupListEpoch == epoch
+                else {
+                    self.terminalGroupListFinishedForTesting?(epoch)
+                    return
+                }
+                self.terminalGroupStoreError = String(
+                    decoding: error.localizedDescription.utf8.prefix(512), as: UTF8.self)
+                self.terminalGroupListFinishedForTesting?(epoch)
+            }
+        }
+    }
+
+    func openSavedTerminalGroup(_ savedLayoutID: SavedTerminalGroupID) {
+        guard let rootURL,
+            let record = savedTerminalGroups.first(where: { $0.id == savedLayoutID })
+        else { return }
+        do {
+            let decoded = try terminalGroupCodec(for: rootURL).openNamedLayout(record)
+            let group = try terminal.insertInertSnapshot(decoded.snapshot)
+            revealTerminalGroup(group.id)
+        } catch { presentTerminalGroupError(error.localizedDescription) }
+    }
+
+    func deleteSavedTerminalGroup(_ savedLayoutID: SavedTerminalGroupID) {
+        guard let rootURL, terminalGroupMutationTask == nil else { return }
+        let key = TerminalGroupWorkspaceKey(standardizedRoot: rootURL)
+        let generation = terminalGroupWorkspaceGeneration
+        terminalGroupMutationEpoch &+= 1
+        let epoch = terminalGroupMutationEpoch
+        terminalGroupMutationTask = Task { [weak self] in
+            do {
+                guard let self else { return }
+                let store = await self.resolvedTerminalGroupSavedLayoutStore()
+                _ = try await store.deleteSavedLayout(
+                    TerminalGroupSavedLayoutDeleteRequest(
+                        workspaceKey: key, savedLayoutID: savedLayoutID))
+                guard !Task.isCancelled,
+                    self.terminalGroupWorkspaceGeneration == generation,
+                    self.terminalGroupMutationEpoch == epoch
+                else { return }
+                _ = try self.terminal.perform(.detachDeletedSavedLayout(savedLayoutID))
+                self.terminalGroupMutationTask = nil
+                self.loadTerminalGroupLibrary(key: key, generation: generation)
+                self.persistWorkspaceState()
+            } catch {
+                guard let self, !Task.isCancelled,
+                    self.terminalGroupWorkspaceGeneration == generation,
+                    self.terminalGroupMutationEpoch == epoch
+                else { return }
+                self.terminalGroupMutationTask = nil
+                self.terminalGroupStoreError = String(
+                    decoding: error.localizedDescription.utf8.prefix(512), as: UTF8.self)
+            }
+        }
+    }
+
+    /// Save uses the open instance only as a snapshot source. It never
+    /// replaces its live pane tree with data read from the named library.
+    func requestTerminalGroupSave(_ groupID: TerminalGroupID) {
+        guard terminalGroupMutationTask == nil, let snapshot = terminal.terminalGroup(groupID)
+        else {
+            return
+        }
+        if snapshot.savedLayoutID != nil {
+            saveTerminalGroup(groupID)
+        } else {
+            // Command-S first tries the current bounded group name. Only a
+            // store conflict needs the Save As-style naming sheet.
+            saveTerminalGroup(
+                snapshot, groupID: groupID, name: snapshot.name, operation: .firstSave,
+                presentNameRequestOnConflict: true)
+        }
+    }
+
+    func requestTerminalGroupSaveAs(_ groupID: TerminalGroupID) {
+        guard terminalGroupMutationTask == nil, let snapshot = terminal.terminalGroup(groupID)
+        else {
+            return
+        }
+        pendingTerminalGroupSaveRequest = TerminalGroupSaveRequest(
+            id: groupID, kind: .saveAs, proposedName: snapshot.name.rawValue)
+    }
+
+    func updatePendingTerminalGroupSaveName(_ name: String) {
+        pendingTerminalGroupSaveRequest?.proposedName = name
+    }
+
+    func cancelPendingTerminalGroupSave() { pendingTerminalGroupSaveRequest = nil }
+
+    func completePendingTerminalGroupSave() {
+        guard let request = pendingTerminalGroupSaveRequest else { return }
+        pendingTerminalGroupSaveRequest = nil
+        let operation: TerminalGroupSavedLayoutSaveOperation =
+            request.kind == .firstSave ? .firstSave : .saveAs
+        saveTerminalGroupAs(request.id, name: request.proposedName, operation: operation)
+    }
+
+    func saveTerminalGroup(_ groupID: TerminalGroupID) {
+        guard let snapshot = terminal.terminalGroup(groupID) else { return }
+        let operation: TerminalGroupSavedLayoutSaveOperation =
+            snapshot.savedLayoutID.map { .save(existingID: $0) } ?? .firstSave
+        saveTerminalGroup(snapshot, groupID: groupID, name: snapshot.name, operation: operation)
+    }
+
+    func saveTerminalGroupAs(
+        _ groupID: TerminalGroupID, name rawName: String,
+        operation: TerminalGroupSavedLayoutSaveOperation = .saveAs
+    ) {
+        guard let snapshot = terminal.terminalGroup(groupID),
+            let name = TerminalGroupName(rawName)
+        else {
+            presentTerminalGroupError("Enter a valid Terminal Group name.")
+            return
+        }
+        do {
+            let namedSnapshot = try TerminalGroupSnapshot(
+                id: snapshot.id, name: name, root: snapshot.root,
+                focusedPaneID: snapshot.focusedPaneID, savedLayoutID: snapshot.savedLayoutID,
+                panes: snapshot.panes, retainedPaneCount: retainedTerminalPaneCount)
+            saveTerminalGroup(namedSnapshot, groupID: groupID, name: name, operation: operation)
+        } catch { presentTerminalGroupError(error.localizedDescription) }
+    }
+
+    private func saveTerminalGroup(
+        _ snapshot: TerminalGroupSnapshot,
+        groupID: TerminalGroupID,
+        name: TerminalGroupName,
+        operation: TerminalGroupSavedLayoutSaveOperation,
+        presentNameRequestOnConflict: Bool = false
+    ) {
+        guard let rootURL, terminalGroupMutationTask == nil else { return }
+        let key = TerminalGroupWorkspaceKey(standardizedRoot: rootURL)
+        let generation = terminalGroupWorkspaceGeneration
+        terminalGroupMutationEpoch &+= 1
+        let epoch = terminalGroupMutationEpoch
+        terminalGroupMutationTask = Task { [weak self] in
+            do {
+                let record = try TerminalGroupRestorationCodec().savedRecord(
+                    from: snapshot,
+                    savedLayoutID: snapshot.savedLayoutID)
+                let request = try TerminalGroupSavedLayoutSaveRequest(
+                    workspaceKey: key, operation: operation, group: record)
+                guard let self else { return }
+                let store = await self.resolvedTerminalGroupSavedLayoutStore()
+                let result = try await store.saveSavedLayout(request)
+                guard !Task.isCancelled,
+                    self.terminalGroupWorkspaceGeneration == generation,
+                    self.terminalGroupMutationEpoch == epoch
+                else { return }
+                guard self.terminal.terminalGroup(groupID) != nil else {
+                    self.terminalGroupMutationTask = nil
+                    return
+                }
+                _ = try self.terminal.perform(
+                    .commitSavedLayout(
+                        groupID: groupID, savedLayoutID: result.savedLayoutID, name: name))
+                self.terminalGroupMutationTask = nil
+                self.loadTerminalGroupLibrary(key: key, generation: generation)
+                self.persistWorkspaceState()
+            } catch {
+                guard let self, !Task.isCancelled,
+                    self.terminalGroupWorkspaceGeneration == generation,
+                    self.terminalGroupMutationEpoch == epoch
+                else { return }
+                self.terminalGroupMutationTask = nil
+                if presentNameRequestOnConflict,
+                    let persistence = error as? TerminalGroupPersistenceError,
+                    persistence == .nameConflict,
+                    self.terminal.terminalGroup(groupID) != nil
+                {
+                    self.pendingTerminalGroupSaveRequest = TerminalGroupSaveRequest(
+                        id: groupID, kind: .firstSave, proposedName: snapshot.name.rawValue)
+                    return
+                }
+                self.terminalGroupStoreError = String(
+                    decoding: error.localizedDescription.utf8.prefix(512), as: UTF8.self)
+            }
+        }
     }
 
     var rootURL: URL? {
@@ -1225,7 +2093,14 @@ final class WorkspaceSession {
         for groupID in editorLayout.groupIDs {
             guard let group = editorLayout.group(id: groupID) else { continue }
             for tab in group.tabs {
-                if case .terminal(let sessionID) = tab.resource { ids.insert(sessionID) }
+                switch tab.resource {
+                case .terminal(let sessionID): ids.insert(sessionID)
+                case .terminalGroup(let terminalGroupID):
+                    for pane in terminal.terminalGroup(terminalGroupID)?.panes ?? [] {
+                        if let sessionID = pane.sessionID { ids.insert(sessionID) }
+                    }
+                case .file, .restorable: break
+                }
             }
         }
         return ids
@@ -1240,7 +2115,10 @@ final class WorkspaceSession {
     var parkedTerminalSessions: [WorkspaceTerminalController] {
         let presented = presentedTerminalSessionIDs
         return terminal.sessions
-            .filter { !presented.contains($0.id) }
+            .filter {
+                terminal.terminalGroupAndPane(containing: $0.id) == nil
+                    && !presented.contains($0.id)
+            }
             .sorted { ($0.parkSequence, $0.index) > ($1.parkSequence, $1.index) }
     }
 
@@ -1428,6 +2306,10 @@ final class WorkspaceSession {
             }
         }
 
+        // Old terminal/run callbacks still belong to the old descriptor and
+        // security scope. Drain them before replacing any workspace state.
+        teardownTerminalGroups()
+        didTeardownTerminalGroups = false
         liveness.stop()
         let previousSecurityScopedURL = securityScopedURL
         let name = url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent
@@ -1447,14 +2329,13 @@ final class WorkspaceSession {
         selectedTreePath = nil
         resetGitWorkbenchState()
         resetFileTreeState()
-        endAllCoordinatorSessions()
-        terminal.shutdownAll()
         languageIntelligence.workspaceDidClose()
         RecentWorkspacesStore().record(url: url, displayName: name)
         Task { await refreshWorkspace() }
         reloadConductorRuns(for: url)
         startFileWatcher()
         languageIntelligence.workspaceDidOpen(root: url)
+        beginTerminalGroupLibrary(for: url)
         persistWorkspaceState()
 
         previousSecurityScopedURL?.stopAccessingSecurityScopedResource()
@@ -2385,7 +3266,9 @@ final class WorkspaceSession {
             requestClose(document)
         case .terminal:
             closeTerminalTab(tab.id)
-        case .restorable, .terminalGroup:
+        case .terminalGroup(let terminalGroupID):
+            requestTerminalGroupClose(terminalGroupID)
+        case .restorable:
             _ = editorLayout.closeTab(tab.id)
             synchronizeSelectionFromLayout()
             persistWorkspaceState()
@@ -2540,7 +3423,10 @@ final class WorkspaceSession {
                 case .terminal(let sessionID):
                     guard terminalSessionIDs.contains(sessionID) else { continue }
                     destination = .terminal(sessionID: sessionID)
-                case .file, .restorable, .terminalGroup:
+                case .terminalGroup(let terminalGroupID):
+                    guard terminal.terminalGroup(terminalGroupID) != nil else { continue }
+                    destination = .terminalGroup(groupID: terminalGroupID)
+                case .file, .restorable:
                     destination = .editorTab(tabID: tab.id, groupID: groupID)
                 }
                 candidates.append(EditorTabSwitcherCandidate(destination: destination))
@@ -2548,10 +3434,13 @@ final class WorkspaceSession {
         }
 
         candidates.append(
+            contentsOf: parkedTerminalGroupIDs.map {
+                EditorTabSwitcherCandidate(destination: .terminalGroup(groupID: $0))
+            })
+        candidates.append(
             contentsOf: parkedTerminalSessions.map {
                 EditorTabSwitcherCandidate(destination: .terminal(sessionID: $0.id))
-            }
-        )
+            })
         return candidates
     }
 
@@ -2609,6 +3498,9 @@ final class WorkspaceSession {
         if case .terminal(let sessionID) = tab.resource {
             return .terminal(sessionID: sessionID)
         }
+        if case .terminalGroup(let terminalGroupID) = tab.resource {
+            return .terminalGroup(groupID: terminalGroupID)
+        }
         return .editorTab(tabID: tab.id, groupID: groupID)
     }
 
@@ -2620,9 +3512,8 @@ final class WorkspaceSession {
             selectEditorTab(tabID, in: groupID)
         case .terminal(let sessionID):
             revealTerminalSession(sessionID)
-        case .terminalGroup:
-            // TG-10 identity shim only. TG-30 owns Terminal Group selection.
-            return
+        case .terminalGroup(let groupID):
+            revealTerminalGroup(groupID)
         }
     }
 
@@ -2645,7 +3536,15 @@ final class WorkspaceSession {
             // `synchronizeSelectionFromLayout` and `revealTerminalSession`
             // for the other two.
             terminal.sessions.first(where: { $0.id == sessionID })?.clearAttention()
-        case .restorable, .terminalGroup:
+        case .terminalGroup(let terminalGroupID):
+            selectedDocumentID = nil
+            selectedTreePath = nil
+            if let paneID = terminal.terminalGroup(terminalGroupID)?.focusedPaneID {
+                terminal.selectedID = terminal.terminalController(for: paneID)?.id
+                terminal.terminalController(for: paneID)?.clearAttention()
+                terminalGroupFocusRequest &+= 1
+            }
+        case .restorable:
             selectedDocumentID = nil
             selectedTreePath = nil
         }
@@ -4183,6 +5082,7 @@ final class WorkspaceSession {
         navigationTask?.cancel()
         indexRebuildTask?.cancel()
         symbolIndexRebuildTask?.cancel()
+        teardownTerminalGroups()
         languageIntelligence.workspaceDidClose()
         stopAccessingSecurityScopedURL()
         TerminalAttentionCenter.shared.unregister(self)
@@ -4211,6 +5111,14 @@ final class WorkspaceSession {
                 location: .local(LocalWorkspaceReference(path: resolved.url.path))
             )
             navigationLadder = makeNavigationLadder(rootURL: resolved.url)
+            beginTerminalGroupLibrary(for: resolved.url)
+            if !restored.terminalGroupRestorationDiagnostics.isEmpty {
+                // Do not disclose a path, saved name, or malformed payload.
+                // This fixed bounded notice survives the first successful
+                // library list so a damaged sibling field remains visible.
+                terminalGroupRestorationError = "One saved Terminal Group could not be restored."
+                terminalGroupStoreError = terminalGroupRestorationError
+            }
             navigatorMode = restored.navigatorMode
             workspaceSearch.loadHistory(for: resolved.url)
             resetFileTreeState()
@@ -4224,15 +5132,21 @@ final class WorkspaceSession {
                 guard FileManager.default.fileExists(atPath: url.path) else { continue }
                 _ = trackNewDocument(url: url)
             }
-            restoreEditorLayout(restored.editorLayout, from: restored.rootPath, to: resolved.url)
+            await restoreTerminalGroupInstances(
+                restored.terminalGroupRestoration, rootURL: resolved.url)
+            restoreEditorLayout(
+                restored.editorLayout, terminalGroups: restored.terminalGroupRestoration,
+                from: restored.rootPath, to: resolved.url)
             if let selected = restored.selectedRelativePath,
                 let document = openDocuments.first(where: {
                     relativePath(for: $0.url) == selected
                 })
             {
                 select(document)
-            } else if let first = openDocuments.first {
+            } else if !hasAnyEditorTabs, let first = openDocuments.first {
                 select(first)
+            } else {
+                synchronizeSelectionFromLayout()
             }
             applyRestoredHibernationPlaceholders()
 
@@ -4242,11 +5156,72 @@ final class WorkspaceSession {
         }
     }
 
+    private func restoreTerminalGroupInstances(
+        _ restoration: TerminalGroupWorkspaceRestoration?, rootURL: URL
+    ) async {
+        guard let restoration else { return }
+        let key = TerminalGroupWorkspaceKey(standardizedRoot: rootURL)
+        let generation = terminalGroupWorkspaceGeneration
+        do {
+            let store = await resolvedTerminalGroupSavedLayoutStore()
+            let records = try await store.listSavedLayouts(for: key)
+            guard terminalGroupWorkspaceGeneration == generation,
+                self.rootURL.map({ TerminalGroupWorkspaceKey(standardizedRoot: $0) }) == key
+            else { return }
+            let savedIDs = Set(records.map(\.id))
+            for record in restoration.openGroups {
+                guard let savedLayoutID = record.savedLayoutID, savedIDs.contains(savedLayoutID)
+                else {
+                    continue
+                }
+                do {
+                    let decoded = try terminalGroupCodec(for: rootURL).restoreOpenInstance(record)
+                    _ = try terminal.insertInertSnapshot(decoded.snapshot)
+                } catch {
+                    // The sibling file tabs remain valid. A corrupt group is
+                    // intentionally dropped as one bounded restoration unit.
+                    terminalGroupRestorationError =
+                        "One saved Terminal Group could not be restored."
+                    terminalGroupStoreError = terminalGroupRestorationError
+                }
+            }
+        } catch {
+            guard terminalGroupWorkspaceGeneration == generation,
+                self.rootURL.map({ TerminalGroupWorkspaceKey(standardizedRoot: $0) }) == key
+            else { return }
+            terminalGroupStoreError = "Saved Terminal Groups could not be loaded."
+        }
+    }
+
+    private func terminalGroupCodec(for workspaceRoot: URL) -> TerminalGroupRestorationCodec {
+        let root = workspaceRoot.resolvingSymlinksInPath().standardizedFileURL
+        let rootPath = root.path
+        let approvedShellPaths = Set(availableTerminalShells.map(\.path))
+        return TerminalGroupRestorationCodec { profile in
+            let folder = root.appending(path: profile.startingFolder.rawValue)
+                .resolvingSymlinksInPath().standardizedFileURL
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory),
+                isDirectory.boolValue,
+                FileManager.default.isReadableFile(atPath: folder.path),
+                folder.path == rootPath || folder.path.hasPrefix(rootPath + "/")
+            else { return .missingFolder }
+            switch profile.shell {
+            case .preferredShell:
+                return approvedShellPaths.isEmpty ? .unapprovedShell : .available
+            case .approvedShellPath(let path):
+                return approvedShellPaths.contains(path) ? .available : .unapprovedShell
+            }
+        }
+    }
+
     private func persistWorkspaceState() {
         guard let rootURL else { return }
         let openPaths = openDocuments.map { relativePath(for: $0.url) }
         let selectedPath = selectedDocument.map { relativePath(for: $0.url) }
         let navigatorMode = navigatorMode
+        let terminalGroupRestoration = terminalGroupWorkspaceRestoration()
+        let restorableEditorLayout = editorLayoutForWorkspaceRestoration()
         restorationTask?.cancel()
         restorationTask = Task(name: "Persist workspace restoration") { [restorationStore] in
             do {
@@ -4259,7 +5234,8 @@ final class WorkspaceSession {
                         openRelativePaths: openPaths,
                         selectedRelativePath: selectedPath,
                         navigatorMode: navigatorMode,
-                        editorLayout: EditorLayoutRestoration(layout: editorLayout)
+                        editorLayout: EditorLayoutRestoration(layout: restorableEditorLayout),
+                        terminalGroupRestoration: terminalGroupRestoration
                     )
                 )
             } catch is CancellationError {
@@ -4268,6 +5244,58 @@ final class WorkspaceSession {
                 return
             }
         }
+    }
+
+    private func terminalGroupWorkspaceRestoration() -> TerminalGroupWorkspaceRestoration? {
+        let records: [TerminalGroupOpenTabRestorationRecord] = terminal.terminalGroups.compactMap {
+            snapshot in
+            guard snapshot.savedLayoutID != nil, presentedTerminalGroupIDs.contains(snapshot.id)
+            else {
+                return nil
+            }
+            let panes: [TerminalGroupOpenPaneRestorationRecord] = snapshot.panes.compactMap {
+                pane in
+                let kind: SavedTerminalPaneKind
+                switch pane.runtimeKind {
+                case .ordinaryShell: kind = .ordinaryShell
+                case .directAgentTerminal, .unavailableAgentTerminal:
+                    kind = .unavailableAgentTerminal
+                case .ensembleRole, .ensembleCoordinator, .unavailableEnsemble:
+                    kind = .unavailableEnsemble
+                }
+                return try? TerminalGroupOpenPaneRestorationRecord(
+                    id: pane.id, explicitUserName: pane.explicitUserName,
+                    themeColor: pane.themeColor, kind: kind,
+                    launchProfile: kind == .ordinaryShell ? pane.launchProfile : nil)
+            }
+            guard panes.count == snapshot.panes.count else { return nil }
+            return try? TerminalGroupOpenTabRestorationRecord(
+                groupID: snapshot.id, name: snapshot.name, root: snapshot.root,
+                focusedPaneID: snapshot.focusedPaneID, savedLayoutID: snapshot.savedLayoutID,
+                panes: panes)
+        }
+        return try? TerminalGroupWorkspaceRestoration(openGroups: records)
+    }
+
+    /// Filters a value copy only. Unsaved groups and every legacy live
+    /// terminal remain usable in this window but never enter the workspace
+    /// restoration payload.
+    private func editorLayoutForWorkspaceRestoration() -> EditorLayoutState {
+        var layout = editorLayout
+        for editorGroupID in layout.groupIDs {
+            for tab in layout.group(id: editorGroupID)?.tabs ?? [] {
+                let retain: Bool
+                switch tab.resource {
+                case .file: retain = true
+                case .terminalGroup(let groupID):
+                    retain = terminal.terminalGroup(groupID)?.savedLayoutID != nil
+                case .terminal, .restorable: retain = false
+                }
+                if !retain { _ = layout.closeTab(tab.id) }
+            }
+        }
+        layout.collapseEmptyGroups()
+        return layout
     }
 
     private func reconcileGitSelection() {
@@ -4338,6 +5366,16 @@ final class WorkspaceSession {
             terminal.sessions.first(where: { $0.id == sessionID })?.clearAttention()
             return
         }
+        if case .terminalGroup(let groupID) = selectedTab?.resource,
+            let paneID = terminal.terminalGroup(groupID)?.focusedPaneID
+        {
+            selectedDocumentID = nil
+            selectedTreePath = nil
+            terminal.selectedID = terminal.terminalController(for: paneID)?.id
+            terminal.terminalController(for: paneID)?.clearAttention()
+            terminalGroupFocusRequest &+= 1
+            return
+        }
         let document = selectedTab.flatMap(document(for:)) ?? fallback
         selectedDocumentID = document?.id
         selectedTreePath = document?.url.path
@@ -4345,6 +5383,7 @@ final class WorkspaceSession {
 
     private func restoreEditorLayout(
         _ restoration: EditorLayoutRestoration?,
+        terminalGroups: TerminalGroupWorkspaceRestoration? = nil,
         from oldRootPath: String,
         to newRootURL: URL
     ) {
@@ -4368,18 +5407,26 @@ final class WorkspaceSession {
         for groupID in layout.groupIDs {
             let tabs = layout.group(id: groupID)?.tabs ?? []
             for tab in tabs {
-                // `isRestorable` drops every non-file resource up front — in
-                // particular a persisted `.terminal` tab (its shell no
-                // longer exists after relaunch; issue #4/ADR 0004).
-                guard tab.resource.isRestorable,
-                    case .file(let savedURL) = tab.resource,
-                    let rebasedURL = rebase(savedURL, from: oldRootURL, to: newRootURL),
-                    openURLs.contains(rebasedURL.resolvingSymlinksInPath().standardizedFileURL)
-                else {
+                switch tab.resource.restorationClassification(terminalGroups: terminalGroups) {
+                case .file:
+                    guard case .file(let savedURL) = tab.resource,
+                        let rebasedURL = rebase(savedURL, from: oldRootURL, to: newRootURL),
+                        openURLs.contains(rebasedURL.resolvingSymlinksInPath().standardizedFileURL)
+                    else {
+                        _ = layout.closeTab(tab.id)
+                        continue
+                    }
+                    layout.updateResource(for: tab.id, to: .file(rebasedURL))
+                case .terminalGroupRecord(let terminalGroupID):
+                    // The envelope record alone is insufficient: only retain
+                    // the tab if its inert runtime snapshot was accepted.
+                    guard terminal.terminalGroup(terminalGroupID) != nil else {
+                        _ = layout.closeTab(tab.id)
+                        continue
+                    }
+                case .missingTerminalGroupRecord, .notRestorable:
                     _ = layout.closeTab(tab.id)
-                    continue
                 }
-                layout.updateResource(for: tab.id, to: .file(rebasedURL))
             }
         }
         layout.collapseEmptyGroups()

@@ -58,6 +58,11 @@ struct WorkspaceWindowView: View {
         .frame(minWidth: 720, minHeight: 480)
         .navigationTitle(session.windowTitle)
         .focusedSceneValue(\.workspaceSession, session)
+        .onDisappear {
+            // Window close and app termination share the session-owned,
+            // idempotent lifecycle funnel; deinit remains a fallback.
+            session.teardownTerminalGroups()
+        }
         .modifier(WorkspaceWindowPresentations(session: session))
     }
 
@@ -186,6 +191,17 @@ struct WorkspaceWindowView: View {
 private struct WorkspaceWindowPresentations: ViewModifier {
     @Bindable var session: WorkspaceSession
 
+    private var terminalGroupCloseBinding: Binding<Bool> {
+        Binding(
+            get: { session.pendingTerminalGroupClose != nil },
+            // SwiftUI writes false after a destructive dialog action. The
+            // model may intentionally enqueue a fresh stale-close request on
+            // the next MainActor turn, so only the explicit Cancel button
+            // owns cancellation.
+            set: { _ in }
+        )
+    }
+
     func body(content: Content) -> some View {
         content
             .fileImporter(
@@ -207,6 +223,22 @@ private struct WorkspaceWindowPresentations: ViewModifier {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(session.openFolderErrorMessage)
+            }
+            .confirmationDialog(
+                "Close Terminal Group?", isPresented: terminalGroupCloseBinding,
+                titleVisibility: .visible
+            ) {
+                Button("Close Terminal Group", role: .destructive) {
+                    session.confirmTerminalGroupClose()
+                }
+                Button("Cancel", role: .cancel) { session.cancelTerminalGroupClose() }
+            } message: {
+                let count = session.pendingTerminalGroupClose?.liveProcessCount ?? 0
+                Text(
+                    count == 1
+                        ? "This will stop 1 running terminal process."
+                        : "This will stop \(count) running terminal processes."
+                )
             }
             .sheet(isPresented: $session.isCommandPalettePresented) {
                 CommandPaletteView(session: session)
