@@ -228,7 +228,8 @@ const dives: Dive[] = [
     body: "The agent wrote four hundred lines. You need to change four. Rafu opens instantly beside your terminal — each repository in its own real window — and gets out of the way.",
     points: [
       "Quick open and workspace-wide find that feel immediate",
-      "An embedded terminal for the one command you still need to run",
+      "Terminal Groups: one named editor tab, split right or down when one command needs more room",
+      "Keyboard pane focus and saved layouts that restore without starting a process",
       "Tabs, splits, and scroll positions restored exactly where you left them",
     ],
     mock: <QuickOpenMock />,

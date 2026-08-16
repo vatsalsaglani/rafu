@@ -2,7 +2,7 @@
 
 - **Applies to:** Rafu's local launcher Unix-domain socket, framing, peer
   authentication, listener/client fd ownership, request routing, and fallback
-- **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-26
+- **Last verified:** Swift 6.3.3, Xcode 26.6, macOS 26.5.2 on 2026-08-17
 
 ## Rule or observed behavior
 
@@ -109,14 +109,15 @@ for another workspace from consuming it; explicit `reuseWindow` and
 is `/usr/bin/open -a <bundle> <folder>` (the containing folder for goto), so
 basic document-open behavior remains available.
 
-In the RafuApp target's Swift 6.2 default-`MainActor` mode, declaring
+In the RafuApp target's default-`MainActor` mode, declaring
 `LauncherIPCServer` as a custom `actor` gives it its own executor and is the
 explicit isolation boundary. Do not spell the type `nonisolated actor`: Swift
-6.2 applies that modifier to the synchronous actor initializer and rejects it
-as invalid. The same diagnostic can affect an actor with only an implicit
-initializer when it conforms to a `nonisolated protocol` in this target; keep
-that actor initializer explicit. `nonisolated` remains appropriate on the
-lifecycle wrappers and pure/static syscall helpers that do not touch actor
+applies that modifier to the synchronous actor initializer and rejects it as
+invalid. Apple Swift 6.3.3 can report the same diagnostic when a test actor's
+primary declaration conforms to an imported `nonisolated protocol`; an
+explicit initializer does not correct it. Keep the actor declaration plain and
+put that conformance in a separate extension. `nonisolated` remains appropriate
+on lifecycle wrappers and pure/static syscall helpers that do not touch actor
 state.
 
 ## Why it matters
@@ -170,9 +171,11 @@ an owner and a contender on one path, verifies directory `0700` and socket
 cleanup leaves the owner's socket present.
 
 The isolation spelling was verified directly by the compiler: `nonisolated
-actor LauncherIPCServer` produced “`nonisolated` on an actor's synchronous
-initializer is invalid”; the ordinary custom actor builds under strict Swift 6
-checking and keeps all mutable listener state actor-isolated.
+actor LauncherIPCServer` and a primary actor conformance to an imported
+`nonisolated protocol` produced “`nonisolated` on an actor's synchronous
+initializer is invalid.” The ordinary custom actor and separate conformance
+extension build under strict Swift 6 checking and keep all mutable state
+actor-isolated.
 
 Headless router tests cover exact and nonmatching roots, component boundaries,
 deepest-root goto, containing-folder goto, deterministic reuse, forced new

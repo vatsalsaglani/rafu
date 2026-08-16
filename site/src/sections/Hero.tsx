@@ -80,13 +80,13 @@ export function Hero() {
             className="mt-7 text-xs tracking-wide"
           >
             <Link
-              to="/docs/ensemble"
+              to="/docs/terminal"
               className="group inline-flex items-center gap-2 text-text-3 transition-colors duration-150 hover:text-text-2"
             >
               <span className="h-1 w-1 rounded-full" style={{ background: "var(--accent)" }} />
               <span>
-                Coming in the next beta — <span className="text-text-2">the Ensemble</span>: seven agent CLIs, one
-                window, your gate
+                Now on main — <span className="text-text-2">Terminal Groups</span>: named panes, explicit starts,
+                inert saved layouts
               </span>
               <span aria-hidden="true" className="transition-transform duration-150 group-hover:translate-x-0.5">
                 →

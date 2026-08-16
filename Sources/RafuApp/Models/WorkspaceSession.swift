@@ -2587,7 +2587,15 @@ final class WorkspaceSession {
     }
 
     func requestOpenFolder() {
+        guard !isOpenFolderImporterPresented else { return }
         isOpenFolderImporterPresented = true
+        let panel = WorkspaceFolderPicker.makePanel()
+        panel.begin { [weak self] response in
+            guard let self else { return }
+            isOpenFolderImporterPresented = false
+            guard response == .OK, let url = panel.url else { return }
+            openLocalWorkspace(at: url)
+        }
     }
 
     func openLocalWorkspace(at url: URL) {

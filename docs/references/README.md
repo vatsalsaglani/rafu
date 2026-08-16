@@ -13,6 +13,7 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`project-structure.md`](project-structure.md) | Adding targets, folders, resources, worktrees, or shared contracts |
 | [`build-and-run.md`](build-and-run.md) | Building, launching, debugging, verifying, or staging the app/CLI |
 | [`swiftui-appkit-boundary.md`](swiftui-appkit-boundary.md) | Changing scenes, per-window state, the editor bridge, commands, or native controls |
+| [`swiftui-file-importer-single-owner.md`](swiftui-file-importer-single-owner.md) | Adding a second file or directory picker to one SwiftUI window, or debugging an enabled picker action that changes state but presents no panel |
 | [`concurrency.md`](concurrency.md) | Adding actors, tasks, process I/O, cancellation, streams, or cross-actor models |
 | [`launcher-cli.md`](launcher-cli.md) | Changing CLI grammar, validation, exit codes, or command help |
 | [`cli-app-ipc.md`](cli-app-ipc.md) | Changing the CLI ↔ app Unix-domain socket protocol: framing/codec, same-user listener, request routing/window focus, goto selection, or the CLI connect/fallback flow |

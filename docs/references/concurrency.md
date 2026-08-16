@@ -1,7 +1,7 @@
 # Concurrency boundaries
 
 - **Applies to:** Observation state, filesystem work, process I/O, syntax, SSH, Git, AI, and tests
-- **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-12
+- **Last verified:** Swift 6.3.3, Xcode 26.6, macOS 26.5.2 on 2026-08-17
 
 ## Module defaults
 
@@ -56,6 +56,27 @@ The FSEvents C callback cannot capture state and is not actor-isolated. The veri
 ## Testing rules
 
 Use Swift Testing async test functions and await production APIs directly. Do not synchronize with arbitrary sleeps. When UI models require it, mark the focused test `@MainActor` rather than weakening production isolation.
+
+### Actor test fakes for an imported `nonisolated protocol`
+
+Apple Swift 6.3.3 rejects an actor whose primary declaration directly conforms
+to an imported `nonisolated protocol`: the protocol modifier is applied to the
+actor's synchronous initializer, where it is invalid. An explicit initializer
+does not correct the diagnostic. Keep the actor declaration plain and put the
+conformance in a separate extension instead:
+
+```swift
+actor SavedLayoutStoreFake {
+    // Isolated state and async witnesses.
+}
+
+extension SavedLayoutStoreFake: TerminalGroupSavedLayoutStoring {}
+```
+
+This keeps the actor's synthesized initializer valid and preserves strict
+checking for every async protocol witness. Do not use an `@preconcurrency`
+import for this case because it weakens checking for the complete imported
+module.
 
 ## Verification
 

@@ -204,21 +204,6 @@ private struct WorkspaceWindowPresentations: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .fileImporter(
-                isPresented: $session.isOpenFolderImporterPresented,
-                allowedContentTypes: [.folder],
-                allowsMultipleSelection: false
-            ) { result in
-                switch result {
-                case .success(let urls):
-                    guard let url = urls.first else {
-                        return
-                    }
-                    session.openLocalWorkspace(at: url)
-                case .failure(let error):
-                    session.reportOpenFolderError(error)
-                }
-            }
             .alert(session.openFolderErrorTitle, isPresented: $session.isOpenFolderErrorPresented) {
                 Button("OK", role: .cancel) {}
             } message: {
