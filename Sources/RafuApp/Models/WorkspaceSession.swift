@@ -1499,7 +1499,9 @@ final class WorkspaceSession {
             pane.launchProfile != nil, pane.startAvailability == .available
         else { return }
         let initialDirectory = rootURL.map { root in
-            root.appending(path: pane.launchProfile?.startingFolder.rawValue ?? "")
+            root.appending(
+                path: pane.launchProfile?.startingFolder.rawValue ?? "",
+                directoryHint: .isDirectory)
         }
         pendingTerminalPaneStartingFolderRequest = TerminalPaneStartingFolderRequest(
             id: paneID, initialDirectory: initialDirectory)
