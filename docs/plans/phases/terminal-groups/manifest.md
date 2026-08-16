@@ -17,7 +17,7 @@ flowchart LR
     M["TG-40<br/>Complete"]
     K["TG-41<br/>Complete"]
     A["TG-42<br/>Complete"]
-    Q["TG-90<br/>In progress"]
+    Q["TG-90<br/>Blocked"]
 
     D --> C
     C --> R
@@ -46,8 +46,8 @@ flowchart LR
 | [TG-30](TG-30-workspace-integration.md) | TG-20, TG-21, TG-22 | Terra | `terminal-groups/tg-30-workspace-integration` | Complete | `02bc5fca3dc61d311625ca08e82211aef86516ed` |
 | [TG-40](TG-40-manager-switcher.md) | TG-30 | Terra | `terminal-groups/tg-40-manager-switcher` | Complete | `ed1585b0c9318c4e1b338cd3d366aabefb1e9ba7` |
 | [TG-41](TG-41-commands-save-ui.md) | TG-30 | Terra | `terminal-groups/tg-41-commands-save-ui` | Complete | `59357fcd6155744d7adc13511028f470cb642b40` |
-| [TG-42](TG-42-agent-ensemble.md) | TG-30 | Terra | `terminal-groups/tg-42-agent-ensemble` | Complete | `a908e85b355182017c2951317a2994282dc23a0f` |
-| [TG-90](TG-90-integration-qa.md) | TG-40, TG-41, TG-42 | Terra | `terminal-groups/tg-90-integration-qa` | In progress | — |
+| [TG-42](TG-42-agent-ensemble.md) | TG-30 | Terra | `terminal-groups/tg-42-agent-ensemble` | Complete | `a908e853dfde6dd9c1d35c24c08172b338b1b96d` |
+| [TG-90](TG-90-integration-qa.md) | TG-40, TG-41, TG-42 | Terra | `terminal-groups/tg-90-integration-qa` | Blocked | — |
 
 `Approved SHA` is the final lane commit that the primary coordinator approved.
 TG-00 is on `main` through merge commit
@@ -70,7 +70,12 @@ are commits `5ae078a9439c5143ae5bacf6af0c874d0f9cfce0`,
 `6d6f842b427db7e960c50bfcfa37d8b0d0b476f5`, and
 `a46f485c2380145e29fdaccc058dc3cd453bdfea`.
 
+TG-90 has an unapproved blocked checkpoint at
+`112f0285f75cd557d9f83aa2bc0e3df46bb3539b`. It is not merged. Q5 manual and
+accessibility checks and Q6 final active-pane measurements remain open.
+
 `Ready` means that all dependencies are complete and the local branch exists.
 `In progress` means that the branch has an active isolated Worktree worker.
-`Blocked` means that one or more dependencies are not complete. The primary
-coordinator updates this file after each approved merge.
+`Blocked` means that a dependency or required external gate is not complete.
+The primary coordinator updates this file after each approved merge or blocker
+change.
