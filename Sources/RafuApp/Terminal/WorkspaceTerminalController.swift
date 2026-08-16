@@ -30,8 +30,30 @@ final class WorkspaceTerminalManager {
     private(set) var sessions: [WorkspaceTerminalController] = []
     var selectedID: UUID?
 
+    /// TG-20 is the one owner of Terminal Group metadata. Legacy callers
+    /// still create unassigned sessions through the adapters below until
+    /// TG-30/TG-42 move them to the aggregate launch API.
+    @ObservationIgnored
+    private var groupRuntime = TerminalGroupRuntime()
+    /// The tracked invalidation point for every immutable Terminal Group
+    /// projection. The mutable reducer remains private and unobservable.
+    private(set) var terminalGroupRevision: UInt64 = 0
+    @ObservationIgnored
+    private var capacityReservations:
+        [TerminalGroupCapacityReservationID: TerminalGroupCapacityReservationState] = [:]
+    @ObservationIgnored
+    private var capacityGeneration: UInt64 = 1
+
     @ObservationIgnored
     private var sessionCounter = 0
+    /// Headless construction seam for TG-20 transaction tests. Production
+    /// keeps this `nil` and uses the concrete lazy controller constructors.
+    @ObservationIgnored
+    var terminalGroupControllerFactory:
+        (
+            @MainActor (Int, TerminalGroupControllerInstantiation) throws ->
+                WorkspaceTerminalController
+        )?
     @ObservationIgnored
     private var parkCounter = 0
 
@@ -69,7 +91,345 @@ final class WorkspaceTerminalManager {
 
     var hasSessions: Bool { !sessions.isEmpty }
 
+    /// Immutable group projections. Reading these values never mounts a
+    /// SwiftTerm view or starts a child process.
+    var terminalGroups: [TerminalGroupSnapshot] {
+        _ = terminalGroupRevision
+        return groupRuntime.snapshots
+    }
+
+    var parkedTerminalGroupIDs: [TerminalGroupID] {
+        _ = terminalGroupRevision
+        return groupRuntime.parkedGroupIDs
+    }
+
+    var retainedTerminalPaneCount: Int {
+        _ = terminalGroupRevision
+        return groupRuntime.retainedPaneCount
+    }
+
+    func terminalGroup(_ id: TerminalGroupID) -> TerminalGroupSnapshot? {
+        _ = terminalGroupRevision
+        return groupRuntime.snapshot(groupID: id)
+    }
+
+    func terminalGroup(containing paneID: TerminalPaneID) -> TerminalGroupID? {
+        _ = terminalGroupRevision
+        return groupRuntime.groupID(containing: paneID)
+    }
+
+    func terminalGroupAndPane(containing sessionID: UUID) -> (TerminalGroupID, TerminalPaneID)? {
+        _ = terminalGroupRevision
+        return groupRuntime.groupAndPane(containing: sessionID)
+    }
+
+    func terminalController(for paneID: TerminalPaneID) -> WorkspaceTerminalController? {
+        guard let groupID = groupRuntime.groupID(containing: paneID),
+            let sessionID = groupRuntime.snapshot(groupID: groupID)?.panes.first(where: {
+                $0.id == paneID
+            })?.sessionID
+        else { return nil }
+        return sessions.first { $0.id == sessionID }
+    }
+
+    func terminalController(sessionID: UUID) -> WorkspaceTerminalController? {
+        sessions.first { $0.id == sessionID }
+    }
+
+    /// The sole public group-mutation entry point. The runtime is value-only:
+    /// it cannot create a controller or start a process as a side effect.
     @discardableResult
+    func perform(_ command: TerminalGroupCommand) throws -> TerminalGroupEffect {
+        if case .prepareClose = command {
+            return .requestCloseConfirmation(try freshCloseToken(for: command))
+        }
+        if case .finalizeClose(let token) = command {
+            // Validate and reduce a copy before a shutdown can happen. A
+            // stale token therefore has zero controller or membership effect.
+            let freshToken = try freshCloseToken(for: .prepareClose(token.target))
+            guard freshToken == token else {
+                throw TerminalGroupValidationError.staleCloseToken
+            }
+            var finalizedRuntime = groupRuntime
+            let effect = try finalizedRuntime.perform(.finalizeClose(freshToken))
+            closeGroupedControllers(sessionIDs: freshToken.affectedSessionIDs)
+            groupRuntime = finalizedRuntime
+            noteTerminalGroupMutation()
+            return effect
+        }
+        switch command {
+        case .startPane, .restartExitedShellPane, .startAllRestartablePanes:
+            // These commands require a controller-binding transaction. Do
+            // not perform a capacity check here and then ask the pure reducer
+            // to reject after observable work has happened.
+            throw TerminalGroupValidationError.unsupportedPaneStart
+        default:
+            break
+        }
+        let effect = try groupRuntime.perform(command)
+        noteTerminalGroupMutation()
+        return effect
+    }
+
+    /// Opens an inert saved-layout instance. It remaps every saved pane and
+    /// split identity and creates no controller, view, process, reservation,
+    /// or Process Resources entry.
+    @discardableResult
+    func insertStoppedSavedGroup(_ record: SavedTerminalGroupRecord) throws -> TerminalGroupSnapshot
+    {
+        let groupID = try groupRuntime.insertStoppedSavedGroup(record)
+        noteTerminalGroupMutation()
+        guard let group = groupRuntime.snapshot(groupID: groupID) else {
+            throw TerminalGroupValidationError.groupNotFound(groupID)
+        }
+        return group
+    }
+
+    /// TG-22 supplies an already-validated decoded instance. Preserve its
+    /// runtime identities and unavailable-start state without re-keying or
+    /// constructing a controller.
+    @discardableResult
+    func insertInertSnapshot(_ snapshot: TerminalGroupSnapshot) throws -> TerminalGroupSnapshot {
+        let inserted = try groupRuntime.insertInertSnapshot(snapshot)
+        noteTerminalGroupMutation()
+        return inserted
+    }
+
+    /// Applies UI rename rules before the frozen command form is available:
+    /// whitespace is trimmed and an empty entry restores a bounded default.
+    func renameTerminalGroup(_ groupID: TerminalGroupID, rawName: String) throws {
+        try groupRuntime.renameGroup(groupID, rawName: rawName)
+        noteTerminalGroupMutation()
+    }
+
+    /// Creates a one-pane live group as one all-or-nothing transaction. The
+    /// controller is lazy: no SwiftTerm view or child process is created here.
+    @discardableResult
+    func createLiveGroup(
+        name: TerminalGroupName? = nil,
+        instantiation: TerminalGroupControllerInstantiation,
+        reservation: TerminalGroupCapacityReservation? = nil
+    ) throws -> TerminalGroupSnapshot {
+        var createdCandidates: [WorkspaceTerminalController] = []
+        do {
+            try validatePreflight(requested: 1, consuming: reservation)
+            try validate(
+                instantiation: instantiation, forStoppedPane: nil, reservation: reservation)
+            let created = try makeControllerCandidate(instantiation, index: sessionCounter + 1)
+            try requireCandidateControllerID(created.id)
+            createdCandidates.append(created)
+            let pane = try livePane(for: instantiation, sessionID: created.id)
+            var proposedRuntime = groupRuntime
+            let groupID = try proposedRuntime.createLiveGroup(
+                name: name, sessionID: created.id, pane: pane)
+            guard let group = proposedRuntime.snapshot(groupID: groupID) else {
+                throw TerminalGroupValidationError.groupNotFound(groupID)
+            }
+
+            // No fallible work follows this point. The reservation is already
+            // validated, so consuming it is a dictionary removal only.
+            acceptControllerCandidate(created, index: sessionCounter + 1)
+            groupRuntime = proposedRuntime
+            sessions.append(created)
+            consumeReservationAfterCommit(reservation)
+            selectedID = created.id
+            noteTerminalOpened(created)
+            noteTerminalGroupMutation()
+            return group
+        } catch {
+            shutdownCandidatesAfterFailure(createdCandidates)
+            cancelReservationAfterFailure(reservation)
+            throw error
+        }
+    }
+
+    /// Starts one existing ordinary-shell pane and atomically binds the lazy
+    /// controller to it. A classified reservation can be consumed only here,
+    /// after the pane/session membership has committed.
+    @discardableResult
+    func startPane(
+        _ paneID: TerminalPaneID,
+        instantiation: TerminalGroupControllerInstantiation,
+        reservation: TerminalGroupCapacityReservation? = nil
+    ) throws -> WorkspaceTerminalController {
+        var createdCandidates: [WorkspaceTerminalController] = []
+        do {
+            try validatePreflight(requested: 1, consuming: reservation)
+            try validate(
+                instantiation: instantiation, forStoppedPane: paneID, reservation: reservation)
+            let created = try makeControllerCandidate(instantiation, index: sessionCounter + 1)
+            try requireCandidateControllerID(created.id)
+            createdCandidates.append(created)
+            var proposedRuntime = groupRuntime
+            try proposedRuntime.bindLazyController(sessionID: created.id, to: paneID)
+
+            acceptControllerCandidate(created, index: sessionCounter + 1)
+            groupRuntime = proposedRuntime
+            sessions.append(created)
+            consumeReservationAfterCommit(reservation)
+            selectedID = created.id
+            noteTerminalOpened(created)
+            noteTerminalGroupMutation()
+            return created
+        } catch {
+            shutdownCandidatesAfterFailure(createdCandidates)
+            cancelReservationAfterFailure(reservation)
+            throw error
+        }
+    }
+
+    /// Splits a focused pane and binds its new lazy controller in one
+    /// transaction. A profile or construction failure restores the exact
+    /// prior tree, membership, session counter, and reservation state.
+    @discardableResult
+    func splitFocusedPane(
+        in groupID: TerminalGroupID,
+        placement: TerminalGroupSplitPlacement,
+        instantiation: TerminalGroupControllerInstantiation,
+        reservation: TerminalGroupCapacityReservation? = nil
+    ) throws -> WorkspaceTerminalController {
+        var createdCandidates: [WorkspaceTerminalController] = []
+        do {
+            try validatePreflight(requested: 1, consuming: reservation)
+            var proposedRuntime = groupRuntime
+            _ = try proposedRuntime.perform(
+                .splitFocusedPane(groupID: groupID, placement: placement))
+            guard let paneID = proposedRuntime.snapshot(groupID: groupID)?.focusedPaneID else {
+                throw TerminalGroupValidationError.groupNotFound(groupID)
+            }
+            try validate(
+                instantiation: instantiation, forStoppedPane: paneID, reservation: reservation,
+                runtime: proposedRuntime)
+            let created = try makeControllerCandidate(instantiation, index: sessionCounter + 1)
+            try requireCandidateControllerID(created.id)
+            createdCandidates.append(created)
+            try proposedRuntime.bindLazyController(sessionID: created.id, to: paneID)
+
+            acceptControllerCandidate(created, index: sessionCounter + 1)
+            groupRuntime = proposedRuntime
+            sessions.append(created)
+            consumeReservationAfterCommit(reservation)
+            selectedID = created.id
+            noteTerminalOpened(created)
+            noteTerminalGroupMutation()
+            return created
+        } catch {
+            shutdownCandidatesAfterFailure(createdCandidates)
+            cancelReservationAfterFailure(reservation)
+            throw error
+        }
+    }
+
+    /// Restarts an exited ordinary-shell pane with its retained controller and
+    /// session UUID. It never creates an unassigned replacement controller.
+    func restartExitedPane(_ paneID: TerminalPaneID) throws {
+        guard let controller = terminalController(for: paneID) else {
+            throw TerminalGroupValidationError.paneNotFound(paneID)
+        }
+        try preflightAdditionalLiveCapacity(1)
+        var proposedRuntime = groupRuntime
+        try proposedRuntime.restartBoundController(sessionID: controller.id, paneID: paneID)
+        controller.restart()
+        groupRuntime = proposedRuntime
+        selectedID = controller.id
+        noteTerminalGroupMutation()
+    }
+
+    /// Starts all explicitly requested restartable panes only after one full
+    /// preflight. Callers supply instantiations for stopped panes only;
+    /// exited panes retain and restart their existing controller identity.
+    func startAllRestartablePanes(
+        in groupID: TerminalGroupID,
+        instantiations: [TerminalPaneID: TerminalGroupControllerInstantiation],
+        reservation: TerminalGroupCapacityReservation? = nil
+    ) throws -> [WorkspaceTerminalController] {
+        var createdCandidates: [WorkspaceTerminalController] = []
+        do {
+            guard let group = groupRuntime.snapshot(groupID: groupID) else {
+                throw TerminalGroupValidationError.groupNotFound(groupID)
+            }
+            let restartable = group.panes.filter {
+                $0.startAvailability == .available
+                    && ($0.status == .stopped || $0.status == .exited)
+            }
+            let stopped = restartable.filter { $0.status == .stopped }
+            guard Set(instantiations.keys) == Set(stopped.map(\.id)) else {
+                throw TerminalGroupValidationError.unsupportedPaneStart
+            }
+            try validatePreflight(requested: restartable.count, consuming: reservation)
+            for pane in stopped {
+                guard let instantiation = instantiations[pane.id] else {
+                    throw TerminalGroupValidationError.paneNotFound(pane.id)
+                }
+                try validate(
+                    instantiation: instantiation, forStoppedPane: pane.id, reservation: reservation)
+            }
+            let sessionCounterBeforeTransaction = sessionCounter
+            var proposedRuntime = groupRuntime
+            var controllersInStablePaneOrder: [WorkspaceTerminalController] = []
+            var candidateIDs: Set<UUID> = []
+            for pane in restartable {
+                switch pane.status {
+                case .exited:
+                    guard let controller = terminalController(for: pane.id) else {
+                        throw TerminalGroupValidationError.paneNotFound(pane.id)
+                    }
+                    try proposedRuntime.restartBoundController(
+                        sessionID: controller.id, paneID: pane.id)
+                    controllersInStablePaneOrder.append(controller)
+                case .stopped:
+                    guard let instantiation = instantiations[pane.id] else {
+                        throw TerminalGroupValidationError.paneNotFound(pane.id)
+                    }
+                    let controller = try makeControllerCandidate(
+                        instantiation,
+                        index: sessionCounterBeforeTransaction + createdCandidates.count + 1
+                    )
+                    try requireCandidateControllerID(controller.id)
+                    guard !candidateIDs.contains(controller.id) else {
+                        throw TerminalGroupValidationError.unsupportedPaneStart
+                    }
+                    candidateIDs.insert(controller.id)
+                    createdCandidates.append(controller)
+                    try proposedRuntime.bindLazyController(sessionID: controller.id, to: pane.id)
+                    controllersInStablePaneOrder.append(controller)
+                case .idle, .live, .unavailable:
+                    throw TerminalGroupValidationError.unsupportedPaneStart
+                }
+            }
+
+            // Restart is non-throwing and occurs only after all possible
+            // validation, construction, and binding failures have passed.
+            for (pane, controller) in zip(restartable, controllersInStablePaneOrder)
+            where pane.status == .exited {
+                controller.restart()
+            }
+            for (offset, controller) in createdCandidates.enumerated() {
+                acceptControllerCandidate(
+                    controller, index: sessionCounterBeforeTransaction + offset + 1)
+            }
+            groupRuntime = proposedRuntime
+            sessions.append(contentsOf: createdCandidates)
+            consumeReservationAfterCommit(reservation)
+            if let focusedPaneID = proposedRuntime.snapshot(groupID: groupID)?.focusedPaneID,
+                let focusedController = terminalController(for: focusedPaneID)
+            {
+                selectedID = focusedController.id
+            }
+            for controller in createdCandidates { noteTerminalOpened(controller) }
+            noteTerminalGroupMutation()
+            return controllersInStablePaneOrder
+        } catch {
+            shutdownCandidatesAfterFailure(createdCandidates)
+            cancelReservationAfterFailure(reservation)
+            throw error
+        }
+    }
+
+    @discardableResult
+    /// Compatibility adapter. TG-30 migrates ordinary shell callers to the
+    /// throwing aggregate launch path; it deliberately keeps its historical,
+    /// nonthrowing capacity behaviour during this isolated TG-20 lane.
     func newSession(startingDirectory: String, shell: TerminalShell) -> WorkspaceTerminalController
     {
         sessionCounter += 1
@@ -78,15 +438,7 @@ final class WorkspaceTerminalManager {
             startingDirectory: startingDirectory,
             shell: shell
         )
-        session.onExit = { [weak self] id, exitCode in
-            self?.sessionDidExit?(id, exitCode)
-        }
-        session.onBell = { [weak self] id in
-            self?.sessionDidBell?(id)
-        }
-        session.onAttentionCleared = { [weak self] id in
-            self?.sessionDidClearAttention?(id)
-        }
+        installCallbacks(on: session)
         sessions.append(session)
         selectedID = session.id
         MemoryTimeline.shared.note(
@@ -103,18 +455,12 @@ final class WorkspaceTerminalManager {
     /// (exit/bell/attention wiring, `ProcessResourceRegistry` registration)
     /// is shared unchanged. Exercised by tests only until C1.
     @discardableResult
+    /// Compatibility adapter. TG-42 migrates classified Agent/Ensemble
+    /// callers to the aggregate reservation and launch path.
     func newSession(spec: TerminalProcessSpec) -> WorkspaceTerminalController {
         sessionCounter += 1
         let session = WorkspaceTerminalController(index: sessionCounter, spec: spec)
-        session.onExit = { [weak self] id, exitCode in
-            self?.sessionDidExit?(id, exitCode)
-        }
-        session.onBell = { [weak self] id in
-            self?.sessionDidBell?(id)
-        }
-        session.onAttentionCleared = { [weak self] id in
-            self?.sessionDidClearAttention?(id)
-        }
+        installCallbacks(on: session)
         sessions.append(session)
         selectedID = session.id
         MemoryTimeline.shared.note(
@@ -126,6 +472,8 @@ final class WorkspaceTerminalManager {
     /// Bumps this session to most-recently-parked, driving
     /// `WorkspaceSession.parkedTerminalSessions`'s MRU ordering. A no-op for
     /// an unknown id.
+    /// Compatibility adapter. TG-30/TG-42 move park identity from a session
+    /// to a Terminal Group. It remains a no-op for unknown legacy sessions.
     func notePark(_ id: UUID) {
         guard let session = sessions.first(where: { $0.id == id }) else { return }
         parkCounter += 1
@@ -158,7 +506,312 @@ final class WorkspaceTerminalManager {
         selectedID = nil
         sessionCounter = 0
         parkCounter = 0
+        groupRuntime.shutdown()
+        noteTerminalGroupMutation()
+        capacityReservations = [:]
+        capacityGeneration &+= 1
+        if capacityGeneration == 0 { capacityGeneration = 1 }
     }
+
+    /// Keeps all session construction paths on the same callback contract.
+    /// The closures are installed once, before a controller becomes visible
+    /// to manager queries or can mount its lazy SwiftTerm view.
+    private func installCallbacks(on session: WorkspaceTerminalController) {
+        session.onExit = { [weak self] id, exitCode in
+            if self?.groupRuntime.markSessionExited(id) == true {
+                self?.noteTerminalGroupMutation()
+            }
+            self?.sessionDidExit?(id, exitCode)
+        }
+        session.onBell = { [weak self] id in
+            self?.sessionDidBell?(id)
+        }
+        session.onAttentionCleared = { [weak self] id in
+            self?.sessionDidClearAttention?(id)
+        }
+    }
+
+    private func noteTerminalGroupMutation() {
+        terminalGroupRevision &+= 1
+        if terminalGroupRevision == 0 { terminalGroupRevision = 1 }
+    }
+
+    private func noteTerminalOpened(_ controller: WorkspaceTerminalController) {
+        MemoryTimeline.shared.note(
+            .terminalOpened, detail: controller.displayName,
+            source: memoryTimelineSource?() ?? "")
+    }
+
+    private func freshCloseToken(for command: TerminalGroupCommand) throws
+        -> TerminalGroupCloseToken
+    {
+        let effect = try groupRuntime.perform(command)
+        guard case .requestCloseConfirmation(let runtimeToken) = effect else {
+            throw TerminalGroupValidationError.staleCloseToken
+        }
+        let actualLiveProcesses = runtimeToken.affectedSessionIDs.reduce(into: 0) { count, id in
+            if terminalController(sessionID: id)?.hasLiveProcess == true { count += 1 }
+        }
+        guard
+            let token = TerminalGroupCloseToken(
+                target: runtimeToken.target,
+                affectedSessionIDs: runtimeToken.affectedSessionIDs,
+                liveProcessCount: actualLiveProcesses, generation: runtimeToken.generation)
+        else { throw TerminalGroupValidationError.staleCloseToken }
+        return token
+    }
+
+    private func requireCandidateControllerID(
+        _ sessionID: UUID
+    ) throws {
+        guard !sessions.contains(where: { $0.id == sessionID }) else {
+            throw TerminalGroupValidationError.unsupportedPaneStart
+        }
+    }
+
+    /// Candidates become manager-owned for rollback only after they pass the
+    /// existing-session identity check. A set protects an injected duplicate
+    /// from repeated shutdown while preserving an existing legacy controller.
+    private func shutdownCandidatesAfterFailure(_ candidates: [WorkspaceTerminalController]) {
+        var closedIDs: Set<UUID> = []
+        for candidate in candidates where closedIDs.insert(candidate.id).inserted {
+            candidate.shutdown()
+        }
+    }
+
+    /// Final close owns controller shutdown after the caller has completed
+    /// its role/coordinator cleanup and the fresh token has passed reducer
+    /// validation. The IDs arrive in stable pane-tree order.
+    private func closeGroupedControllers(sessionIDs: [UUID]) {
+        let groupedControllers = sessionIDs.compactMap { sessionID in
+            sessions.first { $0.id == sessionID }
+        }
+        // The runtime has only been validated on a private copy. Keep its
+        // membership visible while every controller receives shutdown, then
+        // remove both memberships as one synchronous commit.
+        for controller in groupedControllers {
+            controller.shutdown()
+        }
+        for controller in groupedControllers {
+            guard let index = sessions.firstIndex(where: { $0.id == controller.id }) else {
+                continue
+            }
+            sessions.remove(at: index)
+            MemoryTimeline.shared.note(
+                .terminalClosed, detail: controller.displayName,
+                source: memoryTimelineSource?() ?? "")
+        }
+        if let selectedID, !sessions.contains(where: { $0.id == selectedID }) {
+            self.selectedID = sessions.last?.id
+        }
+    }
+
+    private func makeControllerCandidate(
+        _ instantiation: TerminalGroupControllerInstantiation,
+        index: Int
+    ) throws -> WorkspaceTerminalController {
+        let controller: WorkspaceTerminalController
+        if let terminalGroupControllerFactory {
+            controller = try terminalGroupControllerFactory(index, instantiation)
+        } else {
+            switch instantiation {
+            case .ordinaryShell(let startingDirectory, let shell, _):
+                controller = WorkspaceTerminalController(
+                    index: index, startingDirectory: startingDirectory, shell: shell)
+            case .process(let spec, _):
+                controller = WorkspaceTerminalController(index: index, spec: spec)
+            }
+        }
+        return controller
+    }
+
+    /// Candidate construction is side-effect-free for manager state. Only an
+    /// accepted unique candidate advances numbering or gains manager hooks.
+    private func acceptControllerCandidate(_ controller: WorkspaceTerminalController, index: Int) {
+        precondition(sessionCounter + 1 == index)
+        precondition(!sessions.contains(where: { $0.id == controller.id }))
+        sessionCounter = index
+        installCallbacks(on: controller)
+    }
+
+    private func livePane(
+        for instantiation: TerminalGroupControllerInstantiation,
+        sessionID: UUID
+    ) throws -> TerminalPaneSnapshot {
+        switch instantiation {
+        case .ordinaryShell(_, _, let profile):
+            return try TerminalPaneSnapshot(
+                id: TerminalPaneID(), sessionID: sessionID, explicitUserName: nil,
+                reportedTitle: nil, runtimeKind: .ordinaryShell, themeColor: nil,
+                status: .live, launchProfile: profile, startAvailability: .available)
+        case .process(_, let kind):
+            return try TerminalPaneSnapshot(
+                id: TerminalPaneID(), sessionID: sessionID, explicitUserName: nil,
+                reportedTitle: nil, runtimeKind: kind, themeColor: nil,
+                status: .live, launchProfile: nil, startAvailability: .notRestartable)
+        }
+    }
+
+    private func validatePreflight(
+        requested: Int,
+        consuming reservation: TerminalGroupCapacityReservation?
+    ) throws {
+        guard requested >= 0 else {
+            throw TerminalGroupCapacityError.invalidReservationCount(requested)
+        }
+        let reservedToConsume: Int
+        if let reservation {
+            guard reservation.generation == capacityGeneration,
+                capacityReservations[reservation.id] == .reserved(reservation),
+                reservation.reservedLiveSessionCount == requested
+            else { throw TerminalGroupCapacityError.staleReservation(reservation.id) }
+            reservedToConsume = reservation.reservedLiveSessionCount
+        } else {
+            reservedToConsume = 0
+        }
+        let legacyLive = ungroupedLiveSessionCount
+        let allReserved = reservedLiveSessionCount
+        let current = legacyLive + groupRuntime.liveSessionCount + allReserved - reservedToConsume
+        guard current + requested <= TerminalGroupSnapshot.maximumPanesPerGroup else {
+            throw TerminalGroupCapacityError.liveSessionLimitExceeded(
+                current: current, requested: requested)
+        }
+    }
+
+    private func consumeReservationAfterCommit(_ reservation: TerminalGroupCapacityReservation?) {
+        guard let reservation else { return }
+        // `validatePreflight` has proved ownership, generation, and count
+        // before any state changed. This must not throw after a controller is
+        // visible, or it would create a partial insertion transaction.
+        precondition(reservation.generation == capacityGeneration)
+        precondition(capacityReservations[reservation.id] == .reserved(reservation))
+        capacityReservations[reservation.id] = .committed(reservation)
+    }
+
+    private func cancelReservationAfterFailure(_ reservation: TerminalGroupCapacityReservation?) {
+        guard let reservation, reservation.generation == capacityGeneration,
+            capacityReservations[reservation.id] == .reserved(reservation)
+        else { return }
+        capacityReservations[reservation.id] = nil
+    }
+
+    private var ungroupedLiveSessionCount: Int {
+        sessions.filter { session in
+            guard groupRuntime.groupAndPane(containing: session.id) == nil else { return false }
+            return switch session.status {
+            case .idle, .running, .bell: true
+            case .exited: false
+            }
+        }.count
+    }
+
+    private func validate(
+        instantiation: TerminalGroupControllerInstantiation,
+        forStoppedPane paneID: TerminalPaneID?,
+        reservation: TerminalGroupCapacityReservation?,
+        runtime: TerminalGroupRuntime? = nil
+    ) throws {
+        switch instantiation {
+        case .ordinaryShell(_, _, let profile):
+            guard reservation == nil else {
+                throw TerminalGroupValidationError.unsupportedPaneStart
+            }
+            guard let paneID else { return }
+            let inspectedRuntime = runtime ?? groupRuntime
+            guard let groupID = inspectedRuntime.groupID(containing: paneID),
+                let pane = inspectedRuntime.snapshot(groupID: groupID)?.panes.first(where: {
+                    $0.id == paneID
+                }),
+                pane.runtimeKind == .ordinaryShell,
+                pane.launchProfile == profile,
+                pane.status == .stopped || pane.status == .exited
+            else { throw TerminalGroupValidationError.unsupportedPaneStart }
+        case .process(_, let kind):
+            guard reservation != nil else {
+                throw TerminalGroupValidationError.unsupportedPaneStart
+            }
+            switch kind {
+            case .directAgentTerminal, .ensembleRole, .ensembleCoordinator:
+                break
+            case .ordinaryShell, .unavailableAgentTerminal, .unavailableEnsemble:
+                throw TerminalGroupValidationError.unsupportedPaneStart
+            }
+            guard paneID == nil else { throw TerminalGroupValidationError.unsupportedPaneStart }
+        }
+    }
+}
+
+extension WorkspaceTerminalManager: TerminalGroupCapacityReserving {
+    func reserveLiveSessionCapacity(
+        _ requestedLiveSessionCount: Int
+    ) throws -> TerminalGroupCapacityReservation {
+        guard requestedLiveSessionCount > 0 else {
+            throw TerminalGroupCapacityError.invalidReservationCount(requestedLiveSessionCount)
+        }
+        let committed = ungroupedLiveSessionCount + groupRuntime.liveSessionCount
+        let reserved = reservedLiveSessionCount
+        guard
+            committed + reserved + requestedLiveSessionCount
+                <= TerminalGroupSnapshot.maximumPanesPerGroup
+        else {
+            throw TerminalGroupCapacityError.liveSessionLimitExceeded(
+                current: committed + reserved, requested: requestedLiveSessionCount)
+        }
+        guard
+            let reservation = TerminalGroupCapacityReservation(
+                generation: capacityGeneration, reservedLiveSessionCount: requestedLiveSessionCount)
+        else { throw TerminalGroupCapacityError.invalidReservationCount(requestedLiveSessionCount) }
+        capacityReservations[reservation.id] = .reserved(reservation)
+        return reservation
+    }
+
+    func consumeLiveSessionCapacity(_ reservation: TerminalGroupCapacityReservation) throws {
+        // A standalone consume cannot release a reserved slot. Aggregate
+        // insertion first marks it committed after controller/pane membership
+        // exists. This acknowledgement then succeeds exactly once without
+        // changing the already committed live-slot count.
+        guard reservation.generation == capacityGeneration,
+            capacityReservations[reservation.id] == .committed(reservation)
+        else { throw TerminalGroupCapacityError.staleReservation(reservation.id) }
+        capacityReservations[reservation.id] = nil
+    }
+
+    func cancelLiveSessionCapacity(_ reservation: TerminalGroupCapacityReservation) throws {
+        try removeReservation(reservation)
+    }
+
+    private func removeReservation(_ reservation: TerminalGroupCapacityReservation) throws {
+        guard reservation.generation == capacityGeneration,
+            capacityReservations[reservation.id] == .reserved(reservation)
+        else { throw TerminalGroupCapacityError.staleReservation(reservation.id) }
+        capacityReservations[reservation.id] = nil
+    }
+
+    private func preflightAdditionalLiveCapacity(_ requested: Int) throws {
+        guard requested >= 0 else {
+            throw TerminalGroupCapacityError.invalidReservationCount(requested)
+        }
+        let legacyLive = ungroupedLiveSessionCount
+        let reserved = reservedLiveSessionCount
+        let current = legacyLive + groupRuntime.liveSessionCount + reserved
+        guard current + requested <= TerminalGroupSnapshot.maximumPanesPerGroup else {
+            throw TerminalGroupCapacityError.liveSessionLimitExceeded(
+                current: current, requested: requested)
+        }
+    }
+
+    private var reservedLiveSessionCount: Int {
+        capacityReservations.values.reduce(into: 0) { count, state in
+            if case .reserved(let reservation) = state {
+                count += reservation.reservedLiveSessionCount
+            }
+        }
+    }
+}
+
+private enum TerminalGroupCapacityReservationState: Equatable {
+    case reserved(TerminalGroupCapacityReservation)
+    case committed(TerminalGroupCapacityReservation)
 }
 
 /// One terminal session: a lazily spawned login shell plus its SwiftTerm
@@ -285,6 +938,13 @@ final class WorkspaceTerminalController: Identifiable {
     var onAttentionCleared: (@MainActor (UUID) -> Void)?
 
     var isRunning: Bool { status == .running }
+
+    var hasLiveProcess: Bool {
+        switch status {
+        case .running, .bell: true
+        case .idle, .exited: false
+        }
+    }
 
     var shellDisplayName: String { shell.basename }
 
