@@ -298,6 +298,7 @@ struct CommandPaletteView: View {
             )
         }
         .buttonStyle(.plain)
+        .disabled(!row.isEnabled)
     }
 
     private var paletteFooterHints: some View {
@@ -512,6 +513,7 @@ struct CommandPaletteView: View {
                 iconTint: nil,
                 title: command.title,
                 detail: command.detail,
+                isEnabled: command.isEnabled,
                 action: command.action
             )
         }
@@ -679,6 +681,193 @@ struct CommandPaletteView: View {
             ) {
                 dismiss()
                 session.showResources()
+            },
+        ]
+
+        let terminalGroupID = session.selectedTerminalGroupID
+        func availability(_ action: WorkspaceSession.TerminalGroupPresentationAction)
+            -> WorkspaceSession.TerminalGroupPresentationAvailability
+        { session.terminalGroupPresentationAvailability(action) }
+        let contextualAction: WorkspaceSession.TerminalGroupPresentationAction =
+            terminalGroupID == nil ? .newGroup : .splitRight
+        commands += [
+            .init(
+                id: "terminal-group.toggle", title: "Toggle Terminal Group",
+                detail: availability(.toggle).reason ?? "⌃`", symbolName: "terminal",
+                keywords: ["terminal", "group", "toggle"],
+                isEnabled: availability(.toggle).isEnabled
+            ) {
+                guard availability(.toggle).isEnabled else { return }
+                dismiss()
+                session.toggleTerminal()
+            },
+            .init(
+                id: "terminal-group.focus-left", title: "Focus Terminal Pane Left",
+                detail: availability(.focus(.left)).reason ?? "⌃⌘←", symbolName: "arrow.left",
+                keywords: ["terminal", "pane", "focus", "left"],
+                isEnabled: availability(.focus(.left)).isEnabled
+            ) {
+                guard availability(.focus(.left)).isEnabled else { return }
+                dismiss()
+                session.focusTerminalPane(.left)
+            },
+            .init(
+                id: "terminal-group.focus-right", title: "Focus Terminal Pane Right",
+                detail: availability(.focus(.right)).reason ?? "⌃⌘→", symbolName: "arrow.right",
+                keywords: ["terminal", "pane", "focus", "right"],
+                isEnabled: availability(.focus(.right)).isEnabled
+            ) {
+                guard availability(.focus(.right)).isEnabled else { return }
+                dismiss()
+                session.focusTerminalPane(.right)
+            },
+            .init(
+                id: "terminal-group.focus-up", title: "Focus Terminal Pane Up",
+                detail: availability(.focus(.up)).reason ?? "⌃⌘↑", symbolName: "arrow.up",
+                keywords: ["terminal", "pane", "focus", "up"],
+                isEnabled: availability(.focus(.up)).isEnabled
+            ) {
+                guard availability(.focus(.up)).isEnabled else { return }
+                dismiss()
+                session.focusTerminalPane(.up)
+            },
+            .init(
+                id: "terminal-group.focus-down", title: "Focus Terminal Pane Down",
+                detail: availability(.focus(.down)).reason ?? "⌃⌘↓", symbolName: "arrow.down",
+                keywords: ["terminal", "pane", "focus", "down"],
+                isEnabled: availability(.focus(.down)).isEnabled
+            ) {
+                guard availability(.focus(.down)).isEnabled else { return }
+                dismiss()
+                session.focusTerminalPane(.down)
+            },
+            .init(
+                id: "terminal-group.contextual-new",
+                title: terminalGroupID == nil ? "New Terminal Group" : "Split Terminal Right",
+                detail: availability(contextualAction).reason ?? "⌘T", symbolName: "terminal",
+                keywords: ["terminal", "group", "split"],
+                isEnabled: availability(contextualAction).isEnabled
+            ) {
+                guard availability(contextualAction).isEnabled else { return }
+                dismiss()
+                if terminalGroupID == nil {
+                    session.newTerminalGroup()
+                } else {
+                    session.splitFocusedTerminalPane(.right)
+                }
+            },
+            .init(
+                id: "terminal-group.new", title: "New Terminal Group",
+                detail: availability(.newGroup).reason ?? "⌃⇧`",
+                symbolName: "plus.rectangle.on.rectangle", keywords: ["terminal", "group", "new"],
+                isEnabled: availability(.newGroup).isEnabled
+            ) {
+                guard availability(.newGroup).isEnabled else { return }
+                dismiss()
+                session.newTerminalGroup()
+            },
+            .init(
+                id: "terminal-group.split-down", title: "Split Terminal Down",
+                detail: availability(.splitDown).reason ?? "⌘⇧T",
+                symbolName: "rectangle.split.2x1", keywords: ["terminal", "group", "split"],
+                isEnabled: availability(.splitDown).isEnabled
+            ) {
+                guard availability(.splitDown).isEnabled else { return }
+                dismiss()
+                session.splitFocusedTerminalPane(.down)
+            },
+            .init(
+                id: "terminal-group.rename", title: "Rename Terminal Group…",
+                detail: availability(.rename).reason,
+                symbolName: "pencil", keywords: ["terminal", "group", "rename"],
+                isEnabled: availability(.rename).isEnabled
+            ) {
+                guard let terminalGroupID, availability(.rename).isEnabled else { return }
+                dismiss()
+                session.requestTerminalGroupRename(terminalGroupID)
+            },
+            .init(
+                id: "terminal-group.save", title: "Save Terminal Group",
+                detail: availability(.save).reason ?? "⌘S",
+                symbolName: "square.and.arrow.down", keywords: ["terminal", "group", "save"],
+                isEnabled: availability(.save).isEnabled
+            ) {
+                guard let terminalGroupID, availability(.save).isEnabled else { return }
+                dismiss()
+                session.requestTerminalGroupSave(terminalGroupID)
+            },
+            .init(
+                id: "terminal-group.save-as", title: "Save Terminal Group As…",
+                detail: availability(.saveAs).reason ?? "⌘⇧S",
+                symbolName: "square.and.pencil", keywords: ["terminal", "group", "save", "layout"],
+                isEnabled: availability(.saveAs).isEnabled
+            ) {
+                guard let terminalGroupID, availability(.saveAs).isEnabled else { return }
+                dismiss()
+                session.requestTerminalGroupSaveAs(terminalGroupID)
+            },
+            .init(
+                id: "terminal-group.starting-folder", title: "Set Pane Starting Folder…",
+                detail: availability(.setFolder).reason,
+                symbolName: "folder", keywords: ["terminal", "pane", "folder", "directory"],
+                isEnabled: availability(.setFolder).isEnabled
+            ) {
+                guard let paneID = session.focusedTerminalPaneID, availability(.setFolder).isEnabled
+                else { return }
+                dismiss()
+                session.requestTerminalPaneStartingFolder(paneID)
+            },
+            .init(
+                id: "terminal-group.start-pane", title: "Start Terminal Pane",
+                detail: availability(.startPane).reason,
+                symbolName: "play.fill", keywords: ["terminal", "pane", "start"],
+                isEnabled: availability(.startPane).isEnabled
+            ) {
+                guard let paneID = session.focusedTerminalPaneID, availability(.startPane).isEnabled
+                else { return }
+                dismiss()
+                session.startTerminalPane(paneID)
+            },
+            .init(
+                id: "terminal-group.start-all", title: "Start All Restartable Panes",
+                detail: availability(.startAll).reason,
+                symbolName: "play.circle", keywords: ["terminal", "pane", "start", "all"],
+                isEnabled: availability(.startAll).isEnabled
+            ) {
+                guard let terminalGroupID, availability(.startAll).isEnabled else { return }
+                dismiss()
+                session.startAllRestartableTerminalPanes(in: terminalGroupID)
+            },
+            .init(
+                id: "terminal-group.close-pane", title: "Close Terminal Pane",
+                detail: availability(.closePane).reason,
+                symbolName: "xmark", keywords: ["terminal", "pane", "close"],
+                isEnabled: availability(.closePane).isEnabled
+            ) {
+                guard let paneID = session.focusedTerminalPaneID, availability(.closePane).isEnabled
+                else { return }
+                dismiss()
+                session.closeTerminalPane(paneID)
+            },
+            .init(
+                id: "terminal-group.hide", title: "Hide Terminal Group",
+                detail: availability(.hide).reason,
+                symbolName: "eye.slash", keywords: ["terminal", "group", "hide"],
+                isEnabled: availability(.hide).isEnabled
+            ) {
+                guard let terminalGroupID, availability(.hide).isEnabled else { return }
+                dismiss()
+                session.hideTerminalGroup(terminalGroupID)
+            },
+            .init(
+                id: "terminal-group.close", title: "Close Terminal Group",
+                detail: availability(.closeGroup).reason,
+                symbolName: "xmark.rectangle", keywords: ["terminal", "group", "close"],
+                isEnabled: availability(.closeGroup).isEnabled
+            ) {
+                guard let terminalGroupID, availability(.closeGroup).isEnabled else { return }
+                dismiss()
+                session.requestTerminalGroupClose(terminalGroupID)
             },
         ]
 
@@ -1022,6 +1211,7 @@ private struct PaletteRow: Identifiable {
     var fileIcon: FileIconProvider.Icon? = nil
     let title: String
     let detail: String?
+    var isEnabled = true
     let action: @MainActor () -> Void
 }
 
@@ -1035,6 +1225,7 @@ private struct PaletteCommand {
     var detail: String?
     let symbolName: String
     var keywords: [String]
+    var isEnabled = true
     let action: @MainActor () -> Void
 
     var searchText: String { ([title, detail ?? ""] + keywords).joined(separator: " ") }

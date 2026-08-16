@@ -118,6 +118,12 @@ final class WorkspaceTerminalManager {
         return groupRuntime.groupID(containing: paneID)
     }
 
+    func directionalPaneTarget(
+        in groupID: TerminalGroupID, direction: TerminalPaneFocusDirection
+    ) -> TerminalPaneID? {
+        groupRuntime.directionalPaneTarget(in: groupID, direction: direction)
+    }
+
     func terminalGroupAndPane(containing sessionID: UUID) -> (TerminalGroupID, TerminalPaneID)? {
         _ = terminalGroupRevision
         return groupRuntime.groupAndPane(containing: sessionID)

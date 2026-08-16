@@ -54,11 +54,35 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
 @Observable
 @MainActor
 final class WorkspaceSession {
+    enum TerminalGroupPresentationAction: Hashable {
+        case toggle, newGroup, splitRight, splitDown
+        case focus(TerminalPaneFocusDirection)
+        case rename, save, saveAs, setFolder, startPane, startAll, hide, closePane, closeGroup
+    }
+
+    struct TerminalGroupPresentationAvailability: Equatable {
+        let isEnabled: Bool
+        let reason: String?
+    }
     struct TerminalGroupSaveRequest: Identifiable, Equatable {
         enum Kind: Equatable { case firstSave, saveAs }
         let id: TerminalGroupID
         let kind: Kind
         var proposedName: String
+    }
+
+    /// Ephemeral, window-owned presentation input. The terminal runtime keeps
+    /// the authoritative name; this request only holds a bounded user draft.
+    struct TerminalGroupRenameRequest: Identifiable, Equatable {
+        let id: TerminalGroupID
+        var proposedName: String
+    }
+
+    /// Ephemeral, window-owned folder-picker input. It intentionally retains
+    /// no live controller, terminal session, output, or observed CWD.
+    struct TerminalPaneStartingFolderRequest: Identifiable, Equatable {
+        let id: TerminalPaneID
+        let initialDirectory: URL?
     }
 
     struct FileCreationRequest {
@@ -396,6 +420,7 @@ final class WorkspaceSession {
         terminal.shutdownAll()
         pendingTerminalGroupClose = nil
         pendingTerminalGroupSaveRequest = nil
+        clearTerminalGroupPresentationRequests()
     }
 
     let workspaceSearch = WorkspaceSearchModel()
@@ -680,13 +705,21 @@ final class WorkspaceSession {
     private(set) var terminalGroupClosePresentationRevision: UInt64 = 0
     @ObservationIgnored var terminalGroupCloseRepreparedForTesting: (@MainActor () -> Void)?
     private(set) var pendingTerminalGroupSaveRequest: TerminalGroupSaveRequest?
+    /// Window-owned sheet state. It prevents a second submit while the one
+    /// saved-layout mutation is in flight.
+    private(set) var isPendingTerminalGroupSaveSubmission = false
+    private(set) var pendingTerminalGroupRenameRequest: TerminalGroupRenameRequest?
+    private(set) var pendingTerminalPaneStartingFolderRequest: TerminalPaneStartingFolderRequest?
     private(set) var terminalGroupFocusRequest = UInt64(0)
     @ObservationIgnored private var terminalGroupStoreTask: Task<Void, Never>?
     @ObservationIgnored private var terminalGroupChangeTask: Task<Void, Never>?
     @ObservationIgnored private var terminalGroupWorkspaceGeneration: UInt64 = 0
     @ObservationIgnored private var terminalGroupListEpoch: UInt64 = 0
     @ObservationIgnored private var terminalGroupMutationEpoch: UInt64 = 0
+    @ObservationIgnored private var terminalGroupSavePresentationEpoch: UInt64 = 0
     @ObservationIgnored private var terminalGroupMutationTask: Task<Void, Never>?
+    /// Test-only completion observation for a cancelled stale save task.
+    @ObservationIgnored var terminalGroupSaveTaskFinishedForTesting: (@MainActor () -> Void)?
     @ObservationIgnored var terminalGroupListFinishedForTesting: (@MainActor (UInt64) -> Void)?
     /// Test and app-identity injection seam. `nil` resolves the one shared
     /// actor, while a supplied actor gives every operation in this window the
@@ -918,6 +951,132 @@ final class WorkspaceSession {
     }
     var retainedTerminalPaneCount: Int { terminal.retainedTerminalPaneCount }
     var isTerminalGroupStoreMutationInFlight: Bool { terminalGroupMutationTask != nil }
+    var isTerminalGroupModalInputBlocked: Bool {
+        pendingTerminalGroupClose != nil || pendingTerminalGroupSaveRequest != nil
+            || pendingTerminalGroupRenameRequest != nil
+            || pendingTerminalPaneStartingFolderRequest != nil
+    }
+
+    func terminalGroupPresentationAvailability(
+        _ action: TerminalGroupPresentationAction
+    ) -> TerminalGroupPresentationAvailability {
+        if isTerminalGroupModalInputBlocked {
+            return .init(isEnabled: false, reason: "Finish the current Terminal Group sheet first.")
+        }
+        if action == .toggle { return .init(isEnabled: true, reason: nil) }
+        if action == .newGroup {
+            guard retainedTerminalPaneCount < TerminalGroupSnapshot.maximumRetainedPanesPerWindow
+            else {
+                return .init(
+                    isEnabled: false, reason: "The window has reached its Terminal Pane limit.")
+            }
+            guard liveTerminalSessionCount < TerminalGroupSnapshot.maximumPanesPerGroup else {
+                return .init(
+                    isEnabled: false, reason: "The window has reached its live Terminal limit.")
+            }
+            return .init(isEnabled: true, reason: nil)
+        }
+        guard let groupID = selectedTerminalGroupID,
+            let group = terminal.terminalGroup(groupID)
+        else { return .init(isEnabled: false, reason: "Select a Terminal Group.") }
+        if isTerminalGroupStoreMutationInFlight,
+            [.save, .saveAs].contains(action)
+        {
+            return .init(isEnabled: false, reason: "A Terminal Group save is in progress.")
+        }
+        let pane = group.panes.first(where: { $0.id == group.focusedPaneID })
+        switch action {
+        case .splitRight, .splitDown:
+            guard group.panes.count < TerminalGroupSnapshot.maximumPanesPerGroup else {
+                return .init(
+                    isEnabled: false, reason: "This Terminal Group has reached its pane limit.")
+            }
+            guard retainedTerminalPaneCount < TerminalGroupSnapshot.maximumRetainedPanesPerWindow
+            else {
+                return .init(
+                    isEnabled: false, reason: "The window has reached its Terminal Pane limit.")
+            }
+            guard liveTerminalSessionCount < TerminalGroupSnapshot.maximumPanesPerGroup else {
+                return .init(
+                    isEnabled: false, reason: "The window has reached its live Terminal limit.")
+            }
+            return .init(isEnabled: true, reason: nil)
+        case .focus(let direction):
+            return terminal.directionalPaneTarget(in: groupID, direction: direction) == nil
+                ? .init(isEnabled: false, reason: "No Terminal Pane exists in that direction.")
+                : .init(isEnabled: true, reason: nil)
+        case .setFolder:
+            guard let pane else {
+                return .init(isEnabled: false, reason: "Select a Terminal Pane.")
+            }
+            switch pane.runtimeKind {
+            case .directAgentTerminal:
+                return .init(
+                    isEnabled: false,
+                    reason: "Agent Terminal panes cannot set a saved starting folder.")
+            case .unavailableAgentTerminal:
+                return .init(
+                    isEnabled: false,
+                    reason: "Agent Terminal profiles are not saved in this version.")
+            case .ensembleRole, .ensembleCoordinator:
+                return .init(
+                    isEnabled: false,
+                    reason: "Ensemble terminal panes cannot set a saved starting folder.")
+            case .unavailableEnsemble:
+                return .init(
+                    isEnabled: false,
+                    reason: "Ensemble terminal profiles are not saved in this version.")
+            case .ordinaryShell:
+                return pane.launchProfile == nil || pane.startAvailability != .available
+                    ? .init(
+                        isEnabled: false, reason: "This Terminal Pane has no safe starting profile."
+                    )
+                    : .init(isEnabled: true, reason: nil)
+            }
+        case .startPane:
+            guard let pane else {
+                return .init(isEnabled: false, reason: "Select a Terminal Pane.")
+            }
+            guard liveTerminalSessionCount < TerminalGroupSnapshot.maximumPanesPerGroup else {
+                return .init(
+                    isEnabled: false, reason: "The window has reached its live Terminal limit.")
+            }
+            return pane.runtimeKind == .ordinaryShell && pane.status == .stopped
+                && pane.startAvailability == .available && pane.launchProfile != nil
+                ? .init(isEnabled: true, reason: nil)
+                : .init(
+                    isEnabled: false,
+                    reason: "Select a stopped ordinary-shell pane with a safe profile.")
+        case .startAll:
+            let candidates = group.panes.filter {
+                $0.runtimeKind == .ordinaryShell && $0.launchProfile != nil
+                    && $0.startAvailability == .available && $0.status == .stopped
+            }
+            guard !candidates.isEmpty else {
+                return .init(
+                    isEnabled: false, reason: "No restartable Terminal Panes are available.")
+            }
+            guard
+                liveTerminalSessionCount + candidates.count
+                    <= TerminalGroupSnapshot.maximumPanesPerGroup
+            else {
+                return .init(
+                    isEnabled: false,
+                    reason: "The restartable panes exceed the live Terminal limit.")
+            }
+            return .init(isEnabled: true, reason: nil)
+        case .hide:
+            return presentedTerminalGroupIDs.contains(groupID)
+                ? .init(isEnabled: true, reason: nil)
+                : .init(isEnabled: false, reason: "The Terminal Group is already hidden.")
+        case .closePane:
+            return pane == nil
+                ? .init(isEnabled: false, reason: "Select a Terminal Pane.")
+                : .init(isEnabled: true, reason: nil)
+        default:
+            return .init(isEnabled: true, reason: nil)
+        }
+    }
 
     /// Routes a BEL (terminal-manager.md T-E) to attention state and,
     /// opt-in, a system notification. "Not focused" = the session's tab is
@@ -1169,6 +1328,7 @@ final class WorkspaceSession {
     /// switches. `closeTerminalTab(_:)` is the one that also terminates the
     /// shell.
     func toggleTerminal() {
+        guard !isTerminalGroupModalInputBlocked else { return }
         if let selectedTerminalGroupID {
             hideTerminalGroup(selectedTerminalGroupID)
         } else if let selectedTerminalTabID {
@@ -1196,6 +1356,7 @@ final class WorkspaceSession {
     /// The profile holds a normalized workspace-relative path; it never reads
     /// a shell's live working directory.
     func newTerminalGroup(shell: TerminalShell? = nil) {
+        guard !isTerminalGroupModalInputBlocked else { return }
         installTerminalHandlersIfNeeded()
         // Unit-level and migration callers can create a session before a
         // workspace descriptor exists. Keep their historical home-directory
@@ -1226,15 +1387,23 @@ final class WorkspaceSession {
     }
 
     func splitFocusedTerminalPane(_ placement: TerminalGroupSplitPlacement) {
+        guard !isTerminalGroupModalInputBlocked else { return }
         guard let groupID = selectedTerminalGroupID,
             let group = terminal.terminalGroup(groupID),
             let focused = group.panes.first(where: { $0.id == group.focusedPaneID }),
             let rootURL
         else { return }
-        let profile =
-            focused.launchProfile
-            ?? TerminalPaneLaunchProfile(
-                shell: .preferredShell, startingFolder: .root)
+        let profile: TerminalPaneLaunchProfile
+        if focused.runtimeKind == .ordinaryShell,
+            focused.startAvailability == .available,
+            let safeProfile = focused.launchProfile
+        {
+            profile = safeProfile
+        } else {
+            // Classified and unavailable panes never donate a profile. Their
+            // split is a fresh ordinary shell at the bounded workspace root.
+            profile = TerminalPaneLaunchProfile(shell: .preferredShell, startingFolder: .root)
+        }
         guard
             terminalFolder(for: resolvedTerminalDirectory(profile.startingFolder, rootURL: rootURL))
                 != nil,
@@ -1267,6 +1436,7 @@ final class WorkspaceSession {
     }
 
     func focusTerminalPane(_ direction: TerminalPaneFocusDirection) {
+        guard !isTerminalGroupModalInputBlocked else { return }
         guard let groupID = selectedTerminalGroupID else { return }
         do {
             _ = try terminal.perform(.focusDirection(groupID: groupID, direction: direction))
@@ -1276,11 +1446,36 @@ final class WorkspaceSession {
         } catch { presentTerminalGroupError(error.localizedDescription) }
     }
 
+    func terminalPaneFocusTarget(_ direction: TerminalPaneFocusDirection) -> TerminalPaneID? {
+        guard let groupID = selectedTerminalGroupID else { return nil }
+        return terminal.directionalPaneTarget(in: groupID, direction: direction)
+    }
+
     func renameTerminalGroup(_ groupID: TerminalGroupID, to rawName: String) {
         do {
             try terminal.renameTerminalGroup(groupID, rawName: rawName)
             persistWorkspaceState()
         } catch { presentTerminalGroupError(error.localizedDescription) }
+    }
+
+    func requestTerminalGroupRename(_ groupID: TerminalGroupID) {
+        guard !isTerminalGroupModalInputBlocked,
+            let group = terminal.terminalGroup(groupID)
+        else { return }
+        pendingTerminalGroupRenameRequest = TerminalGroupRenameRequest(
+            id: groupID, proposedName: group.name.rawValue)
+    }
+
+    func updatePendingTerminalGroupRename(_ name: String) {
+        pendingTerminalGroupRenameRequest?.proposedName = name
+    }
+
+    func cancelPendingTerminalGroupRename() { pendingTerminalGroupRenameRequest = nil }
+
+    func completePendingTerminalGroupRename() {
+        guard let request = pendingTerminalGroupRenameRequest else { return }
+        pendingTerminalGroupRenameRequest = nil
+        renameTerminalGroup(request.id, to: request.proposedName)
     }
 
     func setTerminalPaneStartingFolder(_ paneID: TerminalPaneID, to directory: URL) {
@@ -1293,6 +1488,31 @@ final class WorkspaceSession {
             _ = try terminal.perform(.setPaneStartingFolder(paneID: paneID, folder: folder))
             persistWorkspaceState()
         } catch { presentTerminalGroupError(error.localizedDescription) }
+    }
+
+    func requestTerminalPaneStartingFolder(_ paneID: TerminalPaneID) {
+        guard !isTerminalGroupModalInputBlocked,
+            rootURL != nil,
+            let groupID = terminal.terminalGroup(containing: paneID),
+            let pane = terminal.terminalGroup(groupID)?.panes.first(where: { $0.id == paneID }),
+            pane.runtimeKind == .ordinaryShell,
+            pane.launchProfile != nil, pane.startAvailability == .available
+        else { return }
+        let initialDirectory = rootURL.map { root in
+            root.appending(path: pane.launchProfile?.startingFolder.rawValue ?? "")
+        }
+        pendingTerminalPaneStartingFolderRequest = TerminalPaneStartingFolderRequest(
+            id: paneID, initialDirectory: initialDirectory)
+    }
+
+    func cancelPendingTerminalPaneStartingFolder() {
+        pendingTerminalPaneStartingFolderRequest = nil
+    }
+
+    func completePendingTerminalPaneStartingFolder(_ directory: URL) {
+        guard let request = pendingTerminalPaneStartingFolderRequest else { return }
+        pendingTerminalPaneStartingFolderRequest = nil
+        setTerminalPaneStartingFolder(request.id, to: directory)
     }
 
     func setTerminalDividerFraction(_ splitID: TerminalGroupSplitID, to fraction: Double) {
@@ -1395,6 +1615,7 @@ final class WorkspaceSession {
     }
 
     func closeTerminalPane(_ paneID: TerminalPaneID) {
+        guard !isTerminalGroupModalInputBlocked else { return }
         guard let groupID = terminal.terminalGroup(containing: paneID),
             let snapshot = terminal.terminalGroup(groupID)
         else { return }
@@ -1409,6 +1630,7 @@ final class WorkspaceSession {
     }
 
     func requestTerminalGroupClose(_ groupID: TerminalGroupID) {
+        guard !isTerminalGroupModalInputBlocked else { return }
         requestTerminalGroupClose(.group(groupID), requiresConfirmation: true)
     }
 
@@ -1755,6 +1977,31 @@ final class WorkspaceSession {
         isOpenFolderErrorPresented = true
     }
 
+    private func clearTerminalGroupPresentationRequests() {
+        terminalGroupSavePresentationEpoch &+= 1
+        isPendingTerminalGroupSaveSubmission = false
+        pendingTerminalGroupSaveRequest = nil
+        pendingTerminalGroupRenameRequest = nil
+        pendingTerminalPaneStartingFolderRequest = nil
+    }
+
+    private func finishPendingTerminalGroupSaveSubmission(
+        groupID: TerminalGroupID, presentationEpoch: UInt64?, succeeded: Bool = true,
+        errorMessage: String? = nil
+    ) {
+        guard let presentationEpoch,
+            terminalGroupSavePresentationEpoch == presentationEpoch,
+            pendingTerminalGroupSaveRequest?.id == groupID
+        else { return }
+        isPendingTerminalGroupSaveSubmission = false
+        if succeeded {
+            pendingTerminalGroupSaveRequest = nil
+        } else if let errorMessage {
+            terminalGroupStoreError = String(
+                decoding: errorMessage.utf8.prefix(512), as: UTF8.self)
+        }
+    }
+
     // MARK: - Saved Terminal Group library
 
     private func resolvedTerminalGroupSavedLayoutStore() async
@@ -1850,6 +2097,7 @@ final class WorkspaceSession {
         terminalGroupChangeTask = nil
         terminalGroupMutationTask?.cancel()
         terminalGroupMutationTask = nil
+        clearTerminalGroupPresentationRequests()
         terminalGroupMutationEpoch &+= 1
         savedTerminalGroups = []
         terminalGroupStoreError = nil
@@ -1954,7 +2202,8 @@ final class WorkspaceSession {
     /// Save uses the open instance only as a snapshot source. It never
     /// replaces its live pane tree with data read from the named library.
     func requestTerminalGroupSave(_ groupID: TerminalGroupID) {
-        guard terminalGroupMutationTask == nil, let snapshot = terminal.terminalGroup(groupID)
+        guard !isTerminalGroupModalInputBlocked, terminalGroupMutationTask == nil,
+            let snapshot = terminal.terminalGroup(groupID)
         else {
             return
         }
@@ -1970,26 +2219,39 @@ final class WorkspaceSession {
     }
 
     func requestTerminalGroupSaveAs(_ groupID: TerminalGroupID) {
-        guard terminalGroupMutationTask == nil, let snapshot = terminal.terminalGroup(groupID)
+        guard !isTerminalGroupModalInputBlocked, terminalGroupMutationTask == nil,
+            let snapshot = terminal.terminalGroup(groupID)
         else {
             return
         }
+        terminalGroupStoreError = nil
+        terminalGroupSavePresentationEpoch &+= 1
         pendingTerminalGroupSaveRequest = TerminalGroupSaveRequest(
             id: groupID, kind: .saveAs, proposedName: snapshot.name.rawValue)
     }
 
     func updatePendingTerminalGroupSaveName(_ name: String) {
+        guard !isPendingTerminalGroupSaveSubmission else { return }
         pendingTerminalGroupSaveRequest?.proposedName = name
     }
 
-    func cancelPendingTerminalGroupSave() { pendingTerminalGroupSaveRequest = nil }
+    func cancelPendingTerminalGroupSave() {
+        guard !isPendingTerminalGroupSaveSubmission else { return }
+        terminalGroupSavePresentationEpoch &+= 1
+        pendingTerminalGroupSaveRequest = nil
+    }
 
     func completePendingTerminalGroupSave() {
-        guard let request = pendingTerminalGroupSaveRequest else { return }
-        pendingTerminalGroupSaveRequest = nil
+        guard let request = pendingTerminalGroupSaveRequest,
+            !isPendingTerminalGroupSaveSubmission
+        else { return }
+        isPendingTerminalGroupSaveSubmission = true
+        terminalGroupStoreError = nil
         let operation: TerminalGroupSavedLayoutSaveOperation =
             request.kind == .firstSave ? .firstSave : .saveAs
-        saveTerminalGroupAs(request.id, name: request.proposedName, operation: operation)
+        saveTerminalGroupAs(
+            request.id, name: request.proposedName, operation: operation,
+            pendingPresentationEpoch: terminalGroupSavePresentationEpoch)
     }
 
     func saveTerminalGroup(_ groupID: TerminalGroupID) {
@@ -2001,12 +2263,16 @@ final class WorkspaceSession {
 
     func saveTerminalGroupAs(
         _ groupID: TerminalGroupID, name rawName: String,
-        operation: TerminalGroupSavedLayoutSaveOperation = .saveAs
+        operation: TerminalGroupSavedLayoutSaveOperation = .saveAs,
+        pendingPresentationEpoch: UInt64? = nil
     ) {
         guard let snapshot = terminal.terminalGroup(groupID),
             let name = TerminalGroupName(rawName)
         else {
             presentTerminalGroupError("Enter a valid Terminal Group name.")
+            finishPendingTerminalGroupSaveSubmission(
+                groupID: groupID, presentationEpoch: pendingPresentationEpoch,
+                succeeded: false, errorMessage: "Enter a valid Terminal Group name.")
             return
         }
         do {
@@ -2014,8 +2280,16 @@ final class WorkspaceSession {
                 id: snapshot.id, name: name, root: snapshot.root,
                 focusedPaneID: snapshot.focusedPaneID, savedLayoutID: snapshot.savedLayoutID,
                 panes: snapshot.panes, retainedPaneCount: retainedTerminalPaneCount)
-            saveTerminalGroup(namedSnapshot, groupID: groupID, name: name, operation: operation)
-        } catch { presentTerminalGroupError(error.localizedDescription) }
+            saveTerminalGroup(
+                namedSnapshot, groupID: groupID, name: name, operation: operation,
+                pendingPresentationEpoch: pendingPresentationEpoch)
+        } catch {
+            let message = error.localizedDescription
+            presentTerminalGroupError(message)
+            finishPendingTerminalGroupSaveSubmission(
+                groupID: groupID, presentationEpoch: pendingPresentationEpoch,
+                succeeded: false, errorMessage: message)
+        }
     }
 
     private func saveTerminalGroup(
@@ -2023,14 +2297,25 @@ final class WorkspaceSession {
         groupID: TerminalGroupID,
         name: TerminalGroupName,
         operation: TerminalGroupSavedLayoutSaveOperation,
-        presentNameRequestOnConflict: Bool = false
+        presentNameRequestOnConflict: Bool = false,
+        pendingPresentationEpoch: UInt64? = nil
     ) {
-        guard let rootURL, terminalGroupMutationTask == nil else { return }
+        guard let rootURL, terminalGroupMutationTask == nil else {
+            let message =
+                rootURL == nil
+                ? "Open a workspace before saving a Terminal Group."
+                : "A Terminal Group save is already in progress."
+            finishPendingTerminalGroupSaveSubmission(
+                groupID: groupID, presentationEpoch: pendingPresentationEpoch,
+                succeeded: false, errorMessage: message)
+            return
+        }
         let key = TerminalGroupWorkspaceKey(standardizedRoot: rootURL)
         let generation = terminalGroupWorkspaceGeneration
         terminalGroupMutationEpoch &+= 1
         let epoch = terminalGroupMutationEpoch
         terminalGroupMutationTask = Task { [weak self] in
+            defer { self?.terminalGroupSaveTaskFinishedForTesting?() }
             do {
                 let record = try TerminalGroupRestorationCodec().savedRecord(
                     from: snapshot,
@@ -2052,6 +2337,8 @@ final class WorkspaceSession {
                     .commitSavedLayout(
                         groupID: groupID, savedLayoutID: result.savedLayoutID, name: name))
                 self.terminalGroupMutationTask = nil
+                self.finishPendingTerminalGroupSaveSubmission(
+                    groupID: groupID, presentationEpoch: pendingPresentationEpoch)
                 self.loadTerminalGroupLibrary(key: key, generation: generation)
                 self.persistWorkspaceState()
             } catch {
@@ -2060,17 +2347,23 @@ final class WorkspaceSession {
                     self.terminalGroupMutationEpoch == epoch
                 else { return }
                 self.terminalGroupMutationTask = nil
+                self.finishPendingTerminalGroupSaveSubmission(
+                    groupID: groupID, presentationEpoch: pendingPresentationEpoch,
+                    succeeded: false, errorMessage: error.localizedDescription)
                 if presentNameRequestOnConflict,
                     let persistence = error as? TerminalGroupPersistenceError,
                     persistence == .nameConflict,
                     self.terminal.terminalGroup(groupID) != nil
                 {
+                    self.terminalGroupSavePresentationEpoch &+= 1
                     self.pendingTerminalGroupSaveRequest = TerminalGroupSaveRequest(
                         id: groupID, kind: .firstSave, proposedName: snapshot.name.rawValue)
                     return
                 }
-                self.terminalGroupStoreError = String(
-                    decoding: error.localizedDescription.utf8.prefix(512), as: UTF8.self)
+                if pendingPresentationEpoch == nil {
+                    self.terminalGroupStoreError = String(
+                        decoding: error.localizedDescription.utf8.prefix(512), as: UTF8.self)
+                }
             }
         }
     }
@@ -3315,6 +3608,7 @@ final class WorkspaceSession {
     /// window (rather than `NSApp.terminate`) is required because an empty
     /// focused window used to quit every open workspace window.
     func requestCloseActiveTab() {
+        guard !isTerminalGroupModalInputBlocked else { return }
         if closeFocusedTabIfPresent() {
             return
         }

@@ -3,6 +3,33 @@ import Testing
 
 @testable import RafuApp
 
+@Test("Directional target query reports outer edges without mutating focus")
+func directionalTargetQueryReportsOuterEdges() throws {
+    var runtime = TerminalGroupRuntime()
+    let groupID = TerminalGroupID()
+    let left = TerminalPaneID()
+    let right = TerminalPaneID()
+    let shell = TerminalPaneLaunchProfile(shell: .preferredShell, startingFolder: .root)
+    let leftPane = try TerminalPaneSnapshot(
+        id: left, sessionID: nil, explicitUserName: nil, reportedTitle: nil,
+        runtimeKind: .ordinaryShell, themeColor: nil, status: .stopped, launchProfile: shell,
+        startAvailability: .available)
+    let rightPane = try TerminalPaneSnapshot(
+        id: right, sessionID: nil, explicitUserName: nil, reportedTitle: nil,
+        runtimeKind: .ordinaryShell, themeColor: nil, status: .stopped, launchProfile: shell,
+        startAvailability: .available)
+    let snapshot = try TerminalGroupSnapshot(
+        id: groupID, name: try #require(TerminalGroupName("Edges")),
+        root: .split(
+            id: TerminalGroupSplitID(), axis: .columns, fraction: 0.5, first: .pane(left),
+            second: .pane(right)), focusedPaneID: left, savedLayoutID: nil,
+        panes: [leftPane, rightPane], retainedPaneCount: 2)
+    _ = try runtime.insertInertSnapshot(snapshot)
+    #expect(runtime.directionalPaneTarget(in: groupID, direction: .left) == nil)
+    #expect(runtime.directionalPaneTarget(in: groupID, direction: .right) == right)
+    #expect(runtime.snapshot(groupID: groupID)?.focusedPaneID == left)
+}
+
 func createdGroupID(_ effect: TerminalGroupEffect) throws -> TerminalGroupID {
     guard case .insertEditorTab(let groupID) = effect else {
         throw TerminalGroupValidationError.invalidName

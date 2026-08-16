@@ -2,7 +2,7 @@
 
 ## Status and execution slot
 
-- **Status:** Planned.
+- **Status:** Implemented on lane; awaiting authorized merge.
 - **Wave:** 4; parallel with TG-40 and TG-42.
 - **Branch:** `terminal-groups/tg-41-commands-save-ui`.
 - **Required base:** exact `<TG30_MERGED_SHA>`.
@@ -287,7 +287,111 @@ message, SHA, next dependency, and **Deviations**.
 
 ## Implementation record
 
-To be completed by the TG-41 implementor before the final gate.
+Status: Implemented on lane; awaiting authorized merge
+
+Implemented on `terminal-groups/tg-41-commands-save-ui` from
+`7bb2488ab17b3e09614e3a5dc69db2030140aab3`.
+
+- Contextual Terminal Group commands, Save/Save As, command-palette routes,
+  native save and rename sheets, and the window-scoped folder picker route
+  use the WorkspaceSession action API.
+- Focused tests cover request ownership, cancellation, teardown reset, modal
+  blocking, forwarding completion to the existing rename/folder validators,
+  action-specific availability, capacity boundaries, shortcut routing, and
+  metadata-only sheet validation and layout summaries.
+- Save-sheet submission is window-owned state. It keeps the request modal
+  until the existing saved-layout mutation succeeds. A conflict or store
+  error leaves the request and old group state in place. The submission epoch
+  prevents an old workspace operation from dismissing a newer request.
+- Contract corrections: splitting a classified or nonrestartable pane stays
+  available when the normal group and window limits permit it; it creates a
+  fresh ordinary-shell pane at the workspace root. Start All considers only
+  stopped ordinary-shell panes with available profiles.
+
+Security and concurrency review: the picker keeps a selected URL only until
+the synchronous WorkspaceSession validation completes. Save completion uses
+the existing store task, workspace generation, mutation epoch, and an added
+window presentation epoch. It does not start a second persistence task.
+The Save control and Return route both use the same 80-Unicode-scalar name
+validation. Interactive dismissal and Cancel are disabled while the existing
+store task is in flight. New Save As requests clear old bounded store errors.
+Synchronous save setup failures use the same group-and-presentation-epoch
+completion guard as asynchronous failures, so a sheet stays available for a
+corrected retry.
+
+Added TG-41 tests include `exitedShellDisablesStartAll`,
+`liveClassifiedPaneFolderReasons`,
+`terminalGroupSaveSheetSubmissionDismissesOnlyAfterSuccess`,
+`terminalGroupSaveSheetConflictKeepsRequestAndGroup`,
+`terminalGroupSaveSheetCancellationBeforeSubmitPreservesState`, and
+`staleTerminalGroupSaveCompletionKeepsNewerRequest`. These use the existing
+TG-30 `TerminalGroupIntegrationStore` actor. TG-41 adds no second store
+fixture.
+`terminalGroupSaveSheetCancellationDuringSubmissionWaitsForSuccess` and
+`terminalGroupSaveSheetDisableAndDismissAudit` cover the in-flight cancel,
+interactive-dismiss, and invalid-draft safeguards.
+
+Authorized deviation: TG-30 omitted the required per-window presentation
+request seam. The merge owner authorized this lane to add only ephemeral
+WorkspaceSession request state and request/update/complete/cancel methods for
+rename and pane starting folder, plus the computed modal-input gate. The state
+is not persisted and completion delegates to the existing validation methods.
+
+The merge owner also authorized the narrow read-only directional query through
+`WorkspaceSession.swift`, `TerminalGroupRuntime.swift`,
+`WorkspaceTerminalController.swift`, and `TerminalGroupRuntimeTests.swift`.
+
+### Verification evidence
+
+- Coordinator verification ran the combined focused TG-41 filter in parallel:
+  91 tests, 0 suites, 0 failures, 0.044 seconds, exit 0. This is coordinator
+  verification, not worker verification.
+- Worker build: `./script/build.sh` completed successfully in 13.68 seconds.
+  SwiftPM reported one pre-existing unhandled-fixture warning for
+  `Tests/RafuAppTests/Fixtures/workbench-converged-surfaces.json`.
+- Full parallel suite did not complete: the one worker process hung with its
+  Swift Testing helper idle on the main run loop after more than five minutes.
+  The owned `swift-test` and helper were stopped. This is not a full-pass
+  result. Rafu Lightning GUI verification is not run yet.
+
+### Review and handoff state
+
+- Security: selected folder URLs are security-scoped only around synchronous
+  validation. The presentation state keeps no live process, output, CWD, or
+  controller reference.
+- Concurrency: the existing store mutation task remains the only save task.
+  Workspace generation, mutation epoch, and presentation epoch reject stale
+  completion effects.
+- Accessibility: menus retain keyboard routes; sheets use named text fields,
+  visible bounded validation, standard Cancel/Save controls, and disabled
+  duplicate-submit state. No VoiceOver or live keyboard pass has run yet.
+- Manual deferral: Rafu Lightning menu, sheet, second-window, Full Keyboard
+  Access, and VoiceOver checks need the later GUI verification step.
+- Deviation: an earlier worker attempt started duplicate focused-test waiters
+  while a cold dependency checkout held SwiftPM. The duplicate waiters were
+  stopped without terminating the original invocation. Later focused evidence
+  above is the coordinator's clean verification result.
+- Risk / coordinator correction: `TerminalGroupSessionIntegrationTests.swift`
+  is TG-30-owned and still asserts that an in-flight Save As has no pending
+  request. TG-41 intentionally keeps the same request open and modal. The
+  coordinator/TG-90 correction should expect that request for the target
+  group, proposed name `Copy`, and `isPendingTerminalGroupSaveSubmission == true`
+  while suspended; after release it should expect a nil request and false
+  submission state. TG-41 does not edit that out-of-scope test.
+
+### Changed paths
+
+- `Sources/RafuApp/App/RafuAppCommands.swift`
+- `Sources/RafuApp/Models/WorkspaceSession.swift`
+- `Sources/RafuApp/Terminal/TerminalGroupRuntime.swift`
+- `Sources/RafuApp/Terminal/WorkspaceTerminalController.swift`
+- `Sources/RafuApp/Views/CommandPaletteView.swift`
+- `Sources/RafuApp/Views/TerminalGroupSaveSheet.swift`
+- `Sources/RafuApp/Views/WorkspaceWindowView.swift`
+- `Tests/RafuAppTests/TerminalGroupCommandPresentationTests.swift`
+- `Tests/RafuAppTests/TerminalGroupRuntimeTests.swift`
+- `Tests/RafuAppTests/TerminalGroupSaveSheetTests.swift`
+- `docs/plans/phases/terminal-groups/TG-41-commands-save-ui.md`
 
 ## Goal Mode start prompt
 
