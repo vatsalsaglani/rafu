@@ -255,6 +255,161 @@ nonisolated enum AgentLauncherModel {
 /// presented `.terminal` tabs). No new state store — the panel and rail
 /// observe `session.terminal` directly.
 nonisolated enum TerminalsPanelModel {
+    /// A stable, hierarchical Terminal Manager row. A group owns its panes;
+    /// panes never become peer terminal tabs or peer switcher candidates.
+    enum HierarchyRow: Identifiable, Equatable, Sendable {
+        case group(TerminalGroupRow)
+        case pane(TerminalPaneRow)
+        case legacy(TerminalSessionRow, isCurrent: Bool)
+
+        var id: String {
+            switch self {
+            case .group(let row): "group-\(row.id)"
+            case .pane(let row): "pane-\(row.id)"
+            case .legacy(let row, _): "legacy-\(row.id)"
+            }
+        }
+
+        var isManagerItem: Bool {
+            switch self {
+            case .group, .legacy: true
+            case .pane: false
+            }
+        }
+    }
+
+    nonisolated struct TerminalGroupRow: Identifiable, Equatable, Sendable {
+        let id: TerminalGroupID
+        let name: String
+        let paneCount: Int
+        let livePaneCount: Int
+        let attentionCount: Int
+        let isParked: Bool
+        let isCurrent: Bool
+        let isSaved: Bool
+        let hasRestartablePane: Bool
+    }
+
+    nonisolated struct TerminalPaneRow: Identifiable, Equatable, Sendable {
+        let id: TerminalPaneID
+        let groupID: TerminalGroupID
+        let name: String
+        let detail: String
+        let status: TerminalPaneStatus
+        let hasAttention: Bool
+        let isFocused: Bool
+        let isUnavailable: Bool
+        let sessionID: UUID?
+        let sessionColor: TerminalSessionColor?
+        var colorName: String? { sessionColor?.displayName }
+        let folder: String
+        let providerOrShell: String
+        let canStart: Bool
+        let canRestart: Bool
+
+        var unavailableMessage: String? {
+            guard isUnavailable else { return nil }
+            return detail
+        }
+    }
+
+    /// Derives the complete hierarchy from the frozen manager snapshot. It
+    /// retains no selection, parking, or expansion state of its own.
+    @MainActor
+    static func hierarchyRows(
+        groups: [TerminalGroupSnapshot],
+        presentedGroupIDs: Set<TerminalGroupID>,
+        currentGroupID: TerminalGroupID?,
+        controllers: [WorkspaceTerminalController],
+        presentedLegacySessionIDs: Set<UUID>,
+        currentLegacySessionID: UUID?,
+        workspaceRoot: String?
+    ) -> [HierarchyRow] {
+        let controllerByID = Dictionary(uniqueKeysWithValues: controllers.map { ($0.id, $0) })
+        let groupedSessionIDs = Set(groups.flatMap(\.panes).compactMap(\.sessionID))
+        let groupedRows = groups.flatMap { group in
+            let panes = group.panes.map { pane in
+                let controller = pane.sessionID.flatMap { controllerByID[$0] }
+                return TerminalPaneRow(
+                    id: pane.id,
+                    groupID: group.id,
+                    name: pane.explicitUserName?.rawValue ?? pane.reportedTitle?.rawValue
+                        ?? controller?.displayName ?? "Terminal Pane",
+                    detail: paneDetail(pane, controller: controller),
+                    status: pane.status,
+                    hasAttention: controller.map {
+                        TerminalSessionPresentation.needsAttention($0.status)
+                    } ?? false,
+                    isFocused: pane.id == group.focusedPaneID,
+                    isUnavailable: pane.status == .unavailable,
+                    sessionID: pane.sessionID,
+                    sessionColor: controller?.sessionColor,
+                    folder: pane.launchProfile?.startingFolder.rawValue
+                        ?? controller?.currentDirectoryPath ?? "No saved folder",
+                    providerOrShell: paneProviderOrShell(pane, controller: controller),
+                    canStart: pane.status == .stopped
+                        && pane.runtimeKind == .ordinaryShell
+                        && pane.startAvailability == .available
+                        && pane.launchProfile != nil,
+                    canRestart: pane.status == .exited
+                        && pane.runtimeKind == .ordinaryShell
+                        && pane.startAvailability == .available
+                        && pane.launchProfile != nil)
+            }
+            let groupRow = TerminalGroupRow(
+                id: group.id,
+                name: group.name.rawValue,
+                paneCount: panes.count,
+                livePaneCount: group.panes.count { $0.status == .live },
+                attentionCount: panes.count { $0.hasAttention },
+                isParked: !presentedGroupIDs.contains(group.id),
+                isCurrent: currentGroupID == group.id,
+                isSaved: group.savedLayoutID != nil,
+                hasRestartablePane: group.panes.contains {
+                    $0.runtimeKind == .ordinaryShell
+                        && $0.status == .stopped
+                        && $0.startAvailability == .available
+                        && $0.launchProfile != nil
+                })
+            return [.group(groupRow)] + panes.map(HierarchyRow.pane)
+        }
+        let legacyRows = rows(
+            sessions: controllers.filter { !groupedSessionIDs.contains($0.id) },
+            presentedIDs: presentedLegacySessionIDs, workspaceRoot: workspaceRoot
+        ).map { row in
+            HierarchyRow.legacy(row, isCurrent: currentLegacySessionID == row.id)
+        }
+        return groupedRows + legacyRows
+    }
+
+    @MainActor
+    private static func paneDetail(
+        _ pane: TerminalPaneSnapshot,
+        controller: WorkspaceTerminalController?
+    ) -> String {
+        if pane.status == .unavailable {
+            return TerminalPanePresentation.unavailableMessage(for: pane.runtimeKind)
+                ?? "Unavailable"
+        }
+        return TerminalPanePresentation.statusLabel(
+            for: pane, controllerStatus: controller?.status)
+    }
+
+    @MainActor
+    private static func paneProviderOrShell(
+        _ pane: TerminalPaneSnapshot,
+        controller: WorkspaceTerminalController?
+    ) -> String {
+        switch pane.runtimeKind {
+        case .ordinaryShell: controller?.shellDisplayName ?? "Shell"
+        case .directAgentTerminal(let provider): provider.displayName
+        case .ensembleRole: "Ensemble role"
+        case .ensembleCoordinator: "Ensemble coordinator"
+        case .unavailableAgentTerminal: "Agent Terminal"
+        case .unavailableEnsemble: "Ensemble"
+        }
+    }
+
     /// One row per session, in creation order — reads `WorkspaceTerminalController`
     /// (a `@MainActor` class), so this is `@MainActor` too. Callers (views)
     /// must derive rows ONCE per body evaluation, never per-row inside a

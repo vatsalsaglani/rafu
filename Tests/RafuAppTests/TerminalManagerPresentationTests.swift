@@ -211,8 +211,8 @@ struct TerminalManagerSourceContractTests {
     func currentRowUsesSharedPresentationContract() throws {
         let panel = try Self.source("Sources/RafuApp/Views/WorkspaceTerminalsPanelView.swift")
 
-        #expect(panel.contains("let currentSessionID = session.currentTerminalSessionID"))
-        #expect(panel.contains("isCurrent: currentSessionID == row.id"))
+        #expect(panel.contains("currentGroupID: session.selectedTerminalGroupID"))
+        #expect(panel.contains("currentLegacySessionID: session.currentTerminalSessionID"))
         #expect(!panel.contains("session.terminal.selectedID"))
         #expect(panel.contains(".managerRow("))
         #expect(panel.contains("needsAttention: row.needsAttention"))
