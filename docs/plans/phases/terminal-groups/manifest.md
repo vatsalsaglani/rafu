@@ -15,9 +15,9 @@ flowchart LR
     S["TG-22<br/>Complete"]
     W["TG-30<br/>Complete"]
     M["TG-40<br/>Complete"]
-    K["TG-41<br/>In progress"]
+    K["TG-41<br/>Complete"]
     A["TG-42<br/>Complete"]
-    Q["TG-90<br/>Blocked"]
+    Q["TG-90<br/>In progress"]
 
     D --> C
     C --> R
@@ -45,9 +45,9 @@ flowchart LR
 | [TG-22](TG-22-persistence.md) | TG-10 | Terra | `terminal-groups/tg-22-persistence` | Complete | `70580d2152401e53223b4d7ee86a2eaebf519326` |
 | [TG-30](TG-30-workspace-integration.md) | TG-20, TG-21, TG-22 | Terra | `terminal-groups/tg-30-workspace-integration` | Complete | `02bc5fca3dc61d311625ca08e82211aef86516ed` |
 | [TG-40](TG-40-manager-switcher.md) | TG-30 | Terra | `terminal-groups/tg-40-manager-switcher` | Complete | `ed1585b0c9318c4e1b338cd3d366aabefb1e9ba7` |
-| [TG-41](TG-41-commands-save-ui.md) | TG-30 | Terra | `terminal-groups/tg-41-commands-save-ui` | In progress | — |
+| [TG-41](TG-41-commands-save-ui.md) | TG-30 | Terra | `terminal-groups/tg-41-commands-save-ui` | Complete | `59357fcd6155744d7adc13511028f470cb642b40` |
 | [TG-42](TG-42-agent-ensemble.md) | TG-30 | Terra | `terminal-groups/tg-42-agent-ensemble` | Complete | `a908e85b355182017c2951317a2994282dc23a0f` |
-| [TG-90](TG-90-integration-qa.md) | TG-40, TG-41, TG-42 | Terra | `terminal-groups/tg-90-integration-qa` | Blocked | — |
+| [TG-90](TG-90-integration-qa.md) | TG-40, TG-41, TG-42 | Terra | `terminal-groups/tg-90-integration-qa` | In progress | — |
 
 `Approved SHA` is the final lane commit that the primary coordinator approved.
 TG-00 is on `main` through merge commit
@@ -63,6 +63,12 @@ on `main` at `7bb2488ab17b3e09614e3a5dc69db2030140aab3`. TG-42 is on `main` thro
 merge commit `fc65d7aab03477a7247bd7cb3e0003c9d8e3bf59`.
 TG-40 is on `main` through merge commit
 `d1c373d23d3428a499082ee2bdbe9ff748194688`.
+TG-41 is on `main` through merge commit
+`85ce20e0077c896f716522aab09c3ced373172c9`. Its main integration corrections
+are commits `5ae078a9439c5143ae5bacf6af0c874d0f9cfce0`,
+`5f6c548017f1224c9219c3d3fb4a0c50fa4113de`,
+`6d6f842b427db7e960c50bfcfa37d8b0d0b476f5`, and
+`a46f485c2380145e29fdaccc058dc3cd453bdfea`.
 
 `Ready` means that all dependencies are complete and the local branch exists.
 `In progress` means that the branch has an active isolated Worktree worker.
