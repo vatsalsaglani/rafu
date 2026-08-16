@@ -38,7 +38,11 @@ func terminalGroupRenameRequestCompletes() throws {
 @MainActor
 @Test("Terminal Group folder request blocks other group commands until cancellation")
 func terminalPaneFolderRequestBlocksCommands() throws {
-    let session = WorkspaceSession()
+    let (session, root) = try makeTerminalGroupWorkspace()
+    defer {
+        session.teardownTerminalGroups()
+        removeTerminalGroupWorkspace(root)
+    }
     session.newTerminalGroup()
     let paneID = try #require(session.focusedTerminalPaneID)
     session.requestTerminalPaneStartingFolder(paneID)
