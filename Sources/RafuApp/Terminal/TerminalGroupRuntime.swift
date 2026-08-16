@@ -22,8 +22,10 @@ nonisolated struct TerminalGroupRuntime: Sendable {
     private var nextDefaultNameNumber = 1
 
     var snapshots: [TerminalGroupSnapshot] {
-        groups.values.sorted {
-            $0.name.rawValue.localizedStandardCompare($1.name.rawValue) == .orderedAscending
+        groups.values.sorted { lhs, rhs in
+            let nameOrder = lhs.name.rawValue.localizedStandardCompare(rhs.name.rawValue)
+            if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+            return lhs.id.rawValue.uuidString < rhs.id.rawValue.uuidString
         }
     }
 
@@ -93,12 +95,52 @@ nonisolated struct TerminalGroupRuntime: Sendable {
             throw TerminalGroupValidationError.savedLayoutNotFound(record.id)
         }
         let groupID = TerminalGroupID()
-        groups[groupID] = try TerminalGroupSnapshot(
+        let snapshot = try TerminalGroupSnapshot(
             id: groupID, name: record.name, root: root, focusedPaneID: focusedPaneID,
             savedLayoutID: record.id, panes: panes,
             retainedPaneCount: retainedPaneCount + panes.count)
+        return try insertInertSnapshot(snapshot).id
+    }
+
+    /// Inserts a TG-22-decoded inert instance without remapping its already
+    /// re-keyed runtime identities. It accepts only zero-session stopped or
+    /// unavailable panes and never constructs a controller or process.
+    mutating func insertInertSnapshot(_ snapshot: TerminalGroupSnapshot) throws
+        -> TerminalGroupSnapshot
+    {
+        try requireRetainedCapacity(snapshot.panes.count)
+        let incomingPaneIDs = Set(snapshot.panes.map(\.id))
+        let existingPaneIDs = Set(groups.values.flatMap { $0.panes.map(\.id) })
+        let incomingSplitIDs = Set(snapshot.root.splitIDs)
+        let existingSplitIDs = Set(groups.values.flatMap { $0.root.splitIDs })
+        guard groups[snapshot.id] == nil,
+            existingPaneIDs.isDisjoint(with: incomingPaneIDs),
+            existingSplitIDs.isDisjoint(with: incomingSplitIDs),
+            snapshot.panes.allSatisfy(isValidInertDecodedPane)
+        else { throw TerminalGroupValidationError.unsupportedPaneStart }
+
+        let inserted = try TerminalGroupSnapshot(
+            id: snapshot.id, name: snapshot.name, root: snapshot.root,
+            focusedPaneID: snapshot.focusedPaneID, savedLayoutID: snapshot.savedLayoutID,
+            panes: snapshot.panes, retainedPaneCount: retainedPaneCount + snapshot.panes.count)
+        groups[inserted.id] = inserted
         advanceGeneration()
-        return groupID
+        return inserted
+    }
+
+    private func isValidInertDecodedPane(_ pane: TerminalPaneSnapshot) -> Bool {
+        guard pane.sessionID == nil, pane.reportedTitle == nil else { return false }
+        switch pane.runtimeKind {
+        case .ordinaryShell:
+            guard pane.status == .stopped, pane.launchProfile != nil else { return false }
+            return pane.startAvailability == .available || pane.startAvailability == .unavailable
+        case .unavailableAgentTerminal, .unavailableEnsemble:
+            // TG-10's `TerminalPaneSnapshot` initializer has already pinned
+            // their unavailable status, nil profile, and unavailable start.
+            return pane.status == .unavailable
+        case .directAgentTerminal, .ensembleRole, .ensembleCoordinator:
+            return false
+        }
     }
 
     /// Adds a live pane only after the manager has constructed its controller
@@ -113,7 +155,9 @@ nonisolated struct TerminalGroupRuntime: Sendable {
         guard pane.sessionID == sessionID, pane.status == .live else {
             throw TerminalGroupValidationError.unsupportedPaneStart
         }
-        guard groupAndPane(containing: sessionID) == nil else {
+        guard groupID(containing: pane.id) == nil,
+            groupAndPane(containing: sessionID) == nil
+        else {
             throw TerminalGroupValidationError.unsupportedPaneStart
         }
         let groupID = TerminalGroupID()
@@ -188,6 +232,25 @@ nonisolated struct TerminalGroupRuntime: Sendable {
             id: group.id, name: group.name, root: group.root,
             focusedPaneID: group.focusedPaneID, savedLayoutID: group.savedLayoutID,
             panes: panes, retainedPaneCount: retainedPaneCount)
+        advanceGeneration()
+    }
+
+    /// UI text arrives as raw input, while the frozen command carries an
+    /// already-valid value. Empty text intentionally restores the next
+    /// bounded default name rather than leaving an invalid group name.
+    mutating func renameGroup(_ groupID: TerminalGroupID, rawName: String) throws {
+        let group = try requireGroup(groupID)
+        let trimmed = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name: TerminalGroupName
+        if trimmed.isEmpty {
+            name = defaultName()
+            nextDefaultNameNumber += 1
+        } else if let parsed = TerminalGroupName(trimmed) {
+            name = parsed
+        } else {
+            throw TerminalGroupValidationError.invalidName
+        }
+        groups[groupID] = try replacing(group, name: name)
         advanceGeneration()
     }
 

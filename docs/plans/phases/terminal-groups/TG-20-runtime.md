@@ -291,6 +291,23 @@ Implemented on `terminal-groups/tg-20-runtime` from base
   stay as documented legacy adapters for TG-30/TG-42 migration.
 - Added headless reducer, lifecycle, and capacity tests. They do not mount a
   SwiftTerm view or start a shell.
+- Corrective work keeps aggregate launch mutations on proposed runtime values
+  until all validation and controller construction succeeds. Start All keeps
+  exited controller/session identity, creates controllers only for stopped
+  panes, and selects the final focused pane in stable tree order.
+- Reservations now move from reserved to committed only after an aggregate
+  insertion. The frozen explicit consume call then succeeds once as an
+  acknowledgement; it rejects before insertion, after cancellation, after
+  shutdown, and after a prior consume.
+- Final close validates a copied runtime before shutdown. A fresh token shuts
+  controllers down in stable tree order before membership removal; a stale
+  token performs zero controller cleanup.
+- Added an inert decoded-snapshot insertion seam for TG-22/TG-30. It
+  preserves validated runtime group, pane, and split IDs plus start
+  availability, accepts no session/controller state, and applies the same
+  retained and duplicate-membership guards as saved-layout insertion.
+- Runtime projections use a UUID tie-break for equal group names, so manager
+  rows retain deterministic order after unrelated dictionary mutations.
 - The aggregate does not call WorkspaceSession or Ensemble cleanup. Its close
   effect returns stable session IDs to the future caller-owned cleanup path.
 - No reusable platform fact required a new reference note: this lane adds no
