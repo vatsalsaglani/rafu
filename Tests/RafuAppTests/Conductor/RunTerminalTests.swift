@@ -13,7 +13,8 @@ private func terminalRunSpec() -> TerminalProcessSpec {
             "RAFU_HANDOFF": "/tmp/rafu-terminal-run/handoff",
             "RAFU_RUN_DIR": "/tmp/rafu-terminal-run",
         ],
-        roleBadge: "advisor")
+        roleBadge: "advisor",
+        outputLogURL: URL(filePath: "/tmp/rafu-terminal-run/output.log"))
 }
 
 @MainActor

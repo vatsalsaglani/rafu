@@ -140,9 +140,9 @@ struct EditorFindFocusRoutingTests {
         let fixture = try FindFocusRuntimeFixture()
         defer { fixture.remove() }
 
-        fixture.session.showDocumentFind()
         let hosted = fixture.host()
         defer { hosted.window.orderOut(nil) }
+        fixture.session.showDocumentFind()
         hosted.flushViewLifecycle()
 
         let editor = try #require(hosted.host.firstDescendant(of: RafuTextView.self))

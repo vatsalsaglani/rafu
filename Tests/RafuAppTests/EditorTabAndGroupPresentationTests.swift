@@ -29,15 +29,16 @@ struct EditorTabAndGroupPresentationTests {
 
         #expect(source.contains("private struct EditorTabItem: View"))
         #expect(source.contains("private struct EditorTerminalTabItem: View"))
+        #expect(source.contains("private struct EditorTerminalGroupTabItem: View"))
         #expect(source.contains("private struct GitDiffTabItem: View"))
         #expect(source.contains("private struct GitStandaloneBlameCanvas: View"))
         #expect(
             source.components(separatedBy: "AttachedWorkbenchTab(isSelected:").count - 1
-                == 4
+                == 5
         )
         #expect(
             source.components(separatedBy: "AttachedWorkbenchTabCloseButton(").count - 1
-                == 4
+                == 5
         )
         #expect(source.contains("StitchedAccentEdge"))
         #expect(!source.contains("StitchedUnderline"))

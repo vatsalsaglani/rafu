@@ -66,8 +66,8 @@ struct EditorTabVisibilityPresentationTests {
             theme: RafuThemeCatalog.indigo)
     }
 
-    @Test("Mixed file and terminal tabs keep both runtime titles visible")
-    func mixedFileAndTerminalTabsKeepVisibleRuntimeTitles() throws {
+    @Test("Mixed file and Terminal Group tabs keep both runtime titles visible")
+    func mixedFileAndTerminalGroupTabsKeepVisibleRuntimeTitles() throws {
         let fixture = try EditorTabVisibilityFixture(fileNames: ["Source.swift"])
         defer { fixture.remove() }
         fixture.session.openDocuments[0].isDirty = true
@@ -151,7 +151,14 @@ private final class EditorTabVisibilityFixture {
         {
             session.selectEditorTab(fileTab.id, in: session.editorLayout.focusedGroupID)
         }
-        return TerminalSessionPresentation.tabLabel(controller.displayName)
+        guard
+            let (groupID, _) = session.terminal.terminalGroupAndPane(
+                containing: controller.id),
+            let terminalGroup = session.terminal.terminalGroup(groupID)
+        else {
+            return ""
+        }
+        return terminalGroup.name.rawValue
     }
 
     func renderedText(width: CGFloat, theme: RafuTheme) throws -> String {
