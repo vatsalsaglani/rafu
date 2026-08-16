@@ -71,7 +71,7 @@ are commits `5ae078a9439c5143ae5bacf6af0c874d0f9cfce0`,
 `a46f485c2380145e29fdaccc058dc3cd453bdfea`.
 
 TG-90 has an unapproved blocked checkpoint at
-`112f0285f75cd557d9f83aa2bc0e3df46bb3539b`. It is not merged. Q5 manual and
+`780df1dcb5ac64184b2e07ae96dd867dcfb79522`. It is not merged. Q5 manual and
 accessibility checks and Q6 final active-pane measurements remain open.
 
 `Ready` means that all dependencies are complete and the local branch exists.
