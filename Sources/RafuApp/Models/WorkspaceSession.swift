@@ -672,6 +672,9 @@ final class WorkspaceSession {
     // session's workspace generation before it reaches visible state.
     private(set) var savedTerminalGroups: [SavedTerminalGroupRecord] = []
     private(set) var terminalGroupStoreError: String?
+    /// Observed list-load state for the current workspace generation and
+    /// list epoch. Views consume this value; they never await test seams.
+    private(set) var isTerminalGroupStoreLoading = false
     private(set) var terminalGroupRestorationError: String?
     private(set) var pendingTerminalGroupClose: TerminalGroupCloseToken?
     private(set) var terminalGroupClosePresentationRevision: UInt64 = 0
@@ -1850,6 +1853,7 @@ final class WorkspaceSession {
         terminalGroupMutationEpoch &+= 1
         savedTerminalGroups = []
         terminalGroupStoreError = nil
+        isTerminalGroupStoreLoading = false
         terminalGroupRestorationError = nil
     }
 
@@ -1859,6 +1863,7 @@ final class WorkspaceSession {
         terminalGroupStoreTask?.cancel()
         terminalGroupListEpoch &+= 1
         let epoch = terminalGroupListEpoch
+        isTerminalGroupStoreLoading = true
         terminalGroupStoreTask = Task { [weak self] in
             do {
                 guard let self else { return }
@@ -1873,6 +1878,7 @@ final class WorkspaceSession {
                 }
                 self.savedTerminalGroups = records
                 self.terminalGroupStoreError = self.terminalGroupRestorationError
+                self.isTerminalGroupStoreLoading = false
                 let existing = Set(records.map(\.id))
                 var detachedSavedLayout = false
                 for snapshot in self.terminal.terminalGroups {
@@ -1895,6 +1901,7 @@ final class WorkspaceSession {
                 }
                 self.terminalGroupStoreError = String(
                     decoding: error.localizedDescription.utf8.prefix(512), as: UTF8.self)
+                self.isTerminalGroupStoreLoading = false
                 self.terminalGroupListFinishedForTesting?(epoch)
             }
         }

@@ -2,7 +2,7 @@
 
 ## Status and execution slot
 
-- **Status:** Planned.
+- **Status:** Implemented on lane; awaiting authorized merge.
 - **Wave:** 4; parallel with TG-41 and TG-42.
 - **Branch:** `terminal-groups/tg-40-manager-switcher`.
 - **Required base:** exact `<TG30_MERGED_SHA>`.
@@ -233,7 +233,56 @@ SHA, next dependency, and **Deviations**.
 
 ## Implementation record
 
-To be completed by the TG-40 implementor before the final gate.
+Implemented the Terminal Manager as a stable group-and-pane hierarchy derived
+only from TG-30 snapshots, controller presentation data, presented group IDs,
+and saved-layout records. Expansion is local state keyed by group ID. Group
+and pane actions use the frozen `WorkspaceSession` routes; pane activation
+reveals its outer group and focuses its exact pane.
+
+Pane rows include provider or shell, folder, status, color-capable controller
+actions, focus, and attention. Unavailable panes are inert and use the fixed
+TG-10 saved-profile messages through `TerminalPanePresentation`. Sessions
+not yet assigned to a Terminal Group remain on the legacy row path, once each.
+Group and pane action menus show only valid actions.
+
+Legacy-row derivation receives its presented IDs, current ID, and workspace
+root, so it preserves the existing visible, parked, current, and relative
+folder behavior. Pane status is separate from provider/shell, and a named
+color label is visible and accessible. Group Save and saved-layout Open/Delete
+controls are disabled while a store mutation is in progress.
+
+The Saved Terminal Groups section reads the already-observed workspace values.
+It does not start store reads from its view body. An authorized TG-30
+dependency correction added the observed, generation- and epoch-guarded
+`WorkspaceSession.isTerminalGroupStoreLoading` value. The section has a
+bounded scroll area for up to 32 records. Its Open and Delete actions use the
+frozen workspace routes, so independent inert instances and deletion
+detachment remain owned by TG-30.
+
+Control-Tab retains its group destination identity and now presents each group
+with pane count, parked state, focused-pane summary, and aggregate attention.
+The existing candidate generator still lists each visible or parked group once.
+
+Added behavior tests for derived group/pane state, unavailable-message mapping,
+legacy compatibility, exact reveal/focus without a duplicate outer tab,
+independent saved opens followed by deletion detachment, and group-only
+switcher candidate/commit/cancel behavior with a file candidate. A pure saved
+layout state model covers loading, empty, error, and records; the focused
+workspace test proves the initial empty-result transition. A pure switcher
+presentation model covers aggregate attention and focused-pane text. The
+authorized WorkspaceSession loading-value test proves current-load completion
+does not leave a stale loading state. The Terminal Manager source-contract audit
+now checks the hierarchy resolver's `currentGroupID` and
+`currentLegacySessionID` inputs, rather than the removed legacy row-local
+variables. Parser and diff checks pass.
+
+**Verification deviations:** an earlier build and test command overlapped; the
+coordinator terminated the queued test and required a clean sequential rerun.
+An initial full parallel-suite diagnostic lost its failure names to terminal
+output truncation, so one coordinator-authorized full rerun wrote its output to
+`/tmp/rafu-tg40-final-suite.log`. That rerun identified the stale owned
+source-contract audit corrected above. No production behavior was changed by
+that correction.
 
 ## Goal Mode start prompt
 

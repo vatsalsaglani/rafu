@@ -35,6 +35,22 @@ nonisolated struct EditorTabSwitcherCandidate: Equatable, Identifiable, Sendable
     var id: EditorTabSwitcherDestination { destination }
 }
 
+/// Pure textual presentation for one compound Terminal Group candidate.
+/// Keeping this outside the overlay makes the group-only switcher contract
+/// testable without constructing a SwiftUI view or mounting a terminal.
+nonisolated struct EditorTerminalGroupSwitcherPresentation: Equatable, Sendable {
+    let title: String
+    let detail: String
+
+    init(name: String, paneCount: Int, focusedPaneName: String, attentionCount: Int, isParked: Bool)
+    {
+        title = name
+        let placement = isParked ? "Parked" : "Terminal Group"
+        let attention = attentionCount == 0 ? "" : " · \(attentionCount) need attention"
+        detail = "\(placement) · \(paneCount) panes · Focused: \(focusedPaneName)\(attention)"
+    }
+}
+
 /// Ephemeral selection state for the window's Ctrl-Tab overlay.
 ///
 /// Selection is only previewed here. The editor layout is changed once, when

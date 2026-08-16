@@ -240,12 +240,37 @@ struct EditorTabSwitcherOverlay: View {
                 symbolName: terminalSymbol(controller.status)
             )
 
-        case .terminalGroup:
-            // TG-10 adds destination identity only. No current candidate can
-            // produce this branch; TG-40 owns final group presentation.
+        case .terminalGroup(let groupID):
+            guard let group = session.terminal.terminalGroup(groupID) else {
+                return Presentation(
+                    title: "Unavailable Terminal Group",
+                    detail: "Group closed",
+                    symbolName: "rectangle.3.group"
+                )
+            }
+            let focusedPane = group.panes.first(where: { $0.id == group.focusedPaneID })
+            let focusedName =
+                focusedPane?.explicitUserName?.rawValue
+                ?? focusedPane?.reportedTitle?.rawValue
+                ?? focusedPane?.sessionID.flatMap {
+                    session.terminal.terminalController(sessionID: $0)?.displayName
+                }
+                ?? "Terminal Pane"
+            let attention = group.panes.count { pane in
+                guard let sessionID = pane.sessionID,
+                    let controller = session.terminal.terminalController(sessionID: sessionID)
+                else { return false }
+                return TerminalSessionPresentation.needsAttention(controller.status)
+            }
+            let presentation = EditorTerminalGroupSwitcherPresentation(
+                name: group.name.rawValue,
+                paneCount: group.panes.count,
+                focusedPaneName: focusedName,
+                attentionCount: attention,
+                isParked: !session.presentedTerminalGroupIDs.contains(groupID))
             return Presentation(
-                title: "Terminal Group",
-                detail: "Unavailable",
+                title: presentation.title,
+                detail: presentation.detail,
                 symbolName: "rectangle.3.group"
             )
         }
