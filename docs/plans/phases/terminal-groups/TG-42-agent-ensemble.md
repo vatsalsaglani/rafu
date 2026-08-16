@@ -2,7 +2,7 @@
 
 ## Status and execution slot
 
-- **Status:** Planned.
+- **Status:** Implemented on lane; awaiting authorized merge.
 - **Wave:** 4; parallel with TG-40 and TG-41.
 - **Branch:** `terminal-groups/tg-42-agent-ensemble`.
 - **Required base:** exact `<TG30_MERGED_SHA>`.
@@ -259,7 +259,30 @@ next dependency, and **Deviations**.
 
 ## Implementation record
 
-To be completed by the TG-42 implementor before the final gate.
+Implemented on `terminal-groups/tg-42-agent-ensemble` from
+`7bb2488ab17b3e09614e3a5dc69db2030140aab3`.
+
+- A1: The Agent Terminal sheet, command palette, and Terminal Manager submit
+  their process specifications through `WorkspaceSession.openAgentTerminal`.
+  TG-30 classifies that route as a direct Agent pane and keeps its PATH-only
+  environment and unavailable saved form.
+- A2: Role launches use `insertClassifiedTerminalSession` with
+  `.ensembleRole`. The one TG-30 lifecycle callback forwards natural and
+  user-close exits. Owner abort removes that callback before close.
+- A3-A4: Coordinator launch reserves one live terminal slot before token mint,
+  inserts an `.ensembleCoordinator` pane with that reservation, then consumes
+  it. A later failure closes an inserted pane, cancels capacity, and revokes
+  the token. The aggregate capacity error is preserved.
+- A5-A6: Both Ensemble paths reveal their aggregate-created session. No
+  Ensemble launcher directly calls `terminal.newSession`; remaining direct
+  manager mutations are the documented WorkspaceSession compatibility and
+  aggregate boundaries.
+
+Focused tests pin role natural/user/owner-close lifecycle semantics, one-pane
+runtime classifications, coordinator exact-once completion, capacity-before-
+mint rejection, and minted-token rollback after injected aggregate construction
+failure. Final formatter, build, parallel-suite, and Rafu Lightning evidence
+follows the authorized lease gate.
 
 ## Goal Mode start prompt
 

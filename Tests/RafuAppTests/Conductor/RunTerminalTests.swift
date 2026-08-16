@@ -23,10 +23,10 @@ func workspaceLauncherCreatesTerminalAndForwardsExit() throws {
     let session = WorkspaceSession()
     let launcher = WorkspaceConductorRunLauncher(
         workspaceSession: session, runID: "terminal-run")
-    var observedExit: (UUID, Int32?)?
+    var observedExits: [(UUID, Int32?)] = []
 
     let sessionID = try launcher.launch(specification: terminalRunSpec()) { id, code in
-        observedExit = (id, code)
+        observedExits.append((id, code))
     }
 
     let terminalController = try #require(
@@ -37,14 +37,36 @@ func workspaceLauncherCreatesTerminalAndForwardsExit() throws {
     #expect(session.selectedConductorRunID == "terminal-run")
     #expect(session.navigatorMode == .runs)
     #expect(session.presentedTerminalSessionIDs == [sessionID])
+    let groupID = try #require(session.terminal.terminalGroupAndPane(containing: sessionID)?.0)
+    let group = try #require(session.terminal.terminalGroup(groupID))
+    #expect(group.panes.count == 1)
+    #expect(group.panes[0].runtimeKind == .ensembleRole)
     #expect(session.terminal.sessionDidExit != nil)
     #expect(session.terminal.sessionDidBell != nil)
 
     terminalController.processDidTerminate(exitCode: 23)
 
-    #expect(observedExit?.0 == sessionID)
-    #expect(observedExit?.1 == 23)
+    #expect(observedExits.map(\.0) == [sessionID])
+    #expect(observedExits.map(\.1) == [23])
     #expect(terminalController.status == .exited(code: 23))
+}
+
+@MainActor
+@Test("Workspace role user close consumes its lifecycle callback once")
+func workspaceRoleUserCloseConsumesLifecycleOnce() throws {
+    let session = WorkspaceSession()
+    let launcher = WorkspaceConductorRunLauncher(workspaceSession: session, runID: "user-close")
+    var observed: [(UUID, Int32?)] = []
+    let sessionID = try launcher.launch(specification: terminalRunSpec()) { id, code in
+        observed.append((id, code))
+    }
+
+    session.closeTerminalSession(sessionID)
+    session.closeTerminalSession(sessionID)
+
+    #expect(observed.map(\.0) == [sessionID])
+    #expect(observed.map(\.1) == [nil])
+    #expect(session.terminal.terminalGroups.isEmpty)
 }
 
 @MainActor
@@ -53,13 +75,17 @@ func workspaceLauncherTerminationClosesItsTerminal() throws {
     let session = WorkspaceSession()
     let launcher = WorkspaceConductorRunLauncher(
         workspaceSession: session, runID: "abort-terminal")
-    let sessionID = try launcher.launch(
-        specification: terminalRunSpec(), onExit: { _, _ in })
+    var callbacks = 0
+    let sessionID = try launcher.launch(specification: terminalRunSpec()) { _, _ in
+        callbacks += 1
+    }
 
     launcher.terminate(sessionID: sessionID)
 
     #expect(!session.terminal.sessions.contains(where: { $0.id == sessionID }))
     #expect(!session.presentedTerminalSessionIDs.contains(sessionID))
+    #expect(session.terminal.terminalGroups.isEmpty)
+    #expect(callbacks == 0)
 }
 
 @MainActor
