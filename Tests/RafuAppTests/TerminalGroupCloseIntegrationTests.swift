@@ -79,14 +79,18 @@ func workspaceSessionStaleCloseRequiresSecondConfirmation() async throws {
     session.terminal.terminalController(for: paneID)?.markRunningForTesting()
     session.requestTerminalGroupClose(groupID)
     let stale = try #require(session.pendingTerminalGroupClose)
-    session.splitFocusedTerminalPane(.right)
+    let profile = TerminalPaneLaunchProfile(shell: .preferredShell, startingFolder: .root)
+    _ = try session.terminal.splitFocusedPane(
+        in: groupID, placement: .right,
+        instantiation: .ordinaryShell(
+            startingDirectory: root.path,
+            shell: TerminalShell(path: "/bin/zsh", name: "zsh", isDefault: true),
+            profile: profile))
 
-    let represented = TerminalGroupIntegrationSignal()
-    session.terminalGroupCloseRepreparedForTesting = {
-        Task { await represented.signal() }
+    await withCheckedContinuation { continuation in
+        session.terminalGroupCloseRepreparedForTesting = { continuation.resume() }
+        session.confirmTerminalGroupClose()
     }
-    session.confirmTerminalGroupClose()
-    await represented.wait()
     let refreshed = try #require(session.pendingTerminalGroupClose)
     #expect(refreshed != stale)
     #expect(session.terminal.terminalGroup(groupID)?.panes.count == 2)
