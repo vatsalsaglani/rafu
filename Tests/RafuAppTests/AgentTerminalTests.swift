@@ -221,3 +221,29 @@ func openAgentTerminalCreatesAndRevealsSession() throws {
     #expect(workspace.editorLayout.tab(matching: .terminalGroup(groupID: groupID)) != nil)
     #expect(!EditorTabResource.terminalGroup(groupID: groupID).isRestorable)
 }
+
+@MainActor
+@Test("Agent Terminal seventh launch reports aggregate capacity without construction")
+func openAgentTerminalSeventhLaunchUsesTerminalGroupCapacityError() throws {
+    let workspace = WorkspaceSession()
+    let root = URL(fileURLWithPath: "/tmp", isDirectory: true)
+    let spec = try AgentTerminalLaunchService(workspaceRoot: root).specification(
+        option: readyAgentTerminalOption(id: .codex), model: nil, startingDirectory: root)
+    for _ in 0..<6 { workspace.openAgentTerminal(spec: spec) }
+    var constructions = 0
+    workspace.terminal.terminalGroupControllerFactory = { index, instantiation in
+        constructions += 1
+        throw TerminalGroupValidationError.unsupportedPaneStart
+    }
+
+    workspace.openAgentTerminal(spec: spec)
+
+    #expect(constructions == 0)
+    #expect(workspace.terminal.sessions.count == 6)
+    #expect(workspace.terminal.terminalGroups.count == 6)
+    #expect(workspace.openFolderErrorTitle == "Terminal Group")
+    #expect(
+        workspace.openFolderErrorMessage
+            == TerminalGroupCapacityError.liveSessionLimitExceeded(current: 6, requested: 1)
+            .localizedDescription)
+}

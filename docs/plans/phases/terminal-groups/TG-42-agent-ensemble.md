@@ -281,8 +281,12 @@ Implemented on `terminal-groups/tg-42-agent-ensemble` from
 Focused tests pin role natural/user/owner-close lifecycle semantics, one-pane
 runtime classifications, coordinator exact-once completion, capacity-before-
 mint rejection, and minted-token rollback after injected aggregate construction
-failure. Final formatter, build, parallel-suite, and Rafu Lightning evidence
-follows the authorized lease gate.
+failure. Agent, role, and coordinator seventh-session tests prove the shared
+six-session capacity result; Agent reaches the Terminal Group error surface,
+while role and coordinator throw the typed capacity error before construction.
+A source audit test proves both Ensemble launchers use classified insertion and
+do not call `terminal.newSession`. Final formatter, build, and parallel-suite
+evidence follows the authorized correction lease gate.
 
 ## Goal Mode start prompt
 

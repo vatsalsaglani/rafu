@@ -89,6 +89,46 @@ func workspaceLauncherTerminationClosesItsTerminal() throws {
 }
 
 @MainActor
+@Test("Role seventh launch fails before controller construction or run selection")
+func workspaceRoleSeventhLaunchPreflightsCapacity() throws {
+    let session = WorkspaceSession()
+    let spec = terminalRunSpec()
+    for _ in 0..<6 {
+        _ = try session.insertClassifiedTerminalSession(
+            spec: spec, kind: .ensembleRole, lifecycle: {})
+    }
+    var constructions = 0
+    session.terminal.terminalGroupControllerFactory = { _, _ in
+        constructions += 1
+        fatalError("must not construct")
+    }
+    let launcher = WorkspaceConductorRunLauncher(workspaceSession: session, runID: "rejected")
+
+    #expect(throws: TerminalGroupCapacityError.liveSessionLimitExceeded(current: 6, requested: 1)) {
+        try launcher.launch(specification: spec, onExit: { _, _ in })
+    }
+    #expect(constructions == 0)
+    #expect(session.terminal.sessions.count == 6)
+    #expect(session.terminal.terminalGroups.count == 6)
+    #expect(session.selectedConductorRunID == nil)
+}
+
+@Test("Ensemble launchers use only the classified aggregate insertion boundary")
+func ensembleLaunchersAvoidDirectTerminalManagerMutation() throws {
+    let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent()
+    for relative in [
+        "Sources/RafuApp/Conductor/Run/WorkspaceConductorRunLauncher.swift",
+        "Sources/RafuApp/Conductor/Ensemble/ConductorCoordinatorLauncher.swift",
+    ] {
+        let source = try String(contentsOf: root.appending(path: relative), encoding: .utf8)
+        #expect(source.contains("insertClassifiedTerminalSession"))
+        #expect(!source.contains("terminal.newSession"))
+    }
+}
+
+@MainActor
 @Test("Fake adapter exit propagates from the workspace terminal to the run FSM")
 func fakeAdapterTerminalExitReachesRunFSM() async throws {
     let root = try makeTerminalRunRepository()
