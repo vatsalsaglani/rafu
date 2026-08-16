@@ -16,7 +16,7 @@ flowchart LR
     W["TG-30<br/>Complete"]
     M["TG-40<br/>In progress"]
     K["TG-41<br/>In progress"]
-    A["TG-42<br/>In progress"]
+    A["TG-42<br/>Complete"]
     Q["TG-90<br/>Blocked"]
 
     D --> C
@@ -46,7 +46,7 @@ flowchart LR
 | [TG-30](TG-30-workspace-integration.md) | TG-20, TG-21, TG-22 | Terra | `terminal-groups/tg-30-workspace-integration` | Complete | `02bc5fca3dc61d311625ca08e82211aef86516ed` |
 | [TG-40](TG-40-manager-switcher.md) | TG-30 | Terra | `terminal-groups/tg-40-manager-switcher` | In progress | — |
 | [TG-41](TG-41-commands-save-ui.md) | TG-30 | Terra | `terminal-groups/tg-41-commands-save-ui` | In progress | — |
-| [TG-42](TG-42-agent-ensemble.md) | TG-30 | Terra | `terminal-groups/tg-42-agent-ensemble` | In progress | — |
+| [TG-42](TG-42-agent-ensemble.md) | TG-30 | Terra | `terminal-groups/tg-42-agent-ensemble` | Complete | `a908e85b355182017c2951317a2994282dc23a0f` |
 | [TG-90](TG-90-integration-qa.md) | TG-40, TG-41, TG-42 | Terra | `terminal-groups/tg-90-integration-qa` | Blocked | — |
 
 `Approved SHA` is the final lane commit that the primary coordinator approved.
@@ -59,7 +59,8 @@ commit `30902b47d874a1f7f2adbb538a03f93f00353b27`; its TG-30 adoption correction
 on `main` through merge commit `57ab67911329dd8b1afc04fe993eb51b3d07bc80`.
 TG-30 is on `main` through merge commit
 `a141ee773ab650817802e10dc928530d5015c335`; its integration-test correction is
-on `main` at `7bb2488ab17b3e09614e3a5dc69db2030140aab3`.
+on `main` at `7bb2488ab17b3e09614e3a5dc69db2030140aab3`. TG-42 is on `main` through
+merge commit `fc65d7aab03477a7247bd7cb3e0003c9d8e3bf59`.
 
 `Ready` means that all dependencies are complete and the local branch exists.
 `In progress` means that the branch has an active isolated Worktree worker.
