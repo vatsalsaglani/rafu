@@ -8,6 +8,12 @@ import Testing
 /// It models the one shared actor, including the registered-before-list
 /// stream contract, without reading Application Support.
 actor TerminalGroupIntegrationStore: TerminalGroupSavedLayoutStoring {
+    // Load-bearing under the RafuApp target's Swift 6.2 default-MainActor
+    // mode: an implicit actor initializer inherits the nonisolated protocol
+    // declaration and is rejected as an invalid nonisolated synchronous
+    // actor initializer. Keep this initializer explicit.
+    init() {}
+
     private var records:
         [TerminalGroupWorkspaceKey: [SavedTerminalGroupID: SavedTerminalGroupRecord]] = [:]
     private var revisions: [TerminalGroupWorkspaceKey: UInt64] = [:]

@@ -113,8 +113,11 @@ In the RafuApp target's Swift 6.2 default-`MainActor` mode, declaring
 `LauncherIPCServer` as a custom `actor` gives it its own executor and is the
 explicit isolation boundary. Do not spell the type `nonisolated actor`: Swift
 6.2 applies that modifier to the synchronous actor initializer and rejects it
-as invalid. `nonisolated` remains appropriate on the lifecycle wrappers and
-pure/static syscall helpers that do not touch actor state.
+as invalid. The same diagnostic can affect an actor with only an implicit
+initializer when it conforms to a `nonisolated protocol` in this target; keep
+that actor initializer explicit. `nonisolated` remains appropriate on the
+lifecycle wrappers and pure/static syscall helpers that do not touch actor
+state.
 
 ## Why it matters
 
