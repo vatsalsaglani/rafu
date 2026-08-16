@@ -308,6 +308,12 @@ Implemented on `terminal-groups/tg-20-runtime` from base
   retained and duplicate-membership guards as saved-layout insertion.
 - Runtime projections use a UUID tie-break for equal group names, so manager
   rows retain deterministic order after unrelated dictionary mutations.
+- Added the TG-30 corrective adoption seam. It moves one existing ungrouped
+  controller into a one-pane group without constructing, starting, restarting,
+  or shutting it down. The manager derives only safe pane classification and
+  presentation metadata, preserves controller identity and callbacks, and
+  rejects retained or live-plus-reserved capacity inconsistencies before any
+  membership mutation.
 - The aggregate does not call WorkspaceSession or Ensemble cleanup. Its close
   effect returns stable session IDs to the future caller-owned cleanup path.
 - No reusable platform fact required a new reference note: this lane adds no
