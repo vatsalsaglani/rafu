@@ -43,20 +43,49 @@ final class WorkspaceConductorRunLauncher: ConductorRunProcessLaunching {
             throw WorkspaceConductorRunLauncherError.workspaceReleased
         }
 
-        // Opening the run installs the terminal's shared exit/attention
-        // handlers before `newSession(spec:)` wires this controller to them.
-        workspaceSession.openConductorRun(runID)
-        let controller = workspaceSession.terminal.newSession(spec: specification)
-        let sharedExitHandler = controller.onExit
-        controller.onExit = { sessionID, exitCode in
-            sharedExitHandler?(sessionID, exitCode)
-            onExit(sessionID, exitCode)
+        // Capacity must fail before opening a run, so a rejected role never
+        // publishes a partial running selection.
+        let reservation = try workspaceSession.reserveTerminalLiveSessionCapacity(1)
+        var insertedID: UUID?
+        do {
+            // Opening the run installs the terminal's shared exit/attention
+            // handlers before classified insertion wires the controller to them.
+            workspaceSession.openConductorRun(runID)
+            var sessionID: UUID?
+            let session = try workspaceSession.insertClassifiedTerminalSession(
+                spec: specification,
+                kind: .ensembleRole,
+                lifecycle: { [weak workspaceSession] in
+                    guard
+                        let workspaceSession,
+                        let sessionID,
+                        let controller = workspaceSession.terminal.sessions.first(where: {
+                            $0.id == sessionID
+                        })
+                    else { return }
+                    let exitCode: Int32?
+                    if case .exited(let code) = controller.status {
+                        exitCode = code
+                    } else {
+                        exitCode = nil
+                    }
+                    onExit(sessionID, exitCode)
+                },
+                reservation: reservation)
+            insertedID = session
+            sessionID = session
+            try workspaceSession.consumeTerminalLiveSessionCapacity(reservation)
+            return session
+        } catch {
+            if let insertedID {
+                workspaceSession.ownerHandledTerminalLifecycleClose(insertedID)
+            }
+            try? workspaceSession.cancelTerminalLiveSessionCapacity(reservation)
+            throw error
         }
-        workspaceSession.revealTerminalSession(controller.id)
-        return controller.id
     }
 
     func terminate(sessionID: UUID) {
-        workspaceSession?.closeTerminalSession(sessionID)
+        workspaceSession?.ownerHandledTerminalLifecycleClose(sessionID)
     }
 }

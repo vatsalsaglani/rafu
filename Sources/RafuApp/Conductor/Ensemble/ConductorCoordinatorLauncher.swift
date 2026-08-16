@@ -128,6 +128,7 @@ struct ConductorCoordinatorLauncher {
         }
         try Task.checkCancellation()
 
+        let reservation = try session.reserveTerminalLiveSessionCapacity(1)
         let coordinatorID = makeCoordinatorID()
         let token = tokenStore.mint(coordinatorID: coordinatorID, grant: grant)
         let shape = AgentTerminalLaunchShape.forCLI(provider)
@@ -144,44 +145,56 @@ struct ConductorCoordinatorLauncher {
             resourceAttribution: "coordinator • \(provider.displayName)"
         )
 
-        let terminalController = session.terminal.newSession(spec: processSpec)
-        let trimmedModel = model?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedLabel = label?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let coordinatorSession = ConductorCoordinatorSession(
-            id: coordinatorID,
-            provider: provider,
-            model: trimmedModel?.isEmpty == false ? trimmedModel : nil,
-            goal: goal,
-            terminalSessionID: terminalController.id,
-            startedAt: clock(),
-            endedAt: nil,
-            label: trimmedLabel?.isEmpty == false ? trimmedLabel : nil,
-            // Trimmed and empty-dropped here so "" — the established
-            // not-set value — never reaches the resolver as a model named
-            // "" and is never handed to a CLI as `--model ''`.
-            providerModelDefaults: providerModelDefaults.compactMapValues {
-                ConductorModelResolution.normalized($0)
-            }
-        )
-        session.registerCoordinatorSession(coordinatorSession) {
-            tokenStore.revoke(coordinatorID: coordinatorID)
-            eventCenter.publish(
-                EnsembleEvent(
-                    cursor: 0,
-                    at: clock(),
-                    runID: coordinatorID,
-                    kind: "state",
-                    state: .completed,
-                    startedBy: coordinatorID
-                ))
-        }
+        var insertedSessionID: UUID?
+        do {
+            let terminalSessionID = try session.insertClassifiedTerminalSession(
+                spec: processSpec,
+                kind: .ensembleCoordinator,
+                lifecycle: { [weak session] in
+                    session?.coordinatorSessionDidEnd(coordinatorID)
+                },
+                reservation: reservation)
+            insertedSessionID = terminalSessionID
+            try session.consumeTerminalLiveSessionCapacity(reservation)
 
-        let sharedExitHandler = terminalController.onExit
-        terminalController.onExit = { [weak session] terminalID, exitCode in
-            sharedExitHandler?(terminalID, exitCode)
-            session?.coordinatorSessionDidEnd(coordinatorID)
+            let trimmedModel = model?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedLabel = label?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let coordinatorSession = ConductorCoordinatorSession(
+                id: coordinatorID,
+                provider: provider,
+                model: trimmedModel?.isEmpty == false ? trimmedModel : nil,
+                goal: goal,
+                terminalSessionID: terminalSessionID,
+                startedAt: clock(),
+                endedAt: nil,
+                label: trimmedLabel?.isEmpty == false ? trimmedLabel : nil,
+                // Trimmed and empty-dropped here so "" — the established
+                // not-set value — never reaches the resolver as a model named
+                // "" and is never handed to a CLI as `--model ''`.
+                providerModelDefaults: providerModelDefaults.compactMapValues {
+                    ConductorModelResolution.normalized($0)
+                }
+            )
+            session.registerCoordinatorSession(coordinatorSession) {
+                tokenStore.revoke(coordinatorID: coordinatorID)
+                eventCenter.publish(
+                    EnsembleEvent(
+                        cursor: 0,
+                        at: clock(),
+                        runID: coordinatorID,
+                        kind: "state",
+                        state: .completed,
+                        startedBy: coordinatorID
+                    ))
+            }
+            return coordinatorSession
+        } catch {
+            if let insertedSessionID {
+                session.ownerHandledTerminalLifecycleClose(insertedSessionID)
+            }
+            try? session.cancelTerminalLiveSessionCapacity(reservation)
+            tokenStore.revoke(coordinatorID: coordinatorID)
+            throw error
         }
-        session.revealTerminalSession(terminalController.id)
-        return coordinatorSession
     }
 }

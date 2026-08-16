@@ -23,10 +23,10 @@ func workspaceLauncherCreatesTerminalAndForwardsExit() throws {
     let session = WorkspaceSession()
     let launcher = WorkspaceConductorRunLauncher(
         workspaceSession: session, runID: "terminal-run")
-    var observedExit: (UUID, Int32?)?
+    var observedExits: [(UUID, Int32?)] = []
 
     let sessionID = try launcher.launch(specification: terminalRunSpec()) { id, code in
-        observedExit = (id, code)
+        observedExits.append((id, code))
     }
 
     let terminalController = try #require(
@@ -37,14 +37,36 @@ func workspaceLauncherCreatesTerminalAndForwardsExit() throws {
     #expect(session.selectedConductorRunID == "terminal-run")
     #expect(session.navigatorMode == .runs)
     #expect(session.presentedTerminalSessionIDs == [sessionID])
+    let groupID = try #require(session.terminal.terminalGroupAndPane(containing: sessionID)?.0)
+    let group = try #require(session.terminal.terminalGroup(groupID))
+    #expect(group.panes.count == 1)
+    #expect(group.panes[0].runtimeKind == .ensembleRole)
     #expect(session.terminal.sessionDidExit != nil)
     #expect(session.terminal.sessionDidBell != nil)
 
     terminalController.processDidTerminate(exitCode: 23)
 
-    #expect(observedExit?.0 == sessionID)
-    #expect(observedExit?.1 == 23)
+    #expect(observedExits.map(\.0) == [sessionID])
+    #expect(observedExits.map(\.1) == [23])
     #expect(terminalController.status == .exited(code: 23))
+}
+
+@MainActor
+@Test("Workspace role user close consumes its lifecycle callback once")
+func workspaceRoleUserCloseConsumesLifecycleOnce() throws {
+    let session = WorkspaceSession()
+    let launcher = WorkspaceConductorRunLauncher(workspaceSession: session, runID: "user-close")
+    var observed: [(UUID, Int32?)] = []
+    let sessionID = try launcher.launch(specification: terminalRunSpec()) { id, code in
+        observed.append((id, code))
+    }
+
+    session.closeTerminalSession(sessionID)
+    session.closeTerminalSession(sessionID)
+
+    #expect(observed.map(\.0) == [sessionID])
+    #expect(observed.map(\.1) == [nil])
+    #expect(session.terminal.terminalGroups.isEmpty)
 }
 
 @MainActor
@@ -53,13 +75,57 @@ func workspaceLauncherTerminationClosesItsTerminal() throws {
     let session = WorkspaceSession()
     let launcher = WorkspaceConductorRunLauncher(
         workspaceSession: session, runID: "abort-terminal")
-    let sessionID = try launcher.launch(
-        specification: terminalRunSpec(), onExit: { _, _ in })
+    var callbacks = 0
+    let sessionID = try launcher.launch(specification: terminalRunSpec()) { _, _ in
+        callbacks += 1
+    }
 
     launcher.terminate(sessionID: sessionID)
 
     #expect(!session.terminal.sessions.contains(where: { $0.id == sessionID }))
     #expect(!session.presentedTerminalSessionIDs.contains(sessionID))
+    #expect(session.terminal.terminalGroups.isEmpty)
+    #expect(callbacks == 0)
+}
+
+@MainActor
+@Test("Role seventh launch fails before controller construction or run selection")
+func workspaceRoleSeventhLaunchPreflightsCapacity() throws {
+    let session = WorkspaceSession()
+    let spec = terminalRunSpec()
+    for _ in 0..<6 {
+        _ = try session.insertClassifiedTerminalSession(
+            spec: spec, kind: .ensembleRole, lifecycle: {})
+    }
+    var constructions = 0
+    session.terminal.terminalGroupControllerFactory = { _, _ in
+        constructions += 1
+        fatalError("must not construct")
+    }
+    let launcher = WorkspaceConductorRunLauncher(workspaceSession: session, runID: "rejected")
+
+    #expect(throws: TerminalGroupCapacityError.liveSessionLimitExceeded(current: 6, requested: 1)) {
+        try launcher.launch(specification: spec, onExit: { _, _ in })
+    }
+    #expect(constructions == 0)
+    #expect(session.terminal.sessions.count == 6)
+    #expect(session.terminal.terminalGroups.count == 6)
+    #expect(session.selectedConductorRunID == nil)
+}
+
+@Test("Ensemble launchers use only the classified aggregate insertion boundary")
+func ensembleLaunchersAvoidDirectTerminalManagerMutation() throws {
+    let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent()
+    for relative in [
+        "Sources/RafuApp/Conductor/Run/WorkspaceConductorRunLauncher.swift",
+        "Sources/RafuApp/Conductor/Ensemble/ConductorCoordinatorLauncher.swift",
+    ] {
+        let source = try String(contentsOf: root.appending(path: relative), encoding: .utf8)
+        #expect(source.contains("insertClassifiedTerminalSession"))
+        #expect(!source.contains("terminal.newSession"))
+    }
 }
 
 @MainActor
