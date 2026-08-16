@@ -13,7 +13,7 @@ flowchart LR
     R["TG-20<br/>Complete"]
     V["TG-21<br/>Complete"]
     S["TG-22<br/>Complete"]
-    W["TG-30<br/>Ready"]
+    W["TG-30<br/>In progress"]
     M["TG-40<br/>Blocked"]
     K["TG-41<br/>Blocked"]
     A["TG-42<br/>Blocked"]
@@ -43,7 +43,7 @@ flowchart LR
 | [TG-20](TG-20-runtime.md) | TG-10 | Terra | `terminal-groups/tg-20-runtime` | Complete | `0b66f294748ba4cb3c32d43991e2fa53adfe9e46` |
 | [TG-21](TG-21-renderer-focus.md) | TG-10 | Terra | `terminal-groups/tg-21-renderer-focus` | Complete | `aa02dcbec6f4bc56f291473867952b8e85444d95` |
 | [TG-22](TG-22-persistence.md) | TG-10 | Terra | `terminal-groups/tg-22-persistence` | Complete | `70580d2152401e53223b4d7ee86a2eaebf519326` |
-| [TG-30](TG-30-workspace-integration.md) | TG-20, TG-21, TG-22 | Terra | `terminal-groups/tg-30-workspace-integration` | Ready | — |
+| [TG-30](TG-30-workspace-integration.md) | TG-20, TG-21, TG-22 | Terra | `terminal-groups/tg-30-workspace-integration` | In progress | — |
 | [TG-40](TG-40-manager-switcher.md) | TG-30 | Terra | `terminal-groups/tg-40-manager-switcher` | Blocked | — |
 | [TG-41](TG-41-commands-save-ui.md) | TG-30 | Terra | `terminal-groups/tg-41-commands-save-ui` | Blocked | — |
 | [TG-42](TG-42-agent-ensemble.md) | TG-30 | Terra | `terminal-groups/tg-42-agent-ensemble` | Blocked | — |
