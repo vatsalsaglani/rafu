@@ -42,9 +42,13 @@ struct RafuAppCommands: Commands {
         }
 
         CommandGroup(replacing: .saveItem) {
-            Button("Save") { workspaceSession?.saveSelectedDocument() }
+            Button(contextualSaveTitle) { performContextualSave() }
                 .keyboardShortcut("s", modifiers: .command)
-                .disabled(workspaceSession?.selectedDocument == nil)
+                .disabled(contextualSaveDisabled)
+
+            Button("Save Terminal Group As…") { performSaveTerminalGroupAs() }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+                .disabled(disabled(.saveAs))
         }
 
         // Replaces the default File > Print… so ⌘P owns Go to File.
@@ -252,15 +256,17 @@ struct RafuAppCommands: Commands {
 
             Divider()
 
-            Button("Toggle Terminal") {
+            Button("Toggle Terminal Group") {
                 workspaceSession?.toggleTerminal()
             }
             .keyboardShortcut("`", modifiers: [.control])
+            .disabled(disabled(.toggle))
 
-            Button("New Terminal Tab") {
-                workspaceSession?.newTerminalTab()
+            Button("New Terminal Group") {
+                workspaceSession?.newTerminalGroup()
             }
             .keyboardShortcut("`", modifiers: [.control, .shift])
+            .disabled(disabled(.newGroup))
 
             Button("New Agent Terminal…") {
                 workspaceSession?.presentAgentTerminalSheet()
@@ -284,8 +290,9 @@ struct RafuAppCommands: Commands {
             // No keyboard shortcut (terminal-manager.md T-B): a menu key
             // equivalent is consumed app-wide before any first responder, so
             // ⌃⇧T would permanently steal readline's transpose-chars from
-            // every embedded shell, and ⌘⇧T collides with "reopen closed
-            // tab". Menu + command palette is the path in v1.
+            // every embedded shell. ⌘⇧T is reserved here for Split Terminal
+            // Down only while a Terminal Group is selected; outside that
+            // context it remains disabled for a future Reopen Closed Tab.
             Button("Show Terminals") {
                 workspaceSession?.toggleUtilityPane(.terminals)
             }
@@ -384,7 +391,10 @@ struct RafuAppCommands: Commands {
                 workspaceSession?.requestCloseActiveTab()
             }
             .keyboardShortcut("w", modifiers: .command)
+            .disabled(isTerminalGroupModalPresented)
         }
+
+        terminalGroupCommands
 
         // `after: .help`, never `replacing: .help` — replacing deletes the
         // system Help menu item entirely.
@@ -431,5 +441,172 @@ struct RafuAppCommands: Commands {
     private func isWorkflowFailed(_ session: WorkspaceSession?) -> Bool {
         guard case .failed = session?.selectedWorkflowController?.state else { return false }
         return true
+    }
+
+    private var isTerminalGroupModalPresented: Bool {
+        workspaceSession?.isTerminalGroupModalInputBlocked == true
+    }
+
+    private var contextualSaveDisabled: Bool {
+        guard let workspaceSession else { return true }
+        if workspaceSession.selectedTerminalGroupID != nil {
+            return !workspaceSession.terminalGroupPresentationAvailability(.save).isEnabled
+        }
+        return isTerminalGroupModalPresented || (workspaceSession.selectedDocument == nil)
+    }
+
+    private var contextualSaveTitle: String {
+        workspaceSession?.selectedTerminalGroupID == nil ? "Save" : "Save Terminal Group"
+    }
+
+    private func performContextualSave() {
+        guard let workspaceSession else { return }
+        if let groupID = workspaceSession.selectedTerminalGroupID {
+            guard workspaceSession.terminalGroupPresentationAvailability(.save).isEnabled else {
+                return
+            }
+            workspaceSession.requestTerminalGroupSave(groupID)
+        } else {
+            workspaceSession.saveSelectedDocument()
+        }
+    }
+
+    private func performSaveTerminalGroupAs() {
+        guard let groupID = workspaceSession?.selectedTerminalGroupID,
+            workspaceSession?.terminalGroupPresentationAvailability(.saveAs).isEnabled == true
+        else { return }
+        workspaceSession?.requestTerminalGroupSaveAs(groupID)
+    }
+
+    private var terminalGroupCommands: some Commands {
+        CommandMenu("Terminal Group") {
+            Button(
+                workspaceSession?.selectedTerminalGroupID == nil
+                    ? "New Terminal Group" : "Split Terminal Right"
+            ) {
+                guard let workspaceSession else { return }
+                if workspaceSession.selectedTerminalGroupID == nil {
+                    guard
+                        workspaceSession.terminalGroupPresentationAvailability(.newGroup).isEnabled
+                    else { return }
+                    workspaceSession.newTerminalGroup()
+                } else {
+                    guard
+                        workspaceSession.terminalGroupPresentationAvailability(.splitRight)
+                            .isEnabled
+                    else { return }
+                    workspaceSession.splitFocusedTerminalPane(.right)
+                }
+            }
+            .keyboardShortcut("t", modifiers: .command)
+            .disabled(
+                disabled(workspaceSession?.selectedTerminalGroupID == nil ? .newGroup : .splitRight)
+            )
+
+            Button("Split Terminal Down") {
+                guard let workspaceSession,
+                    workspaceSession.terminalGroupPresentationAvailability(.splitDown).isEnabled
+                else { return }
+                workspaceSession.splitFocusedTerminalPane(.down)
+            }
+            .keyboardShortcut("t", modifiers: [.command, .shift])
+            .disabled(disabled(.splitDown))
+
+            Divider()
+
+            Button("Focus Terminal Pane Left") {
+                guardAvailable(.focus(.left)) { $0.focusTerminalPane(.left) }
+            }
+            .keyboardShortcut(.leftArrow, modifiers: [.control, .command])
+            .disabled(disabled(.focus(.left)))
+            Button("Focus Terminal Pane Right") {
+                guardAvailable(.focus(.right)) { $0.focusTerminalPane(.right) }
+            }
+            .keyboardShortcut(.rightArrow, modifiers: [.control, .command])
+            .disabled(disabled(.focus(.right)))
+            Button("Focus Terminal Pane Up") {
+                guardAvailable(.focus(.up)) { $0.focusTerminalPane(.up) }
+            }
+            .keyboardShortcut(.upArrow, modifiers: [.control, .command])
+            .disabled(disabled(.focus(.up)))
+            Button("Focus Terminal Pane Down") {
+                guardAvailable(.focus(.down)) { $0.focusTerminalPane(.down) }
+            }
+            .keyboardShortcut(.downArrow, modifiers: [.control, .command])
+            .disabled(disabled(.focus(.down)))
+
+            Divider()
+
+            Button("Rename Terminal Group…") {
+                guardAvailable(.rename) { session in
+                    if let id = session.selectedTerminalGroupID {
+                        session.requestTerminalGroupRename(id)
+                    }
+                }
+            }
+            .disabled(disabled(.rename))
+            Button("Save Terminal Group") { guardAvailable(.save) { _ in performContextualSave() } }
+                .disabled(disabled(.save))
+            Button("Save Terminal Group As…") {
+                guardAvailable(.saveAs) { _ in performSaveTerminalGroupAs() }
+            }
+            .disabled(disabled(.saveAs))
+            Button("Start Terminal Pane") {
+                guardAvailable(.startPane) { session in
+                    if let id = session.focusedTerminalPaneID { session.startTerminalPane(id) }
+                }
+            }
+            .disabled(disabled(.startPane))
+            Button("Set Pane Starting Folder…") {
+                guardAvailable(.setFolder) { session in
+                    if let id = session.focusedTerminalPaneID {
+                        session.requestTerminalPaneStartingFolder(id)
+                    }
+                }
+            }
+            .disabled(disabled(.setFolder))
+            Button("Start All Restartable Panes") {
+                guardAvailable(.startAll) { session in
+                    if let id = session.selectedTerminalGroupID {
+                        session.startAllRestartableTerminalPanes(in: id)
+                    }
+                }
+            }
+            .disabled(disabled(.startAll))
+            Button("Close Terminal Pane") {
+                guardAvailable(.closePane) { session in
+                    if let id = session.focusedTerminalPaneID { session.closeTerminalPane(id) }
+                }
+            }
+            .disabled(disabled(.closePane))
+            Button("Hide Terminal Group") {
+                guardAvailable(.hide) { session in
+                    if let id = session.selectedTerminalGroupID { session.hideTerminalGroup(id) }
+                }
+            }
+            .disabled(disabled(.hide))
+            Button("Close Terminal Group") {
+                guardAvailable(.closeGroup) { session in
+                    if let id = session.selectedTerminalGroupID {
+                        session.requestTerminalGroupClose(id)
+                    }
+                }
+            }
+            .disabled(disabled(.closeGroup))
+        }
+    }
+
+    private func disabled(_ action: WorkspaceSession.TerminalGroupPresentationAction) -> Bool {
+        workspaceSession?.terminalGroupPresentationAvailability(action).isEnabled != true
+    }
+
+    private func guardAvailable(
+        _ action: WorkspaceSession.TerminalGroupPresentationAction,
+        perform: (WorkspaceSession) -> Void
+    ) {
+        guard let workspaceSession,
+            workspaceSession.terminalGroupPresentationAvailability(action).isEnabled
+        else { return }
+        perform(workspaceSession)
     }
 }

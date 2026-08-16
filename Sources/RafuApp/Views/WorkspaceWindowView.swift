@@ -240,6 +240,32 @@ private struct WorkspaceWindowPresentations: ViewModifier {
                         : "This will stop \(count) running terminal processes."
                 )
             }
+            .sheet(item: terminalGroupSaveRequestBinding) { request in
+                TerminalGroupSaveSheet(session: session, request: request)
+            }
+            .sheet(item: terminalGroupRenameRequestBinding) { request in
+                TerminalGroupRenameSheet(session: session, request: request)
+            }
+            .fileImporter(
+                isPresented: terminalPaneStartingFolderBinding,
+                allowedContentTypes: [.folder], allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    if let url = urls.first {
+                        let accessed = url.startAccessingSecurityScopedResource()
+                        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+                        session.completePendingTerminalPaneStartingFolder(url)
+                    } else {
+                        session.cancelPendingTerminalPaneStartingFolder()
+                    }
+                case .failure:
+                    session.cancelPendingTerminalPaneStartingFolder()
+                }
+            }
+            .fileDialogDefaultDirectory(
+                session.pendingTerminalPaneStartingFolderRequest?.initialDirectory
+            )
             .sheet(isPresented: $session.isCommandPalettePresented) {
                 CommandPaletteView(session: session)
             }
@@ -276,6 +302,34 @@ private struct WorkspaceWindowPresentations: ViewModifier {
         Binding(
             get: { session.cliInstallMessage != nil },
             set: { if !$0 { session.cliInstallMessage = nil } }
+        )
+    }
+
+    private var terminalGroupSaveRequestBinding: Binding<WorkspaceSession.TerminalGroupSaveRequest?>
+    {
+        Binding(
+            get: { session.pendingTerminalGroupSaveRequest },
+            set: { request in
+                if request == nil, !session.isPendingTerminalGroupSaveSubmission {
+                    session.cancelPendingTerminalGroupSave()
+                }
+            }
+        )
+    }
+
+    private var terminalGroupRenameRequestBinding:
+        Binding<WorkspaceSession.TerminalGroupRenameRequest?>
+    {
+        Binding(
+            get: { session.pendingTerminalGroupRenameRequest },
+            set: { if $0 == nil { session.cancelPendingTerminalGroupRename() } }
+        )
+    }
+
+    private var terminalPaneStartingFolderBinding: Binding<Bool> {
+        Binding(
+            get: { session.pendingTerminalPaneStartingFolderRequest != nil },
+            set: { if !$0 { session.cancelPendingTerminalPaneStartingFolder() } }
         )
     }
 

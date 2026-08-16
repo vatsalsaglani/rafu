@@ -37,6 +37,16 @@ nonisolated struct TerminalGroupRuntime: Sendable {
         groups.first { $0.value.root.paneIDs.contains(paneID) }?.key
     }
 
+    /// Read-only directional availability for menu and palette validation.
+    /// It shares the reducer's geometric target calculation, so UI cannot
+    /// diverge from actual focus behavior at an outer edge.
+    func directionalPaneTarget(
+        in groupID: TerminalGroupID, direction: TerminalPaneFocusDirection
+    ) -> TerminalPaneID? {
+        guard let group = groups[groupID] else { return nil }
+        return directionalTarget(in: group, direction: direction)
+    }
+
     func groupAndPane(containing sessionID: UUID) -> (TerminalGroupID, TerminalPaneID)? {
         for (groupID, group) in groups {
             if let pane = group.panes.first(where: { $0.sessionID == sessionID }) {
