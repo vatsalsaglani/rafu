@@ -16,7 +16,7 @@ import Testing
 /// actually mounts (`WorkspaceTerminalController.makeOrReuseView`), never
 /// from these session-level calls.
 @MainActor
-@Test("New terminal tab inserts and selects a .terminal tab, same as a file tab")
+@Test("New terminal tab inserts and selects one Terminal Group tab")
 func newTerminalTabOpensAndSelectsEditorTab() throws {
     let session = WorkspaceSession()
     #expect(!session.hasAnyEditorTabs)
@@ -28,11 +28,11 @@ func newTerminalTabOpensAndSelectsEditorTab() throws {
     let controller = try #require(session.terminal.sessions.first)
     let group = session.editorLayout.group(id: session.editorLayout.focusedGroupID)
     let tab = try #require(group?.tabs.first)
-    guard case .terminal(let sessionID) = tab.resource else {
-        Issue.record("Expected the inserted tab to be a .terminal resource")
+    guard case .terminalGroup(let groupID) = tab.resource else {
+        Issue.record("Expected the inserted tab to be a Terminal Group resource")
         return
     }
-    #expect(sessionID == controller.id)
+    #expect(session.terminal.terminalGroup(groupID)?.panes.first?.sessionID == controller.id)
     #expect(group?.selectedTabID == tab.id)
     // A terminal tab carries no document/file selection.
     #expect(session.selectedDocumentID == nil)
@@ -45,8 +45,11 @@ func closingTerminalTabRemovesLayoutAndSession() throws {
     session.newTerminalTab()
     let tab = try #require(
         session.editorLayout.group(id: session.editorLayout.focusedGroupID)?.tabs.first)
+    let groupID = try #require(session.selectedTerminalGroupID)
 
-    session.closeTerminalTab(tab.id)
+    #expect(tab.resource == .terminalGroup(groupID: groupID))
+    session.requestTerminalGroupClose(groupID)
+    session.confirmTerminalGroupClose()
 
     #expect(!session.hasAnyEditorTabs)
     #expect(session.terminal.sessions.isEmpty)
@@ -81,24 +84,25 @@ func toggleTerminalParksThenRevealsFocusedTerminalTab() throws {
     #expect(session.terminal.sessions.count == 1)
     let controller = try #require(session.terminal.sessions.first)
 
-    // A1: toggling away parks — no `.terminal` tab in the layout, but the
-    // session survives in the manager.
+    let groupID = try #require(session.selectedTerminalGroupID)
+    // A1: toggling away parks the compound tab, while its child survives.
     session.toggleTerminal()
     #expect(!session.hasAnyEditorTabs)
     #expect(session.terminal.sessions.count == 1)
-    #expect(session.parkedTerminalSessions.count == 1)
-    #expect(session.parkedTerminalSessions.first?.id == controller.id)
+    #expect(session.parkedTerminalSessions.isEmpty)
+    #expect(session.parkedTerminalGroupIDs == [groupID])
 
     // A2: toggling again reveals the SAME session as a tab — no new one.
     session.toggleTerminal()
     #expect(session.hasAnyEditorTabs)
     #expect(session.terminal.sessions.count == 1)
     let group = session.editorLayout.group(id: session.editorLayout.focusedGroupID)
-    guard case .terminal(let sessionID) = group?.tabs.first?.resource else {
-        Issue.record("Expected the revealed tab to be a .terminal resource")
+    guard case .terminalGroup(let revealedGroupID) = group?.tabs.first?.resource else {
+        Issue.record("Expected the revealed tab to be a Terminal Group resource")
         return
     }
-    #expect(sessionID == controller.id)
+    #expect(revealedGroupID == groupID)
+    #expect(session.focusedTerminalSession?.id == controller.id)
     #expect(session.parkedTerminalSessions.isEmpty)
 }
 
@@ -108,8 +112,7 @@ func parkedTerminalSessionsOrderByMostRecentlyParked() throws {
     let session = WorkspaceSession()
     session.newTerminalTab()
     let firstController = try #require(session.terminal.sessions.first)
-    let firstTabID = try #require(
-        session.editorLayout.group(id: session.editorLayout.focusedGroupID)?.tabs.first?.id)
+    let firstGroupID = try #require(session.selectedTerminalGroupID)
 
     // A second terminal tab opens in a new focused group's tab strip since
     // `newTerminalTab` always inserts+selects into the focused group — same
@@ -117,18 +120,21 @@ func parkedTerminalSessionsOrderByMostRecentlyParked() throws {
     session.newTerminalTab()
     let secondController = try #require(
         session.terminal.sessions.first { $0.id != firstController.id })
-    let secondTab = try #require(
-        session.editorLayout.group(id: session.editorLayout.focusedGroupID)?.tabs
-            .first { $0.resource == .terminal(sessionID: secondController.id) })
+    let secondGroupID = try #require(session.selectedTerminalGroupID)
 
     // Park the first-created session, then the second — MRU order should
     // list the second (parked last) first. Asserted directly on the derived
     // ordering rather than by driving reveals (deterministic).
-    session.hideTerminalTab(firstTabID)
-    session.hideTerminalTab(secondTab.id)
+    session.hideTerminalGroup(firstGroupID)
+    session.hideTerminalGroup(secondGroupID)
 
-    let ids = session.parkedTerminalSessions.map(\.id)
-    #expect(ids == [secondController.id, firstController.id])
+    let ids = session.parkedTerminalGroupIDs
+    #expect(ids == [secondGroupID, firstGroupID])
+    #expect(
+        session.terminal.terminalGroup(secondGroupID)?.panes.first?.sessionID == secondController.id
+    )
+    #expect(
+        session.terminal.terminalGroup(firstGroupID)?.panes.first?.sessionID == firstController.id)
 }
 
 @MainActor
@@ -243,12 +249,12 @@ func closeTerminalSessionRemovesParkedSessionOrNoOps() throws {
     let session = WorkspaceSession()
     session.newTerminalTab()
     let controller = try #require(session.terminal.sessions.first)
-    let tab = try #require(
-        session.editorLayout.group(id: session.editorLayout.focusedGroupID)?.tabs.first)
-    session.hideTerminalTab(tab.id)
-    #expect(session.parkedTerminalSessions.count == 1)
+    let groupID = try #require(session.selectedTerminalGroupID)
+    session.hideTerminalGroup(groupID)
+    #expect(session.parkedTerminalGroupIDs == [groupID])
 
     session.closeTerminalSession(controller.id)
+    session.confirmTerminalGroupClose()
 
     #expect(session.terminal.sessions.isEmpty)
     #expect(session.parkedTerminalSessions.isEmpty)
@@ -276,11 +282,11 @@ func revealTerminalSessionSelectsExistingTabWithoutDuplicating() throws {
     #expect(group?.tabs.count == 2)
     #expect(session.terminal.sessions.count == 1)
     let selectedTab = group?.tabs.first(where: { $0.id == group?.selectedTabID })
-    guard case .terminal(let sessionID) = selectedTab?.resource else {
-        Issue.record("Expected the selected tab to be the revealed terminal")
+    guard case .terminalGroup(let groupID) = selectedTab?.resource else {
+        Issue.record("Expected the selected tab to be the revealed Terminal Group")
         return
     }
-    #expect(sessionID == controller.id)
+    #expect(session.terminal.terminalGroup(groupID)?.panes.first?.sessionID == controller.id)
 
     // terminal-manager.md T-B: the panel's `isParked` derivation must agree
     // — a session already presented as a tab is never parked, reveal or not.

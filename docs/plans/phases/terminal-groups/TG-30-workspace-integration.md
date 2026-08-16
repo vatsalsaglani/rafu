@@ -2,7 +2,7 @@
 
 ## Status and execution slot
 
-- **Status:** Planned.
+- **Status:** Implemented on lane; awaiting authorized merge.
 - **Wave:** 3; serial integration plan.
 - **Branch:** `terminal-groups/tg-30-workspace-integration`.
 - **Required base:** exact `<WAVE2_MERGED_SHA>`.
@@ -501,7 +501,47 @@ and **Deviations**.
 
 ## Implementation record
 
-To be completed by the TG-30 implementor before the final gate.
+Implemented on `terminal-groups/tg-30-workspace-integration` from
+`893caf7f50c77bfa9138519e20ba8d836cdc5b2e`.
+
+- W1-W3: `WorkspaceSession` owns one compound `.terminalGroup` editor tab,
+  group selection, split/focus operations, safe folder fallback, tab rename,
+  and Wave 4 save/close request surfaces.
+- W4-W6: focused-pane attention is scoped to one child session; close and
+  teardown use generation-checked tokens, stable lifecycle/coordinator order,
+  live reservations, six live panes, and 24 retained panes.
+- W7-W8: named layouts use the injected or shared actor with subscription
+  before list, generation/list/mutation epochs, cross-window delete
+  detachment, inert restore, and one group switcher candidate.
+- W9: classified insertion, owner close, natural exit, capacity wrappers, and
+  exact-once callbacks are frozen on `WorkspaceSession`.
+
+Focused integration tests use an actor-backed saved-layout store with explicit
+subscription, list, save, and stale-result barriers. Every test that starts a
+long-lived library binding tears its session down explicitly. Final build,
+parallel suite, and Rafu Lightning verification are recorded in the lane
+handoff commit.
+
+Deviation: the focused Swift Testing filter initially hung because tests
+emitted a store change before the registered stream had delivered its initial
+list. The production subscription-first implementation was retained; tests
+now await subscriber registration and initial list completion before changes.
+
+Compatibility: `newTerminalTab`, Agent insertion, and temporary ungrouped
+Ensemble sessions are source-compatible entry points that reveal one
+compound Terminal Group. The guarded `.terminal` render path remains only for
+decoded legacy restoration records.
+
+Corrective validation: ordinary-shell Start Pane and Start All use the
+manager-owned atomic live-capacity transaction, then reveal only after a
+successful start. Focused workspace tests cover stopped/exited starts, folder
+inheritance, ungrouped adoption, pane/group close, stale Save As/Delete after
+a real workspace replacement, saved-only persistence, and layout repair that
+preserves a selected file tab.
+
+Coordinator-authorized test-path deviation: `Tests/RafuAppTests/TerminalsPanelTests.swift`
+was updated only in its C/D reveal and hide migration assertions. It
+now verifies the compound group, parked group ID, and retained child session.
 
 ## Goal Mode start prompt
 

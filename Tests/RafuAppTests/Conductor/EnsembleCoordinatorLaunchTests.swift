@@ -54,7 +54,8 @@ struct EnsembleCoordinatorLaunchTests {
         #expect(session.conductorCoordinatorSessions.map(\.id) == ["co-test0001"])
         let terminalID = try #require(coordinator.terminalSessionID)
         #expect(session.terminal.selectedID == terminalID)
-        #expect(session.editorLayout.tab(matching: .terminal(sessionID: terminalID)) != nil)
+        let groupID = try #require(session.terminal.terminalGroupAndPane(containing: terminalID)?.0)
+        #expect(session.editorLayout.tab(matching: .terminalGroup(groupID: groupID)) != nil)
 
         let terminal = try #require(
             session.terminal.sessions.first { $0.id == terminalID }

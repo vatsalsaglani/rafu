@@ -54,9 +54,10 @@ func twoTerminalGroupsHaveOneCurrentTerminal() throws {
     let first = try #require(session.terminal.sessions.first)
     let second = try #require(session.terminal.sessions.last)
     let originalGroupID = session.editorLayout.focusedGroupID
+    let secondTerminalGroupID = try #require(
+        session.terminal.terminalGroupAndPane(containing: second.id)?.0)
     let secondTab = try #require(
-        session.editorLayout.tab(matching: .terminal(sessionID: second.id))
-    )
+        session.editorLayout.tab(matching: .terminalGroup(groupID: secondTerminalGroupID)))
     let splitGroupID = session.editorLayout.split(
         group: originalGroupID,
         at: .trailing,
@@ -87,7 +88,9 @@ func parkedTerminalIsNotCurrent() throws {
 
     session.hideTerminalSession(controller.id)
 
-    #expect(session.parkedTerminalSessions.map(\.id) == [controller.id])
+    let terminalGroupID = try #require(
+        session.terminal.terminalGroupAndPane(containing: controller.id)?.0)
+    #expect(session.parkedTerminalGroupIDs == [terminalGroupID])
     #expect(session.terminal.selectedID == controller.id)
     #expect(session.currentTerminalSessionID == nil)
 }

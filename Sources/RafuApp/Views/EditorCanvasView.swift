@@ -189,16 +189,15 @@ private struct EditorGroupView: View {
                             // and keeps its live SwiftTerm view and responder
                             // identity across tab moves and remounts.
                             EditorTerminalTabContent(controller: terminalController)
-                        } else if selectedTerminalGroupID != nil {
-                            // TG-10 restoration shim: a decoded group resource
-                            // has no runtime aggregate yet. This deliberately
-                            // offers no action that could construct a controller
-                            // or start a process; TG-30 replaces it.
-                            ContentUnavailableView(
-                                "Terminal Group Unavailable",
-                                systemImage: "rectangle.3.group",
-                                description: Text(
-                                    "Terminal Group restoration is not available yet.")
+                        } else if let terminalGroupID = selectedTerminalGroupID,
+                            let snapshot = session.terminal.terminalGroup(terminalGroupID)
+                        {
+                            TerminalGroupView(
+                                snapshot: snapshot,
+                                controllerForPane: { session.terminal.terminalController(for: $0) },
+                                action: session.performTerminalGroupViewAction,
+                                theme: theme,
+                                requestFocusToken: session.terminalGroupFocusRequest
                             )
                         } else if loadedDocuments.isEmpty {
                             ContentUnavailableView(
@@ -1131,15 +1130,12 @@ private struct EditorGroupTabBar: View {
                     session: session
                 )
             }
-        case .terminalGroup:
-            Button {
-                session.selectEditorTab(tab.id, in: group.id)
-            } label: {
-                Label("Terminal Group", systemImage: "rectangle.3.group")
-                    .lineLimit(1)
+        case .terminalGroup(let terminalGroupID):
+            if let snapshot = session.terminal.terminalGroup(terminalGroupID) {
+                EditorTerminalGroupTabItem(
+                    tabID: tab.id, groupID: group.id, snapshot: snapshot,
+                    isSelected: tab.id == group.selectedTabID, session: session)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Terminal Group")
         case .restorable:
             EmptyView()
         }
@@ -1213,8 +1209,10 @@ private struct EditorGroupTabBar: View {
                 overflowTabMenuButton(
                     title: TerminalSessionPresentation.tabLabel(controller.displayName), tab: tab)
             }
-        case .terminalGroup:
-            overflowTabMenuButton(title: "Terminal Group", tab: tab)
+        case .terminalGroup(let terminalGroupID):
+            if let snapshot = session.terminal.terminalGroup(terminalGroupID) {
+                overflowTabMenuButton(title: snapshot.name.rawValue, tab: tab)
+            }
         case .restorable:
             EmptyView()
         }
@@ -2245,6 +2243,124 @@ private struct EditorTerminalTabItem: View {
         ]
         .compactMap(\.self)
         .joined(separator: ", ")
+    }
+}
+
+/// One editor resource for a complete Terminal Group. Pane count and bell
+/// count are derived from the immutable group snapshot and the existing
+/// controller statuses; neither requires terminal output or view mounting.
+private struct EditorTerminalGroupTabItem: View {
+    @Environment(\.rafuTheme) private var theme
+    @State private var isHovering = false
+    @State private var isRenaming = false
+    @State private var renameText = ""
+    @FocusState private var renameFieldFocused: Bool
+
+    let tabID: EditorTabID
+    let groupID: EditorGroupID
+    let snapshot: TerminalGroupSnapshot
+    let isSelected: Bool
+    @Bindable var session: WorkspaceSession
+
+    private var attentionCount: Int {
+        snapshot.panes.reduce(into: 0) { count, pane in
+            guard let controller = session.terminal.terminalController(for: pane.id),
+                controller.status == .bell
+            else { return }
+            count += 1
+        }
+    }
+
+    var body: some View {
+        let title = snapshot.name.rawValue
+        AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true) {
+            HStack(spacing: 6) {
+                Image(systemName: "rectangle.3.group")
+                    .foregroundStyle(theme.palette.accent)
+                    .accessibilityHidden(true)
+                if isRenaming {
+                    TextField("Terminal Group name", text: $renameText)
+                        .textFieldStyle(.plain)
+                        .frame(minWidth: 100, maxWidth: 180)
+                        .focused($renameFieldFocused)
+                        .defaultFocus($renameFieldFocused, true)
+                        .accessibilityLabel("Rename Terminal Group")
+                        .onSubmit(commitRename)
+                        .onExitCommand(perform: cancelRename)
+                } else {
+                    Button {
+                        session.selectEditorTab(tabID, in: groupID)
+                    } label: {
+                        Text(title).lineLimit(1).truncationMode(.middle)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Terminal Group \(title)")
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                    .accessibilityValue(
+                        [
+                            isSelected ? "Selected" : nil,
+                            snapshot.panes.count > 1 ? "\(snapshot.panes.count) panes" : nil,
+                            attentionCount > 0 ? "\(attentionCount) panes need attention" : nil,
+                        ]
+                        .compactMap(\.self).joined(separator: ", "))
+                }
+                if !isRenaming {
+                    if snapshot.panes.count > 1 {
+                        Text("\(snapshot.panes.count)")
+                            .font(.caption.weight(.semibold))
+                            .accessibilityLabel("\(snapshot.panes.count) panes")
+                    }
+                    if attentionCount > 0 {
+                        Image(systemName: "bell.fill")
+                            .font(.caption2)
+                            .accessibilityLabel("\(attentionCount) panes need attention")
+                    }
+                }
+                AttachedWorkbenchTabCloseButton(
+                    accessibilityLabel: "Close Terminal Group \(title)",
+                    help: "Close \(title)"
+                ) {
+                    session.requestTerminalGroupClose(snapshot.id)
+                }
+                .opacity(isHovering || isSelected ? 1 : 0)
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .onHover { isHovering = $0 }
+        .onTapGesture(count: 2) {
+            renameText = title
+            isRenaming = true
+            renameFieldFocused = true
+        }
+        .onDrag { session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString)) }
+        .contextMenu {
+            Button("Rename", systemImage: "pencil") {
+                renameText = title
+                isRenaming = true
+                renameFieldFocused = true
+            }
+            Divider()
+            Button("Split Left", systemImage: "rectangle.split.2x1") {
+                session.splitEditorTab(tabID, at: .leading)
+            }
+            Button("Split Right", systemImage: "rectangle.split.2x1") {
+                session.splitEditorTab(tabID, at: .trailing)
+            }
+            Divider()
+            Button("Close") { session.requestTerminalGroupClose(snapshot.id) }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func commitRename() {
+        session.renameTerminalGroup(snapshot.id, to: renameText)
+        isRenaming = false
+        renameFieldFocused = false
+    }
+
+    private func cancelRename() {
+        isRenaming = false
+        renameFieldFocused = false
     }
 }
 

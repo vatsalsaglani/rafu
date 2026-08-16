@@ -199,14 +199,14 @@ func selectingOrRevealingClearsBellAttention() throws {
     first.noteBell()
     #expect(first.status == .bell)
 
+    let firstGroupID = try #require(session.terminal.terminalGroupAndPane(containing: first.id)?.0)
     let firstTab = try #require(
-        session.editorLayout.group(id: session.editorLayout.focusedGroupID)?.tabs
-            .first { $0.resource == .terminal(sessionID: first.id) })
+        session.editorLayout.tab(matching: .terminalGroup(groupID: firstGroupID)))
     session.selectEditorTab(firstTab.id, in: session.editorLayout.focusedGroupID)
     #expect(first.status == .running)
 
-    session.hideTerminalTab(firstTab.id)
-    #expect(session.parkedTerminalSessions.contains { $0.id == first.id })
+    session.hideTerminalGroup(firstGroupID)
+    #expect(session.parkedTerminalGroupIDs.contains(firstGroupID))
     first.noteBell()
     #expect(first.status == .bell)
 
@@ -558,9 +558,9 @@ func selectingTabDismissesHUD() throws {
 
     first.markRunningForTesting()
     first.noteBell()
+    let firstGroupID = try #require(session.terminal.terminalGroupAndPane(containing: first.id)?.0)
     let firstTab = try #require(
-        session.editorLayout.group(id: session.editorLayout.focusedGroupID)?.tabs
-            .first { $0.resource == .terminal(sessionID: first.id) })
+        session.editorLayout.tab(matching: .terminalGroup(groupID: firstGroupID)))
     session.selectEditorTab(firstTab.id, in: session.editorLayout.focusedGroupID)
 
     #expect(first.status == .running)
