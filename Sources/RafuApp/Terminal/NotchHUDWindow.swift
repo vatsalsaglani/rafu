@@ -125,6 +125,12 @@ final class NotchHUDPassthroughHostingView<Content: View>: NSHostingView<Content
 {
     var clickThroughRegions: [CGRect] = []
 
+    // Apple Swift 6.3.3 crashes in EarlyPerfInliner while optimizing this
+    // generic hosting view's synthesized destructor. An explicit empty
+    // destructor preserves the normal stored-property and superclass teardown
+    // while avoiding that compiler shape.
+    deinit {}
+
     /// This view is always installed as `NSWindow.contentView` — the root
     /// of the hierarchy, no superview — so AppKit hands `hitTest(_:)` a
     /// point already in the WINDOW's own coordinate system (the documented

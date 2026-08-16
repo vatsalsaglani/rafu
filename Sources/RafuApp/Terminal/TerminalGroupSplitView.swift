@@ -96,6 +96,11 @@ struct TerminalGroupSplitView<First: View, Second: View>: NSViewRepresentable {
         let secondHost = NSHostingView(rootView: AnyView(EmptyView()))
         var onUserDividerChange: ((Double) -> Void)?
 
+        // Apple Swift 6.3.3 crashes in EarlyPerfInliner while optimizing this
+        // nested generic coordinator's synthesized destructor. This explicit
+        // empty destructor preserves normal stored-property teardown.
+        deinit {}
+
         func releaseHostedViews() {
             onUserDividerChange = nil
             firstHost.rootView = AnyView(EmptyView())
