@@ -8,6 +8,17 @@ and merged to primary `main`. Wave 2 is ready from the exact TG-10 merge.
 The live lane state, worker assignment, branch, and approved SHA are in
 [`manifest.md`](manifest.md).
 
+## Terminal Groups v2
+
+The user directed a v2 extension on 2026-08-17: 20 groups per window, 10 panes
+per group, an independent 200-retained-pane and 200-live-session window bound,
+safe pane naming and theme color, compact colored pane chrome, and icon-only
+three-dot sidebar menus. The serial and parallel lane order is in the v2 graph
+in [`manifest.md`](manifest.md). TG-100 freezes contracts first; TG-110 applies
+them; TG-120 and TG-130 then run from the same approved base; TG-190 performs
+the integrated audit. All v2 implementation workers are Luna Implementors in
+coordinator-created worktrees.
+
 This directory decomposes
 [`../terminal-groups.md`](../terminal-groups.md) into two serial foundation
 plans, two parallel implementation waves, one serial workspace cutover, and
