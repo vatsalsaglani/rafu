@@ -5,10 +5,11 @@
 Planned (2026-07-18). Direction brief only — no implementation started.
 
 **2026-08-16 update:** this document is a historical predecessor for terminal
-layout. ADR 0023 and
+layout. ADR 0023, ADR 0024, and
 [`terminal-groups.md`](terminal-groups.md) now own the current compound-tab,
 restoration, capacity, close, and shortcut rules. T1 remains useful placement
-history. T2 restoration and the six-session choice are resolved by ADR 0023;
+history. T2 restoration and the session-capacity choice are resolved by ADR 0023
+and ADR 0024;
 the old per-session statements below are not current normative guidance.
 Sibling to [`ui-flat-modern-refresh.md`](ui-flat-modern-refresh.md) (adopts
 its design language) and to
@@ -142,9 +143,10 @@ semantics.
 - **TD1:** `Command-T` creates a group outside a Terminal Group and performs
   Split Right inside one. `Shift-Command-T` performs Split Down only in a
   group. `Control-Shift-backtick` always creates a new one-pane group.
-- **TD2:** the window limit is six live sessions across shell, Agent Terminal,
-  and Ensemble paths. It is separate from the six-pane group limit and the
-  24-retained-pane window limit.
+- **TD2:** the window limit is 200 live sessions across shell, Agent Terminal,
+  and Ensemble paths, as superseded by ADR 0024. It is separate from the
+  10-pane group limit and the
+  200-retained-pane window limit.
 - **TD3:** group close confirms the actual live-process count, then uses the
   ADR 0023 prepare, cleanup, and finalize lifecycle. A stale confirmation does
   not mutate a group.

@@ -346,6 +346,11 @@ nonisolated struct TerminalGroupRuntime: Sendable {
             advanceGeneration()
             return .persistWorkspaceRestoration
 
+        case .setPaneName, .setPaneThemeColor:
+            // TG-100 freezes the value contract. The manager and UI lanes
+            // provide the mutation path after this contract is merged.
+            throw TerminalGroupValidationError.unsupportedPaneMetadata
+
         case .commitSavedLayout(let groupID, let savedLayoutID, let name):
             let group = try requireGroup(groupID)
             groups[groupID] = try TerminalGroupSnapshot(

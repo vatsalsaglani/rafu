@@ -58,16 +58,19 @@ Ensemble trust boundary.
   closes the group.
 - Divider fractions are normalized. The default and invalid fallback are `0.5`.
   A minimum pane size can temporarily override a saved fraction.
-- A group has at most six retained panes. A window has at most 24 retained
-  panes across open and parked groups. A retained pane is live, exited, stopped,
-  or unavailable. These are separate from the six-live-session window limit.
-- The six-live-session window limit includes ordinary shells, Agent Terminals,
-  Ensemble coordinator terminals, and Ensemble role terminals. A **live
-  session** is a controller committed for a user-requested launch until its
-  child process exits, including the short lazy interval before its SwiftTerm
-  view mounts and starts the child process. A **reserved slot** exists only
-  during a validated multi-start transaction; it is not a session, live
-  process, or UI item. A **live process** is a child process that has not exited.
+- ADR 0024 supersedes these numeric limits. A group has at most 10 retained
+  panes. A window has at most 200 retained panes across open and parked
+  groups. A retained pane is live, exited, stopped, or unavailable. The window
+  has a separate 200-live-session limit.
+- The v1 six-live-session value in this historical decision is superseded by
+  ADR 0024. The current 200-live-session window limit includes ordinary
+  shells, Agent Terminals, Ensemble coordinator terminals, and Ensemble role
+  terminals. A **live session** is a controller committed for a user-requested
+  launch until its child process exits, including the short lazy interval
+  before its SwiftTerm view mounts and starts the child process. A **reserved
+  slot** exists only during a validated multi-start transaction; it is not a
+  session, live process, or UI item. A **live process** is a child process that
+  has not exited.
 - New Group, Split, and Open Saved Group reject an operation that exceeds a
   retained-pane limit without changing groups, tabs, controllers, or processes.
   Start All validates folders, shells, and capacity before it reserves or
@@ -178,9 +181,8 @@ This ADR supersedes only these earlier statements:
 
 Revisit this decision before adding process survival across relaunch, remote
 terminal profiles, task execution, pane drag or reorder, cross-workspace saved
-layouts, more than six panes per group, more than 24 retained panes per window,
-more than six live sessions per window, a saved Agent profile, or a saved
-Ensemble profile or capability.
+layouts, a saved Agent profile, or a saved Ensemble profile or capability.
+Numeric Terminal Group limits are maintained by ADR 0024.
 
 ## Related
 

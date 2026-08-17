@@ -98,6 +98,14 @@ git diff --check
 Use parallel tests only. Commit all owned changes to the listed branch. Remove
 only this worktree's `.build` directory after the green commit.
 
+## Deviations
+
+The new pane metadata command cases require an exhaustive-switch shim in
+`Sources/RafuApp/Terminal/TerminalGroupRuntime.swift`. The shim rejects those
+new commands with a typed, non-mutating error until the dependent manager and
+UI lanes implement the mutation path. It does not start a process or change
+existing commands.
+
 ## Goal Mode start prompt
 
 > Call `create_goal` first with the objective: "Complete TG-100 from
@@ -111,4 +119,3 @@ only this worktree's `.build` directory after the green commit.
 > merge, rebase, push, or edit `main`. Report branch, commit SHA, changed files,
 > test results, security/concurrency review, unresolved risks, and a named
 > Deviations section.
-

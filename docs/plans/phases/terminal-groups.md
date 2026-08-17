@@ -2,7 +2,7 @@
 
 ## Status
 
-In Progress on 2026-08-16 after ADR 0023 acceptance. This document defines
+In Progress on 2026-08-16 after ADR 0023 acceptance and ADR 0024 limits. This document defines
 product scope and acceptance. TG-00 is complete on its lane; TG-10 is next
 after an authorized merge. The worktree execution contract is in
 [`terminal-groups/README.md`](terminal-groups/README.md).
@@ -190,15 +190,15 @@ persisted free-form text.
 
 ## Lifecycle and resource contract
 
-- The maximum is six live terminal sessions per workspace window, across
+- The maximum is 200 live terminal sessions per workspace window, across
   ordinary shells, Agent Terminals, Ensemble coordinator terminals, and
   Ensemble role terminals.
 - Every creation path must use one capacity preflight. A rejected multi-start
   starts zero sessions.
 - Stopped placeholders and exited panes do not count as live sessions.
-- The 24-retained-pane window bound counts live, exited, stopped, and
-  unavailable panes. It is independent from the six-pane group bound and the
-  six-live-session window bound.
+- The 200-retained-pane window bound counts live, exited, stopped, and
+  unavailable panes. It is independent from the 10-pane group bound and the
+  200-live-session window bound. A window contains at most 20 groups.
 - A capacity reservation counts only while one validated start transaction is
   in progress. It cannot be shown as a pane or counted as a live process.
 - Hiding a group keeps its sessions alive and records group-level MRU order.
@@ -256,8 +256,8 @@ persisted free-form text.
    Saved Group, Start Pane, and Start All Restartable Panes have visible,
    menu, keyboard, and accessibility paths.
 7. Restoration creates no process and stores none of the prohibited data.
-8. The six-pane group bound, 24-retained-pane window bound, and six-live-session
-   window bound are independent. A rejected New, Split, Open, capacity, or
+8. The 10-pane group bound, 200-retained-pane window bound, and 200-live-session
+   window bound are independent. A window contains at most 20 groups. A rejected New, Split, Open, capacity, or
    Start All preflight changes no state and starts zero processes. A later
    external failure uses the documented per-pane result.
 9. Hide/reveal, pane close, group close, workspace switch, window close, and app

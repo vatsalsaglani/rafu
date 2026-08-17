@@ -427,6 +427,17 @@ nonisolated enum TerminalGroupSnapshotError: Error, Equatable, Sendable {
     case duplicateSession(UUID)
 }
 
+/// The independent resource bounds for one workspace window. These values
+/// describe retained metadata and live session capacity separately. They do
+/// not carry process details or authorise a launch.
+nonisolated enum TerminalGroupLimits: Sendable {
+    static let maximumGroupsPerWindow = 20
+    static let maximumPanesPerGroup = 10
+    static let maximumRetainedPanesPerWindow = 200
+    static let maximumLiveSessionsPerWindow = 200
+    static let maximumSavedLayoutsPerWorkspace = 32
+}
+
 /// An immutable, bounded runtime projection. It deliberately has no Codable
 /// conformance: runtime group, pane, split, and session identities are not
 /// reusable saved-layout identities.
@@ -526,6 +537,7 @@ nonisolated struct TerminalGroupSnapshot: Equatable, Sendable {
 // MARK: - Capacity and close validation
 
 nonisolated enum TerminalGroupCapacityError: Error, Equatable, Sendable {
+    case groupLimitExceeded(current: Int, requested: Int)
     case groupPaneLimitExceeded(current: Int, requested: Int)
     case retainedPaneLimitExceeded(current: Int, requested: Int)
     case liveSessionLimitExceeded(current: Int, requested: Int)
@@ -544,7 +556,7 @@ nonisolated struct TerminalGroupCapacityReservation: Equatable, Sendable {
         reservedLiveSessionCount: Int
     ) {
         guard generation > 0,
-            (1...TerminalGroupSnapshot.maximumPanesPerGroup).contains(reservedLiveSessionCount)
+            (1...TerminalGroupLimits.maximumPanesPerGroup).contains(reservedLiveSessionCount)
         else { return nil }
         self.id = id
         self.generation = generation
@@ -588,7 +600,7 @@ nonisolated struct TerminalGroupCloseToken: Equatable, Sendable {
         guard generation > 0,
             liveProcessCount >= 0,
             liveProcessCount <= affectedSessionIDs.count,
-            affectedSessionIDs.count <= TerminalGroupSnapshot.maximumPanesPerGroup,
+            affectedSessionIDs.count <= TerminalGroupLimits.maximumPanesPerGroup,
             Set(affectedSessionIDs).count == affectedSessionIDs.count
         else { return nil }
         self.target = target
@@ -606,6 +618,7 @@ nonisolated enum TerminalGroupValidationError: Error, Equatable, Sendable {
     case invalidStartingFolder
     case invalidDividerFraction
     case unsupportedPaneStart
+    case unsupportedPaneMetadata
     case staleCloseToken
     case savedLayoutNotFound(SavedTerminalGroupID)
 }
@@ -618,6 +631,8 @@ nonisolated enum TerminalGroupCommand: Equatable, Sendable {
     case focusPane(groupID: TerminalGroupID, paneID: TerminalPaneID)
     case focusDirection(groupID: TerminalGroupID, direction: TerminalPaneFocusDirection)
     case renameGroup(groupID: TerminalGroupID, name: TerminalGroupName)
+    case setPaneName(paneID: TerminalPaneID, name: TerminalPaneName?)
+    case setPaneThemeColor(paneID: TerminalPaneID, color: TerminalPaneThemeColor?)
     case commitSavedLayout(
         groupID: TerminalGroupID,
         savedLayoutID: SavedTerminalGroupID,
@@ -646,4 +661,5 @@ nonisolated enum TerminalGroupEffect: Equatable, Sendable {
     case requestCloseConfirmation(TerminalGroupCloseToken)
     case capacityError(TerminalGroupCapacityError)
     case validationError(TerminalGroupValidationError)
+    case paneMetadataChanged(paneID: TerminalPaneID)
 }
