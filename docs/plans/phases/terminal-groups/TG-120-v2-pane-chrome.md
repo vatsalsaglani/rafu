@@ -2,7 +2,10 @@
 
 ## Status
 
-Implemented on lane; awaiting authorized merge.
+Integrated and verified on `main`.
+
+The compact pane header, explicit naming route, color marker, accessible
+controls, and close confirmation behavior are covered by the TG-190 audit.
 
 ## Branch and worker
 

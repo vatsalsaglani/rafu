@@ -2,7 +2,10 @@
 
 ## Status
 
-Implemented on lane; awaiting authorized merge.
+Integrated and verified on `main`.
+
+The runtime, persistence, restoration, Agent, and Ensemble paths are covered
+by the TG-190 integrated audit and the full test suite.
 
 ## Branch and worker
 

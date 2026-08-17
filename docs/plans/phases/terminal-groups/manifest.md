@@ -100,11 +100,11 @@ flowchart LR
 
 | Plan | Depends on | Worker | Branch | Status | Approved SHA |
 |---|---|---|---|---|---|
-| [TG-100](TG-100-v2-contracts.md) | v2 plan SHA | Luna | `terminal-groups/tg-100-v2-contracts` | Complete | `17cc8a4a8edf0bda100c5f2812fe6d6ed30322f8` |
-| [TG-110](TG-110-v2-runtime-capacity-metadata.md) | TG-100 | Luna | `terminal-groups/tg-110-v2-runtime-capacity-metadata` | Complete | `1128fc932e83befcf0fd9d6c987e10eea7855f20` |
-| [TG-120](TG-120-v2-pane-chrome.md) | TG-110 | Luna | `terminal-groups/tg-120-v2-pane-chrome` | Complete | `47794744fe727dd3ca96e36044ee5b9dc40e4ea3` |
-| [TG-130](TG-130-v2-sidebar-menus.md) | TG-110 | Luna | `terminal-groups/tg-130-v2-sidebar-menus` | Complete | `3af8bde7104b3aa4cb13bf7fb16abee272d9dc85` |
-| [TG-190](TG-190-v2-integration-release.md) | TG-120, TG-130 | Luna | `terminal-groups/tg-190-v2-integration-release` | Ready | — |
+| [TG-100](TG-100-v2-contracts.md) | v2 plan SHA | Luna | `terminal-groups/tg-100-v2-contracts` | Integrated and verified | `17cc8a4a8edf0bda100c5f2812fe6d6ed30322f8` |
+| [TG-110](TG-110-v2-runtime-capacity-metadata.md) | TG-100 | Luna | `terminal-groups/tg-110-v2-runtime-capacity-metadata` | Integrated and verified | `1128fc932e83befcf0fd9d6c987e10eea7855f20` |
+| [TG-120](TG-120-v2-pane-chrome.md) | TG-110 | Luna | `terminal-groups/tg-120-v2-pane-chrome` | Integrated and verified | `47794744fe727dd3ca96e36044ee5b9dc40e4ea3` |
+| [TG-130](TG-130-v2-sidebar-menus.md) | TG-110 | Luna | `terminal-groups/tg-130-v2-sidebar-menus` | Integrated and verified | `3af8bde7104b3aa4cb13bf7fb16abee272d9dc85` |
+| [TG-190](TG-190-v2-integration-release.md) | TG-120, TG-130 | Luna | `terminal-groups/tg-190-v2-integration-release` | Integrated and verified | — |
 
 The coordinator substitutes an exact SHA only in the copied Goal Mode prompt.
 The coordinator does not edit tracked plan placeholders after each merge.
