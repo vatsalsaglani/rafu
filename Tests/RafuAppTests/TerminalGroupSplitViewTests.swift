@@ -87,14 +87,16 @@ struct TerminalGroupSplitViewTests {
         splitView.onUserDividerChange = { callbacks.append($0) }
 
         splitView.beginUserDividerDrag()
-        let draggedPosition = (splitView.bounds.width - splitView.dividerThickness) * 0.7
+        let usableLength = splitView.bounds.width - splitView.dividerThickness
+        let draggedPosition = usableLength * 0.7
         splitView.setPosition(draggedPosition, ofDividerAt: 0)
         splitView.applySavedFraction(0.5)
 
         #expect(abs(splitView.subviews[0].frame.width - draggedPosition) < 1)
         splitView.completeUserDividerDrag()
         #expect(callbacks.count == 1)
-        #expect(abs(callbacks[0] - 0.7) < 0.001)
+        let callbackPosition = CGFloat(callbacks[0]) * usableLength
+        #expect(abs(callbackPosition - splitView.subviews[0].frame.width) < 0.001)
 
         splitView.applySavedFraction(0.3)
         let updatedPosition = (splitView.bounds.width - splitView.dividerThickness) * 0.5
