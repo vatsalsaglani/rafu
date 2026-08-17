@@ -187,7 +187,7 @@ nonisolated struct SavedTerminalGroupRecord: Codable, Equatable, Sendable {
         panes: [SavedTerminalPaneRecord]
     ) throws {
         let paneIDs = root.paneIDs
-        guard !paneIDs.isEmpty, paneIDs.count <= TerminalGroupSnapshot.maximumPanesPerGroup else {
+        guard !paneIDs.isEmpty, paneIDs.count <= TerminalGroupLimits.maximumPanesPerGroup else {
             throw TerminalGroupRestorationError.invalidSavedGroup
         }
         guard Set(paneIDs).count == paneIDs.count, Set(root.splitIDs).count == root.splitIDs.count
@@ -359,7 +359,7 @@ nonisolated struct TerminalGroupOpenTabRestorationRecord: Codable, Equatable, Se
         panes: [TerminalGroupOpenPaneRestorationRecord]
     ) throws {
         let paneIDs = root.paneIDs
-        guard !paneIDs.isEmpty, paneIDs.count <= TerminalGroupSnapshot.maximumPanesPerGroup else {
+        guard !paneIDs.isEmpty, paneIDs.count <= TerminalGroupLimits.maximumPanesPerGroup else {
             throw TerminalGroupRestorationError.invalidOpenTab
         }
         guard Set(paneIDs).count == paneIDs.count, Set(root.splitIDs).count == root.splitIDs.count
@@ -388,7 +388,7 @@ nonisolated enum TerminalGroupRestorationDiagnostic: Equatable, Sendable {
 /// erase file tabs, editor groups, or the rest of the workspace payload.
 nonisolated struct TerminalGroupWorkspaceRestoration: Codable, Equatable, Sendable {
     static let currentSchemaVersion = 1
-    static let maximumOpenGroups = 24
+    static let maximumOpenGroups = TerminalGroupLimits.maximumGroupsPerWindow
     static let maximumDiagnostics = 16
     static let maximumRecordsToInspect = maximumOpenGroups + maximumDiagnostics
 
@@ -404,7 +404,9 @@ nonisolated struct TerminalGroupWorkspaceRestoration: Codable, Equatable, Sendab
             throw TerminalGroupRestorationError.duplicateOpenGroup
         }
         let retainedPaneCount = openGroups.reduce(into: 0) { $0 += $1.panes.count }
-        try TerminalGroupSnapshot.validateRetainedPaneCount(retainedPaneCount)
+        guard retainedPaneCount <= TerminalGroupLimits.maximumRetainedPanesPerWindow else {
+            throw TerminalGroupRestorationError.tooManyOpenGroups(retainedPaneCount)
+        }
         schemaVersion = Self.currentSchemaVersion
         self.openGroups = openGroups
         diagnostics = []
@@ -466,7 +468,9 @@ nonisolated struct TerminalGroupWorkspaceRestoration: Codable, Equatable, Sendab
             throw TerminalGroupRestorationError.duplicateOpenGroup
         }
         let retainedPaneCount = openGroups.reduce(into: 0) { $0 += $1.panes.count }
-        try TerminalGroupSnapshot.validateRetainedPaneCount(retainedPaneCount)
+        guard retainedPaneCount <= TerminalGroupLimits.maximumRetainedPanesPerWindow else {
+            throw TerminalGroupRestorationError.tooManyOpenGroups(retainedPaneCount)
+        }
         self.init(schemaVersion: schemaVersion, openGroups: openGroups, diagnostics: diagnostics)
     }
 

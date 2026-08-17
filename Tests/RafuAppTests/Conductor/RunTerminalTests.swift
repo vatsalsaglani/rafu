@@ -89,13 +89,13 @@ func workspaceLauncherTerminationClosesItsTerminal() throws {
 }
 
 @MainActor
-@Test("Role seventh launch fails before controller construction or run selection")
-func workspaceRoleSeventhLaunchPreflightsCapacity() throws {
+@Test("Role launch at the live-session boundary fails before controller construction")
+func workspaceRoleLaunchPreflightsCapacity() throws {
     let session = WorkspaceSession()
     let spec = terminalRunSpec()
-    for _ in 0..<6 {
-        _ = try session.insertClassifiedTerminalSession(
-            spec: spec, kind: .ensembleRole, lifecycle: {})
+    let shell = TerminalShell(path: "/bin/zsh", name: "Default (zsh)", isDefault: true)
+    for _ in 0..<TerminalGroupLimits.maximumLiveSessionsPerWindow {
+        _ = session.terminal.newSession(startingDirectory: "/tmp", shell: shell)
     }
     var constructions = 0
     session.terminal.terminalGroupControllerFactory = { _, _ in
@@ -104,12 +104,13 @@ func workspaceRoleSeventhLaunchPreflightsCapacity() throws {
     }
     let launcher = WorkspaceConductorRunLauncher(workspaceSession: session, runID: "rejected")
 
-    #expect(throws: TerminalGroupCapacityError.liveSessionLimitExceeded(current: 6, requested: 1)) {
+    #expect(throws: TerminalGroupCapacityError.liveSessionLimitExceeded(current: 200, requested: 1))
+    {
         try launcher.launch(specification: spec, onExit: { _, _ in })
     }
     #expect(constructions == 0)
-    #expect(session.terminal.sessions.count == 6)
-    #expect(session.terminal.terminalGroups.count == 6)
+    #expect(session.terminal.sessions.count == 200)
+    #expect(session.terminal.terminalGroups.isEmpty)
     #expect(session.selectedConductorRunID == nil)
 }
 

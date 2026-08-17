@@ -187,7 +187,7 @@ func terminalGroupSnapshotValidatesTreeAndBounds() throws {
             retainedPaneCount: 1
         )
     }
-    #expect(throws: TerminalGroupSnapshotError.retainedPaneLimitExceeded(25)) {
+    #expect(throws: TerminalGroupSnapshotError.retainedPaneLimitExceeded(201)) {
         _ = try TerminalGroupSnapshot(
             id: TerminalGroupID(),
             name: name,
@@ -195,7 +195,7 @@ func terminalGroupSnapshotValidatesTreeAndBounds() throws {
             focusedPaneID: firstPaneID,
             savedLayoutID: nil,
             panes: [panes[0]],
-            retainedPaneCount: 25
+            retainedPaneCount: TerminalGroupLimits.maximumRetainedPanesPerWindow + 1
         )
     }
 
@@ -236,7 +236,7 @@ func terminalGroupSnapshotValidatesTreeAndBounds() throws {
     }
 
     var sevenPaneRoot = TerminalGroupNode.pane(firstPaneID)
-    for _ in 0..<6 {
+    for _ in 0..<TerminalGroupLimits.maximumPanesPerGroup {
         sevenPaneRoot = .split(
             id: TerminalGroupSplitID(),
             axis: .columns,
@@ -245,7 +245,7 @@ func terminalGroupSnapshotValidatesTreeAndBounds() throws {
             second: .pane(TerminalPaneID())
         )
     }
-    #expect(throws: TerminalGroupSnapshotError.tooManyPanes(7)) {
+    #expect(throws: TerminalGroupSnapshotError.tooManyPanes(11)) {
         _ = try TerminalGroupSnapshot(
             id: TerminalGroupID(),
             name: name,

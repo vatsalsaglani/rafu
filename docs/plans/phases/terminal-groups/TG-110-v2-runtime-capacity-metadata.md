@@ -2,7 +2,7 @@
 
 ## Status
 
-Planned.
+Implemented on lane; awaiting authorized merge.
 
 ## Branch and worker
 
@@ -99,3 +99,13 @@ Use parallel tests only. No tracked-file edit is permitted after the test.
 > SHA, changed files, tests, security and concurrency review, risks, and
 > Deviations.
 
+## Deviations
+
+- `Sources/RafuApp/Terminal/TerminalGroupModel.swift`: the legacy snapshot
+  pane and retained limits remain as compatibility aliases to
+  `TerminalGroupLimits`. This was required so snapshot validation uses the
+  accepted TG-100 bounds without changing the public contract shape.
+- `Tests/RafuAppTests/TerminalGroupContractTests.swift`: stale TG-10 boundary
+  fixtures were updated from pane 7 and retained 25 to the TG-100 boundaries.
+  This was authorized by the coordinator because the old assertions failed
+  after the accepted limits were applied.

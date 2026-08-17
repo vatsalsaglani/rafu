@@ -237,6 +237,33 @@ func removeTerminalGroupWorkspace(_ root: URL) {
 }
 
 @MainActor
+@Test("Stopped pane metadata updates by pane ID and persists without a controller")
+func workspaceSessionPaneMetadataUpdatesStoppedPane() throws {
+    let (session, root) = try makeTerminalGroupWorkspace()
+    defer { removeTerminalGroupWorkspace(root) }
+    session.openLocalWorkspace(at: root)
+    let groupID = try createdGroupID(session.terminal.perform(.createGroup(name: nil)))
+    let paneID = try #require(session.terminal.terminalGroup(groupID)?.focusedPaneID)
+    let name = "Saved pane"
+    session.renameTerminalPane(paneID, to: name)
+    session.setTerminalPaneColor(paneID, .warning)
+    _ = try session.terminal.perform(
+        .commitSavedLayout(
+            groupID: groupID, savedLayoutID: SavedTerminalGroupID(),
+            name: try #require(TerminalGroupName("Saved group"))))
+    session.revealTerminalGroup(groupID)
+
+    let pane = try #require(session.terminal.terminalGroup(groupID)?.panes.first)
+    #expect(pane.explicitUserName?.rawValue == name)
+    #expect(pane.themeColor == .warning)
+    #expect(session.terminal.terminalController(for: paneID) == nil)
+    let restoration = try #require(session.terminalGroupWorkspaceRestorationForTesting())
+    let restoredPane = try #require(restoration.openGroups.first?.panes.first)
+    #expect(restoredPane.explicitUserName?.rawValue == name)
+    #expect(restoredPane.themeColor == .warning)
+}
+
+@MainActor
 func installTerminalGroupStore(
     _ store: TerminalGroupIntegrationStore, on session: WorkspaceSession
 ) {
@@ -758,23 +785,28 @@ func workspaceSessionExternalDeleteDetachesMatchingOpenGroup() async throws {
 func workspaceSessionCapacityFailuresDoNotMutateEditorState() throws {
     let (session, root) = try makeTerminalGroupWorkspace()
     defer { removeTerminalGroupWorkspace(root) }
-    for _ in 0..<6 { session.newTerminalGroup() }
+    for _ in 0..<20 { session.newTerminalGroup() }
     let liveTabs = session.editorLayout.group(id: session.editorLayout.focusedGroupID)?.tabs.count
-    #expect(session.liveTerminalSessionCount == 6)
+    #expect(session.liveTerminalSessionCount == 20)
     session.newTerminalGroup()
-    #expect(session.liveTerminalSessionCount == 6)
+    #expect(session.liveTerminalSessionCount == 20)
     #expect(
         session.editorLayout.group(id: session.editorLayout.focusedGroupID)?.tabs.count == liveTabs)
 
     let (retainedSession, retainedRoot) = try makeTerminalGroupWorkspace()
     defer { removeTerminalGroupWorkspace(retainedRoot) }
-    for _ in 0..<TerminalGroupSnapshot.maximumRetainedPanesPerWindow {
-        _ = try retainedSession.terminal.perform(.createGroup(name: nil))
+    for _ in 0..<20 {
+        let groupID = try createdGroupID(
+            retainedSession.terminal.perform(.createGroup(name: nil)))
+        for _ in 0..<9 {
+            _ = try retainedSession.terminal.perform(
+                .splitFocusedPane(groupID: groupID, placement: .right))
+        }
     }
     let retainedTabs = retainedSession.editorLayout.group(
         id: retainedSession.editorLayout.focusedGroupID)?.tabs.count
     retainedSession.newTerminalGroup()
-    #expect(retainedSession.retainedTerminalPaneCount == 24)
+    #expect(retainedSession.retainedTerminalPaneCount == 200)
     #expect(
         retainedSession.editorLayout.group(id: retainedSession.editorLayout.focusedGroupID)?.tabs
             .count == retainedTabs)

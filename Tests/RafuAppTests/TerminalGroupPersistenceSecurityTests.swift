@@ -188,7 +188,7 @@ struct TerminalGroupPersistenceSecurityTests {
     @Test("Raw pane-count and missing-profile errors retain typed results")
     func rawCountAndMissingProfileStayTyped() async throws {
         try await assertTypedLoadError(
-            changing: "panes", to: Array(repeating: NSNull(), count: 7), expected: .exceededBounds)
+            changing: "panes", to: Array(repeating: NSNull(), count: 11), expected: .exceededBounds)
         try await assertMissingProfileKeyError()
     }
 

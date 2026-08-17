@@ -70,6 +70,7 @@ nonisolated struct TerminalGroupRuntime: Sendable {
     mutating func insertStoppedSavedGroup(_ record: SavedTerminalGroupRecord) throws
         -> TerminalGroupID
     {
+        try requireGroupCapacity(requested: 1)
         try requireRetainedCapacity(record.panes.count)
         var paneMap: [SavedTerminalPaneID: TerminalPaneID] = [:]
         var panes: [TerminalPaneSnapshot] = []
@@ -118,6 +119,7 @@ nonisolated struct TerminalGroupRuntime: Sendable {
     mutating func insertInertSnapshot(_ snapshot: TerminalGroupSnapshot) throws
         -> TerminalGroupSnapshot
     {
+        try requireGroupCapacity(requested: 1)
         try requireRetainedCapacity(snapshot.panes.count)
         let incomingPaneIDs = Set(snapshot.panes.map(\.id))
         let existingPaneIDs = Set(groups.values.flatMap { $0.panes.map(\.id) })
@@ -160,6 +162,7 @@ nonisolated struct TerminalGroupRuntime: Sendable {
         sessionID: UUID,
         pane: TerminalPaneSnapshot
     ) throws -> TerminalGroupID {
+        try requireGroupCapacity(requested: 1)
         try requireRetainedCapacity(1)
         try requireLiveCapacity(1)
         guard pane.sessionID == sessionID, pane.status == .live else {
@@ -187,6 +190,7 @@ nonisolated struct TerminalGroupRuntime: Sendable {
         sessionID: UUID,
         pane: TerminalPaneSnapshot
     ) throws -> TerminalGroupID {
+        try requireGroupCapacity(requested: 1)
         try requireRetainedCapacity(1)
         guard pane.sessionID == sessionID,
             pane.status == .live || pane.status == .exited,
@@ -292,6 +296,7 @@ nonisolated struct TerminalGroupRuntime: Sendable {
     mutating func perform(_ command: TerminalGroupCommand) throws -> TerminalGroupEffect {
         switch command {
         case .createGroup(let requestedName):
+            try requireGroupCapacity(requested: 1)
             try requireRetainedCapacity(1)
             let groupID = TerminalGroupID()
             let paneID = TerminalPaneID()
@@ -346,10 +351,31 @@ nonisolated struct TerminalGroupRuntime: Sendable {
             advanceGeneration()
             return .persistWorkspaceRestoration
 
-        case .setPaneName, .setPaneThemeColor:
-            // TG-100 freezes the value contract. The manager and UI lanes
-            // provide the mutation path after this contract is merged.
-            throw TerminalGroupValidationError.unsupportedPaneMetadata
+        case .setPaneName(let paneID, let name):
+            let groupID = try groupIDContaining(paneID)
+            let group = try requireGroup(groupID)
+            guard let index = group.panes.firstIndex(where: { $0.id == paneID }) else {
+                throw TerminalGroupValidationError.paneNotFound(paneID)
+            }
+            var panes = group.panes
+            panes[index] = try replacing(
+                panes[index], explicitUserName: name, themeColor: panes[index].themeColor)
+            groups[groupID] = try replacing(group, panes: panes)
+            advanceGeneration()
+            return .paneMetadataChanged(paneID: paneID)
+
+        case .setPaneThemeColor(let paneID, let color):
+            let groupID = try groupIDContaining(paneID)
+            let group = try requireGroup(groupID)
+            guard let index = group.panes.firstIndex(where: { $0.id == paneID }) else {
+                throw TerminalGroupValidationError.paneNotFound(paneID)
+            }
+            var panes = group.panes
+            panes[index] = try replacing(
+                panes[index], explicitUserName: panes[index].explicitUserName, themeColor: color)
+            groups[groupID] = try replacing(group, panes: panes)
+            advanceGeneration()
+            return .paneMetadataChanged(paneID: paneID)
 
         case .commitSavedLayout(let groupID, let savedLayoutID, let name):
             let group = try requireGroup(groupID)
@@ -544,15 +570,31 @@ nonisolated struct TerminalGroupRuntime: Sendable {
         return pane
     }
 
+    private func groupIDContaining(_ paneID: TerminalPaneID) throws -> TerminalGroupID {
+        guard let groupID = groupID(containing: paneID) else {
+            throw TerminalGroupValidationError.paneNotFound(paneID)
+        }
+        return groupID
+    }
+
     private func requireGroupCapacity(_ group: TerminalGroupSnapshot, requested: Int) throws {
-        guard group.panes.count + requested <= TerminalGroupSnapshot.maximumPanesPerGroup else {
+        guard group.panes.count + requested <= TerminalGroupLimits.maximumPanesPerGroup else {
             throw TerminalGroupCapacityError.groupPaneLimitExceeded(
                 current: group.panes.count, requested: requested)
         }
     }
 
+    private func requireGroupCapacity(requested: Int) throws {
+        guard requested >= 0,
+            groups.count + requested <= TerminalGroupLimits.maximumGroupsPerWindow
+        else {
+            throw TerminalGroupCapacityError.groupLimitExceeded(
+                current: groups.count, requested: requested)
+        }
+    }
+
     private func requireRetainedCapacity(_ requested: Int) throws {
-        guard retainedPaneCount + requested <= TerminalGroupSnapshot.maximumRetainedPanesPerWindow
+        guard retainedPaneCount + requested <= TerminalGroupLimits.maximumRetainedPanesPerWindow
         else {
             throw TerminalGroupCapacityError.retainedPaneLimitExceeded(
                 current: retainedPaneCount, requested: requested)
@@ -560,7 +602,8 @@ nonisolated struct TerminalGroupRuntime: Sendable {
     }
 
     private func requireLiveCapacity(_ requested: Int) throws {
-        guard liveSessionCount + requested <= TerminalGroupSnapshot.maximumPanesPerGroup else {
+        guard liveSessionCount + requested <= TerminalGroupLimits.maximumLiveSessionsPerWindow
+        else {
             throw TerminalGroupCapacityError.liveSessionLimitExceeded(
                 current: liveSessionCount, requested: requested)
         }
@@ -619,13 +662,27 @@ nonisolated struct TerminalGroupRuntime: Sendable {
     private func replacing(
         _ group: TerminalGroupSnapshot,
         name: TerminalGroupName? = nil,
-        focusedPaneID: TerminalPaneID? = nil
+        focusedPaneID: TerminalPaneID? = nil,
+        panes: [TerminalPaneSnapshot]? = nil
     ) throws -> TerminalGroupSnapshot {
         try TerminalGroupSnapshot(
             id: group.id, name: name ?? group.name, root: group.root,
             focusedPaneID: focusedPaneID ?? group.focusedPaneID,
-            savedLayoutID: group.savedLayoutID, panes: group.panes,
+            savedLayoutID: group.savedLayoutID, panes: panes ?? group.panes,
             retainedPaneCount: retainedPaneCount)
+    }
+
+    private func replacing(
+        _ pane: TerminalPaneSnapshot,
+        explicitUserName: TerminalPaneName?,
+        themeColor: TerminalPaneThemeColor?
+    ) throws -> TerminalPaneSnapshot {
+        try TerminalPaneSnapshot(
+            id: pane.id, sessionID: pane.sessionID,
+            explicitUserName: explicitUserName, reportedTitle: pane.reportedTitle,
+            runtimeKind: pane.runtimeKind, themeColor: themeColor,
+            status: pane.status, launchProfile: pane.launchProfile,
+            startAvailability: pane.startAvailability)
     }
 
     private func inserting(

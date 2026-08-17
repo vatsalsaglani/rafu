@@ -442,8 +442,10 @@ nonisolated enum TerminalGroupLimits: Sendable {
 /// conformance: runtime group, pane, split, and session identities are not
 /// reusable saved-layout identities.
 nonisolated struct TerminalGroupSnapshot: Equatable, Sendable {
-    static let maximumPanesPerGroup = 6
-    static let maximumRetainedPanesPerWindow = 24
+    // Compatibility aliases for older callers. Capacity decisions use the
+    // independent TerminalGroupLimits contract.
+    static let maximumPanesPerGroup = TerminalGroupLimits.maximumPanesPerGroup
+    static let maximumRetainedPanesPerWindow = TerminalGroupLimits.maximumRetainedPanesPerWindow
     static let defaultSplitFraction = 0.5
     static let minimumSplitFraction = 0.1
     static let maximumSplitFraction = 0.9

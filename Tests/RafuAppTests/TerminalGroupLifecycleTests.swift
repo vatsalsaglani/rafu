@@ -292,7 +292,7 @@ func terminalGroupNaturalExitCallbackIsInstalledOnce() throws {
 }
 
 @MainActor
-@Test("Legacy newSession remains the documented TG-20 capacity exemption")
+@Test("Legacy newSession remains available below the independent live limit")
 func terminalGroupLegacyAdapterCapacityExemptionIsExplicit() throws {
     let manager = WorkspaceTerminalManager()
     let shell = TerminalShell(path: "/bin/zsh", name: "Default (zsh)", isDefault: true)
@@ -300,9 +300,8 @@ func terminalGroupLegacyAdapterCapacityExemptionIsExplicit() throws {
         _ = manager.newSession(startingDirectory: "/tmp", shell: shell)
     }
     #expect(manager.sessions.count == 7)
-    #expect(throws: TerminalGroupCapacityError.liveSessionLimitExceeded(current: 7, requested: 1)) {
-        try manager.reserveLiveSessionCapacity(1)
-    }
+    let reservation = try manager.reserveLiveSessionCapacity(1)
+    try manager.cancelLiveSessionCapacity(reservation)
 }
 
 @MainActor
@@ -463,25 +462,31 @@ func terminalGroupAdoptionRejectionsAreAtomic() throws {
     #expect(manager.terminalController(sessionID: unknownSpec.id) === unknownSpec)
 
     let overflow = WorkspaceTerminalManager()
+    for _ in 0..<TerminalGroupLimits.maximumGroupsPerWindow {
+        _ = try overflow.perform(.createGroup(name: nil))
+    }
     for _ in 0..<7 {
         _ = overflow.newSession(startingDirectory: "/tmp", shell: shell)
     }
     let candidate = try #require(overflow.sessions.first)
     let overflowSessions = overflow.sessions.map(\.id)
-    #expect(throws: TerminalGroupCapacityError.liveSessionLimitExceeded(current: 7, requested: 0)) {
+    #expect(throws: TerminalGroupCapacityError.groupLimitExceeded(current: 20, requested: 1)) {
         try overflow.adoptUngroupedSession(candidate.id)
     }
-    #expect(overflow.terminalGroups.isEmpty)
+    #expect(overflow.terminalGroups.count == TerminalGroupLimits.maximumGroupsPerWindow)
     #expect(overflow.sessions.map(\.id) == overflowSessions)
     #expect(candidate.status == .idle)
 }
 
 @MainActor
-@Test("Legacy adoption rejects the retained-pane boundary without mutation")
+@Test("Legacy adoption rejects the twenty-group boundary without mutation")
 func terminalGroupAdoptionRetainedCapacityIsAtomic() throws {
     let manager = WorkspaceTerminalManager()
-    for _ in 0..<TerminalGroupSnapshot.maximumRetainedPanesPerWindow {
-        _ = try manager.perform(.createGroup(name: nil))
+    for _ in 0..<TerminalGroupLimits.maximumGroupsPerWindow {
+        let groupID = try createdGroupID(manager.perform(.createGroup(name: nil)))
+        for _ in 0..<(TerminalGroupLimits.maximumPanesPerGroup - 1) {
+            _ = try manager.perform(.splitFocusedPane(groupID: groupID, placement: .right))
+        }
     }
     let shell = TerminalShell(path: "/bin/zsh", name: "Default (zsh)", isDefault: true)
     let legacy = manager.newSession(startingDirectory: "/tmp", shell: shell)
@@ -489,8 +494,7 @@ func terminalGroupAdoptionRetainedCapacityIsAtomic() throws {
     let revision = manager.terminalGroupRevision
 
     #expect(
-        throws: TerminalGroupCapacityError.retainedPaneLimitExceeded(
-            current: TerminalGroupSnapshot.maximumRetainedPanesPerWindow, requested: 1)
+        throws: TerminalGroupCapacityError.groupLimitExceeded(current: 20, requested: 1)
     ) {
         try manager.adoptUngroupedSession(legacy.id)
     }
@@ -504,14 +508,11 @@ func terminalGroupAdoptionRetainedCapacityIsAtomic() throws {
 func terminalGroupAdoptionRejectsReservedCapacityOverflowAtomically() throws {
     let manager = WorkspaceTerminalManager()
     let shell = TerminalShell(path: "/bin/zsh", name: "Default (zsh)", isDefault: true)
-    let profile = TerminalPaneLaunchProfile(shell: .preferredShell, startingFolder: .root)
-    let instantiation = TerminalGroupControllerInstantiation.ordinaryShell(
-        startingDirectory: "/tmp", shell: shell, profile: profile)
-    for _ in 0..<5 {
-        _ = try manager.createLiveGroup(instantiation: instantiation)
-    }
     let reservation = try manager.reserveLiveSessionCapacity(1)
-    let legacy = manager.newSession(startingDirectory: "/tmp", shell: shell)
+    var legacy: WorkspaceTerminalController!
+    for _ in 0..<TerminalGroupLimits.maximumLiveSessionsPerWindow {
+        legacy = manager.newSession(startingDirectory: "/tmp", shell: shell)
+    }
     let originalExit = legacy.onExit
     var preservedExitCount = 0
     var managerExitCount = 0
@@ -525,7 +526,8 @@ func terminalGroupAdoptionRejectsReservedCapacityOverflowAtomically() throws {
     let revision = manager.terminalGroupRevision
     let selectedID = manager.selectedID
 
-    #expect(throws: TerminalGroupCapacityError.liveSessionLimitExceeded(current: 7, requested: 0)) {
+    #expect(throws: TerminalGroupCapacityError.liveSessionLimitExceeded(current: 201, requested: 0))
+    {
         try manager.adoptUngroupedSession(legacy.id)
     }
     #expect(manager.terminalGroups == groupsBefore)

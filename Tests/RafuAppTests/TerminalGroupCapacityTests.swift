@@ -3,30 +3,52 @@ import Testing
 
 @testable import RafuApp
 
-@Test("The sixth pane succeeds and the seventh pane rejects without mutation")
-func terminalGroupPaneCapacityHasNoPartialMutation() throws {
+@Test("Twenty-first Terminal Group is rejected without mutation")
+func terminalGroupCountBoundaryIsAtomic() throws {
+    var runtime = TerminalGroupRuntime()
+    for _ in 0..<TerminalGroupLimits.maximumGroupsPerWindow {
+        _ = try runtime.perform(.createGroup(name: nil))
+    }
+    let before = runtime.snapshots
+    #expect(
+        throws: TerminalGroupCapacityError.groupLimitExceeded(
+            current: TerminalGroupLimits.maximumGroupsPerWindow, requested: 1)
+    ) {
+        try runtime.perform(.createGroup(name: nil))
+    }
+    #expect(runtime.snapshots == before)
+}
+
+@Test("The tenth pane succeeds and the eleventh pane rejects without mutation")
+func terminalGroupTenPaneBoundaryIsAtomic() throws {
     var runtime = TerminalGroupRuntime()
     let groupID = try createdGroupID(runtime.perform(.createGroup(name: nil)))
-    for _ in 0..<5 {
+    for _ in 0..<(TerminalGroupLimits.maximumPanesPerGroup - 1) {
         _ = try runtime.perform(.splitFocusedPane(groupID: groupID, placement: .right))
     }
     let before = try #require(runtime.snapshot(groupID: groupID))
-    #expect(before.panes.count == 6)
-    #expect(throws: TerminalGroupCapacityError.groupPaneLimitExceeded(current: 6, requested: 1)) {
+    #expect(before.panes.count == TerminalGroupLimits.maximumPanesPerGroup)
+    #expect(
+        throws: TerminalGroupCapacityError.groupPaneLimitExceeded(
+            current: TerminalGroupLimits.maximumPanesPerGroup, requested: 1)
+    ) {
         try runtime.perform(.splitFocusedPane(groupID: groupID, placement: .right))
     }
     #expect(runtime.snapshot(groupID: groupID) == before)
 }
 
-@Test("The twenty-fifth retained pane rejects without changing existing groups")
+@Test("Two hundred retained panes are bounded by the twenty-group and ten-pane limits")
 func terminalGroupRetainedCapacityHasNoPartialMutation() throws {
     var runtime = TerminalGroupRuntime()
-    for _ in 0..<24 {
-        _ = try runtime.perform(.createGroup(name: nil))
+    for _ in 0..<20 {
+        let groupID = try createdGroupID(runtime.perform(.createGroup(name: nil)))
+        for _ in 0..<9 {
+            _ = try runtime.perform(.splitFocusedPane(groupID: groupID, placement: .right))
+        }
     }
+    #expect(runtime.retainedPaneCount == 200)
     let before = runtime.snapshots
-    #expect(throws: TerminalGroupCapacityError.retainedPaneLimitExceeded(current: 24, requested: 1))
-    {
+    #expect(throws: TerminalGroupCapacityError.groupLimitExceeded(current: 20, requested: 1)) {
         try runtime.perform(.createGroup(name: nil))
     }
     #expect(runtime.snapshots == before)
@@ -36,12 +58,17 @@ func terminalGroupRetainedCapacityHasNoPartialMutation() throws {
 func terminalGroupRetainedCapacityRejectsSplitAndSavedInsertion() throws {
     var runtime = TerminalGroupRuntime()
     let first = try createdGroupID(runtime.perform(.createGroup(name: nil)))
-    for _ in 1..<24 {
-        _ = try runtime.perform(.createGroup(name: nil))
+    for _ in 0..<9 {
+        _ = try runtime.perform(.splitFocusedPane(groupID: first, placement: .right))
+    }
+    for _ in 0..<19 {
+        let groupID = try createdGroupID(runtime.perform(.createGroup(name: nil)))
+        for _ in 0..<9 {
+            _ = try runtime.perform(.splitFocusedPane(groupID: groupID, placement: .right))
+        }
     }
     let before = runtime.snapshots
-    #expect(throws: TerminalGroupCapacityError.retainedPaneLimitExceeded(current: 24, requested: 1))
-    {
+    #expect(throws: TerminalGroupCapacityError.groupPaneLimitExceeded(current: 10, requested: 1)) {
         try runtime.perform(.splitFocusedPane(groupID: first, placement: .down))
     }
     #expect(runtime.snapshots == before)
@@ -56,15 +83,14 @@ func terminalGroupRetainedCapacityRejectsSplitAndSavedInsertion() throws {
                 launchProfile: TerminalPaneLaunchProfile(
                     shell: .preferredShell, startingFolder: .root))
         ])
-    #expect(throws: TerminalGroupCapacityError.retainedPaneLimitExceeded(current: 24, requested: 1))
-    {
+    #expect(throws: TerminalGroupCapacityError.groupLimitExceeded(current: 20, requested: 1)) {
         try runtime.insertStoppedSavedGroup(record)
     }
     #expect(runtime.snapshots == before)
 }
 
 @MainActor
-@Test("Start All checks all requested slots before changing any stopped pane")
+@Test("Start All succeeds below the independent live-session limit")
 func terminalGroupStartAllCapacityHasNoPartialMutation() throws {
     let manager = WorkspaceTerminalManager()
     let profile = TerminalPaneLaunchProfile(shell: .preferredShell, startingFolder: .root)
@@ -79,10 +105,8 @@ func terminalGroupStartAllCapacityHasNoPartialMutation() throws {
     _ = try manager.perform(.splitFocusedPane(groupID: stoppedGroupID, placement: .right))
     let before = try #require(manager.terminalGroup(stoppedGroupID))
     let starts = Dictionary(uniqueKeysWithValues: before.panes.map { ($0.id, instantiation) })
-    #expect(throws: TerminalGroupCapacityError.liveSessionLimitExceeded(current: 6, requested: 2)) {
-        try manager.startAllRestartablePanes(in: stoppedGroupID, instantiations: starts)
-    }
-    #expect(manager.terminalGroup(stoppedGroupID) == before)
+    _ = try manager.startAllRestartablePanes(in: stoppedGroupID, instantiations: starts)
+    #expect(manager.terminalGroup(stoppedGroupID)?.panes.allSatisfy { $0.status == .live } == true)
 }
 
 @MainActor
@@ -90,9 +114,8 @@ func terminalGroupStartAllCapacityHasNoPartialMutation() throws {
 func terminalGroupReservationsAreBoundedAndReleased() throws {
     let manager = WorkspaceTerminalManager()
     let reservation = try manager.reserveLiveSessionCapacity(6)
-    #expect(throws: TerminalGroupCapacityError.liveSessionLimitExceeded(current: 6, requested: 1)) {
-        try manager.reserveLiveSessionCapacity(1)
-    }
+    let secondReservation = try manager.reserveLiveSessionCapacity(1)
+    try manager.cancelLiveSessionCapacity(secondReservation)
     #expect(throws: TerminalGroupCapacityError.staleReservation(reservation.id)) {
         try manager.consumeLiveSessionCapacity(reservation)
     }
@@ -102,6 +125,48 @@ func terminalGroupReservationsAreBoundedAndReleased() throws {
     #expect(throws: TerminalGroupCapacityError.staleReservation(second.id)) {
         try manager.cancelLiveSessionCapacity(second)
     }
+}
+
+@MainActor
+@Test("Live pane metadata mirrors from pane identity without changing the snapshot")
+func livePaneMetadataMirrorsByPaneID() throws {
+    let manager = WorkspaceTerminalManager()
+    let profile = TerminalPaneLaunchProfile(shell: .preferredShell, startingFolder: .root)
+    let shell = TerminalShell(path: "/bin/zsh", name: "Default (zsh)", isDefault: true)
+    let instantiation = TerminalGroupControllerInstantiation.ordinaryShell(
+        startingDirectory: "/tmp", shell: shell, profile: profile)
+    let groupID = try createdGroupID(manager.perform(.createGroup(name: nil)))
+    let paneID = try #require(manager.terminalGroup(groupID)?.focusedPaneID)
+    manager.terminalGroupControllerFactory = { index, _ in
+        WorkspaceTerminalController(index: index, startingDirectory: "/tmp", shell: shell)
+    }
+    _ = try manager.startPane(paneID, instantiation: instantiation)
+    let name = try #require(TerminalPaneName("Live pane"))
+    _ = try manager.perform(.setPaneName(paneID: paneID, name: name))
+    _ = try manager.perform(.setPaneThemeColor(paneID: paneID, color: .success))
+    #expect(manager.terminalGroup(groupID)?.panes.first?.explicitUserName == name)
+    #expect(manager.terminalGroup(groupID)?.panes.first?.themeColor == .success)
+    #expect(manager.terminalController(for: paneID)?.userName == "Live pane")
+    #expect(manager.terminalController(for: paneID)?.terminalPaneThemeColor == .success)
+}
+
+@MainActor
+@Test("The two-hundredth live legacy session is allowed and the next is rejected")
+func liveSessionBoundaryUsesTheIndependentWindowLimit() throws {
+    let manager = WorkspaceTerminalManager()
+    let shell = TerminalShell(path: "/bin/zsh", name: "Default (zsh)", isDefault: true)
+    for _ in 0..<TerminalGroupLimits.maximumLiveSessionsPerWindow {
+        _ = manager.newSession(startingDirectory: "/tmp", shell: shell)
+    }
+    let before = manager.sessions.count
+    #expect(before == 200)
+    #expect(
+        throws: TerminalGroupCapacityError.liveSessionLimitExceeded(
+            current: 200, requested: 1)
+    ) {
+        try manager.reserveLiveSessionCapacity(1)
+    }
+    #expect(manager.sessions.count == before)
 }
 
 @MainActor
@@ -175,9 +240,6 @@ func terminalGroupNaturalExitReleasesCapacityAndRestartPreflightsAgain() throws 
     let exitingController = try #require(manager.terminalController(for: exitingPane.id))
     exitingController.processDidTerminate(exitCode: 0)
     let reusedSlot = try manager.reserveLiveSessionCapacity(1)
-    #expect(throws: TerminalGroupCapacityError.liveSessionLimitExceeded(current: 6, requested: 1)) {
-        try manager.restartExitedPane(exitingPane.id)
-    }
     try manager.cancelLiveSessionCapacity(reusedSlot)
     try manager.restartExitedPane(exitingPane.id)
     #expect(manager.terminalController(for: exitingPane.id) === exitingController)
@@ -236,8 +298,11 @@ func terminalGroupClassifiedValidationFailureReleasesReservation() throws {
 @Test("A value failure after construction closes the candidate and releases capacity")
 func terminalGroupPostConstructionValueFailureClosesCandidate() throws {
     let manager = WorkspaceTerminalManager()
-    for _ in 0..<24 {
-        _ = try manager.perform(.createGroup(name: nil))
+    for _ in 0..<20 {
+        let groupID = try createdGroupID(manager.perform(.createGroup(name: nil)))
+        for _ in 0..<9 {
+            _ = try manager.perform(.splitFocusedPane(groupID: groupID, placement: .right))
+        }
     }
     let shell = TerminalShell(path: "/bin/zsh", name: "Default (zsh)", isDefault: true)
     let candidate = WorkspaceTerminalController(index: 1, startingDirectory: "/tmp", shell: shell)
@@ -247,15 +312,14 @@ func terminalGroupPostConstructionValueFailureClosesCandidate() throws {
         executableURL: URL(fileURLWithPath: "/usr/bin/false"), arguments: [],
         currentDirectoryPath: "/tmp", environment: [:], roleBadge: "Agent")
 
-    #expect(throws: TerminalGroupCapacityError.retainedPaneLimitExceeded(current: 24, requested: 1))
-    {
+    #expect(throws: TerminalGroupCapacityError.groupLimitExceeded(current: 20, requested: 1)) {
         try manager.createLiveGroup(
             instantiation: .process(spec: spec, kind: .directAgentTerminal(provider: .codex)),
             reservation: reservation)
     }
     #expect(candidate.status == .exited(code: nil))
     #expect(manager.sessions.isEmpty)
-    #expect(manager.retainedTerminalPaneCount == 24)
+    #expect(manager.retainedTerminalPaneCount == 200)
     #expect(throws: TerminalGroupCapacityError.staleReservation(reservation.id)) {
         try manager.cancelLiveSessionCapacity(reservation)
     }
@@ -370,16 +434,14 @@ func terminalGroupAndLegacyCapacityCountsEachControllerOnce() throws {
     for _ in 0..<6 {
         _ = try manager.createLiveGroup(instantiation: instantiation)
     }
-    #expect(throws: TerminalGroupCapacityError.liveSessionLimitExceeded(current: 6, requested: 1)) {
-        try manager.reserveLiveSessionCapacity(1)
-    }
+    let reservation = try manager.reserveLiveSessionCapacity(1)
+    try manager.cancelLiveSessionCapacity(reservation)
 
     let mixed = WorkspaceTerminalManager()
     for _ in 0..<5 {
         _ = try mixed.createLiveGroup(instantiation: instantiation)
     }
     _ = mixed.newSession(startingDirectory: "/tmp", shell: shell)
-    #expect(throws: TerminalGroupCapacityError.liveSessionLimitExceeded(current: 6, requested: 1)) {
-        try mixed.reserveLiveSessionCapacity(1)
-    }
+    let mixedReservation = try mixed.reserveLiveSessionCapacity(1)
+    try mixed.cancelLiveSessionCapacity(mixedReservation)
 }

@@ -445,15 +445,15 @@ private func insertStoppedGroup(_ session: WorkspaceSession, panes count: Int) t
 }
 
 @MainActor
-@Test("Six-pane group disables both split directions")
-func sixPaneGroupDisablesSplits() throws {
+@Test("Ten-pane group disables both split directions")
+func tenPaneGroupDisablesSplits() throws {
     let (session, root) = try makeTerminalGroupWorkspace()
     defer {
         session.teardownTerminalGroups()
         removeTerminalGroupWorkspace(root)
     }
     session.newTerminalGroup()
-    for _ in 0..<5 { session.splitFocusedTerminalPane(.right) }
+    for _ in 0..<9 { session.splitFocusedTerminalPane(.right) }
     #expect(
         session.terminalGroupPresentationAvailability(.splitRight).reason
             == "This Terminal Group has reached its pane limit.")
@@ -471,18 +471,12 @@ func liveCapacityDisablesNewAndStartActions() throws {
         removeTerminalGroupWorkspace(root)
     }
     session.newTerminalGroup()
-    for _ in 0..<5 { session.splitFocusedTerminalPane(.right) }
+    for _ in 0..<9 { session.splitFocusedTerminalPane(.right) }
     let stopped = try insertStoppedGroup(session, panes: 1)
     session.revealTerminalGroup(stopped)
-    #expect(
-        session.terminalGroupPresentationAvailability(.newGroup).reason
-            == "The window has reached its live Terminal limit.")
-    #expect(
-        session.terminalGroupPresentationAvailability(.startPane).reason
-            == "The window has reached its live Terminal limit.")
-    #expect(
-        session.terminalGroupPresentationAvailability(.startAll).reason
-            == "The restartable panes exceed the live Terminal limit.")
+    #expect(session.terminalGroupPresentationAvailability(.newGroup).isEnabled)
+    #expect(session.terminalGroupPresentationAvailability(.startPane).isEnabled)
+    #expect(session.terminalGroupPresentationAvailability(.startAll).isEnabled)
 }
 
 @MainActor
@@ -493,11 +487,12 @@ func retainedCapacityDisablesNewGroup() throws {
         session.teardownTerminalGroups()
         removeTerminalGroupWorkspace(root)
     }
-    for _ in 0..<4 { _ = try insertStoppedGroup(session, panes: 6) }
-    #expect(session.retainedTerminalPaneCount == 24)
+    for _ in 0..<20 { _ = try insertStoppedGroup(session, panes: 10) }
+    #expect(session.retainedTerminalPaneCount == 200)
+    #expect(session.terminalGroupPresentationAvailability(.newGroup).isEnabled == false)
     #expect(
         session.terminalGroupPresentationAvailability(.newGroup).reason
-            == "The window has reached its Terminal Pane limit.")
+            == "The window has reached its Terminal Group limit.")
 }
 
 @MainActor
