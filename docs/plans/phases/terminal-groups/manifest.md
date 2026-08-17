@@ -74,6 +74,41 @@ TG-90 has an unapproved blocked checkpoint at
 `780df1dcb5ac64184b2e07ae96dd867dcfb79522`. It is not merged. Q5 manual and
 accessibility checks and Q6 final active-pane measurements remain open.
 
+## Terminal Groups v2 execution order
+
+The v2 work is an explicit user-directed extension. It does not change the
+blocked status of the older TG-90 close-out lane.
+
+```mermaid
+flowchart LR
+    P["Committed v2 plan set"]
+    C["TG-100<br/>limits and metadata contracts"]
+    R["TG-110<br/>runtime, persistence, workspace"]
+    H["TG-120<br/>compact colored pane chrome"]
+    M["TG-130<br/>sidebar three-dot menus"]
+    Q["TG-190<br/>integration and release gate"]
+    CI["Coordinator<br/>main tests, CI, release branch"]
+
+    P --> C
+    C --> R
+    R --> H
+    R --> M
+    H --> Q
+    M --> Q
+    Q --> CI
+```
+
+| Plan | Depends on | Worker | Branch | Status | Approved SHA |
+|---|---|---|---|---|---|
+| [TG-100](TG-100-v2-contracts.md) | v2 plan SHA | Luna | `terminal-groups/tg-100-v2-contracts` | Planned | — |
+| [TG-110](TG-110-v2-runtime-capacity-metadata.md) | TG-100 | Luna | `terminal-groups/tg-110-v2-runtime-capacity-metadata` | Blocked | — |
+| [TG-120](TG-120-v2-pane-chrome.md) | TG-110 | Luna | `terminal-groups/tg-120-v2-pane-chrome` | Blocked | — |
+| [TG-130](TG-130-v2-sidebar-menus.md) | TG-110 | Luna | `terminal-groups/tg-130-v2-sidebar-menus` | Blocked | — |
+| [TG-190](TG-190-v2-integration-release.md) | TG-120, TG-130 | Luna | `terminal-groups/tg-190-v2-integration-release` | Blocked | — |
+
+The coordinator substitutes an exact SHA only in the copied Goal Mode prompt.
+The coordinator does not edit tracked plan placeholders after each merge.
+
 `Ready` means that all dependencies are complete and the local branch exists.
 `In progress` means that the branch has an active isolated Worktree worker.
 `Blocked` means that a dependency or required external gate is not complete.
