@@ -1,6 +1,16 @@
 # Markdown preview: frontmatter header card
 
-Status: **planned** — this document is a complete implementation brief. An
+Status: **done** — delivered on 2026-08-17. The strict scanner, native card,
+preview integration, focused tests, and reference note are implemented. The
+implementation uses the approved Foundation-only grammar and the final
+colophon/collapse/raw-fallback design. Initial evidence: format fix/lint clean,
+`./script/build.sh` passed, and the metadata-focused parallel tests passed.
+Final evidence: `./script/test.sh` passed with 2,164 tests in 117 suites, and
+`./script/build_and_run.sh --verify` passed. The Lightning app was stopped
+after verification. The CRLF line-record rule is documented in the reference
+note.
+
+This document was a complete implementation brief. An
 implementing agent should not need to redo the analysis or the design
 exploration below; read the listed files, make the listed edits, run the
 listed gates.

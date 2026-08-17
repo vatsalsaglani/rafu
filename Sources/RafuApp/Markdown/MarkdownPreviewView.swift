@@ -40,6 +40,9 @@ struct MarkdownPreviewView: View {
 
                     case .mermaid(let result):
                         MermaidDiagramView(result: result)
+
+                    case .frontmatter(let result):
+                        MarkdownFrontmatterCard(result: result)
                     }
                 }
             }
@@ -109,6 +112,7 @@ nonisolated struct MarkdownPreviewSegment: Identifiable, Sendable {
     enum Content: Sendable {
         case markdown(String)
         case mermaid(MermaidParseResult)
+        case frontmatter(MarkdownFrontmatterParseResult)
     }
 
     let id = UUID()
@@ -117,21 +121,35 @@ nonisolated struct MarkdownPreviewSegment: Identifiable, Sendable {
 
 nonisolated struct MarkdownPreviewSegmentParser: Sendable {
     func parse(_ source: String) -> [MarkdownPreviewSegment] {
+        var prefix: [MarkdownPreviewSegment] = []
+        var markdownSource = source
+        if let scanned = MarkdownFrontmatterScanner().scan(source) {
+            if case .parsed(let metadata) = scanned.result,
+                metadata.fieldCount == 0,
+                metadata.raw.isEmpty
+            {
+                markdownSource = scanned.remainder
+            } else {
+                prefix.append(.init(content: .frontmatter(scanned.result)))
+                markdownSource = scanned.remainder
+            }
+        }
+
         let expression = try? NSRegularExpression(
             pattern: #"(?is)```mermaid[^\n]*\n(.*?)```"#
         )
         guard let expression else {
-            return [.init(content: .markdown(source))]
+            return prefix + [.init(content: .markdown(markdownSource))]
         }
 
-        let sourceString = source as NSString
+        let sourceString = markdownSource as NSString
         let fullRange = NSRange(location: 0, length: sourceString.length)
-        let matches = expression.matches(in: source, range: fullRange)
+        let matches = expression.matches(in: markdownSource, range: fullRange)
         guard !matches.isEmpty else {
-            return [.init(content: .markdown(source))]
+            return prefix + [.init(content: .markdown(markdownSource))]
         }
 
-        var result: [MarkdownPreviewSegment] = []
+        var result = prefix
         var cursor = 0
         for match in matches {
             if match.range.location > cursor {
