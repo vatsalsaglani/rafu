@@ -965,12 +965,16 @@ final class WorkspaceSession {
         }
         if action == .toggle { return .init(isEnabled: true, reason: nil) }
         if action == .newGroup {
-            guard retainedTerminalPaneCount < TerminalGroupSnapshot.maximumRetainedPanesPerWindow
+            guard terminal.terminalGroups.count < TerminalGroupLimits.maximumGroupsPerWindow else {
+                return .init(
+                    isEnabled: false, reason: "The window has reached its Terminal Group limit.")
+            }
+            guard retainedTerminalPaneCount < TerminalGroupLimits.maximumRetainedPanesPerWindow
             else {
                 return .init(
                     isEnabled: false, reason: "The window has reached its Terminal Pane limit.")
             }
-            guard liveTerminalSessionCount < TerminalGroupSnapshot.maximumPanesPerGroup else {
+            guard liveTerminalSessionCount < TerminalGroupLimits.maximumLiveSessionsPerWindow else {
                 return .init(
                     isEnabled: false, reason: "The window has reached its live Terminal limit.")
             }
@@ -987,16 +991,16 @@ final class WorkspaceSession {
         let pane = group.panes.first(where: { $0.id == group.focusedPaneID })
         switch action {
         case .splitRight, .splitDown:
-            guard group.panes.count < TerminalGroupSnapshot.maximumPanesPerGroup else {
+            guard group.panes.count < TerminalGroupLimits.maximumPanesPerGroup else {
                 return .init(
                     isEnabled: false, reason: "This Terminal Group has reached its pane limit.")
             }
-            guard retainedTerminalPaneCount < TerminalGroupSnapshot.maximumRetainedPanesPerWindow
+            guard retainedTerminalPaneCount < TerminalGroupLimits.maximumRetainedPanesPerWindow
             else {
                 return .init(
                     isEnabled: false, reason: "The window has reached its Terminal Pane limit.")
             }
-            guard liveTerminalSessionCount < TerminalGroupSnapshot.maximumPanesPerGroup else {
+            guard liveTerminalSessionCount < TerminalGroupLimits.maximumLiveSessionsPerWindow else {
                 return .init(
                     isEnabled: false, reason: "The window has reached its live Terminal limit.")
             }
@@ -1037,7 +1041,7 @@ final class WorkspaceSession {
             guard let pane else {
                 return .init(isEnabled: false, reason: "Select a Terminal Pane.")
             }
-            guard liveTerminalSessionCount < TerminalGroupSnapshot.maximumPanesPerGroup else {
+            guard liveTerminalSessionCount < TerminalGroupLimits.maximumLiveSessionsPerWindow else {
                 return .init(
                     isEnabled: false, reason: "The window has reached its live Terminal limit.")
             }
@@ -1058,7 +1062,7 @@ final class WorkspaceSession {
             }
             guard
                 liveTerminalSessionCount + candidates.count
-                    <= TerminalGroupSnapshot.maximumPanesPerGroup
+                    <= TerminalGroupLimits.maximumLiveSessionsPerWindow
             else {
                 return .init(
                     isEnabled: false,
@@ -1318,6 +1322,28 @@ final class WorkspaceSession {
             return
         }
         controller.sessionColor = color
+    }
+
+    /// Sets or clears the explicit name for a Terminal Group pane. The
+    /// runtime validates the bounded value before it changes the snapshot;
+    /// live controllers mirror the accepted value by pane identity.
+    func renameTerminalPane(_ paneID: TerminalPaneID, to name: String?) {
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parsed = (trimmed?.isEmpty ?? true) ? nil : TerminalPaneName(trimmed!)
+        guard trimmed?.isEmpty != false || parsed != nil else { return }
+        do {
+            _ = try terminal.perform(.setPaneName(paneID: paneID, name: parsed))
+            persistWorkspaceState()
+        } catch { presentTerminalGroupError(error.localizedDescription) }
+    }
+
+    /// Sets or clears a theme-token color for a Terminal Group pane. Custom
+    /// colors are not part of the saved metadata contract.
+    func setTerminalPaneColor(_ paneID: TerminalPaneID, _ color: TerminalPaneThemeColor?) {
+        do {
+            _ = try terminal.perform(.setPaneThemeColor(paneID: paneID, color: color))
+            persistWorkspaceState()
+        } catch { presentTerminalGroupError(error.localizedDescription) }
     }
 
     /// Issue #4: the terminal presents as an ordinary editor tab (same

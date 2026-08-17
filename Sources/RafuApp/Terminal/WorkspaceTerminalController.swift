@@ -173,6 +173,23 @@ final class WorkspaceTerminalManager {
             break
         }
         let effect = try groupRuntime.perform(command)
+        switch command {
+        case .setPaneName(let paneID, let name):
+            terminalController(for: paneID)?.userName = name?.rawValue
+        case .setPaneThemeColor(let paneID, let color):
+            terminalController(for: paneID)?.sessionColor = color.map {
+                switch $0 {
+                case .accent: .accent
+                case .info: .info
+                case .success: .success
+                case .warning: .warning
+                case .error: .error
+                case .muted: .muted
+                }
+            }
+        default:
+            break
+        }
         noteTerminalGroupMutation()
         return effect
     }
@@ -215,7 +232,7 @@ final class WorkspaceTerminalManager {
         // a legacy capacity overflow into a grouped live-session overflow.
         let committedLive = ungroupedLiveSessionCount + groupRuntime.liveSessionCount
         let accountedLive = committedLive + reservedLiveSessionCount
-        guard accountedLive <= TerminalGroupSnapshot.maximumPanesPerGroup else {
+        guard accountedLive <= TerminalGroupLimits.maximumLiveSessionsPerWindow else {
             throw TerminalGroupCapacityError.liveSessionLimitExceeded(
                 current: accountedLive, requested: 0)
         }
@@ -758,7 +775,7 @@ final class WorkspaceTerminalManager {
         let legacyLive = ungroupedLiveSessionCount
         let allReserved = reservedLiveSessionCount
         let current = legacyLive + groupRuntime.liveSessionCount + allReserved - reservedToConsume
-        guard current + requested <= TerminalGroupSnapshot.maximumPanesPerGroup else {
+        guard current + requested <= TerminalGroupLimits.maximumLiveSessionsPerWindow else {
             throw TerminalGroupCapacityError.liveSessionLimitExceeded(
                 current: current, requested: requested)
         }
@@ -838,7 +855,7 @@ extension WorkspaceTerminalManager: TerminalGroupCapacityReserving {
         let reserved = reservedLiveSessionCount
         guard
             committed + reserved + requestedLiveSessionCount
-                <= TerminalGroupSnapshot.maximumPanesPerGroup
+                <= TerminalGroupLimits.maximumLiveSessionsPerWindow
         else {
             throw TerminalGroupCapacityError.liveSessionLimitExceeded(
                 current: committed + reserved, requested: requestedLiveSessionCount)
@@ -880,7 +897,7 @@ extension WorkspaceTerminalManager: TerminalGroupCapacityReserving {
         let legacyLive = ungroupedLiveSessionCount
         let reserved = reservedLiveSessionCount
         let current = legacyLive + groupRuntime.liveSessionCount + reserved
-        guard current + requested <= TerminalGroupSnapshot.maximumPanesPerGroup else {
+        guard current + requested <= TerminalGroupLimits.maximumLiveSessionsPerWindow else {
             throw TerminalGroupCapacityError.liveSessionLimitExceeded(
                 current: current, requested: requested)
         }

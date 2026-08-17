@@ -37,6 +37,44 @@ func createdGroupID(_ effect: TerminalGroupEffect) throws -> TerminalGroupID {
     return groupID
 }
 
+@Test("Pane name and color mutations preserve the other metadata")
+func paneMetadataMutationsAreIndependent() throws {
+    var runtime = TerminalGroupRuntime()
+    let groupID = try createdGroupID(runtime.perform(.createGroup(name: nil)))
+    let paneID = try #require(runtime.snapshot(groupID: groupID)?.focusedPaneID)
+    let name = try #require(TerminalPaneName("Build"))
+
+    _ = try runtime.perform(.setPaneName(paneID: paneID, name: name))
+    #expect(runtime.snapshot(groupID: groupID)?.panes.first?.explicitUserName == name)
+    #expect(runtime.snapshot(groupID: groupID)?.panes.first?.themeColor == nil)
+
+    _ = try runtime.perform(.setPaneThemeColor(paneID: paneID, color: .warning))
+    #expect(runtime.snapshot(groupID: groupID)?.panes.first?.explicitUserName == name)
+    #expect(runtime.snapshot(groupID: groupID)?.panes.first?.themeColor == .warning)
+
+    _ = try runtime.perform(.setPaneName(paneID: paneID, name: nil))
+    #expect(runtime.snapshot(groupID: groupID)?.panes.first?.explicitUserName == nil)
+    #expect(runtime.snapshot(groupID: groupID)?.panes.first?.themeColor == .warning)
+
+    _ = try runtime.perform(.setPaneThemeColor(paneID: paneID, color: nil))
+    #expect(runtime.snapshot(groupID: groupID)?.panes.first?.explicitUserName == nil)
+    #expect(runtime.snapshot(groupID: groupID)?.panes.first?.themeColor == nil)
+}
+
+@Test("Unknown pane metadata does not change runtime state")
+func unknownPaneMetadataIsNonMutating() throws {
+    var runtime = TerminalGroupRuntime()
+    let groupID = try createdGroupID(runtime.perform(.createGroup(name: nil)))
+    let before = runtime.snapshot(groupID: groupID)
+    let generation = runtime.generation
+    let missing = TerminalPaneID()
+    #expect(throws: TerminalGroupValidationError.paneNotFound(missing)) {
+        try runtime.perform(.setPaneName(paneID: missing, name: nil))
+    }
+    #expect(runtime.snapshot(groupID: groupID) == before)
+    #expect(runtime.generation == generation)
+}
+
 @Test("Terminal Group splits insert after focus and keep a bounded pure tree")
 func terminalGroupSplitsBuildExpectedTree() throws {
     var runtime = TerminalGroupRuntime()
@@ -277,16 +315,28 @@ func terminalGroupInertSnapshotRejectsNonInertPaneState() throws {
 @Test("Inert snapshot insertion rejects the retained-pane boundary without mutation")
 func terminalGroupInertSnapshotRespectsRetainedCapacity() throws {
     var runtime = TerminalGroupRuntime()
-    for _ in 0..<24 {
-        _ = try runtime.perform(.createGroup(name: nil))
+    for _ in 0..<20 {
+        let groupID = try createdGroupID(runtime.perform(.createGroup(name: nil)))
+        for _ in 0..<9 {
+            _ = try runtime.perform(.splitFocusedPane(groupID: groupID, placement: .right))
+        }
     }
     let before = runtime.snapshots
     let snapshot = try inertSnapshot(groupID: TerminalGroupID(), paneID: TerminalPaneID())
-    #expect(throws: TerminalGroupCapacityError.retainedPaneLimitExceeded(current: 24, requested: 1))
-    {
+    #expect(throws: TerminalGroupCapacityError.groupLimitExceeded(current: 20, requested: 1)) {
         try runtime.insertInertSnapshot(snapshot)
     }
     #expect(runtime.snapshots == before)
+}
+
+@Test("Retained-pane validation accepts 200 and rejects 201")
+func retainedPaneContractBoundaryIsExact() {
+    #expect(throws: Never.self) {
+        try TerminalGroupSnapshot.validateRetainedPaneCount(200)
+    }
+    #expect(throws: TerminalGroupSnapshotError.retainedPaneLimitExceeded(201)) {
+        try TerminalGroupSnapshot.validateRetainedPaneCount(201)
+    }
 }
 
 @Test("Inert snapshot insertion rejects a split identity used by another group")

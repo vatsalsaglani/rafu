@@ -38,8 +38,8 @@ func workspaceSessionRestoresSavedGroupWithoutController() async throws {
 func workspaceSessionRetainsLegacyTerminalCompatibilityClassification() {
     let resource = EditorTabResource.terminal(sessionID: UUID())
     #expect(resource.restorationClassification(terminalGroups: nil) == .notRestorable)
-    #expect(TerminalGroupWorkspaceRestoration.maximumOpenGroups == 24)
-    #expect(TerminalGroupSnapshot.maximumRetainedPanesPerWindow == 24)
+    #expect(TerminalGroupWorkspaceRestoration.maximumOpenGroups == 20)
+    #expect(TerminalGroupSnapshot.maximumRetainedPanesPerWindow == 200)
 }
 
 @Test("Malformed Terminal Group data keeps independent file layout data")

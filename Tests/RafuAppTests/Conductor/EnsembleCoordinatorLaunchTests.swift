@@ -152,12 +152,9 @@ struct EnsembleCoordinatorLaunchTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let session = WorkspaceSession()
         session.openLocalWorkspace(at: root)
-        let spec = TerminalProcessSpec(
-            executableURL: URL(fileURLWithPath: "/bin/echo"), arguments: [],
-            currentDirectoryPath: root.path, environment: ["PATH": "/usr/bin"], roleBadge: "role")
-        for _ in 0..<6 {
-            _ = try session.insertClassifiedTerminalSession(
-                spec: spec, kind: .ensembleRole, lifecycle: {})
+        let shell = TerminalShell(path: "/bin/zsh", name: "Default (zsh)", isDefault: true)
+        for _ in 0..<TerminalGroupLimits.maximumLiveSessionsPerWindow {
+            _ = session.terminal.newSession(startingDirectory: root.path, shell: shell)
         }
         var mintCalls = 0
         let tokenStore = ConductorEnsembleTokenStore(randomBytes: { count in
@@ -169,14 +166,14 @@ struct EnsembleCoordinatorLaunchTests {
             makeCoordinatorID: { "co-capacity" })
 
         await #expect(
-            throws: TerminalGroupCapacityError.liveSessionLimitExceeded(current: 6, requested: 1)
+            throws: TerminalGroupCapacityError.liveSessionLimitExceeded(current: 200, requested: 1)
         ) {
             try await launcher.start(
                 provider: .codex, model: nil, goal: "no capacity",
                 grant: ConductorEnsembleGrant(allowedProviders: [.codex]), in: session)
         }
         #expect(mintCalls == 0)
-        #expect(session.terminal.sessions.count == 6)
+        #expect(session.terminal.sessions.count == 200)
         #expect(session.conductorCoordinatorSessions.isEmpty)
     }
 

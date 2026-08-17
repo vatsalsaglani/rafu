@@ -223,13 +223,16 @@ func openAgentTerminalCreatesAndRevealsSession() throws {
 }
 
 @MainActor
-@Test("Agent Terminal seventh launch reports aggregate capacity without construction")
-func openAgentTerminalSeventhLaunchUsesTerminalGroupCapacityError() throws {
+@Test("Agent Terminal launch at the live boundary reports capacity without construction")
+func openAgentTerminalBoundaryUsesTerminalGroupCapacityError() throws {
     let workspace = WorkspaceSession()
     let root = URL(fileURLWithPath: "/tmp", isDirectory: true)
     let spec = try AgentTerminalLaunchService(workspaceRoot: root).specification(
         option: readyAgentTerminalOption(id: .codex), model: nil, startingDirectory: root)
-    for _ in 0..<6 { workspace.openAgentTerminal(spec: spec) }
+    let shell = TerminalShell(path: "/bin/zsh", name: "Default (zsh)", isDefault: true)
+    for _ in 0..<TerminalGroupLimits.maximumLiveSessionsPerWindow {
+        _ = workspace.terminal.newSession(startingDirectory: "/tmp", shell: shell)
+    }
     var constructions = 0
     workspace.terminal.terminalGroupControllerFactory = { index, instantiation in
         constructions += 1
@@ -239,11 +242,11 @@ func openAgentTerminalSeventhLaunchUsesTerminalGroupCapacityError() throws {
     workspace.openAgentTerminal(spec: spec)
 
     #expect(constructions == 0)
-    #expect(workspace.terminal.sessions.count == 6)
-    #expect(workspace.terminal.terminalGroups.count == 6)
+    #expect(workspace.terminal.sessions.count == 200)
+    #expect(workspace.terminal.terminalGroups.isEmpty)
     #expect(workspace.openFolderErrorTitle == "Terminal Group")
     #expect(
         workspace.openFolderErrorMessage
-            == TerminalGroupCapacityError.liveSessionLimitExceeded(current: 6, requested: 1)
+            == TerminalGroupCapacityError.liveSessionLimitExceeded(current: 200, requested: 1)
             .localizedDescription)
 }

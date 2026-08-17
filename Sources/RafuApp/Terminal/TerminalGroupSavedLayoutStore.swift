@@ -343,7 +343,7 @@ private nonisolated enum TerminalGroupSavedLayoutRawInspector {
         guard let rawPanes = group["panes"] as? [Any] else {
             throw TerminalGroupPersistenceError.invalidTree
         }
-        guard rawPanes.count <= TerminalGroupSnapshot.maximumPanesPerGroup else {
+        guard rawPanes.count <= TerminalGroupLimits.maximumPanesPerGroup else {
             throw TerminalGroupPersistenceError.exceededBounds
         }
         var paneIDs: [String] = []
