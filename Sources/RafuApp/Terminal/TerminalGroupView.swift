@@ -5,6 +5,7 @@ import SwiftUI
 nonisolated enum TerminalGroupViewAction: Equatable, Sendable {
     case focus(TerminalPaneID)
     case setDividerFraction(TerminalGroupSplitID, Double)
+    case rename(TerminalPaneID, String?)
     case close(TerminalPaneID)
     case restart(TerminalPaneID)
     case start(TerminalPaneID)
@@ -57,6 +58,13 @@ nonisolated enum TerminalPanePresentation {
 
     static func folderLabel(for pane: TerminalPaneSnapshot) -> String? {
         pane.launchProfile?.startingFolder.rawValue
+    }
+
+    static func themeColor(
+        for pane: TerminalPaneSnapshot,
+        controllerColor: TerminalPaneThemeColor?
+    ) -> TerminalPaneThemeColor? {
+        controllerColor ?? pane.themeColor
     }
 }
 
@@ -139,6 +147,10 @@ private struct TerminalGroupPaneView: View {
     let action: (TerminalGroupViewAction) -> Void
     let theme: RafuTheme
 
+    @State private var isEditingName = false
+    @State private var nameDraft = ""
+    @FocusState private var nameFieldFocused: Bool
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -153,50 +165,69 @@ private struct TerminalGroupPaneView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(TerminalPanePresentation.name(for: pane))
-                    .font(.callout.weight(.medium))
-                Text(
-                    "\(TerminalPanePresentation.providerIdentity(for: pane.runtimeKind)) · \(statusLabel)"
-                )
-                .font(.caption)
-                .foregroundStyle(theme.palette.textSecondary)
-                if let folderLabel = TerminalPanePresentation.folderLabel(for: pane) {
-                    Text(folderLabel)
-                        .font(.caption2)
-                        .foregroundStyle(theme.palette.textSecondary)
-                        .accessibilityLabel("Folder \(folderLabel)")
-                }
-                if isFocused {
-                    Label("Focused pane", systemImage: "circle.inset.filled")
-                        .font(.caption2.weight(.medium))
-                        .accessibilityLabel("Focused pane")
-                }
+        HStack(spacing: 6) {
+            Rectangle()
+                .fill(paneTint)
+                .frame(width: 3, height: 18)
+                .accessibilityHidden(true)
+            nameControl
+            Text(
+                "\(TerminalPanePresentation.providerIdentity(for: pane.runtimeKind)) · \(statusLabel)"
+            )
+            .font(.caption)
+            .foregroundStyle(theme.palette.textSecondary)
+            .lineLimit(1)
+            .help(metadataHelp)
+            if isFocused {
+                Label("Focused pane", systemImage: "circle.inset.filled")
+                    .font(.caption2.weight(.medium))
+                    .accessibilityLabel("Focused pane")
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: 4)
+            Button {
+                beginNameEdit()
+            } label: {
+                Image(systemName: "pencil")
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+            .help("Rename terminal pane")
+            .accessibilityLabel("Rename \(TerminalPanePresentation.name(for: pane))")
             if pane.status == .exited, pane.runtimeKind == .ordinaryShell {
-                Button("Restart", systemImage: "arrow.clockwise") {
+                Button {
                     action(.restart(pane.id))
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .frame(width: 22, height: 22)
                 }
-                .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+                .buttonStyle(.plain)
+                .help("Restart terminal pane")
                 .accessibilityLabel("Restart \(TerminalPanePresentation.name(for: pane))")
             }
             if pane.status == .stopped, pane.startAvailability == .available {
-                Button("Start Pane", systemImage: "play.fill") {
+                Button {
                     action(.start(pane.id))
+                } label: {
+                    Image(systemName: "play.fill")
+                        .frame(width: 22, height: 22)
                 }
-                .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+                .buttonStyle(.plain)
+                .help("Start terminal pane")
+                .accessibilityLabel("Start \(TerminalPanePresentation.name(for: pane))")
             }
-            Button("Close", systemImage: "xmark") {
+            Button {
                 action(.close(pane.id))
+            } label: {
+                Image(systemName: "xmark")
+                    .frame(width: 22, height: 22)
             }
             .buttonStyle(.plain)
+            .help("Close terminal pane")
             .accessibilityLabel("Close \(TerminalPanePresentation.name(for: pane))")
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(theme.palette.cardBackground)
+        .frame(minHeight: 28)
+        .background(paneTint.opacity(0.14))
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(theme.palette.borderSubtle)
@@ -204,6 +235,67 @@ private struct TerminalGroupPaneView: View {
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
+    }
+
+    @ViewBuilder
+    private var nameControl: some View {
+        if isEditingName {
+            TextField("Terminal Pane", text: $nameDraft)
+                .textFieldStyle(.plain)
+                .font(.callout.weight(.medium))
+                .lineLimit(1)
+                .focused($nameFieldFocused)
+                .onSubmit(commitNameEdit)
+                .onExitCommand(perform: cancelNameEdit)
+                .onAppear { nameFieldFocused = true }
+                .accessibilityLabel("Terminal pane name")
+        } else {
+            Text(TerminalPanePresentation.name(for: pane))
+                .font(.callout.weight(.medium))
+                .lineLimit(1)
+                .help(metadataHelp)
+                .accessibilityAddTraits(.isHeader)
+        }
+    }
+
+    private var paneTint: Color {
+        switch TerminalPanePresentation.themeColor(
+            for: pane, controllerColor: controller?.terminalPaneThemeColor)
+        {
+        case .accent: theme.palette.accent
+        case .info: theme.palette.info
+        case .success: theme.palette.success
+        case .warning: theme.palette.warning
+        case .error: theme.palette.error
+        case .muted, .none: theme.palette.textMuted
+        }
+    }
+
+    private var metadataHelp: String {
+        var values = [statusLabel]
+        if let folder = TerminalPanePresentation.folderLabel(for: pane) {
+            values.append("Folder \(folder)")
+        } else {
+            values.append("No saved starting folder")
+        }
+        if isFocused { values.append("Focused pane") }
+        return values.joined(separator: ", ")
+    }
+
+    private func beginNameEdit() {
+        nameDraft = pane.explicitUserName?.rawValue ?? ""
+        isEditingName = true
+    }
+
+    private func commitNameEdit() {
+        action(.rename(pane.id, nameDraft))
+        isEditingName = false
+        nameFieldFocused = false
+    }
+
+    private func cancelNameEdit() {
+        isEditingName = false
+        nameFieldFocused = false
     }
 
     @ViewBuilder
