@@ -228,8 +228,9 @@ output, environment, token, grant, manifest, launch descriptor, or Ensemble
 capability. An Ensemble pane can restore only as the fixed unavailable
 placeholder defined by ADR 0023.
 
-The per-window six-live-session limit includes ordinary shells, Agent
+The per-window 200-live-session limit includes ordinary shells, Agent
 Terminals, Ensemble coordinator terminals, and Ensemble role terminals.
-This is a shared capacity limit, not a capability grant. The delegated-auth,
+This is a shared capacity limit, not a capability grant. ADR 0024 supersedes
+only the numeric value. The delegated-auth,
 file-handoff, Rafu-created-worktree, and explicit merge-back rules in this ADR
 are unchanged.

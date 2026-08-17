@@ -93,6 +93,17 @@ func terminalGroupIdentityAndVocabularyRoundTrip() throws {
         ) == .right)
 }
 
+@Test("Terminal Group v2 limits stay independent and bounded")
+func terminalGroupV2LimitsAreIndependent() {
+    #expect(TerminalGroupLimits.maximumGroupsPerWindow == 20)
+    #expect(TerminalGroupLimits.maximumPanesPerGroup == 10)
+    #expect(TerminalGroupLimits.maximumRetainedPanesPerWindow == 200)
+    #expect(TerminalGroupLimits.maximumLiveSessionsPerWindow == 200)
+    #expect(TerminalGroupLimits.maximumSavedLayoutsPerWorkspace == 32)
+    // The values may coincide. Independence is expressed by distinct named
+    // contracts and by their separate capacity call sites.
+}
+
 @Test("Terminal Group snapshots normalize fractions and reject invalid pane topology")
 func terminalGroupSnapshotValidatesTreeAndBounds() throws {
     let firstPaneID = TerminalPaneID()
@@ -348,7 +359,7 @@ func terminalGroupCapacityAndCloseTokensAreBounded() throws {
     )
     #expect(reservation.generation == 1)
     #expect(TerminalGroupCapacityReservation(generation: 0, reservedLiveSessionCount: 1) == nil)
-    #expect(TerminalGroupCapacityReservation(generation: 1, reservedLiveSessionCount: 7) == nil)
+    #expect(TerminalGroupCapacityReservation(generation: 1, reservedLiveSessionCount: 11) == nil)
 
     let sessionID = UUID()
     let token = try #require(
@@ -379,6 +390,28 @@ func terminalGroupCapacityAndCloseTokensAreBounded() throws {
     #expect(probe.activeReservationIDs == [cancelledReservation.id])
     try reserver.cancelLiveSessionCapacity(cancelledReservation)
     #expect(probe.activeReservationIDs.isEmpty)
+}
+
+@Test("Pane metadata commands carry only bounded runtime values")
+func terminalGroupPaneMetadataCommandsAreBounded() throws {
+    let paneID = TerminalPaneID()
+    let name = try paneName("Build")
+
+    #expect(
+        TerminalGroupCommand.setPaneName(paneID: paneID, name: name)
+            == .setPaneName(paneID: paneID, name: name))
+    #expect(
+        TerminalGroupCommand.setPaneName(paneID: paneID, name: nil)
+            == .setPaneName(paneID: paneID, name: nil))
+    #expect(
+        TerminalGroupCommand.setPaneThemeColor(paneID: paneID, color: .accent)
+            == .setPaneThemeColor(paneID: paneID, color: .accent))
+    #expect(
+        TerminalGroupCommand.setPaneThemeColor(paneID: paneID, color: nil)
+            == .setPaneThemeColor(paneID: paneID, color: nil))
+    #expect(
+        TerminalGroupEffect.paneMetadataChanged(paneID: paneID)
+            == .paneMetadataChanged(paneID: paneID))
 }
 
 @Test("Named saved layouts re-key every runtime identity when opened")

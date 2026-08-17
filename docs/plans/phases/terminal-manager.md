@@ -21,7 +21,8 @@ group-level `Control-backtick` park/MRU/create route; `Control-Shift-backtick`
 new-group route; contextual `Command-T` and group-only `Shift-Command-T`
 routes; directional pane focus; and pane/group close. Group close must prepare,
 clean up, and finalize every affected child session after it revalidates the
-live-process count. Exited panes count toward the 24-retained-pane limit.
+live-process count. Exited panes count toward the 200-retained-pane limit. ADR
+0024 owns the separate 20-group, 10-pane, and 200-live-session limits.
 
 **Set Pane Starting Folder…** is the narrow exception to this plan’s old
 workspace-root/profile rule. It stores only a user-selected in-workspace future

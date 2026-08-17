@@ -67,8 +67,8 @@ and explicit AI-assisted commit drafting.
     directional focus, rename, Save, Save As, inert zero-process restoration,
     always-new `Control-Shift-backtick`, and group-level `Control-backtick`
     park/MRU/create behavior are available through visible, menu, keyboard, and
-    accessibility paths. The six-pane group, 24-retained-pane window, and
-    six-live-session window limits are separate.
+    accessibility paths. The 10-pane group, 200-retained-pane window, and
+    200-live-session window limits are separate. The window allows 20 groups.
 
 ## Architecture locks
 
