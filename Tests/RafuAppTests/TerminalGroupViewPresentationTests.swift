@@ -99,7 +99,10 @@ struct TerminalGroupViewPresentationTests {
 
         #expect(TerminalPanePresentation.providerIdentity(for: directAgent.runtimeKind) == "Codex")
         #expect(TerminalPanePresentation.folderLabel(for: directAgent) == nil)
-        #expect(source.contains("Label(\"Focused pane\""))
+        #expect(!source.contains("Label(\"Focused pane\""))
+        #expect(source.contains("theme.palette.info"))
+        #expect(source.contains("dash: [2, 4]"))
+        #expect(!source.contains("isFocused ? theme.palette.accent"))
         #expect(source.contains("No saved starting folder"))
         #expect(source.contains("provider.displayName"))
         #expect(!source.contains("startingFolder.rawValue ?? \".\""))
@@ -143,7 +146,8 @@ struct TerminalGroupViewPresentationTests {
     func paneMetadataKeepsAccessibleText() throws {
         let source = try Self.source("Sources/RafuApp/Terminal/TerminalGroupView.swift")
 
-        #expect(source.contains("Focused pane"))
+        #expect(source.contains(".accessibilityValue(isFocused ? \"Focused pane\" : \"Pane\")"))
+        #expect(!source.contains("Label(\"Focused pane\""))
         #expect(source.contains("No saved starting folder"))
         #expect(source.contains(".accessibilityLabel(\"Terminal pane name\")"))
         #expect(source.contains(".onExitCommand(perform: cancelNameEdit)"))

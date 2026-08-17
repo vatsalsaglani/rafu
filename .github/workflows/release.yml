@@ -162,6 +162,13 @@ jobs:
               EDIT_FLAGS+=(--prerelease=false)
             fi
             gh release edit "$TAG" "${EDIT_FLAGS[@]}"
+            # The replacement artifact was built from this release-branch
+            # commit. Keep the existing release tag aligned with that exact
+            # source revision instead of leaving it on the first build.
+            gh api --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" \
+              --field sha="$GITHUB_SHA" \
+              --field force=true >/dev/null
           else
             gh release create "$TAG" "$ASSET" \
               --target "$GITHUB_SHA" \

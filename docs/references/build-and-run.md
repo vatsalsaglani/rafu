@@ -182,10 +182,12 @@ validation.
   `Sources/RafuCore/BuildInformation.swift` before building.
 - `.github/workflows/release.yml`: pushing a `release/v<semver>` branch
   builds, verifies, zips, and publishes a GitHub release named for that
-  version (the `v<semver>` tag is created automatically by the release — no
-  manual tag management). A hyphenated version (e.g. `v0.1.0-beta`) publishes
-  as a pre-release. The workflow refuses to run unless the latest completed
-  CI run on `main` succeeded. Release notes include the
+  version. The first run creates the `v<semver>` tag. A later push to the same
+  release branch replaces the named ZIP, updates the release notes and state,
+  and moves that tag to the successful release build commit. No manual tag or
+  asset management is required. A hyphenated version (e.g. `v0.1.0-beta`)
+  publishes as a pre-release. The workflow refuses to run unless the latest
+  completed CI run on `main` succeeded. Release notes include the
   `xattr -dr com.apple.quarantine` step required for the unsigned build.
 - The generated Info.plist declares `CFBundleDocumentTypes` for
   `public.folder` so `open -a Rafu <folder>` (the CLI's mechanism) routes as

@@ -16,6 +16,14 @@ private func makeCloseWorkspace() throws -> (WorkspaceSession, URL) {
 }
 
 @MainActor
+private func makeCloseWorkspace(preferenceSuiteName: String) throws -> (WorkspaceSession, URL) {
+    let (session, root) = try makeCloseWorkspace()
+    session.terminalPaneClosePreferenceStore = TerminalPaneClosePreferenceStore(
+        suiteName: preferenceSuiteName)
+    return (session, root)
+}
+
+@MainActor
 @Test("A close token becomes stale after a group mutation")
 func terminalGroupCloseRequiresFreshToken() throws {
     let manager = WorkspaceTerminalManager()
@@ -53,6 +61,100 @@ func workspaceSessionLastPaneCloseRequestsGroupConfirmation() throws {
     #expect(session.pendingTerminalGroupClose?.target == .group(groupID))
     #expect(session.pendingTerminalGroupClose?.liveProcessCount == 1)
     session.cancelTerminalGroupClose()
+}
+
+@MainActor
+@Test("Command-W confirms and closes only the focused live pane in a split group")
+func commandWClosesFocusedLivePaneOnly() throws {
+    let (session, root) = try makeCloseWorkspace()
+    defer { try? FileManager.default.removeItem(at: root) }
+    session.newTerminalGroup()
+    let groupID = try #require(session.selectedTerminalGroupID)
+    session.splitFocusedTerminalPane(.right)
+    let focusedPaneID = try #require(session.focusedTerminalPaneID)
+    session.renameTerminalPane(focusedPaneID, to: "Build")
+    session.terminal.terminalController(for: focusedPaneID)?.markRunningForTesting()
+
+    session.requestCloseActiveTab()
+
+    #expect(session.pendingTerminalGroupClose?.target == .pane(focusedPaneID))
+    #expect(session.pendingTerminalGroupClose?.liveProcessCount == 1)
+    #expect(session.terminal.terminalGroup(groupID)?.panes.count == 2)
+    #expect(session.terminalGroupCloseConfirmationTitle == "Close Terminal Pane?")
+    #expect(session.terminalGroupCloseConfirmationActionTitle == "Close Terminal Pane")
+    #expect(
+        session.terminalGroupCloseConfirmationMessage
+            == "This will stop the running process in Build.")
+
+    session.confirmTerminalGroupClose()
+
+    #expect(session.pendingTerminalGroupClose == nil)
+    #expect(session.terminal.terminalGroup(groupID)?.panes.count == 1)
+    #expect(session.editorLayout.tab(matching: .terminalGroup(groupID: groupID)) != nil)
+}
+
+@MainActor
+@Test("Command-W uses group close when the focused pane is the last pane")
+func commandWClosesSinglePaneGroup() throws {
+    let (session, root) = try makeCloseWorkspace()
+    defer { try? FileManager.default.removeItem(at: root) }
+    session.newTerminalGroup()
+    let groupID = try #require(session.selectedTerminalGroupID)
+    let paneID = try #require(session.focusedTerminalPaneID)
+    session.terminal.terminalController(for: paneID)?.markRunningForTesting()
+
+    session.requestCloseActiveTab()
+
+    #expect(session.pendingTerminalGroupClose?.target == .group(groupID))
+    #expect(session.terminalGroupCloseConfirmationTitle == "Close Terminal Group?")
+    #expect(session.terminalGroupCloseConfirmationActionTitle == "Close Terminal Group")
+    #expect(session.terminal.terminalGroup(groupID)?.panes.count == 1)
+    session.cancelTerminalGroupClose()
+}
+
+@MainActor
+@Test("Do not ask again skips later pane warnings but not group warnings")
+func runningPaneCloseWarningCanBeSuppressed() throws {
+    let suiteName = "RafuTerminalPaneClosePreferenceTests.\(UUID().uuidString)"
+    defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
+
+    let (firstSession, firstRoot) = try makeCloseWorkspace(preferenceSuiteName: suiteName)
+    defer { try? FileManager.default.removeItem(at: firstRoot) }
+    firstSession.newTerminalGroup()
+    firstSession.splitFocusedTerminalPane(.right)
+    let firstPaneID = try #require(firstSession.focusedTerminalPaneID)
+    firstSession.terminal.terminalController(for: firstPaneID)?.markRunningForTesting()
+
+    firstSession.requestCloseActiveTab()
+
+    #expect(firstSession.pendingTerminalGroupClose?.target == .pane(firstPaneID))
+    #expect(firstSession.canSuppressPendingTerminalPaneCloseConfirmation)
+    firstSession.confirmTerminalPaneCloseAndSuppressFutureWarnings()
+    #expect(firstSession.pendingTerminalGroupClose == nil)
+    #expect(
+        UserDefaults(suiteName: suiteName)?.bool(
+            forKey: TerminalPaneClosePreferenceStore.defaultsKey) == true)
+
+    let (secondSession, secondRoot) = try makeCloseWorkspace(preferenceSuiteName: suiteName)
+    defer { try? FileManager.default.removeItem(at: secondRoot) }
+    secondSession.newTerminalGroup()
+    let secondGroupID = try #require(secondSession.selectedTerminalGroupID)
+    secondSession.splitFocusedTerminalPane(.right)
+    let secondPaneID = try #require(secondSession.focusedTerminalPaneID)
+    secondSession.terminal.terminalController(for: secondPaneID)?.markRunningForTesting()
+
+    secondSession.requestCloseActiveTab()
+
+    #expect(secondSession.pendingTerminalGroupClose == nil)
+    #expect(secondSession.terminal.terminalGroup(secondGroupID)?.panes.count == 1)
+
+    let lastPaneID = try #require(secondSession.focusedTerminalPaneID)
+    secondSession.terminal.terminalController(for: lastPaneID)?.markRunningForTesting()
+    secondSession.requestCloseActiveTab()
+
+    #expect(secondSession.pendingTerminalGroupClose?.target == .group(secondGroupID))
+    #expect(!secondSession.canSuppressPendingTerminalPaneCloseConfirmation)
+    secondSession.cancelTerminalGroupClose()
 }
 
 @MainActor

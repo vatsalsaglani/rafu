@@ -77,10 +77,15 @@ a vertical pane stack.
    to the validated saved-layout name.
 8. `Control-backtick` hides or reveals the complete group. Hiding keeps all
    live sessions alive.
-9. `Command-W` closes the complete group tab. If it has live processes, Rafu
-   shows one confirmation with the live-process count.
+9. `Command-W` closes the focused pane when the group has more than one pane.
+   If that pane has a live process, Rafu shows one pane-specific confirmation.
+   With one pane, `Command-W` closes the complete group and uses the existing
+   group-level live-process confirmation. The pane warning offers **Close and
+   Don’t Ask Again**. That saved app preference skips later running-pane
+   warnings only and never skips group-close confirmation.
 10. A pane close action ends only that pane's session and collapses the
-    redundant split. Closing the last pane closes the group.
+    redundant split. A live pane requires confirmation for that pane. Closing
+    the last pane closes the group.
 11. A naturally exited session stays as an exited pane with Restart and Close
     actions.
 12. `Control-Tab` lists one Terminal Group once. Pane movement stays with the
@@ -239,8 +244,9 @@ persisted free-form text.
 - Existing direct manager entry points remain as temporary adapters until all
   callers move to the aggregate API. TG-90 removes only adapters that have no
   callers.
-- Existing file tabs, editor group drag and drop, `Command-W`, file Save, and
-  document restoration keep their behavior.
+- Existing file tabs, editor group drag and drop, file Save, and document
+  restoration keep their behavior. `Command-W` changes only inside a selected
+  multi-pane Terminal Group as defined in the interaction contract.
 - Deleting a named saved layout does not close an open group. Every open group
   in every window for that workspace that refers to it becomes unsaved and
   will not restore unless the user saves it again.

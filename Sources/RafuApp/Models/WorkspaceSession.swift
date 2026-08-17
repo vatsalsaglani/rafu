@@ -732,6 +732,11 @@ final class WorkspaceSession {
     private let shellCatalog = TerminalShellCatalog()
     @ObservationIgnored
     private let preferredShellStore = PreferredShellStore()
+    /// App-scoped preference for one-pane close warnings. Tests replace this
+    /// value with an isolated defaults suite. Complete group close remains a
+    /// separate confirmation authority.
+    @ObservationIgnored
+    var terminalPaneClosePreferenceStore = TerminalPaneClosePreferenceStore()
     /// `TerminalShellCatalog.shells()` reads `/etc/shells` and probes the
     /// filesystem — compute it once per session lifetime and never call
     /// `shellCatalog.shells()` directly from a `View.body`/`Commands` body.
@@ -955,6 +960,45 @@ final class WorkspaceSession {
         pendingTerminalGroupClose != nil || pendingTerminalGroupSaveRequest != nil
             || pendingTerminalGroupRenameRequest != nil
             || pendingTerminalPaneStartingFolderRequest != nil
+    }
+
+    var terminalGroupCloseConfirmationTitle: String {
+        switch pendingTerminalGroupClose?.target {
+        case .pane: "Close Terminal Pane?"
+        case .group, .none: "Close Terminal Group?"
+        }
+    }
+
+    var terminalGroupCloseConfirmationActionTitle: String {
+        switch pendingTerminalGroupClose?.target {
+        case .pane: "Close Terminal Pane"
+        case .group, .none: "Close Terminal Group"
+        }
+    }
+
+    var terminalGroupCloseConfirmationMessage: String {
+        guard let pendingTerminalGroupClose else {
+            return "This will stop the running terminal process."
+        }
+        switch pendingTerminalGroupClose.target {
+        case .pane(let paneID):
+            let name =
+                terminal.terminalGroup(containing: paneID)
+                .flatMap { terminal.terminalGroup($0) }
+                .flatMap { group in group.panes.first { $0.id == paneID } }
+                .map(TerminalPanePresentation.name(for:)) ?? "Terminal Pane"
+            return "This will stop the running process in \(name)."
+        case .group:
+            let count = pendingTerminalGroupClose.liveProcessCount
+            return count == 1
+                ? "This will stop 1 running terminal process."
+                : "This will stop \(count) running terminal processes."
+        }
+    }
+
+    var canSuppressPendingTerminalPaneCloseConfirmation: Bool {
+        guard case .pane = pendingTerminalGroupClose?.target else { return false }
+        return true
     }
 
     func terminalGroupPresentationAvailability(
@@ -1648,13 +1692,16 @@ final class WorkspaceSession {
         guard let groupID = terminal.terminalGroup(containing: paneID),
             let snapshot = terminal.terminalGroup(groupID)
         else { return }
-        // The last pane closes the complete outer resource. This preserves
-        // one group-level live-process confirmation rather than silently
-        // treating a terminal tab close as a pane-only operation.
+        // The last pane closes the complete outer resource. A non-last live
+        // pane owns a pane-specific confirmation before its process stops.
         if snapshot.panes.count == 1 {
             requestTerminalGroupClose(.group(groupID), requiresConfirmation: true)
         } else {
-            requestTerminalGroupClose(.pane(paneID), requiresConfirmation: false)
+            requestTerminalGroupClose(
+                .pane(paneID),
+                requiresConfirmation:
+                    !terminalPaneClosePreferenceStore.skipsRunningPaneConfirmation
+            )
         }
     }
 
@@ -1665,7 +1712,7 @@ final class WorkspaceSession {
 
     func cancelTerminalGroupClose() { pendingTerminalGroupClose = nil }
 
-    func confirmTerminalGroupClose() {
+    func confirmTerminalGroupClose(suppressFuturePaneWarnings: Bool = false) {
         guard let pending = pendingTerminalGroupClose else { return }
         do {
             let affectedGroupID: TerminalGroupID? =
@@ -1693,12 +1740,20 @@ final class WorkspaceSession {
                 removeTerminalGroupTab(affectedGroupID)
             }
             synchronizeSelectionFromLayout()
+            if suppressFuturePaneWarnings, case .pane = fresh.target {
+                terminalPaneClosePreferenceStore.suppressFutureConfirmations()
+            }
             pendingTerminalGroupClose = nil
             persistWorkspaceState()
         } catch {
             pendingTerminalGroupClose = nil
             presentTerminalGroupError(error.localizedDescription)
         }
+    }
+
+    func confirmTerminalPaneCloseAndSuppressFutureWarnings() {
+        guard case .pane = pendingTerminalGroupClose?.target else { return }
+        confirmTerminalGroupClose(suppressFuturePaneWarnings: true)
     }
 
     private func requestTerminalGroupClose(
@@ -3583,8 +3638,10 @@ final class WorkspaceSession {
     /// Cmd+W's first-priority target: the selected tab in the FOCUSED
     /// editor group, if any. Mirrors the tab strip's own close semantics per
     /// resource kind — a file tab keeps the dirty-save confirmation
-    /// (`requestClose`), a terminal tab terminates its shell via
-    /// `closeTerminalTab` rather than parking it (ADR 0014 — a generic
+    /// (`requestClose`), a Terminal Group closes its focused pane while it
+    /// has siblings and otherwise closes the group, and a terminal tab
+    /// terminates its shell via `closeTerminalTab` rather than parking it
+    /// (ADR 0014 — a generic
     /// close defaults to close, never `hideTerminalTab`), and a
     /// `.restorable` placeholder tab closes outright since it backs no
     /// live process or dirty document (`EditorTabResource.isRestorable`).
@@ -3604,7 +3661,13 @@ final class WorkspaceSession {
         case .terminal:
             closeTerminalTab(tab.id)
         case .terminalGroup(let terminalGroupID):
-            requestTerminalGroupClose(terminalGroupID)
+            if let group = terminal.terminalGroup(terminalGroupID) {
+                if group.panes.count == 1 {
+                    requestTerminalGroupClose(terminalGroupID)
+                } else {
+                    closeTerminalPane(group.focusedPaneID)
+                }
+            }
         case .restorable:
             _ = editorLayout.closeTab(tab.id)
             synchronizeSelectionFromLayout()
@@ -3638,8 +3701,8 @@ final class WorkspaceSession {
     }
 
     /// Cmd+W. Resolves in order: the focused group's selected tab (file,
-    /// terminal, or restorable placeholder); else an editor-hosted Git
-    /// diff; else — a truly empty window — closes only THIS window when
+    /// Terminal Group, terminal, or restorable placeholder); else an
+    /// editor-hosted Git diff; else — a truly empty window — closes only THIS window when
     /// other workspace windows remain open, and otherwise preserves the
     /// existing last-window quit-confirmation UX. Closing only this
     /// window (rather than `NSApp.terminate`) is required because an empty
