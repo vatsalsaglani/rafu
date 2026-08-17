@@ -2,7 +2,21 @@
 
 ## Status
 
-Planned.
+Implemented on lane; awaiting authorized merge.
+
+## Implementation record
+
+- Commit: `b3bfe1c10e9476615cf026cd79d7c7d6cc9acfc8`
+- Files: `Sources/RafuApp/Views/WorkspaceTerminalsPanelView.swift`,
+  `Tests/RafuAppTests/TerminalManagerPresentationTests.swift`
+- Validation: format fix, format lint, build, 2,145 parallel tests in 117
+  suites, and `git diff --check` passed.
+- Accessibility: group and pane menus use icon-only ellipsis controls with
+  22-by-22 hit areas, hidden indicators, help text, and explicit labels.
+- Security: pane actions use bounded `TerminalPaneID` metadata routes. No
+  process, command, credential, or environment data is added.
+- Deviations: none. Existing fixture and compiler warnings remain documented
+  by the test and build output.
 
 ## Branch and worker
 
@@ -67,4 +81,3 @@ Run format fix, format lint, build, `./script/test.sh` in parallel mode, and
 > Run the ordered parallel gates, commit, and delete this worktree's `.build`
 > last. Do not merge, rebase, or push. Report branch, commit SHA, files, tests,
 > accessibility review, risks, and Deviations.
-

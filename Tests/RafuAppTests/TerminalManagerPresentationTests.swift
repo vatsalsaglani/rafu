@@ -207,6 +207,24 @@ struct TerminalManagerSourceContractTests {
         #expect(panel.contains("ProgressView()"))
     }
 
+    @Test("Terminal group and pane menus are compact, accessible, and pane scoped")
+    func terminalGroupMenusUsePaneIdentity() throws {
+        let panel = try Self.source("Sources/RafuApp/Views/WorkspaceTerminalsPanelView.swift")
+
+        #expect(!panel.contains(#"Menu("Terminal Group actions"#))
+        #expect(!panel.contains(#"Menu("Pane actions"#))
+        #expect(panel.contains(".menuIndicator(.hidden)"))
+        #expect(panel.contains(".fixedSize()"))
+        #expect(panel.contains(#"Image(systemName: "ellipsis")"#))
+        #expect(panel.contains(#".help("Actions for \(row.name)")"#))
+        #expect(panel.contains(#".accessibilityLabel("Actions for \(row.name)")"#))
+        #expect(panel.contains("renamingPaneID == pane.id"))
+        #expect(panel.contains("beginPaneRename(pane.id, pane.name)"))
+        #expect(panel.contains("session.renameTerminalPane(paneID, to: paneRenameText)"))
+        #expect(panel.contains("session.setTerminalPaneColor(pane.id, color)"))
+        #expect(panel.contains("TerminalPaneThemeColor.presets"))
+    }
+
     @Test("Current derives from focus, not selectedID, and drives the shared manager-row resolver")
     func currentRowUsesSharedPresentationContract() throws {
         let panel = try Self.source("Sources/RafuApp/Views/WorkspaceTerminalsPanelView.swift")
