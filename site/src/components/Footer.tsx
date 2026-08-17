@@ -16,15 +16,15 @@ export function Footer() {
         </div>
 
         <nav className="flex items-center gap-6 text-sm text-text-2" aria-label="Footer">
-          <a href="/#craft" className="transition-colors duration-150 hover:text-text">
+          <Link to="/#craft" className="transition-colors duration-150 hover:text-text">
             Craft
-          </a>
-          <a href="/#features" className="transition-colors duration-150 hover:text-text">
+          </Link>
+          <Link to="/#features" className="transition-colors duration-150 hover:text-text">
             Features
-          </a>
-          <a href="/#themes" className="transition-colors duration-150 hover:text-text">
+          </Link>
+          <Link to="/#themes" className="transition-colors duration-150 hover:text-text">
             Themes
-          </a>
+          </Link>
           <Link to="/docs" className="transition-colors duration-150 hover:text-text">
             Docs
           </Link>

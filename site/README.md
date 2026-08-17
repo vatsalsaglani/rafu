@@ -45,6 +45,13 @@ Static files (`dist/`) — any static host works. SPA fallback (`/* → /index.h
 required for client routes. `public/og.png` is generated from
 `src/brand/og-master.svg` (square master, center-crop to 1200×630).
 
+GitHub Pages serves this repository below `/rafu/`. Use React Router `Link` for
+internal routes and landing-page section links so `BrowserRouter` applies its
+configured base. Root-relative links in Markdown are rebased by
+`plugins/vite-rafu-docs.ts` during the build. Do not add a plain internal anchor
+such as `<a href="/#features">`; it resolves against the domain root and leaves
+the `/rafu/` site.
+
 ## Honest placeholders (pre-launch)
 
 - `Download for macOS` is an inert *soon* pill (`src/components/DownloadSoon.tsx`)

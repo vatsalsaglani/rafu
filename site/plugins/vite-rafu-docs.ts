@@ -98,9 +98,15 @@ interface TocEntry {
 }
 
 export function rafuDocs(): Plugin {
+  let publicBase = "/";
+
   return {
     name: "rafu-docs",
     enforce: "pre",
+
+    configResolved(config) {
+      publicBase = config.base;
+    },
 
     resolveId(source, importer) {
       if (!source.endsWith(HIGHLIGHT_QUERY)) return null;
@@ -151,8 +157,11 @@ export function rafuDocs(): Plugin {
               tokens as unknown[],
             );
             const external = /^https?:\/\//.test(href);
+            const renderedHref = href.startsWith("/") && !href.startsWith("//")
+              ? `${publicBase.replace(/\/$/, "")}${href}`
+              : href;
             const attrs = external ? ' target="_blank" rel="noopener noreferrer"' : "";
-            return `<a href="${escapeAttr(href)}"${attrs}>${text}</a>`;
+            return `<a href="${escapeAttr(renderedHref)}"${attrs}>${text}</a>`;
           },
         },
       });

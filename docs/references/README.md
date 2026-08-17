@@ -12,6 +12,7 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 |---|---|
 | [`project-structure.md`](project-structure.md) | Adding targets, folders, resources, worktrees, or shared contracts |
 | [`build-and-run.md`](build-and-run.md) | Building, launching, debugging, verifying, or staging the app/CLI |
+| [`github-pages-subpath-links.md`](github-pages-subpath-links.md) | Adding or reviewing internal links in the landing and documentation site deployed below `/rafu/` |
 | [`swiftui-appkit-boundary.md`](swiftui-appkit-boundary.md) | Changing scenes, per-window state, the editor bridge, commands, or native controls |
 | [`nssplitview-divider-position-quantization.md`](nssplitview-divider-position-quantization.md) | Testing `NSSplitView` divider callbacks across local and hosted macOS environments without assuming an exact requested fraction |
 | [`swiftui-file-importer-single-owner.md`](swiftui-file-importer-single-owner.md) | Adding a second file or directory picker to one SwiftUI window, or debugging an enabled picker action that changes state but presents no panel |

@@ -34,13 +34,13 @@ export function Nav() {
 
           <div className="hidden items-center gap-1 md:flex">
             {NAV_SECTIONS.map((item) => (
-              <a
+              <Link
                 key={item.label}
-                href={item.href}
+                to={item.href}
                 className="rounded-md px-3 py-1.5 text-sm text-text-2 transition-colors duration-150 hover:text-text"
               >
                 {item.label}
-              </a>
+              </Link>
             ))}
             <Link
               to="/docs"
@@ -88,14 +88,14 @@ export function Nav() {
             className="mx-4 mt-2 rounded-xl border border-border bg-elevated p-2 shadow-lg md:hidden"
           >
             {NAV_SECTIONS.map((item) => (
-              <a
+              <Link
                 key={item.label}
-                href={item.href}
+                to={item.href}
                 onClick={() => setOpen(false)}
                 className="block rounded-lg px-3 py-2.5 text-sm text-text-2 hover:bg-hover hover:text-text"
               >
                 {item.label}
-              </a>
+              </Link>
             ))}
             <Link
               to="/docs"
