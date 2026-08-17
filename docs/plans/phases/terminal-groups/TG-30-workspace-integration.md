@@ -258,8 +258,11 @@ companion, and reply routing continue to identify the session UUID.
   group close and do not bypass it with a direct `shutdownAll()` call.
 
 Preserve the current generic editor close resolution: focused tab first, then
-diff, then window. `Command-W` still closes one selected outer tab, not one
-internal pane.
+diff, then window. After the 2026-08-17 interaction amendment, `Command-W`
+closes the focused pane inside a selected multi-pane Terminal Group. The last
+pane still closes the outer tab through the group-close route. The live-pane
+warning offers **Close and Don’t Ask Again**. Store only one app-scoped Boolean
+and use it only to skip later pane warnings. Never apply it to group close.
 
 ### W6. Capacity and error presentation seam
 

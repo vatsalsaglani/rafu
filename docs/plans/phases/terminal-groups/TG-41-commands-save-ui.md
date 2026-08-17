@@ -156,8 +156,11 @@ Add menu and palette actions for:
 - Close Terminal Group.
 
 Enable each action from frozen workspace state. Close Group routes through
-confirmation. Close Pane is not `Command-W`; `Command-W` keeps closing the
-outer selected tab through the existing command.
+confirmation. After the 2026-08-17 interaction amendment, `Command-W` uses
+Close Pane in a selected multi-pane group. A running pane gets a pane-specific
+confirmation with **Close and Don’t Ask Again**. This app-scoped choice skips
+later running-pane warnings only. The last pane uses Close Group and always
+keeps its group-level warning.
 
 ### K4. Pane starting folder
 
@@ -448,8 +451,8 @@ picker without sending input or reading live CWD. Route document and group Save
 correctly. Save As uses one per-window native sheet and never reads the store
 directly. A successful Save As renames only its target group. Menus and palette
 use the same action and validation. Block all group shortcuts behind a save
-sheet, folder picker, or close confirmation. Preserve Command-W and every
-current shortcut outside the exact Terminal Group context.
+sheet, folder picker, or close confirmation. Preserve Command-W outside the
+exact Terminal Group context and preserve every other current shortcut.
 
 Add all focused tests and run the named read-only regressions. Use one SwiftPM
 invocation at a time. Isolate failures and never edit an unowned failure.

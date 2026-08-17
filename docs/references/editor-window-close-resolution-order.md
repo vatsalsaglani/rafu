@@ -1,7 +1,7 @@
 # Cmd+W window close resolution order and per-window targeting
 
 - **Applies to:** `WorkspaceSession.requestCloseActiveTab()`, per-window Cmd+W routing, empty-window quit confirmation, `WorkspaceWindowRegistry` tracking
-- **Last verified:** Swift 6.2, macOS 26, 2026-07-24
+- **Last verified:** Swift 6.2, macOS 26, 2026-08-17
 
 ## Rule or observed behavior
 
@@ -10,6 +10,11 @@ Cmd+W close resolution follows a prioritized order that routes first through the
 1. **Focused editor group's selected tab:**
    - File tab: routes to `EditorDocument.requestClose()`, preserving the existing dirty-save-confirmation UX
    - Terminal tab: routes to `requestCloseTerminalTab()`, terminating the shell per ADR 0014 (terminal sessions never park when explicitly closed from the tab ✕ or Cmd+W)
+   - Terminal Group: closes the focused pane when siblings remain. A live
+     process gets a pane-specific confirmation. The last pane uses the
+     complete group-close path and its group-level confirmation. **Close and
+     Don’t Ask Again** stores one app-scoped Boolean that skips later running
+     pane warnings. It does not skip complete group-close confirmation.
    - Restorable tab (`.restorable`, only for `.file` resource type): routes to the generic `editorLayout.closeTab()` path
 
 2. **Open Git diff (editor-hosted):** if present and the group has no tabs, closes the diff view
@@ -26,7 +31,7 @@ Cmd+W close resolution follows a prioritized order that routes first through the
 
 ## Why it matters
 
-Cmd+W is the universal close-focused-thing shortcut on macOS; its behavior must be consistent, predictable, and distinct from Cmd+Q. Users expect Cmd+W to close ONE window or tab, not the entire application. The resolution order ensures that closing behavior cascades sensibly (most specific to least specific) and that terminal processes are explicitly terminated only when the user intends to close that tab (not when the entire window is closing).
+Cmd+W is the universal close-focused-thing shortcut on macOS; its behavior must be consistent, predictable, and distinct from Cmd+Q. Users expect Cmd+W to close one focused item, not the entire application. Inside a Terminal Group, the focused pane is that item while siblings remain. The resolution order ensures that closing behavior cascades sensibly from pane to tab to window. A running pane stops after confirmation unless the user explicitly saved the pane-only suppression preference. A complete group still requires its own warning.
 
 ## Testing gotcha: AppKit window-close crashes
 
@@ -42,7 +47,7 @@ Cmd+W is the universal close-focused-thing shortcut on macOS; its behavior must 
 
 - Unit tests for the decision logic: `resolveEmptyWindowCloseAction(hasOtherWorkspaceWindows:quitWithoutEmptyWindowConfirmation:)` tested in isolation with various input combinations
 - Window-registry count tests: verify that `liveWorkspaceWindowCount()` returns the correct tally after windows are added and removed (without calling `performClose`)
-- Integration tests for each tab-type's close behavior (file, terminal, restorable) against a dummy session
+- Integration tests for each tab type and Terminal Group pane/group close route against a dummy session
 
 ## Verification
 
@@ -55,13 +60,20 @@ swift test
 ./script/build_and_run.sh --verify
 ```
 
-`swift test`: 1294 tests passing, 0 build warnings. `./script/format.sh --lint`: clean. `./script/build_and_run.sh --verify`: app launches successfully. Manual GUI verification of the multi-window Cmd+W behavior (close one window, last-window quit confirmation) pending user acceptance pass.
+`./script/test.sh`: 2,151 tests passed in parallel mode. `./script/test.sh
+--no-parallel`: 2,151 tests passed in sequential CI mode. Format lint and build
+passed. `./script/build_and_run.sh --verify` launched Rafu Lightning. A live
+two-pane check showed the info-color dotted focus border inside the solid group
+outline and showed **Close and Don’t Ask Again** only on the pane warning.
 
 ## Related code, ADRs, and phases
 
 - `Sources/RafuApp/Models/WorkspaceSession.swift` — `requestCloseActiveTab()`, `closeFocusedTabIfPresent()`, `EmptyWindowCloseAction`, `resolveEmptyWindowCloseAction(…)`
 - `Sources/RafuApp/Support/WorkspaceWindowRegistry.swift` — `liveWorkspaceWindowCount()`, `closeWindow(for:)`, per-window tracking
 - `Tests/RafuAppTests/WorkspaceCloseActionTests.swift` — focused tests for decision logic and registry counts
+- `Tests/RafuAppTests/TerminalGroupCloseIntegrationTests.swift` — focused-pane and last-pane Command-W behavior
+- `Sources/RafuApp/Terminal/TerminalPaneClosePreferenceStore.swift` — the
+  app-scoped, nonsecret pane-warning preference
 - [ADR 0004](0004-embedded-terminal.md) — terminal lifecycle (sessions never auto-park on close)
 - [ADR 0014](0014-terminal-as-editor-tab.md) — terminal sessions as editor tabs, explicit hide vs. close semantics
 - [`swiftui-appkit-boundary.md`](swiftui-appkit-boundary.md) — window and responder management

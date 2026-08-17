@@ -40,6 +40,12 @@ Ensemble trust boundary.
 - `Control-backtick` parks the selected group. Otherwise it reveals the most
   recently parked group. When no group is parked, it creates a new one-pane
   group. `Control-Tab` lists one group once, not once per pane.
+- `Command-W` closes the focused pane when the selected group has more than
+  one pane. A live process requires confirmation for that pane only. When the
+  focused pane is the last pane, `Command-W` uses the complete group-close
+  path and its group-level confirmation. The pane warning offers **Close and
+  Don’t Ask Again**. That explicit app-scoped preference skips later running
+  pane warnings only; it never skips a complete group-close warning.
 - **Set Pane Starting Folder…** selects an in-workspace folder only for a
   future user-requested start. It never sends `cd` to a running shell. A split
   inherits a restartable focused pane’s stored folder; otherwise it uses the
@@ -131,6 +137,10 @@ leaves unavailable Agent Terminal and Ensemble placeholders unchanged.
   Closing a pane ends only that pane’s session. Closing a group counts its live
   processes, confirms once when needed, then prepares, cleans up, and finalizes
   every affected child session. A stale confirmation does nothing.
+- Focus is visible through an info-color dotted pane border. It must not use
+  the solid accent outline that marks the complete Terminal Group tab. Do not
+  add a visible `Focused pane` label to the compact header. VoiceOver and
+  pointer help still expose the focus state.
 - Naturally exited sessions remain exited panes with Restart and Close actions.
   Exited panes count toward the 24-retained-pane limit. Workspace switch,
   window close, and app quit end all live sessions owned by that window. One

@@ -210,20 +210,21 @@ private struct WorkspaceWindowPresentations: ViewModifier {
                 Text(session.openFolderErrorMessage)
             }
             .confirmationDialog(
-                "Close Terminal Group?", isPresented: terminalGroupCloseBinding,
+                session.terminalGroupCloseConfirmationTitle,
+                isPresented: terminalGroupCloseBinding,
                 titleVisibility: .visible
             ) {
-                Button("Close Terminal Group", role: .destructive) {
+                Button(session.terminalGroupCloseConfirmationActionTitle, role: .destructive) {
                     session.confirmTerminalGroupClose()
+                }
+                if session.canSuppressPendingTerminalPaneCloseConfirmation {
+                    Button("Close and Don’t Ask Again", role: .destructive) {
+                        session.confirmTerminalPaneCloseAndSuppressFutureWarnings()
+                    }
                 }
                 Button("Cancel", role: .cancel) { session.cancelTerminalGroupClose() }
             } message: {
-                let count = session.pendingTerminalGroupClose?.liveProcessCount ?? 0
-                Text(
-                    count == 1
-                        ? "This will stop 1 running terminal process."
-                        : "This will stop \(count) running terminal processes."
-                )
+                Text(session.terminalGroupCloseConfirmationMessage)
             }
             .sheet(item: terminalGroupSaveRequestBinding) { request in
                 TerminalGroupSaveSheet(session: session, request: request)

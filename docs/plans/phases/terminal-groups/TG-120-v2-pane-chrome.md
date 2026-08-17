@@ -46,13 +46,18 @@ the text Close control with an icon-only control.
    the multi-line header expansion.
 2. Show the explicit pane name, then the reported title, then `Terminal Pane`.
    Keep status, starting folder, and focus information available to VoiceOver
-   and pointer help without making the row tall.
+   and pointer help without making the row tall. Show focus with an info-color
+   dotted pane border that differs from the solid Terminal Group outline, not
+   a visible `Focused pane` label.
 3. Provide an inline pane-name edit route that calls the pane-ID workspace API.
    Use private focus state, select/focus the field when editing starts, commit
    on Return, and cancel on Escape. Empty input clears the explicit name.
 4. Render Close as `xmark` only. Use a real `Button`, at least a 22-by-22 hit
    target, help text, and `Close <pane name>` accessibility label. Preserve the
-   existing typed close route and last-pane group confirmation.
+   existing typed close route. A running non-last pane gets its own close
+   confirmation with **Close and Don’t Ask Again**. That app-scoped choice
+   skips later running-pane warnings only. The last pane uses group-close
+   confirmation, which the preference never skips.
 5. Keep Start and Restart compact and accessible. Do not hide a core action.
 6. Tint the title row from the live/snapshot pane color. Use a low-opacity fill
    plus a solid marker or border so normal text remains readable. Color is not

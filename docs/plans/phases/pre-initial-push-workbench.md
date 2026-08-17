@@ -40,8 +40,12 @@ and explicit AI-assisted commit drafting.
 12. Active editor items select and reveal the matching file in the Files tree.
 13. Tabs can be dragged left/right/above/below into any number of recursive editor
     groups; keyboard/menu commands provide the same operations.
-14. `Command-W` closes the focused tab first; with no tabs it asks Quit/Cancel and
-    offers a persisted “Don't ask again,” while preserving normal Close Window.
+14. `Command-W` closes the focused tab first. In a multi-pane Terminal Group it
+    closes only the focused pane, with a pane-specific live-process confirmation.
+    **Close and Don’t Ask Again** suppresses later running-pane warnings, but
+    never the warning for a complete Terminal Group.
+    With no tabs it asks Quit/Cancel and offers a persisted “Don't ask again,”
+    while preserving normal Close Window.
 15. Syntax highlighting uses a replaceable maintained backend with broad common
     language/framework coverage, open-buffer-only parsing, and measured memory.
 16. Folder context/hover actions create files and folders; menu/command paths exist.
@@ -301,7 +305,7 @@ Five parallel implementor workstreams landed verified on `main`, building toward
 
 1. **Editor line-manipulation shortcuts** (Option+↑/↓ move, Shift+Option+↓ duplicate, ⌘⇧K delete): dispatched from `RafuTextView.keyDown(with:)` NOT as global menu equivalents (which would hijack paragraph-navigation in every text field app-wide); single undo step per operation; CRLF round-trips correctly; multi-caret non-goal this pass (identified for follow-up). New reference: [`line-manipulation-shortcuts.md`](../../references/line-manipulation-shortcuts.md).
 
-2. **Cmd+W window close resolution order:** focused tab (file, terminal, or restorable) → open Git diff → empty window (close this one if others exist, else quit confirmation). Per-window targeting via `WorkspaceWindowRegistry.closeWindow(for:)` because SwiftUI `dismissWindow` closes all windows in a `WindowGroup`. Terminal close does NOT park (per ADR 0014). Includes high-value testing finding: AppKit `performClose` crashes intermittently under swift-testing parallel execution; mitigation extracted pure decision logic for unit tests. New reference: [`editor-window-close-resolution-order.md`](../../references/editor-window-close-resolution-order.md).
+2. **Cmd+W window close resolution order:** focused item first (a pane inside a multi-pane Terminal Group, otherwise the selected file, terminal, Terminal Group, or restorable tab) → open Git diff → empty window (close this one if others exist, else quit confirmation). Per-window targeting via `WorkspaceWindowRegistry.closeWindow(for:)` because SwiftUI `dismissWindow` closes all windows in a `WindowGroup`. Terminal close does NOT park (per ADR 0014). Includes high-value testing finding: AppKit `performClose` crashes intermittently under swift-testing parallel execution; mitigation extracted pure decision logic for unit tests. New reference: [`editor-window-close-resolution-order.md`](../../references/editor-window-close-resolution-order.md).
 
 3. **Tab-strip scrollbar fix** (already documented per concurrent workstream #3): validated existing [`scrollview-legacy-scroller-always-setting.md`](../../references/scrollview-legacy-scroller-always-setting.md).
 

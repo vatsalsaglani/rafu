@@ -157,6 +157,26 @@ private struct TerminalGroupPaneView: View {
             terminalContent
         }
         .background(theme.palette.editorBackground)
+        .overlay {
+            if isFocused {
+                Rectangle()
+                    .strokeBorder(
+                        theme.palette.info,
+                        style: StrokeStyle(
+                            lineWidth: 1.5,
+                            lineCap: .round,
+                            dash: [2, 4]
+                        )
+                    )
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            } else {
+                Rectangle()
+                    .strokeBorder(theme.palette.borderSubtle, lineWidth: RafuMetrics.hairline)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
             "\(TerminalPanePresentation.name(for: pane)), \(statusLabel), \(folderAccessibilityLabel)"
@@ -178,11 +198,6 @@ private struct TerminalGroupPaneView: View {
             .foregroundStyle(theme.palette.textSecondary)
             .lineLimit(1)
             .help(metadataHelp)
-            if isFocused {
-                Label("Focused pane", systemImage: "circle.inset.filled")
-                    .font(.caption2.weight(.medium))
-                    .accessibilityLabel("Focused pane")
-            }
             Spacer(minLength: 4)
             Button {
                 beginNameEdit()
