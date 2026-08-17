@@ -2,7 +2,11 @@
 
 ## Status
 
-Planned.
+Integrated and verified on `main`.
+
+Integration evidence is recorded by TG-190. The accepted contracts are in
+`main` through the TG-100 merge and are exercised by the v2 capacity,
+restoration, and end-to-end tests.
 
 ## Branch and worker
 

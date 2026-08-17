@@ -2,7 +2,10 @@
 
 ## Status
 
-Planned.
+Integrated and verified on `main`.
+
+The integrated audit passed. The coordinator owns the post-merge serial suite,
+Rafu Lightning launch, CI, and release-branch actions.
 
 ## Branch and worker
 
@@ -78,4 +81,3 @@ Rafu Lightning launch, GitHub CI, and release-branch work after merge.
 > worktree's `.build` last. Do not merge, rebase, push, or create a release
 > branch. Report branch, commit SHA, files, tests, security/concurrency and
 > accessibility reviews, risks, and Deviations.
-

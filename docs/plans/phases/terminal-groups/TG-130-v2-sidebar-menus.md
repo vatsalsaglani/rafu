@@ -2,7 +2,10 @@
 
 ## Status
 
-Implemented on lane; awaiting authorized merge.
+Integrated and verified on `main`.
+
+The group and pane three-dot menus, pane-ID metadata routes, and legacy
+standalone-terminal routes are covered by the TG-190 audit.
 
 ## Implementation record
 

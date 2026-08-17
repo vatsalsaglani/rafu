@@ -19,6 +19,9 @@ them; TG-120 and TG-130 then run from the same approved base; TG-190 performs
 the integrated audit. All v2 implementation workers are Luna Implementors in
 coordinator-created worktrees.
 
+TG-100, TG-110, TG-120, TG-130, and TG-190 are now integrated and verified on
+`main`. The older TG-90 lane remains blocked and unchanged.
+
 This directory decomposes
 [`../terminal-groups.md`](../terminal-groups.md) into two serial foundation
 plans, two parallel implementation waves, one serial workspace cutover, and
