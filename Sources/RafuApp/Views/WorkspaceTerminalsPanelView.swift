@@ -1,5 +1,22 @@
 import SwiftUI
 
+extension TerminalPaneThemeColor {
+    fileprivate static let presets: [TerminalPaneThemeColor] = [
+        .accent, .info, .success, .warning, .error, .muted,
+    ]
+
+    fileprivate var displayName: String {
+        switch self {
+        case .accent: "Accent"
+        case .info: "Blue"
+        case .success: "Green"
+        case .warning: "Amber"
+        case .error: "Red"
+        case .muted: "Gray"
+        }
+    }
+}
+
 /// The terminals panel (terminal-manager.md T-B): every live terminal
 /// session in creation order, whether or not it currently has a tab. Sessions
 /// outlive their tabs (T-A) — hiding a row parks the session, closing it
@@ -33,7 +50,7 @@ struct WorkspaceTerminalsPanelView: View {
     @State private var expandedGroupIDs: Set<TerminalGroupID> = []
     @State private var renamingGroupID: TerminalGroupID?
     @State private var groupRenameText = ""
-    @State private var renamingPaneSessionID: UUID?
+    @State private var renamingPaneID: TerminalPaneID?
     @State private var paneRenameText = ""
 
     var body: some View {
@@ -226,7 +243,7 @@ struct WorkspaceTerminalsPanelView: View {
                         if expandedGroupIDs.contains(pane.groupID) {
                             TerminalGroupPaneRowView(
                                 row: pane,
-                                isRenaming: renamingPaneSessionID == pane.sessionID,
+                                isRenaming: renamingPaneID == pane.id,
                                 renameText: $paneRenameText,
                                 revealAndFocus: {
                                     session.revealTerminalGroup(pane.groupID)
@@ -236,14 +253,11 @@ struct WorkspaceTerminalsPanelView: View {
                                 start: pane.canStart ? { session.startTerminalPane(pane.id) } : nil,
                                 restart: pane.canRestart
                                     ? { session.restartTerminalPane(pane.id) } : nil,
-                                beginRename: pane.sessionID.map { id in
-                                    { beginPaneRename(id, pane.name) }
-                                },
-                                commitRename: pane.sessionID.map { id in { commitPaneRename(id) } },
+                                beginRename: { beginPaneRename(pane.id, pane.name) },
+                                commitRename: { commitPaneRename(pane.id) },
                                 cancelRename: cancelPaneRename,
                                 setColor: { color in
-                                    guard let id = pane.sessionID else { return }
-                                    session.setTerminalSessionColor(id, color)
+                                    session.setTerminalPaneColor(pane.id, color)
                                 }
                             )
                         }
@@ -293,18 +307,18 @@ struct WorkspaceTerminalsPanelView: View {
         groupRenameText = ""
     }
 
-    private func beginPaneRename(_ sessionID: UUID, _ name: String) {
+    private func beginPaneRename(_ paneID: TerminalPaneID, _ name: String) {
         paneRenameText = name
-        renamingPaneSessionID = sessionID
+        renamingPaneID = paneID
     }
 
-    private func commitPaneRename(_ sessionID: UUID) {
-        session.renameTerminalSession(sessionID, to: paneRenameText)
+    private func commitPaneRename(_ paneID: TerminalPaneID) {
+        session.renameTerminalPane(paneID, to: paneRenameText)
         cancelPaneRename()
     }
 
     private func cancelPaneRename() {
-        renamingPaneSessionID = nil
+        renamingPaneID = nil
         paneRenameText = ""
     }
 
@@ -573,7 +587,7 @@ private struct TerminalGroupManagerRowView: View {
                 .foregroundStyle(theme.palette.textMuted)
             }
             Spacer(minLength: 0)
-            Menu("Terminal Group actions", systemImage: "ellipsis") {
+            Menu {
                 Button("Reveal", action: reveal)
                 if !row.isParked { Button("Hide Group", action: hide) }
                 Button("Rename", action: beginRename)
@@ -581,8 +595,15 @@ private struct TerminalGroupManagerRowView: View {
                 if let startAll { Button("Start All Restartable Panes", action: startAll) }
                 Divider()
                 Button("Close Group", role: .destructive, action: close)
+            } label: {
+                Image(systemName: "ellipsis")
+                    .frame(width: 22, height: 22)
+                    .contentShape(.rect)
             }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Actions for \(row.name)")
             .accessibilityLabel("Actions for \(row.name)")
         }
         .padding(RafuMetrics.space2)
@@ -622,7 +643,7 @@ private struct TerminalGroupPaneRowView: View {
     let beginRename: (() -> Void)?
     let commitRename: (() -> Void)?
     let cancelRename: () -> Void
-    let setColor: (TerminalSessionColor?) -> Void
+    let setColor: (TerminalPaneThemeColor?) -> Void
 
     @Environment(\.rafuTheme) private var theme
 
@@ -651,14 +672,14 @@ private struct TerminalGroupPaneRowView: View {
                 }
             }
             Spacer(minLength: 0)
-            Menu("Pane actions", systemImage: "ellipsis") {
+            Menu {
                 Button("Reveal and Focus", action: revealAndFocus)
                 if let restart { Button("Restart Shell", action: restart) }
                 if let start { Button("Start Pane", action: start) }
                 if let beginRename {
                     Button("Rename", action: beginRename)
                     Menu("Color") {
-                        ForEach(TerminalSessionColor.presets, id: \.self) { color in
+                        ForEach(TerminalPaneThemeColor.presets, id: \.self) { color in
                             Button(color.displayName) { setColor(color) }
                         }
                         Divider()
@@ -666,8 +687,16 @@ private struct TerminalGroupPaneRowView: View {
                     }
                 }
                 Button("Close Pane", role: .destructive, action: close)
+            } label: {
+                Image(systemName: "ellipsis")
+                    .frame(width: 22, height: 22)
+                    .contentShape(.rect)
             }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Actions for \(row.name)")
+            .accessibilityLabel("Actions for \(row.name)")
         }
         .padding(.leading, RafuMetrics.space4)
         .padding(.trailing, RafuMetrics.space2)
