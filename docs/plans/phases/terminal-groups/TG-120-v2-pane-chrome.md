@@ -2,7 +2,7 @@
 
 ## Status
 
-Planned.
+Implemented on lane; awaiting authorized merge.
 
 ## Branch and worker
 
@@ -74,4 +74,3 @@ Run format fix, format lint, build, `./script/test.sh` in parallel mode, and
 > Run the ordered parallel gates, commit, and delete this worktree's `.build`
 > last. Do not merge, rebase, or push. Report branch, commit SHA, files, tests,
 > accessibility review, risks, and Deviations.
-

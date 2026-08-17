@@ -110,13 +110,45 @@ struct TerminalGroupViewPresentationTests {
         let source = try Self.source("Sources/RafuApp/Terminal/TerminalGroupView.swift")
 
         #expect(source.contains("case close(TerminalPaneID)"))
+        #expect(source.contains("case rename(TerminalPaneID, String?)"))
         #expect(source.contains("case restart(TerminalPaneID)"))
         #expect(source.contains("case start(TerminalPaneID)"))
-        #expect(source.contains("Button(\"Restart\""))
-        #expect(source.contains("Button(\"Start Pane\""))
-        #expect(source.contains("Button(\"Close\""))
+        #expect(source.contains("Image(systemName: \"arrow.clockwise\")"))
+        #expect(source.contains("Image(systemName: \"play.fill\")"))
+        #expect(source.contains("Image(systemName: \"xmark\")"))
+        #expect(source.contains(".frame(width: 22, height: 22)"))
+        #expect(source.contains(".help(\"Close terminal pane\")"))
+        #expect(source.contains("TextField(\"Terminal Pane\""))
         #expect(!source.contains("shutdown()"))
         #expect(!source.contains("restart()"))
+    }
+
+    @Test("Pane metadata uses explicit names and pane theme colors")
+    func paneMetadataUsesExplicitValues() throws {
+        let explicit = try #require(TerminalPaneName("Build"))
+        let pane = try TerminalPaneSnapshot(
+            id: TerminalPaneID(), sessionID: UUID(), explicitUserName: explicit,
+            reportedTitle: TerminalReportedTitle("shell"), runtimeKind: .ordinaryShell,
+            themeColor: .warning, status: .live, launchProfile: nil,
+            startAvailability: .notRestartable)
+
+        #expect(TerminalPanePresentation.name(for: pane) == "Build")
+        #expect(
+            TerminalPanePresentation.themeColor(for: pane, controllerColor: nil) == .warning)
+        #expect(
+            TerminalPanePresentation.themeColor(for: pane, controllerColor: .success) == .success)
+    }
+
+    @Test("Pane metadata keeps accessible status and focus text")
+    func paneMetadataKeepsAccessibleText() throws {
+        let source = try Self.source("Sources/RafuApp/Terminal/TerminalGroupView.swift")
+
+        #expect(source.contains("Focused pane"))
+        #expect(source.contains("No saved starting folder"))
+        #expect(source.contains(".accessibilityLabel(\"Terminal pane name\")"))
+        #expect(source.contains(".onExitCommand(perform: cancelNameEdit)"))
+        #expect(source.contains(".onAppear { nameFieldFocused = true }"))
+        #expect(source.contains(".background(paneTint.opacity(0.14))"))
     }
 
     private func terminalPane(id: TerminalPaneID = TerminalPaneID(), status: TerminalPaneStatus)

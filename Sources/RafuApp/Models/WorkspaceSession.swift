@@ -1557,6 +1557,7 @@ final class WorkspaceSession {
             focusTerminalPane(paneID, in: groupID)
         case .setDividerFraction(let splitID, let fraction):
             setTerminalDividerFraction(splitID, to: fraction)
+        case .rename(let paneID, let name): renameTerminalPane(paneID, to: name)
         case .close(let paneID): closeTerminalPane(paneID)
         case .restart(let paneID): restartTerminalPane(paneID)
         case .start(let paneID): startTerminalPane(paneID)
