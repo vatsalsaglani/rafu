@@ -33,7 +33,6 @@ struct CanvasCommands: Commands {
             Button("Enter Content") { board?.contentIsActive = true }.disabled(
                 board?.focusedCard == nil)
             Button("Leave Content") { board?.leaveContent() }.disabled(board == nil)
-            Button("Back to Canvas") { board?.backToBoard() }.disabled(board?.focusedCard == nil)
             Button("Show Canvas List") {
                 board?.backToBoard()
                 board?.showsList = true

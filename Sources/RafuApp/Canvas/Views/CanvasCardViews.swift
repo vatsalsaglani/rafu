@@ -10,15 +10,7 @@ struct CanvasAddCardMenu: View {
             Button("File…") { session.chooseCanvasFile(board.id, imageOnly: false) }
             Button("Image…") { session.chooseCanvasFile(board.id, imageOnly: true) }
             Button("Note") { session.addCanvasNote(board.id) }
-            Menu("Terminal Group") {
-                Button("New Stopped Group") { session.addCanvasStoppedTerminal(board.id) }
-                Divider()
-                ForEach(session.terminal.terminalGroups, id: \.id) { group in
-                    Button(group.name.rawValue) {
-                        session.addCanvasTerminal(group.id, to: board.id)
-                    }
-                }
-            }
+            Button("Terminal") { session.addCanvasStoppedTerminal(board.id) }
             Button("Local Web App…") { session.canvasDialog = .web(board.id) }
             Button("Native macOS App…") { session.chooseCanvasApplication(board.id) }
         }
@@ -29,6 +21,7 @@ struct CanvasAddCardMenu: View {
 
 struct CanvasCardShell: View {
     @Environment(\.rafuTheme) private var theme
+    @Environment(\.canvasPresentationID) private var presentationID
     let card: CanvasCard
     let board: CanvasBoardState
     let session: WorkspaceSession
@@ -41,18 +34,7 @@ struct CanvasCardShell: View {
             HStack(spacing: 8) {
                 Image(systemName: card.content.symbol).foregroundStyle(theme.palette.accent)
                 Button {
-                    focusBoard()
-                    if NSEvent.modifierFlags.contains(.command)
-                        || NSEvent.modifierFlags.contains(.shift)
-                    {
-                        if board.selection.contains(card.id) {
-                            board.selection.remove(card.id)
-                        } else {
-                            board.selection.insert(card.id)
-                        }
-                    } else {
-                        board.selection = [card.id]
-                    }
+                    activateCard()
                 } label: {
                     Text(card.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading).contentShape(.rect)
@@ -80,45 +62,38 @@ struct CanvasCardShell: View {
             .padding(.horizontal, 12).frame(height: 36)
             .background(theme.palette.sidebarBackground)
             .contentShape(.rect)
-            .gesture(
-                DragGesture(minimumDistance: 3, coordinateSpace: .global).onChanged { value in
-                    if dragStart == nil {
-                        focusBoard()
-                        dragStart = card.rect
-                        board.beginGesture()
-                        board.selection = [card.id]
-                    }
-                    guard var rect = dragStart else { return }
-                    rect.x = min(
-                        50_000,
-                        max(-50_000, rect.x + value.translation.width / board.viewport.scale))
-                    rect.y = min(
-                        50_000,
-                        max(-50_000, rect.y + value.translation.height / board.viewport.scale))
-                    board.setRect(rect, for: card.id)
-                }.onEnded { _ in
-                    if var rect = board.cards.first(where: { $0.id == card.id })?.rect {
-                        rect.x = (rect.x / 8).rounded() * 8
-                        rect.y = (rect.y / 8).rounded() * 8
-                        board.setRect(rect, for: card.id)
-                    }
-                    board.endGesture()
-                    dragStart = nil
-                })
+            .highPriorityGesture(cardDrag)
             Divider()
             if case .nativeApp = card.content {
                 CanvasNativeAppCard(card: card, board: board, session: session)
+            } else if case .terminal = card.content {
+                CanvasTerminalCard(card: card, board: board, session: session)
+            } else if case .web = card.content {
+                CanvasWebCard(card: card, board: board, session: session)
+            } else if case .file(let path) = card.content, board.focusedCardID == card.id {
+                CanvasFilePreview(path: path, session: session)
+            } else if case .note = card.content, board.focusedCardID == card.id {
+                CanvasNoteEditor(
+                    card: card, board: board, session: session,
+                    presentationID: presentationID,
+                    isCurrentPresentation: session.canvasResources[board.id]?.canPresent(
+                        owner: presentationID) == true)
             } else if case .image(let path) = card.content {
-                CanvasImageContent(path: path, session: session).padding(12)
+                Button(action: activateCard) {
+                    CanvasImageContent(path: path, session: session).padding(12)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(.rect)
+                }.buttonStyle(.plain)
+                    .highPriorityGesture(cardDrag)
             } else {
                 Button {
-                    focusBoard()
-                    board.selection = [card.id]
+                    activateCard()
                 } label: {
                     CanvasCardSummary(card: card)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .padding(14).contentShape(.rect)
                 }.buttonStyle(.plain)
+                    .highPriorityGesture(cardDrag)
             }
             Divider()
             HStack {
@@ -131,7 +106,8 @@ struct CanvasCardShell: View {
                 }
                 Button("Focus") { board.focus(card.id) }
             }
-            .font(.caption).buttonStyle(.plain).padding(.horizontal, 12).frame(height: 30)
+            .font(.caption).buttonStyle(.plain).padding(.leading, 12).padding(.trailing, 28).frame(
+                height: 30)
         }
         .background(theme.palette.editorBackground)
         .clipShape(.rect(cornerRadius: 8))
@@ -146,10 +122,12 @@ struct CanvasCardShell: View {
         .overlay(alignment: .bottomTrailing) {
             Image(systemName: "arrow.up.left.and.arrow.down.right")
                 .font(.system(size: 9)).foregroundStyle(.secondary)
-                .padding(3).contentShape(.rect)
+                .frame(width: 22, height: 22).contentShape(.rect)
                 .gesture(
                     DragGesture(minimumDistance: 2, coordinateSpace: .global).onChanged { value in
                         if resizeStart == nil {
+                            board.backToBoard()
+                            focusBoard()
                             resizeStart = card.rect
                             board.beginGesture()
                         }
@@ -170,6 +148,47 @@ struct CanvasCardShell: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(card.title), \(card.content.kindName)")
+    }
+
+    private func activateCard() {
+        if NSEvent.modifierFlags.contains(.command) || NSEvent.modifierFlags.contains(.shift) {
+            focusBoard()
+            if board.selection.contains(card.id) {
+                board.selection.remove(card.id)
+            } else {
+                board.selection.insert(card.id)
+            }
+        } else {
+            board.focus(card.id)
+        }
+    }
+
+    private var cardDrag: some Gesture {
+        DragGesture(minimumDistance: 3, coordinateSpace: .global).onChanged { value in
+            if dragStart == nil {
+                board.backToBoard()
+                focusBoard()
+                dragStart = card.rect
+                board.beginGesture()
+                board.selection = [card.id]
+            }
+            guard var rect = dragStart else { return }
+            rect.x = min(
+                50_000,
+                max(-50_000, rect.x + value.translation.width / board.viewport.scale))
+            rect.y = min(
+                50_000,
+                max(-50_000, rect.y + value.translation.height / board.viewport.scale))
+            board.setRect(rect, for: card.id)
+        }.onEnded { _ in
+            if var rect = board.cards.first(where: { $0.id == card.id })?.rect {
+                rect.x = (rect.x / 8).rounded() * 8
+                rect.y = (rect.y / 8).rounded() * 8
+                board.setRect(rect, for: card.id)
+            }
+            board.endGesture()
+            dragStart = nil
+        }
     }
 
     private func move(dx: Double, dy: Double) {
@@ -206,10 +225,10 @@ private struct CanvasCardSummary: View {
                     snapshot.isEmpty
                         ? "An empty note. Focus to edit." : String(snapshot.prefix(512))
                 )
-                .lineLimit(9).textSelection(.enabled)
+                .lineLimit(9)
             case .terminal:
-                Label("Terminal Group", systemImage: "terminal")
-                Text("Focus this card to see its state or start a stopped pane.")
+                Label("Terminal", systemImage: "terminal")
+                Text("Click to use this terminal.")
             case .web(let destination):
                 Label(destination.address, systemImage: "globe")
                 Text("Focus and choose Connect. Rafu does not start a server.")
@@ -218,61 +237,6 @@ private struct CanvasCardSummary: View {
             }
         }
         .font(.callout).foregroundStyle(.secondary)
-    }
-}
-
-struct CanvasFocusView: View {
-    let board: CanvasBoardState
-    let session: WorkspaceSession
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button("Back to Canvas", systemImage: "arrow.left") { board.backToBoard() }
-                if let card = board.focusedCard {
-                    Label(card.title, systemImage: card.content.symbol).lineLimit(1)
-                }
-                Spacer()
-                Text("100%").font(.caption).foregroundStyle(.secondary)
-                Button(board.contentIsActive ? "Leave Content" : "Enter Content") {
-                    if board.contentIsActive {
-                        board.leaveContent()
-                    } else {
-                        board.contentIsActive = true
-                    }
-                }
-            }
-            .controlSize(.small).buttonStyle(.bordered).padding(10)
-            Divider()
-            if let card = board.focusedCard {
-                CanvasFocusedCardContent(card: card, board: board, session: session)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
-}
-
-private struct CanvasFocusedCardContent: View {
-    @Environment(\.canvasPresentationID) private var presentationID
-    let card: CanvasCard
-    let board: CanvasBoardState
-    let session: WorkspaceSession
-
-    var body: some View {
-        switch card.content {
-        case .file(let path): CanvasFilePreview(path: path, session: session)
-        case .image(let path): CanvasImagePreview(path: path, session: session)
-        case .note:
-            CanvasNoteEditor(
-                card: card, board: board, session: session,
-                presentationID: presentationID,
-                isCurrentPresentation: session.canvasResources[board.id]?.canPresent(
-                    owner: presentationID) == true)
-        case .terminal: CanvasTerminalCard(card: card, board: board, session: session)
-        case .web: CanvasWebCard(card: card, board: board, session: session)
-        case .nativeApp: CanvasNativeAppCard(card: card, board: board, session: session)
-        }
     }
 }
 

@@ -6,6 +6,40 @@ import Testing
 @Suite("Canvas board transactions")
 @MainActor
 struct CanvasBoardStateTests {
+    @Test("Focus enters content once and returning to the board releases input")
+    func directFocus() throws {
+        let board = CanvasBoardState(document: CanvasDocument(title: "Task"))
+        try board.add(title: "Terminal", content: .terminal(groupID: TerminalGroupID()))
+        let id = try #require(board.cards.first?.id)
+        #expect(!board.contentIsActive)
+        board.showsList = true
+        board.focus(id)
+        #expect(!board.showsList)
+        #expect(board.selection == [id])
+        #expect(board.focusedCardID == id)
+        #expect(board.contentIsActive)
+        board.backToBoard()
+        #expect(!board.contentIsActive)
+        #expect(board.focusedCardID == nil)
+        board.focus(CanvasCardID())
+        #expect(!board.contentIsActive)
+        #expect(board.focusedCardID == nil)
+    }
+
+    @Test("Changing card focus keeps live surfaces attached")
+    func focusDoesNotStopOtherCards() throws {
+        let board = CanvasBoardState(document: CanvasDocument(title: "Task"))
+        try board.add(title: "First", content: .terminal(groupID: TerminalGroupID()))
+        try board.add(title: "Second", content: .terminal(groupID: TerminalGroupID()))
+        var stops = 0
+        board.stopLiveContent = { stops += 1 }
+        board.focus(board.cards[0].id)
+        board.focus(board.cards[1].id)
+        #expect(stops == 0)
+        #expect(board.focusedCardID == board.cards[1].id)
+        #expect(board.contentIsActive)
+    }
+
     @Test("A drag is one undo transaction and undo retains the current storage revision")
     func gestureUndo() throws {
         var document = CanvasDocument(title: "Task")

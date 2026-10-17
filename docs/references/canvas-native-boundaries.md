@@ -225,3 +225,70 @@ or a status-bar memory value as that evidence. No Release app was built or
 launched. Use the existing project policy for any later Release measurement
 allowance. UI-fix gate logs are stored under
 `/tmp/rafu-canvas-implementation-20261017/`.
+
+## Direct input correction, 2026-10-18
+
+Applies to the Canvas board on the same macOS 27 / Swift 6.4 host above.
+The board's optional Space-drag gesture must use the `.subviews` mask when
+Space is up. Using `.none` disables child gestures too, including background
+and card drags. The native pass reproduced and repaired the fault: dragging
+empty space moved all cards; dragging a title moved only that card. Summary
+drags use the same transaction, while a click enters content. Note summaries
+do not select text; native note editing remains available in focus mode.
+
+The editor overlay must identify each WorkspaceCanvasView by board ID.
+Without that identity, switching between two Canvas tabs reuses local view
+state without installing the new board's presentation owner. Focus can then
+show a blank note or reject a terminal lease. A hosted-view regression switches
+between two boards and checks presentation ownership.
+
+Repeat with `./script/test.sh --filter 'Canvas(BoardState|Integration)Tests'`
+and the canonical Lightning launch. In a disposable board, drag empty space,
+drag a card title and summary, undo, click once to focus, and type in a note
+or an explicitly started terminal. Switch to a second Canvas and back.
+Focus alone must not start a shell, load a web page, or capture a window.
+Related: ADR 0025 and `docs/plans/phases/workspace-canvas.md`.
+
+The direct-input pass also found that a note's first representable update can
+occur before its mount has a window. NativeContentMount now exposes a narrow
+window-attachment callback, cleared on detach. The note requests first responder
+only for its current presentation and only while content is active. The pass
+verified one-click note typing and native undo, one-click stopped-terminal
+controls, explicit Start followed by shell output, and one-click input after
+switching Canvas tabs. The test shell was exited. No new process, file-write,
+capture, or network authority was added.
+
+## Inline cards, 2026-10-18
+
+The user's later correction supersedes the separate 100% focus surface described
+in the earlier evidence. Terminals, local web apps, and active notes now mount
+inside board cards. New terminal cards are single terminals. One-pane internal
+group records retain the existing process/restoration boundary; Canvas adds no
+new runtime owner. Group splits are disabled from Canvas. Four terminal surface
+leases and two loaded web views remain the per-window limits.
+
+Focus changes and Leave Content now release keyboard focus without unloading
+other visible cards. Hiding/closing the Canvas still stops web/capture resources
+and parks terminals. A native web mount uses a window-scoped mouse-down observer
+to update card focus while leaving the event intact for WebKit. Its observer is
+removed on detach. No synthetic input or cross-process event forwarding is used.
+
+SwiftUI board key handlers must return ignored while card content is active.
+Without this guard, the focusable ancestor consumes Space, Return, Delete, and
+arrow keys before the native terminal can use them. Background wheel handling
+also excludes the active card body. Header dragging and the corner resize handle
+keep separate layout gestures.
+
+The native pass on macOS 27 / Swift 6.4 verified:
+- Shell input containing spaces and Return produced "inline terminal ok".
+- A corner resize changed the PTY from 9 rows × 45 columns to 15 × 50.
+- Board zoom from 95% to 79% retained 15 × 50.
+- A local web card resized while its terminal neighbour remained visible.
+  Its input accepted "Inline app input works"; its button showed
+  "Local interaction passed".
+- Add Card offers Terminal directly, and a second stopped terminal card can
+  be started without adding group chrome or replacing the board.
+
+These are functional checks, not frame-time or sustained-input measurements.
+The full accessibility/performance and native capture matrix above remains open.
+Build/test logs for this pass use the /tmp/rafu-inline-* prefix.

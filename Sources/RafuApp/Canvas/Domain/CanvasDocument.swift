@@ -120,7 +120,7 @@ nonisolated enum CanvasCardContent: Codable, Equatable, Sendable {
         case .file: "File"
         case .image: "Image"
         case .note: "Note"
-        case .terminal: "Terminal Group"
+        case .terminal: "Terminal"
         case .web: "Local Web App"
         case .nativeApp: "Native App"
         }

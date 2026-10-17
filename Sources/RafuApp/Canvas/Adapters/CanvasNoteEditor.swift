@@ -85,10 +85,21 @@ struct CanvasNoteEditor: NSViewRepresentable {
         buffer.textView.textColor = NSColor(theme.palette.textPrimary)
         buffer.textView.insertionPointColor = NSColor(theme.palette.accent)
         buffer.scrollView.backgroundColor = NSColor(theme.palette.editorBackground)
-        buffer.textView.isEditable = board.contentIsActive
-        buffer.textView.isSelectable = board.contentIsActive
-        if board.contentIsActive, view.window?.firstResponder !== buffer.textView {
+        let active = board.contentIsActive && board.focusedCardID == card.id
+        buffer.textView.isEditable = active
+        buffer.textView.isSelectable = active
+        let owner = presentationID
+        let cardID = card.id
+        view.onWindowAttached = { [weak board, weak resources, weak buffer, weak view] in
+            guard let board, let buffer, let view, board.contentIsActive,
+                board.focusedCardID == cardID,
+                resources?.canPresent(owner: owner) == true,
+                buffer.scrollView.superview === view
+            else { return }
             view.window?.makeFirstResponder(buffer.textView)
+        }
+        if active, view.window?.firstResponder !== buffer.textView {
+            view.onWindowAttached?()
         }
     }
     static func dismantleNSView(_ view: NativeContentMount, coordinator: ()) { view.detach() }

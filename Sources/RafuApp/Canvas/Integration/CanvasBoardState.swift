@@ -117,8 +117,14 @@ final class CanvasBoardState: Identifiable {
     func add(title: String, content: CanvasCardContent) throws {
         guard cards.count < CanvasLimits.cards else { throw CanvasError.capacity }
         let offset = Double(cards.count % 5) * 36
-        let card = CanvasCard(
-            title: title, rect: .init(x: 40 + offset, y: 40 + offset), content: content)
+        var rect = CanvasRect(x: 40 + offset, y: 40 + offset)
+        switch content {
+        case .terminal, .web:
+            rect.width = 640
+            rect.height = 420
+        default: break
+        }
+        let card = CanvasCard(title: title, rect: rect, content: content)
         try edit { $0.cards.append(card) }
         selection = [card.id]
     }
@@ -191,9 +197,11 @@ final class CanvasBoardState: Identifiable {
     }
 
     func focus(_ id: CanvasCardID) {
-        leaveContent()
+        guard cards.contains(where: { $0.id == id }) else { return }
+        showsList = false
         selection = [id]
         focusedCardID = id
+        contentIsActive = true
     }
 
     func leaveContent() {

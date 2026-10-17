@@ -1083,6 +1083,9 @@ final class WorkspaceSession {
         let pane = group.panes.first(where: { $0.id == group.focusedPaneID })
         switch action {
         case .splitRight, .splitDown:
+            guard selectedCanvasID == nil else {
+                return .init(isEnabled: false, reason: "Add another terminal card on the Canvas.")
+            }
             guard group.panes.count < TerminalGroupLimits.maximumPanesPerGroup else {
                 return .init(
                     isEnabled: false, reason: "This Terminal Group has reached its pane limit.")
@@ -1505,7 +1508,7 @@ final class WorkspaceSession {
     }
 
     func splitFocusedTerminalPane(_ placement: TerminalGroupSplitPlacement) {
-        guard !isTerminalGroupModalInputBlocked else { return }
+        guard !isTerminalGroupModalInputBlocked, selectedCanvasID == nil else { return }
         guard let groupID = selectedTerminalGroupID,
             let group = terminal.terminalGroup(groupID),
             let focused = group.panes.first(where: { $0.id == group.focusedPaneID }),

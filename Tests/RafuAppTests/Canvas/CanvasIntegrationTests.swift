@@ -53,6 +53,51 @@ struct CanvasIntegrationTests {
         #expect(board.visibleSize.height > 450 && board.visibleSize.height < 600)
     }
 
+    @Test("Switching Canvas tabs transfers presentation ownership to the new board")
+    func switchingBoardsInstallsPresentation() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let session = makeSession(CanvasPersistenceStore(directory: folder))
+        session.descriptor = WorkspaceDescriptor(
+            displayName: "Test", location: .local(.init(path: folder.path)))
+        #expect(await session.canvas.configure(root: folder))
+        let first = try #require(await session.canvas.create(title: "First"))
+        session.presentCanvasBoard(first)
+        let host = NSHostingView(rootView: EditorCanvasView(session: session, openFolder: {}))
+        host.frame = CGRect(x: 0, y: 0, width: 900, height: 600)
+        host.layoutSubtreeIfNeeded()
+        #expect(session.canvasResources[first.id]?.isPresented == true)
+        let second = try #require(await session.canvas.create(title: "Second"))
+        session.presentCanvasBoard(second)
+        host.layoutSubtreeIfNeeded()
+        #expect(session.canvasResources[second.id]?.isPresented == true)
+        session.presentCanvasBoard(first)
+        host.layoutSubtreeIfNeeded()
+        #expect(session.canvasResources[first.id]?.isPresented == true)
+    }
+
+    @Test("A native mount requests focus only after attachment and clears it on detach")
+    func nativeMountFocusAttachment() {
+        let mount = NativeContentMount()
+        let note = CanvasNoteBuffer(snapshot: "Note")
+        mount.mount(note.scrollView)
+        var attachments = 0
+        mount.onWindowAttached = { [weak mount, weak note] in
+            attachments += 1
+            if let text = note?.textView { mount?.window?.makeFirstResponder(text) }
+        }
+        #expect(attachments == 0)
+        let window = NSWindow(
+            contentRect: CGRect(x: 0, y: 0, width: 600, height: 400),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = mount
+        #expect(attachments == 1)
+        #expect(window.firstResponder === note.textView)
+        mount.detach()
+        #expect(mount.onWindowAttached == nil)
+        window.contentView = nil
+    }
+
     @Test("Canvas layout restoration retains only records that were loaded")
     func typedRestoration() throws {
         let id = CanvasID()
@@ -92,6 +137,7 @@ struct CanvasIntegrationTests {
             return
         }
         #expect(session.terminal.terminalGroup(groupID)?.savedLayoutID == nil)
+        #expect(session.terminal.terminalGroup(groupID)?.panes.count == 1)
         #expect(await session.canvas.save(board.id))
         #expect(try board.snapshot().terminalGroups?.openGroups.count == 1)
         board.focus(card.id)
@@ -99,7 +145,10 @@ struct CanvasIntegrationTests {
         board.contentIsActive = true
         session.canvasTerminalOwners[groupID] = board.id
         #expect(session.selectedTerminalGroupID == groupID)
+        #expect(!session.terminalGroupPresentationAvailability(.splitRight).isEnabled)
+        #expect(!session.terminalGroupPresentationAvailability(.splitDown).isEnabled)
         board.leaveContent()
+        #expect(session.canvasTerminalOwners[groupID] == board.id)
         #expect(session.selectedTerminalGroupID == nil)
         #expect(session.terminal.sessions.isEmpty)
 

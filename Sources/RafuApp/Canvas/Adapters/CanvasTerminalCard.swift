@@ -1,70 +1,125 @@
 import SwiftUI
 
+/// A Canvas terminal is one native terminal surface. The existing terminal
+/// manager remains the runtime owner; no second PTY or process model is added.
 struct CanvasTerminalCard: View {
     @Environment(\.rafuTheme) private var theme
     @Environment(\.canvasPresentationID) private var presentationID
     let card: CanvasCard
     let board: CanvasBoardState
     let session: WorkspaceSession
+
+    private var active: Bool { board.contentIsActive && board.focusedCardID == card.id }
+
     var body: some View {
-        if case .terminal(let id) = card.content, let snapshot = session.terminal.terminalGroup(id)
+        if case .terminal(let id) = card.content, let group = session.terminal.terminalGroup(id),
+            let pane = group.panes.first
         {
             VStack(spacing: 0) {
-                if board.contentIsActive, session.canvasTerminalOwners[id] == board.id,
-                    session.canvasResources[board.id]?.canPresent(owner: presentationID) == true
-                {
-                    TerminalGroupView(
-                        snapshot: snapshot,
-                        controllerForPane: { session.terminal.terminalController(for: $0) },
-                        action: session.performTerminalGroupViewAction, theme: theme,
-                        requestFocusToken: session.terminalGroupFocusRequest
+                HStack {
+                    Text(
+                        TerminalPanePresentation.statusLabel(
+                            for: pane,
+                            controllerStatus: session.terminal.terminalController(for: pane.id)?
+                                .status)
                     )
-                    .environment(
-                        \.terminalSurfaceCanMount,
-                        { [weak session] in
-                            session?.canvasTerminalOwners[id] == board.id
-                                && session?.canvasResources[board.id]?.canPresent(
-                                    owner: presentationID) == true
-                        })
-                } else {
-                    ContentUnavailableView {
-                        Label(snapshot.name.rawValue, systemImage: "terminal")
-                    } description: {
-                        Text(
-                            "\(snapshot.panes.count) panes. Enter Content to transfer the existing terminal view here. Stopped panes need a separate Start action."
-                        )
-                    } actions: {
-                        Button("Enter Content") { enter(id) }
-                        Button("Reveal Terminal Group") {
-                            board.leaveContent()
-                            session.revealTerminalGroup(id)
+                    .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    if pane.status == .stopped, pane.startAvailability == .available {
+                        Button("Start") {
+                            guard focus(id) else { return }
+                            session.performTerminalGroupViewAction(.start(pane.id))
                         }
                     }
+                    if pane.status == .exited, pane.runtimeKind == .ordinaryShell {
+                        Button("Restart") {
+                            guard focus(id) else { return }
+                            session.performTerminalGroupViewAction(.restart(pane.id))
+                        }
+                    }
+                }.padding(6).buttonStyle(.bordered).controlSize(.small)
+                if session.canvasTerminalOwners[id] == board.id,
+                    session.canvasResources[board.id]?.canPresent(owner: presentationID) == true
+                {
+                    if let controller = session.terminal.terminalController(for: pane.id) {
+                        TerminalHostView(
+                            controller: controller, theme: theme, paneID: pane.id,
+                            isFocusedPane: active,
+                            requestFocusToken: session.terminalGroupFocusRequest,
+                            onDidBecomeFirstResponder: { paneID in
+                                if !active { board.focus(card.id) }
+                                session.performTerminalGroupViewAction(.focus(paneID))
+                            }
+                        )
+                        .environment(
+                            \.terminalSurfaceCanMount,
+                            { [weak session] in
+                                session?.canvasTerminalOwners[id] == board.id
+                                    && session?.canvasResources[board.id]?.canPresent(
+                                        owner: presentationID) == true
+                            })
+                    } else {
+                        Button {
+                            focus(id)
+                        } label: {
+                            Text(
+                                pane.status == .stopped
+                                    ? "Start this terminal when you are ready."
+                                    : "Terminal unavailable"
+                            )
+                            .font(.callout).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .contentShape(.rect)
+                        }.buttonStyle(.plain)
+                    }
+                } else {
+                    VStack(spacing: 8) {
+                        Text("Terminal view is not attached.").font(.caption)
+                        Button("Show Terminal") { acquire(id) }
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .onChange(of: board.contentIsActive, initial: true) { _, active in
-                if active { enter(id) }
+            .onChange(
+                of: session.canvasResources[board.id]?.canPresent(owner: presentationID) == true,
+                initial: true
+            ) { _, available in if available { acquire(id) } }
+            .onChange(of: active) { _, value in if value { focus(id) } }
+            .onDisappear {
+                guard session.canvasResources[board.id]?.canPresent(owner: presentationID) == true,
+                    session.canvasTerminalOwners[id] == board.id
+                else { return }
+                session.canvasTerminalOwners[id] = nil
             }
         } else {
-            ContentUnavailableView(
-                "Terminal Group Unavailable", systemImage: "terminal",
-                description: Text("The group was closed. Add another group to this Canvas."))
+            Text("Terminal unavailable. Add another terminal.")
+                .font(.caption).frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
-    private func enter(_ id: TerminalGroupID) {
+
+    private func acquire(_ id: TerminalGroupID) {
         guard session.canvasResources[board.id]?.permitsLiveContent == true,
-            session.canvasResources[board.id]?.canPresent(owner: presentationID) == true
+            session.canvasResources[board.id]?.canPresent(owner: presentationID) == true,
+            board.cards.first(where: { $0.content == .terminal(groupID: id) })?.id == card.id
         else { return }
-        guard session.canvasTerminalOwners[id] != nil || session.canvasTerminalOwners.count < 4
-        else {
-            board.errorMessage = "Four terminal card surfaces are already active. Leave one first."
-            board.contentIsActive = false
-            return
-        }
-        _ = try? session.terminal.perform(.revealGroup(id))
+        guard
+            session.canvasTerminalOwners[id] == board.id
+                || (session.canvasTerminalOwners[id] == nil
+                    && session.canvasTerminalOwners.count < 4)
+        else { return }
         session.canvasTerminalOwners[id] = board.id
-        board.contentIsActive = true
+    }
+
+    @discardableResult
+    private func focus(_ id: TerminalGroupID) -> Bool {
+        acquire(id)
+        guard session.canvasTerminalOwners[id] == board.id else { return false }
+        if !active { board.focus(card.id) }
+        _ = try? session.terminal.perform(.revealGroup(id))
+        if let pane = session.terminal.terminalGroup(id)?.panes.first {
+            session.focusTerminalPane(pane.id, in: id)
+        }
         session.requestCanvasTerminalFocus()
+        return true
     }
 }
 
@@ -79,7 +134,7 @@ extension WorkspaceSession {
     }
     func addCanvasStoppedTerminal(_ id: CanvasID) {
         guard let board = canvas.boards[id], board.cards.count < CanvasLimits.cards,
-            let name = TerminalGroupName("Canvas Terminal")
+            let name = TerminalGroupName("Terminal")
         else { return }
         performCanvasEdit(board) {
             let paneID = SavedTerminalPaneID()

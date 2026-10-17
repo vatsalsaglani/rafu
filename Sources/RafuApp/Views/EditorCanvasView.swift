@@ -337,6 +337,7 @@ private struct EditorGroupView: View {
                     .overlay {
                         if let board = selectedCanvas {
                             WorkspaceCanvasView(board: board, session: session)
+                                .id(board.id)
                         }
                     }
                     .overlay {

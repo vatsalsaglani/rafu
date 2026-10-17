@@ -4,6 +4,7 @@ import SwiftUI
 /// SwiftUI has no desktop wheel event with scoped modifier/delta access.
 struct CanvasScrollBridge: NSViewRepresentable {
     let isEnabled: Bool
+    var capturesScroll: (CGPoint) -> Bool = { _ in true }
     let pan: (Double, Double) -> Void
     let zoom: (Double) -> Void
     let hidden: () -> Void
@@ -17,6 +18,7 @@ struct CanvasScrollBridge: NSViewRepresentable {
     func updateNSView(_ view: Host, context: Context) { configure(view) }
     private func configure(_ view: Host) {
         view.isEnabled = isEnabled
+        view.capturesScroll = capturesScroll
         view.pan = pan
         view.zoom = zoom
         view.onHidden = hidden
@@ -26,6 +28,7 @@ struct CanvasScrollBridge: NSViewRepresentable {
 
     final class Host: NSView {
         var isEnabled = true
+        var capturesScroll: (CGPoint) -> Bool = { _ in true }
         var pan: ((Double, Double) -> Void)?
         var zoom: ((Double) -> Void)?
         var onHidden: (() -> Void)?
@@ -47,6 +50,10 @@ struct CanvasScrollBridge: NSViewRepresentable {
                     window.isKeyWindow, window.attachedSheet == nil, NSApp.modalWindow == nil,
                     bounds.contains(convert(event.locationInWindow, from: nil))
                 else { return event }
+                let local = convert(event.locationInWindow, from: nil)
+                guard capturesScroll(CGPoint(x: local.x, y: bounds.height - local.y)) else {
+                    return event
+                }
                 if event.modifierFlags.contains(.control) {
                     zoom?(event.scrollingDeltaY > 0 ? 1.05 : 1 / 1.05)
                 } else {

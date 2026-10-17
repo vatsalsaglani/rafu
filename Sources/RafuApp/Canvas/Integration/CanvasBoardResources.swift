@@ -106,7 +106,10 @@ final class CanvasBoardResources {
     func stopAll() {
         if let session, let board {
             let owned = session.canvasTerminalOwners.filter { $0.value == board.id }.map(\.key)
-            for id in owned { session.hideTerminalGroup(id) }
+            for id in owned {
+                session.canvasTerminalOwners[id] = nil
+                session.hideTerminalGroup(id)
+            }
         }
         leaveInteractiveContent()
         for web in webs.values { web.stop() }
@@ -115,7 +118,6 @@ final class CanvasBoardResources {
     private func leaveInteractiveContent() {
         guard let session, let board else { return }
         for (id, canvasID) in session.canvasTerminalOwners where canvasID == board.id {
-            session.canvasTerminalOwners[id] = nil
             for pane in session.terminal.terminalGroup(id)?.panes ?? [] {
                 session.terminal.terminalController(for: pane.id)?.resignNativeFocus()
             }
@@ -126,7 +128,6 @@ final class CanvasBoardResources {
             {
                 view.window?.makeFirstResponder(nil)
             }
-            web.stop()
         }
         for note in notes.values {
             if note.textView.window?.firstResponder === note.textView {

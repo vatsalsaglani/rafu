@@ -34,9 +34,7 @@ struct WorkspaceCanvasView: View {
                 .padding(10)
                 .background(theme.palette.sidebarBackground)
             }
-            if board.focusedCardID != nil {
-                CanvasFocusView(board: board, session: session)
-            } else {
+            Group {
                 toolbar
                 Divider()
                 if board.showsList {
@@ -73,7 +71,16 @@ struct WorkspaceCanvasView: View {
                 if let id = board.selection.first { board.focus(id) }
             }
             .disabled(board.selection.count != 1)
-            Button(board.showsList ? "Board" : "List") { board.showsList.toggle() }
+            if board.contentIsActive {
+                Button("Leave Content") {
+                    board.backToBoard()
+                    boardHasKeyboardFocus = true
+                }
+            }
+            Button(board.showsList ? "Board" : "List") {
+                board.backToBoard()
+                board.showsList.toggle()
+            }
             Menu {
                 Button("Rename…") { session.canvasDialog = .renameBoard(board.id) }
                 Button("Save") { session.saveCanvas(board.id) }
@@ -106,6 +113,7 @@ struct WorkspaceCanvasView: View {
                     .contentShape(.rect)
                     .gesture(backgroundDrag)
                     .onTapGesture {
+                        board.backToBoard()
                         boardHasKeyboardFocus = true
                         board.selection = []
                     }
@@ -170,7 +178,19 @@ struct WorkspaceCanvasView: View {
             .clipped()
             .background(
                 CanvasScrollBridge(
-                    isEnabled: !board.contentIsActive,
+                    isEnabled: true,
+                    capturesScroll: { point in
+                        guard board.contentIsActive, let card = board.focusedCard else {
+                            return true
+                        }
+                        let origin = project(CGPoint(x: card.rect.x, y: card.rect.y + 36))
+                        return !CGRect(
+                            origin: origin,
+                            size: CGSize(
+                                width: card.rect.width * board.viewport.scale,
+                                height: (card.rect.height - 66) * board.viewport.scale)
+                        ).contains(point)
+                    },
                     pan: { dx, dy in
                         var viewport = board.viewport
                         viewport.x = min(100_000, max(-100_000, viewport.x - dx))
@@ -181,7 +201,7 @@ struct WorkspaceCanvasView: View {
                     hidden: {}
                 )
             )
-            .highPriorityGesture(backgroundDrag, including: spaceIsDown ? .all : .none)
+            .highPriorityGesture(backgroundDrag, including: spaceIsDown ? .all : .subviews)
             .gesture(
                 MagnifyGesture().onChanged { value in
                     if magnifyStart == nil { magnifyStart = board.viewport }
@@ -221,11 +241,14 @@ struct WorkspaceCanvasView: View {
             .onChange(of: boardHasKeyboardFocus) { _, focused in if !focused { spaceIsDown = false }
             }
             .onKeyPress(.space, phases: [.down, .repeat, .up]) { event in
+                guard !board.contentIsActive else { return .ignored }
                 spaceIsDown = event.phase != .up
                 return .handled
             }
             .onKeyPress("z", phases: .down) { event in
-                guard event.modifiers.contains(.command) else { return .ignored }
+                guard !board.contentIsActive, event.modifiers.contains(.command) else {
+                    return .ignored
+                }
                 if event.modifiers.contains(.shift) {
                     board.performRedo()
                 } else {
@@ -234,30 +257,36 @@ struct WorkspaceCanvasView: View {
                 return .handled
             }
             .onKeyPress(.delete) {
+                guard !board.contentIsActive else { return .ignored }
                 session.requestCanvasCardRemoval(board.id)
                 return .handled
             }
-            .onMoveCommand { direction in
-                switch direction {
-                case .left:
+            .onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow]) { event in
+                guard !board.contentIsActive else { return .ignored }
+                switch event.key {
+                case .leftArrow:
                     session.performCanvasEdit(board) { try board.moveSelection(dx: -10, dy: 0) }
-                case .right:
+                case .rightArrow:
                     session.performCanvasEdit(board) { try board.moveSelection(dx: 10, dy: 0) }
-                case .up:
+                case .upArrow:
                     session.performCanvasEdit(board) { try board.moveSelection(dx: 0, dy: -10) }
-                case .down:
+                case .downArrow:
                     session.performCanvasEdit(board) { try board.moveSelection(dx: 0, dy: 10) }
-                @unknown default: break
+                default: return .ignored
                 }
+                return .handled
             }
             .onKeyPress(.return) {
-                guard let id = board.selection.first, board.selection.count == 1 else {
+                guard !board.contentIsActive, let id = board.selection.first,
+                    board.selection.count == 1
+                else {
                     return .ignored
                 }
                 board.focus(id)
                 return .handled
             }
             .onKeyPress(.escape) {
+                guard !board.contentIsActive else { return .ignored }
                 board.selection = []
                 board.connectingFrom = nil
                 return .handled

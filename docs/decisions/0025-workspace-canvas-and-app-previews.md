@@ -39,11 +39,25 @@ Saved boards restore inertly: no process, browser load, app launch, capture, or
 permission grant. Persist no terminal output, prompt, environment, command,
 cookie, token, PID, foreign window ID, or captured frame.
 
-Board/content focus is explicit. Focus stays inside the Canvas tab; an always
-visible Leave Content/Back to Canvas route protects terminal and web input.
-Interactive terminals, web apps, and notes use a 100% focus surface within the
-Canvas. Board cards show bounded summaries, images, and native-window previews.
-This keeps terminal dimensions stable during board zoom and keeps input readable.
+The user's 2026-10-18 input correction changes card activation: a single click
+focuses content inside the card, without replacing the board.
+Command/Shift-click retains board selection;
+dragging a header or summary moves the card. Background dragging pans the board.
+Start, Connect, Choose Window, and Open App remain separate explicit actions.
+
+Board/content focus is explicit. Terminals, local web apps, and notes accept
+input inside resizable cards. The board stays visible. A visible Leave Content
+action returns keyboard input to board commands. Native app cards remain
+preview-only; Open App activates the separate application.
+
+Each new terminal card contains one terminal. It reuses a one-pane internal
+Terminal Group record for runtime ownership and inert restoration, but Canvas
+does not expose group creation or splits. Existing multi-pane references keep
+their stored record; Canvas shows the first pane, while the normal terminal
+workspace retains access to the full group. Board zoom scales a fixed logical
+card frame. Card resize changes that logical frame and the terminal size.
+Terminal presentation remains bounded to four surfaces per window.
+
 Canvas List and visible/menu/keyboard actions provide non-spatial access.
 Undo restores references and geometry, never live resource capability.
 

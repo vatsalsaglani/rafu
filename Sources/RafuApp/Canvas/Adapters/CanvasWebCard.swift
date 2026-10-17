@@ -153,7 +153,10 @@ struct CanvasWebCard: View {
                     }
                     Text(controller.status).font(.caption).foregroundStyle(.secondary)
                     if controller.webView == nil {
-                        Button("Connect") { session.connectCanvasWeb(card.id, board: board.id) }
+                        Button("Connect") {
+                            board.focus(card.id)
+                            session.connectCanvasWeb(card.id, board: board.id)
+                        }
                     } else {
                         Button("Stop") { controller.stop() }
                     }
@@ -165,8 +168,13 @@ struct CanvasWebCard: View {
                 }
                 if controller.webView != nil {
                     CanvasWebHost(
-                        controller: controller, acceptsInput: board.contentIsActive,
+                        controller: controller, acceptsInput: true,
                         isCurrentPresentation: isCurrent,
+                        onInput: {
+                            if board.focusedCardID != card.id || !board.contentIsActive {
+                                board.focus(card.id)
+                            }
+                        },
                         canMount: { [weak resources] in
                             resources?.canPresent(owner: presentationID) == true
                         })
@@ -189,6 +197,7 @@ private struct CanvasWebHost: NSViewRepresentable {
     let controller: CanvasWebPreviewController
     let acceptsInput: Bool
     let isCurrentPresentation: Bool
+    let onInput: () -> Void
     let canMount: @MainActor () -> Bool
     func makeNSView(context: Context) -> NativeContentMount { NativeContentMount() }
     func updateNSView(_ view: NativeContentMount, context: Context) {
@@ -197,6 +206,7 @@ private struct CanvasWebHost: NSViewRepresentable {
             return
         }
         view.mount(web)
+        view.onContentMouseDown = onInput
         view.isHidden = false
         view.acceptsContentInput = acceptsInput
     }

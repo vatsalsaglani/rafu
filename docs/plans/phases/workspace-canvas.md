@@ -81,7 +81,7 @@ other product's ownership, app embedding, persistence, or security behavior.
 
 | Card | First-release behavior | Explicit action that starts work |
 |---|---|---|
-| Terminal Group | Live native SwiftTerm group; reuse existing controllers, pane identity, attention, and close rules | Start a stopped group, or choose an existing group |
+| Terminal | One native SwiftTerm terminal inside a resizable card; reuse existing runtime and close rules | Start the stopped terminal |
 | File | Title, path, type, dirty state, and a bounded preview; Open uses the existing document/editor | Open the file in its normal editor tab |
 | Note | Small plain-text or Markdown note with native editing and native preview | Edit the note |
 | Image | Bounded thumbnail from an explicitly selected workspace file | Open in the existing media viewer |
@@ -127,9 +127,12 @@ card still works. This plan does not request screen permission now.
 - Scroll/pinch over board background pans/zooms. Scroll over an active terminal
   or web card belongs to that content. Space-drag pans only in board mode,
   never while entering terminal, web, or note text.
-- Single click selects a card; a header drag moves it. Selection does not start
-  a process, web load, capture, or another app. A clear Enter Content action
-  gives keyboard focus to interactive content. Escape returns focus to the
+- A single click focuses content inside the card. The board stays visible.
+  A header drag moves the card; a summary drag moves an inactive note/file/image.
+  The bottom-right handle resizes the card. Command/Shift-click
+  selects cards for board commands. Focus does not start a process, web load,
+  capture, or another app. Stopped terminals still require Start, and web
+  previews still require Connect. Escape returns focus to the
   card shell when not consumed by that content; a visible Leave Content button
   and a dedicated menu action always provide an exit path.
 - Board mode supports range selection, arrow-key movement, snapping, alignment,
@@ -137,12 +140,15 @@ card still works. This plan does not request screen permission now.
   ordinary drags never create connections.
 - The MVP does not edit source files in scaled miniature editors. Open File
   brings forward the existing editor, with the same dirty text and undo stack.
-- At readable scale, terminals and web cards can be interactive. At overview
-  scale, use summaries or bounded ephemeral frames and open the selected card
-  in a 1:1 focus surface. Zoom must not repeatedly change terminal row/column
-  counts. A deliberate card resize changes PTY size once after a bounded update.
+- Terminals and web apps run inside the board cards. Zoom scales the card's
+  logical frame and must not change terminal row/column counts. A deliberate
+  card resize changes the terminal's logical size through its existing resize
+  path. Each new terminal card is one terminal; no group/split UI is shown.
+  Existing multi-pane references remain readable through their first pane;
+  their full group remains in the ordinary terminal workspace.
 - Command routing follows an explicit board/content focus state. In terminal
-  content, group split and pane-focus commands call the existing group verbs.
+  content, process and input commands use the existing runtime. Group splitting
+  is disabled while a Canvas terminal has focus; add another terminal card.
   Save saves the Canvas, not an arbitrary terminal session. Closing a focused
   terminal pane uses its existing confirmation; closing a Canvas parks its
   groups and stops its web/capture surfaces. Neither operation hides a process
