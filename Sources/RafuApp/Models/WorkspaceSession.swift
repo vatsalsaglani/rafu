@@ -7,7 +7,7 @@ import RafuCore
 // (`Package.swift`) makes the custom `init(from:)` below MainActor-isolated,
 // which in turn makes the whole `Decodable` conformance MainActor-isolated —
 // unusable from a plain (non-`@MainActor`) `JSONDecoder().decode(...)` call
-// such as `WorkspaceRestorationStore.load()`'s `@concurrent` context or a
+// such as `WorkspaceRestorationStore.load()`'s actor context or a
 // headless test. This is a pure, `Sendable` value type; it never needed
 // actor isolation.
 nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable {
@@ -105,7 +105,9 @@ final class WorkspaceSession {
         var editableContent: String
     }
 
-    var descriptor: WorkspaceDescriptor?
+    var descriptor: WorkspaceDescriptor? {
+        didSet { cancelLocationNavigation() }
+    }
     var navigatorMode: WorkspaceNavigatorMode = .files {
         didSet { persistWorkspaceState() }
     }
@@ -137,7 +139,9 @@ final class WorkspaceSession {
     /// Window-scoped, non-persisted Ctrl-Tab selection. The overlay previews
     /// this value and commits its destination only when Control is released.
     private(set) var editorTabSwitcherState: EditorTabSwitcherState?
-    var selectedDocumentID: UUID?
+    var selectedDocumentID: UUID? {
+        didSet { cancelLocationNavigation() }
+    }
     var selectedTreePath: String?
     /// The in-flight payload for the current, same-process editor drag (tab
     /// or sidebar file). Only ever read inside a `performDrop` that already
@@ -274,7 +278,13 @@ final class WorkspaceSession {
     @ObservationIgnored
     let conductorRunController: ConductorRunController
 
-    init(conductorAdapters: [any ConductorCLIAdapter] = ConductorAdapterRegistry.all) {
+    init(
+        conductorAdapters: [any ConductorCLIAdapter] = ConductorAdapterRegistry.all,
+        restorationStore: WorkspaceRestorationStore = WorkspaceRestorationStore(),
+        closeSaveTracker: WorkspaceCloseSaveTracker = .shared
+    ) {
+        self.closeSaveTracker = closeSaveTracker
+        self.restorationStore = restorationStore
         self.conductorAdapters = conductorAdapters
         self.conductorRunController = ConductorRunController(adapters: conductorAdapters)
     }
@@ -412,6 +422,10 @@ final class WorkspaceSession {
     /// and controllers are both removed before a second path can observe them.
     func teardownTerminalGroups() {
         guard !didTeardownTerminalGroups else { return }
+        // Capture inert saved-group metadata before shutdown removes it.
+        // The task remains discoverable after this window leaves the registry.
+        closeSaveTracker.track(flushWorkspaceState())
+        cancelLocationNavigation()
         didTeardownTerminalGroups = true
         endTerminalGroupLibrary()
         cleanupTerminalSessions(terminal.sessions.map(\.id))
@@ -503,13 +517,25 @@ final class WorkspaceSession {
     private var ignoreSuggestionTask: Task<Void, Never>?
 
     @ObservationIgnored
-    private let restorationStore = WorkspaceRestorationStore()
+    private let restorationStore: WorkspaceRestorationStore
+
+    @ObservationIgnored
+    private let closeSaveTracker: WorkspaceCloseSaveTracker
 
     @ObservationIgnored
     private let cliInstaller = CLIInstaller()
 
     @ObservationIgnored
     private var restorationTask: Task<Void, Never>?
+
+    @ObservationIgnored
+    private var restorationAuthorizationID = UUID()
+
+    @ObservationIgnored
+    private var locationNavigationTask: Task<Void, Never>?
+
+    @ObservationIgnored
+    private var locationNavigationID = UUID()
 
     @ObservationIgnored
     private let liveness = WorkspaceLivenessService()
@@ -535,11 +561,10 @@ final class WorkspaceSession {
         conductorRunController.revealLiveTerminal(for: runID, in: self)
     }
 
-    /// Hosts the run-detail timeline in the editor canvas (C5) — the Runs
-    /// panel's row-selection path. Clears the file selection so
-    /// `EditorCanvasView` routes to the canvas instead of a document, the
-    /// same additive branch pattern `GitStandaloneDiffCanvas` established.
+    /// Selects the run-detail tab in its editor group. The group's file
+    /// selection and live editor remain intact below the auxiliary content.
     func showConductorRunDetail(_ runID: String) {
+        prepareAuxiliarySelection()
         selectedConductorRunID = runID
         navigatorMode = .runs
         conductorRunCanvasID = runID
@@ -549,16 +574,13 @@ final class WorkspaceSession {
         settingsVisible = false
         selectedDocumentID = nil
         selectedTreePath = nil
+        recordAuxiliaryTab(.runDetail(runID))
     }
 
-    /// Leaves the run-detail canvas, falling back to the last open document
-    /// tab (if any) exactly like `closeGitDiff()`'s fallback.
+    /// Closes run detail and returns to its group's selected file or terminal.
     func closeConductorRunDetail() {
-        guard conductorRunCanvasID != nil else { return }
-        conductorRunCanvasID = nil
-        if selectedDocumentID == nil, let fallback = openDocuments.last {
-            select(fallback)
-        }
+        guard let conductorRunCanvasID else { return }
+        closeAuxiliaryTab(.runDetail(conductorRunCanvasID))
     }
 
     /// Hosts the workspace-wide Ensemble projection in the editor canvas.
@@ -567,6 +589,7 @@ final class WorkspaceSession {
     var conductorGraphVisible = false
 
     func showConductorGraph() {
+        prepareAuxiliarySelection()
         conductorGraphVisible = true
         conductorRunCanvasID = nil
         ensembleStartCanvasVisible = false
@@ -575,20 +598,15 @@ final class WorkspaceSession {
         selectedDocumentID = nil
         selectedTreePath = nil
         navigatorMode = .runs
+        recordAuxiliaryTab(.graph)
     }
 
     func closeConductorGraph() {
-        guard conductorGraphVisible else { return }
-        conductorGraphVisible = false
-        if selectedDocumentID == nil, let fallback = openDocuments.last {
-            select(fallback)
-        }
+        closeAuxiliaryTab(.graph)
     }
 
-    /// Editor-hosted Ensemble creation canvases (UX-01). These are peers of
-    /// graph and run detail: every activator clears the other canvas modes,
-    /// and closing falls back to the last open document exactly like
-    /// `closeConductorRunDetail()`.
+    /// Ensemble creation tabs share an editor group with files. Only one
+    /// auxiliary route is selected, but open auxiliary tabs remain available.
     var ensembleStartCanvasVisible = false
     var ensembleNewRunCanvasVisible = false
     @ObservationIgnored private var ensembleStartLaunchInProgress = false
@@ -597,6 +615,8 @@ final class WorkspaceSession {
     /// The native Settings scene remains the no-window fallback for ⌘,;
     /// focused workspace windows route here instead.
     var settingsVisible = false
+    var auxiliaryTabs: [WorkspaceAuxiliaryTab] = []
+    var auxiliaryTabGroups: [WorkspaceAuxiliaryTab: EditorGroupID] = [:]
 
     func showSettings() {
         closeBlame()
@@ -615,19 +635,17 @@ final class WorkspaceSession {
         ensembleNewRunCanvasVisible = false
         selectedDocumentID = nil
         selectedTreePath = nil
+        recordAuxiliaryTab(.settings)
     }
 
     func closeSettings() {
-        guard settingsVisible else { return }
-        settingsVisible = false
-        if selectedDocumentID == nil, let fallback = openDocuments.last {
-            select(fallback)
-        }
+        closeAuxiliaryTab(.settings)
     }
 
     /// C8-07's four "New Ensemble…" entry points share this guarded seam.
     func showEnsembleStart() {
         guard descriptor != nil else { return }
+        prepareAuxiliarySelection()
         ensembleStartCanvasVisible = true
         ensembleNewRunCanvasVisible = false
         conductorGraphVisible = false
@@ -636,14 +654,11 @@ final class WorkspaceSession {
         selectedDocumentID = nil
         selectedTreePath = nil
         navigatorMode = .runs
+        recordAuxiliaryTab(.ensembleStart)
     }
 
     func closeEnsembleStart() {
-        guard ensembleStartCanvasVisible else { return }
-        ensembleStartCanvasVisible = false
-        if selectedDocumentID == nil, let fallback = openDocuments.last {
-            select(fallback)
-        }
+        closeAuxiliaryTab(.ensembleStart)
     }
 
     /// Coordinator launch reveals its terminal as part of starting Door 1.
@@ -660,6 +675,7 @@ final class WorkspaceSession {
 
     func showEnsembleNewRun() {
         guard descriptor != nil, canStartConductorWorkflowRun else { return }
+        prepareAuxiliarySelection()
         ensembleNewRunCanvasVisible = true
         ensembleStartCanvasVisible = false
         conductorGraphVisible = false
@@ -668,14 +684,11 @@ final class WorkspaceSession {
         selectedDocumentID = nil
         selectedTreePath = nil
         navigatorMode = .runs
+        recordAuxiliaryTab(.ensembleNewRun)
     }
 
     func closeEnsembleNewRun() {
-        guard ensembleNewRunCanvasVisible else { return }
-        ensembleNewRunCanvasVisible = false
-        if selectedDocumentID == nil, let fallback = openDocuments.last {
-            select(fallback)
-        }
+        closeAuxiliaryTab(.ensembleNewRun)
     }
 
     /// Drives `WorkspaceWindowView`'s `NavigationSplitView` column
@@ -2707,12 +2720,17 @@ final class WorkspaceSession {
         let name = url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent
 
         securityScopedURL = hasSecurityScope ? url : nil
+        // A fresh authorization must not reuse an older bookmark for this path.
+        restorationAuthorizationID = UUID()
         descriptor = WorkspaceDescriptor(
             displayName: name,
             location: .local(LocalWorkspaceReference(path: url.path))
         )
         navigationLadder = makeNavigationLadder(rootURL: url)
         openDocuments = []
+        suspendAuxiliarySelection()
+        auxiliaryTabs = []
+        auxiliaryTabGroups = [:]
         editorLayout = EditorLayoutState()
         documentFindStates = [:]
         workspaceSearch.reset()
@@ -2889,45 +2907,105 @@ final class WorkspaceSession {
     func goToLine(_ line: Int) {
         guard let document = selectedDocument, let snapshotProvider = document.textSnapshotProvider
         else { return }
+        cancelLocationNavigation()
         let offset = LineColumnIndex.utf16Offset(line: line, column: 1, in: snapshotProvider())
         findState(for: document).select(NSRange(location: offset, length: 0))
     }
 
-    /// Opens a file at a workspace-relative path and selects the location
-    /// described by `location` — the CLI `--goto` entry point
-    /// (`Sources/RafuCore/Launcher/IPC/**`; contract signature landed by
-    /// I0, see `docs/plans/phases/cli-app-ipc.md`). Mirrors
-    /// `openWorkspaceSymbol`'s open/select shape, computing the UTF-16
-    /// selection range from the file's on-disk contents via
-    /// `LineColumnIndex`. Reusing `DocumentFindState.select(_:)` means a
-    /// buffer that isn't mounted yet still receives the pending selection
-    /// once it is (`DocumentFindState.attach(_:)`); a dirty in-memory
-    /// buffer's live text and exact-column precision on a hibernated tab
-    /// are completed by the IPC lane's I4 increment — this is an honest
-    /// best-effort selection, not the final behavior.
-    func openFile(atRelativePath relativePath: String, selecting location: SourceLocation) {
-        guard let rootURL else { return }
+    /// Resolves CLI line/column navigation through the bounded async text
+    /// loader. A live or transient dirty buffer always takes precedence.
+    /// Returns the load task so callers that need completion can await it.
+    @discardableResult
+    func openFile(
+        atRelativePath relativePath: String, selecting location: SourceLocation
+    ) -> Task<Void, Never>? {
+        guard let rootURL else { return nil }
         let url = rootURL.appending(path: relativePath)
-        let document: EditorDocument
-        if let existing = openDocuments.first(where: { $0.url == url }) {
-            document = existing
-        } else {
-            document = trackNewDocument(url: url)
+        let document = openDocuments.first(where: { $0.url == url }) ?? trackNewDocument(url: url)
+        let liveText = document.pendingDirtyText ?? document.textSnapshotProvider?()
+        select(document)
+        // A newly mounted clean editor exposes its empty storage before the
+        // async load finishes. Resolve that case with the file loader instead.
+        if let liveText, !liveText.isEmpty || document.isDirty {
+            applyLocation(
+                location, in: liveText, to: document,
+                captureForLoad: document.pendingDirtyText != nil
+                    || document.textSnapshotProvider == nil)
+            return nil
         }
-        let liveText = document.textSnapshotProvider?()
-        let text = liveText ?? (try? String(contentsOf: url, encoding: .utf8))
-        let range = text.map {
+        // A dirty buffer with no available snapshot is never replaced by a
+        // disk-derived caret. Its editor retains ownership of that state.
+        guard !document.isDirty else { return nil }
+        let requestID = locationNavigationID
+        let requestedSelection =
+            document.selectionProvider?() ?? document.restoredSelection
+            ?? NSRange(location: 0, length: 0)
+        let task = Task(name: "Resolve file navigation") {
+            [weak self, weak document, fileService] in
+            do {
+                let range = try await WorkspaceLocationLoader.range(
+                    at: url, location: location, fileService: fileService)
+                try Task.checkCancellation()
+                guard let self, let document,
+                    locationNavigationID == requestID,
+                    self.rootURL == rootURL,
+                    selectedDocumentID == document.id,
+                    openDocuments.contains(where: { $0 === document })
+                else { return }
+                // A pointer or keyboard caret move can happen without a tab
+                // change. Do not let the disk result take that selection back.
+                if let currentSelection = document.selectionProvider?(),
+                    currentSelection != requestedSelection
+                {
+                    return
+                }
+                // A live load or edits may have completed while the read was
+                // suspended. Resolve against that text even when it is clean.
+                let currentText = document.pendingDirtyText ?? document.textSnapshotProvider?()
+                let captureForLoad =
+                    document.pendingDirtyText != nil || document.textSnapshotProvider == nil
+                    || (currentText?.isEmpty != false && !document.isDirty)
+                if let currentText, !currentText.isEmpty || document.isDirty {
+                    applyLocation(
+                        location, in: currentText, to: document, captureForLoad: captureForLoad)
+                } else if !document.isDirty {
+                    applyLocationRange(range, to: document, captureForLoad: captureForLoad)
+                }
+            } catch {
+                // The editor's load path owns file errors. Cancellation and
+                // stale navigation must not show a second error alert.
+            }
+        }
+        locationNavigationTask = task
+        return task
+    }
+
+    private func applyLocation(
+        _ location: SourceLocation, in text: String, to document: EditorDocument,
+        captureForLoad: Bool
+    ) {
+        applyLocationRange(
             NSRange(
                 location: LineColumnIndex.utf16Offset(
-                    line: location.line, column: location.column, in: $0),
-                length: 0
-            )
-        }
-        if liveText == nil, let range {
+                    line: location.line, column: location.column, in: text), length: 0),
+            to: document, captureForLoad: captureForLoad)
+    }
+
+    private func applyLocationRange(
+        _ range: NSRange, to document: EditorDocument, captureForLoad: Bool
+    ) {
+        // Find can attach before the editor's async load completes. Keep the
+        // same range for restoreViewState() after that load as well.
+        if captureForLoad {
             document.captureViewState(selection: range, scrollFraction: nil)
         }
-        select(document)
-        if let range { findState(for: document).select(range) }
+        findState(for: document).select(range)
+    }
+
+    private func cancelLocationNavigation() {
+        locationNavigationID = UUID()
+        locationNavigationTask?.cancel()
+        locationNavigationTask = nil
     }
 
     /// Caret-driven navigation entry point for the "Go to Definition"/"Go to
@@ -3558,6 +3636,7 @@ final class WorkspaceSession {
     }
 
     func select(_ document: EditorDocument) {
+        suspendAuxiliarySelection()
         let resource = EditorTabResource.file(document.url)
         let tab: EditorTabState
         let groupID: EditorGroupID
@@ -3709,6 +3788,10 @@ final class WorkspaceSession {
     /// focused window used to quit every open workspace window.
     func requestCloseActiveTab() {
         guard !isTerminalGroupModalInputBlocked else { return }
+        if let tab = selectedAuxiliaryTab {
+            closeAuxiliaryTab(tab)
+            return
+        }
         if closeFocusedTabIfPresent() {
             return
         }
@@ -3921,6 +4004,7 @@ final class WorkspaceSession {
     func selectEditorTab(_ tabID: EditorTabID, in groupID: EditorGroupID) {
         guard let tab = editorLayout.group(id: groupID)?.tabs.first(where: { $0.id == tabID })
         else { return }
+        suspendAuxiliarySelection()
         editorLayout.select(tabID, in: groupID)
         switch tab.resource {
         case .file:
@@ -4017,12 +4101,10 @@ final class WorkspaceSession {
             moveEditorTab(tabID, to: groupID)
             return
         }
-        if editorLayout.group(containing: tabID)?.id == groupID {
-            splitEditorTab(tabID, at: edge)
-        } else {
-            moveEditorTab(tabID, to: groupID)
-            splitEditorTab(tabID, at: edge)
-        }
+        guard editorLayout.split(group: groupID, at: edge, moving: tabID) != nil else { return }
+        synchronizeSelectionFromLayout()
+        updateHibernationStates()
+        persistWorkspaceState()
     }
 
     /// Handles a file dropped from the Files sidebar. Directories are
@@ -5479,8 +5561,8 @@ final class WorkspaceSession {
 
     isolated deinit {
         liveness.stop()
-        restorationTask?.cancel()
         navigationTask?.cancel()
+        locationNavigationTask?.cancel()
         indexRebuildTask?.cancel()
         symbolIndexRebuildTask?.cancel()
         teardownTerminalGroups()
@@ -5499,6 +5581,7 @@ final class WorkspaceSession {
         do {
             guard let restored = try await restorationStore.load() else { return }
             let resolved = try await restorationStore.resolve(restored.bookmark)
+            guard descriptor == nil, !Task.isCancelled else { return }
             guard FileManager.default.fileExists(atPath: resolved.url.path),
                 resolved.url.startAccessingSecurityScopedResource()
             else {
@@ -5506,7 +5589,16 @@ final class WorkspaceSession {
                 return
             }
 
+            let authorizationID = UUID()
+            await restorationStore.cacheBookmark(
+                resolved.isStale ? nil : restored.bookmark,
+                for: resolved.url, authorizationID: authorizationID)
+            guard descriptor == nil, !Task.isCancelled else {
+                resolved.url.stopAccessingSecurityScopedResource()
+                return
+            }
             securityScopedURL = resolved.url
+            restorationAuthorizationID = authorizationID
             descriptor = WorkspaceDescriptor(
                 displayName: resolved.url.lastPathComponent,
                 location: .local(LocalWorkspaceReference(path: resolved.url.path))
@@ -5617,16 +5709,60 @@ final class WorkspaceSession {
     }
 
     private func persistWorkspaceState() {
-        guard let rootURL else { return }
+        guard rootURL != nil, !didTeardownTerminalGroups else { return }
+        restorationTask?.cancel()
+        // Do not build layout/group values or ask for a bookmark until rapid
+        // tab and navigator changes have settled. This task holds no session
+        // while it sleeps.
+        restorationTask = Task(name: "Combine workspace restoration") { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(200))
+                try Task.checkCancellation()
+                guard let self else { return }
+                let save = makeWorkspaceStateSaveTask()
+                restorationTask = save
+                await save?.value
+            } catch {
+                return
+            }
+        }
+    }
+
+    /// Wait for the current combined request or final close save. This is also
+    /// the app-termination seam after terminal teardown has captured state.
+    func waitForWorkspaceStateSave() async {
+        await restorationTask?.value
+    }
+
+    /// Capture before close tears down saved Terminal Groups. The returned
+    /// task owns only value metadata and the store, so session release cannot
+    /// discard it. App termination can await this task before replying.
+    @discardableResult
+    func flushWorkspaceState() -> Task<Void, Never>? {
+        restorationTask?.cancel()
+        let save = makeWorkspaceStateSaveTask()
+        restorationTask = save
+        return save
+    }
+
+    private func makeWorkspaceStateSaveTask() -> Task<Void, Never>? {
+        guard let rootURL else { return nil }
         let openPaths = openDocuments.map { relativePath(for: $0.url) }
         let selectedPath = selectedDocument.map { relativePath(for: $0.url) }
         let navigatorMode = navigatorMode
         let terminalGroupRestoration = terminalGroupWorkspaceRestoration()
         let restorableEditorLayout = editorLayoutForWorkspaceRestoration()
-        restorationTask?.cancel()
-        restorationTask = Task(name: "Persist workspace restoration") { [restorationStore] in
+        let authorizationID = restorationAuthorizationID
+        // A URL rebuilt from the descriptor path does not carry the folder
+        // importer's or resolved bookmark's security capability. Retain and
+        // bookmark the original granted URL when this session has one.
+        let bookmarkURL = securityScopedURL ?? rootURL
+        let retainedScope = bookmarkURL.startAccessingSecurityScopedResource() ? bookmarkURL : nil
+        return Task(name: "Save workspace restoration") { [restorationStore] in
+            defer { retainedScope?.stopAccessingSecurityScopedResource() }
             do {
-                let bookmark = try await restorationStore.makeBookmark(for: rootURL)
+                let bookmark = try await restorationStore.makeBookmark(
+                    for: bookmarkURL, authorizationID: authorizationID)
                 try Task.checkCancellation()
                 try await restorationStore.save(
                     RestorableWorkspace(
@@ -5639,8 +5775,6 @@ final class WorkspaceSession {
                         terminalGroupRestoration: terminalGroupRestoration
                     )
                 )
-            } catch is CancellationError {
-                return
             } catch {
                 return
             }

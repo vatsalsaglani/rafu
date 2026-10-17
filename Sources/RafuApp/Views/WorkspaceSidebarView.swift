@@ -130,7 +130,7 @@ struct WorkspaceSidebarView: View {
 /// `DisclosureGroup` recursion (instead of `OutlineGroup`) is required by
 /// the lazy tree: `OutlineGroup` needs a fully materialized `children`
 /// key path up front, which is exactly what per-directory loading avoids.
-private struct WorkspaceFileTreeItem: View {
+struct WorkspaceFileTreeItem: View {
     @Bindable var session: WorkspaceSession
     let node: WorkspaceFileNode
     @Binding var renameNode: WorkspaceFileNode?
@@ -211,19 +211,7 @@ private struct WorkspaceFileTreeItem: View {
     @ViewBuilder
     private var row: some View {
         let base =
-            FileTreeRow(
-                node: node,
-                isSelected: node.url.path == session.selectedTreePath,
-                isDropTarget: isDropTargeted,
-                gitBadge: session.gitTreeBadges[node.relativePath]
-            )
-            .contentShape(.rect)
-            .onTapGesture(count: 2) { session.open(node) }
-            .simultaneousGesture(
-                TapGesture(count: 1).onEnded {
-                    session.selectedTreePath = node.url.path
-                }
-            )
+            interactiveRow
             .contextMenu { contextMenu }
             .listRowBackground(Color.clear)
         if node.isDirectory {
@@ -242,6 +230,39 @@ private struct WorkspaceFileTreeItem: View {
                 return provider
             }
         }
+    }
+
+    @ViewBuilder
+    private var interactiveRow: some View {
+        if node.isDirectory {
+            rowLabel
+                .simultaneousGesture(
+                    TapGesture().onEnded { activateRow() }
+                )
+        } else {
+            Button(action: activateRow) {
+                rowLabel
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var rowLabel: some View {
+        FileTreeRow(
+            node: node,
+            isSelected: node.url.path == session.selectedTreePath,
+            isDropTarget: isDropTargeted,
+            gitBadge: session.gitTreeBadges[node.relativePath]
+        )
+        .contentShape(.rect)
+    }
+
+    /// Only an explicit row action opens a file. Tree selection also changes
+    /// during editor navigation and reveal, so observing that value would
+    /// create a second, unwanted editor-navigation action.
+    func activateRow() {
+        session.selectedTreePath = node.url.path
+        if !node.isDirectory { session.open(node) }
     }
 
     @State private var isDropTargeted = false
@@ -383,7 +404,7 @@ private struct FileTreeRow: View {
         )
         .help(node.relativePath)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
-        .accessibilityHint(node.isDirectory ? "Folder" : "Double-click to open")
+        .accessibilityHint(node.isDirectory ? "Folder" : "Open file")
     }
 
     /// Tints the file name for statuses whose meaning is otherwise carried only

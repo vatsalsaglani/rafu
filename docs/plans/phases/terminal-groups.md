@@ -15,6 +15,17 @@ ADR 0023 before source work starts.
 
 ## Product outcome
 
+### 2026-10-17 input repair scope
+
+The user reports that Shift-Return and Control-Return do not add a newline in
+agent CLIs. The coordinator owns `Terminal/RafuTerminalView.swift`, a narrow
+terminal key policy helper, focused input tests, and an input reference note.
+Preserve plain Return, IME composition, Option/Command bindings, and negotiated
+keyboard protocols. Test exact outbound bytes without starting an agent or
+sending a prompt. Verify the native input path in Rafu Lightning with a local
+probe, then run format, build, parallel and serial tests. Canvas work requested
+in the same turn is planning only, in a separate proposed phase document.
+
 A user can keep one task in one named **Terminal Group** tab. The tab can hold
 one or more **terminal panes** in a recursive split layout. Each live pane owns
 one existing `WorkspaceTerminalController`, one PTY, and one SwiftTerm view.

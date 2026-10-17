@@ -131,50 +131,66 @@ func clampSelectionBounds() {
             == NSRange(location: 0, length: 0))
 }
 
-/// Model-level round trip for the structural-remount data-loss fix: mirrors
-/// exactly the branch `CodeEditorView.Coordinator.load()` takes around
-/// `document.pendingDirtyText`, without needing a live `NSTextView`.
 @MainActor
-@Test("pendingDirtyText: a dirty hand-off wins over disk, stays dirty, and clears after restore")
-func pendingDirtyTextWinsOverDiskAndClearsAfterRestore() {
-    let document = EditorDocument(url: URL(fileURLWithPath: "/tmp/example.swift"))
-    let diskText = "disk contents"
-
-    // dismantleNSView only captures the hand-off for a dirty document.
+@Test("A first-load dirty seed wins over real disk content and clears after load")
+func pendingDirtyTextWinsOverDiskAndClearsAfterRestore() async throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    try Data("disk contents".utf8).write(to: url)
+    defer { try? FileManager.default.removeItem(at: url) }
+    let document = EditorDocument(url: url)
+    defer { document.editorResources?.release() }
     document.isDirty = true
     document.pendingDirtyText = "unsaved edits"
 
-    // load()'s text-source decision: the hand-off wins, disk is never read.
-    let seededDirtyText = document.pendingDirtyText
-    let text = seededDirtyText ?? diskText
-    #expect(text == "unsaved edits")
+    let editor = CodeEditorView(document: document, theme: RafuThemeCatalog.indigo)
+    let coordinator = editor.makeCoordinator()
+    let initialLoad = try #require(coordinator.loadTask)
+    await initialLoad.value
 
-    // load()'s post-restore bookkeeping: stays dirty, hand-off clears.
-    if seededDirtyText != nil {
-        document.isDirty = true
-        document.pendingDirtyText = nil
-    }
+    #expect(document.textSnapshotProvider?() == "unsaved edits")
     #expect(document.isDirty)
     #expect(document.pendingDirtyText == nil)
+    #expect(try String(contentsOf: url, encoding: .utf8) == "disk contents")
 
-    // A later load of a now-clean document (no pending hand-off) falls
-    // through to disk, matching unchanged pre-increment behavior.
+    // A clean hibernation must release the seed-backed editor. The next
+    // actual load must read disk instead of restoring the consumed seed.
     document.isDirty = false
-    let cleanSeededText = document.pendingDirtyText
-    #expect(cleanSeededText == nil)
-    #expect((cleanSeededText ?? diskText) == diskText)
+    document.markHibernated()
+    #expect(document.editorResources == nil)
+    document.markLoaded()
+    let reloadedCoordinator = editor.makeCoordinator()
+    let diskLoad = try #require(reloadedCoordinator.loadTask)
+    await diskLoad.value
+    #expect(reloadedCoordinator !== coordinator)
+    #expect(document.textSnapshotProvider?() == "disk contents")
+    #expect(!document.isDirty)
+    #expect(document.pendingDirtyText == nil)
 }
 
 @MainActor
-@Test("dismantleNSView's isDirty guard: a clean document never captures a hand-off")
-func pendingDirtyTextNeverCapturedForCleanDocument() {
-    let document = EditorDocument(url: URL(fileURLWithPath: "/tmp/example.swift"))
-    document.isDirty = false
+@Test("A clean host teardown retains resources without a seed; hibernation releases them")
+func pendingDirtyTextNeverCapturedForCleanDocument() async throws {
+    let document = EditorDocument(untitledNumber: 1)
+    let editor = CodeEditorView(document: document, theme: RafuThemeCatalog.indigo)
+    let coordinator = editor.makeCoordinator()
+    let load = try #require(coordinator.loadTask)
+    await load.value
+    let resources = try #require(document.editorResources)
+    let host = editor.makeHost(coordinator: coordinator)
+    #expect(resources.activeHost === host)
 
-    // Mirrors dismantleNSView's `if coordinator.document.isDirty { ... }`
-    // guard: a clean document's live text is never captured.
-    if document.isDirty {
-        document.pendingDirtyText = "should never be captured"
-    }
+    CodeEditorView.dismantleNSView(host, coordinator: coordinator)
+    #expect(document.editorResources === resources)
+    #expect(resources.activeHost == nil)
+    #expect(document.textSnapshotProvider?() == "")
+    #expect(document.saveAction != nil)
+    #expect(!document.isDirty)
+    #expect(document.pendingDirtyText == nil)
+
+    document.markHibernated()
+    #expect(document.loadState == .hibernated)
+    #expect(document.editorResources == nil)
+    #expect(document.textSnapshotProvider == nil)
+    #expect(document.saveAction == nil)
     #expect(document.pendingDirtyText == nil)
 }

@@ -502,6 +502,7 @@ final class EnsembleStartModel {
 struct EnsembleStartCanvas: View {
     @Environment(\.rafuTheme) private var theme
     @Bindable var session: WorkspaceSession
+    var showsTabStrip = true
 
     @State private var model = EnsembleStartModel()
 
@@ -519,8 +520,10 @@ struct EnsembleStartCanvas: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            tabStrip
-            Divider().overlay(theme.palette.borderSubtle)
+            if showsTabStrip {
+                tabStrip
+                Divider().overlay(theme.palette.borderSubtle)
+            }
             header
             Divider().overlay(theme.palette.borderSubtle)
             doorContent

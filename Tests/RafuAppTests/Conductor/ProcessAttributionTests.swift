@@ -57,7 +57,7 @@ func loginShellSpecHasNoAttribution() {
     #expect(spec.resourceAttribution == nil)
     // The attribution never reaches the child: it is not argv, not env.
     let launch = spec.resolvedLaunch()
-    #expect(!(launch.arguments ?? []).contains(where: { $0.contains("•") }))
+    #expect(!launch.arguments.contains(where: { $0.contains("•") }))
     #expect(!(launch.environment ?? []).contains(where: { $0.contains("•") }))
 }
 

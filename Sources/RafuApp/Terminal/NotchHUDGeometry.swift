@@ -130,7 +130,7 @@ extension NotchHUDGeometry {
     /// notch housing: the safe-area band height on a notched screen, 0 on
     /// the non-notch fallback (where the window already sits below the
     /// menu bar).
-    static func bandInset(for metrics: NotchScreenMetrics) -> CGFloat {
+    nonisolated static func bandInset(for metrics: NotchScreenMetrics) -> CGFloat {
         notchRect(for: metrics) != nil ? metrics.safeAreaTopInset : 0
     }
 }

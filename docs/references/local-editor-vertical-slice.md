@@ -10,8 +10,8 @@
   in any editor group, marked dirty, or among the newest eight accessed. Other
   documents hibernate (text storage released), reloading from disk on refocus
   with restored selection and scroll position; dirty documents never hibernate.
-  Dirty text captured during a structural remount (group split/tab move) survives
-  the SwiftUI subtree teardown via `pendingDirtyText`. See
+  Loaded TextKit resources survive a structural remount (group split/tab move)
+  through the document-owned resource object and a new mount host. See
   [`editor-working-set-and-hibernation.md`](editor-working-set-and-hibernation.md).
 - Live text stays in `NSTextStorage`. SwiftUI observes identity, dirty state,
   revision, preview mode, and errors only. Syntax attributes are debounced and
@@ -19,7 +19,7 @@
 - The tree excludes known generated/heavy roots and symbolic links, but keeps
   useful dotfiles such as `.env`, `.gitignore`, `.github`, and `.swift-format`.
   One unreadable child directory produces an empty node rather than discarding the
-  entire workspace tree. UTF-8 editing is capped at 4 MB for this checkpoint.
+  entire workspace tree. UTF-8 editing is capped at 16 MiB, with the separate 2 MiB guard (ADR 0019 amendment).
   The sidebar tree is lazy and expansion-driven, not eagerly recursive — see
   [`memory-and-file-indexing.md`](memory-and-file-indexing.md).
 - Markdown preview is a native block renderer. The native Mermaid preview renders

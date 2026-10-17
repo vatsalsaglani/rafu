@@ -90,17 +90,22 @@ if [[ -d "$ROOT_DIR/Resources" ]]; then
   cp -R "$ROOT_DIR/Resources/." "$APP_RESOURCES/"
 fi
 
-# Stage the SwiftPM resource bundle (vendored tree-sitter highlights.scm) at
-# the .app TOP LEVEL — beside Contents, NOT inside Contents/Resources — which
-# is where `Bundle.module` resolves it via `Bundle.main.bundleURL`. SPM emits a
-# FLAT bundle, so SwiftTreeSitter's own bundle resolver never finds these; we
-# load them directly with `Bundle.module`. See
-# Sources/RafuApp/Resources/Grammars/README.md.
-# SPM names the bundle "<PackageName>_<TargetName>.bundle" — here Rafu_RafuApp.
+# Older SwiftPM emits flat bundles whose accessor searches the app root.
+# Swift 6.4's Swift Build backend emits macOS bundles and searches Resources.
+# Preserve each generated bundle layout and include dependency resources.
 RESOURCE_BUNDLE_NAME="Rafu_${GUI_PRODUCT}.bundle"
-if [[ -d "$BUILD_BIN_DIR/$RESOURCE_BUNDLE_NAME" ]]; then
-  rm -rf "$APP_BUNDLE/$RESOURCE_BUNDLE_NAME"
-  cp -R "$BUILD_BIN_DIR/$RESOURCE_BUNDLE_NAME" "$APP_BUNDLE/$RESOURCE_BUNDLE_NAME"
+for resource_bundle_name in "$RESOURCE_BUNDLE_NAME" "SwiftTerm_SwiftTerm.bundle"; do
+  source_bundle="$BUILD_BIN_DIR/$resource_bundle_name"
+  if [[ -d "$source_bundle/Contents/Resources" ]]; then
+    cp -R "$source_bundle" "$APP_RESOURCES/"
+  elif [[ -d "$source_bundle" ]]; then
+    cp -R "$source_bundle" "$APP_BUNDLE/"
+  fi
+done
+if [[ -d "$APP_RESOURCES/$RESOURCE_BUNDLE_NAME/Contents/Resources" ]]; then
+  GRAMMAR_RESOURCE_ROOT="$APP_RESOURCES/$RESOURCE_BUNDLE_NAME/Contents/Resources"
+else
+  GRAMMAR_RESOURCE_ROOT="$APP_BUNDLE/$RESOURCE_BUNDLE_NAME"
 fi
 
 "$ROOT_DIR/script/generate_app_icon.sh" "$APP_ICON" "$SEAM_COLOR"
@@ -166,8 +171,8 @@ PLIST
 # ("bundleProxyForCurrentProcess is nil") against an unsigned app. `--sign -`
 # needs no Developer ID/keychain entry, so this stays CI/local-safe.
 #
-# NOT fatal on failure: the vendored tree-sitter resource bundle
-# ("$RESOURCE_BUNDLE_NAME") deliberately sits at the .app TOP LEVEL, beside
+# NOT fatal on failure: with older SwiftPM, the vendored tree-sitter resource bundle
+# ("$RESOURCE_BUNDLE_NAME") sits at the .app TOP LEVEL, beside
 # Contents (see Sources/RafuApp/Resources/Grammars/README.md) — SwiftPM's
 # flat resource-bundle layout requires this for `Bundle.module` to resolve
 # it, both under `swift test`/`swift run` and here. `codesign` treats a
@@ -195,10 +200,9 @@ test -f "$APP_RESOURCES/Themes/notion-light.json"
 test -f "$APP_RESOURCES/Themes/notion-dark.json"
 test -f "$APP_RESOURCES/Themes/github-light.json"
 test -f "$APP_RESOURCES/Themes/github-dark.json"
-# The vendored tree-sitter query bundle must land at the .app top level (where
-# Bundle.module resolves it) with its grammar subdirectories intact.
-test -d "$APP_BUNDLE/Rafu_${GUI_PRODUCT}.bundle"
-test -f "$APP_BUNDLE/Rafu_${GUI_PRODUCT}.bundle/Grammars/Swift/highlights.scm"
+# Verify the grammar in the resource layout emitted by the active backend.
+test -d "$GRAMMAR_RESOURCE_ROOT"
+test -f "$GRAMMAR_RESOURCE_ROOT/Grammars/Swift/highlights.scm"
 test -f "$APP_RESOURCES/AppIcon/rafu-icon-seam.svg"
 test -f "$APP_RESOURCES/FileIcons/claude.svg"
 test -f "$APP_RESOURCES/FileIcons/codex.svg"

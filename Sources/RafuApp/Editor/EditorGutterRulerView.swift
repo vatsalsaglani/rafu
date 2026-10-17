@@ -24,14 +24,15 @@ struct EditorGutterStyle: Equatable {
 }
 
 /// Line-number gutter for the code editor: numbers, caret-line emphasis, and
-/// per-line Git change strips. State is per open buffer; the line-start index
-/// is invalidated on every edit and rebuilt lazily on the next draw.
+/// per-line Git change strips. One edit-driven line index serves line count,
+/// lookup, and width. Layout work stays outside text-storage edit processing.
 final class EditorGutterRulerView: NSRulerView {
     var style: EditorGutterStyle {
         didSet {
             guard style != oldValue else { return }
             cachedDigitWidth = nil
-            updateThickness()
+            thicknessNeedsUpdate = true
+            scheduleThicknessUpdate()
             needsDisplay = true
         }
     }
@@ -51,8 +52,15 @@ final class EditorGutterRulerView: NSRulerView {
     var peekAction: (@MainActor (Int) -> Void)?
 
     private weak var textView: NSTextView?
-    private var lineStartOffsets: [Int] = [0]
-    private var lineIndexIsValid = false
+    private var lineIndex: EditorGutterLineIndex
+    private var thicknessNeedsUpdate = true
+    private var thicknessUpdateIsScheduled = false
+    private(set) var thicknessUpdateCount = 0
+    private(set) var thicknessRetileCount = 0
+
+    /// Per-buffer counters for tests and debugger measurement; contains no text.
+    var lineIndexOperations: EditorGutterLineIndex.Operations { lineIndex.operations }
+    var indexedLineCount: Int { lineIndex.lineCount }
     private var cachedDigitWidth: CGFloat?
 
     private static let stripWidth: CGFloat = 3
@@ -62,6 +70,11 @@ final class EditorGutterRulerView: NSRulerView {
     init(scrollView: NSScrollView, textView: NSTextView, style: EditorGutterStyle) {
         self.style = style
         self.textView = textView
+        if let storage = textView.textStorage {
+            lineIndex = EditorGutterLineIndex(content: storage.mutableString)
+        } else {
+            lineIndex = EditorGutterLineIndex(content: "" as NSString)
+        }
         super.init(scrollView: scrollView, orientation: .verticalRuler)
         // NSView.clipsToBounds defaults to false since macOS 14, and AppKit
         // hands rulers a dirty rect wider than their bounds. Without clipping,
@@ -76,6 +89,12 @@ final class EditorGutterRulerView: NSRulerView {
                 .size(withAttributes: [.font: style.font]).width + Self.trailingPadding
         )
 
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(gutterStorageDidProcessEditing(_:)),
+            name: NSTextStorage.didProcessEditingNotification,
+            object: textView.textStorage
+        )
         textView.postsFrameChangedNotifications = true
         scrollView.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(
@@ -90,6 +109,7 @@ final class EditorGutterRulerView: NSRulerView {
             name: NSView.frameDidChangeNotification,
             object: textView
         )
+        updateThickness()
     }
 
     @available(*, unavailable)
@@ -103,28 +123,55 @@ final class EditorGutterRulerView: NSRulerView {
 
     override var isFlipped: Bool { true }
 
+    /// Compatibility entry point for explicit buffer loads. Normal edits have
+    /// already updated the index through the storage notification. Only repair
+    /// a missed storage replacement; do not rescan a correctly indexed load.
     func invalidateLineIndex() {
-        lineIndexIsValid = false
+        if let content = textView?.textStorage?.mutableString,
+            content.length != lineIndex.utf16Length
+        {
+            lineIndex.rebuild(content: content)
+        }
+        thicknessNeedsUpdate = true
         updateThickness()
         needsDisplay = true
     }
 
-    /// Marks the cached line index stale and requests a redraw WITHOUT
-    /// recomputing thickness. Safe to call synchronously from inside a text
-    /// edit transaction — unlike `invalidateLineIndex()`, whose
-    /// `updateThickness()` calls `enclosingScrollView?.tile()`, which
-    /// re-enters TextKit layout. Running that tile inside
-    /// `NSTextStorageDelegate.textStorage(_:didProcessEditing:…)`, while a
-    /// just-inserted range was still settling, raised `-[NSLayoutManager
-    /// _fillLayoutHoleForCharacterRange:…]` on large pastes (crash report,
-    /// 2026-07-22) — the same "never touch AppKit text state synchronously
-    /// on the edit path" hazard as the prior caret-color and find crashes.
-    /// The edit-processing delegate calls this immediately (so line numbers
-    /// stay correct and a redraw is queued) and defers `updateThickness()`
-    /// to the next runloop turn, after `processEditing` returns.
+    /// The coordinator can call this inside didProcessEditing. It must never
+    /// tile or request TextKit geometry there. The storage notification owns
+    /// the edit delta; this compatibility call only requests deferred width.
     func markLineIndexStale() {
-        lineIndexIsValid = false
+        scheduleThicknessUpdate()
         needsDisplay = true
+    }
+
+    // Keep a unique selector: NSObject has a deprecated, nonisolated
+    // textStorageDidProcessEditing: category method in AppKit.
+    @objc private func gutterStorageDidProcessEditing(_ notification: Notification) {
+        guard let storage = notification.object as? NSTextStorage,
+            storage === textView?.textStorage,
+            storage.editedMask.contains(.editedCharacters)
+        else { return }
+        lineIndex.applyEdit(
+            content: storage.mutableString,
+            editedRange: storage.editedRange,
+            changeInLength: storage.changeInLength
+        )
+        thicknessNeedsUpdate = true
+        scheduleThicknessUpdate()
+        needsDisplay = true
+    }
+
+    private func scheduleThicknessUpdate() {
+        guard !thicknessUpdateIsScheduled else { return }
+        thicknessUpdateIsScheduled = true
+        // This AppKit boundary needs an actual next-runloop dispatch. An
+        // immediate MainActor call can re-enter TextKit during processEditing.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            thicknessUpdateIsScheduled = false
+            updateThickness()
+        }
     }
 
     /// Recomputes the gutter width from the current line count and, when it
@@ -133,8 +180,10 @@ final class EditorGutterRulerView: NSRulerView {
     /// the text view is already tiled at the old width and renders under the
     /// numbers.
     func updateThickness() {
-        guard let content = textView?.string as NSString? else { return }
-        let lines = max(1, lineCount(in: content))
+        guard thicknessNeedsUpdate else { return }
+        thicknessNeedsUpdate = false
+        thicknessUpdateCount += 1
+        let lines = lineIndex.lineCount
         if cachedDigitWidth == nil {
             cachedDigitWidth = ("8" as NSString).size(withAttributes: [.font: style.font]).width
         }
@@ -145,28 +194,13 @@ final class EditorGutterRulerView: NSRulerView {
         )
         guard abs(needed - ruleThickness) > 0.5 else { return }
         ruleThickness = needed
+        thicknessRetileCount += 1
         // `EditorDropForwardingScrollView.tile()` converts macOS 26's
         // overlay-inset ruler tiling back to classic frame tiling, so after
         // this the clip view starts at the gutter's trailing edge and x = 0
         // is the true horizontal home — see that override for the details.
         enclosingScrollView?.tile()
         enclosingScrollView?.documentView?.needsDisplay = true
-    }
-
-    /// Fast newline count (no offsets array); used only for thickness sizing.
-    private func lineCount(in content: NSString) -> Int {
-        var count = 1
-        var index = 0
-        while index < content.length {
-            var lineEnd = 0
-            content.getLineStart(
-                nil, end: &lineEnd, contentsEnd: nil,
-                for: NSRange(location: index, length: 0))
-            if lineEnd <= index { break }
-            if lineEnd < content.length { count += 1 }
-            index = lineEnd
-        }
-        return count
     }
 
     @objc private func clientLayoutChanged() {
@@ -186,8 +220,7 @@ final class EditorGutterRulerView: NSRulerView {
             let layoutManager = textView.layoutManager,
             let container = textView.textContainer
         else { return }
-        let content = textView.string as NSString
-        rebuildLineIndexIfNeeded(content: content)
+        let contentLength = textView.textStorage?.length ?? 0
 
         let origin = textView.textContainerOrigin
         let rulerOffset = convert(NSPoint.zero, from: textView)
@@ -202,12 +235,12 @@ final class EditorGutterRulerView: NSRulerView {
             [.font: self.style.font, .foregroundColor: color]
         }
 
-        var lineIndex = lineNumber(forCharacterAt: charRange.location) - 1
-        while lineIndex < lineStartOffsets.count {
-            let startOffset = lineStartOffsets[lineIndex]
+        var rowIndex = lineNumber(forCharacterAt: charRange.location) - 1
+        while rowIndex < lineIndex.starts.count {
+            let startOffset = lineIndex.starts[rowIndex]
             guard startOffset <= NSMaxRange(charRange) else { break }
             let fragmentRect: NSRect
-            if startOffset >= content.length {
+            if startOffset >= contentLength {
                 // Trailing empty line (or empty buffer).
                 fragmentRect = layoutManager.extraLineFragmentRect
             } else {
@@ -216,7 +249,7 @@ final class EditorGutterRulerView: NSRulerView {
                     forGlyphAt: glyphIndex, effectiveRange: nil)
             }
             let y = fragmentRect.minY + origin.y + rulerOffset.y
-            let lineNumber = lineIndex + 1
+            let lineNumber = rowIndex + 1
 
             let label = "\(lineNumber)" as NSString
             let color =
@@ -231,7 +264,7 @@ final class EditorGutterRulerView: NSRulerView {
                 withAttributes: labelAttributes
             )
             drawGitMarkers(forLine: lineNumber, y: y, height: fragmentRect.height)
-            lineIndex += 1
+            rowIndex += 1
         }
     }
 
@@ -270,8 +303,6 @@ final class EditorGutterRulerView: NSRulerView {
         }
         let textPoint = textView.convert(event.locationInWindow, from: nil)
         let index = textView.characterIndexForInsertion(at: textPoint)
-        let content = textView.string as NSString
-        rebuildLineIndexIfNeeded(content: content)
         let line = lineNumber(forCharacterAt: index)
         guard hasGitMarkerStrip(atLine: line) else {
             super.mouseDown(with: event)
@@ -286,56 +317,12 @@ final class EditorGutterRulerView: NSRulerView {
             || markers.modified.contains(where: { $0.contains(line) })
     }
 
-    /// 1-based line number of the line containing an arbitrary character
-    /// offset in the client text view's CURRENT content, rebuilding the
-    /// cached line-start index first if it was invalidated (e.g. by a
-    /// recent edit). Used outside `draw()` — by GX1's caret-line detection
-    /// (`CodeEditorView.Coordinator.scheduleInlineBlame()`) — so callers
-    /// never read a stale index the way a raw `lineNumber(forCharacterAt:)`
-    /// call could.
+    /// Uses the index updated synchronously by character-edit notifications.
     func lineNumber(forOffset offset: Int) -> Int {
-        if let content = textView?.string as NSString? {
-            rebuildLineIndexIfNeeded(content: content)
-        }
-        return lineNumber(forCharacterAt: offset)
+        lineIndex.lineNumber(forOffset: offset)
     }
 
-    /// 1-based line number of the line containing `offset`.
     private func lineNumber(forCharacterAt offset: Int) -> Int {
-        var low = 0
-        var high = lineStartOffsets.count - 1
-        while low < high {
-            let mid = (low + high + 1) / 2
-            if lineStartOffsets[mid] <= offset {
-                low = mid
-            } else {
-                high = mid - 1
-            }
-        }
-        return low + 1
+        lineIndex.lineNumber(forOffset: offset)
     }
-
-    private func rebuildLineIndexIfNeeded(content: NSString) {
-        guard !lineIndexIsValid else { return }
-        var offsets: [Int] = [0]
-        var location = 0
-        while location < content.length {
-            var lineEnd = 0
-            var contentsEnd = 0
-            content.getLineStart(
-                nil, end: &lineEnd, contentsEnd: &contentsEnd,
-                for: NSRange(location: location, length: 0)
-            )
-            if lineEnd >= content.length {
-                // A trailing newline yields one final empty line.
-                if contentsEnd < lineEnd { offsets.append(lineEnd) }
-                break
-            }
-            offsets.append(lineEnd)
-            location = lineEnd
-        }
-        lineStartOffsets = offsets
-        lineIndexIsValid = true
-    }
-
 }

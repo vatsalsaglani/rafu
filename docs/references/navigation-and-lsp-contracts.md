@@ -139,7 +139,7 @@ The language-server trust gate must be presented to the user to be meaningful. W
 
 ### DocumentDidOpen disk-read fallback (post-merge validation fix A3, 2026-07-15)
 
-When `LanguageIntelligenceCoordinator.documentDidOpen` runs synchronously before the editor mounts, `document.textSnapshotProvider` is `nil`. Rather than send an empty `didOpen` payload to the language server (which would cause an authoritative-empty LSP answer to block syntactic fallback on immediate Go to Definition), the coordinator now reads the document text from disk off-main (respecting the 4 MB cap; oversized/unreadable files fall back to `""`). The disk read is the truth because the document was just opened clean. When the provider IS available (editor mounted), behavior is unchanged.
+When `LanguageIntelligenceCoordinator.documentDidOpen` runs synchronously before the editor mounts, `document.textSnapshotProvider` is `nil`. Rather than send an empty `didOpen` payload to the language server (which would cause an authoritative-empty LSP answer to block syntactic fallback on immediate Go to Definition), the coordinator now reads the document text from disk off-main (respecting the 16 MiB cap; oversized/unreadable files fall back to `""`). The disk read is the truth because the document was just opened clean. When the provider IS available (editor mounted), behavior is unchanged.
 
 ### Edit-forwarding gate and LanguageServerStatus.forwardsDocumentChanges (post-merge validation fix B2, 2026-07-15)
 

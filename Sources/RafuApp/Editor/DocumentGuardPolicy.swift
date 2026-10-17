@@ -17,9 +17,8 @@ nonisolated enum DocumentGuardDecision: Equatable, Sendable {
 /// guard mode. Computed once at document open (see
 /// `CodeEditorView.Coordinator.load()`); never re-evaluated per keystroke.
 nonisolated enum DocumentGuardPolicy {
-    /// Deliberately below `WorkspaceFileService.maximumEditorBytes` (4 MB):
-    /// the editor's open cap already rejects anything above 4 MB, so this
-    /// threshold is what actually makes `.tooLarge` reachable in practice.
+    /// Deliberately below the 16 MiB file-open cap. Files above 2 MiB
+    /// still open as guarded plain text without automatic syntax work.
     static let maximumUnguardedBytes = 2 * 1_024 * 1_024
 
     /// UTF-16 code units. Minified single-line files (dense JSON, bundled

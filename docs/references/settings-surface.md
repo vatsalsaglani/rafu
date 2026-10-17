@@ -15,6 +15,21 @@ pane-strip, full-width, grouped-Form, routing, and lifetime rules below describe
 the verified surface. The successor must preserve the routing and pane-lifetime
 rules.
 
+## 2026-10-17 file-shelf repair
+
+The user requested that Settings keep existing file tabs accessible. Settings
+now uses a real selectable tab on its editor group's shared shelf. Its former
+stand-alone tab header is omitted in that host. Its content covers only the
+group body; the file editor stays mounted and other splits stay visible.
+Selecting a file leaves the Settings tab open. Closing Settings returns to the
+same group's selected file or terminal. `Command-W` closes Settings first.
+
+The window owns this auxiliary tab state outside the restorable layout. It is
+not saved on relaunch. The seven Settings panes and no-window native Settings
+fallback keep their existing behavior. This supersedes the older full-canvas
+presentation text below. See [editor canvas routing](editor-canvas-routing.md)
+for the ownership rule, tests, verification commands, and integration gates.
+
 ## Rule or observed behavior
 
 Rafu has one seven-pane `RafuSettingsView` and two hosts:

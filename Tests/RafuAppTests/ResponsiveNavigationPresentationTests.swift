@@ -3,15 +3,9 @@ import Testing
 
 @testable import RafuApp
 
-@Suite("Responsive navigation presentation")
+// Source checks below enforce construction policy. They do not prove UI behavior.
+@Suite("Responsive navigation source policy")
 struct ResponsiveNavigationPresentationTests {
-    @Test("Settings selects the regular rail at 812 points and compact navigation below it")
-    func settingsBreakpointSelection() {
-        #expect(SettingsPresentationLayout.usesCompactNavigation(forAvailableCanvasWidth: 811))
-        #expect(!SettingsPresentationLayout.usesCompactNavigation(forAvailableCanvasWidth: 812))
-        #expect(!SettingsPresentationLayout.usesCompactNavigation(forAvailableCanvasWidth: 832))
-    }
-
     @Test("Compact category navigation is in the page column before its header")
     func compactHierarchyContract() throws {
         let source = try Self.source("Sources/RafuApp/Settings/RafuSettingsView.swift")
@@ -37,6 +31,8 @@ struct ResponsiveNavigationPresentationTests {
             SettingsPane.allCases == [
                 .general, .appearance, .ai, .languageServers, .usage, .agents, .ensemble,
             ])
+        #expect(source.contains("case .compact:"))
+        #expect(source.contains("@State private var isCompactNavigationExpanded = false"))
         #expect(source.contains("Button(action: toggleCompactNavigation)"))
         #expect(source.contains("if isCompactNavigationExpanded"))
         #expect(source.contains("ForEach(SettingsPane.allCases)"))
@@ -47,20 +43,6 @@ struct ResponsiveNavigationPresentationTests {
         #expect(source.contains("isCompactNavigationExpanded = false"))
         #expect(source.contains(".onChange(of: variant)"))
         #expect(source.contains("if newVariant == .regular"))
-    }
-
-    @Test("Resizing retains the one visited-pane host and does not duplicate it by variant")
-    func retainedPaneHostAcrossResizeContract() throws {
-        let source = try Self.source("Sources/RafuApp/Settings/RafuSettingsView.swift")
-
-        #expect(source.components(separatedBy: "private var paneContent: some View").count - 1 == 1)
-        #expect(source.components(separatedBy: "ZStack {").count - 1 == 1)
-        #expect(source.contains("@State private var visitedPanes: Set<SettingsPane> = [.general]"))
-        #expect(source.contains("visitedPanes.insert(newPane)"))
-        #expect(source.contains("pageIdentity(isCompact: isCompact)"))
-        #expect(source.contains(".opacity(candidate == pane ? 1 : 0)"))
-        #expect(source.contains(".disabled(candidate != pane)"))
-        #expect(source.contains(".accessibilityHidden(candidate != pane)"))
     }
 
     @Test("Compact navigation uses themed full-width controls with a vertical text escape path")

@@ -25,7 +25,7 @@ extension ServerPack {
     /// typescript-language-server this way still only unpacks its release
     /// tarball — see `CuratedCatalog`'s note on why that alone isn't yet a
     /// runnable server.)
-    static let all: [ServerPack] = [
+    nonisolated static let all: [ServerPack] = [
         ServerPack(
             id: "node-web-tools",
             displayName: "Web & Python (Node-hosted)",

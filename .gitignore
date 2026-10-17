@@ -27,3 +27,5 @@ docs/issues/images/
 cmd-f-error.txt
 
 select-multi-words-and-update-error.txt
+# Generated Visual Plan runtime bundles; retain MDX, SVG, and prototype sources.
+docs/plans/wireframes/workspace-canvas/*.plan.html

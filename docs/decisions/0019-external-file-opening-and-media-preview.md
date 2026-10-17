@@ -31,8 +31,8 @@ The editor renders media content based on file type, with a built-in classificat
 | `.png`, `.jpeg`, `.jpg`, `.gif`, `.webp`, `.heic`, `.heif`, `.bmp`, `.tiff`, `.ico` | Bitmap image (existing `ImagePreviewView`) | Inline NSImage rendering |
 | `.svg` | Vector image (NSImage native rendering) | Bounded by NSImage's native SVG support; no JS/animation; complex SVGs may mis-render |
 | `.mp4`, `.mov`, `.m4v` | Video player (new `VideoPreviewView` via AVKit) | Inline video playback with AVKit `AVPlayer` |
-| All other types, UTF-8 ≤4 MB | Editable text | Opened as text editor tab |
-| Non-UTF-8 or >4 MB non-media | Error state | "Binary — no preview available"; specific friendlier error messaging is future scope |
+| All other types, UTF-8 ≤16 MiB | Editable text | Opened as text editor tab |
+| Non-UTF-8 or >16 MiB non-media | Error state | "Binary — no preview available"; specific friendlier error messaging is future scope |
 | HTML, PDF | No preview (future scope) | Not added in this pass; WKWebView use remains blocked per ADR 0008 (web-view-per-document non-goal) |
 
 **Video memory management:** `VideoPreviewView` releases its `AVPlayer` on `.onDisappear` (calls `replaceCurrentItem(with: nil)`) so hibernated or closed video tabs hold no playback resources and do not contribute to resident memory. Idle resident-memory budget (~150 MB per AGENTS.md) is preserved.
@@ -44,12 +44,33 @@ The editor renders media content based on file type, with a built-in classificat
 - `VideoPreviewView` uses AVKit (Apple's native video framework) and is permitted. ADR 0008's non-goal is WKWebView-specific ("no shared WKWebView, no per-document web view"); AVKit is a different framework.
 - No HTML or PDF web preview is added; that would require either a web view or a more sophisticated renderer, both deferred.
 
+## 2026-10-17 amendment: bounded 16 MiB text opening
+
+The user reported that an ordinary 6,722,977-byte UTF-8 text file could not
+open under the original 4 MiB cap. The text-open cap is now **16 MiB
+(16,777,216 bytes)** for workspace and external text files. This replaces the
+original 4 MiB decision. The 2 MiB syntax guard and the 10,000 UTF-16-unit
+line guard stay in effect. Files above those thresholds open as guarded text;
+this amendment does not enable automatic syntax work on them.
+
+The file service opens one nonblocking, close-on-exec descriptor and checks
+its regular-file type and size with `fstat`. It reads in 64 KiB chunks, with
+a total limit of the cap plus one detection byte. The read rejects overflow
+without returning partial text, even if the file grows after the size check.
+Strict UTF-8 decoding and atomic writes stay in effect. There is no binary
+preview, streaming editor, or automatic content transmission.
+
+The cap bounds input bytes. It is not a claim about total editor memory or
+large-file response time. TextKit storage, decoded strings, undo, and open
+editors can use more memory. Runtime and memory measurements remain separate
+gates under the editor repair phase.
+
 ## Alternatives considered
 
 - **Don't support external files.** Rejected — the user explicitly requested this, and it is a natural extension of drag-and-drop.
 - **Add external files to the workspace tree.** Rejected — preserving workspace identity cleanly requires keeping external files separate and ephemeral.
 - **Use a web view (WKWebView) for SVG/HTML/PDF preview.** Rejected per ADR 0008 (no per-document web views); defer until that non-goal is formally revisited.
-- **Buffer non-UTF-8 files or files >4 MB.** Rejected — adding format detection and binary preview is out of scope for this pass; keep the threshold simple and document it.
+- **Buffer non-UTF-8 files or files >16 MiB.** Rejected — format detection and binary preview remain outside this phase. Keep an explicit byte cap.
 
 ## Consequences
 
@@ -59,7 +80,7 @@ The editor renders media content based on file type, with a built-in classificat
 - Durable tradeoff: external file tabs are NOT restored across app relaunch. Workspace persistence (ADR 0006) covers only workspace-internal files. This keeps the persistence model clean and avoids dangling-link edge cases.
 - **Residual limitations, explicit and deferred:**
   - SVG rendering is bounded by NSImage's parser; complex SVGs may mis-render (not a bug, a limitation of the tool).
-  - Non-UTF-8 or >4 MB non-media files surface an error message; a friendlier "binary, no preview" state is future scope.
+  - Non-UTF-8 or >16 MiB non-media files surface an error message; a friendlier "binary, no preview" state is future scope.
   - Sidebar file drops directly on the tab bar are now harmless no-ops (a minor usability gap; see `editor-tab-reorder-drop-zones.md`).
 
 ## Revisit trigger
@@ -67,7 +88,7 @@ The editor renders media content based on file type, with a built-in classificat
 Revisit if:
 - A future phase adds per-document web views and wants to render HTML/PDF (would require re-evaluating ADR 0008).
 - SVG rendering issues become frequent enough to justify a third-party SVG renderer.
-- The >4 MB UTF-8 threshold or non-UTF-8 error handling needs to change based on user feedback.
+- The 16 MiB UTF-8 threshold or non-UTF-8 error handling needs to change based on user feedback.
 
 ## Related plan, reference, and implementation paths
 

@@ -196,3 +196,52 @@ validation.
 See [`app-variants-and-state-isolation.md`](app-variants-and-state-isolation.md)
 for bundle/process/state identity, CLI pairing, and the intentionally empty
 Lightning state.
+
+## Swift 6.4 and Metal toolchain checks
+
+- **Applies to:** local Rafu Lightning builds with Xcode's Swift 6.4 toolchain.
+- **Last verified environment:** Apple Swift 6.4 (swiftlang-6.4.0.34.1),
+  macOS 27.0.1 (26A434), 2026-10-17.
+- **Observed failure:** SwiftTerm's `Shaders.metal` build failed because the
+  optional Metal toolchain was absent. The build output also reported a missing
+  `Shaders.dia`; that secondary message did not identify the cause.
+- **Diagnostic:** `xcrun metal --version` reported the missing toolchain.
+  `xcodebuild -downloadComponent MetalToolchain` installed component 27A266a.
+  The first retry still failed tool lookup. After the component reported
+  `installed`, `xcrun --kill-cache` and `xcrun metal --version` resolved it.
+- **Separate compiler failure:** the three private `Shape` types in
+  `RafuWorkbenchStyles.swift` inherited the app target's default main-actor
+  isolation. Swift 6.4 rejected their `path(in:)` protocol witnesses with
+  `ConformanceIsolation`. These value types only calculate paths from a
+  `CGFloat` and a rectangle; explicitly mark the types `nonisolated`.
+  Do not weaken concurrency checking for the target.
+- **Verification commands:** `xcodebuild -showComponent MetalToolchain -json`,
+  `xcrun metal --version`, `./script/build_and_run.sh --verify`, and
+  `./script/test.sh`.
+- **Related:** `Package.swift`, `Sources/RafuApp/Support/RafuWorkbenchStyles.swift`,
+  ADR 0001, and `docs/plans/phases/pre-initial-push-workbench.md`.
+
+- **Resource layout:** this Swift 6.4 build emitted
+  `Rafu_RafuApp.bundle/Contents/Resources/Grammars`, not the older flat
+  `Rafu_RafuApp.bundle/Grammars` path. Its generated accessor searches
+  `Bundle.main.resourceURL`. The canonical script now stages structured
+  bundles in `Contents/Resources`, retains app-root staging for flat bundles,
+  and includes `SwiftTerm_SwiftTerm.bundle`. Its grammar check follows the
+  emitted layout. Reproduce with a cold local build and inspect the generated
+  `resource_bundle_accessor.swift` before changing bundle placement.
+
+- **Historical test gate:** the runtime review on 2026-10-17 built and
+  launched the app, but `./script/test.sh` stopped at compilation in
+  `LanguageServersCatalogModelTests.swift:40`. Swift Testing's `#expect`
+  expansion accessed main-actor-isolated `ServerPack.all` from a nonisolated
+  autoclosure. No tests ran. This is a separate test compile failure; a
+  successful GUI build does not establish a passing suite. Preserve the
+  failed build cache for diagnosis rather than deleting it to retry.
+  The initial repair awaited the pack IDs before `#expect`. A later test
+  compile exposed four direct calls in `ServerPackTests` with the same
+  isolation error. The final repair marks the immutable `ServerPack.all`
+  catalog `nonisolated`; the assertion compares local IDs without an actor
+  hop. Integration must verify the repair; the failed review did not run
+  any tests. See
+  [`test-source-policy-and-bookmark-isolation.md`](test-source-policy-and-bookmark-isolation.md)
+  for test isolation, source-check limits, and the separate fixture warning.

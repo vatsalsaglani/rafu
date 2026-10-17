@@ -62,6 +62,23 @@ final class MultiCaretOverlayView: NSView {
         }
     }
 
+    /// Called when a SwiftUI host hides this editor without detaching it.
+    func updateVisibility() {
+        restartBlinking()
+    }
+
+    private var isEditorVisible: Bool {
+        var ancestor = superview
+        while let view = ancestor {
+            if view.isHidden { return false }
+            if let host = view as? CodeEditorView.EditorMountHostView {
+                return host.isEditorVisible
+            }
+            ancestor = view.superview
+        }
+        return !isHiddenOrHasHiddenAncestor
+    }
+
     private func restartBlinking() {
         blinkTimer?.invalidate()
         blinkTimer = nil
@@ -69,7 +86,7 @@ final class MultiCaretOverlayView: NSView {
         isBlinking = false
         needsDisplay = true
 
-        guard window != nil, !caretRects.isEmpty, !reduceMotion else { return }
+        guard window != nil, isEditorVisible, !caretRects.isEmpty, !reduceMotion else { return }
         isBlinking = true
         let timer = Timer(timeInterval: 0.53, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {

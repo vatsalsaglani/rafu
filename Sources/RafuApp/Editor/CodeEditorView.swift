@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 import SwiftUI
 
 /// Bundled GX2 hunk-peek and blame-hover wiring for `CodeEditorView`,
@@ -33,6 +34,7 @@ struct GitPeekActions {
 
 struct CodeEditorView: NSViewRepresentable {
     let document: EditorDocument
+    let isVisible: Bool
     let theme: RafuTheme
     let findState: DocumentFindState?
     let requestFind: (@MainActor () -> Void)?
@@ -64,6 +66,7 @@ struct CodeEditorView: NSViewRepresentable {
 
     init(
         document: EditorDocument,
+        isVisible: Bool = true,
         theme: RafuTheme,
         findState: DocumentFindState? = nil,
         requestFind: (@MainActor () -> Void)? = nil,
@@ -81,6 +84,7 @@ struct CodeEditorView: NSViewRepresentable {
         gitPeekActions: GitPeekActions? = nil
     ) {
         self.document = document
+        self.isVisible = isVisible
         self.theme = theme
         self.findState = findState
         self.requestFind = requestFind
@@ -99,10 +103,30 @@ struct CodeEditorView: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(document: document, theme: theme, findState: findState)
+        if let resources = document.editorResources { return resources.coordinator }
+        let coordinator = Coordinator(document: document, theme: theme, findState: findState)
+        let scrollView = makeEditorScrollView(coordinator: coordinator)
+        document.editorResources = EditorResources(scrollView: scrollView, coordinator: coordinator)
+        return coordinator
     }
 
-    func makeNSView(context: Context) -> NSScrollView {
+    func makeNSView(context: Context) -> EditorMountHostView {
+        makeHost(coordinator: context.coordinator)
+    }
+
+    /// Each SwiftUI mount gets a fresh host; only the document's AppKit editor moves.
+    func makeHost(coordinator: Coordinator) -> EditorMountHostView {
+        let host = EditorMountHostView()
+        guard let resources = document.editorResources, resources.coordinator === coordinator else {
+            return host
+        }
+        resources.attach(to: host, isVisible: isVisible)
+        return host
+    }
+
+    private func makeEditorScrollView(coordinator: Coordinator) -> NSScrollView {
+        let interval = EditorResources.signposter.beginInterval("EditorCreate")
+        defer { EditorResources.signposter.endInterval("EditorCreate", interval) }
         let scrollView = EditorDropForwardingScrollView()
         scrollView.dropForwarding = dropForwarding
         scrollView.hasVerticalScroller = true
@@ -125,13 +149,13 @@ struct CodeEditorView: NSViewRepresentable {
         textView.selectedTextAttributes = [
             .backgroundColor: NSColor(rafuHex: theme.editor.selectionBackground)
         ]
-        textView.delegate = context.coordinator
+        textView.delegate = coordinator
         textView.navigateAction = navigate
         textView.hoverAction = hover
         textView.hoverTheme = theme
         textView.findAction = requestFind
         scrollView.documentView = textView
-        context.coordinator.applyEditorColors(theme, to: textView, scrollView: scrollView)
+        coordinator.applyEditorColors(theme, to: textView, scrollView: scrollView)
 
         let gutter = EditorGutterRulerView(
             scrollView: scrollView,
@@ -142,37 +166,37 @@ struct CodeEditorView: NSViewRepresentable {
         scrollView.hasVerticalRuler = true
         scrollView.rulersVisible = true
 
-        context.coordinator.textView = textView
-        context.coordinator.gutterRuler = gutter
-        context.coordinator.gitLineChangesProvider = gitLineChangesProvider
-        context.coordinator.requestGitRefresh = requestGitRefresh
-        context.coordinator.inlineBlameEnabled = inlineBlameEnabled
-        context.coordinator.inlineBlameProvider = inlineBlameProvider
-        context.coordinator.fileBlameAnnotationsEnabled = fileBlameAnnotationsEnabled
-        context.coordinator.fileBlameProvider = fileBlameAnnotationsProvider
-        context.coordinator.aiCompletionEnabled = aiCompletionEnabled
-        context.coordinator.aiCompletionProvider = aiCompletionProvider
-        context.coordinator.gitPeekActions = gitPeekActions
-        gutter.peekAction = { [weak coordinator = context.coordinator] line in
+        coordinator.textView = textView
+        coordinator.gutterRuler = gutter
+        coordinator.gitLineChangesProvider = gitLineChangesProvider
+        coordinator.requestGitRefresh = requestGitRefresh
+        coordinator.inlineBlameEnabled = inlineBlameEnabled
+        coordinator.inlineBlameProvider = inlineBlameProvider
+        coordinator.fileBlameAnnotationsEnabled = fileBlameAnnotationsEnabled
+        coordinator.fileBlameProvider = fileBlameAnnotationsProvider
+        coordinator.aiCompletionEnabled = aiCompletionEnabled
+        coordinator.aiCompletionProvider = aiCompletionProvider
+        coordinator.gitPeekActions = gitPeekActions
+        gutter.peekAction = { [weak coordinator = coordinator] line in
             coordinator?.presentHunkPeek(atLine: line)
         }
-        textView.blameHoverAction = { [weak coordinator = context.coordinator] in
+        textView.blameHoverAction = { [weak coordinator = coordinator] in
             coordinator?.presentBlameHover()
         }
-        context.coordinator.installSyntaxPipeline(for: textView)
-        textView.textStorage?.delegate = context.coordinator
-        context.coordinator.installFindController(for: textView)
-        context.coordinator.applyThemeDecorations()
-        context.coordinator.load()
-        document.saveAction = { [weak coordinator = context.coordinator] in coordinator?.save() }
+        coordinator.installSyntaxPipeline(for: textView)
+        textView.textStorage?.delegate = coordinator
+        coordinator.installFindController(for: textView)
+        coordinator.applyThemeDecorations()
+        coordinator.load()
+        document.saveAction = { [weak coordinator = coordinator] in coordinator?.save() }
         document.textSnapshotProvider = { [weak textView] in textView?.string ?? "" }
         document.selectionProvider = { [weak textView] in
             textView?.selectedRange() ?? NSRange(location: 0, length: 0)
         }
-        document.peekChangeAtCaretAction = { [weak coordinator = context.coordinator] in
+        document.peekChangeAtCaretAction = { [weak coordinator = coordinator] in
             coordinator?.presentHunkPeekAtCaretLine()
         }
-        document.toggleCommentAction = { [weak coordinator = context.coordinator] in
+        document.toggleCommentAction = { [weak coordinator = coordinator] in
             coordinator?.toggleLineComment()
         }
         document.selectNextOccurrenceAction = { [weak textView] in
@@ -205,25 +229,31 @@ struct CodeEditorView: NSViewRepresentable {
         return scrollView
     }
 
-    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+    func updateNSView(_ host: EditorMountHostView, context: Context) {
+        let coordinator = context.coordinator
+        guard let resources = document.editorResources,
+            resources.coordinator === coordinator, resources.activeHost === host
+        else { return }
+        let scrollView = resources.scrollView
+        host.setEditorVisible(isVisible)
         (scrollView as? EditorDropForwardingScrollView)?.dropForwarding = dropForwarding
-        context.coordinator.theme = theme
-        context.coordinator.gitLineChangesProvider = gitLineChangesProvider
-        context.coordinator.requestGitRefresh = requestGitRefresh
-        context.coordinator.gitPeekActions = gitPeekActions
-        context.coordinator.updateSyntaxPipeline()
-        context.coordinator.updateFindState(findState)
-        context.coordinator.applyThemeDecorations()
-        context.coordinator.reloadIfNeeded()
-        context.coordinator.syncGuardSuppression()
-        context.coordinator.updateInlineBlame(
+        coordinator.theme = theme
+        coordinator.gitLineChangesProvider = gitLineChangesProvider
+        coordinator.requestGitRefresh = requestGitRefresh
+        coordinator.gitPeekActions = gitPeekActions
+        coordinator.updateSyntaxPipeline()
+        coordinator.updateFindState(findState)
+        coordinator.applyThemeDecorations()
+        coordinator.reloadIfNeeded()
+        coordinator.syncGuardSuppression()
+        coordinator.updateInlineBlame(
             enabled: inlineBlameEnabled, provider: inlineBlameProvider)
-        context.coordinator.updateFileBlameAnnotations(
+        coordinator.updateFileBlameAnnotations(
             enabled: fileBlameAnnotationsEnabled, provider: fileBlameAnnotationsProvider)
-        context.coordinator.updateAICompletion(
+        coordinator.updateAICompletion(
             enabled: aiCompletionEnabled, provider: aiCompletionProvider)
         guard let textView = scrollView.documentView as? RafuTextView else { return }
-        context.coordinator.applyEditorColors(theme, to: textView, scrollView: scrollView)
+        coordinator.applyEditorColors(theme, to: textView, scrollView: scrollView)
         textView.refreshMultiCaretOverlay()
         textView.navigateAction = navigate
         textView.hoverAction = hover
@@ -231,51 +261,126 @@ struct CodeEditorView: NSViewRepresentable {
         textView.findAction = requestFind
     }
 
-    static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
-        // Capture selection and scroll BEFORE tearing anything down so a
-        // hibernation remount restores where the user was. Safe on any
-        // dismantle (hibernation, close, window teardown); a dirty document
-        // is never hibernated, so its live text is never released here.
-        coordinator.captureViewState(from: nsView)
-        // A dirty document can still be torn down by a STRUCTURAL SwiftUI
-        // remount (splitting or moving a tab reshapes the erased view tree
-        // and rebuilds every editor in it, not just the tab that moved — see
-        // `EditorDocument.pendingDirtyText`). Hand off the live text so the
-        // next `load()` seeds from it instead of disk, preserving the
-        // unsaved edits that would otherwise be silently discarded.
-        if coordinator.document.isDirty {
-            coordinator.document.pendingDirtyText = coordinator.textView?.string
+    static func dismantleNSView(_ host: EditorMountHostView, coordinator: Coordinator) {
+        // A late callback for an old host must never detach the new host.
+        guard let resources = host.resources, resources.coordinator === coordinator,
+            resources.activeHost === host
+        else { return }
+        resources.detach(from: host)
+    }
+
+    /// Document-scoped TextKit resources. This is not SwiftUI-observed state.
+    @MainActor
+    final class EditorResources {
+        let scrollView: NSScrollView
+        let coordinator: Coordinator
+        private(set) weak var activeHost: EditorMountHostView?
+        private var isReleased = false
+        private weak var pendingFocusWindow: NSWindow?
+        fileprivate static let signposter = OSSignposter(
+            subsystem: "dev.vatsalsaglani.rafu", category: "EditorLifetime")
+
+        init(scrollView: NSScrollView, coordinator: Coordinator) {
+            self.scrollView = scrollView
+            self.coordinator = coordinator
+            Self.signposter.emitEvent("EditorCreated")
         }
-        coordinator.loadTask?.cancel()
-        coordinator.gitMarkersTask?.cancel()
-        coordinator.clearInlineBlame()
-        coordinator.clearFileBlameAnnotations()
-        coordinator.clearAICompletion()
-        coordinator.tearDownSyntaxPipeline()
-        coordinator.textView?.textStorage?.delegate = nil
-        coordinator.uninstallFindController()
-        coordinator.textView?.dismissHover()
-        coordinator.textView?.closePeekPopover()
-        coordinator.textView?.navigateAction = nil
-        coordinator.textView?.hoverAction = nil
-        coordinator.textView?.hoverTheme = nil
-        coordinator.textView?.findAction = nil
-        coordinator.textView?.blameHoverAction = nil
-        coordinator.gutterRuler?.peekAction = nil
-        coordinator.document.saveAction = nil
-        coordinator.document.textSnapshotProvider = nil
-        coordinator.document.selectionProvider = nil
-        coordinator.document.peekChangeAtCaretAction = nil
-        coordinator.document.toggleCommentAction = nil
-        coordinator.document.selectNextOccurrenceAction = nil
-        coordinator.document.selectAllOccurrencesAction = nil
-        coordinator.document.addCaretAboveAction = nil
-        coordinator.document.addCaretBelowAction = nil
-        coordinator.document.moveLineUpAction = nil
-        coordinator.document.moveLineDownAction = nil
-        coordinator.document.duplicateLineUpAction = nil
-        coordinator.document.duplicateLineDownAction = nil
-        coordinator.document.deleteLineAction = nil
+
+        isolated deinit {
+            coordinator.releaseResources()
+            Self.signposter.emitEvent("EditorReleased")
+        }
+
+        func attach(to host: EditorMountHostView, isVisible: Bool) {
+            guard !isReleased else { return }
+            let interval = Self.signposter.beginInterval("EditorMount")
+            defer { Self.signposter.endInterval("EditorMount", interval) }
+            let textView = coordinator.textView
+            let focusWindow = scrollView.window ?? pendingFocusWindow
+            let hadFocus = pendingFocusWindow != nil || focusWindow?.firstResponder === textView
+            pendingFocusWindow = nil
+            activeHost?.resources = nil
+            scrollView.removeFromSuperview()
+            activeHost = host
+            host.resources = self
+            host.addSubview(scrollView)
+            scrollView.autoresizingMask = [.width, .height]
+            scrollView.frame = host.bounds
+            host.setEditorVisible(isVisible)
+            if hadFocus, let focusWindow {
+                host.restoreFocus(in: focusWindow)
+            }
+        }
+
+        func detach(from host: EditorMountHostView) {
+            guard activeHost === host else { return }
+            Self.signposter.emitEvent("EditorUnmounted")
+            if let window = scrollView.window, window.firstResponder === coordinator.textView {
+                pendingFocusWindow = window
+            }
+            host.setEditorVisible(false)
+            scrollView.removeFromSuperview()
+            host.resources = nil
+            activeHost = nil
+            // Drop callbacks contain group-local state. They must not outlive a host.
+            (scrollView as? EditorDropForwardingScrollView)?.dropForwarding = nil
+        }
+
+        func release() {
+            guard !isReleased else { return }
+            isReleased = true
+            coordinator.captureViewState(from: scrollView)
+            if let activeHost { detach(from: activeHost) }
+            coordinator.releaseResources()
+        }
+    }
+
+    @MainActor
+    final class EditorMountHostView: NSView {
+        fileprivate var resources: EditorResources?
+        private(set) var isEditorVisible = false
+        private weak var focusWindow: NSWindow?
+
+        func setEditorVisible(_ visible: Bool) {
+            let changed = isEditorVisible != visible
+            isEditorVisible = visible
+            if !visible {
+                resources?.coordinator.textView?.dismissHover()
+                resources?.coordinator.textView?.closePeekPopover()
+            }
+            if !visible, let window,
+                let responder = window.firstResponder as? NSView,
+                responder === self || responder.isDescendant(of: self)
+            {
+                window.makeFirstResponder(nil)
+            }
+            resources?.scrollView.isHidden = !visible
+            if changed { updateCaretVisibility(in: resources?.scrollView) }
+        }
+
+        private func updateCaretVisibility(in view: NSView?) {
+            guard let view else { return }
+            (view as? MultiCaretOverlayView)?.updateVisibility()
+            for child in view.subviews { updateCaretVisibility(in: child) }
+        }
+
+        fileprivate func restoreFocus(in window: NSWindow) {
+            focusWindow = window
+            restoreFocusIfAttached()
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            restoreFocusIfAttached()
+        }
+
+        private func restoreFocusIfAttached() {
+            guard let window, window === focusWindow,
+                let textView = resources?.coordinator.textView, isEditorVisible
+            else { return }
+            focusWindow = nil
+            window.makeFirstResponder(textView)
+        }
     }
 
     @MainActor
@@ -285,12 +390,13 @@ struct CodeEditorView: NSViewRepresentable {
         /// limiting interactive undo.
         static let undoLevelCap = 200
 
-        let document: EditorDocument
+        private(set) weak var document: EditorDocument?
         var theme: RafuTheme
         weak var textView: RafuTextView?
         weak var gutterRuler: EditorGutterRulerView?
         var loadTask: Task<Void, Never>?
         var gitMarkersTask: Task<Void, Never>?
+        private(set) var saveTask: Task<Void, Never>?
         var gitLineChangesProvider: (@MainActor () async -> GitGutterLineChanges?)?
         var requestGitRefresh: (@MainActor () -> Void)?
         var inlineBlameEnabled = false
@@ -366,7 +472,47 @@ struct CodeEditorView: NSViewRepresentable {
             cappedUndoManager
         }
 
+        private var resourcesReleased = false
+
+        func releaseResources() {
+            guard !resourcesReleased else { return }
+            resourcesReleased = true
+            loadTask?.cancel()
+            gitMarkersTask?.cancel()
+            clearInlineBlame()
+            clearFileBlameAnnotations()
+            clearAICompletion()
+            tearDownSyntaxPipeline()
+            textView?.textStorage?.delegate = nil
+            textView?.delegate = nil
+            uninstallFindController()
+            textView?.dismissHover()
+            textView?.closePeekPopover()
+            textView?.navigateAction = nil
+            textView?.hoverAction = nil
+            textView?.hoverTheme = nil
+            textView?.findAction = nil
+            textView?.blameHoverAction = nil
+            gutterRuler?.peekAction = nil
+            guard let document, document.editorResources?.coordinator === self else { return }
+            document.saveAction = nil
+            document.textSnapshotProvider = nil
+            document.selectionProvider = nil
+            document.peekChangeAtCaretAction = nil
+            document.toggleCommentAction = nil
+            document.selectNextOccurrenceAction = nil
+            document.selectAllOccurrencesAction = nil
+            document.addCaretAboveAction = nil
+            document.addCaretBelowAction = nil
+            document.moveLineUpAction = nil
+            document.moveLineDownAction = nil
+            document.duplicateLineUpAction = nil
+            document.duplicateLineDownAction = nil
+            document.deleteLineAction = nil
+        }
+
         func load() {
+            guard let document else { return }
             loadTask?.cancel()
             let requestedRevision = document.revision
             loadedRevision = requestedRevision
@@ -374,13 +520,9 @@ struct CodeEditorView: NSViewRepresentable {
             loadTask = Task(name: "Load \(document.displayName)") { [weak self] in
                 guard let self else { return }
                 do {
-                    // A pending dirty hand-off (see `EditorDocument.pendingDirtyText`)
-                    // always wins over the disk read: it means this mount is
-                    // rebuilding a still-dirty document after a structural
-                    // remount, and reading disk here would silently discard
-                    // unsaved edits. The disk read is skipped entirely in
-                    // that case, so no late-arriving disk content can clobber
-                    // the seeded text.
+                    // Compatibility for a one-shot seed supplied before the
+                    // first editor is made. Structural moves reuse this editor
+                    // and never enter load().
                     let seededDirtyText = document.pendingDirtyText
                     let text: String
                     if let seededDirtyText {
@@ -401,6 +543,7 @@ struct CodeEditorView: NSViewRepresentable {
                     // what's actually in the buffer.
                     let decision = await DocumentGuardPolicy.decide(for: text)
                     try Task.checkCancellation()
+                    guard !resourcesReleased, document.revision == requestedRevision else { return }
                     textView?.string = text
                     gutterRuler?.invalidateLineIndex()
                     document.applyGuardDecision(decision)
@@ -424,6 +567,9 @@ struct CodeEditorView: NSViewRepresentable {
                 } catch is CancellationError {
                     return
                 } catch {
+                    guard !Task.isCancelled, !resourcesReleased,
+                        document.revision == requestedRevision
+                    else { return }
                     textView?.string = "Unable to open this file.\n\n\(error.localizedDescription)"
                     textView?.isEditable = false
                     canSave = false
@@ -433,9 +579,10 @@ struct CodeEditorView: NSViewRepresentable {
         }
 
         /// Records the current selection and vertical scroll fraction on the
-        /// document so a later reload can restore them. Called from
-        /// `dismantleNSView` before teardown.
+        /// document so a later reload can restore them. Called before
+        /// hibernation releases the document's editor resources.
         func captureViewState(from scrollView: NSScrollView) {
+            guard let document else { return }
             guard let textView else { return }
             if textView.hasMultipleCarets {
                 document.captureViewState(
@@ -464,6 +611,7 @@ struct CodeEditorView: NSViewRepresentable {
         /// clears them so a later external reload does not resurrect a stale
         /// position. Fixes the cursor/scroll reset on a hibernation remount.
         private func restoreViewState() {
+            guard let document else { return }
             guard let textView else { return }
             let selection = document.restoredSelection
             let scrollFraction = document.restoredScrollFraction
@@ -490,6 +638,7 @@ struct CodeEditorView: NSViewRepresentable {
         }
 
         func textDidChange(_ notification: Notification) {
+            guard let document else { return }
             guard !isLoading else { return }
             document.isDirty = true
             // The full-file blame decoration goes stale the instant the
@@ -559,6 +708,7 @@ struct CodeEditorView: NSViewRepresentable {
         /// override made through `EditorDocumentView`'s banner button is
         /// picked up on the next SwiftUI update pass.
         func syncGuardSuppression(forceRepaint: Bool = false) {
+            guard let document else { return }
             let suppressed = document.suppressesSyntax
             guard forceRepaint || suppressed != appliedSuppression else { return }
             appliedSuppression = suppressed
@@ -567,14 +717,17 @@ struct CodeEditorView: NSViewRepresentable {
         }
 
         func save() {
-            guard canSave, let text = textView?.string else { return }
+            guard let document else { return }
+            guard !isLoading, !resourcesReleased, canSave, let text = textView?.string else {
+                return
+            }
+            let savedGeneration = editGeneration
             let url = document.url
-            let document = document
             let fileService = fileService
-            Task(name: "Save \(document.displayName)") {
+            saveTask = Task(name: "Save \(document.displayName)") {
                 do {
                     try await fileService.writeText(text, to: url)
-                    document.isDirty = false
+                    document.isDirty = editGeneration != savedGeneration
                     document.revision += 1
                     loadedRevision = document.revision
                     recordDiskModificationDate()
@@ -589,6 +742,7 @@ struct CodeEditorView: NSViewRepresentable {
         }
 
         func reloadIfNeeded() {
+            guard let document else { return }
             guard !document.isDirty, loadedRevision != document.revision else { return }
             load()
         }
@@ -597,12 +751,14 @@ struct CodeEditorView: NSViewRepresentable {
         /// load or save so the workspace watcher can tell external edits
         /// apart from Rafu's own writes.
         private func recordDiskModificationDate() {
+            guard let document else { return }
             document.knownDiskModificationDate =
                 (try? FileManager.default.attributesOfItem(atPath: document.url.path))?[
                     .modificationDate] as? Date
         }
 
         func installSyntaxPipeline(for textView: NSTextView) {
+            guard let document else { return }
             syntaxPipeline = NeonSyntaxHighlightingPipeline(
                 textView: textView,
                 theme: theme,
@@ -613,14 +769,15 @@ struct CodeEditorView: NSViewRepresentable {
         }
 
         /// Cancels the grammar actor bring-up, any in-flight reparse, and
-        /// releases the parser/tree. Called from `dismantleNSView` so a
-        /// closed, hibernated, or structurally remounted editor does not leak
-        /// syntax work.
+        /// releases the parser/tree. Called only when document resources
+        /// are released; moving a SwiftUI host keeps the same parser.
         func tearDownSyntaxPipeline() {
             syntaxPipeline?.tearDown()
+            syntaxPipeline = nil
         }
 
         func updateSyntaxPipeline() {
+            guard let document else { return }
             syntaxPipeline?.update(
                 theme: theme,
                 fileExtension: document.url.pathExtension.lowercased(),
@@ -688,6 +845,7 @@ struct CodeEditorView: NSViewRepresentable {
         /// resolved from the same file-extension/file-name pair the syntax
         /// pipeline and `LineCommenter` already key off.
         func toggleLineComment() {
+            guard let document else { return }
             guard let textView, textView.isEditable else { return }
             let syntax = CommentSyntaxTable.syntax(
                 forExtension: document.url.pathExtension.lowercased(),
@@ -759,6 +917,7 @@ struct CodeEditorView: NSViewRepresentable {
         }
 
         func refreshGitMarkers() {
+            guard let document else { return }
             gitMarkersTask?.cancel()
             guard let gitLineChangesProvider else {
                 gutterRuler?.gitMarkers = nil
@@ -805,6 +964,7 @@ struct CodeEditorView: NSViewRepresentable {
         /// spawned between keystrokes. Only a caret move on a SAVED
         /// (non-dirty) buffer reaches the debounce.
         func scheduleInlineBlame() {
+            guard let document else { return }
             guard inlineBlameEnabled, !document.isDirty, let textView, let inlineBlameProvider
             else {
                 clearInlineBlame()
@@ -827,15 +987,15 @@ struct CodeEditorView: NSViewRepresentable {
                 // this is the guard that keeps a typing burst from ever
                 // reaching `WorkspaceSession.inlineBlame(for:)` — and the
                 // process it would spawn — at all.
-                guard let self, self.document.revision == requestedRevision,
+                guard let self, document.revision == requestedRevision,
                     self.inlineBlameLine == caretLine,
-                    !self.document.isDirty
+                    !document.isDirty
                 else { return }
                 guard let blame = await inlineBlameProvider() else { return }
                 if Task.isCancelled { return }
-                guard self.document.revision == requestedRevision,
+                guard document.revision == requestedRevision,
                     self.inlineBlameLine == caretLine,
-                    !self.document.isDirty
+                    !document.isDirty
                 else { return }
                 guard let line = blame.lines.first(where: { $0.lineNumber == caretLine }) else {
                     self.textView?.inlineBlameAnnotation = nil
@@ -894,6 +1054,7 @@ struct CodeEditorView: NSViewRepresentable {
         /// load/save, never mid-typing) and the debounced continuation, so
         /// no `git blame` process is ever spawned between keystrokes.
         func scheduleFileBlameAnnotations() {
+            guard let document else { return }
             guard fileBlameAnnotationsEnabled, !document.isDirty, textView != nil,
                 let fileBlameProvider
             else {
@@ -905,14 +1066,14 @@ struct CodeEditorView: NSViewRepresentable {
             fileBlameTask = Task(name: "File blame \(document.displayName)") { [weak self] in
                 try? await Task.sleep(for: Self.fileBlameDebounce)
                 if Task.isCancelled { return }
-                guard let self, self.document.revision == requestedRevision, !self.document.isDirty
+                guard let self, document.revision == requestedRevision, !document.isDirty
                 else { return }
                 guard let blame = await fileBlameProvider() else {
                     self.textView?.fileBlameAnnotations = nil
                     return
                 }
                 if Task.isCancelled { return }
-                guard self.document.revision == requestedRevision, !self.document.isDirty,
+                guard document.revision == requestedRevision, !document.isDirty,
                     let currentText = self.textView?.string
                 else { return }
                 let annotations = InlineBlameFormatter.fileAnnotations(
@@ -949,6 +1110,7 @@ struct CodeEditorView: NSViewRepresentable {
         /// after 500ms of quiet, and its reply is dropped unless the buffer
         /// revision and caret are still exactly where they were.
         func scheduleAICompletion() {
+            guard let document else { return }
             guard aiCompletionEnabled, let textView, let aiCompletionProvider,
                 !isLoading, !document.suppressesSyntax,
                 !textView.hasMarkedText(), !textView.hasMultipleCarets,
@@ -1109,7 +1271,7 @@ struct CodeEditorView: NSViewRepresentable {
             let insertion = AutoIndenter.newlineInsertion(
                 forCaretAt: affectedCharRange.location,
                 in: textView.string,
-                fileExtension: document.url.pathExtension.lowercased()
+                fileExtension: document?.url.pathExtension.lowercased() ?? ""
             )
             guard insertion != "\n" else { return true }
             textView.insertText(insertion, replacementRange: affectedCharRange)
@@ -1129,18 +1291,6 @@ struct CodeEditorView: NSViewRepresentable {
                     changeInLength: delta
                 )
                 if editedMask.contains(.editedCharacters) {
-                    // We are INSIDE the text storage's edit transaction here.
-                    // Mark the gutter stale + queue a redraw synchronously
-                    // (cheap, safe), but DEFER the thickness recompute: it
-                    // calls scrollView.tile(), which re-enters TextKit layout
-                    // and raised _fillLayoutHoleForCharacterRange on large
-                    // pastes when run during didProcessEditing (crash
-                    // 2026-07-22). The deferral runs it after processEditing
-                    // returns, when layout can generate safely.
-                    gutterRuler?.markLineIndexStale()
-                    DispatchQueue.main.async { [weak gutterRuler] in
-                        gutterRuler?.updateThickness()
-                    }
                     // A text edit invalidates any shown hover tooltip (its
                     // anchored range and payload may no longer be valid) and
                     // any shown GX2 peek popover (its anchored line/hunk may
@@ -1149,7 +1299,7 @@ struct CodeEditorView: NSViewRepresentable {
                     textView?.closePeekPopover()
                 }
                 if editedMask.contains(.editedCharacters), !isLoading {
-                    document.recordEditDelta(editedRange: editedRange, changeInLength: delta)
+                    document?.recordEditDelta(editedRange: editedRange, changeInLength: delta)
                 }
             }
         }

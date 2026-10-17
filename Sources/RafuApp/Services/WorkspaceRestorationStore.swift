@@ -88,37 +88,80 @@ nonisolated struct RestorableWorkspace: Codable, Sendable {
     }
 }
 
-nonisolated struct WorkspaceRestorationStore: Sendable {
-    private let defaultsKey = "dev.rafu.last-workspace.v1"
+/// Serializes each complete metadata blob and bookmark access off MainActor.
+/// There is no suspension between the cancellation check and the atomic
+/// UserDefaults value replacement. No document text or process state is saved.
+actor WorkspaceRestorationStore {
+    private let defaultsKey: String
+    private let defaultsSuiteName: String?
+    private let bookmarkMaker: @Sendable (URL) async throws -> Data
+    private var cachedBookmark: (url: URL, authorizationID: UUID?, data: Data)?
+    private var bookmarkGeneration = UUID()
 
-    @concurrent
-    func save(_ workspace: RestorableWorkspace) async throws {
-        let data = try JSONEncoder().encode(workspace)
-        UserDefaults.standard.set(data, forKey: defaultsKey)
+    init(
+        defaultsSuiteName: String? = nil,
+        defaultsKey: String = "dev.rafu.last-workspace.v1",
+        bookmarkMaker: @escaping @Sendable (URL) async throws -> Data = { url in
+            try url.bookmarkData(
+                options: [.withSecurityScope],
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil)
+        }
+    ) {
+        self.defaultsSuiteName = defaultsSuiteName
+        self.defaultsKey = defaultsKey
+        self.bookmarkMaker = bookmarkMaker
     }
 
-    @concurrent
-    func load() async throws -> RestorableWorkspace? {
-        guard let data = UserDefaults.standard.data(forKey: defaultsKey) else { return nil }
+    private var defaults: UserDefaults {
+        if let defaultsSuiteName, let suite = UserDefaults(suiteName: defaultsSuiteName) {
+            return suite
+        }
+        return .standard
+    }
+
+    func save(_ workspace: RestorableWorkspace) throws {
+        try Task.checkCancellation()
+        let data = try JSONEncoder().encode(workspace)
+        try Task.checkCancellation()
+        defaults.set(data, forKey: defaultsKey)
+    }
+
+    func load() throws -> RestorableWorkspace? {
+        guard let data = defaults.data(forKey: defaultsKey) else { return nil }
         return try JSONDecoder().decode(RestorableWorkspace.self, from: data)
     }
 
-    @concurrent
-    func clear() async {
-        UserDefaults.standard.removeObject(forKey: defaultsKey)
+    func clear() {
+        bookmarkGeneration = UUID()
+        cachedBookmark = nil
+        defaults.removeObject(forKey: defaultsKey)
     }
 
-    @concurrent
-    func makeBookmark(for url: URL) async throws -> Data {
-        try url.bookmarkData(
-            options: [.withSecurityScope],
-            includingResourceValuesForKeys: nil,
-            relativeTo: nil
-        )
+    func cacheBookmark(_ data: Data?, for url: URL, authorizationID: UUID) {
+        bookmarkGeneration = UUID()
+        cachedBookmark = data.map { (url, authorizationID, $0) }
     }
 
-    @concurrent
-    func resolve(_ bookmark: Data) async throws -> (url: URL, isStale: Bool) {
+    func makeBookmark(for url: URL, authorizationID: UUID? = nil) async throws -> Data {
+        try Task.checkCancellation()
+        if let cachedBookmark,
+            cachedBookmark.url == url,
+            cachedBookmark.authorizationID == authorizationID
+        {
+            return cachedBookmark.data
+        }
+        let generation = UUID()
+        bookmarkGeneration = generation
+        let data = try await bookmarkMaker(url)
+        try Task.checkCancellation()
+        if bookmarkGeneration == generation {
+            cachedBookmark = (url, authorizationID, data)
+        }
+        return data
+    }
+
+    func resolve(_ bookmark: Data) throws -> (url: URL, isStale: Bool) {
         var isStale = false
         let url = try URL(
             resolvingBookmarkData: bookmark,

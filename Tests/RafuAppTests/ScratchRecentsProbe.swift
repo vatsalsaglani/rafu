@@ -3,30 +3,45 @@ import Testing
 
 @testable import RafuApp
 
-@Test("PROBE: recents bookmark round trip")
-@MainActor
-func probeRecentsRoundTrip() throws {
-    let dir = FileManager.default.temporaryDirectory.appending(
-        path: "rafu-recents-probe-\(UUID().uuidString)", directoryHint: .isDirectory)
-    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: dir) }
+@Suite("Recent workspace bookmark persistence")
+struct RecentWorkspaceBookmarkPersistenceTests {
+    @Test("A serialized recent entry resolves its security-scoped bookmark")
+    func bookmarkPersistenceRoundTrip() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(
+            path: "rafu-recents-test-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
 
-    let store = RecentWorkspacesStore()
-    store.record(url: dir, displayName: "probe")
-    defer { store.remove(rootPath: dir.path) }
+        // Exercise the persisted entry and resolver without reading or changing
+        // UserDefaults.standard, which belongs to the running app/test process.
+        let bookmark = try directory.bookmarkData(
+            options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
+        let opened = Date(timeIntervalSinceReferenceDate: 1_000)
+        let entry = RecentWorkspaceEntry(
+            bookmark: bookmark, rootPath: directory.path, displayName: "Test workspace",
+            lastOpened: opened)
+        let data = try JSONEncoder().encode([entry])
+        let decoded = try JSONDecoder().decode([RecentWorkspaceEntry].self, from: data)
+        let restored = try #require(decoded.first)
+        #expect(decoded.count == 1)
+        #expect(!restored.bookmark.isEmpty)
+        #expect(restored.bookmark == bookmark)
+        #expect(restored.rootPath == directory.path)
+        #expect(restored.displayName == "Test workspace")
+        #expect(restored.lastOpened == opened)
+        #expect(restored.id == directory.path)
 
-    guard let entry = store.load().first(where: { $0.rootPath == dir.path }) else {
-        print("PROBE: record FAILED — no entry persisted (bookmarkData threw?)")
-        return
+        let resolved = try RecentWorkspacesStore().resolve(restored)
+        #expect(resolved.resolvingSymlinksInPath().path == directory.resolvingSymlinksInPath().path)
     }
-    print("PROBE: entry persisted, bookmark bytes = \(entry.bookmark.count)")
-    do {
-        let resolved = try store.resolve(entry)
-        print("PROBE: resolved = \(resolved.path)")
-        let ok = resolved.startAccessingSecurityScopedResource()
-        print("PROBE: startAccessingSecurityScopedResource = \(ok)")
-        if ok { resolved.stopAccessingSecurityScopedResource() }
-    } catch {
-        print("PROBE: resolve THREW: \(error)")
+
+    @Test("Invalid bookmark data fails resolution")
+    func invalidBookmarkFailsResolution() {
+        let entry = RecentWorkspaceEntry(
+            bookmark: Data(), rootPath: "/unused", displayName: "Invalid",
+            lastOpened: Date(timeIntervalSinceReferenceDate: 0))
+        #expect(throws: (any Error).self) {
+            try RecentWorkspacesStore().resolve(entry)
+        }
     }
 }

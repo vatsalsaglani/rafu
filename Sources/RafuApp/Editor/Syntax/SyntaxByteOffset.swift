@@ -35,20 +35,66 @@ nonisolated enum SyntaxByteOffset {
     /// distance from the start of the current line, converted to bytes. The
     /// offset is clamped into `0...text.utf16.count`.
     static func point(forUTF16Offset offset: Int, in text: String) -> Point {
-        let string = text as NSString
-        let clamped = min(max(offset, 0), string.length)
-        var row = 0
-        var lineStart = 0
-        var index = 0
-        let newline: unichar = 0x000A
-        while index < clamped {
-            if string.character(at: index) == newline {
-                row += 1
-                lineStart = index + 1
-            }
-            index += 1
+        LineIndex(text).point(forUTF16Offset: offset)
+    }
+
+    /// Parser-owned LF line starts. Tree-sitter counts LF only, including in
+    /// CRLF text. Point lookup is logarithmic and never reads a text prefix.
+    nonisolated struct LineIndex: Sendable {
+        private var starts: [Int] = [0]
+        private(set) var length: Int
+        /// Structural evidence for bounded scanning: queries add no work and
+        /// an edit scans only its replacement, regardless of its location.
+        private(set) var scannedUTF16Count: Int
+
+        init(_ text: String) {
+            let string = text as NSString
+            length = string.length
+            scannedUTF16Count = string.length
+            appendLineStarts(in: string, range: NSRange(location: 0, length: length))
         }
-        let column = (clamped - lineStart) * bytesPerUTF16Unit
-        return Point(row: row, column: column)
+
+        func point(forUTF16Offset offset: Int) -> Point {
+            let clamped = min(max(offset, 0), length)
+            let row = upperBound(clamped) - 1
+            return Point(row: row, column: (clamped - starts[row]) * bytesPerUTF16Unit)
+        }
+
+        /// Call only for a validated contiguous edit relative to this index.
+        mutating func applyEdit(
+            startUTF16: Int, oldEndUTF16: Int, newEndUTF16: Int, newText: String
+        ) {
+            let firstRemoved = upperBound(startUTF16)
+            let suffixStart = upperBound(oldEndUTF16)
+            let delta = newEndUTF16 - oldEndUTF16
+            let suffix = starts[suffixStart...].map { $0 + delta }
+            starts.removeSubrange(firstRemoved...)
+            let replacementRange = NSRange(
+                location: startUTF16, length: newEndUTF16 - startUTF16)
+            appendLineStarts(in: newText as NSString, range: replacementRange)
+            starts.append(contentsOf: suffix)
+            length += delta
+            scannedUTF16Count += replacementRange.length
+        }
+
+        private mutating func appendLineStarts(in string: NSString, range: NSRange) {
+            for index in range.location..<NSMaxRange(range) {
+                if string.character(at: index) == 0x000A { starts.append(index + 1) }
+            }
+        }
+
+        private func upperBound(_ offset: Int) -> Int {
+            var low = 0
+            var high = starts.count
+            while low < high {
+                let middle = low + (high - low) / 2
+                if starts[middle] <= offset {
+                    low = middle + 1
+                } else {
+                    high = middle
+                }
+            }
+            return low
+        }
     }
 }

@@ -25,6 +25,10 @@ final class RafuTextView: NSTextView {
     private var primaryCaretIndex = 0
     private var isSynchronizingNativeSelection = false
     private var multiCaretOverlay: MultiCaretOverlayView?
+    private var isUpdatingMultiCaretOverlay = false
+    private var isDrawingDecorations = false
+
+    let viewportLayoutMetrics = EditorViewportLayoutMetrics()
 
     private(set) var isPerformingMultiCaretEdit = false
 
@@ -162,7 +166,12 @@ final class RafuTextView: NSTextView {
     /// to draw nothing. Set by `CodeEditorView.Coordinator`'s debounced
     /// scheduler; drawing never touches `NSTextStorage`.
     var inlineBlameAnnotation: InlineBlameAnnotation? {
-        didSet { if oldValue != inlineBlameAnnotation { setNeedsDisplay(visibleRect) } }
+        didSet {
+            if oldValue != inlineBlameAnnotation {
+                inlineBlameRect = .zero
+                setNeedsDisplay(visibleRect)
+            }
+        }
     }
 
     var inlineBlameColor: NSColor? {
@@ -253,13 +262,8 @@ final class RafuTextView: NSTextView {
 
     // MARK: - Hover tooltip state
 
-    /// The single in-flight hover debounce task. Cancelled and replaced on
-    /// every pointer move so only the latest hover position is ever resolved
-    /// (no repeating timer).
-    private var hoverDebounceTask: Task<Void, Never>?
-    /// The UTF-16 offset the pending/shown hover targets, compared after the
-    /// async resolve so a stale result never shows over a newer position.
-    private var hoverTargetOffset: Int?
+    /// Pointer movement within one identifier does not restart its delay.
+    private let hoverRequests = EditorHoverRequestScheduler()
     private var hoverPopover: NSPopover?
     private var hoverTrackingArea: NSTrackingArea?
     /// Observer on the enclosing clip view's bounds, so any scroll (including
@@ -267,7 +271,7 @@ final class RafuTextView: NSTextView {
     /// the tooltip.
     private var hoverClipObserver: NSObjectProtocol?
 
-    private static let hoverDelay = Duration.milliseconds(450)
+    private static let blameHoverDelay = Duration.milliseconds(450)
 
     /// ⌥-click toggles a caret and ⌘-click invokes "go to definition" when an
     /// action is wired. Marked-text composition and every other click (plain,
@@ -342,9 +346,7 @@ final class RafuTextView: NSTextView {
             scheduleBlameHover()
             return
         }
-        hoverDebounceTask?.cancel()
-        hoverDebounceTask = nil
-        hoverTargetOffset = nil
+        hoverRequests.cancel()
         blameHoverDebounceTask?.cancel()
         blameHoverDebounceTask = nil
     }
@@ -354,14 +356,12 @@ final class RafuTextView: NSTextView {
         // Only cancel a still-pending resolve. A SHOWN tooltip is left to the
         // popover's `.semitransient` behavior (outside click / scroll), so the
         // pointer can travel into it to reach the "Go to Declaration" button.
-        hoverDebounceTask?.cancel()
-        hoverDebounceTask = nil
-        hoverTargetOffset = nil
+        hoverRequests.cancel()
         blameHoverDebounceTask?.cancel()
         blameHoverDebounceTask = nil
     }
 
-    /// Debounced blame-hover resolve: after `hoverDelay`, invokes
+    /// Debounced blame-hover resolve: after `blameHoverDelay`, invokes
     /// `blameHoverAction`, which builds and presents the blame-hover card
     /// itself (see the property doc comment). A no-op when a peek popover is
     /// already shown, so an in-flight card is never replaced by a stale
@@ -371,7 +371,7 @@ final class RafuTextView: NSTextView {
             return
         }
         blameHoverDebounceTask = Task { [weak self] in
-            try? await Task.sleep(for: Self.hoverDelay)
+            try? await Task.sleep(for: Self.blameHoverDelay)
             if Task.isCancelled { return }
             guard self != nil else { return }
             blameHoverAction()
@@ -737,8 +737,14 @@ final class RafuTextView: NSTextView {
     }
 
     override func setFrameSize(_ newSize: NSSize) {
+        let previousSize = frame.size
         super.setFrameSize(newSize)
-        guard hasMultipleCarets, !hasMarkedText() else { return }
+        // Viewport layout can resize the document view repeatedly. The active
+        // draw pass will update carets from its shared snapshot after layout;
+        // do not recursively start new layout from these frame callbacks.
+        guard frame.size != previousSize, !isDrawingDecorations,
+            hasMultipleCarets, !hasMarkedText()
+        else { return }
         multiCaretOverlay?.frame = bounds
         updateMultiCaretOverlay()
     }
@@ -807,7 +813,10 @@ final class RafuTextView: NSTextView {
         }
     }
 
-    private func updateMultiCaretOverlay() {
+    private func updateMultiCaretOverlay(viewport: EditorViewportLayout? = nil) {
+        guard !isUpdatingMultiCaretOverlay else { return }
+        isUpdatingMultiCaretOverlay = true
+        defer { isUpdatingMultiCaretOverlay = false }
         guard hasMultipleCarets else {
             multiCaretOverlay?.removeFromSuperview()
             multiCaretOverlay = nil
@@ -820,7 +829,18 @@ final class RafuTextView: NSTextView {
         let overlayRanges = caretRanges.filter {
             $0.length == 0 && !retainedEmptyRanges.contains($0)
         }
-        let rects = overlayRanges.compactMap(caretRect(for:))
+        guard !overlayRanges.isEmpty else {
+            multiCaretOverlay?.removeFromSuperview()
+            multiCaretOverlay = nil
+            return
+        }
+        let viewport =
+            viewport
+            ?? EditorViewportLayout(
+                textView: self, rect: visibleRect, metrics: viewportLayoutMetrics)
+        let rects = overlayRanges.compactMap { range in
+            viewport?.caretRect(at: range.location)
+        }
         guard !rects.isEmpty else {
             multiCaretOverlay?.removeFromSuperview()
             multiCaretOverlay = nil
@@ -844,53 +864,6 @@ final class RafuTextView: NSTextView {
         )
     }
 
-    private func caretRect(for range: NSRange) -> NSRect? {
-        guard range.length == 0, let layoutManager, let textContainer else { return nil }
-        layoutManager.ensureLayout(for: textContainer)
-        let contentLength = (string as NSString).length
-        let location = min(max(range.location, 0), contentLength)
-        let origin = textContainerOrigin
-        let lineHeight = layoutManager.defaultLineHeight(
-            for: font
-                ?? NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-        )
-
-        var caretRect: NSRect
-        if location == contentLength,
-            layoutManager.extraLineFragmentTextContainer === textContainer,
-            layoutManager.extraLineFragmentRect.height > 0
-        {
-            caretRect = layoutManager.extraLineFragmentRect
-        } else if location < contentLength {
-            let glyphRange = layoutManager.glyphRange(
-                forCharacterRange: NSRange(location: location, length: 1),
-                actualCharacterRange: nil
-            )
-            caretRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
-            caretRect.size.width = 1
-        } else if contentLength > 0 {
-            let glyphRange = layoutManager.glyphRange(
-                forCharacterRange: NSRange(location: contentLength - 1, length: 1),
-                actualCharacterRange: nil
-            )
-            let glyphRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
-            caretRect = NSRect(
-                x: glyphRect.maxX, y: glyphRect.minY, width: 1, height: glyphRect.height)
-        } else {
-            caretRect = NSRect(
-                x: textContainer.lineFragmentPadding,
-                y: 0,
-                width: 1,
-                height: lineHeight
-            )
-        }
-        caretRect.origin.x += origin.x
-        caretRect.origin.y += origin.y
-        caretRect.size.width = max(1, caretRect.width)
-        caretRect.size.height = max(lineHeight, caretRect.height)
-        return caretRect
-    }
-
     private func lineContentLength(_ lineRange: NSRange, in content: NSString) -> Int {
         var end = NSMaxRange(lineRange)
         while end > lineRange.location {
@@ -904,33 +877,32 @@ final class RafuTextView: NSTextView {
         return end - lineRange.location
     }
 
-    /// Debounced hover resolve. Cancels the prior task, then — only when the
-    /// pointer is actually over an identifier — schedules a `hoverDelay` wait
-    /// followed by an LSP resolve. Cancellation is checked after the sleep AND
-    /// after the resolve, and the resolved offset is compared against the still-
-    /// current target, so a superseded position never shows a tooltip.
+    /// Start one short delay per identifier. Small pointer movements within
+    /// that identifier keep the pending request and any displayed tooltip.
     private func scheduleHover(at point: NSPoint) {
-        hoverDebounceTask?.cancel()
-        guard let hoverAction else { return }
-        let index = characterIndexForInsertion(at: point)
+        scheduleHover(atUTF16Offset: characterIndexForInsertion(at: point))
+    }
+
+    @discardableResult
+    func scheduleHover(atUTF16Offset index: Int) -> Task<Void, Never>? {
+        guard let hoverAction else { return nil }
         let length = (string as NSString).length
         guard index >= 0, index <= length,
-            IdentifierUnderCaret.word(in: string, at: index) != nil
+            let word = IdentifierUnderCaret.word(in: string, at: index)
         else {
-            hoverTargetOffset = nil
-            return
+            hoverRequests.cancel()
+            return nil
         }
-        hoverTargetOffset = index
-        hoverDebounceTask = Task { [weak self] in
-            try? await Task.sleep(for: Self.hoverDelay)
-            if Task.isCancelled { return }
-            guard let self, self.hoverTargetOffset == index else { return }
-            let info = await hoverAction(index)
-            if Task.isCancelled { return }
-            guard let info, self.hoverTargetOffset == index else { return }
-            self.showHoverTooltip(info, at: index)
+        let range = NSRange(location: word.position, length: (word.word as NSString).length)
+        observeClipViewForHoverDismissal()
+        return hoverRequests.schedule(target: range) {
+            await hoverAction(index)
+        } present: { [weak self] info in
+            self?.showHoverTooltip(info, at: index)
         }
     }
+
+    var isHoverTooltipPresented: Bool { hoverPopover?.isShown == true }
 
     private func showHoverTooltip(_ info: EditorHoverInfo, at offset: Int) {
         guard let layoutManager, let textContainer,
@@ -975,9 +947,7 @@ final class RafuTextView: NSTextView {
     /// Dismisses the tooltip and cancels any pending resolve. Called on edit
     /// (from the storage delegate), keystroke, scroll, click, and teardown.
     func dismissHover() {
-        hoverDebounceTask?.cancel()
-        hoverDebounceTask = nil
-        hoverTargetOffset = nil
+        hoverRequests.cancel()
         closeHoverPopover()
     }
 
@@ -995,7 +965,9 @@ final class RafuTextView: NSTextView {
     }
 
     private func observeClipViewForHoverDismissal() {
-        guard let clipView = enclosingScrollView?.contentView else { return }
+        guard hoverClipObserver == nil, let clipView = enclosingScrollView?.contentView else {
+            return
+        }
         clipView.postsBoundsChangedNotifications = true
         hoverClipObserver = NotificationCenter.default.addObserver(
             forName: NSView.boundsDidChangeNotification, object: clipView, queue: .main
@@ -1156,20 +1128,31 @@ final class RafuTextView: NSTextView {
     private static let tabColumns = 4
 
     override func drawBackground(in rect: NSRect) {
+        guard !isDrawingDecorations else { return }
+        isDrawingDecorations = true
+        defer { isDrawingDecorations = false }
         super.drawBackground(in: rect)
-        drawCurrentLineHighlight(in: rect)
-        drawIndentGuides(in: rect)
-        drawBracketBorders()
-        // A visible completion ghost owns the caret line; blame would
-        // overlap it. Full-file blame (issue #15) already annotates every
-        // line, including the caret's, so it takes over from the single
-        // caret-line GX1 annotation whenever it is populated.
+        // Share one current viewport across all decorations and extra carets.
+        // Do not cache geometry across edits, font changes, or scrolling.
+        inlineBlameRect = .zero
+        guard rect.intersects(visibleRect) else { return }
+        guard
+            let viewport = EditorViewportLayout(
+                textView: self, rect: visibleRect, metrics: viewportLayoutMetrics)
+        else { return }
+        drawCurrentLineHighlight(in: viewport)
+        drawIndentGuides(in: viewport)
+        drawBracketBorders(in: viewport)
+        if hasMultipleCarets {
+            updateMultiCaretOverlay(viewport: viewport)
+        }
+        // A completion takes precedence over blame on the caret line.
         if inlineCompletionGhost != nil {
-            drawInlineCompletionGhost(in: rect)
+            drawInlineCompletionGhost(in: viewport)
         } else if fileBlameAnnotations != nil {
-            drawFileBlameAnnotations(in: rect)
+            drawFileBlameAnnotations(in: viewport)
         } else {
-            drawInlineBlameAnnotation(in: rect)
+            drawInlineBlameAnnotation(in: viewport)
         }
     }
 
@@ -1177,24 +1160,16 @@ final class RafuTextView: NSTextView {
     /// the ghost color at the editor font size — additive drawing only, no
     /// `NSTextStorage` attributes. A multi-line suggestion shows its first
     /// line with a trailing ⋯; Tab still inserts the whole suggestion.
-    private func drawInlineCompletionGhost(in rect: NSRect) {
+    private func drawInlineCompletionGhost(in viewport: EditorViewportLayout) {
         guard let ghost = inlineCompletionGhost, !ghost.isEmpty,
             let color = inlineCompletionGhostColor,
-            let layoutManager, let textContainer,
             !hasMultipleCarets, !hasMarkedText(),
             selectedRange().length == 0
         else { return }
 
         let content = string as NSString
         let caret = min(selectedRange().location, content.length)
-        let origin = textContainerOrigin
-        let glyphIndex = layoutManager.glyphIndexForCharacter(at: caret)
-        var caretRect = layoutManager.boundingRect(
-            forGlyphRange: NSRange(location: glyphIndex, length: 0), in: textContainer)
-        if caretRect.height <= 0 {
-            caretRect = layoutManager.extraLineFragmentRect
-        }
-        guard caretRect.height > 0 else { return }
+        guard let caretRect = viewport.caretRect(at: caret) else { return }
 
         let firstLine =
             ghost.split(separator: "\n", omittingEmptySubsequences: false)
@@ -1208,11 +1183,11 @@ final class RafuTextView: NSTextView {
         ]
         let size = label.size(withAttributes: attributes)
         let drawOrigin = NSPoint(
-            x: caretRect.minX + origin.x,
-            y: caretRect.minY + origin.y + (caretRect.height - size.height) / 2
+            x: caretRect.minX,
+            y: caretRect.minY + (caretRect.height - size.height) / 2
         )
         let drawRect = NSRect(origin: drawOrigin, size: size)
-        guard drawRect.intersects(rect) else { return }
+        guard drawRect.intersects(viewport.viewRect) else { return }
         label.draw(at: drawOrigin, withAttributes: attributes)
     }
 
@@ -1223,10 +1198,9 @@ final class RafuTextView: NSTextView {
     /// blame state. `CodeEditorView.Coordinator` clears
     /// `inlineBlameAnnotation` synchronously the moment the caret moves to a
     /// different line, so this always trusts the caret's CURRENT line.
-    private func drawInlineBlameAnnotation(in rect: NSRect) {
+    private func drawInlineBlameAnnotation(in viewport: EditorViewportLayout) {
         guard let annotation = inlineBlameAnnotation,
             let inlineBlameColor,
-            let layoutManager, let textContainer,
             !hasMultipleCarets,
             selectedRange().length == 0
         else {
@@ -1235,31 +1209,10 @@ final class RafuTextView: NSTextView {
         }
         let content = string as NSString
         let caret = min(selectedRange().location, content.length)
-        // `NSString.lineRange(for:)` walks to the line's true start and end,
-        // which is O(document) per call on single-giant-line content (e.g.
-        // minified JSON) and produced a 32-second main-thread hang during
-        // drawing. Line discovery is bounded like `drawIndentGuides`; when
-        // the caret's line boundary sits beyond the scan cap, nothing is
-        // drawn and the hover hit-test rect is cleared rather than left
-        // pointing at stale geometry.
-        guard let lineRange = boundedLineRange(around: caret, in: content) else {
-            inlineBlameRect = .zero
-            return
-        }
-        let origin = textContainerOrigin
-
-        let fragmentRect: NSRect
-        if lineRange.length == 0 {
-            fragmentRect = layoutManager.extraLineFragmentRect
-        } else {
-            let glyphRange = layoutManager.glyphRange(
-                forCharacterRange: lineRange, actualCharacterRange: nil)
-            fragmentRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
-        }
-        guard fragmentRect.height > 0 else {
-            inlineBlameRect = .zero
-            return
-        }
+        guard viewport.containsInsertion(at: caret),
+            let lineRange = boundedLineRange(around: caret, in: content),
+            let fragmentRect = viewport.lineEndRect(for: lineRange)
+        else { return }
 
         let baseFont =
             font ?? .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
@@ -1271,11 +1224,11 @@ final class RafuTextView: NSTextView {
         ]
         let label = annotation.text as NSString
         let size = label.size(withAttributes: attributes)
-        let x = fragmentRect.maxX + origin.x + Self.inlineBlameLeadingPadding
-        let y = fragmentRect.minY + origin.y + (fragmentRect.height - size.height) / 2
+        let x = fragmentRect.maxX + Self.inlineBlameLeadingPadding
+        let y = fragmentRect.minY + (fragmentRect.height - size.height) / 2
         let drawRect = NSRect(x: x, y: y, width: size.width, height: size.height)
-        inlineBlameRect = drawRect
-        guard drawRect.intersects(rect) else { return }
+        guard drawRect.intersects(viewport.viewRect) else { return }
+        inlineBlameRect = drawRect.intersection(viewport.viewRect)
         label.draw(at: drawRect.origin, withAttributes: attributes)
     }
 
@@ -1287,21 +1240,13 @@ final class RafuTextView: NSTextView {
     /// in `fileBlameAnnotations` by its starting character offset — no
     /// separate global line-number cache needed. Purely additive drawing,
     /// never touches `NSTextStorage`.
-    private func drawFileBlameAnnotations(in rect: NSRect) {
+    private func drawFileBlameAnnotations(in viewport: EditorViewportLayout) {
         guard let fileBlameAnnotations, !fileBlameAnnotations.isEmpty,
-            let fileBlameColor,
-            let layoutManager, let textContainer
+            let fileBlameColor
         else { return }
         let content = string as NSString
-        guard content.length > 0 else { return }
 
-        let origin = textContainerOrigin
-        var containerRect = rect
-        containerRect.origin.x -= origin.x
-        containerRect.origin.y -= origin.y
-        let glyphRange = layoutManager.glyphRange(forBoundingRect: containerRect, in: textContainer)
-        let charRange = layoutManager.characterRange(
-            forGlyphRange: glyphRange, actualGlyphRange: nil)
+        let charRange = viewport.characterRange
 
         let baseFont =
             font ?? .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
@@ -1320,76 +1265,66 @@ final class RafuTextView: NSTextView {
                 continue
             }
 
-            let lineGlyphRange = layoutManager.glyphRange(
-                forCharacterRange: lineRange, actualCharacterRange: nil)
-            let fragmentRect = layoutManager.boundingRect(
-                forGlyphRange: lineGlyphRange, in: textContainer)
-            guard fragmentRect.height > 0 else { continue }
+            guard let fragmentRect = viewport.lineEndRect(for: lineRange) else { continue }
 
-            let label = text as NSString
-            let size = label.size(withAttributes: attributes)
-            let x = fragmentRect.maxX + origin.x + Self.inlineBlameLeadingPadding
-            let y = fragmentRect.minY + origin.y + (fragmentRect.height - size.height) / 2
-            let drawRect = NSRect(x: x, y: y, width: size.width, height: size.height)
-            guard drawRect.intersects(rect) else { continue }
-            label.draw(at: drawRect.origin, withAttributes: attributes)
+            drawFileBlameLabel(text, at: fragmentRect, attributes: attributes, viewport: viewport)
+        }
+        // An empty document or trailing newline has no glyph in charRange.
+        // The extra line fragment is the only valid geometry for that line.
+        if let text = fileBlameAnnotations[content.length], !text.isEmpty,
+            let fragmentRect = viewport.lineEndRect(
+                for: NSRange(location: content.length, length: 0))
+        {
+            drawFileBlameLabel(text, at: fragmentRect, attributes: attributes, viewport: viewport)
         }
     }
 
-    private func drawCurrentLineHighlight(in rect: NSRect) {
+    private func drawFileBlameLabel(
+        _ text: String, at fragmentRect: NSRect,
+        attributes: [NSAttributedString.Key: Any], viewport: EditorViewportLayout
+    ) {
+        let label = text as NSString
+        let size = label.size(withAttributes: attributes)
+        let drawRect = NSRect(
+            x: fragmentRect.maxX + Self.inlineBlameLeadingPadding,
+            y: fragmentRect.minY + (fragmentRect.height - size.height) / 2,
+            width: size.width, height: size.height)
+        guard drawRect.intersects(viewport.viewRect) else { return }
+        label.draw(at: drawRect.origin, withAttributes: attributes)
+    }
+
+    private func drawCurrentLineHighlight(in viewport: EditorViewportLayout) {
         guard let currentLineHighlightColor,
-            let layoutManager, let textContainer,
-            !hasMultipleCarets,
-            selectedRange().length == 0
+            !hasMultipleCarets, selectedRange().length == 0
         else { return }
         let content = string as NSString
         let caret = min(selectedRange().location, content.length)
-        // `NSString.lineRange(for:)` walks to the line's true start and end,
-        // which is O(document) per call on single-giant-line content (e.g.
-        // minified JSON) and, combined with `setSelectedRange` firing this
-        // draw on every caret move, produced multi-second main-thread hangs.
-        // Line discovery is bounded like `drawIndentGuides`; when the
-        // caret's line boundary sits beyond the scan cap, nothing is drawn.
-        guard let lineRange = boundedLineRange(around: caret, in: content) else { return }
-        let origin = textContainerOrigin
-
-        let lineRect: NSRect
-        if lineRange.length == 0 {
-            // Caret on the trailing empty line (or an empty document).
-            lineRect = layoutManager.extraLineFragmentRect
-        } else {
-            let glyphRange = layoutManager.glyphRange(
-                forCharacterRange: lineRange, actualCharacterRange: nil)
-            lineRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
-        }
-        guard lineRect.height > 0 else { return }
+        guard viewport.containsInsertion(at: caret),
+            let lineRange = boundedLineRange(around: caret, in: content)
+        else { return }
+        let lineRect =
+            lineRange.length == 0
+            ? viewport.caretRect(at: caret) : viewport.boundingRect(for: lineRange)
+        guard let lineRect, lineRect.height > 0 else { return }
         let highlightRect = NSRect(
-            x: rect.minX,
-            y: lineRect.minY + origin.y,
-            width: rect.width,
-            height: lineRect.height
-        )
-        guard highlightRect.intersects(rect) else { return }
+            x: viewport.viewRect.minX, y: lineRect.minY,
+            width: viewport.viewRect.width, height: lineRect.height)
+        guard highlightRect.intersects(viewport.viewRect) else { return }
         currentLineHighlightColor.setFill()
-        highlightRect.intersection(rect).fill()
+        highlightRect.intersection(viewport.viewRect).fill()
     }
 
     // Indent guides use the plain `indentGuide` token for every stop. The
     // `indentGuideActive` variant (brightening the guides that enclose the
     // caret's block) needs a block-scope walk on every selection change and
     // is intentionally not implemented yet.
-    private func drawIndentGuides(in rect: NSRect) {
-        guard let indentGuideColor, let layoutManager, let textContainer, let font else { return }
+    private func drawIndentGuides(in viewport: EditorViewportLayout) {
+        guard let indentGuideColor, let textContainer, let font else { return }
         let content = string as NSString
         guard content.length > 0 else { return }
 
-        let origin = textContainerOrigin
-        var containerRect = rect
-        containerRect.origin.x -= origin.x
-        containerRect.origin.y -= origin.y
-        let glyphRange = layoutManager.glyphRange(forBoundingRect: containerRect, in: textContainer)
-        let charRange = layoutManager.characterRange(
-            forGlyphRange: glyphRange, actualGlyphRange: nil)
+        let origin = viewport.origin
+        let charRange = viewport.characterRange
         let columnWidth = (" " as NSString).size(withAttributes: [.font: font]).width
         guard columnWidth > 0 else { return }
         let leftInset = origin.x + textContainer.lineFragmentPadding
@@ -1409,15 +1344,12 @@ final class RafuTextView: NSTextView {
                 columns > 0
             else { continue }
 
-            let lineGlyphRange = layoutManager.glyphRange(
-                forCharacterRange: lineRange, actualCharacterRange: nil)
-            let lineRect = layoutManager.boundingRect(
-                forGlyphRange: lineGlyphRange, in: textContainer)
+            guard let lineRect = viewport.boundingRect(for: lineRange) else { continue }
             var column = 0
             while column < columns {
                 let x = leftInset + CGFloat(column) * columnWidth
-                NSRect(x: x, y: lineRect.minY + origin.y, width: 1, height: lineRect.height)
-                    .fill()
+                NSRect(x: x, y: lineRect.minY, width: 1, height: lineRect.height)
+                    .intersection(viewport.viewRect).fill()
                 column += Self.indentColumns
             }
         }
@@ -1436,6 +1368,13 @@ final class RafuTextView: NSTextView {
     /// `lineRange(for:)`), or `nil` when either boundary lies beyond
     /// `maxIndentGuideLineScan`.
     private func boundedLineRange(around location: Int, in content: NSString) -> NSRange? {
+        guard location >= 0, location <= content.length else { return nil }
+        // A position between CR and LF still belongs to the preceding line.
+        let location =
+            location > 0 && location < content.length
+                && content.character(at: location) == 10
+                && content.character(at: location - 1) == 13
+            ? location - 1 : location
         let cap = Self.maxIndentGuideLineScan
         let newlines = CharacterSet.newlines
 
@@ -1457,7 +1396,13 @@ final class RafuTextView: NSTextView {
         let forwardHit = content.rangeOfCharacter(from: newlines, range: forwardWindow)
         let lineEnd: Int
         if forwardHit.location != NSNotFound {
-            lineEnd = NSMaxRange(forwardHit)
+            let end = NSMaxRange(forwardHit)
+            // Keep CRLF together so the per-line walk does not draw LF as a
+            // second empty line or use the wrong full-file blame key.
+            lineEnd =
+                content.character(at: forwardHit.location) == 13
+                    && end < content.length && content.character(at: end) == 10
+                ? end + 1 : end
         } else if forwardLimit == content.length {
             lineEnd = content.length
         } else {
@@ -1489,21 +1434,15 @@ final class RafuTextView: NSTextView {
         return nil
     }
 
-    private func drawBracketBorders() {
-        guard let bracketBorderColor, let layoutManager, let textContainer,
-            !hasMultipleCarets,
+    private func drawBracketBorders(in viewport: EditorViewportLayout) {
+        guard let bracketBorderColor, !hasMultipleCarets,
             !matchedBracketRanges.isEmpty
         else { return }
-        let length = (string as NSString).length
-        let origin = textContainerOrigin
         bracketBorderColor.setStroke()
         for range in matchedBracketRanges {
-            guard NSMaxRange(range) <= length else { continue }
-            let glyphRange = layoutManager.glyphRange(
-                forCharacterRange: range, actualCharacterRange: nil)
-            var glyphRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
-            glyphRect.origin.x += origin.x
-            glyphRect.origin.y += origin.y
+            guard let glyphRect = viewport.boundingRect(for: range),
+                glyphRect.intersects(viewport.viewRect)
+            else { continue }
             let path = NSBezierPath(rect: glyphRect.insetBy(dx: 0.5, dy: 0.5))
             path.lineWidth = 1
             path.stroke()

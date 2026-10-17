@@ -38,6 +38,8 @@ final class ExternalOpenRequests {
 /// app-level memory-pressure monitor exactly once, at launch, regardless of
 /// how many workspace windows subsequently open.
 final class RafuAppDelegate: NSObject, NSApplicationDelegate {
+    private let terminationPersistence = WorkspaceTerminationPersistence()
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         MemoryPressureMonitor.shared.start()
         LauncherIPCServer.shared.start()
@@ -53,6 +55,17 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
         // once at launch (idempotent; a no-op on a non-notch/disabled
         // machine, terminal-notch-hud.md NC-B).
         NotchCompanionModel.shared.activateIfEnabled()
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Existing tab-close and empty-window confirmation paths stay in
+        // charge of their decisions. This hook only completes metadata saves.
+        // The registry orders the key window first; the helper saves it last.
+        let sessions = WorkspaceWindowRegistry.shared.sessionSnapshots().map(\.session)
+        terminationPersistence.request(sessions: sessions) {
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     func applicationWillTerminate(_ notification: Notification) {

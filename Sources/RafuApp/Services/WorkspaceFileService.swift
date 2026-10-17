@@ -1,7 +1,8 @@
+import Darwin
 import Foundation
 
 nonisolated struct WorkspaceFileService: Sendable {
-    static let maximumEditorBytes = 4 * 1_024 * 1_024
+    static let maximumEditorBytes = 16 * 1_024 * 1_024
     /// Directories the file tree never descends into. Shared with the
     /// workspace liveness classifier so watching and listing agree.
     static let excludedDirectories: Set<String> = [
@@ -28,16 +29,55 @@ nonisolated struct WorkspaceFileService: Sendable {
     @concurrent
     func readText(at url: URL) async throws -> String {
         try Task.checkCancellation()
-        let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
-        guard values.isRegularFile == true else { throw WorkspaceFileError.notRegularFile }
-        if let size = values.fileSize, size > Self.maximumEditorBytes {
-            throw WorkspaceFileError.fileTooLarge(size)
+        // Validate the opened descriptor, not metadata for a path that can
+        // change before open. Nonblocking open also prevents a replaced path
+        // or a named pipe from blocking before the regular-file check.
+        let descriptor = url.withUnsafeFileSystemRepresentation { path in
+            guard let path else {
+                errno = EINVAL
+                return Int32(-1)
+            }
+            return Darwin.open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)
         }
-        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+        guard descriptor >= 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        defer { try? handle.close() }
+        var attributes = stat()
+        guard fstat(descriptor, &attributes) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        guard attributes.st_mode & S_IFMT == S_IFREG else {
+            throw WorkspaceFileError.notRegularFile
+        }
+        guard attributes.st_size <= Self.maximumEditorBytes else {
+            throw WorkspaceFileError.fileTooLarge(Int(clamping: attributes.st_size))
+        }
+        let data = try Self.readBoundedData(from: handle)
+        try Task.checkCancellation()
         guard let text = String(data: data, encoding: .utf8) else {
             throw WorkspaceFileError.notUTF8
         }
         return text
+    }
+
+    /// Read no more than the cap plus one detection byte, even when the file
+    /// grows after fstat. No partial document is returned on overflow. The
+    /// caller owns and validates the descriptor. Internal for regression tests.
+    static func readBoundedData(from handle: FileHandle) throws -> Data {
+        var data = Data()
+        while true {
+            try Task.checkCancellation()
+            let count = min(64 * 1_024, maximumEditorBytes + 1 - data.count)
+            guard let chunk = try handle.read(upToCount: count), !chunk.isEmpty else {
+                return data
+            }
+            guard chunk.count <= maximumEditorBytes - data.count else {
+                throw WorkspaceFileError.fileTooLarge(data.count + chunk.count)
+            }
+            data.append(chunk)
+        }
     }
 
     @concurrent
@@ -177,7 +217,7 @@ enum WorkspaceFileError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .fileTooLarge(let bytes):
-            "This file is \(bytes) bytes. Rafu's initial editor limit is 4 MB."
+            "This file is at least \(bytes) bytes. Rafu’s editor limit is \(WorkspaceFileService.maximumEditorBytes / 1_024 / 1_024) MiB."
         case .invalidName: "Enter a non-empty file name without a slash."
         case .itemAlreadyExists(let name): "An item named \(name) already exists."
         case .couldNotCreate(let name): "Could not create \(name)."

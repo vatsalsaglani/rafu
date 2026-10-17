@@ -6,6 +6,7 @@ import SwiftUI
 /// run detail.
 struct ConductorGraphCanvas: View {
     @Bindable var session: WorkspaceSession
+    var showsTabStrip = true
     @Environment(\.rafuTheme) private var theme
     @State private var graph = ConductorGraph.empty
     @State private var selectedNodeID: String?
@@ -16,8 +17,10 @@ struct ConductorGraphCanvas: View {
         let refreshInput = graphRefreshInput
 
         VStack(spacing: 0) {
-            tabStrip
-            Divider().overlay(theme.palette.borderSubtle)
+            if showsTabStrip {
+                tabStrip
+                Divider().overlay(theme.palette.borderSubtle)
+            }
             if graph.nodes.isEmpty {
                 ContentUnavailableView(
                     "No Ensemble Runs",

@@ -7,6 +7,73 @@
 - **Last verified:** Swift 6.2 language mode (Swift 6.3.3, Xcode 26.6),
   macOS 26.5.2, on 2026-07-26 (UX-01 + UX-02).
 
+## 2026-10-17 repair: auxiliary tabs share the file shelf
+
+The user requested that Settings and Ensemble keep open file tabs accessible.
+This section supersedes the older full-canvas presentation rules below for
+Settings, New Ensemble, New Ensemble Run, Ensemble graph, and run detail.
+The route resolver still identifies the selected content. `EditorCanvasView`
+normalizes these routes to one stable editor layout tree. Each auxiliary tab
+belongs to one editor group and covers only that group's body. The group's
+file and terminal tabs remain on its existing shelf. Other splits stay visible.
+
+`WorkspaceAuxiliaryTab` and the window's `WorkspaceSession` own a small,
+ephemeral tab list and group map outside `EditorLayoutState`. There is one tab
+for each auxiliary surface, including one replaceable run-detail tab. Closing
+a group makes its auxiliary tabs available in the focused surviving group.
+Opening a file suspends the auxiliary selection. It does not close the
+auxiliary tab or discard its retained form. Selecting its shelf button returns
+to it. `Command-W` closes the selected auxiliary tab before the underlying file
+or terminal. Closing it returns to its own group's selected tab, rather than
+the last document in the window.
+
+Keep the loaded file editor subtree mounted below the auxiliary content. Its
+visibility, hit testing, and accessibility must be disabled while covered.
+Terminal views use their existing tab-switch teardown and controller-owned view
+reuse. This cancels queued focus requests without stopping a process or losing
+terminal state.
+`AuxiliaryEditorFocusHost` supplies a narrow native responder boundary around
+each retained auxiliary form. On inactive updates it resigns only a responder
+inside that host. For a shared window field editor, its delegate identifies
+the owning text field. Copy the SwiftUI environment into this host and disable
+inactive content. A file editor or another pane that already has focus must
+keep it. `WorkspaceAuxiliaryTabTests` covers subtree ownership and this guarded
+resignation. Its workspace fixtures use unique defaults suites, fake bookmarks,
+and a final awaited persistence flush before cleanup.
+
+Guard banners leave the rendered tree when their document is inactive. Parent
+`accessibilityHidden` alone did not remove a combined large-file warning from
+the accessibility tree during the 2026-10-17 app check. Keep the native editor
+mounted, but conditionally render its banner. `EditorGuardBannerVisibilityTests`
+checks the visible banner's height and the inactive banner's empty content.
+The rebuilt Lightning app check confirmed that switching from the large file
+to a small file removes the warning from the accessibility tree.
+
+Do not replace the layout tree with a Settings or Ensemble view: that removes
+the file shelf and can disturb native view state. Auxiliary hosts omit their
+old stand-alone header when the group shelf supplies their tab. Auxiliary tab
+selection starts no terminal or run. Explicit Run actions retain their gates.
+The existing no-window native Settings fallback remains in place.
+
+These tab records do not enter `RestorableWorkspace` or `EditorLayoutRestoration`.
+A workspace change clears them. This preserves the saved split layout and inert
+Terminal Group restoration contract.
+
+Evidence: `WorkspaceAuxiliaryTabTests` covers dirty native text, undo, selection,
+group ownership, active/inactive close, window isolation, and unchanged layout
+restoration. Run `./script/test.sh --filter WorkspaceAuxiliaryTabTests`, the full
+parallel and serial suites, and `./script/build_and_run.sh --verify`. Check both
+windows, keyboard reachability, hidden-editor focus, file/auxiliary switching,
+and a second split. On 2026-10-17, Swift 6.4 / macOS 27.0.1, the focused
+auxiliary-tab tests passed. The canonical Lightning app check confirmed shared
+file shelves, file/Settings switching, Ensemble New Run, Command-W return,
+a second window, and another split remaining visible. No Ensemble run or
+language server was started.
+
+Related code: `Models/WorkspaceAuxiliaryTabs.swift`, `Views/AuxiliaryEditorTab.swift`,
+`Views/EditorCanvasView.swift`, and `Models/WorkspaceSession.swift`. Related scope:
+`docs/plans/phases/editor-performance-repair.md`, UX-01, UX-02, and ADR 0018.
+
 ## Rule
 
 `EditorCanvasView.body` renders exactly one canvas, chosen by a single pure

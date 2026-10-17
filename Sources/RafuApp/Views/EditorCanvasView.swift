@@ -9,7 +9,7 @@ struct EditorCanvasView: View {
 
     var body: some View {
         ZStack {
-            canvas(for: EditorCanvasRoute.resolve(EditorCanvasRoute.Inputs(session: session)))
+            canvas(for: layoutRoute)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.palette.editorBackground)
@@ -29,6 +29,20 @@ struct EditorCanvasView: View {
             Button("Cancel", role: .cancel) { session.pendingCloseDocument = nil }
         } message: {
             Text("\(session.pendingCloseDocument?.displayName ?? "This file") has unsaved changes.")
+        }
+    }
+
+    private var layoutRoute: EditorCanvasRoute {
+        let route = EditorCanvasRoute.resolve(.init(session: session))
+        // Keep the same layout-tree identity while an auxiliary tab is open.
+        // Only the owning group's content changes; every split stays visible.
+        switch route {
+        case .settings, .ensembleStart, .ensembleNewRun, .graph, .runDetail:
+            return .editor
+        case .welcome, .empty:
+            return session.auxiliaryTabs.isEmpty ? route : .editor
+        default:
+            return route
         }
     }
 
@@ -140,6 +154,7 @@ private struct EditorLayoutTreeView: View {
 }
 
 private struct EditorGroupView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.rafuTheme) private var theme
     @State private var hoveredDropEdge: EditorSplitEdge?
     @State private var isDropTargeted = false
@@ -148,6 +163,8 @@ private struct EditorGroupView: View {
     @Bindable var session: WorkspaceSession
 
     var body: some View {
+        // Editor callbacks capture this value, not the view and its session.
+        let group = group
         let terminalIdentities = terminalIdentityPresentations
         let selectedTerminalIdentity = selectedTerminalController.flatMap {
             terminalIdentities[$0.id]
@@ -213,11 +230,15 @@ private struct EditorGroupView: View {
                             // and interactive; inactive documents stay mounted.
                             ZStack {
                                 ForEach(loadedDocuments) { document in
-                                    let isActive = document.id == selectedDocument?.id
+                                    let isActive =
+                                        document.id == selectedDocument?.id
+                                        && session.selectedAuxiliaryTab(in: group.id) == nil
                                     EditorDocumentView(
                                         document: document,
+                                        isVisible: isActive,
                                         findState: session.findState(for: document),
-                                        requestFind: { [weak session, weak document] in
+                                        requestFind: {
+                                            [weak session = session, weak document = document] in
                                             guard let session, let document,
                                                 let tab = group.tabs.first(where: {
                                                     $0.resource == .file(document.url)
@@ -227,39 +248,42 @@ private struct EditorGroupView: View {
                                             session.showDocumentFind()
                                         },
                                         gitLineChangesProvider: {
-                                            [weak session, weak document] in
+                                            [weak session = session, weak document = document] in
                                             guard let session, let document else { return nil }
                                             return await session.gutterLineChanges(for: document)
                                         },
-                                        requestGitRefresh: { [weak session] in
+                                        requestGitRefresh: { [weak session = session] in
                                             guard let session else { return }
                                             Task { await session.refreshGit() }
                                         },
                                         dropForwarding: isActive ? dropForwarding : nil,
-                                        navigate: { [weak session] kind in
+                                        navigate: { [weak session = session] kind in
                                             session?.navigate(kind: kind)
                                         },
-                                        hover: { [weak session, weak document] offset in
+                                        hover: {
+                                            [weak session = session, weak document = document]
+                                            offset in
                                             guard let session, let document else { return nil }
                                             return await session.hoverInfo(
                                                 at: document.url, utf16Offset: offset)
                                         },
                                         inlineBlameEnabled: session.isInlineBlameEnabled,
                                         inlineBlameProvider: {
-                                            [weak session, weak document] in
+                                            [weak session = session, weak document = document] in
                                             guard let session, let document else { return nil }
                                             return await session.inlineBlame(for: document)
                                         },
                                         fileBlameAnnotationsEnabled: session
                                             .isFileBlameAnnotationsEnabled,
                                         fileBlameAnnotationsProvider: {
-                                            [weak session, weak document] in
+                                            [weak session = session, weak document = document] in
                                             guard let session, let document else { return nil }
                                             return await session.fileBlameAnnotations(for: document)
                                         },
                                         aiCompletionEnabled: session.isAICompletionEnabled,
                                         aiCompletionProvider: {
-                                            [weak session, weak document] prefix, suffix in
+                                            [weak session = session, weak document = document]
+                                            prefix, suffix in
                                             guard let session, let document else { return nil }
                                             return await session.inlineCompletion(
                                                 prefix: prefix, suffix: suffix,
@@ -273,6 +297,21 @@ private struct EditorGroupView: View {
                                     .accessibilityHidden(!isActive)
                                 }
                             }
+                        }
+                    }
+                    .opacity(session.selectedAuxiliaryTab(in: group.id) == nil ? 1 : 0)
+                    .allowsHitTesting(session.selectedAuxiliaryTab(in: group.id) == nil)
+                    .accessibilityHidden(session.selectedAuxiliaryTab(in: group.id) != nil)
+                    .overlay {
+                        ForEach(session.auxiliaryTabs(in: group.id)) { tab in
+                            AuxiliaryEditorFocusHost(
+                                isActive: session.selectedAuxiliaryTab(in: group.id) == tab
+                            ) {
+                                AuxiliaryEditorTabContent(tab: tab, session: session)
+                            }
+                            .opacity(session.selectedAuxiliaryTab(in: group.id) == tab ? 1 : 0)
+                            .allowsHitTesting(session.selectedAuxiliaryTab(in: group.id) == tab)
+                            .accessibilityHidden(session.selectedAuxiliaryTab(in: group.id) != tab)
                         }
                     }
                     .overlay {
@@ -311,11 +350,13 @@ private struct EditorGroupView: View {
     /// `nil` when the selection is a file tab (or the referenced session no
     /// longer exists — e.g. it was closed by another path).
     private var selectedTerminalController: WorkspaceTerminalController? {
+        guard session.selectedAuxiliaryTab(in: group.id) == nil else { return nil }
         guard case .terminal(let sessionID) = selectedTab?.resource else { return nil }
         return session.terminal.sessions.first { $0.id == sessionID }
     }
 
     private var selectedTerminalGroupID: TerminalGroupID? {
+        guard session.selectedAuxiliaryTab(in: group.id) == nil else { return nil }
         guard case .terminalGroup(let groupID) = selectedTab?.resource else { return nil }
         return groupID
     }
@@ -362,18 +403,18 @@ private struct EditorGroupView: View {
     /// Open Blame Canvas reuses the existing read-only blame path.
     private func gitPeekActions(for document: EditorDocument) -> GitPeekActions {
         GitPeekActions(
-            workingTreeDiffProvider: { [weak session, weak document] in
+            workingTreeDiffProvider: { [weak session = session, weak document = document] in
                 guard let session, let document else { return nil }
                 return await session.workingTreeDiff(for: document)
             },
-            stageHunk: { [weak session] hunk, diff in
+            stageHunk: { [weak session = session] hunk, diff in
                 await session?.stagePeekHunk(hunk, in: diff)
             },
-            openFullDiff: { [weak session, weak document] in
+            openFullDiff: { [weak session = session, weak document = document] in
                 guard let session, let document else { return }
                 session.openWorkingTreeDiff(for: document)
             },
-            showCommitInHistory: { [weak session] line in
+            showCommitInHistory: { [weak session = session] line in
                 guard let session else { return }
                 session.navigatorMode = .sourceControl
                 session.gitInspectorSection = .history
@@ -384,10 +425,10 @@ private struct EditorGroupView: View {
                     Task { await session.gitSelectHistoryCommit(commit) }
                 }
             },
-            openBlameCanvas: { [weak session] in
+            openBlameCanvas: { [weak session = session] in
                 Task { await session?.openBlameForSelectedFile() }
             },
-            isBusy: { [weak session] in
+            isBusy: { [weak session = session] in
                 session?.isGitBusy == true || session?.isGitHunkActionBusy == true
             }
         )
@@ -399,40 +440,48 @@ private struct EditorGroupView: View {
     /// pointer, so without this the preview only appeared over the thin
     /// SwiftUI chrome strip (tab bar/breadcrumb) and vanished over the text.
     private var dropForwarding: EditorDropForwarding {
-        EditorDropForwarding(
+        let targeted = $isDropTargeted
+        let hoveredEdge = $hoveredDropEdge
+        let groupID = group.id
+        let reduceMotion = reduceMotion
+        return EditorDropForwarding(
             updated: { location, size in
                 let edge = EditorDropGeometry.target(at: location, in: size)
-                isDropTargeted = true
-                if edge != hoveredDropEdge {
-                    withAnimation(.spring(duration: 0.22)) { hoveredDropEdge = edge }
+                targeted.wrappedValue = true
+                if edge != hoveredEdge.wrappedValue {
+                    withAnimation(reduceMotion ? nil : .spring(duration: 0.22)) {
+                        hoveredEdge.wrappedValue = edge
+                    }
                 }
             },
             exited: {
-                isDropTargeted = false
-                hoveredDropEdge = nil
+                targeted.wrappedValue = false
+                hoveredEdge.wrappedValue = nil
             },
-            perform: { location, size, pasteboardPayload in
+            perform: { [weak session = session] location, size, pasteboardPayload in
+                guard let session else { return false }
                 let edge = EditorDropGeometry.target(at: location, in: size)
-                isDropTargeted = false
-                hoveredDropEdge = nil
+                targeted.wrappedValue = false
+                hoveredEdge.wrappedValue = nil
                 guard let payload = session.activeEditorDrag ?? pasteboardPayload else {
                     return false
                 }
                 session.clearEditorDrag()
                 switch payload {
                 case .tab(let id):
-                    session.handleEditorTabDrop(id, on: group.id, edge: edge)
+                    session.handleEditorTabDrop(id, on: groupID, edge: edge)
                 case .file(let path):
-                    session.handleEditorFileDrop(path: path, on: group.id, edge: edge)
+                    session.handleEditorFileDrop(path: path, on: groupID, edge: edge)
                 }
                 return true
             },
-            performFiles: { location, size, paths in
+            performFiles: { [weak session = session] location, size, paths in
+                guard let session else { return false }
                 guard !paths.isEmpty else { return false }
                 let edge = EditorDropGeometry.target(at: location, in: size)
-                isDropTargeted = false
-                hoveredDropEdge = nil
-                session.handleEditorFileDrops(paths: paths, on: group.id, edge: edge)
+                targeted.wrappedValue = false
+                hoveredEdge.wrappedValue = nil
+                session.handleEditorFileDrops(paths: paths, on: groupID, edge: edge)
                 return true
             }
         )
@@ -767,6 +816,7 @@ private struct TabStripReorderDropDelegate: DropDelegate {
 /// Translucent preview of the pane a dragged tab would occupy — the current
 /// content visually yields half the group instead of showing arrow buttons.
 private struct EditorSplitPreviewOverlay: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.rafuTheme) private var theme
     let edge: EditorSplitEdge?
 
@@ -790,7 +840,7 @@ private struct EditorSplitPreviewOverlay: View {
                     )
                     .padding(5)
             }
-            .animation(.spring(duration: 0.22), value: edge)
+            .animation(reduceMotion ? nil : .spring(duration: 0.22), value: edge)
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
@@ -989,7 +1039,7 @@ private struct EmptyEditorView: View {
                 Text("\(workspaceName) is open")
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(theme.palette.textPrimary)
-                Text("Double-click a file in the sidebar, or press ⌘⇧P for commands.")
+                Text("Click a file in the sidebar, or press ⌘⇧P for commands.")
                     .font(.callout)
                     .foregroundStyle(theme.palette.textSecondary)
             }
@@ -1050,6 +1100,14 @@ private struct EditorGroupTabBar: View {
                                     }
                                 }
                         }
+                        ForEach(session.auxiliaryTabs(in: group.id)) { tab in
+                            AuxiliaryEditorTabItem(
+                                tab: tab,
+                                isSelected: session.selectedAuxiliaryTab(in: group.id) == tab,
+                                select: { session.selectAuxiliaryTab(tab) },
+                                close: { session.closeAuxiliaryTab(tab) }
+                            )
+                        }
                     }
                     .coordinateSpace(.named(Self.coordinateSpaceName))
                     // Forces the enclosing NSScrollView's legacy scroller off
@@ -1094,7 +1152,8 @@ private struct EditorGroupTabBar: View {
     }
 
     private var selectedDocument: EditorDocument? {
-        guard let selectedTabID = group.selectedTabID,
+        guard session.selectedAuxiliaryTab(in: group.id) == nil,
+            let selectedTabID = group.selectedTabID,
             let tab = group.tabs.first(where: { $0.id == selectedTabID })
         else { return nil }
         return session.document(for: tab)
@@ -1109,7 +1168,8 @@ private struct EditorGroupTabBar: View {
                     tabID: tab.id,
                     groupID: group.id,
                     document: document,
-                    isSelected: tab.id == group.selectedTabID,
+                    isSelected: tab.id == group.selectedTabID
+                        && session.selectedAuxiliaryTab(in: group.id) == nil,
                     session: session
                 )
             }
@@ -1126,7 +1186,8 @@ private struct EditorGroupTabBar: View {
                     groupID: group.id,
                     controller: controller,
                     identity: terminalIdentities[sessionID],
-                    isSelected: tab.id == group.selectedTabID,
+                    isSelected: tab.id == group.selectedTabID
+                        && session.selectedAuxiliaryTab(in: group.id) == nil,
                     session: session
                 )
             }
@@ -1134,7 +1195,8 @@ private struct EditorGroupTabBar: View {
             if let snapshot = session.terminal.terminalGroup(terminalGroupID) {
                 EditorTerminalGroupTabItem(
                     tabID: tab.id, groupID: group.id, snapshot: snapshot,
-                    isSelected: tab.id == group.selectedTabID, session: session)
+                    isSelected: tab.id == group.selectedTabID
+                        && session.selectedAuxiliaryTab(in: group.id) == nil, session: session)
             }
         case .restorable:
             EmptyView()
@@ -1823,7 +1885,7 @@ private struct GitDiffCell: View {
     /// Debounce before a stable hover resolves — matches the editor's own
     /// hover delay (`RafuTextView.hoverDelay`) so both surfaces feel
     /// consistent.
-    private static let hoverDelay: Duration = .milliseconds(350)
+    private static let hoverDelay: Duration = EditorHoverTiming.documentationDelay
 
     var body: some View {
         HStack(spacing: 0) {
@@ -2367,6 +2429,7 @@ private struct EditorTerminalGroupTabItem: View {
 private struct EditorDocumentView: View {
     @Environment(\.rafuTheme) private var theme
     @Bindable var document: EditorDocument
+    var isVisible: Bool = true
     let findState: DocumentFindState
     var requestFind: (@MainActor () -> Void)? = nil
     let gitLineChangesProvider: (@MainActor () async -> GitGutterLineChanges?)?
@@ -2385,7 +2448,7 @@ private struct EditorDocumentView: View {
     var body: some View {
         VStack(spacing: 0) {
             if document.suppressesSyntax {
-                GuardBannerView(document: document)
+                GuardBannerView(document: document, isVisible: isVisible)
             }
             Group {
                 if document.isVideo {
@@ -2395,6 +2458,7 @@ private struct EditorDocumentView: View {
                 } else if document.isMarkdown || document.isSVG {
                     MarkdownEditorPresentation(
                         document: document,
+                        isVisible: isVisible,
                         findState: findState,
                         theme: theme,
                         requestFind: requestFind,
@@ -2414,6 +2478,7 @@ private struct EditorDocumentView: View {
                 } else {
                     CodeEditorView(
                         document: document,
+                        isVisible: isVisible,
                         theme: theme,
                         findState: findState,
                         requestFind: requestFind,
@@ -2454,11 +2519,18 @@ private struct EditorDocumentView: View {
 ///
 /// Deferred: dedicated menu/palette override command; the banner button is
 /// this increment's sole override path.
-private struct GuardBannerView: View {
+struct GuardBannerView: View {
     @Environment(\.rafuTheme) private var theme
     let document: EditorDocument
+    let isVisible: Bool
 
     var body: some View {
+        // The document editor stays mounted for TextKit. Its combined banner
+        // must leave the tree while inactive, so it cannot remain in AX output.
+        if isVisible { banner }
+    }
+
+    private var banner: some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 10, weight: .semibold))
@@ -2498,6 +2570,7 @@ private struct GuardBannerView: View {
 
 private struct MarkdownEditorPresentation: View {
     @Bindable var document: EditorDocument
+    var isVisible: Bool = true
     let findState: DocumentFindState
     let theme: RafuTheme
     var requestFind: (@MainActor () -> Void)? = nil
@@ -2532,6 +2605,7 @@ private struct MarkdownEditorPresentation: View {
     private var editor: some View {
         CodeEditorView(
             document: document,
+            isVisible: isVisible,
             theme: theme,
             findState: findState,
             requestFind: requestFind,

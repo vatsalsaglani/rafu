@@ -278,7 +278,7 @@ struct RafuWorkbenchStyleContractTests {
         #expect(currentAttention.showsIdentityAccent)
     }
 
-    @Test("Terminal status stays outside border, identity, focus, current, and attention inputs")
+    @Test("Source policy excludes terminal status from border resolver inputs")
     func terminalStatusIsSeparate() throws {
         let source = try Self.workbenchStyleSource()
         let contract = try #require(
@@ -292,7 +292,6 @@ struct RafuWorkbenchStyleContractTests {
         #expect(resolverSource.contains("case editorGroup(isFocused: Bool)"))
         #expect(resolverSource.contains("case managerRow(isCurrent: Bool, needsAttention: Bool)"))
         #expect(!resolverSource.contains("status:"))
-        #expect(source.contains("Status is deliberately not an input"))
     }
 
     @Test("Settings sections restore heading, containment, and source-order semantics")

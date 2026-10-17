@@ -17,6 +17,30 @@ import SwiftTerm
 final class RafuTerminalView: LocalProcessTerminalView {
     var onBell: (() -> Void)?
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        TerminalNewlineMonitor.updateRegistration(for: self)
+    }
+
+    isolated deinit {
+        TerminalNewlineMonitor.removeRegistration(for: self)
+    }
+
+    /// SwiftTerm's keyDown is public but not open. The local monitor calls
+    /// this only for the event window's visible terminal first responder.
+    func handleLegacyNewline(_ event: NSEvent) -> Bool {
+        guard
+            TerminalNewlinePolicy.usesLegacyLineFeed(
+                event: event,
+                hasMarkedText: hasMarkedText(),
+                hasKeyboardProtocol: !getTerminal().keyboardEnhancementFlags.isEmpty
+            )
+        else { return false }
+        // LF is Ctrl-J: distinct from Return's CR in raw-mode CLI input.
+        send([0x0A])
+        return true
+    }
+
     /// A narrow responder-chain seam for Terminal Groups. The callback is
     /// installed with a weak coordinator capture and cleared when its host is
     /// dismantled, so the AppKit view never becomes a focus-state owner.

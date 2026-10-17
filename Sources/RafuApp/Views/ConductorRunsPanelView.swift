@@ -719,6 +719,7 @@ private struct ConductorWorkflowLibraryRow: View {
 struct ConductorNewRunCanvas: View {
     @Environment(\.rafuTheme) private var theme
     @Bindable var session: WorkspaceSession
+    var showsTabStrip = true
     @State private var model = ConductorNewRunModel()
     @State private var workflowModel = ConductorWorkflowLaunchModel()
     @State private var taskPrompt = ""
@@ -729,7 +730,7 @@ struct ConductorNewRunCanvas: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            tabStrip
+            if showsTabStrip { tabStrip }
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("New Ensemble Run")
@@ -799,7 +800,9 @@ struct ConductorNewRunCanvas: View {
         .task(id: session.rootURL?.standardizedFileURL) {
             await model.load(workspaceRoot: session.rootURL)
             await workflowModel.load(workspaceRoot: session.rootURL)
-            if !model.agents.isEmpty || !workflowModel.workflows.isEmpty {
+            if session.ensembleNewRunCanvasVisible,
+                !model.agents.isEmpty || !workflowModel.workflows.isEmpty
+            {
                 promptFocused = true
             }
         }

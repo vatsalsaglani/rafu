@@ -12,6 +12,7 @@ struct WorkspaceGotoLocationTests {
         let fixture = try Fixture(diskText: "one\ntwo\n")
         defer { fixture.remove() }
         let session = fixture.session()
+        defer { session.descriptor = nil }
         let document = EditorDocument(url: fixture.fileURL)
         document.textSnapshotProvider = { "zero\nlive target\n" }
         session.openDocuments = [document]
@@ -28,15 +29,17 @@ struct WorkspaceGotoLocationTests {
     }
 
     @Test("Goto queues a disk-based CRLF selection until an editor mounts")
-    func unmountedBufferQueuesDiskSelection() throws {
+    func unmountedBufferQueuesDiskSelection() async throws {
         let fixture = try Fixture(diskText: "alpha\r\nbeta\n")
         defer { fixture.remove() }
         let session = fixture.session()
+        defer { session.descriptor = nil }
 
-        session.openFile(
+        let navigation = session.openFile(
             atRelativePath: fixture.relativePath,
             selecting: RafuCore.SourceLocation(line: 2, column: 3)
         )
+        await navigation?.value
 
         let document = try #require(session.selectedDocument)
         #expect(document.textSnapshotProvider == nil)
@@ -47,18 +50,20 @@ struct WorkspaceGotoLocationTests {
     }
 
     @Test("Goto rematerializes a hibernated tab and retains its pending caret")
-    func hibernatedBufferRematerializes() throws {
+    func hibernatedBufferRematerializes() async throws {
         let fixture = try Fixture(diskText: "first\nsecond\n")
         defer { fixture.remove() }
         let session = fixture.session()
+        defer { session.descriptor = nil }
         let document = EditorDocument(url: fixture.fileURL)
         document.markHibernated()
         session.openDocuments = [document]
 
-        session.openFile(
+        let navigation = session.openFile(
             atRelativePath: fixture.relativePath,
             selecting: RafuCore.SourceLocation(line: 99, column: 99)
         )
+        await navigation?.value
 
         #expect(document.loadState == .loaded)
         #expect(document.restoredSelection == NSRange(location: 13, length: 0))
@@ -76,6 +81,7 @@ struct WorkspaceGoToLineTests {
         let fixture = try Fixture(diskText: "one\ntwo\n")
         defer { fixture.remove() }
         let session = fixture.session()
+        defer { session.descriptor = nil }
         let document = EditorDocument(url: fixture.fileURL)
         document.textSnapshotProvider = { "alpha\nbravo\ncharlie\n" }
         session.openDocuments = [document]
@@ -96,6 +102,7 @@ struct WorkspaceGoToLineTests {
         let fixture = try Fixture(diskText: "one\n")
         defer { fixture.remove() }
         let session = fixture.session()
+        defer { session.descriptor = nil }
 
         session.goToLine(1)
         #expect(session.selectedDocument == nil)
@@ -106,6 +113,7 @@ struct WorkspaceGoToLineTests {
         let fixture = try Fixture(diskText: "one\n")
         defer { fixture.remove() }
         let session = fixture.session()
+        defer { session.descriptor = nil }
         let document = EditorDocument(url: fixture.fileURL)
         session.openDocuments = [document]
         session.selectedDocumentID = document.id
@@ -150,7 +158,9 @@ private struct Fixture {
 
     @MainActor
     func session() -> WorkspaceSession {
-        let session = WorkspaceSession()
+        let store = WorkspaceRestorationStore(
+            defaultsSuiteName: rootURL.lastPathComponent, bookmarkMaker: { _ in Data([1]) })
+        let session = WorkspaceSession(restorationStore: store)
         session.descriptor = WorkspaceDescriptor(
             displayName: rootURL.lastPathComponent,
             location: .local(LocalWorkspaceReference(path: rootURL.path))
@@ -160,5 +170,7 @@ private struct Fixture {
 
     func remove() {
         try? FileManager.default.removeItem(at: rootURL)
+        UserDefaults(suiteName: rootURL.lastPathComponent)?.removePersistentDomain(
+            forName: rootURL.lastPathComponent)
     }
 }

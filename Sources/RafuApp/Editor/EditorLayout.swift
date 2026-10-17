@@ -396,6 +396,11 @@ nonisolated struct EditorLayoutState: Codable, Equatable, Sendable {
             restore(movedTab, to: sourceGroupID)
             return nil
         }
+        // A cross-group move can empty its source. Collapse only after the
+        // target split exists so removal can never invalidate that target.
+        if let sourceGroupID, sourceGroupID != groupID {
+            root.collapseEmptyGroups()
+        }
         focusedGroupID = newGroup.id
         return newGroup.id
     }

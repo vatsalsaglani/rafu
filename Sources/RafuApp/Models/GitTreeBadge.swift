@@ -86,7 +86,7 @@ extension GitSnapshot {
     /// Changes outside the open workspace subtree are ignored. Every ancestor
     /// directory of a change (up to, but excluding, the workspace root) is
     /// marked with the most severe status beneath it.
-    func treeBadges(workspaceRoot: URL) -> [String: GitTreeBadge] {
+    nonisolated func treeBadges(workspaceRoot: URL) -> [String: GitTreeBadge] {
         let repositoryRoot = repositoryRoot ?? workspaceRoot
         let rootPath = workspaceRoot.standardizedFileURL.path
         var badges: [String: GitTreeBadge] = [:]

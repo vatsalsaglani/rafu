@@ -3,11 +3,14 @@
 - **Applies to:** scenes, per-window state, native commands, and the TextKit editor
 - **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-13
 
+2026-10-17 amendment: source review on Swift 6.4 / macOS 27.0.1 for retained
+resources, incremental gutter indexing, and deferred Find highlights.
+
 ## Ownership rule
 
 Use SwiftUI to own scenes and small UI-visible metadata. Each `WindowGroup` instance creates one `WorkspaceSession`; do not place window selection, tabs, drafts, or connection errors in a global singleton.
 
-Use AppKit only for capabilities that genuinely require it. The editor boundary is an `NSViewRepresentable` around `NSTextView`/TextKit. SwiftUI passes stable configuration and metadata into the bridge; the text system owns the mutable document storage and high-frequency selection/editing behavior. A bounded editor working set keeps a document's `NSTextView` mounted when the document is visible in any editor group, marked dirty, or among the newest eight by access order; all other documents hibernate (text storage released), reloading from disk on refocus with restored selection and scroll position. Dirty documents are never hibernated. See [`editor-working-set-and-hibernation.md`](editor-working-set-and-hibernation.md) for the full design, data-loss fixes, and transient-text-snapshot exception.
+Use AppKit only for capabilities that genuinely require it. The editor boundary is an `NSViewRepresentable` around `NSTextView`/TextKit. SwiftUI passes stable configuration and metadata into the bridge; the text system owns the mutable document storage and high-frequency selection/editing behavior. A bounded editor working set keeps a document's `NSTextView` mounted when the document is visible in any editor group, marked dirty, or among the newest eight by access order; all other documents hibernate (text storage released), reloading from disk on refocus with restored selection and scroll position. Dirty documents are never hibernated. See [`editor-working-set-and-hibernation.md`](editor-working-set-and-hibernation.md) for the working-set rule. Loaded documents retain TextKit resources independently of the SwiftUI mount host; moves transfer the scroll view and preserve undo. See [`editor-resource-lifetime-repair.md`](editor-resource-lifetime-repair.md).
 
 ## Non-negotiable buffer rule
 
@@ -30,8 +33,8 @@ The pre-first-commit checkpoint uses a focused bespoke bridge with native undo/f
 The Neon syntax pipeline periodically calls `setAttributes` over the full `NSTextStorage` range (`SyntaxHighlighter.applyBaseStyle`), so any decoration written as a storage attribute is silently clobbered. Verified decoration layers that survive re-highlighting:
 
 - Current-line highlight, indent guides, and matched-bracket boxes draw in `RafuTextView.drawBackground(in:)`.
-- Line numbers and Git change strips draw in `EditorGutterRulerView` (an `NSRulerView`); its per-buffer line-start index is invalidated in `textStorage(_:didProcessEditing:...)` and rebuilt lazily on the next draw.
-- Find-match highlights use `NSLayoutManager` temporary attributes, gated on `DocumentFindState.isActive` because `refresh()` also runs on every keystroke while the find bar is closed, and capped at 2 000 painted matches.
+- Line numbers and Git change strips draw in `EditorGutterRulerView` (an `NSRulerView`); its per-buffer line-start index applies character edits incrementally. Width changes run after edit processing and share one queued update.
+- Find-match highlights use `NSLayoutManager` temporary attributes, capped at 2 000 painted matches. Inactive refresh does no matching. Active matching runs off the main actor. Storage callbacks invalidate requests immediately but defer highlight changes until edit processing returns.
 
 Two supporting nuances:
 

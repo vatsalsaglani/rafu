@@ -21,6 +21,19 @@
 - Keep live text in `NSTextStorage`. Find models store only queries, options,
   ranges, counts, and small previews.
 
+## Scheduling amendment, 2026-10-17
+
+Active document matching runs off the main actor with one active request and
+one pending request. Revision and query checks reject stale results. TextKit
+edit notifications invalidate requests immediately; highlight changes wait
+until layout-manager edit processing returns. Inactive refresh does no matching.
+See [`document-find-bounded-search.md`](document-find-bounded-search.md).
+
+File-location reads use the async editor file boundary. Live buffer text takes
+precedence. Workspace metadata saves are combined, and close/quit paths await
+tracked final saves. Bookmark access uses the granted URL. See
+[`workspace-navigation-and-restoration-scheduling.md`](workspace-navigation-and-restoration-scheduling.md).
+
 ## Why it matters
 
 Path aliases otherwise make valid search results fail only in temporary folders

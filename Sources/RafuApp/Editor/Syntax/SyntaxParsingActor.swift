@@ -23,11 +23,10 @@ import SwiftTreeSitter
 ///     snapshot cross the boundary.
 ///   - `applyEdit` is atomic: it runs `tree.edit(_:)` and `parser.parse` with no
 ///     `await` in between, so no other actor call can observe a tree that was
-///     edited but not yet reparsed. The pipeline delivers edits through a
-///     non-cancelling serial chain, so `applyEdit` sees mutations in order and
-///     never drops one (dropping an edit would desync the tree from `text`).
-///   - `version` is a span-staleness *tag* on the incremental path, never a
-///     gate: every edit is applied so the tree stays consistent with `text`.
+///     edited but not yet reparsed. One worker delivers contiguous edits
+///     in order, or sends a full snapshot when pending edits are coalesced.
+///   - Only contiguous versions reuse a tree. A version gap resets it; an
+///     older version is rejected. Token requests require the exact version.
 ///
 /// The UTF-16 encoding path is used throughout: `Parser` defaults to UTF-16, a
 /// tree-sitter byte offset is `utf16 * 2`, and query ranges come back as
@@ -72,16 +71,12 @@ actor SyntaxParsingActor {
     /// Most recent parse tree. `nil` before the first parse or when the
     /// document exceeds `maxParseUTF16Length`.
     private var tree: MutableTree?
-    /// The text the current `tree` was parsed from. Retained because an
-    /// incremental `InputEdit`'s `oldEndPoint` (row/column of the *replaced*
-    /// text) must be computed from the pre-edit newline structure, which the
-    /// post-edit string no longer carries. Byte offsets are authoritative
-    /// regardless; the points are supplied for correctness. Cost: one document
-    /// copy per live grammar buffer, bounded by `maxParseUTF16Length` and tab
-    /// hibernation (`tearDown`).
+    /// Snapshot used by the bounded Markdown inline pass. The parser also owns
+    /// the LF line index for this version, including old edit endpoints.
+    /// Both are discarded when the document exceeds the parse cap.
     private var text = ""
-    /// Highest snapshot version seen. On the full-parse baseline it gates stale
-    /// snapshots; on the incremental path it is only a tag (see type doc).
+    private var positions = SyntaxByteOffset.LineIndex("")
+    /// Exact version of the retained snapshot and position index.
     private var latestVersion = 0
     /// Upper bound (UTF-16 units) on documents parsed off-main, guarding
     /// typing latency and memory on very large buffers. Above it the actor
@@ -134,22 +129,34 @@ actor SyntaxParsingActor {
         }
     }
 
+    /// A single worker calls this method; parsing stays on this actor.
+    func process(_ request: SyntaxSnapshotRequest) {
+        if let edit = request.edit {
+            applyEdit(
+                startUTF16: edit.startUTF16, oldEndUTF16: edit.oldEndUTF16,
+                newEndUTF16: edit.newEndUTF16, newText: request.text, version: request.version)
+        } else {
+            updateSnapshot(request.text, version: request.version)
+        }
+    }
+
     /// Full reparse of `text` at `version` — the baseline used at grammar
     /// activation and full refresh. Discards the call if a newer snapshot was
     /// already parsed (`version` staleness), and drops the tree for documents
-    /// past the guard cap. Retains `text` so a subsequent `applyEdit` can build
-    /// a correct `InputEdit`.
+    /// past the guard cap. Retains the text and indexed positions together.
     func updateSnapshot(_ text: String, version: Int) {
-        guard version >= latestVersion else { return }
+        guard !Task.isCancelled, version >= latestVersion else { return }
         latestVersion = version
-        self.text = text
 
         let length = (text as NSString).length
         guard length <= maxParseUTF16Length else {
+            self.text = ""
             tree = nil
+            positions = SyntaxByteOffset.LineIndex("")
             lastReparseMetric = nil
             return
         }
+        positions = SyntaxByteOffset.LineIndex(text)
         performFullParse(text, byteLength: length * SyntaxByteOffset.bytesPerUTF16Unit)
     }
 
@@ -160,11 +167,9 @@ actor SyntaxParsingActor {
     /// applied to storage (`oldEndUTF16` reconstructs the pre-edit end from the
     /// storage delegate's `changeInLength`).
     ///
-    /// Atomic and never dropped: `version` only tags staleness; every edit is
-    /// applied so `tree` stays consistent with `text`. Falls back to a full
-    /// parse when there is no prior tree (first edit, or the document was over
-    /// the cap and shrank back under it), and drops the tree when `newText`
-    /// exceeds the cap.
+    /// Atomic: no suspension between tree edit and parse. Older versions are
+    /// rejected. A gap, invalid delta, or missing tree uses a full snapshot,
+    /// so no skipped edit can leave a retained tree out of sync.
     func applyEdit(
         startUTF16: Int,
         oldEndUTF16: Int,
@@ -172,30 +177,42 @@ actor SyntaxParsingActor {
         newText: String,
         version: Int
     ) {
+        guard !Task.isCancelled, version > latestVersion else { return }
+        let isContiguous = version == latestVersion + 1
         latestVersion = version
 
         let newLength = (newText as NSString).length
         guard newLength <= maxParseUTF16Length else {
             tree = nil
-            text = newText
+            text = ""
+            positions = SyntaxByteOffset.LineIndex("")
             lastReparseMetric = nil
             return
         }
 
         let byteLength = newLength * SyntaxByteOffset.bytesPerUTF16Unit
-        guard let editedTree = tree else {
+        guard let editedTree = tree, isContiguous,
+            startUTF16 >= 0, oldEndUTF16 >= startUTF16, oldEndUTF16 <= positions.length,
+            newEndUTF16 >= startUTF16, newEndUTF16 <= newLength,
+            newLength == positions.length + newEndUTF16 - oldEndUTF16
+        else {
+            positions = SyntaxByteOffset.LineIndex(newText)
             performFullParse(newText, byteLength: byteLength)
             return
         }
 
-        let oldText = text
+        let startPoint = positions.point(forUTF16Offset: startUTF16)
+        let oldEndPoint = positions.point(forUTF16Offset: oldEndUTF16)
+        positions.applyEdit(
+            startUTF16: startUTF16, oldEndUTF16: oldEndUTF16,
+            newEndUTF16: newEndUTF16, newText: newText)
         let inputEdit = InputEdit(
             startByte: SyntaxByteOffset.byteOffset(forUTF16Offset: startUTF16),
             oldEndByte: SyntaxByteOffset.byteOffset(forUTF16Offset: oldEndUTF16),
             newEndByte: SyntaxByteOffset.byteOffset(forUTF16Offset: newEndUTF16),
-            startPoint: SyntaxByteOffset.point(forUTF16Offset: startUTF16, in: oldText),
-            oldEndPoint: SyntaxByteOffset.point(forUTF16Offset: oldEndUTF16, in: oldText),
-            newEndPoint: SyntaxByteOffset.point(forUTF16Offset: newEndUTF16, in: newText)
+            startPoint: startPoint,
+            oldEndPoint: oldEndPoint,
+            newEndPoint: positions.point(forUTF16Offset: newEndUTF16)
         )
         editedTree.edit(inputEdit)
 
@@ -208,24 +225,34 @@ actor SyntaxParsingActor {
             "mode=incremental editByte=\(SyntaxByteOffset.byteOffset(forUTF16Offset: startUTF16)) docBytes=\(byteLength)"
         )
         tree = parser.parse(tree: editedTree) { offset, point in
+            guard !Task.isCancelled else { return nil }
             let chunk = base(offset, point)
             bytesRead += chunk?.count ?? 0
             return chunk
         }
         signposter.endInterval("parse", state, "bytesRead=\(bytesRead)")
 
+        guard !Task.isCancelled else {
+            discardCancelledParse()
+            return
+        }
         text = newText
         lastReparseMetric = ReparseMetric(
             bytesRead: bytesRead, docBytes: byteLength, wasIncremental: true)
     }
 
-    /// Highlight spans intersecting the UTF-16 `range`, mapped to
-    /// `RafuTheme.syntax` keys. Returns `[]` before the first successful
-    /// parse. The query is bounded to `range` via `cursor.setRange`; the
-    /// pipeline only ever asks for the visible range plus Neon's look-ahead/
-    /// behind, so no extra narrowing is needed here.
+    /// A pending editor request cannot query a tree from an older snapshot.
+    /// `nil` must become a failed Neon completion, never a valid empty range.
+    func tokens(inUTF16 range: NSRange, version: Int) -> [SyntaxSpan]? {
+        guard !Task.isCancelled, version == latestVersion else { return nil }
+        let spans = tokens(inUTF16: range)
+        return Task.isCancelled ? nil : spans
+    }
+
+    /// Highlight spans intersecting the UTF-16 range, mapped to theme keys.
+    /// The pipeline limits requests to the viewport and Neon's small margin.
     func tokens(inUTF16 range: NSRange) -> [SyntaxSpan] {
-        guard let tree else { return [] }
+        guard !Task.isCancelled, let tree else { return [] }
 
         let signposter = SyntaxSignpost.signposter
         let id = signposter.makeSignpostID()
@@ -235,14 +262,15 @@ actor SyntaxParsingActor {
         cursor.setRange(range)
 
         var spans: [SyntaxSpan] = []
+        defer { signposter.endInterval("query", state, "spans=\(spans.count)") }
         for namedRange in cursor.highlights() {
+            if Task.isCancelled { return [] }
             guard let key = CaptureTokenMap.themeKey(forCapture: namedRange.name) else { continue }
             spans.append(SyntaxSpan(themeKey: key, range: namedRange.range))
         }
 
         spans.append(contentsOf: inlineTokens(inUTF16: range, tree: tree))
 
-        signposter.endInterval("query", state, "spans=\(spans.count)")
         return spans
     }
 
@@ -268,6 +296,7 @@ actor SyntaxParsingActor {
         var spans: [SyntaxSpan] = []
         var consumedUTF16 = 0
         matches: for match in locatorCursor {
+            if Task.isCancelled { return [] }
             for capture in match.captures {
                 let nodeRange = capture.node.range
                 guard nodeRange.length > 0 else { continue }
@@ -305,14 +334,26 @@ actor SyntaxParsingActor {
         let state = signposter.beginInterval(
             "parse", id: id, "mode=full docBytes=\(byteLength)")
         tree = parser.parse(tree: nil as MutableTree?) { offset, point in
+            guard !Task.isCancelled else { return nil }
             let chunk = base(offset, point)
             bytesRead += chunk?.count ?? 0
             return chunk
         }
         signposter.endInterval("parse", state, "bytesRead=\(bytesRead)")
 
+        guard !Task.isCancelled else {
+            discardCancelledParse()
+            return
+        }
         self.text = text
         lastReparseMetric = ReparseMetric(
             bytesRead: bytesRead, docBytes: byteLength, wasIncremental: false)
+    }
+
+    private func discardCancelledParse() {
+        tree = nil
+        text = ""
+        positions = SyntaxByteOffset.LineIndex("")
+        lastReparseMetric = nil
     }
 }

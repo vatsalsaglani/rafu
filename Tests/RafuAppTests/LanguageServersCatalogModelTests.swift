@@ -36,8 +36,9 @@ struct LanguageServersCatalogModelTests {
             let rows = await model.rows
             let packs = await model.packs
             let userRows = await model.userRows
+            let expectedPackIDs = ServerPack.all.map(\.id)
             #expect(rows.map(\.id).sorted() == CuratedCatalog.servers.map(\.id).sorted())
-            #expect(packs.map(\.id) == ServerPack.all.map(\.id))
+            #expect(packs.map(\.id) == expectedPackIDs)
             #expect(userRows.isEmpty)
         }
     }

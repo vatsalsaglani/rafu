@@ -72,25 +72,6 @@ struct ThemedControlStyleScanTests {
         )
     }
 
-    /// The pane bar is hand-drawn now, so "all seven panes are reachable" is
-    /// no longer guaranteed by seven `Tab` literals the compiler sees. This
-    /// is the behavioral half of the guard the scan cannot express.
-    @Test("Settings still exposes all seven panes, each labelled and glyphed")
-    func settingsPanesAreComplete() {
-        #expect(
-            SettingsPane.allCases == [
-                .general, .appearance, .ai, .languageServers, .usage, .agents, .ensemble,
-            ])
-        #expect(
-            SettingsPane.allCases.map(\.title) == [
-                "General", "Appearance", "AI", "Language Servers", "Usage", "Agents", "Ensemble",
-            ])
-        // An empty glyph name renders a blank pill: legible only by label,
-        // and invisible in the bar's icon-over-label anatomy.
-        #expect(SettingsPane.allCases.allSatisfy { !$0.systemImage.isEmpty })
-        #expect(Set(SettingsPane.allCases.map(\.systemImage)).count == SettingsPane.allCases.count)
-    }
-
     /// Walks up from this test's own location to the directory holding
     /// `Package.swift`. Test bundles have no reliable pointer back to the
     /// checkout, and hardcoding a relative depth breaks the moment the file

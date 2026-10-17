@@ -6,11 +6,14 @@ import SwiftUI
 struct SettingsCanvas: View {
     @Environment(\.rafuTheme) private var theme
     @Bindable var session: WorkspaceSession
+    var showsTabStrip = true
 
     var body: some View {
         VStack(spacing: 0) {
-            tabStrip
-            Divider().overlay(theme.palette.borderSubtle)
+            if showsTabStrip {
+                tabStrip
+                Divider().overlay(theme.palette.borderSubtle)
+            }
             RafuSettingsView()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

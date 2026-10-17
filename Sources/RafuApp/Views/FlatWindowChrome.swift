@@ -14,13 +14,10 @@ import SwiftUI
 ///    in full screen (the Safari behavior). Without one, AppKit auto-hides
 ///    the titlebar and reveals it when the pointer reaches the top edge.
 ///
-/// Window content merges with the titlebar zone: `WorkspaceWindowView`
-/// applies `.ignoresSafeArea(.container, edges: .top)`, which DOES render
-/// SwiftUI content under the transparent titlebar (an earlier note here
-/// claimed only backgrounds bleed into that zone — that is true merely of
-/// content that respects the top safe area). The window `backgroundColor`
-/// still matches the sidebar surface as a fallback for the first frames
-/// before SwiftUI lays out.
+/// The workspace scene selects `hiddenTitleBar` before the window appears.
+/// This bridge cancels the window-level top safe area so nested hosting views
+/// also lay content out in that zone. The window background matches the
+/// content surface while SwiftUI lays out.
 ///
 /// Two AppKit behaviors fight the flat look and are both handled here:
 ///
@@ -76,19 +73,20 @@ struct FlatWindowChrome: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
+    func makeNSView(context: Context) -> AttachmentView {
+        let view = AttachmentView(frame: .zero)
         configure(context.coordinator)
         context.coordinator.attach(to: view, topologyToken: topologyToken)
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
+    func updateNSView(_ nsView: AttachmentView, context: Context) {
         configure(context.coordinator)
         context.coordinator.attach(to: nsView, topologyToken: topologyToken)
     }
 
-    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+    static func dismantleNSView(_ nsView: AttachmentView, coordinator: Coordinator) {
+        nsView.coordinator = nil
         coordinator.detach()
     }
 
@@ -96,6 +94,23 @@ struct FlatWindowChrome: NSViewRepresentable {
         coordinator.titleBarColor = titleBarColor
         coordinator.hidesTrafficLights = hidesTrafficLights
         coordinator.onFullScreenChange = onFullScreenChange
+    }
+
+    /// `makeNSView` can run before AppKit attaches the view to a window.
+    /// Observe the actual attachment instead of making one run-loop guess.
+    /// The view keeps only a weak coordinator reference; SwiftUI owns both.
+    final class AttachmentView: NSView {
+        weak var coordinator: Coordinator?
+        var topologyToken: TopologyToken = .empty
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let window {
+                coordinator?.bind(to: window, topologyToken: topologyToken)
+            } else {
+                coordinator?.detach()
+            }
+        }
     }
 
     /// Matches the private AppKit views that paint titlebar material over
@@ -122,7 +137,6 @@ struct FlatWindowChrome: NSViewRepresentable {
 
         private weak var window: NSWindow?
         private var topologyToken: TopologyToken?
-        private var attachGeneration = 0
         private var appliedTitleBarColor: NSColor?
         private var appliedHidesTrafficLights: Bool?
         private var pendingDeferredPasses: [UUID: DispatchWorkItem] = [:]
@@ -135,27 +149,17 @@ struct FlatWindowChrome: NSViewRepresentable {
 
         deinit { NotificationCenter.default.removeObserver(self) }
 
-        /// `view.window` is `nil` until AppKit finishes inserting the view
-        /// into a window's hierarchy, which has not happened during
-        /// `makeNSView` itself — deferring one main run-loop turn is the
-        /// standard way to observe it (same reason as `WindowAccessor`).
-        func attach(to view: NSView, topologyToken: TopologyToken = .empty) {
-            attachGeneration &+= 1
-            let generation = attachGeneration
+        /// Bind now if attached. Otherwise `viewDidMoveToWindow` binds when
+        /// AppKit supplies the window, even if several transactions pass first.
+        func attach(to view: AttachmentView, topologyToken: TopologyToken = .empty) {
+            view.coordinator = self
+            view.topologyToken = topologyToken
             if let window = view.window {
                 bind(to: window, topologyToken: topologyToken)
-                return
-            }
-            DispatchQueue.main.async { [weak self, weak view] in
-                guard let self, self.attachGeneration == generation,
-                    let window = view?.window
-                else { return }
-                self.bind(to: window, topologyToken: topologyToken)
             }
         }
 
-        /// Headless seam: `attach(to:)` has to defer a run-loop turn before
-        /// `view.window` exists, so tests bind a window directly.
+        /// Shared entry point for view attachment and headless window tests.
         func bind(to window: NSWindow, topologyToken: TopologyToken = .empty) {
             if window !== self.window {
                 detach()
@@ -190,7 +194,6 @@ struct FlatWindowChrome: NSViewRepresentable {
         }
 
         func detach() {
-            attachGeneration &+= 1
             NotificationCenter.default.removeObserver(self)
             cancelDeferredPasses()
             window = nil
@@ -400,9 +403,19 @@ struct FlatWindowChrome: NSViewRepresentable {
 /// breadcrumb). Interactive controls layered above it still win hit-testing;
 /// only clicks on empty area reach the handle.
 struct WindowDragHandle: View {
+    @State private var target = WindowTitlebarDoubleClickTarget()
+
     var body: some View {
         Color.clear
             .contentShape(Rectangle())
             .gesture(WindowDragGesture())
+            .simultaneousGesture(
+                TapGesture(count: 2).onEnded {
+                    target.forwardDoubleClick(NSApp.currentEvent)
+                }
+            )
+            .allowsWindowActivationEvents(true)
+            .background(WindowDragAttachment(target: target))
+            .accessibilityHidden(true)
     }
 }

@@ -87,6 +87,15 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`workspace-lifecycle-dual-funnel.md`](workspace-lifecycle-dual-funnel.md) | Workspace-open work that must fire on TWO code paths: `openLocalWorkspace(at:)` for explicit open/replace, and `restoreLastWorkspaceIfAvailable()` for window state restoration (the paths do not call each other) |
 | [`ensemble-onboarding.md`](ensemble-onboarding.md) | Changing the guided "New Ensemble…" sheet, its three doors, CLI gating reuse, budget-grant defaults, the universal copyable-goal paste fallback (no supported agent CLI accepts an initial-prompt argument), or the template/expert-door reuse of C6's instantiation and launch paths — also the two review-caught form patterns: provider-default leaks from an `if isEmpty` prefill, and consent controls that can reach the empty set |
 
+| [`editor-resource-lifetime-repair.md`](editor-resource-lifetime-repair.md) | Document-owned TextKit resources, mount-host transfer, stale teardown guards, undo and hibernation |
+| [`editor-viewport-layout-repair.md`](editor-viewport-layout-repair.md) | Viewport-bounded app layout requests, caret and decoration geometry, and structural counters |
+| [`editor-gutter-incremental-index.md`](editor-gutter-incremental-index.md) | Incremental UTF-16 line starts, CRLF boundaries, deferred ruler width, and NSObject selector collision |
+| [`syntax-bounded-snapshot-worker.md`](syntax-bounded-snapshot-worker.md) | One active and one pending parse snapshot, version gaps, stale tokens, and indexed edit points |
+| [`document-find-bounded-search.md`](document-find-bounded-search.md) | Off-main matching, request identity, pending commands, and highlight changes after TextKit edits |
+| [`workspace-navigation-and-restoration-scheduling.md`](workspace-navigation-and-restoration-scheduling.md) | Async goto, stale-result checks, bookmark caching, combined metadata saves, and quit completion |
+| [`window-chrome-attachment-repair.md`](window-chrome-attachment-repair.md) | Synchronous window attachment, independent window state, and bounded chrome repair |
+| [`test-source-policy-and-bookmark-isolation.md`](test-source-policy-and-bookmark-isolation.md) | Source-policy test limits, real bookmark assertions, and isolated preferences |
+
 ## Reference-note template
 
 ```markdown
@@ -107,3 +116,8 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 ```
 
 Keep one focused subject per note. Add it to this index. Use an ADR instead when the content is a choice among alternatives rather than an observed engineering fact.
+
+- [Single-click sidebar opening](sidebar-single-click-opening.md): native file activation without programmatic reveal reopening.
+- [Documentation hover timing and lifetime](editor-hover-request-timing.md): short per-identifier delay and cancellation for hidden or scrolled editors.
+
+- [Terminal modified Return](terminal-modified-return.md): legacy newline bytes, negotiated keyboard input, and the bounded native event bridge.

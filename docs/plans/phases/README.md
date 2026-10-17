@@ -24,6 +24,11 @@ Bootstrap itself did **not** claim TextKit editing, Tree-sitter, SSH, launcher I
 
 ## Status and sequence
 
+[Workspace Canvas and app cards](workspace-canvas.md) is a planning-only proposal
+from 2026-10-17. It includes terminals, files, local web app previews, and optional
+native macOS window previews. It does not authorize implementation or supersede
+the accepted web-view, terminal, or restoration decisions.
+
 | Phase | Status | Depends on | Gate |
 |---|---|---|---|
 | [Phase 0](phase-0-feasibility.md) | Planned | Bootstrap checkpoint | Editor, SSH, and CLI feasibility proven |

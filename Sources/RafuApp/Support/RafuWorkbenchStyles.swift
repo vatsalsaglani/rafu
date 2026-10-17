@@ -76,7 +76,7 @@ struct CornerCutoutOverlay: View {
     }
 }
 
-private struct CornerCutoutShape: Shape {
+private nonisolated struct CornerCutoutShape: Shape {
     let radius: CGFloat
 
     func path(in rect: CGRect) -> Path {
@@ -128,7 +128,7 @@ struct WorkbenchDeckSurface<Content: View>: View {
     }
 }
 
-private struct AttachedTabFillShape: Shape {
+private nonisolated struct AttachedTabFillShape: Shape {
     let radius: CGFloat
 
     func path(in rect: CGRect) -> Path {
@@ -152,7 +152,7 @@ private struct AttachedTabFillShape: Shape {
 
 /// An open-bottom outline: top and both sides are structural; the owning tab
 /// shelf keeps the full-width bottom seam.
-private struct AttachedTabOutlineShape: Shape {
+private nonisolated struct AttachedTabOutlineShape: Shape {
     let radius: CGFloat
 
     func path(in rect: CGRect) -> Path {

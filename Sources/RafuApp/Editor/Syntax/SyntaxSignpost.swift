@@ -10,4 +10,11 @@ import OSLog
 nonisolated enum SyntaxSignpost {
     static let signposter = OSSignposter(
         subsystem: "dev.vatsalsaglani.rafu", category: "syntax")
+
+    /// Queue depth and reset counters contain no source text or file identity.
+    static func recordQueue(pending: Int, active: Int, coalesced: Int, resets: Int) {
+        signposter.emitEvent(
+            "snapshotQueue",
+            "pending=\(pending) active=\(active) coalesced=\(coalesced) resets=\(resets)")
+    }
 }

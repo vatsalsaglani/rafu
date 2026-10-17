@@ -13,7 +13,9 @@ struct RafuApplication: App {
         }
         .defaultSize(width: 1_100, height: 720)
         .windowResizability(.contentMinSize)
-        .windowToolbarStyle(.unified)
+        // Set the initial title presentation before SwiftUI orders a new
+        // window. The AppKit bridge handles safe areas and later transitions.
+        .windowStyle(.hiddenTitleBar)
         .commands {
             RafuAppCommands()
         }

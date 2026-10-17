@@ -23,10 +23,10 @@ final class EditorDocument: Identifiable {
     /// Whether this document's editor is currently mounted (`loaded`) or has
     /// been released to a reload-from-disk state (`hibernated`). Observed so
     /// `EditorGroupView` mounts the editor only for loaded documents; the
-    /// live `NSTextStorage` survives exactly as long as the editor is
-    /// mounted. A dirty document is never hibernated (see
-    /// `DocumentHibernationPolicy`), so its unsaved edits are always retained
-    /// by the mounted view.
+    /// live `NSTextStorage` survives structural host moves and is released
+    /// only on hibernation or document close. A dirty document is never
+    /// hibernated (see `DocumentHibernationPolicy`), so its unsaved edits
+    /// remain in the retained TextKit storage.
     enum LoadState: Sendable {
         case loaded
         case hibernated
@@ -87,18 +87,14 @@ final class EditorDocument: Identifiable {
     @ObservationIgnored
     var restoredScrollFraction: CGFloat?
 
-    /// Transient hand-off for a DIRTY buffer's live text across an
-    /// app-triggered STRUCTURAL SwiftUI remount — splitting a group or
-    /// moving a tab to another group reshapes `EditorLayoutTreeView`'s
-    /// erased view tree, which tears down and rebuilds every `NSView` in the
-    /// affected subtree, not only the tab that moved. An ordinary `NSView`
-    /// cannot survive that kind of teardown, so `CodeEditorView.dismantleNSView`
-    /// captures the live text here just before releasing the view, and the
-    /// next `load()` seeds from it instead of reading disk, then clears it
-    /// immediately. This is the one sanctioned place a buffer snapshot lives
-    /// briefly outside TextKit, and only ever for a document that is already
-    /// dirty — never observed, never a substitute for the mounted
-    /// `NSTextStorage` being the live text's normal home.
+    /// AppKit owns the live buffer, undo stack, and parser for this loaded
+    /// document. SwiftUI mounts only a host around these stable resources.
+    /// The coordinator refers back to this document weakly.
+    @ObservationIgnored
+    var editorResources: CodeEditorView.EditorResources?
+
+    /// Legacy one-shot seed for callers that supply a dirty snapshot before
+    /// the first editor is made. Structural moves now retain TextKit itself.
     @ObservationIgnored
     var pendingDirtyText: String?
 
@@ -264,6 +260,8 @@ final class EditorDocument: Identifiable {
     /// so the mounted view keeps owning its live text.
     func markHibernated() {
         guard !isDirty else { return }
+        editorResources?.release()
+        editorResources = nil
         loadState = .hibernated
     }
 

@@ -1,7 +1,8 @@
-# ADR 0006: Bounded editor working set with hibernation and transient dirty-text snapshots
+# ADR 0006: Bounded editor working set with retained TextKit resources
 
 - **Status:** Accepted
 - **Date:** 2026-07-15
+- **Amended:** 2026-10-17, editor lifetime repair requested by the user
 
 ## Context
 
@@ -41,12 +42,18 @@ Alternatives considered:
 
 ## Decision
 
-- A document's editor stays **mounted** (its `NSTextStorage` lives) when the
-  document is visible in any group, **or** dirty, **or** among the newest
-  `N` by access order. `N = 8` (`DocumentHibernationPolicy.keepLoadedLimit`).
-  All other documents **hibernate**: their editor is unmounted, exactly as
-  the pre-existing behavior, so hibernation adds no memory over the old
-  aggressive teardown.
+- A document retains its editor resources when it is visible in any group,
+  dirty, or among the newest `N` by access order. `N = 8`
+  (`DocumentHibernationPolicy.keepLoadedLimit`). Other clean documents
+  hibernate and release their TextKit resources.
+- `EditorDocument` owns one `@ObservationIgnored EditorResources` reference.
+  The owner retains the scroll view and coordinator; the coordinator holds a
+  weak document reference. Live text remains in `NSTextStorage`. Each SwiftUI
+  mount receives a new host and transfers the retained scroll view into it.
+  A stale host cannot update or dismantle a new host's resources.
+- A structural move preserves text, undo, selection, and parser state. It does
+  not load from disk or copy text into a model. Only final release or clean
+  hibernation tears down the resource owner. Release is idempotent.
 - **Dirty documents never hibernate.** This is the data-safety invariant,
   enforced in three layers: the policy never returns a dirty document,
   `EditorDocument.markHibernated()` is a no-op while dirty, and
@@ -59,14 +66,9 @@ Alternatives considered:
   other restored tabs start hibernated (the policy's grace-bypass path) and
   materialize on focus.
 - **Undo is capped** at `levelsOfUndo = 200` via `undoManager(for:)`.
-- **One sanctioned exception to the "text lives only in TextKit" invariant:**
-  `EditorDocument.pendingDirtyText` — a transient, non-observed, dirty-only
-  buffer snapshot captured in `dismantleNSView` and consumed by `load()` in
-  place of the disk read. It exists solely because a *structural* layout
-  change (group split, cross-group tab move) replaces an `AnyView` subtree
-  and destroys the `NSView` regardless of `loadState`, so keeping-mounted
-  cannot preserve the buffer there. It is cleared immediately on restore and
-  never used for clean documents.
+- `pendingDirtyText` remains a non-observed compatibility input for an initial
+  load. A supplied seed takes precedence over disk and is consumed once.
+  Structural moves no longer write this property.
 - A `underMemoryPressure` input to the policy hibernates all eligible
   documents (drops the newest-N grace); the DispatchSource that drives it is
   wired in the caps/pressure increment, not here.
@@ -82,17 +84,16 @@ Alternatives considered:
 - Opening a group now mounts all its loaded tabs (hidden ones inert:
   `opacity(0)`, `allowsHitTesting(false)`, `accessibilityHidden`), a new
   one-time disk-read + git-gutter fan-out bounded by the working-set size.
-- Known limitations: a purely theoretical double-structural-remount race
-  within one guard-decision async gap (harmless — snapshot text is identical
-  across an automated remount); a clean guard-overridden large file loses its
-  "Enable Highlighting" override after hibernation (banner reappears; dirty
-  files unaffected); cross-launch cursor/scroll is not persisted, so restored
-  tabs materialize at top-of-file on first focus.
+- A clean guard-overridden large file can lose its highlighting override after
+  hibernation. Cross-launch cursor and scroll are not persisted.
+- The 2026-10-17 amendment replaces the earlier transient-snapshot decision.
+  A snapshot can preserve text but cannot preserve undo or parser ownership.
+  Stable resources separate the loaded-document lifetime from SwiftUI host
+  lifetime while keeping the working-set bound. Keeping every editor alive
+  remains rejected.
 
-**Revisit trigger:** if the working-set bound (`N = 8`) proves wrong under
-real many-tab use, tune the constant, not the model; if structural remounts
-become avoidable (stable layout identity without `AnyView` erasure), the
-`pendingDirtyText` exception can be removed.
+**Revisit trigger:** measure the working-set bound under many-tab use. Tune
+`N` only with evidence. Remove the compatibility seed when no caller needs it.
 
 **Related:** `docs/plans/phases/memory-resilience.md`,
 `docs/plans/phases/lane-1-memory-and-syntax-plan.md` (increments 4–5);

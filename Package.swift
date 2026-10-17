@@ -145,7 +145,8 @@ let package = Package(
         ),
         .testTarget(
             name: "RafuAppTests",
-            dependencies: ["RafuApp"]
+            dependencies: ["RafuApp"],
+            exclude: ["Fixtures/workbench-converged-surfaces.json"]
         ),
     ],
     swiftLanguageModes: [.v6]

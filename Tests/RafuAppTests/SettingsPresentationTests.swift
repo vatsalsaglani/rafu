@@ -7,7 +7,14 @@ import Testing
 struct SettingsPresentationTests {
     @Test("All Settings panes keep a title, subtitle, and unique glyph")
     func paneMetadataIsComplete() {
-        #expect(SettingsPane.allCases.count == 7)
+        #expect(
+            SettingsPane.allCases == [
+                .general, .appearance, .ai, .languageServers, .usage, .agents, .ensemble,
+            ])
+        #expect(
+            SettingsPane.allCases.map(\.title) == [
+                "General", "Appearance", "AI", "Language Servers", "Usage", "Agents", "Ensemble",
+            ])
         #expect(SettingsPane.allCases.allSatisfy { !$0.title.isEmpty })
         #expect(SettingsPane.allCases.allSatisfy { !$0.subtitle.isEmpty })
         #expect(SettingsPane.allCases.allSatisfy { !$0.systemImage.isEmpty })
@@ -16,24 +23,12 @@ struct SettingsPresentationTests {
 
     @Test("Settings navigation switches only from available canvas width")
     func compactNavigationBreakpoint() {
+        #expect(SettingsPresentationLayout.usesCompactNavigation(forAvailableCanvasWidth: 811))
         #expect(SettingsPresentationLayout.usesCompactNavigation(forAvailableCanvasWidth: 811.9))
         #expect(!SettingsPresentationLayout.usesCompactNavigation(forAvailableCanvasWidth: 812))
+        #expect(!SettingsPresentationLayout.usesCompactNavigation(forAvailableCanvasWidth: 832))
         #expect(!SettingsPresentationLayout.usesCompactNavigation(forAvailableCanvasWidth: 1_440))
         #expect(SettingsPresentationLayout.navigationBreakpoint == 812)
-    }
-
-    @Test("Compact navigation keeps every category reachable in an in-flow disclosure")
-    func compactNavigationIsAnInFlowDisclosure() throws {
-        let source = try Self.source("Sources/RafuApp/Settings/SettingsPaneNavigation.swift")
-        #expect(source.contains("case .compact:"))
-        #expect(source.contains("@State private var isCompactNavigationExpanded = false"))
-        #expect(source.contains("if isCompactNavigationExpanded"))
-        #expect(source.contains("ForEach(SettingsPane.allCases)"))
-        #expect(source.contains("Button(action:"))
-        #expect(source.contains(".onExitCommand(perform: collapseCompactNavigation)"))
-        #expect(!source.contains("Menu {"))
-        #expect(!source.contains(".popover("))
-        #expect(!source.contains("ScrollView(.horizontal)"))
     }
 
     @Test("Settings page measure preserves the compact desktop hierarchy")
@@ -45,34 +40,27 @@ struct SettingsPresentationTests {
         #expect(SettingsPresentationLayout.regularCombinedMaximumWidth == 1_092)
     }
 
-    @Test("Adaptive navigation retains one pane host outside its variant branch")
-    func retainedPaneHostContract() throws {
+    // This is a source policy check. Runtime retention and initialization counts
+    // require a mounted Settings view and resize/selection events.
+    @Test("Source policy keeps one lazy pane host outside navigation variants")
+    func retainedPaneHostSourcePolicy() throws {
         let source = try Self.source("Sources/RafuApp/Settings/RafuSettingsView.swift")
-        #expect(source.contains("private var paneContent: some View"))
+        #expect(source.components(separatedBy: "private var paneContent: some View").count - 1 == 1)
         #expect(source.components(separatedBy: "ZStack {").count - 1 == 1)
+        #expect(source.contains("@State private var visitedPanes: Set<SettingsPane> = [.general]"))
+        #expect(source.contains("visitedPanes.insert(newPane)"))
         #expect(source.contains("ForEach(SettingsPane.allCases.filter(visitedPanes.contains))"))
+        #expect(!source.contains("ForEach(SettingsPane.allCases) { candidate in"))
         #expect(source.contains(".opacity(candidate == pane ? 1 : 0)"))
         #expect(source.contains(".disabled(candidate != pane)"))
         #expect(source.contains(".accessibilityHidden(candidate != pane)"))
 
-        let navigation = try #require(source.range(of: "adaptiveSettingsLayout"))
-        let navigationTail = source[navigation.lowerBound...]
-        let pageColumn = try #require(navigationTail.range(of: "pageColumn(isCompact: isCompact)"))
-        let paneHost = try #require(source.range(of: "private var paneContent"))
-        #expect(pageColumn.lowerBound < paneHost.lowerBound)
-    }
-
-    @Test("Opening Settings does not eagerly initialize panes with I/O")
-    func settingsDefersUnvisitedPaneInitialization() throws {
-        let source = try Self.source("Sources/RafuApp/Settings/RafuSettingsView.swift")
-
-        // General is the only pane present at construction. The remaining
-        // panes own task-driven catalog, provider, usage, and CLI loads, so
-        // they must not be constructed merely because Settings opened.
-        #expect(source.contains("@State private var visitedPanes: Set<SettingsPane> = [.general]"))
-        #expect(source.contains("ForEach(SettingsPane.allCases.filter(visitedPanes.contains))"))
-        #expect(!source.contains("ForEach(SettingsPane.allCases) { candidate in"))
-        #expect(source.contains("visitedPanes.insert(newPane)"))
+        let pageColumnStart = try #require(source.range(of: "private func pageColumn"))
+        let pageIdentityStart = try #require(source.range(of: "private func pageIdentity"))
+        let pageColumn = String(source[pageColumnStart.lowerBound..<pageIdentityStart.lowerBound])
+        #expect(pageColumn.contains("pageIdentity(isCompact: isCompact)"))
+        #expect(pageColumn.contains("paneContent"))
+        #expect(!pageColumn.contains("if isCompact"))
     }
 
     @Test("Settings page groups use the shared accessible section container")

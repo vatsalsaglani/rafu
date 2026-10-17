@@ -1,7 +1,9 @@
 # Large-file guard mode
 
 - Applies to: editor document open, syntax highlighting suppression, symbol scanning
-- Last verified: Swift 6.2, macOS 14+, Xcode 16, 2026-07-15
+- Original guard verification: Swift 6.2, macOS 14+, Xcode 16, 2026-07-15.
+- Bounded-read verification: Swift 6.4, macOS 27.0.1, 2026-10-17; focused
+  regression tests and the canonical Rafu Lightning app check passed.
 
 ## Rule or observed behavior
 
@@ -21,7 +23,10 @@ The policy computation runs **once at document open** off the main actor (inside
 
 ## Why it matters
 
-Guarded mode prevents parsing workload from blocking the editor's main-actor typing path on large files. The 2 MB threshold is carefully chosen to guard the 2–4 MB band of files that are still openable (the `WorkspaceFileService.readText` hard-rejects files > 4 MB), ensuring guard mode actually engages for files that would otherwise incur syntax overhead without violating the hard-close cap. The 10,000 UTF-16 limit catches minified or procedurally generated single-line files that would otherwise tokenize wastefully.
+Guarded mode suppresses automatic parsing on large files. The 2 MiB threshold
+guards the openable band above 2 MiB through 16 MiB. The 10,000 UTF-16-unit
+limit catches dense single-line files below the byte threshold. These limits
+reduce syntax work; they do not prove editor response time or total memory use.
 
 ## Reproduction or evidence
 
@@ -43,7 +48,9 @@ App-level verification: `./script/build_and_run.sh --verify` confirmed UI banner
 ## Related code, ADRs, and phases
 
 - **Code**: `Sources/RafuApp/Editor/DocumentGuardPolicy.swift`, `Sources/RafuApp/Editor/CodeEditorView.swift` (Coordinator), `Sources/RafuApp/Views/CommandPaletteView.swift` (prepareSymbolsIfNeeded gate), `Sources/RafuApp/Views/EditorCanvasView.swift` (banner host)
-- **Deviation**: The lane-1 phase plan proposed an 8 MB threshold, but `WorkspaceFileService.readText` already hard-rejects files > 4 MB (`maximumEditorBytes`), so an 8 MB guard would be dead code. Threshold finalized at 2 MB to engage in the openable band.
+- **History**: The original 2 MiB guard was below a 4 MiB open cap. The
+  2026-10-17 user follow-up raises only the open cap to 16 MiB. The guard
+  thresholds stay fixed. See the amendment to ADR 0019.
 - **Known limitations**:
   1. Pasting a huge line into an already-open normal document does not retroactively guard it; guard mode engages at open only with an explicit session-only override.
   2. Files with lone-`\r` (classic Mac) line endings scan as one line, conservatively triggering the line-length guard.
@@ -51,6 +58,52 @@ App-level verification: `./script/build_and_run.sh --verify` confirmed UI banner
 - **Symbol index reuse**: Increment 10 (`WorkspaceSymbolIndex`) reads the same `document.suppressesSyntax` flag to skip guarded files from the index.
 - **Deferred**: A dedicated menu/command-palette "Enable Highlighting for this file" override command; the banner Button is the sufficient keyboard-reachable path this increment (accessible via Full Keyboard Access, not hidden behind a gesture).
 - **Lane**: Lane 1, Increment 2 — memory resilience + Tree-sitter Stages A/B
+
+## Bounded text reads (2026-10-17)
+
+Applies to: `WorkspaceFileService.readText`, for local workspace and external
+text files. Verified on Swift 6.4 and macOS 27.0.1 on 2026-10-17. The focused
+bounded-read tests passed. A synthetic file of exactly 6,722,977 bytes opened
+with the guard banner in Rafu Lightning through one sidebar click. No release
+performance or memory claim is made.
+
+The open cap is 16 MiB (16,777,216 bytes). A regular UTF-8 file of exactly that
+size is accepted. Larger files fail. Files above 2 MiB still use the syntax
+guard. This supports the reported 6,722,977-byte text file within a fixed bound.
+
+A path size check alone does not bound a read: the file can grow or the path
+can change after that check. Use one `O_RDONLY | O_NONBLOCK | O_CLOEXEC`
+descriptor, check its type and size with `fstat`, and read from that descriptor.
+`O_NONBLOCK` lets the regular-file check reject named pipes without waiting for
+a writer. Reads request at most 64 KiB and at most the remaining cap plus one
+detection byte. Overflow throws; it never returns a truncated document.
+Cancellation is checked between chunks and before strict UTF-8 decoding.
+No user content or paths are logged. Atomic writes use the existing path.
+
+Input bytes are bounded; total resident memory is not equal to this cap.
+Decoded strings, TextKit storage, undo, and other open documents add memory.
+The existing working-set policy still applies. Release memory evidence remains
+a separate phase gate.
+
+Synthetic regressions in `WorkspaceFileBoundedReadTests` cover the reported
+byte count, exact cap, cap plus one, file growth after a small descriptor size
+snapshot, UTF-8 across chunk boundaries, empty files, invalid UTF-8, directories,
+named pipes, and cancellation. The growth test calls the bounded reader after
+extending its open file; it does not depend on a timed race. It checks the
+file offset to prove that only the cap plus one byte was consumed.
+
+Coordinator verification commands, with one SwiftPM invocation at a time:
+
+```bash
+./script/test.sh --filter WorkspaceFileBoundedReadTests
+./script/test.sh --filter guardPolicy
+./script/test.sh
+./script/test.sh --no-parallel
+./script/build_and_run.sh --verify
+```
+
+Related decision: [ADR 0019](../decisions/0019-external-file-opening-and-media-preview.md).
+Related phase: [Editor performance and UI repair](../plans/phases/editor-performance-repair.md).
 
 ## Bounded indent-guide line scan (post-fan-out fix, 2026-07-18)
 

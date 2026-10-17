@@ -14,12 +14,14 @@ struct WorkspaceWindowView: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             windowContent
-            WindowTopLeftControlCluster(
-                session: session,
-                lightsVisible: trafficLightsRevealed && !isWindowFullScreen,
-                hoverTrackingEnabled: !isWindowFullScreen,
-                onHoverChange: { trafficLightsRevealed = $0 }
-            )
+            if !showsWelcome {
+                WindowTopLeftControlCluster(
+                    session: session,
+                    lightsVisible: trafficLightsRevealed && !isWindowFullScreen,
+                    hoverTrackingEnabled: !isWindowFullScreen,
+                    onHoverChange: { trafficLightsRevealed = $0 }
+                )
+            }
             if session.editorTabSwitcherState != nil {
                 EditorTabSwitcherOverlay(session: session)
                     .zIndex(10)
@@ -34,7 +36,9 @@ struct WorkspaceWindowView: View {
         // (see flat-window-chrome-titlebar-merge.md).
         .background(
             FlatWindowChrome(
-                titleBarColor: NSColor(theme.palette.sidebarBackground),
+                titleBarColor: NSColor(
+                    showsWelcome ? theme.palette.editorBackground : theme.palette.sidebarBackground
+                ),
                 topologyToken: windowChromeTopologyToken,
                 hidesTrafficLights: !trafficLightsRevealed && !isWindowFullScreen,
                 onFullScreenChange: { isFullScreen in
@@ -66,8 +70,48 @@ struct WorkspaceWindowView: View {
         .modifier(WorkspaceWindowPresentations(session: session))
     }
 
+    private var showsWelcome: Bool {
+        EditorCanvasRoute.resolve(EditorCanvasRoute.Inputs(session: session)) == .welcome
+    }
+
+    @ViewBuilder
     private var windowContent: some View {
+        if showsWelcome {
+            VStack(spacing: 0) {
+                welcomeWindowHeader
+                editorCanvas
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(theme.palette.editorBackground)
+        } else {
+            workbenchContent
+        }
+    }
+
+    /// A new window has no navigator or utility actions yet. Keep a quiet
+    /// drag surface and the native controls without an empty rail or toggle.
+    private var welcomeWindowHeader: some View {
+        HStack(spacing: 0) {
+            WindowDragHandle()
+                .frame(width: 76)
+                .onHover { inside in
+                    guard !isWindowFullScreen else { return }
+                    trafficLightsRevealed = inside
+                }
+            WindowDragHandle()
+        }
+        .frame(height: 42)
+    }
+
+    private var workbenchContent: some View {
         VStack(spacing: 0) {
+            if !isWindowFullScreen {
+                WindowDragHandle()
+                    .frame(height: 14)
+                    .frame(maxWidth: .infinity)
+                    .background(theme.palette.sidebarBackground)
+            }
             // Issue: flat sidebar. `NavigationSplitView` on macOS 26 floats
             // the sidebar as an inset, rounded Liquid Glass card whenever the
             // window is key — visible elevation, shadow, and margins that
@@ -124,9 +168,10 @@ struct WorkspaceWindowView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            Divider()
+            // The status bar owns its top boundary.
             WorkspaceStatusBar(session: session)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var editorCanvas: some View {

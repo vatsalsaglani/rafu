@@ -7,6 +7,20 @@ struct SyntaxHighlighter {
     let theme: RafuTheme
     let fileExtension: String
     let fileName: String
+    // Cache lifetime equals one immutable theme/language configuration.
+    private let cache = Cache()
+
+    private final class Cache {
+        var font: NSFont?
+        var rules: [CompiledRule]?
+        var attributes: [String: [NSAttributedString.Key: Any]] = [:]
+    }
+
+    private struct CompiledRule {
+        let expression: NSRegularExpression
+        let token: String
+        let captureGroup: Int
+    }
 
     init(theme: RafuTheme, fileExtension: String, fileName: String = "") {
         self.theme = theme
@@ -26,7 +40,12 @@ struct SyntaxHighlighter {
     }
 
     /// Base editor font resolved from the theme's `fonts.editor` block.
-    var baseFont: NSFont { theme.resolvedEditorFont() }
+    var baseFont: NSFont {
+        if let font = cache.font { return font }
+        let font = theme.resolvedEditorFont()
+        cache.font = font
+        return font
+    }
 
     func applyBaseStyle(to storage: NSTextStorage) {
         let fullRange = NSRange(location: 0, length: storage.length)
@@ -51,9 +70,17 @@ struct SyntaxHighlighter {
         let scanRange = NSRange(location: scanStart, length: max(0, scanEnd - scanStart))
         var tokens: [Token] = []
 
-        for rule in rules {
-            guard let expression = try? NSRegularExpression(pattern: rule.pattern) else { continue }
-            expression.enumerateMatches(in: text, range: scanRange) { match, _, _ in
+        if cache.rules == nil {
+            cache.rules = rules.compactMap { rule in
+                guard let expression = try? NSRegularExpression(pattern: rule.pattern) else {
+                    return nil
+                }
+                return CompiledRule(
+                    expression: expression, token: rule.token, captureGroup: rule.captureGroup)
+            }
+        }
+        for rule in cache.rules ?? [] {
+            rule.expression.enumerateMatches(in: text, range: scanRange) { match, _, _ in
                 guard let match else { return }
                 let range = match.range(at: rule.captureGroup)
                 guard range.location != NSNotFound else { return }
@@ -64,6 +91,7 @@ struct SyntaxHighlighter {
     }
 
     func attributes(for token: Token) -> [NSAttributedString.Key: Any] {
+        if let attributes = cache.attributes[token.name] { return attributes }
         guard let rule = theme.syntax[token.name] else { return [:] }
         var attributes: [NSAttributedString.Key: Any] = [:]
         if let color = rule.color {
@@ -81,16 +109,27 @@ struct SyntaxHighlighter {
             )
         }
         if rule.underline == true { attributes[.underlineStyle] = 1 }
+        cache.attributes[token.name] = attributes
         return attributes
     }
 
-    var styleSignature: String {
-        let syntax = theme.syntax.sorted(by: { $0.key < $1.key }).map { key, value in
-            "\(key):\(value.color ?? ""):\(value.fontStyle ?? ""):\(value.underline == true):\(value.background ?? "")"
-        }.joined(separator: "|")
-        let font = "\(theme.fonts?.editor?.family ?? "system")@\(theme.editorFontSize)"
-        return
-            "\(theme.name)|\(font)|\(theme.editor.background)|\(theme.editor.foreground)|\(fileExtension)|\(fileName)|\(syntax)"
+    /// Compare the style inputs without sorting or building signature strings
+    /// on each representable update. A user can reload a theme with the same name.
+    func matches(theme other: RafuTheme, fileExtension: String, fileName: String) -> Bool {
+        guard self.fileExtension == fileExtension.lowercased(),
+            self.fileName == fileName.lowercased(),
+            theme.name == other.name,
+            theme.editor.background == other.editor.background,
+            theme.editor.foreground == other.editor.foreground,
+            theme.fonts?.editor?.family == other.fonts?.editor?.family,
+            theme.editorFontSize == other.editorFontSize,
+            theme.syntax.count == other.syntax.count
+        else { return false }
+        return theme.syntax.allSatisfy { key, value in
+            guard let next = other.syntax[key] else { return false }
+            return value.color == next.color && value.fontStyle == next.fontStyle
+                && value.underline == next.underline && value.background == next.background
+        }
     }
 
     private var keywordPattern: String {
@@ -307,15 +346,11 @@ final class NeonSyntaxHighlightingPipeline: NSObject {
     /// Bring-up handle for the grammar actor; cancelled on suppression change
     /// and teardown.
     private var activationTask: Task<Void, Never>?
-    /// Tail of the non-cancelling serial chain that delivers reparse work
-    /// (incremental edits and full refreshes) to the actor in FIFO order. Each
-    /// enqueued task awaits its predecessor's `.value` before touching the
-    /// actor, because independent `Task`s do NOT queue into an actor in
-    /// submission order — without the chain, a later edit could reparse before
-    /// an earlier edit's `tree.edit(_:)` applied and corrupt the tree. Edits
-    /// are never dropped (dropping one desyncs the tree from the text); the tail
-    /// is only cancelled on grammar teardown.
-    private var syntaxWorkTail: Task<Void, Never>?
+    private var tokenTask: Task<Void, Never>?
+    private var tokenRequestID: UUID?
+    /// One active parse plus at most one pending full text snapshot.
+    private var syntaxWorker: SyntaxSnapshotWorker?
+    private var isTornDown = false
     /// Monotonic parse-generation counter handed to the actor for staleness
     /// (a newer snapshot always wins). Independent of `EditorDocument.revision`.
     private var snapshotVersion = 0
@@ -387,8 +422,10 @@ final class NeonSyntaxHighlightingPipeline: NSObject {
         // is live and to the regex tokenizer otherwise; both hand results back
         // on the main actor as Neon requires.
         highlighter.tokenProvider = { [weak self] range, completion in
-            guard let self, let textView = self.textView else {
-                completion(.success(.noChange))
+            guard let self, let textView = self.textView,
+                !self.isTornDown, !self.isSuppressed
+            else {
+                completion(.failure(TokenProviderError.staleContent))
                 return
             }
             guard let actor = self.syntaxActor else {
@@ -403,9 +440,21 @@ final class NeonSyntaxHighlightingPipeline: NSObject {
             // so an edit scheduled between this closure and the task body
             // cannot make a stale request look current.
             let requestGeneration = self.contentGeneration
-            Task { [weak self] in
-                let spans = await actor.tokens(inUTF16: range)
-                guard let self, self.syntaxActor === actor,
+            let requestVersion = self.snapshotVersion
+            self.tokenTask?.cancel()
+            let requestID = UUID()
+            self.tokenRequestID = requestID
+            self.tokenTask = Task { [weak self] in
+                defer {
+                    if let self, self.tokenRequestID == requestID {
+                        self.tokenTask = nil
+                        self.tokenRequestID = nil
+                    }
+                }
+                let spans = await actor.tokens(inUTF16: range, version: requestVersion)
+                guard !Task.isCancelled, let spans, let self, self.syntaxActor === actor,
+                    !self.isTornDown, !self.isSuppressed,
+                    self.snapshotVersion == requestVersion,
                     self.contentGeneration == requestGeneration
                 else {
                     completion(.failure(TokenProviderError.staleContent))
@@ -449,10 +498,12 @@ final class NeonSyntaxHighlightingPipeline: NSObject {
             deactivateGrammar()
             activateGrammarIfPossible()
         }
-        let next = SyntaxHighlighter(
+        guard
+            !configuration.highlighter.matches(
+                theme: theme, fileExtension: fileExtension, fileName: fileName)
+        else { return }
+        configuration.highlighter = SyntaxHighlighter(
             theme: theme, fileExtension: fileExtension, fileName: fileName)
-        guard next.styleSignature != configuration.highlighter.styleSignature else { return }
-        configuration.highlighter = next
         applyBaseStyleAndInvalidate()
     }
 
@@ -461,22 +512,21 @@ final class NeonSyntaxHighlightingPipeline: NSObject {
         editedRange: NSRange,
         changeInLength delta: Int
     ) {
-        guard !isSuppressed else { return }
+        guard !isTornDown else { return }
         guard editedMask.contains(.editedCharacters) else { return }
         contentGeneration += 1
+        tokenTask?.cancel()
         let previousRange = NSRange(
             location: editedRange.location,
             length: max(0, editedRange.length - delta)
         )
-        highlighter.didChangeContent(in: previousRange, delta: delta)
-        if syntaxActor != nil {
-            // Incremental off-main reparse (8b): apply one `InputEdit` and
-            // reparse with the edited tree as a hint. The offsets come straight
-            // from the storage delegate (post-edit `editedRange` + `delta`), the
-            // full post-edit text is captured now, and the work is delivered
-            // through the serial chain so edits reach the actor in order.
+        // Publish the new snapshot version before Neon can request tokens.
+        if !isSuppressed, syntaxActor != nil {
             enqueueEdit(editedRange: editedRange, delta: delta)
-        } else {
+        }
+        // Keep Neon's range bookkeeping current even while syntax is suppressed.
+        highlighter.didChangeContent(in: previousRange, delta: delta)
+        if !isSuppressed, syntaxActor == nil {
             highlighter.invalidate(.range(editedRange))
         }
     }
@@ -487,21 +537,32 @@ final class NeonSyntaxHighlightingPipeline: NSObject {
     /// by Neon, and tree construction is owned by `activateGrammarIfPossible`.
     /// Avoiding a reparse here keeps a theme switch off the parse path entirely.
     func applyBaseStyleAndInvalidate() {
-        guard let storage = textView?.textStorage else { return }
+        guard !isTornDown, let storage = textView?.textStorage else { return }
         configuration.highlighter.applyBaseStyle(to: storage)
         guard !isSuppressed else { return }
         highlighter.invalidate(.all)
     }
 
     /// Cancels in-flight grammar work. Called from
-    /// `CodeEditorView.dismantleNSView` so a closed, hibernated, or remounted
-    /// editor releases its parser, tree, and tasks.
+    /// resource owner so a closed or hibernated editor releases its parser,
+    /// tree, and tasks. Structural host moves keep this pipeline alive.
     func tearDown() {
+        isTornDown = true
         deactivateGrammar()
+        NotificationCenter.default.removeObserver(self)
     }
 
+    /// Deterministic test synchronization; no timer or activation poll.
+    func waitForSyntaxWorkForTesting() async {
+        await activationTask?.value
+        await syntaxWorker?.waitUntilIdle()
+        await tokenTask?.value
+    }
+
+    var syntaxQueueMetricsForTesting: SyntaxSnapshotWorker.Metrics? { syntaxWorker?.metrics }
+
     private func activateGrammarIfPossible() {
-        guard !isSuppressed, syntaxActor == nil, let grammarID else { return }
+        guard !isTornDown, !isSuppressed, syntaxActor == nil, let grammarID else { return }
         activationTask?.cancel()
         activationTask = Task { [weak self] in
             guard let registry = self?.grammarRegistry else { return }
@@ -522,11 +583,21 @@ final class NeonSyntaxHighlightingPipeline: NSObject {
             }
             guard
                 let self,
-                !self.isSuppressed,
+                !self.isTornDown, !self.isSuppressed,
                 self.grammarID == grammarID,
                 self.syntaxActor == nil
             else { return }
             self.syntaxActor = actor
+            self.syntaxWorker = SyntaxSnapshotWorker(
+                operation: { request in await actor.process(request) },
+                didFinish: { [weak self] version in
+                    guard let self, !self.isTornDown, self.syntaxActor === actor,
+                        self.snapshotVersion == version
+                    else { return }
+                    // Keep full invalidation: multiline syntax can change far
+                    // beyond the edited line. Only the newest parse triggers it.
+                    self.highlighter.invalidate(.all)
+                })
             self.enqueueFullRefresh()
         }
     }
@@ -534,68 +605,39 @@ final class NeonSyntaxHighlightingPipeline: NSObject {
     private func deactivateGrammar() {
         activationTask?.cancel()
         activationTask = nil
-        syntaxWorkTail?.cancel()
-        syntaxWorkTail = nil
+        tokenTask?.cancel()
+        tokenTask = nil
+        tokenRequestID = nil
+        syntaxWorker?.stop()
+        syntaxWorker = nil
         syntaxActor = nil
     }
 
-    /// Enqueues one incremental `InputEdit` reparse. Offsets and the full
-    /// post-edit text are captured synchronously on the main actor (the actor
-    /// then computes the pre-edit points from its retained snapshot); the work
-    /// runs after all prior chained work so edits are applied in order.
+    /// Captures one post-edit snapshot. If another edit already waits, the
+    /// worker replaces it with this snapshot and requests a full tree reset.
     private func enqueueEdit(editedRange: NSRange, delta: Int) {
         guard let textView else { return }
-        let startUTF16 = editedRange.location
-        let newEndUTF16 = editedRange.location + editedRange.length
-        let oldEndUTF16 = editedRange.location + editedRange.length - delta
-        let newText = textView.string
         snapshotVersion += 1
-        let version = snapshotVersion
-        enqueueSyntaxWork { actor in
-            await actor.applyEdit(
-                startUTF16: startUTF16,
-                oldEndUTF16: oldEndUTF16,
-                newEndUTF16: newEndUTF16,
-                newText: newText,
-                version: version
-            )
-        }
+        syntaxWorker?.submit(
+            SyntaxSnapshotRequest(
+                text: textView.string,
+                version: snapshotVersion,
+                edit: SyntaxSnapshotRequest.Edit(
+                    startUTF16: editedRange.location,
+                    oldEndUTF16: NSMaxRange(editedRange) - delta,
+                    newEndUTF16: NSMaxRange(editedRange))))
     }
 
-    /// Enqueues a full-parse baseline (grammar activation / full refresh) on the
-    /// same serial chain so it can never interleave with pending incremental
-    /// edits. The current full text is captured now.
     private func enqueueFullRefresh() {
         guard let textView else { return }
-        let text = textView.string
         snapshotVersion += 1
-        let version = snapshotVersion
-        enqueueSyntaxWork { actor in
-            await actor.updateSnapshot(text, version: version)
-        }
-    }
-
-    /// Appends `work` to the non-cancelling serial chain: the new task awaits
-    /// the previous tail's `.value`, runs `work` against the live actor off the
-    /// main actor, then invalidates so Neon re-queries the visible range. The
-    /// `syntaxActor === actor` guards drop the trailing invalidation if the
-    /// grammar was torn down while the work was queued.
-    private func enqueueSyntaxWork(
-        _ work: @escaping @Sendable (SyntaxParsingActor) async -> Void
-    ) {
-        guard let actor = syntaxActor else { return }
-        let previous = syntaxWorkTail
-        syntaxWorkTail = Task { [weak self] in
-            await previous?.value
-            if Task.isCancelled { return }
-            await work(actor)
-            if Task.isCancelled { return }
-            guard let self, self.syntaxActor === actor else { return }
-            self.highlighter.invalidate(.all)
-        }
+        syntaxWorker?.submit(
+            SyntaxSnapshotRequest(
+                text: textView.string, version: snapshotVersion, edit: nil))
     }
 
     @objc private func visibleContentChanged() {
+        guard !isTornDown, !isSuppressed else { return }
         highlighter.visibleContentDidChange()
     }
 }
