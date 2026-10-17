@@ -5,6 +5,20 @@ import Testing
 
 @Suite("Canvas document and destination contracts")
 struct CanvasDocumentTests {
+    @Test("Existing Canvas links decode as visual relationships")
+    func legacyConnectionBehavior() throws {
+        let source = CanvasCardID()
+        let target = CanvasCardID()
+        let edge = CanvasConnection(from: source, to: target)
+        var json = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(edge)) as? [String: Any])
+        json.removeValue(forKey: "behavior")
+        let decoded = try JSONDecoder().decode(
+            CanvasConnection.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(decoded == edge)
+        #expect(decoded.behavior == .related)
+    }
+
     @Test(arguments: [
         "https://example.com", "file:///tmp/app", "http://localhost.evil/",
         "http://127.0.0.1.evil/", "http://user:password@localhost/", "javascript:alert(1)",

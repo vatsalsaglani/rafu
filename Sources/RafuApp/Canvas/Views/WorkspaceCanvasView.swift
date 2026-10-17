@@ -132,7 +132,16 @@ struct WorkspaceCanvasView: View {
                             control2: CGPoint(x: end.x - 50, y: end.y))
                         context.stroke(
                             path, with: .color(theme.palette.textSecondary),
-                            style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                            style: StrokeStyle(
+                                lineWidth: 1, dash: [5, 4]))
+                        do {
+                            var arrow = Path()
+                            arrow.move(to: CGPoint(x: end.x - 9, y: end.y - 5))
+                            arrow.addLine(to: end)
+                            arrow.addLine(to: CGPoint(x: end.x - 9, y: end.y + 5))
+                            context.stroke(
+                                arrow, with: .color(theme.palette.textSecondary), lineWidth: 2)
+                        }
                         context.draw(
                             Text(connection.label).font(.caption2).foregroundStyle(
                                 theme.palette.textSecondary),
@@ -176,6 +185,10 @@ struct WorkspaceCanvasView: View {
                 board.visibleSize = $0
             }
             .clipped()
+            .onDrop(
+                of: [.rafuEditorDrag, .fileURL],
+                delegate: CanvasFileDropDelegate(boardID: board.id, session: session)
+            )
             .background(
                 CanvasScrollBridge(
                     isEnabled: true,
@@ -231,10 +244,12 @@ struct WorkspaceCanvasView: View {
                 .padding(12)
             }
             .overlay(alignment: .bottomLeading) {
-                Text("Drag the background or Space-drag to pan. Shift-drag selects cards.")
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .padding(8).background(theme.palette.editorBackground.opacity(0.9))
-                    .padding(8).allowsHitTesting(false)
+                Text(
+                    "Drop files to add nodes. Shift-drag selects nodes. ⌘⇧W closes selected nodes."
+                )
+                .font(.caption2).foregroundStyle(.secondary)
+                .padding(8).background(theme.palette.editorBackground.opacity(0.9))
+                .padding(8).allowsHitTesting(false)
             }
             .focusable()
             .focused($boardHasKeyboardFocus)

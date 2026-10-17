@@ -271,7 +271,7 @@ struct CanvasListView: View {
                     HStack {
                         Text(relationshipText(connection))
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        Button("Edit Label…") {
+                        Button("Edit Connection…") {
                             session.canvasDialog = .connectionLabel(board.id, connection.id)
                         }
                         Button("Remove") {
@@ -292,6 +292,7 @@ struct CanvasListView: View {
     private func relationshipText(_ connection: CanvasConnection) -> String {
         let from = board.cards.first { $0.id == connection.from }?.title ?? "Missing card"
         let to = board.cards.first { $0.id == connection.to }?.title ?? "Missing card"
-        return "\(from) → \(connection.label) → \(to)"
+        return
+            "\(from) → Related: \(connection.label) → \(to)"
     }
 }

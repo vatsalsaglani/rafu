@@ -40,6 +40,9 @@ struct CanvasCommands: Commands {
             Divider()
             Button("Undo Canvas Layout") { board?.performUndo() }.disabled(board?.canUndo != true)
             Button("Redo Canvas Layout") { board?.performRedo() }.disabled(board?.canRedo != true)
+            Button("Close Selected Node") { session?.closeSelectedCanvasNodes() }
+                .keyboardShortcut("w", modifiers: [.command, .shift])
+                .disabled(session?.canCloseSelectedCanvasNodes != true)
             Button("Remove Selected Cards…") {
                 if let board { session?.requestCanvasCardRemoval(board.id) }
             }.disabled(board?.selection.isEmpty != false)

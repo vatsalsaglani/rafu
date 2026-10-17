@@ -173,11 +173,38 @@ nonisolated struct CanvasCard: Codable, Equatable, Identifiable, Sendable {
     var content: CanvasCardContent
 }
 
+nonisolated enum CanvasConnectionBehavior: String, Codable, CaseIterable, Sendable {
+    case related
+}
+
 nonisolated struct CanvasConnection: Codable, Equatable, Identifiable, Sendable {
     var id = UUID()
     var from: CanvasCardID
     var to: CanvasCardID
     var label = "Related to"
+    var behavior: CanvasConnectionBehavior = .related
+
+    init(
+        id: UUID = UUID(), from: CanvasCardID, to: CanvasCardID,
+        label: String = "Related to", behavior: CanvasConnectionBehavior = .related
+    ) {
+        self.id = id
+        self.from = from
+        self.to = to
+        self.label = label
+        self.behavior = behavior
+    }
+
+    private enum CodingKeys: CodingKey { case id, from, to, label, behavior }
+    init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        from = try values.decode(CanvasCardID.self, forKey: .from)
+        to = try values.decode(CanvasCardID.self, forKey: .to)
+        label = try values.decode(String.self, forKey: .label)
+        behavior =
+            try values.decodeIfPresent(CanvasConnectionBehavior.self, forKey: .behavior) ?? .related
+    }
 }
 
 nonisolated struct CanvasDocument: Codable, Equatable, Identifiable, Sendable {

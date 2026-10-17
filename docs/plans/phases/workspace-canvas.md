@@ -1,5 +1,14 @@
 # Workspace Canvas and app cards
 
+- Current direction, 2026-10-18: the user authorized parallel agents and a
+  checkpoint commit and push to `main`. These instructions supersede the
+  sequential/local-only execution restrictions below. Finish file-drop nodes,
+  generic connection controls, and Command-Shift-W node closing before the push.
+  The next work uses ordinary terminal cards and the user's interactive Claude
+  Code/Codex sessions. Separate Agent/task forms and managed Start Run controls
+  were rejected and removed before this checkpoint. Live-session communication
+  still requires implementation and provider verification after the push.
+
 - Status: Implementation authorized, 2026-10-17. Sequential execution in the primary checkout; local commits only. ADR 0025 records the accepted scope.
 - Date: 2026-10-17.
 - Request: a spatial workspace based on the supplied Maestri image, including native macOS app windows.

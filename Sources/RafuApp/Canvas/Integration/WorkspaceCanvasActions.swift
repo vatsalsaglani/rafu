@@ -204,6 +204,84 @@ extension WorkspaceSession {
         pendingCanvasRemoval = nil
     }
 
+    var canCloseSelectedCanvasNodes: Bool {
+        selectedCanvas?.selection.isEmpty == false && !isTerminalGroupModalInputBlocked
+    }
+
+    func closeSelectedCanvasNodes() {
+        guard canCloseSelectedCanvasNodes, let board = selectedCanvas else { return }
+        guard let snapshot = try? board.snapshot() else {
+            requestCanvasCardRemoval(board.id)
+            return
+        }
+        let needsConfirmation = snapshot.cards.contains { card in
+            guard board.selection.contains(card.id) else { return false }
+            switch card.content {
+            case .terminal: return true
+            case .note(let text): return !text.isEmpty
+            default: return false
+            }
+        }
+        if needsConfirmation {
+            requestCanvasCardRemoval(board.id)
+        } else {
+            removeCanvasCards(board.id)
+        }
+    }
+
+    /// A drop adds references only. Validation is off-main and the edit is one
+    /// transaction, so a rejected batch cannot leave a partially added board.
+    func addCanvasDroppedFiles(_ urls: [URL], to id: CanvasID, at location: CGPoint) async {
+        guard let root = rootURL, let board = canvas.boards[id], !urls.isEmpty else { return }
+        guard urls.count <= CanvasLimits.cards - board.cards.count else {
+            board.errorMessage = CanvasError.capacity.localizedDescription
+            return
+        }
+        let viewport = board.viewport
+        do {
+            let paths = try await Self.canvasDroppedPaths(urls, root: root)
+            guard !Task.isCancelled, rootURL == root, canvas.boards[id] === board else { return }
+            let x = (location.x - viewport.x) / viewport.scale
+            let y = (location.y - viewport.y) / viewport.scale
+            let cards = paths.enumerated().map { index, path in
+                CanvasCard(
+                    title: String(URL(fileURLWithPath: path).lastPathComponent.prefix(120)),
+                    rect: CanvasRect(
+                        x: min(50_000, max(-50_000, x + Double(index) * 24)),
+                        y: min(50_000, max(-50_000, y + Double(index) * 24))),
+                    content: .file(path: path))
+            }
+            try board.edit { document in
+                guard document.cards.count + cards.count <= CanvasLimits.cards else {
+                    throw CanvasError.capacity
+                }
+                document.cards.append(contentsOf: cards)
+            }
+            board.backToBoard()
+            board.selection = Set(cards.map(\.id))
+        } catch is CancellationError {
+            return
+        } catch {
+            guard rootURL == root, canvas.boards[id] === board else { return }
+            board.errorMessage = error.localizedDescription
+        }
+    }
+
+    @concurrent
+    private static func canvasDroppedPaths(_ urls: [URL], root: URL) async throws -> [String] {
+        var paths: [String] = []
+        for url in urls {
+            try Task.checkCancellation()
+            guard url.isFileURL else { throw CanvasError.invalidPath }
+            let path = try await CanvasPreviewLoader.relativePath(for: url, root: root)
+            let checked = root.appending(path: path)
+            let metadata = try checked.resourceValues(forKeys: [.isRegularFileKey])
+            guard metadata.isRegularFile == true else { throw CanvasError.invalidPath }
+            paths.append(path)
+        }
+        return paths
+    }
+
     func chooseCanvasFile(_ id: CanvasID, imageOnly: Bool) {
         guard let rootURL, let board = canvas.boards[id] else { return }
         let panel = NSOpenPanel()

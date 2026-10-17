@@ -1,7 +1,7 @@
 # Canvas native boundaries and initial evidence
 
 - Applies to: ADR 0025 and Canvas C0–C5; local macOS workspaces.
-- Verified: 2026-10-17, macOS 27.0.1, Apple Swift 6.4, Swift 6.2 package mode,
+- Verified: 2026-10-18, macOS 27.0.1, Apple Swift 6.4, Swift 6.2 package mode,
   strict concurrency, arm64, deployment target macOS 15.
 
 ## Rules and observations
@@ -292,3 +292,36 @@ The native pass on macOS 27 / Swift 6.4 verified:
 These are functional checks, not frame-time or sustained-input measurements.
 The full accessibility/performance and native capture matrix above remains open.
 Build/test logs for this pass use the /tmp/rafu-inline-* prefix.
+
+## File drops and node closing
+
+Sidebar file drags advertise both the private editor drag type and a file URL.
+When Canvas is selected, the enclosing editor body must stop accepting those
+types. Otherwise its editor-navigation drop handler competes with the Canvas
+file-node destination. The tab strip keeps its independent drop handling.
+See `EditorCanvasView` and `WorkspaceSidebarView` for the two boundaries.
+The Canvas destination uses the editor's explicit copy proposal and reads the
+private file payload before the public file URL. Automated sidebar drags had no
+visible result with either the URL-only Transferable handler or the explicit
+delegate. The source/destination cause is not established; manual verification
+remains open. Tab payloads are rejected; asynchronous URL batches preserve
+source order and fail as a whole when any provider fails to supply a valid URL.
+The incoming provider is the source of file identity. Do not use the destination
+session's `activeEditorDrag` cache: cancellation can leave it stale, and a drag
+from another window updates the source session only.
+
+Canvas drops validate regular files off the main actor, then append the whole
+batch in one undo transaction. Coordinates subtract viewport translation and
+divide by zoom. The current schema accepts workspace-relative files only;
+outside files and directories are rejected without a partial insertion.
+
+Command-Shift-W removes selected reference nodes immediately and supports undo.
+It does not delete source files. Terminals and nonempty note snapshots keep the
+existing confirmation because they have process or content state.
+The native check added First.swift through Add Card and confirmed that
+Command-Shift-W removed the node while First.swift remained in the sidebar.
+
+Check with `./script/test.sh --filter CanvasNodeInteractionTests`, then drag a
+sidebar file onto the running Canvas and close it with Command-Shift-W. Check
+that the node disappears and the source stays in the sidebar. These additions
+change input routing, not the existing native capture or performance claims.

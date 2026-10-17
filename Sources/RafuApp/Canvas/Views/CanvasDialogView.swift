@@ -3,6 +3,22 @@ import SwiftUI
 struct CanvasDialogView: View {
     let dialog: CanvasDialog
     let session: WorkspaceSession
+
+    var body: some View {
+        switch dialog {
+        case .connection(let id, let from, let to):
+            CanvasConnectionDialog(boardID: id, initialFrom: from, initialTo: to, session: session)
+        case .connectionLabel(let id, let edge):
+            CanvasConnectionDialog(boardID: id, edgeID: edge, session: session)
+        default:
+            CanvasBasicDialogView(dialog: dialog, session: session)
+        }
+    }
+}
+
+struct CanvasBasicDialogView: View {
+    let dialog: CanvasDialog
+    let session: WorkspaceSession
     @State private var text = ""
     @State private var error: String?
     @State private var busy = false

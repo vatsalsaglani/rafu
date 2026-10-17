@@ -150,6 +150,16 @@ final class CanvasBoardState: Identifiable {
         connectingFrom = nil
     }
 
+    func addConnection(
+        from: CanvasCardID, to: CanvasCardID, label: String = "Related to",
+        behavior: CanvasConnectionBehavior = .related
+    ) throws {
+        guard connections.count < CanvasLimits.connections else { throw CanvasError.capacity }
+        try edit {
+            $0.connections.append(.init(from: from, to: to, label: label, behavior: behavior))
+        }
+    }
+
     func beginGesture() { if gestureStart == nil { gestureStart = document } }
 
     func setRect(_ rect: CanvasRect, for id: CanvasCardID) {

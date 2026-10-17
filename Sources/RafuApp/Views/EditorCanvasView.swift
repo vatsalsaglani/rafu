@@ -357,10 +357,10 @@ private struct EditorGroupView: View {
                             EditorSplitPreviewOverlay(edge: hoveredDropEdge)
                         }
                     }
-                    // Finder/external files retain the same body-only drop
-                    // target; the tab strip remains structurally excluded.
+                    // Canvas owns file drops while visible. The enclosing
+                    // editor target must not turn them into editor navigation.
                     .onDrop(
-                        of: [.rafuEditorDrag, .fileURL],
+                        of: selectedCanvas == nil ? [.rafuEditorDrag, .fileURL] : [],
                         delegate: EditorDropDelegate(
                             groupID: group.id,
                             size: proxy.size,
