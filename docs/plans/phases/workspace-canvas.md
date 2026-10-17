@@ -1,10 +1,29 @@
 # Workspace Canvas and app cards
 
-- Status: Proposed; planning only. No Canvas implementation is authorized by this document.
+- Status: Implementation authorized, 2026-10-17. Sequential execution in the primary checkout; local commits only. ADR 0025 records the accepted scope.
 - Date: 2026-10-17.
 - Request: a spatial workspace based on the supplied Maestri image, including native macOS app windows.
 - Reference: https://cdn.maestri.dev/assets/feature-canvas.png
 - Related: ADR 0002, 0006, 0018, 0019, 0020, 0023, 0024; the active pre-initial-push workbench phase.
+
+## Active execution override
+
+The user authorized a baseline commit and implementation of the approved Canvas
+scope. Baseline: `0c4db05`. Use one agent and one checkout in C0–C5 order. Do not
+create implementation subagents or worktrees. The nine worktree assignments in
+the earlier execution proposal are now historical workstream boundaries; their
+path and validation contracts still guide the sequential stages. Only consult
+Astra at Medium if genuinely needed. No application push or release is authorized.
+
+Progress:
+
+- Baseline `0c4db05`: repairs and planning sources committed; format, build,
+  2,273 parallel/serial tests, canonical Lightning launch verified. The known
+  Ensemble status test passed alone and serially after a parallel load failure.
+- C0 SDK/native view probes: 3 tests pass. Live permission and source-loss checks
+  remain C4/C5 checks through visible controls. See `canvas-native-boundaries.md`.
+- C1 bounded document schema and C2 atomic store: focused contract/persistence
+  checks pass. Board UI and integration are in progress; C2 is not complete.
 
 ## Intended experience
 
@@ -16,7 +35,7 @@ ownership, fixed-SHA dependencies, review gates, and integration order for C0–
 It is distinct from the earlier eight-worktree performance/UI repair effort.
 Its [rendered page](../wireframes/workspace-canvas/execution-plan.plan.html) is
 also published on the existing private planning site. These are future
-assignments; application worktree creation and repository actions are not authorized.
+assignments from the earlier planning request. The sequential override above is now authoritative.
 
 The [Visual Plan source](../wireframes/workspace-canvas/canvas-plan.mdx),
 [rendered plan](../wireframes/workspace-canvas/canvas-plan.plan.html), and

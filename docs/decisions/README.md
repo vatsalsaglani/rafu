@@ -34,6 +34,7 @@ Accepted ADRs take precedence over older plan suggestions when they explicitly s
 | [0022](0022-recessed-workbench-deck.md) | Accepted | Supersede ADR 0012's flush-main-pane composition with one 4 pt recessed workbench deck, compact semantic workbench radii, attached active tabs, measured 4 pt editor-group separation including native splitters, and collision-safe theme-resolved terminal perimeters while preserving opaque JSON-theme surfaces, accessibility, and no Liquid Glass |
 | [0023](0023-terminal-groups-and-saved-layouts.md) | Accepted | Define one Terminal Group editor tab with bounded recursive panes, explicit user-start only, and inert workspace-local saved layouts; Agent Terminal and Ensemble panes restore only as unavailable placeholders without launch descriptors or capability data |
 | [0024](0024-terminal-group-v2-limits-and-pane-metadata.md) | Accepted | Separate Terminal Group resource limits and add bounded runtime pane-name and theme-token metadata commands |
+| [0025](0025-workspace-canvas-and-app-previews.md) | Accepted | Optional Workspace Canvas with native notes, one-owner terminal presentation, bounded local web and selected-window app previews, and inert restoration |
 
 Unresolved choices are tracked in [`open-decisions.md`](open-decisions.md).
 

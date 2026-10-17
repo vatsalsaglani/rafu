@@ -121,3 +121,5 @@ Keep one focused subject per note. Add it to this index. Use an ADR instead when
 - [Documentation hover timing and lifetime](editor-hover-request-timing.md): short per-identifier delay and cancellation for hidden or scrolled editors.
 
 - [Terminal modified Return](terminal-modified-return.md): legacy newline bytes, negotiated keyboard input, and the bounded native event bridge.
+
+- [Canvas native boundaries and initial evidence](canvas-native-boundaries.md) — C0 probes, Swift picker value semantics, and bounded persistence.
