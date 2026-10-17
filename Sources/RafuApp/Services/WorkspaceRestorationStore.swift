@@ -7,6 +7,7 @@ nonisolated struct RestorableWorkspace: Codable, Sendable {
     let selectedRelativePath: String?
     let navigatorMode: WorkspaceNavigatorMode
     let editorLayout: EditorLayoutRestoration?
+    let canvasIDs: [CanvasID]
     /// Inert Terminal Group metadata only. The custom decoder below isolates
     /// this optional future field so a malformed or newer group record cannot
     /// discard the existing workspace, file tabs, or editor layout.
@@ -22,8 +23,10 @@ nonisolated struct RestorableWorkspace: Codable, Sendable {
         selectedRelativePath: String?,
         navigatorMode: WorkspaceNavigatorMode,
         editorLayout: EditorLayoutRestoration?,
-        terminalGroupRestoration: TerminalGroupWorkspaceRestoration? = nil
+        terminalGroupRestoration: TerminalGroupWorkspaceRestoration? = nil,
+        canvasIDs: [CanvasID] = []
     ) {
+        self.canvasIDs = Array(canvasIDs.prefix(CanvasLimits.boards))
         self.bookmark = bookmark
         self.rootPath = rootPath
         self.openRelativePaths = openRelativePaths
@@ -42,6 +45,7 @@ nonisolated struct RestorableWorkspace: Codable, Sendable {
         case navigatorMode
         case editorLayout
         case terminalGroupRestoration
+        case canvasIDs
     }
 
     init(from decoder: any Decoder) throws {
@@ -52,8 +56,16 @@ nonisolated struct RestorableWorkspace: Codable, Sendable {
         selectedRelativePath = try container.decodeIfPresent(
             String.self, forKey: .selectedRelativePath)
         navigatorMode = try container.decode(WorkspaceNavigatorMode.self, forKey: .navigatorMode)
-        editorLayout = try container.decodeIfPresent(
+        editorLayout = try? container.decodeIfPresent(
             EditorLayoutRestoration.self, forKey: .editorLayout)
+
+        if let list = try? container.nestedUnkeyedContainer(forKey: .canvasIDs),
+            (list.count ?? Int.max) <= CanvasLimits.boards
+        {
+            canvasIDs = (try? container.decode([CanvasID].self, forKey: .canvasIDs)) ?? []
+        } else {
+            canvasIDs = []
+        }
 
         guard container.contains(.terminalGroupRestoration) else {
             terminalGroupRestoration = nil
@@ -78,6 +90,7 @@ nonisolated struct RestorableWorkspace: Codable, Sendable {
 
     func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(canvasIDs, forKey: .canvasIDs)
         try container.encode(bookmark, forKey: .bookmark)
         try container.encode(rootPath, forKey: .rootPath)
         try container.encode(openRelativePaths, forKey: .openRelativePaths)

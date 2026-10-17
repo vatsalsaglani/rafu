@@ -136,6 +136,15 @@ final class WorkspaceSession {
     var symbolIndexGeneration = 0
     var openDocuments: [EditorDocument] = []
     var editorLayout = EditorLayoutState()
+    @ObservationIgnored let canvasImages = CanvasImagePool()
+    let canvas: WorkspaceCanvasStore
+    var canvasDialog: CanvasDialog?
+    var pendingCanvasRemoval: CanvasID?
+    var pendingCanvasDelete: CanvasSummary?
+    var canvasTerminalOwners: [TerminalGroupID: CanvasID] = [:]
+    @ObservationIgnored var canvasResources: [CanvasID: CanvasBoardResources] = [:]
+    @ObservationIgnored var pendingCanvasTerminalRemoval: (CanvasID, CanvasCardID, TerminalGroupID)?
+
     /// Window-scoped, non-persisted Ctrl-Tab selection. The overlay previews
     /// this value and commits its destination only when Control is released.
     private(set) var editorTabSwitcherState: EditorTabSwitcherState?
@@ -281,8 +290,10 @@ final class WorkspaceSession {
     init(
         conductorAdapters: [any ConductorCLIAdapter] = ConductorAdapterRegistry.all,
         restorationStore: WorkspaceRestorationStore = WorkspaceRestorationStore(),
-        closeSaveTracker: WorkspaceCloseSaveTracker = .shared
+        closeSaveTracker: WorkspaceCloseSaveTracker = .shared,
+        canvasStore: WorkspaceCanvasStore = WorkspaceCanvasStore()
     ) {
+        self.canvas = canvasStore
         self.closeSaveTracker = closeSaveTracker
         self.restorationStore = restorationStore
         self.conductorAdapters = conductorAdapters
@@ -424,9 +435,15 @@ final class WorkspaceSession {
         guard !didTeardownTerminalGroups else { return }
         // Capture inert saved-group metadata before shutdown removes it.
         // The task remains discoverable after this window leaves the registry.
+        canvas.refreshResourceSnapshots()
+        canvas.prepareResourceSnapshot = nil
         closeSaveTracker.track(flushWorkspaceState())
-        cancelLocationNavigation()
+        // Adapter cleanup can park groups and request another metadata save.
+        // Block those requests before they can cancel the captured close save.
         didTeardownTerminalGroups = true
+        for resources in canvasResources.values { resources.stopAll() }
+
+        cancelLocationNavigation()
         endTerminalGroupLibrary()
         cleanupTerminalSessions(terminal.sessions.map(\.id))
         endAllCoordinatorSessions()
@@ -900,8 +917,15 @@ final class WorkspaceSession {
         switch tab.resource {
         case .terminal(let sessionID): return sessionID
         case .terminalGroup(let groupID):
-            guard let paneID = terminal.terminalGroup(groupID)?.focusedPaneID else { return nil }
+            guard canvasTerminalOwners[groupID] == nil,
+                let paneID = terminal.terminalGroup(groupID)?.focusedPaneID
+            else { return nil }
             return terminal.terminalController(for: paneID)?.id
+        case .canvas:
+            guard let id = selectedTerminalGroupID,
+                let pane = terminal.terminalGroup(id)?.focusedPaneID
+            else { return nil }
+            return terminal.terminalController(for: pane)?.id
         case .file, .restorable: return nil
         }
     }
@@ -925,12 +949,21 @@ final class WorkspaceSession {
     /// Frozen Wave 4 presentation seam. A group appears once in the editor
     /// layout; panes remain internal to that resource.
     var selectedTerminalGroupID: TerminalGroupID? {
-        guard let group = editorLayout.group(id: editorLayout.focusedGroupID),
+        guard selectedAuxiliaryTab == nil,
+            let group = editorLayout.group(id: editorLayout.focusedGroupID),
             let tabID = group.selectedTabID,
-            let tab = group.tabs.first(where: { $0.id == tabID }),
-            case .terminalGroup(let groupID) = tab.resource
+            let tab = group.tabs.first(where: { $0.id == tabID })
         else { return nil }
-        return groupID
+        switch tab.resource {
+        case .terminalGroup(let id): return id
+        case .canvas(let id):
+            guard let board = canvas.boards[id], board.contentIsActive,
+                case .terminal(let groupID) = board.focusedCard?.content,
+                canvasTerminalOwners[groupID] == id
+            else { return nil }
+            return groupID
+        default: return nil
+        }
     }
 
     var focusedTerminalPaneID: TerminalPaneID? {
@@ -943,13 +976,14 @@ final class WorkspaceSession {
     }
 
     var presentedTerminalGroupIDs: Set<TerminalGroupID> {
-        Set(
-            editorLayout.groupIDs.flatMap { editorGroupID in
-                editorLayout.group(id: editorGroupID)?.tabs.compactMap { tab in
-                    guard case .terminalGroup(let groupID) = tab.resource else { return nil }
-                    return groupID
-                } ?? []
-            })
+        Set(canvasTerminalOwners.keys).union(
+            Set(
+                editorLayout.groupIDs.flatMap { editorGroupID in
+                    editorLayout.group(id: editorGroupID)?.tabs.compactMap { tab in
+                        guard case .terminalGroup(let groupID) = tab.resource else { return nil }
+                        return groupID
+                    } ?? []
+                }))
     }
 
     var parkedTerminalGroupIDs: [TerminalGroupID] { terminal.parkedTerminalGroupIDs }
@@ -973,6 +1007,7 @@ final class WorkspaceSession {
         pendingTerminalGroupClose != nil || pendingTerminalGroupSaveRequest != nil
             || pendingTerminalGroupRenameRequest != nil
             || pendingTerminalPaneStartingFolderRequest != nil
+            || canvasDialog != nil || pendingCanvasRemoval != nil || pendingCanvasDelete != nil
     }
 
     var terminalGroupCloseConfirmationTitle: String {
@@ -1642,7 +1677,12 @@ final class WorkspaceSession {
                     startingDirectory: resolvedTerminalDirectory(
                         profile.startingFolder, rootURL: rootURL),
                     shell: shell, profile: profile))
-            revealTerminalGroup(groupID)
+            if selectedCanvasID == nil || selectedTerminalGroupID != groupID {
+                revealTerminalGroup(groupID)
+            } else {
+                terminal.selectedID = terminal.terminalController(for: paneID)?.id
+                persistWorkspaceState()
+            }
             terminalGroupFocusRequest &+= 1
         } catch { presentTerminalGroupError(error.localizedDescription) }
     }
@@ -1695,7 +1735,14 @@ final class WorkspaceSession {
         do {
             _ = try terminal.startAllRestartablePanes(
                 in: groupID, instantiations: instantiations)
-            revealTerminalGroup(groupID)
+            if selectedCanvasID == nil || selectedTerminalGroupID != groupID {
+                revealTerminalGroup(groupID)
+            } else {
+                if let pane = terminal.terminalGroup(groupID)?.focusedPaneID {
+                    terminal.selectedID = terminal.terminalController(for: pane)?.id
+                }
+                persistWorkspaceState()
+            }
             terminalGroupFocusRequest &+= 1
         } catch { presentTerminalGroupError(error.localizedDescription) }
     }
@@ -1723,7 +1770,10 @@ final class WorkspaceSession {
         requestTerminalGroupClose(.group(groupID), requiresConfirmation: true)
     }
 
-    func cancelTerminalGroupClose() { pendingTerminalGroupClose = nil }
+    func cancelTerminalGroupClose() {
+        pendingTerminalGroupClose = nil
+        pendingCanvasTerminalRemoval = nil
+    }
 
     func confirmTerminalGroupClose(suppressFuturePaneWarnings: Bool = false) {
         guard let pending = pendingTerminalGroupClose else { return }
@@ -1757,9 +1807,11 @@ final class WorkspaceSession {
                 terminalPaneClosePreferenceStore.suppressFutureConfirmations()
             }
             pendingTerminalGroupClose = nil
+            finishCanvasTerminalRemoval()
             persistWorkspaceState()
         } catch {
             pendingTerminalGroupClose = nil
+            pendingCanvasTerminalRemoval = nil
             presentTerminalGroupError(error.localizedDescription)
         }
     }
@@ -2064,6 +2116,7 @@ final class WorkspaceSession {
     }
 
     private func removeTerminalGroupTab(_ groupID: TerminalGroupID) {
+        canvasTerminalOwners[groupID] = nil
         guard let tab = editorLayout.tab(matching: .terminalGroup(groupID: groupID)) else { return }
         _ = editorLayout.closeTab(tab.id)
     }
@@ -2496,7 +2549,7 @@ final class WorkspaceSession {
                     for pane in terminal.terminalGroup(terminalGroupID)?.panes ?? [] {
                         if let sessionID = pane.sessionID { ids.insert(sessionID) }
                     }
-                case .file, .restorable: break
+                case .file, .restorable, .canvas: break
                 }
             }
         }
@@ -2694,6 +2747,15 @@ final class WorkspaceSession {
     }
 
     func openLocalWorkspace(at url: URL) {
+        canvas.refreshResourceSnapshots()
+        if canvas.hasPendingWrites {
+            Task { [weak self] in
+                guard let self, await canvas.flushAll() else { return }
+                openLocalWorkspace(at: url)
+            }
+            return
+        }
+
         // URLs from the file importer or bookmarks carry a security scope;
         // URLs from the rafu CLI / Finder open events do not. Without a
         // scope, plain readability is sufficient (and all this build can
@@ -2714,6 +2776,13 @@ final class WorkspaceSession {
         // Old terminal/run callbacks still belong to the old descriptor and
         // security scope. Drain them before replacing any workspace state.
         teardownTerminalGroups()
+        canvas.clearAfterWorkspaceFlush()
+        canvasResources = [:]
+        canvasTerminalOwners = [:]
+        canvasDialog = nil
+        pendingCanvasRemoval = nil
+        pendingCanvasDelete = nil
+        pendingCanvasTerminalRemoval = nil
         didTeardownTerminalGroups = false
         liveness.stop()
         let previousSecurityScopedURL = securityScopedURL
@@ -3747,6 +3816,8 @@ final class WorkspaceSession {
                     closeTerminalPane(group.focusedPaneID)
                 }
             }
+        case .canvas(let id):
+            closeCanvas(id)
         case .restorable:
             _ = editorLayout.closeTab(tab.id)
             synchronizeSelectionFromLayout()
@@ -3910,7 +3981,7 @@ final class WorkspaceSession {
                 case .terminalGroup(let terminalGroupID):
                     guard terminal.terminalGroup(terminalGroupID) != nil else { continue }
                     destination = .terminalGroup(groupID: terminalGroupID)
-                case .file, .restorable:
+                case .file, .restorable, .canvas:
                     destination = .editorTab(tabID: tab.id, groupID: groupID)
                 }
                 candidates.append(EditorTabSwitcherCandidate(destination: destination))
@@ -4029,7 +4100,7 @@ final class WorkspaceSession {
                 terminal.terminalController(for: paneID)?.clearAttention()
                 terminalGroupFocusRequest &+= 1
             }
-        case .restorable:
+        case .canvas, .restorable:
             selectedDocumentID = nil
             selectedTreePath = nil
         }
@@ -4389,7 +4460,7 @@ final class WorkspaceSession {
         }
     }
 
-    private func relativePath(for url: URL) -> String {
+    func relativePath(for url: URL) -> String {
         guard let rootURL else { return url.lastPathComponent }
         return String(url.path.dropFirst(rootURL.path.count)).trimmingCharacters(
             in: CharacterSet(charactersIn: "/")
@@ -5617,6 +5688,7 @@ final class WorkspaceSession {
             resetFileTreeState()
             startFileWatcher()
             await refreshWorkspace()
+            guard self.rootURL == resolved.url else { return }
 
             languageIntelligence.workspaceDidOpen(root: resolved.url)
             reloadConductorRuns(for: resolved.url)
@@ -5625,8 +5697,18 @@ final class WorkspaceSession {
                 guard FileManager.default.fileExists(atPath: url.path) else { continue }
                 _ = trackNewDocument(url: url)
             }
+            if await canvas.configure(root: resolved.url) {
+                for id in restored.canvasIDs {
+                    if let board = await canvas.open(id) {
+                        guard self.rootURL == resolved.url else { return }
+                        installCanvasResources(for: board)
+                    }
+                }
+            }
             await restoreTerminalGroupInstances(
                 restored.terminalGroupRestoration, rootURL: resolved.url)
+            guard self.rootURL == resolved.url else { return }
+            for board in canvas.boards.values { restoreCanvasTerminalReferences(board) }
             restoreEditorLayout(
                 restored.editorLayout, terminalGroups: restored.terminalGroupRestoration,
                 from: restored.rootPath, to: resolved.url)
@@ -5708,6 +5790,10 @@ final class WorkspaceSession {
         }
     }
 
+    func requestCanvasTerminalFocus() { terminalGroupFocusRequest &+= 1 }
+
+    func scheduleCanvasWorkspaceSave() { persistWorkspaceState() }
+
     private func persistWorkspaceState() {
         guard rootURL != nil, !didTeardownTerminalGroups else { return }
         restorationTask?.cancel()
@@ -5750,6 +5836,7 @@ final class WorkspaceSession {
         let openPaths = openDocuments.map { relativePath(for: $0.url) }
         let selectedPath = selectedDocument.map { relativePath(for: $0.url) }
         let navigatorMode = navigatorMode
+        let canvasIDs = canvas.savedIDs
         let terminalGroupRestoration = terminalGroupWorkspaceRestoration()
         let restorableEditorLayout = editorLayoutForWorkspaceRestoration()
         let authorizationID = restorationAuthorizationID
@@ -5772,7 +5859,7 @@ final class WorkspaceSession {
                         selectedRelativePath: selectedPath,
                         navigatorMode: navigatorMode,
                         editorLayout: EditorLayoutRestoration(layout: restorableEditorLayout),
-                        terminalGroupRestoration: terminalGroupRestoration
+                        terminalGroupRestoration: terminalGroupRestoration, canvasIDs: canvasIDs
                     )
                 )
             } catch {
@@ -5781,10 +5868,36 @@ final class WorkspaceSession {
         }
     }
 
-    private func terminalGroupWorkspaceRestoration() -> TerminalGroupWorkspaceRestoration? {
+    func restoreCanvasTerminalReferences(_ board: CanvasBoardState) {
+        guard let rootURL, let document = try? board.snapshot() else { return }
+        let references = Set(
+            document.cards.compactMap { card -> TerminalGroupID? in
+                if case .terminal(let id) = card.content { id } else { nil }
+            })
+        for record in document.terminalGroups?.openGroups ?? []
+        where references.contains(record.groupID) {
+            guard terminal.terminalGroup(record.groupID) == nil else { continue }
+            if let value = try? terminalGroupCodec(for: rootURL).restoreOpenInstance(record) {
+                _ = try? terminal.insertInertSnapshot(value.snapshot)
+            }
+        }
+    }
+
+    func canvasTerminalRestoration(_ ids: Set<TerminalGroupID>)
+        -> TerminalGroupWorkspaceRestoration?
+    {
+        terminalGroupWorkspaceRestoration(canvasIDs: ids)
+    }
+
+    private func terminalGroupWorkspaceRestoration(canvasIDs: Set<TerminalGroupID>? = nil)
+        -> TerminalGroupWorkspaceRestoration?
+    {
         let records: [TerminalGroupOpenTabRestorationRecord] = terminal.terminalGroups.compactMap {
             snapshot in
-            guard snapshot.savedLayoutID != nil, presentedTerminalGroupIDs.contains(snapshot.id)
+            guard
+                canvasIDs.map({ $0.contains(snapshot.id) })
+                    ?? (snapshot.savedLayoutID != nil
+                        && presentedTerminalGroupIDs.contains(snapshot.id))
             else {
                 return nil
             }
@@ -5821,6 +5934,7 @@ final class WorkspaceSession {
             for tab in layout.group(id: editorGroupID)?.tabs ?? [] {
                 let retain: Bool
                 switch tab.resource {
+                case .canvas(let id): retain = canvas.boards[id]?.revision ?? 0 > 0
                 case .file: retain = true
                 case .terminalGroup(let groupID):
                     retain = terminal.terminalGroup(groupID)?.savedLayoutID != nil
@@ -5942,7 +6056,9 @@ final class WorkspaceSession {
         for groupID in layout.groupIDs {
             let tabs = layout.group(id: groupID)?.tabs ?? []
             for tab in tabs {
-                switch tab.resource.restorationClassification(terminalGroups: terminalGroups) {
+                switch tab.resource.restorationClassification(
+                    terminalGroups: terminalGroups, canvasIDs: Set(canvas.savedIDs))
+                {
                 case .file:
                     guard case .file(let savedURL) = tab.resource,
                         let rebasedURL = rebase(savedURL, from: oldRootURL, to: newRootURL),
@@ -5959,6 +6075,7 @@ final class WorkspaceSession {
                         _ = layout.closeTab(tab.id)
                         continue
                     }
+                case .canvasRecord: break
                 case .missingTerminalGroupRecord, .notRestorable:
                     _ = layout.closeTab(tab.id)
                 }

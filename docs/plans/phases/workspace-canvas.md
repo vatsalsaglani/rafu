@@ -22,8 +22,24 @@ Progress:
   Ensemble status test passed alone and serially after a parallel load failure.
 - C0 SDK/native view probes: 3 tests pass. Live permission and source-loss checks
   remain C4/C5 checks through visible controls. See `canvas-native-boundaries.md`.
-- C1 bounded document schema and C2 atomic store: focused contract/persistence
-  checks pass. Board UI and integration are in progress; C2 is not complete.
+- Foundation `165a85d`: bounded schema, native boundary probes, board transactions,
+  atomic per-variant store, and window-store tests committed. Build, 2,290 tests
+  in parallel/serial modes, and canonical Lightning launch passed.
+- C1–C4 code is implemented: typed tabs, board controls, native notes,
+  file/image cards, terminal presentation leases, local web views, and native app
+  previews. The integrated code passed 2,306 parallel and serial tests plus the
+  canonical Lightning launch. The UI repairs use a final format, lint, build,
+  parallel, and serial gate sequence before the local checkpoint commit.
+- C5 native checks resumed after unlock. Notes/save/reopen, a stopped terminal,
+  modified Return bytes, live loopback web input/unload, a second window, and
+  source undo across Canvas/Settings passed. The pass found and repaired an
+  empty-editor overlay size fault, blank native app card setup, card selection
+  keyboard focus, and the picker callback's off-main handoff. Hosted-view and picker-ticket regressions cover
+  the repairs. A user-selected live window preview displayed a frame and stopped
+  on a Settings switch, with no automatic resume. Source-loss/permission and
+  lock checks, the full accessibility matrix, sustained input and active
+  performance measurements remain open. No Release
+  launch was performed. See `canvas-native-boundaries.md` for evidence and limits.
 
 ## Intended experience
 

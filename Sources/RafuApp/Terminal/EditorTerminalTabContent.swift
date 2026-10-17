@@ -56,7 +56,19 @@ struct EditorTerminalTabContent: View {
 /// SwiftTerm's small SwiftUI hosting boundary. The default arguments preserve
 /// the existing one-terminal editor-tab behaviour; Terminal Groups supply a
 /// pane identity and opt in to the single focused-leaf responder bridge.
+private struct TerminalSurfacePermissionKey: EnvironmentKey {
+    static let defaultValue: @MainActor @Sendable () -> Bool = { true }
+}
+
+extension EnvironmentValues {
+    var terminalSurfaceCanMount: @MainActor @Sendable () -> Bool {
+        get { self[TerminalSurfacePermissionKey.self] }
+        set { self[TerminalSurfacePermissionKey.self] = newValue }
+    }
+}
+
 struct TerminalHostView: NSViewRepresentable {
+    @Environment(\.terminalSurfaceCanMount) private var canMount
     let controller: WorkspaceTerminalController
     let theme: RafuTheme
     var paneID: TerminalPaneID?
@@ -68,22 +80,25 @@ struct TerminalHostView: NSViewRepresentable {
         Coordinator()
     }
 
-    func makeNSView(context: Context) -> LocalProcessTerminalView {
-        let view = controller.makeOrReuseView(theme: theme)
-        configureFocusCallback(on: view, coordinator: context.coordinator)
-        requestFocusIfNeeded(on: view, coordinator: context.coordinator)
-        return view
-    }
+    func makeNSView(context: Context) -> NativeContentMount { NativeContentMount() }
 
-    func updateNSView(_ nsView: LocalProcessTerminalView, context: Context) {
+    func updateNSView(_ container: NativeContentMount, context: Context) {
+        guard canMount() else {
+            context.coordinator.invalidatePendingFocusRequest()
+            container.detach()
+            return
+        }
+        let nsView = controller.makeOrReuseView(theme: theme)
+        container.mount(nsView)
         controller.applyTheme(theme, to: nsView)
         configureFocusCallback(on: nsView, coordinator: context.coordinator)
         requestFocusIfNeeded(on: nsView, coordinator: context.coordinator)
     }
 
-    static func dismantleNSView(_ nsView: LocalProcessTerminalView, coordinator: Coordinator) {
+    static func dismantleNSView(_ container: NativeContentMount, coordinator: Coordinator) {
         coordinator.invalidatePendingFocusRequest()
-        (nsView as? RafuTerminalView)?.clearFirstResponderCallback(owner: coordinator)
+        (container.hosted as? RafuTerminalView)?.clearFirstResponderCallback(owner: coordinator)
+        container.detach()
         coordinator.paneID = nil
         coordinator.onDidBecomeFirstResponder = nil
     }
@@ -110,8 +125,10 @@ struct TerminalHostView: NSViewRepresentable {
         coordinator.focusRequestGeneration &+= 1
         let token = requestFocusToken
         let generation = coordinator.focusRequestGeneration
+        let permission = canMount
         DispatchQueue.main.async { [weak coordinator, weak view] in
             guard
+                permission(),
                 let coordinator,
                 token == coordinator.lastRequestedFocusToken,
                 generation == coordinator.focusRequestGeneration,

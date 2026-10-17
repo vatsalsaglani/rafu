@@ -34,6 +34,25 @@ final class WorkspaceCanvasStore {
         return true
     }
 
+    func refreshResourceSnapshots() {
+        for board in boards.values {
+            board.refreshResources(prepareResourceSnapshot)
+            if board.isDirty { board.requestSave?() }
+        }
+    }
+
+    func clearAfterWorkspaceFlush() {
+        guard !hasPendingWrites else { return }
+        for board in boards.values {
+            board.requestSave = nil
+            onBoardHidden?(board.id)
+        }
+        boards = [:]
+        library = []
+        workspace = nil
+        generation = UUID()
+    }
+
     func refreshLibrary() async {
         guard let workspace else { return }
         let ticket = generation
@@ -50,6 +69,10 @@ final class WorkspaceCanvasStore {
 
     func create(title: String, copying original: CanvasDocument? = nil) async -> CanvasBoardState? {
         guard let workspace else { return nil }
+        guard boards.count < CanvasLimits.boards else {
+            libraryNotice = CanvasError.capacity.localizedDescription
+            return nil
+        }
         let ticket = generation
         do {
             var document = original ?? CanvasDocument(title: title)
@@ -71,6 +94,10 @@ final class WorkspaceCanvasStore {
     func open(_ id: CanvasID) async -> CanvasBoardState? {
         if let board = boards[id] { return board }
         guard let workspace else { return nil }
+        guard boards.count < CanvasLimits.boards else {
+            libraryNotice = CanvasError.capacity.localizedDescription
+            return nil
+        }
         let ticket = generation
         do {
             guard let document = try await persistence.load(id, workspace: workspace) else {
@@ -86,6 +113,10 @@ final class WorkspaceCanvasStore {
 
     func reload(_ id: CanvasID) async -> Bool {
         guard let workspace else { return false }
+        if let pending = boards[id]?.saveTask {
+            pending.cancel()
+            _ = await pending.value
+        }
         let ticket = generation
         do {
             guard let document = try await persistence.load(id, workspace: workspace) else {
@@ -104,8 +135,10 @@ final class WorkspaceCanvasStore {
     func saveCopy(_ id: CanvasID) async -> CanvasBoardState? {
         guard let board = boards[id] else { return nil }
         do {
+            var snapshot = try board.snapshot()
+            prepareResourceSnapshot?(&snapshot)
             return await create(
-                title: String(board.title.prefix(100)) + " Copy", copying: try board.snapshot())
+                title: String(board.title.prefix(100)) + " Copy", copying: snapshot)
         } catch {
             board.errorMessage = error.localizedDescription
             return nil
@@ -133,6 +166,7 @@ final class WorkspaceCanvasStore {
     func save(_ id: CanvasID) async -> Bool {
         guard let board = boards[id] else { return true }
         if let pending = board.saveTask { return await pending.value }
+        board.refreshResources(prepareResourceSnapshot)
         guard board.isDirty else { return true }
         let task = Task(name: "Flush Canvas changes") { [weak self, weak board] in
             guard let self, let board else { return false }
@@ -175,6 +209,7 @@ final class WorkspaceCanvasStore {
         // Each repeat consumes edits that arrived during a real save. There is
         // no polling timer and no detached process or unbounded snapshot queue.
         while board.isDirty {
+            guard boards[board.id] === board, !Task.isCancelled else { return false }
             let stamp = board.changeStamp
             do {
                 var snapshot = try board.snapshot()

@@ -215,6 +215,12 @@ struct EditorTabSwitcherOverlay: View {
                     detail: editorDetail(groupID: groupID, suffix: "Terminal"),
                     symbolName: "terminal"
                 )
+            case .canvas(let id):
+                return Presentation(
+                    title: session.canvas.boards[id]?.title ?? "Canvas",
+                    detail: editorDetail(groupID: groupID, suffix: "Canvas"),
+                    symbolName: "rectangle.3.group",
+                    isDirty: session.canvas.boards[id]?.isDirty == true)
             case .terminalGroup:
                 return Presentation(
                     title: "Terminal Group",

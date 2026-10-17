@@ -1,0 +1,333 @@
+import AppKit
+import SwiftUI
+
+struct CanvasAddCardMenu: View {
+    let board: CanvasBoardState
+    let session: WorkspaceSession
+
+    var body: some View {
+        Menu("Add Card", systemImage: "plus") {
+            Button("File…") { session.chooseCanvasFile(board.id, imageOnly: false) }
+            Button("Image…") { session.chooseCanvasFile(board.id, imageOnly: true) }
+            Button("Note") { session.addCanvasNote(board.id) }
+            Menu("Terminal Group") {
+                Button("New Stopped Group") { session.addCanvasStoppedTerminal(board.id) }
+                Divider()
+                ForEach(session.terminal.terminalGroups, id: \.id) { group in
+                    Button(group.name.rawValue) {
+                        session.addCanvasTerminal(group.id, to: board.id)
+                    }
+                }
+            }
+            Button("Local Web App…") { session.canvasDialog = .web(board.id) }
+            Button("Native macOS App…") { session.chooseCanvasApplication(board.id) }
+        }
+        .fixedSize()
+        .disabled(board.cards.count >= CanvasLimits.cards)
+    }
+}
+
+struct CanvasCardShell: View {
+    @Environment(\.rafuTheme) private var theme
+    let card: CanvasCard
+    let board: CanvasBoardState
+    let session: WorkspaceSession
+    var focusBoard: () -> Void = {}
+    @State private var dragStart: CanvasRect?
+    @State private var resizeStart: CanvasRect?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: card.content.symbol).foregroundStyle(theme.palette.accent)
+                Button {
+                    focusBoard()
+                    if NSEvent.modifierFlags.contains(.command)
+                        || NSEvent.modifierFlags.contains(.shift)
+                    {
+                        if board.selection.contains(card.id) {
+                            board.selection.remove(card.id)
+                        } else {
+                            board.selection.insert(card.id)
+                        }
+                    } else {
+                        board.selection = [card.id]
+                    }
+                } label: {
+                    Text(card.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading).contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(board.selection.contains(card.id) ? .isSelected : [])
+                Menu {
+                    Button("Focus") { board.focus(card.id) }
+                    Button("Rename…") { session.canvasDialog = .renameCard(board.id, card.id) }
+                    Button("Move Left") { move(dx: -20, dy: 0) }
+                    Button("Move Right") { move(dx: 20, dy: 0) }
+                    Button("Move Up") { move(dx: 0, dy: -20) }
+                    Button("Move Down") { move(dx: 0, dy: 20) }
+                    Button("Make Larger") { resize(40) }
+                    Button("Make Smaller") { resize(-40) }
+                    Button("Remove…") {
+                        board.selection = [card.id]
+                        session.requestCanvasCardRemoval(board.id)
+                    }
+                } label: {
+                    Image(systemName: "ellipsis").accessibilityLabel("\(card.title) actions")
+                }
+                .menuStyle(.borderlessButton).frame(width: 18)
+            }
+            .padding(.horizontal, 12).frame(height: 36)
+            .background(theme.palette.sidebarBackground)
+            .contentShape(.rect)
+            .gesture(
+                DragGesture(minimumDistance: 3, coordinateSpace: .global).onChanged { value in
+                    if dragStart == nil {
+                        focusBoard()
+                        dragStart = card.rect
+                        board.beginGesture()
+                        board.selection = [card.id]
+                    }
+                    guard var rect = dragStart else { return }
+                    rect.x = min(
+                        50_000,
+                        max(-50_000, rect.x + value.translation.width / board.viewport.scale))
+                    rect.y = min(
+                        50_000,
+                        max(-50_000, rect.y + value.translation.height / board.viewport.scale))
+                    board.setRect(rect, for: card.id)
+                }.onEnded { _ in
+                    if var rect = board.cards.first(where: { $0.id == card.id })?.rect {
+                        rect.x = (rect.x / 8).rounded() * 8
+                        rect.y = (rect.y / 8).rounded() * 8
+                        board.setRect(rect, for: card.id)
+                    }
+                    board.endGesture()
+                    dragStart = nil
+                })
+            Divider()
+            if case .nativeApp = card.content {
+                CanvasNativeAppCard(card: card, board: board, session: session)
+            } else if case .image(let path) = card.content {
+                CanvasImageContent(path: path, session: session).padding(12)
+            } else {
+                Button {
+                    focusBoard()
+                    board.selection = [card.id]
+                } label: {
+                    CanvasCardSummary(card: card)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .padding(14).contentShape(.rect)
+                }.buttonStyle(.plain)
+            }
+            Divider()
+            HStack {
+                Text(card.content.kindName).font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                if case .file(let path) = card.content {
+                    Button("Open File") { session.openCanvasFile(path) }
+                } else if case .image(let path) = card.content {
+                    Button("Open Image") { session.openCanvasFile(path) }
+                }
+                Button("Focus") { board.focus(card.id) }
+            }
+            .font(.caption).buttonStyle(.plain).padding(.horizontal, 12).frame(height: 30)
+        }
+        .background(theme.palette.editorBackground)
+        .clipShape(.rect(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8).stroke(
+                board.selection.contains(card.id)
+                    ? theme.palette.accent : theme.palette.borderSubtle,
+                lineWidth: board.selection.contains(card.id) ? 2 : 1
+            )
+            .allowsHitTesting(false)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                .font(.system(size: 9)).foregroundStyle(.secondary)
+                .padding(3).contentShape(.rect)
+                .gesture(
+                    DragGesture(minimumDistance: 2, coordinateSpace: .global).onChanged { value in
+                        if resizeStart == nil {
+                            resizeStart = card.rect
+                            board.beginGesture()
+                        }
+                        guard var rect = resizeStart else { return }
+                        rect.width = min(
+                            2_000,
+                            max(240, rect.width + value.translation.width / board.viewport.scale))
+                        rect.height = min(
+                            2_000,
+                            max(160, rect.height + value.translation.height / board.viewport.scale))
+                        board.setRect(rect, for: card.id)
+                    }.onEnded { _ in
+                        board.endGesture()
+                        resizeStart = nil
+                    }
+                )
+                .accessibilityHidden(true)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(card.title), \(card.content.kindName)")
+    }
+
+    private func move(dx: Double, dy: Double) {
+        board.selection = [card.id]
+        session.performCanvasEdit(board) { try board.moveSelection(dx: dx, dy: dy) }
+    }
+
+    private func resize(_ delta: Double) {
+        session.performCanvasEdit(board) {
+            try board.edit { document in
+                guard let index = document.cards.firstIndex(where: { $0.id == card.id }) else {
+                    return
+                }
+                document.cards[index].rect.width = min(2_000, max(240, card.rect.width + delta))
+                document.cards[index].rect.height = min(2_000, max(160, card.rect.height + delta))
+            }
+        }
+    }
+}
+
+private struct CanvasCardSummary: View {
+    let card: CanvasCard
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            switch card.content {
+            case .file(let path):
+                Label(path, systemImage: "doc.text").font(.callout)
+                Text("Open in the existing editor to keep its text and undo history.")
+            case .image(let path):
+                Label(path, systemImage: "photo").font(.callout)
+                Text("Focus to view the image.")
+            case .note(let snapshot):
+                Text(
+                    snapshot.isEmpty
+                        ? "An empty note. Focus to edit." : String(snapshot.prefix(512))
+                )
+                .lineLimit(9).textSelection(.enabled)
+            case .terminal:
+                Label("Terminal Group", systemImage: "terminal")
+                Text("Focus this card to see its state or start a stopped pane.")
+            case .web(let destination):
+                Label(destination.address, systemImage: "globe")
+                Text("Focus and choose Connect. Rafu does not start a server.")
+            case .nativeApp:
+                EmptyView()
+            }
+        }
+        .font(.callout).foregroundStyle(.secondary)
+    }
+}
+
+struct CanvasFocusView: View {
+    let board: CanvasBoardState
+    let session: WorkspaceSession
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button("Back to Canvas", systemImage: "arrow.left") { board.backToBoard() }
+                if let card = board.focusedCard {
+                    Label(card.title, systemImage: card.content.symbol).lineLimit(1)
+                }
+                Spacer()
+                Text("100%").font(.caption).foregroundStyle(.secondary)
+                Button(board.contentIsActive ? "Leave Content" : "Enter Content") {
+                    if board.contentIsActive {
+                        board.leaveContent()
+                    } else {
+                        board.contentIsActive = true
+                    }
+                }
+            }
+            .controlSize(.small).buttonStyle(.bordered).padding(10)
+            Divider()
+            if let card = board.focusedCard {
+                CanvasFocusedCardContent(card: card, board: board, session: session)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+}
+
+private struct CanvasFocusedCardContent: View {
+    @Environment(\.canvasPresentationID) private var presentationID
+    let card: CanvasCard
+    let board: CanvasBoardState
+    let session: WorkspaceSession
+
+    var body: some View {
+        switch card.content {
+        case .file(let path): CanvasFilePreview(path: path, session: session)
+        case .image(let path): CanvasImagePreview(path: path, session: session)
+        case .note:
+            CanvasNoteEditor(
+                card: card, board: board, session: session,
+                presentationID: presentationID,
+                isCurrentPresentation: session.canvasResources[board.id]?.canPresent(
+                    owner: presentationID) == true)
+        case .terminal: CanvasTerminalCard(card: card, board: board, session: session)
+        case .web: CanvasWebCard(card: card, board: board, session: session)
+        case .nativeApp: CanvasNativeAppCard(card: card, board: board, session: session)
+        }
+    }
+}
+
+struct CanvasListView: View {
+    let board: CanvasBoardState
+    let session: WorkspaceSession
+
+    var body: some View {
+        List {
+            Section("Cards") {
+                ForEach(board.cards) { card in
+                    HStack {
+                        Button {
+                            board.selection = [card.id]
+                            board.focus(card.id)
+                        } label: {
+                            Label(card.title, systemImage: card.content.symbol)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }.buttonStyle(.plain)
+                        Text(card.content.kindName).font(.caption).foregroundStyle(.secondary)
+                        Button("Select") { board.selection.insert(card.id) }
+                        Button("Remove…") {
+                            board.selection = [card.id]
+                            session.requestCanvasCardRemoval(board.id)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            Section("Relationships") {
+                ForEach(board.connections) { connection in
+                    HStack {
+                        Text(relationshipText(connection))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button("Edit Label…") {
+                            session.canvasDialog = .connectionLabel(board.id, connection.id)
+                        }
+                        Button("Remove") {
+                            session.performCanvasEdit(board) {
+                                try board.edit {
+                                    $0.connections.removeAll { $0.id == connection.id }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .listStyle(.inset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private func relationshipText(_ connection: CanvasConnection) -> String {
+        let from = board.cards.first { $0.id == connection.from }?.title ?? "Missing card"
+        let to = board.cards.first { $0.id == connection.to }?.title ?? "Missing card"
+        return "\(from) → \(connection.label) → \(to)"
+    }
+}

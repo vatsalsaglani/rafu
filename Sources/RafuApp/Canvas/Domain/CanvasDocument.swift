@@ -188,6 +188,7 @@ nonisolated struct CanvasDocument: Codable, Equatable, Identifiable, Sendable {
     var cards: [CanvasCard] = []
     var connections: [CanvasConnection] = []
     var viewport = CanvasViewport()
+    var terminalGroups: TerminalGroupWorkspaceRestoration?
 
     init(title: String, id: CanvasID = CanvasID()) {
         self.title = title
@@ -195,7 +196,7 @@ nonisolated struct CanvasDocument: Codable, Equatable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: CodingKey {
-        case version, id, revision, title, cards, connections, viewport
+        case version, id, revision, title, cards, connections, viewport, terminalGroups
     }
 
     init(from decoder: any Decoder) throws {
@@ -213,6 +214,8 @@ nonisolated struct CanvasDocument: Codable, Equatable, Identifiable, Sendable {
         cards = try container.decode([CanvasCard].self, forKey: .cards)
         connections = try container.decode([CanvasConnection].self, forKey: .connections)
         viewport = try container.decode(CanvasViewport.self, forKey: .viewport)
+        terminalGroups = try container.decodeIfPresent(
+            TerminalGroupWorkspaceRestoration.self, forKey: .terminalGroups)
         try validate()
     }
 

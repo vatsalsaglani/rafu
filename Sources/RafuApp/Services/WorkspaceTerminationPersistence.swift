@@ -4,6 +4,20 @@ import Foundation
 /// reply and return `.terminateLater` there; send its reply after these saves.
 @MainActor
 final class WorkspaceTerminationPersistence {
+    nonisolated private struct Metadata: Equatable {
+        let root: URL?
+        let layout: EditorLayoutState
+        let navigator: WorkspaceNavigatorMode
+        let selectedDocumentID: UUID?
+        let files: [URL]
+        let canvases: Set<CanvasID>
+    }
+    private static func metadata(_ session: WorkspaceSession) -> Metadata {
+        .init(
+            root: session.rootURL, layout: session.editorLayout,
+            navigator: session.navigatorMode, selectedDocumentID: session.selectedDocumentID,
+            files: session.openDocuments.map(\.url), canvases: Set(session.canvas.savedIDs))
+    }
     private var task: Task<Void, Never>?
     private let closeSaveTracker: WorkspaceCloseSaveTracker
 
@@ -17,7 +31,8 @@ final class WorkspaceTerminationPersistence {
     /// write document contents, or tear down processes while saving metadata.
     @discardableResult
     func request(
-        sessions: [WorkspaceSession], reply: @escaping @MainActor () -> Void
+        sessions: [WorkspaceSession], onSaveFailure: (@MainActor () -> Void)? = nil,
+        reply: @escaping @MainActor () -> Void
     ) -> Task<Void, Never> {
         if let task { return task }
         // Enter before creating the task, so a close during any following
@@ -28,16 +43,36 @@ final class WorkspaceTerminationPersistence {
             // Keep the barrier through AppKit's synchronous reply. If the
             // callback returns without quitting, normal close saves resume.
             defer { closeSaveTracker.endQuit() }
-            // A closed window can still own a slow bookmark/save on another
-            // actor. Drain those tasks before writing the live windows.
-            await closeSaveTracker.drain()
-            for session in sessions.dropFirst().reversed() {
+            // Each repeat consumes edits made during an awaited content or
+            // metadata write. It is not a timer or a poll. Reply only after a
+            // final synchronous check sees stable metadata and no dirty board.
+            while true {
+                for session in sessions {
+                    guard await session.canvas.flushAll() else {
+                        self?.task = nil
+                        session.revealCanvasSaveFailure()
+                        onSaveFailure?()
+                        return
+                    }
+                }
+                let before = sessions.map(Self.metadata)
+                // A closed window can still own a slow bookmark/save. Drain
+                // those tasks before the live windows; the key window stays last.
                 await closeSaveTracker.drain()
-                await session.flushWorkspaceState()?.value
-            }
-            if let prioritySession = sessions.first {
-                await closeSaveTracker.drainBeforeFinalSave {
-                    await prioritySession.flushWorkspaceState()?.value
+                for session in sessions.dropFirst().reversed() {
+                    await closeSaveTracker.drain()
+                    await session.flushWorkspaceState()?.value
+                }
+                if let prioritySession = sessions.first {
+                    await closeSaveTracker.drainBeforeFinalSave {
+                        await prioritySession.flushWorkspaceState()?.value
+                    }
+                }
+                for session in sessions { session.canvas.refreshResourceSnapshots() }
+                if !sessions.contains(where: { $0.canvas.hasPendingWrites }),
+                    before == sessions.map(Self.metadata)
+                {
+                    break
                 }
             }
             self?.task = nil

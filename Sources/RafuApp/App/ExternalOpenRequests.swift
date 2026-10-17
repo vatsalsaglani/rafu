@@ -59,12 +59,17 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // Existing tab-close and empty-window confirmation paths stay in
-        // charge of their decisions. This hook only completes metadata saves.
+        // charge of their decisions. This hook first flushes Canvas content,
+        // then completes workspace metadata saves.
         // The registry orders the key window first; the helper saves it last.
         let sessions = WorkspaceWindowRegistry.shared.sessionSnapshots().map(\.session)
-        terminationPersistence.request(sessions: sessions) {
-            sender.reply(toApplicationShouldTerminate: true)
-        }
+        terminationPersistence.request(
+            sessions: sessions,
+            onSaveFailure: {
+                sender.reply(toApplicationShouldTerminate: false)
+            },
+            reply: { sender.reply(toApplicationShouldTerminate: true) }
+        )
         return .terminateLater
     }
 

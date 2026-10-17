@@ -16,6 +16,7 @@ final class CanvasBoardState: Identifiable {
     var focusedCardID: CanvasCardID?
     var contentIsActive = false
     var showsList = false
+    var visibleSize: CGSize = .zero
     var connectingFrom: CanvasCardID?
     @ObservationIgnored var noteSnapshots: [CanvasCardID: @MainActor () throws -> String] = [:]
     @ObservationIgnored var requestSave: (@MainActor () -> Void)?
@@ -57,6 +58,15 @@ final class CanvasBoardState: Identifiable {
     }
     var focusedCard: CanvasCard? { cards.first { $0.id == focusedCardID } }
 
+    var retainedNoteIDs: Set<CanvasCardID> {
+        Set(
+            ([document] + undo + redo).flatMap {
+                $0.cards.compactMap { card -> CanvasCardID? in
+                    if case .note = card.content { card.id } else { nil }
+                }
+            })
+    }
+
     func snapshot() throws -> CanvasDocument {
         var value = document
         for index in value.cards.indices {
@@ -67,6 +77,15 @@ final class CanvasBoardState: Identifiable {
         }
         try value.validate()
         return value
+    }
+
+    func refreshResources(_ prepare: ((inout CanvasDocument) -> Void)?) {
+        var value = document
+        prepare?(&value)
+        if value != document {
+            document = value
+            markDirty()
+        }
     }
 
     func acceptSaved(_ saved: CanvasDocument, stamp: UInt64) {
@@ -111,6 +130,7 @@ final class CanvasBoardState: Identifiable {
             $0.cards.removeAll { removing.contains($0.id) }
             $0.connections.removeAll { removing.contains($0.from) || removing.contains($0.to) }
         }
+        if let focusedCardID, removing.contains(focusedCardID) { self.focusedCardID = nil }
         selection = []
     }
 

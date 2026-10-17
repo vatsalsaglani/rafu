@@ -59,9 +59,14 @@ struct WorkspaceWindowView: View {
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)
         )
+        .background(CanvasWindowCloseGuard(session: session).frame(width: 0, height: 0))
+        .modifier(CanvasPresentations(session: session))
         .frame(minWidth: 720, minHeight: 480)
         .navigationTitle(session.windowTitle)
         .focusedSceneValue(\.workspaceSession, session)
+        .onChange(of: session.terminal.terminalGroupRevision) { _, _ in
+            session.canvas.refreshResourceSnapshots()
+        }
         .onDisappear {
             // Window close and app termination share the session-owned,
             // idempotent lifecycle funnel; deinit remains a fallback.

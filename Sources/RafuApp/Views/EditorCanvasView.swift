@@ -209,13 +209,33 @@ private struct EditorGroupView: View {
                         } else if let terminalGroupID = selectedTerminalGroupID,
                             let snapshot = session.terminal.terminalGroup(terminalGroupID)
                         {
-                            TerminalGroupView(
-                                snapshot: snapshot,
-                                controllerForPane: { session.terminal.terminalController(for: $0) },
-                                action: session.performTerminalGroupViewAction,
-                                theme: theme,
-                                requestFocusToken: session.terminalGroupFocusRequest
-                            )
+                            if session.canvasTerminalOwners[terminalGroupID] != nil {
+                                ContentUnavailableView {
+                                    Label(
+                                        "Terminal is in a Canvas", systemImage: "rectangle.3.group")
+                                } description: {
+                                    Text("Transfer its existing view to this tab to continue here.")
+                                } actions: {
+                                    Button("Transfer Here") {
+                                        session.canvasTerminalOwners[terminalGroupID] = nil
+                                    }
+                                }
+                            } else {
+                                TerminalGroupView(
+                                    snapshot: snapshot,
+                                    controllerForPane: {
+                                        session.terminal.terminalController(for: $0)
+                                    },
+                                    action: session.performTerminalGroupViewAction,
+                                    theme: theme,
+                                    requestFocusToken: session.terminalGroupFocusRequest
+                                )
+                                .environment(
+                                    \.terminalSurfaceCanMount,
+                                    { [weak session = session] in
+                                        session?.canvasTerminalOwners[terminalGroupID] == nil
+                                    })
+                            }
                         } else if loadedDocuments.isEmpty {
                             ContentUnavailableView(
                                 "Empty Editor Group",
@@ -233,6 +253,7 @@ private struct EditorGroupView: View {
                                     let isActive =
                                         document.id == selectedDocument?.id
                                         && session.selectedAuxiliaryTab(in: group.id) == nil
+                                        && selectedCanvas == nil
                                     EditorDocumentView(
                                         document: document,
                                         isVisible: isActive,
@@ -299,9 +320,25 @@ private struct EditorGroupView: View {
                             }
                         }
                     }
-                    .opacity(session.selectedAuxiliaryTab(in: group.id) == nil ? 1 : 0)
-                    .allowsHitTesting(session.selectedAuxiliaryTab(in: group.id) == nil)
-                    .accessibilityHidden(session.selectedAuxiliaryTab(in: group.id) != nil)
+                    // Overlays receive the base view's size. An empty editor
+                    // has only its placeholder's intrinsic size, so claim the
+                    // complete group body before presenting Canvas or Settings.
+                    .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+                    .opacity(
+                        session.selectedAuxiliaryTab(in: group.id) == nil && selectedCanvas == nil
+                            ? 1 : 0
+                    )
+                    .allowsHitTesting(
+                        session.selectedAuxiliaryTab(in: group.id) == nil && selectedCanvas == nil
+                    )
+                    .accessibilityHidden(
+                        session.selectedAuxiliaryTab(in: group.id) != nil || selectedCanvas != nil
+                    )
+                    .overlay {
+                        if let board = selectedCanvas {
+                            WorkspaceCanvasView(board: board, session: session)
+                        }
+                    }
                     .overlay {
                         ForEach(session.auxiliaryTabs(in: group.id)) { tab in
                             AuxiliaryEditorFocusHost(
@@ -334,6 +371,13 @@ private struct EditorGroupView: View {
                 }
             }
         }
+    }
+
+    private var selectedCanvas: CanvasBoardState? {
+        guard session.selectedAuxiliaryTab(in: group.id) == nil,
+            case .canvas(let id) = selectedTab?.resource
+        else { return nil }
+        return session.canvas.boards[id]
     }
 
     private var selectedTab: EditorTabState? {
@@ -1130,6 +1174,17 @@ private struct EditorGroupTabBar: View {
                     )
                 }
                 .scrollIndicators(.hidden)
+                Button {
+                    session.editorLayout.focus(group.id)
+                    session.requestNewCanvas()
+                } label: {
+                    Image(systemName: "plus.rectangle.on.rectangle")
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .help("New Canvas")
+                .accessibilityLabel("New Canvas")
+                .disabled(session.rootURL == nil)
                 if let document = selectedDocument, document.supportsPresentationModes {
                     Divider().frame(height: 20)
                     MarkdownModeControl(
@@ -1197,6 +1252,14 @@ private struct EditorGroupTabBar: View {
                     tabID: tab.id, groupID: group.id, snapshot: snapshot,
                     isSelected: tab.id == group.selectedTabID
                         && session.selectedAuxiliaryTab(in: group.id) == nil, session: session)
+            }
+        case .canvas(let id):
+            if let board = session.canvas.boards[id] {
+                CanvasEditorTabItem(
+                    tab: tab, groupID: group.id, board: board,
+                    isSelected: tab.id == group.selectedTabID
+                        && session.selectedAuxiliaryTab(in: group.id) == nil,
+                    session: session)
             }
         case .restorable:
             EmptyView()
@@ -1275,6 +1338,8 @@ private struct EditorGroupTabBar: View {
             if let snapshot = session.terminal.terminalGroup(terminalGroupID) {
                 overflowTabMenuButton(title: snapshot.name.rawValue, tab: tab)
             }
+        case .canvas(let id):
+            overflowTabMenuButton(title: session.canvas.boards[id]?.title ?? "Canvas", tab: tab)
         case .restorable:
             EmptyView()
         }

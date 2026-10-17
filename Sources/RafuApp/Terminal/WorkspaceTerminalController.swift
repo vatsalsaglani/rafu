@@ -1107,6 +1107,11 @@ final class WorkspaceTerminalController: Identifiable {
     /// part of the "not focused" test for bell attention (terminal-manager
     /// .md T-E): not the focused tab, OR the app inactive, OR the window
     /// not key. `false` when parked (no mounted view) or never spawned.
+    func resignNativeFocus() {
+        guard let terminalView, terminalView.window?.firstResponder === terminalView else { return }
+        terminalView.window?.makeFirstResponder(nil)
+    }
+
     var isHostWindowKey: Bool { terminalView?.window?.isKeyWindow ?? false }
 
     func markParked(sequence: Int) {

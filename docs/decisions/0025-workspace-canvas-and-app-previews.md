@@ -41,6 +41,9 @@ cookie, token, PID, foreign window ID, or captured frame.
 
 Board/content focus is explicit. Focus stays inside the Canvas tab; an always
 visible Leave Content/Back to Canvas route protects terminal and web input.
+Interactive terminals, web apps, and notes use a 100% focus surface within the
+Canvas. Board cards show bounded summaries, images, and native-window previews.
+This keeps terminal dimensions stable during board zoom and keeps input readable.
 Canvas List and visible/menu/keyboard actions provide non-spatial access.
 Undo restores references and geometry, never live resource capability.
 

@@ -591,6 +591,43 @@ struct CommandPaletteView: View {
 
     private func makeCommands() -> [PaletteCommand] {
         var commands: [PaletteCommand] = [
+            .init(
+                title: "New Canvas…", symbolName: "rectangle.3.group",
+                keywords: ["board", "spatial"]
+            ) {
+                dismiss()
+                session.requestNewCanvas()
+            },
+            .init(
+                title: "Open Canvas…", symbolName: "rectangle.3.group",
+                keywords: ["board", "saved"]
+            ) {
+                dismiss()
+                session.requestCanvasLibrary()
+            },
+            .init(
+                title: "Canvas: Fit All", symbolName: "arrow.up.left.and.arrow.down.right",
+                keywords: ["board", "zoom"]
+            ) {
+                dismiss()
+                session.selectedCanvas?.fitAll()
+            },
+            .init(
+                title: "Canvas: Arrange", symbolName: "square.grid.2x2",
+                keywords: ["board", "layout"]
+            ) {
+                dismiss()
+                if let board = session.selectedCanvas {
+                    session.performCanvasEdit(board) { try board.arrange() }
+                }
+            },
+            .init(
+                title: "Canvas: Leave Content", symbolName: "arrow.uturn.backward",
+                keywords: ["focus", "board"]
+            ) {
+                dismiss()
+                session.selectedCanvas?.leaveContent()
+            },
             .init(title: "Open Folder…", symbolName: "folder.badge.plus", keywords: ["workspace"]) {
                 dismiss()
                 session.requestOpenFolder()
@@ -1185,6 +1222,74 @@ struct CommandPaletteView: View {
                     dismiss()
                 }
             )
+        }
+        if let board = session.selectedCanvas {
+            commands.append(contentsOf: [
+                .init(title: "Canvas: Add File…", symbolName: "doc.badge.plus", keywords: ["card"])
+                {
+                    dismiss()
+                    session.chooseCanvasFile(board.id, imageOnly: false)
+                },
+                .init(title: "Canvas: Add Image…", symbolName: "photo", keywords: ["card"]) {
+                    dismiss()
+                    session.chooseCanvasFile(board.id, imageOnly: true)
+                },
+                .init(title: "Canvas: Add Note", symbolName: "note.text", keywords: ["card"]) {
+                    dismiss()
+                    session.addCanvasNote(board.id)
+                },
+                .init(
+                    title: "Canvas: Add Stopped Terminal Group", symbolName: "terminal",
+                    keywords: ["card"]
+                ) {
+                    dismiss()
+                    session.addCanvasStoppedTerminal(board.id)
+                },
+                .init(title: "Canvas: Add Local Web App…", symbolName: "globe", keywords: ["card"])
+                {
+                    dismiss()
+                    session.canvasDialog = .web(board.id)
+                },
+                .init(
+                    title: "Canvas: Add Native macOS App…", symbolName: "macwindow",
+                    keywords: ["card"]
+                ) {
+                    dismiss()
+                    session.chooseCanvasApplication(board.id)
+                },
+                .init(title: "Canvas: Actual Size", symbolName: "1.square", keywords: ["zoom"]) {
+                    dismiss()
+                    board.zoom(1 / board.viewport.scale)
+                },
+                .init(
+                    title: "Canvas: Zoom In", symbolName: "plus.magnifyingglass", keywords: ["zoom"]
+                ) {
+                    dismiss()
+                    board.zoom(1.2)
+                },
+                .init(
+                    title: "Canvas: Zoom Out", symbolName: "minus.magnifyingglass",
+                    keywords: ["zoom"]
+                ) {
+                    dismiss()
+                    board.zoom(1 / 1.2)
+                },
+                .init(
+                    title: "Canvas: Show List", symbolName: "list.bullet",
+                    keywords: ["cards", "connections"]
+                ) {
+                    dismiss()
+                    board.backToBoard()
+                    board.showsList = true
+                },
+                .init(
+                    title: "Canvas: Connect Selected Cards…",
+                    symbolName: "point.3.connected.trianglepath.dotted", keywords: ["relationship"]
+                ) {
+                    dismiss()
+                    session.requestCanvasConnection(board.id)
+                },
+            ])
         }
         return commands
     }

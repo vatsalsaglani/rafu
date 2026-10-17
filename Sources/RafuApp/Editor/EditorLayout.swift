@@ -36,14 +36,11 @@ nonisolated enum EditorTabResource: Codable, Equatable, Sendable {
     /// codec contract. TG-30 supplies its workspace restoration behavior;
     /// until then `isRestorable` deliberately remains false.
     case terminalGroup(groupID: TerminalGroupID)
+    case canvas(CanvasID)
 
-    /// Whether this resource is meaningful across a relaunch. Only an
-    /// on-disk file tab is: a terminal tab's `sessionID` references a shell
-    /// process that no longer exists once the app restarts (ADR 0004 —
-    /// sessions are lazy and per-window, never persisted), and the
-    /// speculative `.restorable` kind has no restoration path implemented
-    /// yet either. `WorkspaceSession.restoreEditorLayout` drops any tab
-    /// whose resource answers `false` here.
+    /// Files can restore without a separate record. Canvas and Terminal Group
+    /// tabs use restorationClassification with validated external metadata.
+    /// Legacy process IDs and generic placeholders never restore.
     var isRestorable: Bool {
         if case .file = self { return true }
         return false
@@ -53,7 +50,7 @@ nonisolated enum EditorTabResource: Codable, Equatable, Sendable {
     /// store: callers provide the already-decoded safe workspace envelope and
     /// can retain a group resource only when its matching inert record exists.
     func restorationClassification(
-        terminalGroups: TerminalGroupWorkspaceRestoration?
+        terminalGroups: TerminalGroupWorkspaceRestoration?, canvasIDs: Set<CanvasID> = []
     ) -> EditorTabResourceRestorationClassification {
         switch self {
         case .file:
@@ -64,6 +61,8 @@ nonisolated enum EditorTabResource: Codable, Equatable, Sendable {
             } else {
                 .missingTerminalGroupRecord(groupID)
             }
+        case .canvas(let id):
+            canvasIDs.contains(id) ? .canvasRecord(id) : .notRestorable
         case .restorable, .terminal:
             .notRestorable
         }
@@ -72,6 +71,7 @@ nonisolated enum EditorTabResource: Codable, Equatable, Sendable {
 
 nonisolated enum EditorTabResourceRestorationClassification: Equatable, Sendable {
     case file
+    case canvasRecord(CanvasID)
     case terminalGroupRecord(TerminalGroupID)
     case missingTerminalGroupRecord(TerminalGroupID)
     case notRestorable
@@ -484,7 +484,7 @@ nonisolated struct EditorLayoutState: Codable, Equatable, Sendable {
 }
 
 nonisolated struct EditorLayoutRestoration: Codable, Equatable, Sendable {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
 
     let schemaVersion: Int
     let layout: EditorLayoutState
@@ -500,7 +500,7 @@ nonisolated struct EditorLayoutRestoration: Codable, Equatable, Sendable {
     }
 
     func restoredLayout() throws -> EditorLayoutState {
-        guard schemaVersion == Self.currentSchemaVersion else {
+        guard schemaVersion == 1 || schemaVersion == Self.currentSchemaVersion else {
             throw EditorLayoutRestorationError.unsupportedSchema(schemaVersion)
         }
         guard !layout.groupIDs.isEmpty else {

@@ -17,6 +17,8 @@ struct RafuAppCommands: Commands {
             .keyboardShortcut(",", modifiers: .command)
         }
 
+        CanvasCommands()
+
         CommandGroup(replacing: .newItem) {
             // Issue #6: ⌘N opens a blank untitled document (⌘S saves it
             // anywhere via a save panel), matching VS Code's File > New File
@@ -449,6 +451,7 @@ struct RafuAppCommands: Commands {
 
     private var contextualSaveDisabled: Bool {
         guard let workspaceSession else { return true }
+        if workspaceSession.selectedCanvasID != nil { return isTerminalGroupModalPresented }
         if workspaceSession.selectedTerminalGroupID != nil {
             return !workspaceSession.terminalGroupPresentationAvailability(.save).isEnabled
         }
@@ -456,12 +459,15 @@ struct RafuAppCommands: Commands {
     }
 
     private var contextualSaveTitle: String {
-        workspaceSession?.selectedTerminalGroupID == nil ? "Save" : "Save Terminal Group"
+        if workspaceSession?.selectedCanvasID != nil { return "Save Canvas" }
+        return workspaceSession?.selectedTerminalGroupID == nil ? "Save" : "Save Terminal Group"
     }
 
     private func performContextualSave() {
         guard let workspaceSession else { return }
-        if let groupID = workspaceSession.selectedTerminalGroupID {
+        if let id = workspaceSession.selectedCanvasID {
+            workspaceSession.saveCanvas(id)
+        } else if let groupID = workspaceSession.selectedTerminalGroupID {
             guard workspaceSession.terminalGroupPresentationAvailability(.save).isEnabled else {
                 return
             }
