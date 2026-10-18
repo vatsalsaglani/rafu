@@ -117,7 +117,8 @@ struct EditorSplitDropTests {
         let group = EditorGroupState(tabs: [only])
         var layout = EditorLayoutState(root: .group(group), focusedGroupID: group.id)
 
-        let created = try #require(layout.split(group: group.id, at: .trailing, moving: only.id))
+        let split = layout.split(group: group.id, at: .trailing, moving: only.id)
+        let created = try #require(split)
         #expect(layout.groupIDs == [group.id, created])
         #expect(layout.group(id: created)?.tabs.map(\.id) == [only.id])
         #expect(layout.group(id: group.id)?.tabs.isEmpty == true)
