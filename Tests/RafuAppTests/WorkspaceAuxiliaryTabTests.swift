@@ -27,7 +27,7 @@ struct WorkspaceAuxiliaryTabTests {
         await session.flushWorkspaceState()?.value
     }
 
-    @Test("Settings and Ensemble keep dirty text, undo, and the selected file tab")
+    @Test("Settings keeps dirty text, undo, and the selected file tab")
     func dirtyEditorSurvivesAuxiliarySelection() async throws {
         try await withWorkspace { session in
             session.newUntitledDocument()
@@ -52,8 +52,7 @@ struct WorkspaceAuxiliaryTabTests {
             let fileTabID = try #require(session.editorLayout.group(id: groupID)?.selectedTabID)
 
             session.showSettings()
-            session.showEnsembleNewRun()
-            #expect(session.auxiliaryTabs(in: groupID) == [.settings, .ensembleNewRun])
+            #expect(session.auxiliaryTabs(in: groupID) == [.settings])
             #expect(session.editorLayout.group(id: groupID)?.selectedTabID == fileTabID)
             session.selectEditorTab(fileTabID, in: groupID)
             #expect(session.selectedAuxiliaryTab == nil)
@@ -111,14 +110,15 @@ struct WorkspaceAuxiliaryTabTests {
                 first.newUntitledDocument()
                 let document = try #require(first.selectedDocument)
                 first.showSettings()
-                first.showEnsembleStart()
                 first.select(document)
-                first.closeAuxiliaryTab(.settings)
-                #expect(first.selectedDocument === document)
-                #expect(first.auxiliaryTabs == [.ensembleStart])
+                #expect(first.auxiliaryTabs == [.settings])
                 #expect(second.auxiliaryTabs.isEmpty)
                 #expect(second.selectedAuxiliaryTab == nil)
-                first.selectAuxiliaryTab(.ensembleStart)
+                first.closeAuxiliaryTab(.settings)
+                #expect(first.selectedDocument === document)
+                #expect(first.auxiliaryTabs.isEmpty)
+                first.showSettings()
+                first.selectAuxiliaryTab(.settings)
                 first.requestCloseActiveTab()
                 #expect(first.selectedDocument === document)
                 #expect(first.auxiliaryTabs.isEmpty)
@@ -134,13 +134,12 @@ struct WorkspaceAuxiliaryTabTests {
             let before = try JSONEncoder().encode(
                 EditorLayoutRestoration(layout: session.editorLayout))
             session.showSettings()
-            session.showEnsembleStart()
             let after = try JSONEncoder().encode(
                 EditorLayoutRestoration(layout: session.editorLayout))
             let beforeObject = try JSONSerialization.jsonObject(with: before) as? NSDictionary
             let afterObject = try JSONSerialization.jsonObject(with: after) as? NSDictionary
             #expect(beforeObject == afterObject)
-            #expect(session.auxiliaryTabs == [.settings, .ensembleStart])
+            #expect(session.auxiliaryTabs == [.settings])
         }
     }
 

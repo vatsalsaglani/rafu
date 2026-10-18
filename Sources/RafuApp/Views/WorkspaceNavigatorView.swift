@@ -25,8 +25,6 @@ struct WorkspaceUtilityPanelView: View {
             SourceControlPanelView(session: session)
         case .terminals:
             WorkspaceTerminalsPanelView(session: session)
-        case .runs:
-            ConductorRunsPanelView(session: session)
         }
     }
 }
@@ -99,7 +97,6 @@ struct WorkspaceUtilityRail: View {
             railButton(.search)
             railButton(.sourceControl)
             railButton(.terminals)
-            railButton(.runs)
             Spacer()
         }
         // The rail starts below the titlebar row (`WindowTitlebarRow`).

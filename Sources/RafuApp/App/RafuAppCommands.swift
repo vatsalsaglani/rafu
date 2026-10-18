@@ -307,65 +307,6 @@ struct RafuAppCommands: Commands {
 
             Divider()
 
-            // Ensemble (ADR 0018, conductor/C5-pipelines.md). No keyboard
-            // shortcuts here for the same reason as the terminal group above:
-            // a menu key equivalent is consumed app-wide before any first
-            // responder, and these verbs are reachable via the menu, the
-            // command palette, and the run-detail canvas's own buttons.
-            Button("Show Runs") {
-                workspaceSession?.navigatorMode = .runs
-            }
-            .disabled(workspaceSession?.rootURL == nil)
-
-            Button("Show Ensemble Graph") {
-                workspaceSession?.showConductorGraph()
-            }
-            .disabled(workspaceSession?.rootURL == nil)
-
-            // C8-07: unlike the group above, ⌘⇧E is safe app-wide — it is a
-            // Command-modified shortcut, not a Control-only one a terminal's
-            // responder chain would otherwise swallow first.
-            Button("New Ensemble…") {
-                workspaceSession?.showEnsembleStart()
-            }
-            .keyboardShortcut("e", modifiers: [.command, .shift])
-            .disabled(workspaceSession?.descriptor == nil)
-
-            Button("New Ensemble Run…") {
-                workspaceSession?.showEnsembleNewRun()
-            }
-            .disabled(workspaceSession?.canStartConductorWorkflowRun != true)
-
-            // Every verb below resolves the engine that owns the SELECTED run
-            // (C6: several pipelines may be in flight per window), never the
-            // window's singular controller.
-            Button("Approve Gate") {
-                guard let workflow = workspaceSession?.selectedWorkflowController else { return }
-                Task { await workflow.approveGate() }
-            }
-            .disabled(!isAwaitingWorkflowGate(workspaceSession))
-
-            Button("Revise Gate Artifact") {
-                guard let session = workspaceSession,
-                    let workflow = session.selectedWorkflowController
-                else { return }
-                workflow.reviseArtifact(in: session)
-            }
-            .disabled(!isAwaitingWorkflowGate(workspaceSession))
-
-            Button("Abort Run") {
-                workspaceSession?.selectedWorkflowController?.abort()
-            }
-            .disabled(workspaceSession?.selectedWorkflowController?.isInFlight != true)
-
-            Button("Retry Failed Step") {
-                guard let workflow = workspaceSession?.selectedWorkflowController else { return }
-                Task { await workflow.retryFailedStep() }
-            }
-            .disabled(!isWorkflowFailed(workspaceSession))
-
-            Divider()
-
             Button("Go to Definition") {
                 workspaceSession?.navigate(kind: .definition)
             }
@@ -432,16 +373,6 @@ struct RafuAppCommands: Commands {
 
     private func hasTrackedChanges(in session: WorkspaceSession) -> Bool {
         session.gitSnapshot?.changes.contains { $0.kind != .untracked } == true
-    }
-
-    private func isAwaitingWorkflowGate(_ session: WorkspaceSession?) -> Bool {
-        guard case .awaitingGate = session?.selectedWorkflowController?.state else { return false }
-        return true
-    }
-
-    private func isWorkflowFailed(_ session: WorkspaceSession?) -> Bool {
-        guard case .failed = session?.selectedWorkflowController?.state else { return false }
-        return true
     }
 
     private var isTerminalGroupModalPresented: Bool {

@@ -5,7 +5,7 @@ import Testing
 @testable import RafuApp
 
 /// conductor/C0-shim.md increment 4: the registry-driven Agents settings
-/// surface, the `.runs` navigator case, and `WorkspaceSession`'s run seams.
+/// surface and the tolerant navigator-mode decode.
 ///
 /// Every store test injects a UUID-suffixed suite name — never `.standard` —
 /// mirroring `UsageStoreTests`'s isolation discipline, and cleans that suite
@@ -344,46 +344,17 @@ func settingsRowCarriesNoCredential() {
     }
 }
 
-// MARK: - Navigator case and session seams
+// MARK: - Navigator tolerance
 
-@Test("The .runs navigator mode encodes as \"runs\" and round-trips")
-func runsNavigatorModeRoundTrips() throws {
-    let encoded = try JSONEncoder().encode(WorkspaceNavigatorMode.runs)
-    #expect(String(decoding: encoded, as: UTF8.self) == "\"runs\"")
-    #expect(try JSONDecoder().decode(WorkspaceNavigatorMode.self, from: encoded) == .runs)
-    #expect(WorkspaceNavigatorMode.runs.title == "Runs")
-    #expect(!WorkspaceNavigatorMode.runs.symbolName.isEmpty)
-    #expect(WorkspaceNavigatorMode.allCases.count == 5)
+@Test("The retired \"runs\" navigator mode decodes to .files instead of failing restoration")
+func retiredRunsNavigatorModeFallsBackToFiles() throws {
+    let data = Data("\"runs\"".utf8)
+    #expect(try JSONDecoder().decode(WorkspaceNavigatorMode.self, from: data) == .files)
+    #expect(WorkspaceNavigatorMode.allCases.count == 4)
 }
 
-@Test("An unknown navigator mode still falls back to .files after adding .runs")
+@Test("An unknown navigator mode still falls back to .files")
 func unknownNavigatorModeStillFallsBack() throws {
     let data = Data("\"totally-unknown\"".utf8)
     #expect(try JSONDecoder().decode(WorkspaceNavigatorMode.self, from: data) == .files)
-}
-
-@Test("openConductorRun records the selection and reveals the Runs navigator")
-@MainActor
-func openConductorRunRevealsThePanel() {
-    let session = WorkspaceSession()
-    #expect(session.conductorRuns.isEmpty)
-    #expect(session.selectedConductorRunID == nil)
-
-    session.openConductorRun("20260724-101500")
-    #expect(session.selectedConductorRunID == "20260724-101500")
-    #expect(session.navigatorMode == .runs)
-
-    // The run controller is pre-landed per window so C1 fills bodies without
-    // adding a stored property to this shared file. Constructing a session
-    // starts nothing and attaches no store.
-    #expect(session.conductorRunController.state == .idle)
-    #expect(session.conductorRunController.manifest == nil)
-    #expect(session.conductorRunController.store == nil)
-    #expect(session.conductorRunController.adapters.map(\.id) == ConductorCLIID.allCases)
-    // Two windows never share one run engine.
-    #expect(session.conductorRunController !== WorkspaceSession().conductorRunController)
-
-    // The shared rail toggle still works for the new case.
-    session.toggleUtilityPane(.runs)
-    #expect(session.navigatorMode == .files)
 }
