@@ -359,16 +359,22 @@ private struct EditorGroupView: View {
                             EditorSplitPreviewOverlay(edge: hoveredDropEdge)
                         }
                     }
-                    // Canvas owns file drops while visible. The enclosing
-                    // editor target must not turn them into editor navigation.
+                    // A visible board owns FILE drops (they add nodes), so the
+                    // group must not turn them into editor navigation. It still
+                    // takes TAB drags, so an editor group can be split while a
+                    // board shows: the delegate declines files in that state
+                    // and the board's own target declines tabs
+                    // (`EditorDropRouting`).
                     .onDrop(
-                        of: selectedCanvas == nil ? [.rafuEditorDrag, .fileURL] : [],
+                        of: selectedCanvas == nil
+                            ? [.rafuEditorDrag, .fileURL] : [.rafuEditorDrag],
                         delegate: EditorDropDelegate(
                             groupID: group.id,
                             size: proxy.size,
                             hoveredEdge: $hoveredDropEdge,
                             isTargeted: $isDropTargeted,
-                            session: session
+                            session: session,
+                            canvasIsVisible: selectedCanvas != nil
                         )
                     )
                 }
@@ -551,6 +557,16 @@ private struct EditorDropDelegate: DropDelegate {
     @Binding var hoveredEdge: EditorSplitEdge?
     @Binding var isTargeted: Bool
     let session: WorkspaceSession
+    /// A board fills the group. The delegate then takes tab drags only; the
+    /// board keeps file drags (see `EditorDropRouting`).
+    var canvasIsVisible = false
+
+    func validateDrop(info: DropInfo) -> Bool {
+        guard canvasIsVisible else { return true }
+        return info.hasItemsConforming(to: [.rafuEditorDrag])
+            && EditorDropRouting.groupAccepts(
+                session.activeEditorDrag, canvasIsVisible: canvasIsVisible)
+    }
 
     func dropEntered(info: DropInfo) {
         isTargeted = true
@@ -1121,6 +1137,10 @@ private struct EditorGroupTabBar: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var tabFrames: [EditorTabID: CGRect] = [:]
     @State private var hoveredInsertionIndex: Int?
+    /// Visible width of the scrolling strip. The drop target stretches to at
+    /// least this width so the empty part of the bar (and an empty group's
+    /// whole bar) accepts a dragged tab.
+    @State private var stripViewportWidth: CGFloat = 0
 
     let group: EditorGroupState
     let terminalIdentities: [UUID: EditorTerminalIdentityPresentation]
@@ -1160,6 +1180,13 @@ private struct EditorGroupTabBar: View {
                     .background(ScrollerHidingConfigurator())
                     .onPreferenceChange(TabStripFramePreferenceKey.self) { tabFrames = $0 }
                     .overlay(alignment: .topLeading) { insertionIndicator }
+                    // The target covers the whole visible strip, not only the
+                    // tabs: dropping past the last tab appends, and an empty
+                    // group's bar still receives a tab. The leading alignment
+                    // keeps the content origin, so the tab frames above stay
+                    // valid for the drop location.
+                    .frame(minWidth: stripViewportWidth, alignment: .leading)
+                    .contentShape(Rectangle())
                     // The structurally scoped reorder target remains below
                     // the group's body split/move target.
                     .onDrop(
@@ -1175,6 +1202,11 @@ private struct EditorGroupTabBar: View {
                     )
                 }
                 .scrollIndicators(.hidden)
+                .onGeometryChange(for: CGFloat.self) {
+                    $0.size.width
+                } action: {
+                    stripViewportWidth = $0
+                }
                 // Tabs scroll under a trailing fade, so the fixed controls
                 // below never overlap (or clip) a tab or its close button.
                 .overlay(alignment: .trailing) {
