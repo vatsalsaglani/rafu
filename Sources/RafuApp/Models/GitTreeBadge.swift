@@ -14,19 +14,7 @@ nonisolated struct GitTreeBadge: Hashable, Sendable {
     /// used git's raw porcelain "??" for untracked, which read as broken and
     /// even wrapped onto two lines in a narrow sidebar. "U" = untracked,
     /// "!" = conflicted, matching VS Code's explorer decorations.
-    var shortCode: String {
-        switch kind {
-        case .added: "A"
-        case .copied: "C"
-        case .conflicted: "!"
-        case .deleted: "D"
-        case .modified: "M"
-        case .renamed: "R"
-        case .typeChanged: "T"
-        case .untracked: "U"
-        case .unknown: "•"
-        }
-    }
+    var shortCode: String { GitStatusPresentation.letter(for: kind) }
 
     /// VoiceOver description; the color-coded letter is never the sole channel.
     var accessibilityLabel: String {

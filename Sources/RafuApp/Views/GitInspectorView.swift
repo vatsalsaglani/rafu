@@ -1,5 +1,13 @@
 import SwiftUI
 
+/// Shared sizes for the Source Control panel (G2).
+private enum GitPanelMetrics {
+    /// One-line file row height.
+    static let fileRowHeight: CGFloat = 24
+    /// Side of the rounded status-letter square.
+    static let statusBadgeSize: CGFloat = 16
+}
+
 struct SourceControlPanelView: View {
     @Environment(\.rafuTheme) private var theme
     @Bindable var session: WorkspaceSession
@@ -42,7 +50,7 @@ struct SourceControlPanelView: View {
                 }
             }
         }
-        .frame(minWidth: 250, idealWidth: 310)
+        .frame(minWidth: 300, idealWidth: 340)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .alert("Create Branch", isPresented: $isCreatingBranch) {
             TextField("Branch name", text: $newBranchName)
@@ -73,35 +81,10 @@ struct SourceControlPanelView: View {
     }
 
     private var repositoryContext: some View {
-        VStack(spacing: RafuMetrics.space2) {
-            HStack(spacing: 6) {
-                branchMenu
-                Spacer(minLength: RafuMetrics.space1)
-                syncMenu
-            }
-            if let branches = session.gitBranchSnapshot {
-                HStack(spacing: 10) {
-                    if let upstream = branches.upstream {
-                        Label(upstream, systemImage: "cloud")
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .help(upstream)
-                    } else {
-                        Label("No upstream", systemImage: "icloud.slash")
-                    }
-                    Spacer()
-                    if branches.aheadCount > 0 {
-                        Label("\(branches.aheadCount)", systemImage: "arrow.up")
-                            .help("Commits ahead")
-                    }
-                    if branches.behindCount > 0 {
-                        Label("\(branches.behindCount)", systemImage: "arrow.down")
-                            .help("Commits behind")
-                    }
-                }
-                .font(.caption2)
-                .foregroundStyle(theme.palette.textSecondary)
-            }
+        HStack(spacing: RafuMetrics.space2) {
+            branchMenu
+            Spacer(minLength: RafuMetrics.space1)
+            syncMenu
         }
         .padding(.horizontal, RafuMetrics.utilityBodyInset)
         .padding(.vertical, RafuMetrics.space2)
@@ -116,65 +99,97 @@ struct SourceControlPanelView: View {
         .accessibilityElement(children: .contain)
     }
 
+    /// One branch pull-down (G4, G13): Switch To, Create Branch…, Merge into
+    /// Current. Rename and Delete are omitted because `GitService` has no
+    /// primitive for them. Searchable switching stays in the status bar.
+    @ViewBuilder
     private var branchMenu: some View {
-        HStack(spacing: 2) {
-            if let branches = session.gitBranchSnapshot {
-                RafuSearchableDropdown(
-                    items: branches.localBranches + branches.remoteBranches,
-                    text: \.name,
-                    keywords: { [$0.name] },
-                    isCurrent: \.isCurrent,
-                    onSelect: { branch in
-                        guard !branch.isCurrent else { return }
-                        Task { await session.gitCheckoutBranch(named: branch.name) }
-                    },
-                    searchPrompt: "Search branches",
-                    sectionTitle: { $0.kind == .local ? "Local" : "Remote" }
-                ) {
-                    Label(snapshot.branch, systemImage: "arrow.triangle.branch")
-                        .font(.headline)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                .help("Switch branches — \(snapshot.branch)")
-
-                Menu {
-                    Menu("Merge into Current", systemImage: "arrow.triangle.merge") {
-                        ForEach(branches.localBranches.filter { !$0.isCurrent }) { branch in
-                            Button(branch.name) { pendingMergeBranch = branch.name }
+        if let branches = session.gitBranchSnapshot {
+            Menu {
+                Menu("Switch To", systemImage: "arrow.triangle.swap") {
+                    ForEach(branches.localBranches) { branch in
+                        Button {
+                            guard !branch.isCurrent else { return }
+                            Task { await session.gitCheckoutBranch(named: branch.name) }
+                        } label: {
+                            if branch.isCurrent {
+                                Label(branch.name, systemImage: "checkmark")
+                            } else {
+                                Text(branch.name)
+                            }
+                        }
+                        .disabled(branch.isCurrent)
+                    }
+                    if !branches.remoteBranches.isEmpty {
+                        Divider()
+                        Menu("Remote Branches") {
+                            ForEach(branches.remoteBranches) { branch in
+                                Button(branch.name) {
+                                    Task { await session.gitCheckoutBranch(named: branch.name) }
+                                }
+                            }
                         }
                     }
-                    .disabled(branches.localBranches.allSatisfy(\.isCurrent))
-                    Divider()
-                    Button("Create Branch…", systemImage: "plus") { isCreatingBranch = true }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(theme.palette.textSecondary)
-                        .frame(width: 22, height: 22)
-                        .contentShape(.rect)
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Merge or create a branch")
-                .accessibilityLabel("Branch actions")
-            } else {
-                Label(snapshot.branch, systemImage: "arrow.triangle.branch")
-                    .font(.headline)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .foregroundStyle(theme.palette.textMuted)
-                    .help(snapshot.branch)
+                .disabled(branches.localBranches.count < 2 && branches.remoteBranches.isEmpty)
+                Button("Create Branch…", systemImage: "plus") { isCreatingBranch = true }
+                Menu("Merge into Current", systemImage: "arrow.triangle.merge") {
+                    ForEach(branches.localBranches.filter { !$0.isCurrent }) { branch in
+                        Button(branch.name) { pendingMergeBranch = branch.name }
+                    }
+                }
+                .disabled(branches.localBranches.allSatisfy(\.isCurrent))
+            } label: {
+                branchMenuLabel
             }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .help("Switch, create, or merge branches — \(snapshot.branch)")
+            .accessibilityLabel("Branch \(snapshot.branch)")
+        } else {
+            branchMenuLabel
+                .foregroundStyle(theme.palette.textMuted)
+                .help(snapshot.branch)
         }
     }
 
+    private var branchMenuLabel: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "arrow.triangle.branch")
+                .font(.system(size: 12, weight: .medium))
+            Text(snapshot.branch)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+        }
+        .foregroundStyle(theme.palette.textPrimary)
+        .contentShape(.rect)
+    }
+
+    private var syncPresentation: GitSyncPresentation {
+        GitSyncPresentation.resolve(
+            hasRemote: !session.gitRemoteNames.isEmpty
+                || session.gitBranchSnapshot?.upstream != nil,
+            upstream: session.gitBranchSnapshot?.upstream,
+            aheadCount: session.gitBranchSnapshot?.aheadCount ?? 0,
+            behindCount: session.gitBranchSnapshot?.behindCount ?? 0
+        )
+    }
+
+    /// One neutral sync control (G4, G15): a capsule with "↑n ↓n" when the
+    /// branch tracks an upstream, "No remote" when there is no remote. Fetch,
+    /// Pull, and Push are disabled without a remote.
     private var syncMenu: some View {
-        Menu {
+        let presentation = syncPresentation
+        let disabledHelp = presentation.canSync ? nil : GitSyncPresentation.noRemoteHelp
+        return Menu {
             Button("Fetch All", systemImage: "arrow.clockwise") {
                 Task { await session.gitFetch() }
             }
+            .disabled(!presentation.canSync)
+            .help(disabledHelp ?? "Fetch from every remote")
             Menu("Pull", systemImage: "arrow.down.circle") {
                 Button("Merge") { Task { await session.gitPull(strategy: .merge) } }
                 Button("Rebase") { Task { await session.gitPull(strategy: .rebase) } }
@@ -182,26 +197,68 @@ struct SourceControlPanelView: View {
                     Task { await session.gitPull(strategy: .fastForwardOnly) }
                 }
             }
-            if session.gitBranchSnapshot?.upstream != nil {
-                Button("Push", systemImage: "arrow.up.circle") {
-                    Task { await session.gitPush() }
-                }
-            } else if !session.gitRemoteNames.isEmpty {
-                Menu("Publish Branch", systemImage: "arrow.up.circle") {
-                    ForEach(session.gitRemoteNames, id: \.self) { remote in
-                        Button(remote) { Task { await session.gitPush(remote: remote) } }
-                    }
-                }
-            } else {
-                Button("Push", systemImage: "arrow.up.circle") {
-                    Task { await session.gitPush() }
+            .disabled(!presentation.canSync)
+            .help(disabledHelp ?? "Pull from the upstream branch")
+            pushItem(disabledHelp: disabledHelp)
+            if !presentation.canSync, session.canPublishToGitHub {
+                // A generic "Add Remote…" has no GitService primitive. The
+                // GitHub publish flow is the one existing path that adds an
+                // `origin` remote, and it stays an explicit user action.
+                Divider()
+                Button("Publish to GitHub…", systemImage: "arrow.up.forward.app") {
+                    session.isGitHubPublishPresented = true
                 }
             }
         } label: {
-            Image(systemName: "arrow.triangle.2.circlepath")
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 10, weight: .medium))
+                Text(presentation.label)
+                    .font(.system(size: 11, weight: .medium))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+            }
+            .foregroundStyle(theme.palette.textSecondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(theme.palette.chipBackground))
+            .contentShape(.capsule)
         }
         .menuStyle(.borderlessButton)
-        .help("Fetch, pull, or push")
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(disabledHelp ?? syncHelp)
+        .accessibilityLabel(presentation.accessibilityLabel)
+    }
+
+    private var syncHelp: String {
+        guard let upstream = session.gitBranchSnapshot?.upstream else {
+            return "Fetch, pull, or push"
+        }
+        return "Fetch, pull, or push — tracking \(upstream)"
+    }
+
+    @ViewBuilder
+    private func pushItem(disabledHelp: String?) -> some View {
+        if session.gitBranchSnapshot?.upstream != nil {
+            Button("Push", systemImage: "arrow.up.circle") {
+                Task { await session.gitPush() }
+            }
+        } else if !session.gitRemoteNames.isEmpty {
+            Menu("Publish Branch", systemImage: "arrow.up.circle") {
+                ForEach(session.gitRemoteNames, id: \.self) { remote in
+                    Button(remote) { Task { await session.gitPush(remote: remote) } }
+                }
+            }
+        } else {
+            Button("Push", systemImage: "arrow.up.circle") {
+                Task { await session.gitPush() }
+            }
+            .disabled(true)
+            .help(disabledHelp ?? "Push the current branch")
+        }
     }
 
     private var snapshot: GitSnapshot {
@@ -232,6 +289,7 @@ struct GitInspectorView: View {
     /// Whether the commit composer's hygiene-warning row is expanded to
     /// list the flagged paths. Local, ephemeral UI state — never persisted.
     @State private var isHygieneWarningExpanded = false
+    @FocusState private var isCommitMessageFocused: Bool
     @AppStorage("gitChangesViewMode") private var gitChangesViewModeRaw =
         GitChangesViewMode.flat.rawValue
 
@@ -244,11 +302,10 @@ struct GitInspectorView: View {
             if let mergeState = session.gitMergeState {
                 mergeBanner(mergeState)
             }
-            RafuSegmentedPicker(
+            GitSectionPicker(
                 items: GitInspectorSection.allCases,
                 selection: $session.gitInspectorSection,
-                fillsWidth: true,
-                title: \.title
+                changeCount: snapshot.changes.count
             )
             .accessibilityLabel("Source Control section")
             .accessibilityValue(session.gitInspectorSection.title)
@@ -265,7 +322,7 @@ struct GitInspectorView: View {
                 historyView
             }
         }
-        .frame(minWidth: 250, idealWidth: 310)
+        .frame(minWidth: 300, idealWidth: 340)
         // `alignment: .top` is load-bearing: `.frame(maxHeight: .infinity)`
         // defaults to CENTER alignment, so any tab whose content under-fills
         // (History with no commits) floated the whole header/picker stack to
@@ -379,46 +436,68 @@ struct GitInspectorView: View {
                 }
                 .listStyle(.inset)
                 .scrollContentBackground(.hidden)
+                .environment(\.defaultMinListRowHeight, GitPanelMetrics.fileRowHeight)
             }
             commitComposer
         }
     }
 
+    /// Count on the left; a neutral "View as" pull-down and a neutral stash
+    /// icon on the right (G5). Nothing here is gold.
     private var changesHeader: some View {
         HStack(spacing: 6) {
-            Image(systemName: "pencil")
-                .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(theme.palette.textMuted)
             Text(
                 "\(snapshot.changes.count) changed \(snapshot.changes.count == 1 ? "file" : "files")"
             )
-            .font(.caption2)
-            .foregroundStyle(theme.palette.textMuted)
+            .font(.system(size: 12))
+            .foregroundStyle(theme.palette.textSecondary)
+            .lineLimit(1)
             Spacer(minLength: 4)
-            Button("Stash Changes", systemImage: "archivebox") {
+            Button("Stash Changes…", systemImage: "archivebox") {
                 isStashSheetPresented = true
             }
             .buttonStyle(RafuIconButtonStyle(size: 22, iconSize: 11))
             .disabled(snapshot.changes.isEmpty || session.isGitBusy || session.isGitHunkActionBusy)
-            .help("Stash working-tree changes explicitly")
-            Button("Flat List", systemImage: "list.bullet") {
-                gitChangesViewModeRaw = GitChangesViewMode.flat.rawValue
-            }
-            .buttonStyle(
-                RafuIconButtonStyle(isActive: changesViewMode == .flat, size: 22, iconSize: 11)
-            )
-            .help("Show changes as a flat list")
-            Button("Grouped by Folder", systemImage: "folder") {
-                gitChangesViewModeRaw = GitChangesViewMode.tree.rawValue
-            }
-            .buttonStyle(
-                RafuIconButtonStyle(isActive: changesViewMode == .tree, size: 22, iconSize: 11)
-            )
-            .help("Group changes by folder")
+            .help("Stash Changes…")
+            viewAsMenu
         }
         .padding(.horizontal, 10)
         .padding(.top, 8)
         .padding(.bottom, 2)
+    }
+
+    private var viewAsMenu: some View {
+        Menu {
+            Picker("View as", selection: changesViewModeBinding) {
+                ForEach(GitChangesViewMode.allCases, id: \.self) { mode in
+                    Label(mode.title, systemImage: mode.symbolName).tag(mode)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            HStack(spacing: 3) {
+                Text("View as")
+                    .font(.system(size: 12))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+            }
+            .foregroundStyle(theme.palette.textSecondary)
+            .contentShape(.rect)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("View as List or Tree")
+        .accessibilityLabel("View as")
+        .accessibilityValue(changesViewMode.title)
+    }
+
+    private var changesViewModeBinding: Binding<GitChangesViewMode> {
+        Binding(
+            get: { changesViewMode },
+            set: { gitChangesViewModeRaw = $0.rawValue }
+        )
     }
 
     private var stashSection: some View {
@@ -460,9 +539,8 @@ struct GitInspectorView: View {
                     "Worktrees (\(session.gitWorktrees.count))",
                     systemImage: "point.3.filled.connected.trianglepath.dotted"
                 )
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(theme.palette.textMuted)
-                .textCase(.uppercase)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(theme.palette.textPrimary)
                 Spacer()
                 Button("Add Worktree", systemImage: "plus") {
                     isAddWorktreeSheetPresented = true
@@ -547,77 +625,56 @@ struct GitInspectorView: View {
             Task { await session.gitOpenChangeDiff(change, scope: scope) }
         }
         .contextMenu {
-            Button(scope == .staged ? "Open Staged Diff" : "Open Working Tree Diff") {
+            Button(
+                scope == .staged ? "Open Staged Diff" : "Open Working Tree Diff",
+                systemImage: "arrow.left.arrow.right"
+            ) {
                 Task { await session.gitOpenChangeDiff(change, scope: scope) }
             }
             Divider()
-            Button(scope == .staged ? "Unstage" : "Stage") {
+            Button(
+                scope == .staged ? "Unstage" : "Stage",
+                systemImage: scope == .staged ? "minus.circle" : "plus.circle"
+            ) {
                 Task { await session.setStaged(scope != .staged, change: change) }
             }
         }
     }
 
+    /// Message field with the AI draft control inside its trailing edge (G7),
+    /// a "Commits N files" caption, and Commit as the panel's one accent
+    /// button. ⌘Return commits while the field has focus.
     private var commitComposer: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            RafuCardHeaderRow {
-                HStack(spacing: 6) {
-                    Image(systemName: "square.and.pencil")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(theme.palette.textSecondary)
-                    Text("Commit")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(theme.palette.textPrimary)
-                }
-            } trailing: {
-                HStack(spacing: 6) {
-                    if session.isGeneratingAICommitMessage {
-                        ProgressView().controlSize(.mini)
-                        Button("Stop Generating", systemImage: "stop.fill") {
-                            session.cancelAICommitGeneration()
-                        }
-                        .buttonStyle(RafuIconButtonStyle(size: 24))
-                        .help("Stop generating the commit message.")
-                    } else {
-                        Button("Generate Commit Message", systemImage: "sparkles") {
-                            session.startAICommitGeneration()
-                        }
-                        .buttonStyle(RafuIconButtonStyle(size: 24))
-                        .disabled(!session.canGenerateAICommitMessage)
-                        .help(
-                            "Generate from \(session.aiCommitGenerationScopeDescription). No commit is created automatically."
-                        )
-                    }
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            commitMessageField
+            if let error = session.aiCommitGenerationError {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption2)
+                    .foregroundStyle(theme.palette.error)
             }
-            VStack(alignment: .leading, spacing: 8) {
-                RafuChip(text: session.aiCommitGenerationScopeDescription)
-                TextField("Commit message", text: $session.gitCommitMessage, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(2...5)
-                    .rafuField()
-                if let error = session.aiCommitGenerationError {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .font(.caption2)
-                        .foregroundStyle(theme.palette.error)
-                }
-                if !session.commitHygieneFindings.isEmpty {
-                    commitHygieneWarning(session.commitHygieneFindings)
-                }
-                HStack {
-                    Button("Stage All") { Task { await session.stageAll() } }
-                        .buttonStyle(RafuSecondaryButtonStyle(compact: true))
-                    Spacer()
-                    Button("Commit") { Task { await session.commit() } }
-                        .buttonStyle(RafuProminentButtonStyle(compact: true))
-                        .disabled(
-                            session.gitCommitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-                                .isEmpty || snapshot.stagedChanges.isEmpty
-                                || session.isGeneratingAICommitMessage
-                        )
-                }
+            if !session.commitHygieneFindings.isEmpty {
+                commitHygieneWarning(session.commitHygieneFindings)
             }
-            .padding(10)
+            HStack(spacing: 8) {
+                Text(GitCommitCaption.text(stagedCount: snapshot.stagedChanges.count))
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Button("Stage All") { Task { await session.stageAll() } }
+                    .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+                Button("Commit") { Task { await session.commit() } }
+                    .buttonStyle(RafuProminentButtonStyle(compact: true))
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .help("Commit staged changes (⌘Return)")
+                    .disabled(
+                        session.gitCommitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+                            .isEmpty || snapshot.stagedChanges.isEmpty
+                            || session.isGeneratingAICommitMessage
+                    )
+            }
         }
+        .padding(10)
         .background(theme.palette.cardBackground)
         .clipShape(
             RoundedRectangle(cornerRadius: RafuMetrics.radiusDenseCard, style: .continuous)
@@ -628,6 +685,44 @@ struct GitInspectorView: View {
         )
         .aiCommitGeneratingBorder(isActive: session.isGeneratingAICommitMessage)
         .padding(RafuMetrics.utilityBodyInset)
+    }
+
+    private var commitMessageField: some View {
+        TextField("Message", text: $session.gitCommitMessage, axis: .vertical)
+            .textFieldStyle(.plain)
+            .lineLimit(2...5)
+            .focused($isCommitMessageFocused)
+            .padding(.trailing, 24)
+            .rafuField(isFocused: isCommitMessageFocused)
+            .overlay(alignment: .topTrailing) {
+                draftControl
+                    .padding(.top, 2)
+                    .padding(.trailing, 2)
+            }
+    }
+
+    @ViewBuilder
+    private var draftControl: some View {
+        if session.isGeneratingAICommitMessage {
+            HStack(spacing: 2) {
+                ProgressView().controlSize(.mini)
+                Button("Stop Generating", systemImage: "stop.fill") {
+                    session.cancelAICommitGeneration()
+                }
+                .buttonStyle(RafuIconButtonStyle(size: 22, iconSize: 10))
+                .help("Stop generating the commit message.")
+            }
+        } else {
+            Button("Draft Message with AI", systemImage: "sparkles") {
+                session.startAICommitGeneration()
+            }
+            .buttonStyle(RafuIconButtonStyle(size: 22, iconSize: 12))
+            .keyboardShortcut("g", modifiers: [.command, .option])
+            .disabled(!session.canGenerateAICommitMessage)
+            .help(
+                "Draft Message with AI (⌥⌘G). From \(session.aiCommitGenerationScopeDescription). No commit is created automatically."
+            )
+        }
     }
 
     /// Calm, advisory-only warning for `CommitHygieneChecker.findings` on the
@@ -700,7 +795,8 @@ struct GitInspectorView: View {
                 // commit-row list, but keeps the SAME
                 // `gitSelectedHistoryCommitID` selection binding and the
                 // same `gitSelectHistoryCommit` tap handler every other
-                // History entry point already uses.
+                // History entry point already uses. G11: the selected
+                // commit's details expand directly under its row.
                 GitCommitGraphView(
                     commits: commits,
                     currentBranch: session.gitBranchSnapshot?.currentBranch,
@@ -709,22 +805,13 @@ struct GitInspectorView: View {
                     hasMore: session.gitHistoryPage?.hasMore ?? false,
                     isBusy: session.isGitBusy,
                     selection: $session.gitSelectedHistoryCommitID,
+                    detailChanges: session.gitHistoryCommitChanges,
+                    isDetailLoading: session.isGitHistoryDetailLoading,
                     onSelect: { commit in Task { await session.gitSelectHistoryCommit(commit) } },
+                    onOpenDiff: { change in Task { await session.gitOpenHistoryDiff(change) } },
                     onFetch: { Task { await session.gitFetch() } },
                     onLoadMore: { Task { await session.loadMoreHistory() } }
                 )
-                if let commit = selectedHistoryCommit {
-                    Divider()
-                    GitHistoryDetail(
-                        commit: commit,
-                        changes: session.gitHistoryCommitChanges,
-                        isLoading: session.isGitHistoryDetailLoading,
-                        openDiff: { change in
-                            Task { await session.gitOpenHistoryDiff(change) }
-                        }
-                    )
-                    .frame(maxHeight: 260)
-                }
             } else {
                 // Expands to claim the tab's remaining space so the empty
                 // state centers WITHIN it — without this the under-filled
@@ -737,11 +824,6 @@ struct GitInspectorView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-    }
-
-    private var selectedHistoryCommit: GitCommitSummary? {
-        guard let id = session.gitSelectedHistoryCommitID else { return nil }
-        return session.gitHistoryPage?.commits.first { $0.id == id }
     }
 
     private var snapshot: GitSnapshot {
@@ -758,6 +840,75 @@ struct GitInspectorView: View {
     private func refreshAllGitState() async {
         await session.refreshGit()
         await GitStashCoordinator.refresh(session: session)
+    }
+}
+
+/// "Changes (n) | History | Worktrees" (G1). Words never wrap: every segment
+/// is one line with a fixed (equal) width, and below
+/// `GitSectionPickerLayout.iconThreshold` the segments show icons with
+/// tooltips instead.
+private struct GitSectionPicker: View {
+    @Environment(\.rafuTheme) private var theme
+    let items: [GitInspectorSection]
+    @Binding var selection: GitInspectorSection
+    let changeCount: Int
+
+    var body: some View {
+        GeometryReader { proxy in
+            let usesIcons = GitSectionPickerLayout.usesIcons(forWidth: proxy.size.width)
+            HStack(spacing: 2) {
+                ForEach(items, id: \.self) { item in
+                    segment(for: item, usesIcons: usesIcons)
+                }
+            }
+            .padding(2)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(theme.palette.appBackground.opacity(0.6))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(theme.palette.borderSubtle)
+            )
+        }
+        .frame(height: 28)
+    }
+
+    private func segment(for item: GitInspectorSection, usesIcons: Bool) -> some View {
+        let isSelected = item == selection
+        let label = item.segmentLabel(changeCount: changeCount)
+        return Button {
+            selection = item
+        } label: {
+            Group {
+                if usesIcons {
+                    Image(systemName: item.symbolName)
+                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                } else {
+                    Text(label)
+                        .font(.system(size: 11.5, weight: isSelected ? .semibold : .regular))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+            }
+            .foregroundStyle(isSelected ? theme.palette.textPrimary : theme.palette.textSecondary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+                        .fill(theme.palette.elevatedBackground)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+                                .strokeBorder(theme.palette.borderStrong.opacity(0.6))
+                        )
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 5.5, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help(label)
+        .accessibilityLabel(item.title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
@@ -844,6 +995,9 @@ private struct GitStashChangesSheet: View {
     }
 }
 
+/// One-line stash row (G6): archive glyph, name, relative date. The "···"
+/// menu replaces the date while the pointer is over the row; the same items
+/// are always in the context menu. Branch and selector live in the tooltip.
 private struct GitStashRow: View {
     let entry: GitStashEntry
     let apply: () -> Void
@@ -851,33 +1005,49 @@ private struct GitStashRow: View {
     let requestDrop: () -> Void
 
     @Environment(\.rafuTheme) private var theme
+    @State private var isHovering = false
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "archivebox")
-                .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(entry.message)
-                    .lineLimit(2)
-                HStack(spacing: 5) {
-                    if let branch = entry.branch {
-                        RafuChip(text: branch, foreground: theme.palette.accent)
-                    }
-                    RafuChip(text: entry.selector)
-                    RafuChip(Text(entry.createdAt, style: .relative))
-                }
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(accessibilityText)
+                .foregroundStyle(theme.palette.textSecondary)
+                .accessibilityHidden(true)
+            Text(entry.message)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .foregroundStyle(theme.palette.textPrimary)
             Spacer(minLength: 4)
-            Menu("Stash Actions", systemImage: "ellipsis.circle") {
-                actions
+            ZStack(alignment: .trailing) {
+                Text(GitRelativeTime.label(for: entry.createdAt))
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .lineLimit(1)
+                    .opacity(isHovering ? 0 : 1)
+                Menu {
+                    actions
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(theme.palette.textSecondary)
+                        .frame(width: 24, height: 20)
+                        .contentShape(.rect)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Stash Actions")
+                .accessibilityLabel("Stash Actions")
+                .opacity(isHovering ? 1 : 0)
             }
-            .menuStyle(.borderlessButton)
             .fixedSize()
         }
-        .padding(.vertical, 2)
+        .frame(minHeight: GitPanelMetrics.fileRowHeight)
+        .contentShape(.rect)
+        .onHover { isHovering = $0 }
+        .animation(isHovering ? RafuMotion.hoverIn : RafuMotion.hoverOut, value: isHovering)
         .contextMenu { actions }
+        .help(helpText)
+        .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder
@@ -888,9 +1058,9 @@ private struct GitStashRow: View {
         Button("Drop Stash…", systemImage: "trash", role: .destructive) { requestDrop() }
     }
 
-    private var accessibilityText: String {
-        let branch = entry.branch.map { ", branch \($0)" } ?? ""
-        return "Stash \(entry.index), \(entry.message)\(branch)"
+    private var helpText: String {
+        let branch = entry.branch.map { " on \($0)" } ?? ""
+        return "\(entry.selector)\(branch)"
     }
 }
 
@@ -903,34 +1073,47 @@ private struct GitWorktreeRow: View {
     @Environment(\.rafuTheme) private var theme
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
             Image(
                 systemName: isCurrent
                     ? "checkmark.circle.fill" : "point.3.connected.trianglepath.dotted"
             )
             .foregroundStyle(isCurrent ? theme.palette.accent : theme.palette.textSecondary)
+            .frame(width: 16)
+            .padding(.top, 2)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(worktree.name)
                         .fontWeight(.medium)
                         .lineLimit(1)
-                        .truncationMode(.tail)
+                        .truncationMode(.middle)
                         .foregroundStyle(theme.palette.textPrimary)
-                    if let branch = worktree.branch {
-                        chip(branch, color: theme.palette.accent)
-                    } else if worktree.isDetached {
-                        chip("detached", color: theme.palette.textMuted)
+                        .layoutPriority(1)
+                    if worktree.isMain { RafuChip(text: "Main").fixedSize() }
+                    if worktree.isLocked {
+                        RafuChip(text: "Locked", foreground: theme.palette.warning).fixedSize()
                     }
-                    if worktree.isMain { chip("main worktree", color: theme.palette.textMuted) }
-                    if worktree.isLocked { chip("locked", color: theme.palette.warning) }
-                    if worktree.isPrunable { chip("prunable", color: theme.palette.error) }
-                    Spacer(minLength: 0)
+                    if worktree.isPrunable {
+                        RafuChip(text: "Prunable", foreground: theme.palette.error).fixedSize()
+                    }
                 }
                 Text(worktree.path)
-                    .font(.caption2)
-                    .foregroundStyle(theme.palette.textMuted)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(theme.palette.textSecondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                if let branch = worktree.branch {
+                    Label(branch, systemImage: "arrow.triangle.branch")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(theme.palette.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                } else if worktree.isDetached {
+                    Text("Detached HEAD")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(theme.palette.textSecondary)
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 4)
             Menu {
@@ -945,8 +1128,8 @@ private struct GitWorktreeRow: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("Worktree actions")
-            .accessibilityLabel("Worktree actions")
+            .help("Worktree Actions")
+            .accessibilityLabel("Worktree Actions")
         }
         .padding(.vertical, 3)
         .contentShape(.rect)
@@ -958,6 +1141,9 @@ private struct GitWorktreeRow: View {
     @ViewBuilder
     private var actions: some View {
         Button("Open in New Window", systemImage: "macwindow.badge.plus") { openInNewWindow() }
+        Button("Reveal in Finder", systemImage: "folder") {
+            NSWorkspace.shared.activateFileViewerSelecting([URL(filePath: worktree.path)])
+        }
         Button("Copy Path", systemImage: "doc.on.doc") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(worktree.path, forType: .string)
@@ -968,19 +1154,9 @@ private struct GitWorktreeRow: View {
         }
     }
 
-    private func chip(_ text: String, color: Color) -> some View {
-        Text(text)
-            .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 1)
-            .background(
-                Capsule().fill(theme.palette.chipBackground)
-            )
-    }
-
     private var accessibilityText: String {
         var parts = ["Worktree \(worktree.name)"]
+        if worktree.isMain { parts.append("main worktree") }
         if isCurrent { parts.append("current") }
         if let branch = worktree.branch { parts.append("branch \(branch)") }
         if worktree.isLocked { parts.append("locked") }
@@ -1087,14 +1263,41 @@ private enum GitChangeRowPresentation {
     }
 }
 
+/// The status letter in a 16 pt rounded square (G2, G3): shape plus letter
+/// plus colour, with the state name as tooltip and VoiceOver label. Letters
+/// come from `GitStatusPresentation`, the same source the Files sidebar
+/// badges use.
+struct GitStatusLetterBadge: View {
+    @Environment(\.rafuTheme) private var theme
+    let kind: GitChangeKind
+
+    var body: some View {
+        let badge = GitTreeBadge(kind: kind, isDirectory: false)
+        let color = badge.color(in: theme.palette)
+        let shape = RoundedRectangle(cornerRadius: 4, style: .continuous)
+        Text(badge.shortCode)
+            .font(.system(size: 10, weight: .bold, design: .rounded))
+            .foregroundStyle(color)
+            .frame(width: GitPanelMetrics.statusBadgeSize, height: GitPanelMetrics.statusBadgeSize)
+            .background(shape.fill(color.opacity(0.14)))
+            .overlay(shape.strokeBorder(color.opacity(0.5), lineWidth: RafuMetrics.hairline))
+            .help(GitStatusPresentation.title(for: kind))
+            .accessibilityLabel(GitStatusPresentation.title(for: kind))
+    }
+}
+
+/// One-line (24 pt) file row (G2): checkbox, file icon, name, folder path in
+/// secondary text only when the file is not at the root, status letter.
 private struct GitChangeRow: View {
     @Environment(\.rafuTheme) private var theme
     let change: GitChange
     let presentation: GitChangeRowPresentation
+    var showsFolder = true
     let toggleStaged: () -> Void
 
     var body: some View {
-        HStack(spacing: 7) {
+        let parts = GitChangePathParts(path: change.path)
+        HStack(spacing: 6) {
             Button(action: toggleStaged) {
                 Image(systemName: presentation.symbolName)
                     .foregroundStyle(
@@ -1104,43 +1307,26 @@ private struct GitChangeRow: View {
             .buttonStyle(.plain)
             .help(presentation == .staged ? "Unstage" : "Stage")
             .accessibilityLabel(presentation.accessibilityLabel)
-            VStack(alignment: .leading, spacing: 2) {
-                Text((change.path as NSString).lastPathComponent).lineLimit(1)
-                Text(change.path).font(.caption2)
-                    .foregroundStyle(theme.palette.textMuted).lineLimit(1)
+            FileIconView(icon: FileIconProvider.fileIcon(named: parts.name), size: 12)
+                .frame(width: 14)
+                .accessibilityHidden(true)
+            Text(parts.name)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .layoutPriority(1)
+            if showsFolder, let folder = parts.folder {
+                Text(folder)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
             }
             Spacer(minLength: 4)
-            Text(statusSymbol)
-                .font(.caption.monospaced().weight(.bold))
-                .foregroundStyle(statusColor)
-                .accessibilityLabel(change.statusLabel)
+            GitStatusLetterBadge(kind: change.kind)
         }
-        .frame(minHeight: 40)
+        .frame(height: GitPanelMetrics.fileRowHeight)
+        .help(change.path)
         .listRowSeparator(.hidden)
-    }
-
-    private var statusSymbol: String {
-        switch change.kind {
-        case .added, .untracked: "A"
-        case .copied: "C"
-        case .conflicted: "!"
-        case .deleted: "D"
-        case .modified: "M"
-        case .renamed: "R"
-        case .typeChanged: "T"
-        case .unknown: "•"
-        }
-    }
-
-    private var statusColor: Color {
-        switch change.kind {
-        case .added, .copied: theme.palette.gitAdded
-        case .untracked: theme.palette.gitUntracked
-        case .deleted: theme.palette.gitDeleted
-        case .conflicted: theme.palette.gitConflict
-        case .renamed, .typeChanged: theme.palette.gitRenamed
-        case .modified, .unknown: theme.palette.gitModified
-        }
     }
 }
 
@@ -1209,6 +1395,7 @@ private struct GitChangeTreeRows: View {
                 .font(.caption2.monospaced())
                 .foregroundStyle(theme.palette.textMuted)
         }
+        .frame(height: GitPanelMetrics.fileRowHeight)
         .padding(.leading, CGFloat(depth) * Self.indentUnit)
         .contentShape(.rect)
         .onTapGesture { toggleCollapsed(node.id) }
@@ -1220,6 +1407,7 @@ private struct GitChangeTreeRows: View {
         return GitChangeRow(
             change: change,
             presentation: presentation(for: change),
+            showsFolder: false,
             toggleStaged: {
                 Task { await session.setStaged(!isFullyStaged, change: change) }
             }
@@ -1232,17 +1420,20 @@ private struct GitChangeTreeRows: View {
         }
         .contextMenu {
             if change.isStaged {
-                Button("Open Staged Diff") {
+                Button("Open Staged Diff", systemImage: "arrow.left.arrow.right") {
                     Task { await session.gitOpenChangeDiff(change, scope: .staged) }
                 }
             }
             if change.hasUnstagedChanges {
-                Button("Open Working Tree Diff") {
+                Button("Open Working Tree Diff", systemImage: "arrow.left.arrow.right") {
                     Task { await session.gitOpenChangeDiff(change, scope: .workingTree) }
                 }
             }
             Divider()
-            Button(isFullyStaged ? "Unstage" : "Stage") {
+            Button(
+                isFullyStaged ? "Unstage" : "Stage",
+                systemImage: isFullyStaged ? "minus.circle" : "plus.circle"
+            ) {
                 Task { await session.setStaged(!isFullyStaged, change: change) }
             }
         }
@@ -1268,55 +1459,5 @@ private struct GitChangeTreeRows: View {
         case .some: .partial
         case .none: .unstaged
         }
-    }
-}
-
-private struct GitHistoryDetail: View {
-    @Environment(\.rafuTheme) private var theme
-    let commit: GitCommitSummary
-    let changes: [GitCommitFileChange]
-    let isLoading: Bool
-    let openDiff: (GitCommitFileChange) -> Void
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(commit.subject).font(.headline).textSelection(.enabled)
-                Text("\(commit.authorName) <\(commit.authorEmail)>")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                Text(commit.id).font(.caption2.monospaced()).foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                if isLoading {
-                    ProgressView().controlSize(.small).frame(maxWidth: .infinity)
-                } else if changes.isEmpty {
-                    Text("This commit has no file changes.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(changes) { change in
-                        Button {
-                            openDiff(change)
-                        } label: {
-                            HStack {
-                                Image(systemName: "doc.text")
-                                Text(change.path).lineLimit(1)
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                            }
-                            .contentShape(.rect)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Open diff for \(change.path)")
-                    }
-                }
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .background(theme.palette.elevatedBackground.opacity(0.5))
     }
 }
