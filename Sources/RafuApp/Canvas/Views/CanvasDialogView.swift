@@ -34,7 +34,7 @@ struct CanvasBasicDialogView: View {
             Text(title).font(.system(size: 15, weight: .semibold))
             if case .reload = dialog {
                 Text(
-                    "Reload replaces this window's Canvas with the saved version. Unsaved Canvas changes will be lost."
+                    "Reload replaces this window's Ensemble with the saved version. Unsaved Ensemble changes will be lost."
                 )
             } else {
                 TextField(placeholder, text: $text).textFieldStyle(.roundedBorder)
@@ -76,15 +76,15 @@ struct CanvasBasicDialogView: View {
 
     private var title: String {
         switch dialog {
-        case .newBoard: "New Canvas"
-        case .library: "Open Canvas"
-        case .renameBoard: "Rename Canvas"
+        case .newBoard: "New Ensemble"
+        case .library: "Open Ensemble"
+        case .renameBoard: "Rename Ensemble"
         case .renameCard: "Rename Card"
         case .web: "Add Web App"
         case .connection: "Connect Cards"
         case .connectionLabel: "Edit Link"
-        case .reload: "Reload Canvas?"
-        case .shortcuts: "Canvas Shortcuts"
+        case .reload: "Reload Ensemble?"
+        case .shortcuts: "Ensemble Shortcuts"
         }
     }
     private var placeholder: String {
@@ -114,13 +114,13 @@ struct CanvasBasicDialogView: View {
                     guard await session.createCanvas(named: text) else {
                         error =
                             session.canvas.libraryNotice
-                            ?? "Enter a Canvas name of 1 to 120 characters."
+                            ?? "Enter an Ensemble name of 1 to 120 characters."
                         return
                     }
                 case .library, .shortcuts: break
                 case .reload(let id):
                     guard await session.reloadCanvas(id) else {
-                        error = "The Canvas could not be reloaded."
+                        error = "The Ensemble could not be reloaded."
                         return
                     }
                 case .renameBoard(let id):
@@ -179,15 +179,15 @@ struct CanvasLibrarySheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Open Canvas").font(.system(size: 15, weight: .semibold))
-            TextField("Search", text: $query, prompt: Text("Search Canvases"))
+            Text("Open Ensemble").font(.system(size: 15, weight: .semibold))
+            TextField("Search", text: $query, prompt: Text("Search Ensembles"))
                 .textFieldStyle(.roundedBorder)
             if let notice = session.canvas.libraryNotice {
                 Text(notice).font(.callout).foregroundStyle(theme.palette.textSecondary)
             }
             if session.canvas.isLoading { ProgressView().controlSize(.small) }
             if items.isEmpty, !session.canvas.isLoading {
-                Text(query.isEmpty ? "No saved Canvases." : "No Canvas matches the search.")
+                Text(query.isEmpty ? "No saved Ensembles." : "No Ensemble matches the search.")
                     .foregroundStyle(theme.palette.textSecondary)
                     .frame(maxWidth: .infinity, minHeight: 80)
             } else {
@@ -204,7 +204,7 @@ struct CanvasLibrarySheet: View {
                         Button("Open") { open(id) }
                         if session.canvas.boards[id] == nil {
                             Divider()
-                            Button("Delete Saved Canvas…", role: .destructive) { delete(item) }
+                            Button("Delete Saved Ensemble…", role: .destructive) { delete(item) }
                         }
                     }
                 } primaryAction: { ids in
@@ -219,8 +219,8 @@ struct CanvasLibrarySheet: View {
                     Image(systemName: "minus")
                 }
                 .disabled(!canDeleteSelection)
-                .help("Delete the selected saved Canvas")
-                .accessibilityLabel("Delete Saved Canvas")
+                .help("Delete the selected saved Ensemble")
+                .accessibilityLabel("Delete Saved Ensemble")
                 Spacer()
                 Button("Cancel", role: .cancel) { session.canvasDialog = nil }
                 Button("Open") { if let selection { open(selection) } }
@@ -273,14 +273,14 @@ struct CanvasShortcutsSheet: View {
         ("⌥⌘ + arrow keys", "Resize the selected card"),
         ("Tab, ⇧Tab", "Select the next or previous card"),
         ("N, T", "New note, new terminal"),
-        ("⌫", "Remove the selection from the Canvas. Files are never deleted"),
+        ("⌫", "Remove the selection from the Ensemble. Files are never deleted"),
         ("⌘9, ⌥⌘9, ⌘0", "Zoom to fit, zoom to selection, actual size"),
         ("⌥⌘L", "Connect two selected cards"),
     ]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Canvas Shortcuts").font(.system(size: 15, weight: .semibold))
+            Text("Ensemble Shortcuts").font(.system(size: 15, weight: .semibold))
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 6) {
                 ForEach(Self.rows, id: \.0) { row in
                     GridRow {

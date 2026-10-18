@@ -84,6 +84,7 @@ public nonisolated enum CanvasAgentToolError: Error, Equatable, Sendable {
     case invalidArgument(String)
     case headingNotFound
     case noteTooLarge
+    case textTooLarge(kilobytes: Int)
 
     public var message: String {
         switch self {
@@ -93,6 +94,8 @@ public nonisolated enum CanvasAgentToolError: Error, Equatable, Sendable {
         case .invalidArgument(let key): "Invalid value for \"\(key)\"."
         case .headingNotFound: "No Markdown heading in the note matches \"heading\"."
         case .noteTooLarge: "A note can contain at most 64 KiB of UTF-8 text."
+        case .textTooLarge(let kilobytes):
+            "\"text\" is too long for this node kind: at most \(kilobytes) KiB of UTF-8."
         }
     }
 }

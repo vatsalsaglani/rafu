@@ -123,9 +123,9 @@ struct RafuSettingsView: View {
         NotchSettingsSection()
 
         Section {
-            Toggle("Haptic feedback on the Canvas", isOn: $canvasHapticsEnabled)
+            Toggle("Haptic feedback on the Ensemble", isOn: $canvasHapticsEnabled)
         } header: {
-            Text("Canvas")
+            Text("Ensemble")
         } footer: {
             Text("Plays only on Force Touch trackpads.")
         }

@@ -62,6 +62,7 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
     private let terminationPersistence = WorkspaceTerminationPersistence()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        CanvasDiagramPanels.registerPaletteItems()  // X9 diagrams
         MemoryPressureMonitor.shared.start()
         LauncherIPCServer.shared.start()
         // Registering the reply-capable notification category and
