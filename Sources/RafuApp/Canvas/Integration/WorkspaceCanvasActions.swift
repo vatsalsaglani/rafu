@@ -317,7 +317,9 @@ extension WorkspaceSession {
         let viewport = board.viewport
         do {
             let paths = try await Self.canvasDroppedPaths(urls, root: root)
-            guard !Task.isCancelled, rootURL == root, canvas.boards[id] === board else { return }
+            guard !Task.isCancelled, rootURL == root, canvas.boards[id] === board,
+                !paths.isEmpty
+            else { return }
             let x = (location.x - viewport.x) / viewport.scale
             let y = (location.y - viewport.y) / viewport.scale
             let cards = paths.enumerated().map { index, path in
@@ -326,7 +328,7 @@ extension WorkspaceSession {
                     rect: CanvasRect(
                         x: min(50_000, max(-50_000, x + Double(index) * 24)),
                         y: min(50_000, max(-50_000, y + Double(index) * 24))),
-                    content: .file(path: path))
+                    content: CanvasDroppedFileKind.content(forRelativePath: path))
             }
             try board.edit { document in
                 guard document.cards.count + cards.count <= CanvasLimits.cards else {
@@ -350,6 +352,11 @@ extension WorkspaceSession {
         for url in urls {
             try Task.checkCancellation()
             guard url.isFileURL else { throw CanvasError.invalidPath }
+            // A dropped folder is ignored, not an error: the rest of the batch
+            // still lands, and a folder-only drop adds nothing.
+            if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+                continue
+            }
             let path = try await CanvasPreviewLoader.relativePath(for: url, root: root)
             let checked = root.appending(path: path)
             let metadata = try checked.resourceValues(forKeys: [.isRegularFileKey])
