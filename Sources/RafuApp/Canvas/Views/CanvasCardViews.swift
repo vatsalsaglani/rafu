@@ -537,6 +537,7 @@ struct CanvasCardShell: View {
         board.select([card.id])
         raiseIfNeeded()
         guard clicks >= 2 else { return }
+        if CanvasWhiteboardEditing.shared.requestEditing(card) { return }  // X5 whiteboard
         if titleFrame.contains(location) {
             board.renamingCardID = card.id
         } else {

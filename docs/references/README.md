@@ -129,3 +129,4 @@ Keep one focused subject per note. Add it to this index. Use an ADR instead when
 - [macOS redesign visual system](macos-redesign-visual-system.md): the "One Gold Thread" rules: gold budget, neutral structure, focus language, Canvas-only shadows, typography roles, `RafuMotion` values, and `RafuHaptics` rules.
 - [Linux Swift verification](linux-swift-verification.md): checking Swift changes in a Linux container without the macOS SDK (`swiftc -parse -swift-version 6`, `swift-format lint`, scratch SwiftPM packages) and why a Mac build stays mandatory.
 - [Canvas interaction](canvas-interaction.md): Canvas input map, Return to Board, z-order, snapping and zoom faces, edge layering and link states, note Read/Edit modes.
+- [Canvas whiteboard and Ensemble file](canvas-whiteboard-and-ensemble-file.md): whiteboard and Mermaid card kinds, saved-format compatibility, bounds, the `.rafuensemble` format, file-bound boards and their expected-version check, palette keys.

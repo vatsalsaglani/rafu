@@ -268,13 +268,20 @@ extension CanvasCardContent {
         case .terminal: CGSize(width: 320, height: 180)
         case .web: CGSize(width: 320, height: 220)
         case .nativeApp: CGSize(width: 220, height: 160)
+        case .mermaid, .frame: CGSize(width: 200, height: 140)
+        // Whiteboard items stay light: only the stored card minimum applies.
+        case .shape, .stroke, .text, .serviceIcon:
+            CGSize(width: CanvasRect.absoluteMinimumWidth, height: CanvasRect.absoluteMinimumHeight)
         }
     }
 
-    /// Image cards keep their shape when they are resized.
+    /// Image and service icon cards keep their shape when they are resized.
     nonisolated var keepsAspect: Bool {
-        if case .image = self { return true }
-        return false
+        switch self {
+        case .image, .serviceIcon: true
+        case .file, .note, .terminal, .web, .nativeApp, .mermaid, .shape, .stroke, .text, .frame:
+            false
+        }
     }
 }
 
