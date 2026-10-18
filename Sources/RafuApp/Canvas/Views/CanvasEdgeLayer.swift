@@ -50,7 +50,8 @@ enum CanvasEdgeScene {
         }
         let inputs = connections.map { CanvasEdgeInput(id: $0.id, from: $0.from, to: $0.to) }
         let routes = CanvasEdgeGeometry.routes(for: inputs, rects: rects)
-        let byID = Dictionary(connections.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let byID = Dictionary(
+            connections.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let states = bridge.linkStates(in: board)
 
         var result: [CanvasEdgeDisplay] = []
@@ -288,7 +289,9 @@ private struct CanvasEdgeView: View {
                     }
                     let center = curve.point(at: head)
                     context.fill(
-                        Path(ellipseIn: CGRect(x: center.x - 2, y: center.y - 2, width: 4, height: 4)),
+                        Path(
+                            ellipseIn: CGRect(x: center.x - 2, y: center.y - 2, width: 4, height: 4)
+                        ),
                         with: .color(color))
                 }
             }

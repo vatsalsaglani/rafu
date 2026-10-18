@@ -16,28 +16,9 @@ struct CanvasTerminalCard: View {
             let pane = group.panes.first
         {
             VStack(spacing: 0) {
-                HStack {
-                    Text(
-                        TerminalPanePresentation.statusLabel(
-                            for: pane,
-                            controllerStatus: session.terminal.terminalController(for: pane.id)?
-                                .status)
-                    )
-                    .font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    if pane.status == .stopped, pane.startAvailability == .available {
-                        Button("Start") {
-                            guard focus(id) else { return }
-                            session.performTerminalGroupViewAction(.start(pane.id))
-                        }
-                    }
-                    if pane.status == .exited, pane.runtimeKind == .ordinaryShell {
-                        Button("Restart") {
-                            guard focus(id) else { return }
-                            session.performTerminalGroupViewAction(.restart(pane.id))
-                        }
-                    }
-                }.padding(6).buttonStyle(.bordered).controlSize(.small)
+                if pane.status == .exited, pane.runtimeKind == .ordinaryShell {
+                    exitedStrip(pane, id: id)
+                }
                 if session.canvasTerminalOwners[id] == board.id,
                     session.canvasResources[board.id]?.canPresent(owner: presentationID) == true
                 {
@@ -59,18 +40,7 @@ struct CanvasTerminalCard: View {
                                         owner: presentationID) == true
                             })
                     } else {
-                        Button {
-                            focus(id)
-                        } label: {
-                            Text(
-                                pane.status == .stopped
-                                    ? "Start this terminal when you are ready."
-                                    : "Terminal unavailable"
-                            )
-                            .font(.callout).foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .contentShape(.rect)
-                        }.buttonStyle(.plain)
+                        notRunningBlock(pane, id: id)
                     }
                 } else {
                     VStack(spacing: 8) {
@@ -84,6 +54,11 @@ struct CanvasTerminalCard: View {
                 initial: true
             ) { _, available in if available { acquire(id) } }
             .onChange(of: active) { _, value in if value { focus(id) } }
+            .onChange(of: board.terminalStartRequest, initial: true) { _, request in
+                guard request == card.id else { return }
+                board.terminalStartRequest = nil
+                startOrRestart(id)
+            }
             .onDisappear {
                 guard session.canvasResources[board.id]?.canPresent(owner: presentationID) == true,
                     session.canvasTerminalOwners[id] == board.id
@@ -93,6 +68,62 @@ struct CanvasTerminalCard: View {
         } else {
             Text("Terminal unavailable. Add another terminal.")
                 .font(.caption).frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// Not running: one centred block with the next step (review C6).
+    private func notRunningBlock(_ pane: TerminalPaneSnapshot, id: TerminalGroupID) -> some View {
+        let shell = pane.launchProfile.map { CanvasCardPresentation.shellName($0.shell) }
+        let folder = pane.launchProfile.map {
+            CanvasCardPresentation.folderName($0.startingFolder.rawValue)
+        }
+        return VStack(spacing: 10) {
+            Image(systemName: "apple.terminal")
+                .font(.system(size: 28)).foregroundStyle(theme.palette.textSecondary)
+                .accessibilityHidden(true)
+            if let shell {
+                Text(shell).font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(theme.palette.textPrimary)
+            }
+            if let folder {
+                Text(folder).font(.system(size: 12)).foregroundStyle(theme.palette.textSecondary)
+                    .lineLimit(1)
+            }
+            if pane.status == .stopped, pane.startAvailability == .available {
+                Button("Start Shell") { startOrRestart(id) }
+                    .buttonStyle(RafuProminentButtonStyle())
+                    .help("Start a shell in this card. Nothing runs until you start it.")
+            } else {
+                Text("Terminal unavailable").font(.callout)
+                    .foregroundStyle(theme.palette.textSecondary)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func exitedStrip(_ pane: TerminalPaneSnapshot, id: TerminalGroupID) -> some View {
+        HStack {
+            Text("The shell has exited.").font(.system(size: 12))
+                .foregroundStyle(theme.palette.textSecondary)
+            Spacer()
+            Button("Restart Shell") { startOrRestart(id) }
+                .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(theme.palette.cardBackground)
+    }
+
+    /// Start Shell and Restart Shell are explicit user actions: the button,
+    /// the header, the menu, or Return on the selected card.
+    private func startOrRestart(_ id: TerminalGroupID) {
+        guard focus(id), let pane = session.terminal.terminalGroup(id)?.panes.first else {
+            return
+        }
+        if pane.status == .stopped, pane.startAvailability == .available {
+            session.performTerminalGroupViewAction(.start(pane.id))
+        } else if pane.status == .exited, pane.runtimeKind == .ordinaryShell {
+            session.performTerminalGroupViewAction(.restart(pane.id))
         }
     }
 

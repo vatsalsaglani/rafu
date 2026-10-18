@@ -1,43 +1,101 @@
 import AppKit
+import RafuCore
 import SwiftUI
 
-struct CanvasFilePreview: View {
+/// A read-only, syntax-coloured excerpt of the first lines of a file (review
+/// C12). Loaded lazily, only while the card is on screen, and bounded to 40
+/// lines and 8 KiB. An open editor buffer, even a dirty one, is the source
+/// when there is one.
+struct CanvasFileExcerptCard: View {
+    @Environment(\.rafuTheme) private var theme
+    let card: CanvasCard
     let path: String
+    let board: CanvasBoardState
     let session: WorkspaceSession
-    @State private var preview = ""
+    var activate: () -> Void = {}
+    @State private var lines: [AttributedString] = []
     @State private var notice: String?
+
+    private let lineHeight: CGFloat = 15
+    private let inset: CGFloat = 10
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label(path, systemImage: "doc.text").lineLimit(2)
-                Spacer()
-                Button("Open File") { session.openCanvasFile(path) }
-            }
-            Text("Read-only preview · first 8 KiB").font(.caption).foregroundStyle(.secondary)
-            if let notice { Text(notice).foregroundStyle(.secondary) }
-            ScrollView {
-                Text(preview).font(.system(.body, design: .monospaced)).textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
+        VStack(alignment: .leading, spacing: 0) {
+            if let notice {
+                Text(notice).font(.system(size: 12)).foregroundStyle(theme.palette.textSecondary)
+            } else {
+                ForEach(lines.indices, id: \.self) { index in
+                    Text(lines[index])
+                        .font(.system(size: 11, design: .monospaced))
+                        .lineLimit(1)
+                        .frame(height: lineHeight, alignment: .leading)
+                }
             }
         }
-        .padding(20)
-        .task(id: path) {
-            guard let root = session.rootURL else { return }
-            // Prefer the existing native editor's dirty text. It remains the
-            // only source-file owner; this view keeps only a bounded prefix.
-            if let document = session.openDocuments.first(where: {
-                session.relativePath(for: $0.url) == path
-            }),
-                let snapshot = document.textSnapshotProvider
-            {
-                preview = String(decoding: snapshot().utf8.prefix(8 * 1_024), as: UTF8.self)
-                notice = document.isDirty ? "This preview includes unsaved file changes." : nil
+        .padding(inset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
+        .contentShape(.rect)
+        .gesture(
+            SpatialTapGesture(count: 2).onEnded { value in
+                let line = max(1, Int(((value.location.y - inset) / lineHeight).rounded(.down)) + 1)
+                session.openFile(atRelativePath: path, selecting: SourceLocation(line: line))
+            }
+        )
+        .simultaneousGesture(TapGesture().onEnded { activate() })
+        .help("Double-click to open \(path) in the editor")
+        .accessibilityLabel("\(path), first lines")
+        .task(id: path) { await load() }
+    }
+
+    private func load() async {
+        guard let root = session.rootURL else { return }
+        let text: String
+        if let document = session.openDocuments.first(where: {
+            session.relativePath(for: $0.url) == path
+        }), let snapshot = document.textSnapshotProvider {
+            text = String(decoding: snapshot().utf8.prefix(8 * 1_024), as: UTF8.self)
+        } else {
+            do { text = try await CanvasPreviewLoader.text(path: path, root: root) } catch {
+                notice = error.localizedDescription
                 return
             }
-            do { preview = try await CanvasPreviewLoader.text(path: path, root: root) } catch {
-                notice = error.localizedDescription
-            }
         }
+        guard !Task.isCancelled else { return }
+        notice = nil
+        lines = Self.highlighted(CanvasCardSummaryText.excerpt(of: text), path: path, theme: theme)
+    }
+
+    private static func highlighted(_ text: String, path: String, theme: RafuTheme)
+        -> [AttributedString]
+    {
+        let url = URL(fileURLWithPath: path)
+        let storage = NSTextStorage(string: text)
+        SyntaxHighlighter(
+            theme: theme, fileExtension: url.pathExtension, fileName: url.lastPathComponent
+        ).apply(to: storage)
+        var result: [AttributedString] = []
+        var location = 0
+        for line in text.components(separatedBy: "\n") {
+            let length = (line as NSString).length
+            result.append(
+                attributed(
+                    storage.attributedSubstring(from: NSRange(location: location, length: length))))
+            location += length + 1
+        }
+        return result
+    }
+
+    private static func attributed(_ source: NSAttributedString) -> AttributedString {
+        var output = AttributedString()
+        source.enumerateAttribute(
+            .foregroundColor, in: NSRange(location: 0, length: source.length)
+        ) { value, range, _ in
+            var piece = AttributedString(source.attributedSubstring(from: range).string)
+            if let color = value as? NSColor { piece.foregroundColor = Color(nsColor: color) }
+            output.append(piece)
+        }
+        return output
     }
 }
 

@@ -33,7 +33,7 @@ final class CanvasWebPreviewController: NSObject, WKNavigationDelegate, WKUIDele
         webView?.uiDelegate = nil
         webView?.removeFromSuperview()
         webView = nil
-        status = "Paused — choose Connect to resume"
+        status = "Paused — choose Load to resume"
     }
 
     func webView(
@@ -135,6 +135,7 @@ final class CanvasWebPreviewController: NSObject, WKNavigationDelegate, WKUIDele
 }
 
 struct CanvasWebCard: View {
+    @Environment(\.rafuTheme) private var theme
     @Environment(\.canvasPresentationID) private var presentationID
     let card: CanvasCard
     let board: CanvasBoardState
@@ -144,27 +145,18 @@ struct CanvasWebCard: View {
             let controller = resources.web(for: card)
         {
             let isCurrent = resources.canPresent(owner: presentationID)
-            VStack(spacing: 10) {
-                HStack {
-                    Text(controller.destination.address).lineLimit(1)
-                    Spacer()
-                    if let url = controller.destination.url {
-                        Button("Open in Browser") { NSWorkspace.shared.open(url) }
-                    }
-                    Text(controller.status).font(.caption).foregroundStyle(.secondary)
-                    if controller.webView == nil {
-                        Button("Connect") {
-                            board.focus(card.id)
-                            session.connectCanvasWeb(card.id, board: board.id)
-                        }
-                    } else {
-                        Button("Stop") { controller.stop() }
-                    }
-                }.padding(12)
+            VStack(spacing: 0) {
                 if let url = controller.blockedNavigation {
-                    Button("Open \(url.host() ?? "Link") in Browser") {
-                        NSWorkspace.shared.open(url)
+                    HStack {
+                        Text(controller.status).font(.system(size: 12))
+                            .foregroundStyle(theme.palette.textSecondary).lineLimit(1)
+                        Spacer()
+                        Button("Open \(url.host() ?? "Link") in Browser") {
+                            NSWorkspace.shared.open(url)
+                        }
+                        .buttonStyle(RafuSecondaryButtonStyle(compact: true))
                     }
+                    .padding(.horizontal, 12).padding(.vertical, 6)
                 }
                 if controller.webView != nil {
                     CanvasWebHost(
@@ -179,16 +171,40 @@ struct CanvasWebCard: View {
                             resources?.canPresent(owner: presentationID) == true
                         })
                 } else {
-                    ContentUnavailableView(
-                        "Local App Preview", systemImage: "globe",
-                        description: Text(
-                            "Connect after you start the server. The app can contact external services. Media needs a user action. New windows, downloads, and browser authentication are disabled."
+                    VStack(spacing: 10) {
+                        Image(systemName: "globe").font(.system(size: 28))
+                            .foregroundStyle(theme.palette.textSecondary)
+                            .accessibilityHidden(true)
+                        Text(
+                            CanvasCardPresentation.displayTitle(
+                                title: controller.destination.address, content: card.content)
                         )
-                    )
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(theme.palette.textPrimary)
+                        Button("Load") {
+                            board.focus(card.id)
+                            session.connectCanvasWeb(card.id, board: board.id)
+                        }
+                        .buttonStyle(RafuProminentButtonStyle())
+                        .help("Load the page. Rafu does not start your server.")
+                        Text(
+                            "Rafu does not start your server. The page can contact external services once it loads."
+                        )
+                        .font(.system(size: 11)).foregroundStyle(theme.palette.textSecondary)
+                        .multilineTextAlignment(.center)
+                        if controller.status != "Not connected",
+                            !controller.status.hasPrefix("Paused")
+                        {
+                            Text(controller.status).font(.system(size: 11))
+                                .foregroundStyle(theme.palette.textSecondary)
+                        }
+                    }
+                    .padding(16)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .allowsHitTesting(isCurrent)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .allowsHitTesting(isCurrent)
         }
     }
 }

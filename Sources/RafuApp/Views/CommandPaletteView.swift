@@ -603,14 +603,14 @@ struct CommandPaletteView: View {
                 session.requestCanvasLibrary()
             },
             .init(
-                title: "Canvas: Fit All", symbolName: "arrow.up.left.and.arrow.down.right",
+                title: "Canvas: Zoom to Fit", symbolName: "arrow.up.left.and.arrow.down.right",
                 keywords: ["board", "zoom"]
             ) {
                 dismiss()
                 session.selectedCanvas?.fitAll()
             },
             .init(
-                title: "Canvas: Arrange", symbolName: "square.grid.2x2",
+                title: "Canvas: Tidy Up", symbolName: "square.grid.2x2",
                 keywords: ["board", "layout"]
             ) {
                 dismiss()
@@ -619,7 +619,7 @@ struct CommandPaletteView: View {
                 }
             },
             .init(
-                title: "Canvas: Leave Content", symbolName: "arrow.uturn.backward",
+                title: "Canvas: Return to Board", symbolName: "arrow.uturn.backward",
                 keywords: ["focus", "board"]
             ) {
                 dismiss()
@@ -1241,19 +1241,18 @@ struct CommandPaletteView: View {
                     session.addCanvasNote(board.id)
                 },
                 .init(
-                    title: "Canvas: Add Stopped Terminal Group", symbolName: "terminal",
+                    title: "Canvas: Add Terminal", symbolName: "terminal",
                     keywords: ["card"]
                 ) {
                     dismiss()
                     session.addCanvasStoppedTerminal(board.id)
                 },
-                .init(title: "Canvas: Add Local Web App…", symbolName: "globe", keywords: ["card"])
-                {
+                .init(title: "Canvas: Add Web App…", symbolName: "globe", keywords: ["card"]) {
                     dismiss()
                     session.canvasDialog = .web(board.id)
                 },
                 .init(
-                    title: "Canvas: Add Native macOS App…", symbolName: "macwindow",
+                    title: "Canvas: Add Mac App…", symbolName: "macwindow",
                     keywords: ["card"]
                 ) {
                     dismiss()

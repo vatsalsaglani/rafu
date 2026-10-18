@@ -11,6 +11,7 @@ nonisolated enum CanvasDialog: Identifiable {
     case connection(CanvasID, CanvasCardID, CanvasCardID?)
     case connectionLabel(CanvasID, UUID)
     case reload(CanvasID)
+    case shortcuts
 
     var id: String {
         switch self {
@@ -23,6 +24,7 @@ nonisolated enum CanvasDialog: Identifiable {
             "connect-\(id.rawValue)-\(a.rawValue)-\(b?.rawValue.uuidString ?? "choose")"
         case .connectionLabel(let id, let edge): "label-\(id.rawValue)-\(edge)"
         case .reload(let id): "reload-\(id.rawValue)"
+        case .shortcuts: "shortcuts"
         }
     }
 }
@@ -179,7 +181,48 @@ extension WorkspaceSession {
         guard let board = canvas.boards[id] else { return }
         let selected = board.cards.filter { board.selection.contains($0.id) }
         guard selected.count == 2 else { return }
-        connectCanvasCards(boardID: id, from: selected[0].id, to: selected[1].id)
+        // The keyboard and VoiceOver path: the Connect sheet, prefilled.
+        canvasDialog = .connection(id, selected[0].id, selected[1].id)
+    }
+
+    /// Duplicate puts a copy 24 pt down and right of the original. A terminal
+    /// copy is a new stopped terminal; nothing starts. A note copy carries the
+    /// note's current text.
+    func duplicateCanvasCard(_ boardID: CanvasID, _ cardID: CanvasCardID) {
+        guard let board = canvas.boards[boardID], board.cards.count < CanvasLimits.cards,
+            let original = board.cards.first(where: { $0.id == cardID })
+        else { return }
+        var rect = original.rect
+        rect.x = min(50_000, rect.x + 24)
+        rect.y = min(50_000, rect.y + 24)
+        let title = String("\(original.title) Copy".prefix(120))
+        if case .terminal = original.content {
+            let before = board.cards.count
+            addCanvasStoppedTerminal(boardID)
+            guard board.cards.count == before + 1, let created = board.cards.last else { return }
+            performCanvasEdit(board) {
+                try board.edit { value in
+                    guard let index = value.cards.firstIndex(where: { $0.id == created.id })
+                    else { return }
+                    value.cards[index].rect = rect
+                    value.cards[index].title = title
+                }
+            }
+            return
+        }
+        var content = original.content
+        if case .note = original.content,
+            let current = (try? board.snapshot())?.cards.first(where: { $0.id == cardID })
+        {
+            content = current.content
+        }
+        let copy = CanvasCard(title: title, rect: rect, content: content)
+        performCanvasEdit(board) {
+            try CanvasMotion.animateThrowing(RafuMotion.nodeCreate) {
+                try board.edit { $0.cards.append(copy) }
+            }
+            board.select([copy.id])
+        }
     }
 
     func connectCanvasCards(boardID: CanvasID, from: CanvasCardID, to: CanvasCardID) {

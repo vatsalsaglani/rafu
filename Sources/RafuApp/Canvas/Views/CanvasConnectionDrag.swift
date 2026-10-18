@@ -293,38 +293,3 @@ private struct CanvasConnectionPortDot: View {
         .onChange(of: isDragging) { _, active in if !active { cancelled() } }
     }
 }
-
-/// The first connection control. `CanvasConnectionPorts` supersedes it; remove
-/// it once `CanvasCardShell` uses the ports.
-struct CanvasConnectionHandle: View {
-    let title: String
-    let connect: () -> Void
-    let changed: (CGPoint) -> Void
-    let ended: (CGPoint) -> Void
-    let cancelled: () -> Void
-    @GestureState private var isDragging = false
-
-    var body: some View {
-        Button(action: connect) {
-            Image(systemName: "link")
-                .font(.system(size: 11, weight: .semibold))
-                .frame(width: 24, height: 24)
-                .background(.background, in: .circle)
-                .overlay { Circle().strokeBorder(.secondary, lineWidth: 1) }
-                .contentShape(.circle)
-        }
-        .buttonStyle(.plain)
-        .help("Drag to another card to connect, or click to choose a target.")
-        .accessibilityLabel("Connect \(title)")
-        .accessibilityHint("Drag to another card, or activate to choose a target.")
-        .highPriorityGesture(
-            DragGesture(
-                minimumDistance: 3, coordinateSpace: .named(CanvasConnectionCoordinateSpace.board)
-            )
-            .updating($isDragging) { _, active, _ in active = true }
-            .onChanged { changed($0.location) }
-            .onEnded { ended($0.location) }
-        )
-        .onChange(of: isDragging) { _, active in if !active { cancelled() } }
-    }
-}

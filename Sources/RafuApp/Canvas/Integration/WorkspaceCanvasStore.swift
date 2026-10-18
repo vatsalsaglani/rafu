@@ -231,7 +231,9 @@ final class WorkspaceCanvasStore {
         }
         library = library.map { item in
             item.id == board.id
-                ? CanvasSummary(id: board.id, title: board.title, revision: board.revision) : item
+                ? CanvasSummary(
+                    id: board.id, title: board.title, revision: board.revision,
+                    cardCount: board.cards.count, modified: Date()) : item
         }
         return true
     }

@@ -296,7 +296,8 @@ struct CanvasEdgeOverlay: View {
 
     @ViewBuilder
     private func connectionPreview(viewport: CanvasViewport) -> some View {
-        if let source = drag.source, let start = drag.startPort(in: board.cards, viewport: viewport),
+        if let source = drag.source,
+            let start = drag.startPort(in: board.cards, viewport: viewport),
             let curve = previewCurve(viewport: viewport)
         {
             let snap = currentSnap(viewport: viewport)
@@ -398,7 +399,8 @@ struct CanvasEdgeOverlay: View {
 
     @ViewBuilder
     private func popoverAnchors(_ displays: [CanvasEdgeDisplay]) -> some View {
-        if let id = board.labelEditorConnectionID, let display = displays.first(where: { $0.id == id })
+        if let id = board.labelEditorConnectionID,
+            let display = displays.first(where: { $0.id == id })
         {
             Color.clear.frame(width: 1, height: 1)
                 .popover(
@@ -466,7 +468,9 @@ private struct CanvasEdgeEndHandle: View {
                 .onChanged { changed($0.location) }
                 .onEnded { ended($0.location) }
             )
-            .help("Drag to another card to reconnect this end. Drop on the empty board to delete the link.")
+            .help(
+                "Drag to another card to reconnect this end. Drop on the empty board to delete the link."
+            )
             .accessibilityHidden(true)
     }
 }
