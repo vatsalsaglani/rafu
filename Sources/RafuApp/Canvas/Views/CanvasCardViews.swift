@@ -43,52 +43,67 @@ struct CanvasCardShell: View {
         let selected = board.selection.contains(card.id)
         let contentFocused = board.contentIsActive && board.focusedCardID == card.id
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        Group {
-            if face.showsLiveContent {
-                liveFace(scale: scale, selected: selected, contentFocused: contentFocused)
-            } else {
-                compactFace(face, scale: scale)
-            }
+        faceContent(face, scale: scale, selected: selected, contentFocused: contentFocused)
+            .background(theme.palette.elevatedBackground)
+            .clipShape(shape)
+            .background { surface(shape) }
+            .overlay { border(shape, contentFocused: contentFocused) }
+            .overlay { selectionRing(isOn: selected || isConnectionTarget) }
+            .overlay { resizeOverlay(face, scale: scale, selected: selected) }
+            .overlay { portsOverlay(scale: scale, selected: selected) }
+            .onHover { inside in hoverChanged(inside) }
+            .onDisappear { hideTask?.cancel() }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(accessibilityTitle)
+            .accessibilityValue(headerState ?? "")
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .modifier(CanvasCardAccessibilityActions(card: card, board: board, session: session))
+    }
+
+    @ViewBuilder
+    private func faceContent(
+        _ face: CanvasZoomFace, scale: Double, selected: Bool, contentFocused: Bool
+    ) -> some View {
+        if face.showsLiveContent {
+            liveFace(scale: scale, selected: selected, contentFocused: contentFocused)
+        } else {
+            compactFace(face, scale: scale)
         }
-        .background(theme.palette.elevatedBackground)
-        .clipShape(shape)
-        .background { surface(shape) }
-        .overlay { border(shape, contentFocused: contentFocused) }
-        .overlay {
-            RoundedRectangle(cornerRadius: cornerRadius + 2, style: .continuous)
-                .strokeBorder(theme.palette.accent, lineWidth: contrast == .increased ? 2.5 : 1.5)
-                .padding(-2)
-                .opacity(selected || isConnectionTarget ? 1 : 0)
-                .animation(RafuMotion.selection, value: selected || isConnectionTarget)
-                .allowsHitTesting(false)
+    }
+
+    /// The gold ring for a selected card or a valid connection target.
+    private func selectionRing(isOn: Bool) -> some View {
+        RoundedRectangle(cornerRadius: cornerRadius + 2, style: .continuous)
+            .strokeBorder(theme.palette.accent, lineWidth: contrast == .increased ? 2.5 : 1.5)
+            .padding(-2)
+            .opacity(isOn ? 1 : 0)
+            .animation(RafuMotion.selection, value: isOn)
+            .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private func resizeOverlay(_ face: CanvasZoomFace, scale: Double, selected: Bool)
+        -> some View
+    {
+        if face.showsLiveContent {
+            CanvasResizeZones(
+                size: CGSize(width: card.rect.width, height: card.rect.height),
+                scale: scale, showsHandles: selected,
+                changed: { edges, value in resizeChanged(edges, value) },
+                ended: { resizeEnded() })
         }
-        .overlay {
-            if face.showsLiveContent {
-                CanvasResizeZones(
-                    size: CGSize(width: card.rect.width, height: card.rect.height),
-                    scale: scale, showsHandles: selected,
-                    changed: { edges, value in resizeChanged(edges, value) },
-                    ended: { resizeEnded() })
-            }
-        }
-        .overlay {
-            CanvasConnectionPorts(
-                title: card.title,
-                isVisible: isHovering || selected || board.focusedCardID == card.id,
-                connect: { session.canvasDialog = .connection(board.id, card.id, nil) },
-                changed: { updateConnectionDrag(card.id, $0) },
-                ended: { finishConnectionDrag(card.id, $0) },
-                cancelled: { cancelConnectionDrag(card.id) },
-                viewportScale: scale
-            )
-        }
-        .onHover { inside in hoverChanged(inside) }
-        .onDisappear { hideTask?.cancel() }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(accessibilityTitle)
-        .accessibilityValue(headerState ?? "")
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        .modifier(CanvasCardAccessibilityActions(card: card, board: board, session: session))
+    }
+
+    private func portsOverlay(scale: Double, selected: Bool) -> some View {
+        CanvasConnectionPorts(
+            title: card.title,
+            isVisible: isHovering || selected || board.focusedCardID == card.id,
+            connect: { session.canvasDialog = .connection(board.id, card.id, nil) },
+            changed: { updateConnectionDrag(card.id, $0) },
+            ended: { finishConnectionDrag(card.id, $0) },
+            cancelled: { cancelConnectionDrag(card.id) },
+            viewportScale: scale
+        )
     }
 
     // MARK: Faces

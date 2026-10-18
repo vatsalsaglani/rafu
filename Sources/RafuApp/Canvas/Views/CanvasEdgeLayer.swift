@@ -198,7 +198,7 @@ private struct CanvasEdgeView: View {
     private var isHovered: Bool { board.hoveredConnectionID == display.id }
 
     var body: some View {
-        _ = travelTick
+        let _ = travelTick
         let style = CanvasEdgeStyle(display: display, palette: theme.palette, isHovered: isHovered)
         let activity =
             display.isMessageLink
