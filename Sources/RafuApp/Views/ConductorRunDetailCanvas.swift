@@ -484,7 +484,7 @@ private struct ConductorStepTimelineRow: View {
         // `statusSymbol`'s string — symbols stay pure presentation output.
         switch row.status {
         case .failed: theme.palette.gitDeleted
-        case .awaitingGate, .interrupted: theme.palette.accent
+        case .awaitingGate, .interrupted: theme.palette.warning
         case .completed: theme.palette.gitAdded
         case .pending, .running, .aborted: theme.palette.textSecondary
         }

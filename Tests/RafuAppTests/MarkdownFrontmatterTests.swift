@@ -298,6 +298,34 @@ func previewSegmentationWithoutMetadataIsUnchanged() {
     #expect(trailing.contains("After."))
 }
 
+@Test("The card count is plain-case and counts the rows shown, not the lifted title")
+func cardCountMatchesShownRows() {
+    let source = """
+        ---
+        name: Review Only
+        color: purple
+        ---
+        """
+
+    guard let scan = MarkdownFrontmatterScanner().scan(source),
+        case .parsed(let metadata) = scan.result
+    else {
+        Issue.record("Expected metadata to parse")
+        return
+    }
+    // The name is the title, so one row is shown even though two keys exist.
+    #expect(metadata.fieldCount == 2)
+    #expect(metadata.fields.count == 1)
+    #expect(
+        MarkdownFrontmatterPresentation.countLabel(rowCount: metadata.fields.count) == "1 field")
+    #expect(MarkdownFrontmatterPresentation.countLabel(rowCount: 2) == "2 fields")
+    #expect(MarkdownFrontmatterPresentation.countLabel(rowCount: 0) == nil)
+    for count in 1...5 {
+        let label = MarkdownFrontmatterPresentation.countLabel(rowCount: count)
+        #expect(label == label?.lowercased())
+    }
+}
+
 private func expectNoScan(_ scanner: MarkdownFrontmatterScanner, _ source: String) {
     if case .some = scanner.scan(source) {
         Issue.record("Expected no leading metadata scan")
