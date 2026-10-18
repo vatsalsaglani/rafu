@@ -169,7 +169,8 @@ nonisolated private final class CanvasCaptureOutput: NSObject, SCStreamOutput, S
 @Observable
 final class CanvasNativeAppController {
     let bundleID: String
-    var status = "App reference — no preview"
+    static let referenceStatus = "App reference — no preview"
+    var status = CanvasNativeAppController.referenceStatus
     private(set) var frame: CGImage?
     private(set) var isCapturing = false
     @ObservationIgnored private var stream: SCStream?
@@ -277,38 +278,25 @@ final class CanvasNativeAppController {
 }
 
 struct CanvasNativeAppCard: View {
+    @Environment(\.rafuTheme) private var theme
     let card: CanvasCard
     let board: CanvasBoardState
     let session: WorkspaceSession
     @State private var controller: CanvasNativeAppController?
     @State private var visibilityOwner = UUID()
-    var body: some View {
-        VStack(spacing: 0) {
-            if let controller {
-                VStack(spacing: 10) {
-                    if let frame = controller.frame {
-                        Image(decorative: frame, scale: 1).resizable().scaledToFit()
-                            .accessibilityHidden(true)
-                    } else {
-                        Image(systemName: "macwindow").font(.largeTitle).foregroundStyle(.secondary)
-                    }
-                    Text(controller.status).font(.caption).foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    HStack {
-                        Button("Open App") { controller.openApp() }
-                        if controller.isCapturing {
-                            Button("Stop Preview") { controller.stop() }
-                        } else {
-                            Button("Choose Window…") { controller.chooseWindow() }
-                        }
-                    }.controlSize(.small)
-                    Text("Window preview only. Use Open App for keyboard and pointer input.")
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-                .padding(12).frame(maxWidth: .infinity, maxHeight: .infinity)
+    @State private var appIcon: NSImage?
+    @State private var showsPictureNote = false
 
+    var body: some View {
+        Group {
+            if let controller {
+                if let frame = controller.frame {
+                    picture(frame, controller: controller)
+                } else {
+                    reference(controller)
+                }
             } else {
-                Text("Preparing app reference…").foregroundStyle(.secondary)
+                Text("Preparing app reference…").foregroundStyle(theme.palette.textSecondary)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -318,9 +306,76 @@ struct CanvasNativeAppCard: View {
             else { return }
             controller = resources.nativeApp(for: card)
             resources.showNative(card.id, owner: visibilityOwner)
+            if case .nativeApp(let bundleID) = card.content,
+                let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+            {
+                appIcon = NSWorkspace.shared.icon(forFile: url.path)
+            }
         }
         .onDisappear {
             session.canvasResources[board.id]?.hideNative(card.id, owner: visibilityOwner)
         }
+    }
+
+    /// The app is a separate process. Its body is an icon, its name, and the
+    /// two ways to use it (review C8).
+    private func reference(_ controller: CanvasNativeAppController) -> some View {
+        VStack(spacing: 10) {
+            Group {
+                if let appIcon {
+                    Image(nsImage: appIcon).resizable().scaledToFit()
+                } else {
+                    Image(systemName: "macwindow").resizable().scaledToFit()
+                        .foregroundStyle(theme.palette.textSecondary)
+                }
+            }
+            .frame(width: 48, height: 48)
+            .accessibilityHidden(true)
+            Text(card.title).font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(theme.palette.textPrimary).lineLimit(1)
+            Button("Open \(card.title)") { controller.openApp() }
+                .buttonStyle(RafuProminentButtonStyle())
+            if controller.isCapturing {
+                Button("Stop Window Preview") { controller.stop() }
+                    .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+            } else {
+                Button("Show Window Preview…") { controller.chooseWindow() }
+                    .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+            }
+            if controller.status != CanvasNativeAppController.referenceStatus {
+                Text(controller.status).font(.system(size: 11))
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .padding(12)
+    }
+
+    /// A picture never looks interactive: no text cursor, no hover highlight.
+    /// A click selects the card and explains where input goes.
+    private func picture(_ frame: CGImage, controller: CanvasNativeAppController) -> some View {
+        Image(decorative: frame, scale: 1).resizable().scaledToFit()
+            .padding(8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(.rect)
+            .onTapGesture {
+                board.backToBoard()
+                board.select([card.id])
+                showsPictureNote = true
+            }
+            .popover(isPresented: $showsPictureNote) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(CanvasCardPresentation.previewCaption(appName: card.title))
+                        .font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+                    Button("Open \(card.title)") {
+                        showsPictureNote = false
+                        controller.openApp()
+                    }
+                    .buttonStyle(RafuProminentButtonStyle(compact: true))
+                }
+                .padding(14).frame(width: 260)
+            }
+            .accessibilityLabel("Picture of a \(card.title) window")
+            .accessibilityHint("Input goes to \(card.title), not to this picture.")
     }
 }

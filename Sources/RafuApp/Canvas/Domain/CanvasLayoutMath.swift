@@ -277,3 +277,7 @@ extension CanvasCardContent {
         return false
     }
 }
+
+extension CanvasRect {
+    nonisolated var cgRect: CGRect { CGRect(x: x, y: y, width: width, height: height) }
+}

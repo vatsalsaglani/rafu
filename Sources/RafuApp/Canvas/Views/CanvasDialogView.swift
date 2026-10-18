@@ -11,6 +11,10 @@ struct CanvasDialogView: View {
             CanvasConnectionDialog(boardID: id, initialFrom: from, initialTo: to, session: session)
         case .connectionLabel(let id, let edge):
             CanvasConnectionDialog(boardID: id, edgeID: edge, session: session)
+        case .library:
+            CanvasLibrarySheet(session: session)
+        case .shortcuts:
+            CanvasShortcutsSheet(session: session)
         default:
             CanvasBasicDialogView(dialog: dialog, session: session)
         }
@@ -18,6 +22,7 @@ struct CanvasDialogView: View {
 }
 
 struct CanvasBasicDialogView: View {
+    @Environment(\.rafuTheme) private var theme
     let dialog: CanvasDialog
     let session: WorkspaceSession
     @State private var text = ""
@@ -26,10 +31,8 @@ struct CanvasBasicDialogView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(title).font(.title2.bold())
-            if case .library = dialog {
-                library
-            } else if case .reload = dialog {
+            Text(title).font(.system(size: 15, weight: .semibold))
+            if case .reload = dialog {
                 Text(
                     "Reload replaces this window's Canvas with the saved version. Unsaved Canvas changes will be lost."
                 )
@@ -56,59 +59,32 @@ struct CanvasBasicDialogView: View {
                     .font(.callout).foregroundStyle(.secondary)
                 }
             }
-            if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+            if let error {
+                Text(error).foregroundStyle(theme.palette.error).textSelection(.enabled)
+            }
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { session.canvasDialog = nil }
-                if case .library = dialog {
-                } else {
-                    Button(actionTitle) { submit() }.keyboardShortcut(.defaultAction).disabled(busy)
-                }
+                Button(actionTitle) { submit() }.keyboardShortcut(.defaultAction).disabled(busy)
             }
         }
         .padding(24).frame(width: 480)
         .task {
             text = initialText
-            if case .library = dialog { await session.prepareCanvasLibrary() }
-        }
-    }
-
-    private var library: some View {
-        VStack(alignment: .leading) {
-            if let notice = session.canvas.libraryNotice { Text(notice).font(.callout) }
-            if session.canvas.isLoading { ProgressView() }
-            if session.canvas.library.isEmpty {
-                Text("No saved Canvases.").foregroundStyle(.secondary)
-            }
-            List(session.canvas.library, id: \.id) { item in
-                HStack {
-                    Button(item.title) {
-                        session.canvasDialog = nil
-                        Task { await session.openCanvas(item.id) }
-                    }.buttonStyle(.plain)
-                    Spacer()
-                    if session.canvas.boards[item.id] == nil {
-                        Button("Delete Saved Canvas", systemImage: "trash", role: .destructive) {
-                            // Deletion uses a separate confirmation with the record revision.
-                            session.pendingCanvasDelete = item
-                            session.canvasDialog = nil
-                        }.labelStyle(.iconOnly)
-                    }
-                }
-            }.frame(height: 240)
         }
     }
 
     private var title: String {
         switch dialog {
         case .newBoard: "New Canvas"
-        case .library: "Saved Canvases"
+        case .library: "Open Canvas"
         case .renameBoard: "Rename Canvas"
         case .renameCard: "Rename Card"
-        case .web: "Add Local Web App"
+        case .web: "Add Web App"
         case .connection: "Connect Cards"
-        case .connectionLabel: "Edit Connection"
+        case .connectionLabel: "Edit Link"
         case .reload: "Reload Canvas?"
+        case .shortcuts: "Canvas Shortcuts"
         }
     }
     private var placeholder: String {
@@ -141,7 +117,7 @@ struct CanvasBasicDialogView: View {
                             ?? "Enter a Canvas name of 1 to 120 characters."
                         return
                     }
-                case .library: break
+                case .library, .shortcuts: break
                 case .reload(let id):
                     guard await session.reloadCanvas(id) else {
                         error = "The Canvas could not be reloaded."
@@ -175,5 +151,149 @@ struct CanvasBasicDialogView: View {
                 session.canvasDialog = nil
             } catch { self.error = error.localizedDescription }
         }
+    }
+}
+
+/// Open Canvas: search, "N cards · edited 2 h ago" rows, Open as the default
+/// button. Deleting is one step deeper, with a confirmation (review C15).
+struct CanvasLibrarySheet: View {
+    @Environment(\.rafuTheme) private var theme
+    let session: WorkspaceSession
+    @State private var query = ""
+    @State private var selection: CanvasID?
+
+    private var items: [CanvasSummary] {
+        let text = query.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return session.canvas.library }
+        return session.canvas.library.filter { $0.title.localizedCaseInsensitiveContains(text) }
+    }
+
+    private var selectedItem: CanvasSummary? {
+        session.canvas.library.first { $0.id == selection }
+    }
+
+    private var canDeleteSelection: Bool {
+        guard let selection else { return false }
+        return session.canvas.boards[selection] == nil
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Open Canvas").font(.system(size: 15, weight: .semibold))
+            TextField("Search", text: $query, prompt: Text("Search Canvases"))
+                .textFieldStyle(.roundedBorder)
+            if let notice = session.canvas.libraryNotice {
+                Text(notice).font(.callout).foregroundStyle(theme.palette.textSecondary)
+            }
+            if session.canvas.isLoading { ProgressView().controlSize(.small) }
+            if items.isEmpty, !session.canvas.isLoading {
+                Text(query.isEmpty ? "No saved Canvases." : "No Canvas matches the search.")
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .frame(maxWidth: .infinity, minHeight: 80)
+            } else {
+                List(items, selection: $selection) { item in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.title).lineLimit(1)
+                        Text(detail(item)).font(.caption)
+                            .foregroundStyle(theme.palette.textSecondary)
+                    }
+                    .padding(.vertical, 2)
+                }
+                .contextMenu(forSelectionType: CanvasID.self) { ids in
+                    if let id = ids.first, let item = summary(id) {
+                        Button("Open") { open(id) }
+                        if session.canvas.boards[id] == nil {
+                            Divider()
+                            Button("Delete Saved Canvas…", role: .destructive) { delete(item) }
+                        }
+                    }
+                } primaryAction: { ids in
+                    if let id = ids.first { open(id) }
+                }
+                .frame(height: 240)
+            }
+            HStack {
+                Button {
+                    if let item = selectedItem { delete(item) }
+                } label: {
+                    Image(systemName: "minus")
+                }
+                .disabled(!canDeleteSelection)
+                .help("Delete the selected saved Canvas")
+                .accessibilityLabel("Delete Saved Canvas")
+                Spacer()
+                Button("Cancel", role: .cancel) { session.canvasDialog = nil }
+                Button("Open") { if let selection { open(selection) } }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(selection == nil)
+            }
+        }
+        .padding(24).frame(width: 480)
+        .task { await session.prepareCanvasLibrary() }
+    }
+
+    private func summary(_ id: CanvasID) -> CanvasSummary? {
+        session.canvas.library.first { $0.id == id }
+    }
+
+    private func detail(_ item: CanvasSummary) -> String {
+        let count = session.canvas.boards[item.id]?.cards.count ?? item.cardCount
+        return CanvasCardSummaryText.libraryDetail(cardCount: count, modified: item.modified)
+    }
+
+    private func open(_ id: CanvasID) {
+        session.canvasDialog = nil
+        Task { await session.openCanvas(id) }
+    }
+
+    private func delete(_ item: CanvasSummary) {
+        // Deletion uses a separate confirmation with the record revision.
+        session.pendingCanvasDelete = item
+        session.canvasDialog = nil
+    }
+}
+
+/// Help > Canvas Shortcuts. The pointer paths are in the card and Canvas
+/// menus; these are the keys (review 7.2).
+struct CanvasShortcutsSheet: View {
+    @Environment(\.rafuTheme) private var theme
+    let session: WorkspaceSession
+
+    private static let rows: [(String, String)] = [
+        ("Double-click the board", "Add a card at that point"),
+        ("Drag a card's header", "Move it. Hold ⌘ to turn off snapping"),
+        ("Drag from a card's edge port", "Connect to another card"),
+        ("Drag the board, or Space + drag", "Pan"),
+        ("⇧-drag on the board", "Select with a marquee"),
+        ("Pinch, or ⌃ + scroll", "Zoom"),
+        ("Return", "Enter the selected card. On a stopped terminal, start its shell"),
+        ("⌃⇥", "Return to Board"),
+        ("Esc", "Deselect, when the board has focus"),
+        ("Arrow keys", "Move the selection 8 pt. Add ⇧ for 40 pt"),
+        ("⌥⌘ + arrow keys", "Resize the selected card"),
+        ("Tab, ⇧Tab", "Select the next or previous card"),
+        ("N, T", "New note, new terminal"),
+        ("⌫", "Remove the selection from the Canvas. Files are never deleted"),
+        ("⌘9, ⌥⌘9, ⌘0", "Zoom to fit, zoom to selection, actual size"),
+        ("⌥⌘L", "Connect two selected cards"),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Canvas Shortcuts").font(.system(size: 15, weight: .semibold))
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 6) {
+                ForEach(Self.rows, id: \.0) { row in
+                    GridRow {
+                        Text(row.0).fontWeight(.medium)
+                        Text(row.1).foregroundStyle(theme.palette.textSecondary)
+                    }
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Done") { session.canvasDialog = nil }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24).frame(width: 560)
     }
 }

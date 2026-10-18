@@ -37,6 +37,42 @@ nonisolated enum CanvasZoomMetrics {
         min(maximumScale, max(minimumScale, scale))
     }
 
+    /// The viewport that centres `bounds` (board units) in a view of `size`
+    /// with room for the Canvas bar and margins. Never zooms in past
+    /// `maximumScale`.
+    static func viewport(
+        fitting bounds: CGRect, in size: CGSize, maximumScale: Double = 1,
+        horizontalMargin: Double = 80, verticalMargin: Double = 100
+    ) -> CanvasViewport {
+        guard bounds.width > 0, bounds.height > 0, size.width > 0, size.height > 0 else {
+            return CanvasViewport()
+        }
+        let fitWidth = (Double(size.width) - horizontalMargin) / Double(bounds.width)
+        let fitHeight = (Double(size.height) - verticalMargin) / Double(bounds.height)
+        let scale = min(maximumScale, clamped(min(fitWidth, fitHeight)))
+        return CanvasViewport(
+            scale: scale,
+            x: (Double(size.width) - Double(bounds.width) * scale) / 2 - Double(bounds.minX)
+                * scale,
+            y: (Double(size.height) - Double(bounds.height) * scale) / 2
+                - Double(bounds.minY) * scale)
+    }
+
+    /// A viewport scaled about `anchor` (view space), or the centre of a view
+    /// of `size`. The board point under the anchor stays under it.
+    static func viewport(
+        scaling start: CanvasViewport, to scale: Double, in size: CGSize, anchor: CGPoint? = nil
+    ) -> CanvasViewport {
+        let scale = clamped(scale)
+        let ratio = scale / start.scale
+        let ax = Double(anchor?.x ?? size.width / 2)
+        let ay = Double(anchor?.y ?? size.height / 2)
+        return CanvasViewport(
+            scale: scale,
+            x: ax - (ax - start.x) * ratio,
+            y: ay - (ay - start.y) * ratio)
+    }
+
     /// The logical title size that keeps the title at least 11 screen points.
     static func titleFontSize(scale: Double) -> Double {
         guard scale.isFinite, scale > 0 else { return baseTitlePoints }

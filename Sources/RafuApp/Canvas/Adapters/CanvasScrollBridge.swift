@@ -6,7 +6,8 @@ struct CanvasScrollBridge: NSViewRepresentable {
     let isEnabled: Bool
     var capturesScroll: (CGPoint) -> Bool = { _ in true }
     let pan: (Double, Double) -> Void
-    let zoom: (Double) -> Void
+    /// Zoom factor and the pointer position in the bridge's top-left space.
+    let zoom: (Double, CGPoint) -> Void
     let hidden: () -> Void
     var visible: () -> Void = {}
 
@@ -30,7 +31,7 @@ struct CanvasScrollBridge: NSViewRepresentable {
         var isEnabled = true
         var capturesScroll: (CGPoint) -> Bool = { _ in true }
         var pan: ((Double, Double) -> Void)?
-        var zoom: ((Double) -> Void)?
+        var zoom: ((Double, CGPoint) -> Void)?
         var onHidden: (() -> Void)?
         var onVisible: (() -> Void)?
         private var monitor: Any?
@@ -51,11 +52,13 @@ struct CanvasScrollBridge: NSViewRepresentable {
                     bounds.contains(convert(event.locationInWindow, from: nil))
                 else { return event }
                 let local = convert(event.locationInWindow, from: nil)
-                guard capturesScroll(CGPoint(x: local.x, y: bounds.height - local.y)) else {
+                let point = CGPoint(x: local.x, y: bounds.height - local.y)
+                guard capturesScroll(point) else {
                     return event
                 }
-                if event.modifierFlags.contains(.control) {
-                    zoom?(event.scrollingDeltaY > 0 ? 1.05 : 1 / 1.05)
+                if event.modifierFlags.contains(.control) || event.modifierFlags.contains(.command)
+                {
+                    zoom?(event.scrollingDeltaY > 0 ? 1.05 : 1 / 1.05, point)
                 } else {
                     pan?(event.scrollingDeltaX, event.scrollingDeltaY)
                 }

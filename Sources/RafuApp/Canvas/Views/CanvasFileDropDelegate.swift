@@ -7,6 +7,16 @@ import UniformTypeIdentifiers
 struct CanvasFileDropDelegate: DropDelegate {
     let boardID: CanvasID
     let session: WorkspaceSession
+    /// Drives the dashed drop outline on the board (review 7.4).
+    var isTargeted: Binding<Bool> = .constant(false)
+
+    func dropEntered(info: DropInfo) {
+        isTargeted.wrappedValue = validateDrop(info: info)
+    }
+
+    func dropExited(info: DropInfo) {
+        isTargeted.wrappedValue = false
+    }
 
     func validateDrop(info: DropInfo) -> Bool {
         guard session.rootURL != nil, let board = session.canvas.boards[boardID],
@@ -24,6 +34,7 @@ struct CanvasFileDropDelegate: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
+        isTargeted.wrappedValue = false
         guard validateDrop(info: info) else { return false }
         let location = info.location
         if let provider = info.itemProviders(for: [.rafuEditorDrag]).first {

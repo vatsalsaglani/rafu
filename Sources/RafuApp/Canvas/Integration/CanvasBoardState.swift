@@ -1,5 +1,22 @@
+import AppKit
 import Foundation
 import Observation
+import SwiftUI
+
+/// Which links the board draws. W6b's edge layer reads `linkVisibility`.
+enum CanvasLinkVisibility: String, CaseIterable, Sendable {
+    case all
+    case messageOnly
+    case none
+
+    var title: String {
+        switch self {
+        case .all: "All"
+        case .messageOnly: "Message Links Only"
+        case .none: "None"
+        }
+    }
+}
 
 /// Only metadata changes are observed. Native note owners supply text snapshots
 /// for saves; their live buffers never flow through Observation.
@@ -18,6 +35,18 @@ final class CanvasBoardState: Identifiable {
     var showsList = false
     var visibleSize: CGSize = .zero
     var connectingFrom: CanvasCardID?
+    /// View state, not saved: the "Show Links" choice (review 7.6).
+    var linkVisibility: CanvasLinkVisibility = .all
+    /// The card whose title is being renamed inline in its header.
+    var renamingCardID: CanvasCardID?
+    /// Set by Return, the header or the menu to ask the terminal card to start
+    /// (or restart) its shell. The card clears it. Starting is always an
+    /// explicit user action; nothing sets this on its own.
+    var terminalStartRequest: CanvasCardID?
+    /// Board-space point for the next added card, set by the Add popover and
+    /// consumed by `add`. Any other path to add a card clears it first.
+    @ObservationIgnored var creationCenter: CGPoint?
+    @ObservationIgnored private var lastCreatedOrigin: CGPoint?
     @ObservationIgnored var noteSnapshots: [CanvasCardID: @MainActor () throws -> String] = [:]
     @ObservationIgnored var requestSave: (@MainActor () -> Void)?
     @ObservationIgnored var revokeSessionLinks: (([UUID]) -> Void)?
@@ -116,27 +145,66 @@ final class CanvasBoardState: Identifiable {
         requestSave?()
     }
 
-    func add(title: String, content: CanvasCardContent) throws {
+    /// Adds a card. With `center` (board units) the card appears centred on
+    /// that point. Otherwise it appears at the middle of the visible board,
+    /// stepping 24 pt from the previous new card; a board that has not been laid
+    /// out yet keeps the older cascade.
+    func add(title: String, content: CanvasCardContent, center: CGPoint? = nil) throws {
         guard cards.count < CanvasLimits.cards else { throw CanvasError.capacity }
-        let offset = Double(cards.count % 5) * 36
-        var rect = CanvasRect(x: 40 + offset, y: 40 + offset)
+        let center = center ?? creationCenter
+        creationCenter = nil
+        var rect = CanvasRect(x: 40, y: 40)
         switch content {
         case .terminal, .web:
             rect.width = 640
             rect.height = 420
         default: break
         }
+        if let center {
+            rect.x = Double(center.x) - rect.width / 2
+            rect.y = Double(center.y) - rect.height / 2
+        } else if visibleSize.width > 0, visibleSize.height > 0 {
+            let scale = document.viewport.scale
+            rect.x = (Double(visibleSize.width) / 2 - document.viewport.x) / scale - rect.width / 2
+            rect.y =
+                (Double(visibleSize.height) / 2 - document.viewport.y) / scale - rect.height / 2
+            while let last = lastCreatedOrigin, abs(last.x - rect.x) < 1,
+                abs(last.y - rect.y) < 1
+            {
+                rect.x += 24
+                rect.y += 24
+            }
+            lastCreatedOrigin = CGPoint(x: rect.x, y: rect.y)
+        } else {
+            let offset = Double(cards.count % 5) * 36
+            rect.x += offset
+            rect.y += offset
+        }
+        rect.x = min(50_000, max(-50_000, rect.x.rounded()))
+        rect.y = min(50_000, max(-50_000, rect.y.rounded()))
         let card = CanvasCard(title: title, rect: rect, content: content)
-        try edit { $0.cards.append(card) }
-        selection = [card.id]
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        try withAnimation(
+            RafuMotion.resolve(
+                RafuMotion.nodeCreate, reduceMotion: reduceMotion, reduced: RafuMotion.reducedFade)
+        ) {
+            try edit { $0.cards.append(card) }
+        }
+        select([card.id])
     }
 
     func removeSelection() throws {
         let removing = selection
         leaveContent()
-        try edit {
-            $0.cards.removeAll { removing.contains($0.id) }
-            $0.connections.removeAll { removing.contains($0.from) || removing.contains($0.to) }
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        try withAnimation(
+            RafuMotion.resolve(
+                RafuMotion.nodeRemove, reduceMotion: reduceMotion, reduced: RafuMotion.reducedFade)
+        ) {
+            try edit {
+                $0.cards.removeAll { removing.contains($0.id) }
+                $0.connections.removeAll { removing.contains($0.from) || removing.contains($0.to) }
+            }
         }
         if let focusedCardID, removing.contains(focusedCardID) { self.focusedCardID = nil }
         selection = []
@@ -188,13 +256,40 @@ final class CanvasBoardState: Identifiable {
         requestSave?()
     }
 
+    /// Tidy Up: flows every card into rows with a 16 pt gap so none overlap.
     func arrange() throws {
         try edit { value in
-            for index in value.cards.indices {
-                value.cards[index].rect.x = 40 + Double(index % 3) * 460
-                value.cards[index].rect.y = 40 + Double(index / 3) * 340
-            }
+            let tidy = CanvasLayoutMath.tidy(value.cards.map(\.rect))
+            for index in value.cards.indices { value.cards[index].rect = tidy[index] }
         }
+    }
+
+    /// Moves the cards to the end (front) or start (back) of the stack. The
+    /// array order is the z-order, so this is an undoable edit.
+    func reorder(_ ids: Set<CanvasCardID>, toFront: Bool) throws {
+        guard !ids.isEmpty else { return }
+        try edit { value in
+            value.cards = CanvasLayoutMath.reordered(value.cards, moving: ids, toFront: toFront)
+        }
+    }
+
+    /// Raises cards inside a drag. The drag's own undo step covers the change,
+    /// so a click-drag that also reorders is still one undo.
+    func raiseDuringGesture(_ ids: Set<CanvasCardID>) {
+        guard !ids.isEmpty else { return }
+        beginGesture()
+        let next = CanvasLayoutMath.reordered(document.cards, moving: ids, toFront: true)
+        guard next != document.cards else { return }
+        document.cards = next
+        markDirty()
+    }
+
+    var frontmostCardID: CanvasCardID? { cards.last?.id }
+
+    /// Selects exactly `ids`. A new card selection clears any link selection.
+    func select(_ ids: Set<CanvasCardID>) {
+        if selection != ids { selection = ids }
+        if !ids.isEmpty { clearConnectionSelection() }
     }
 
     func moveSelection(dx: Double, dy: Double) throws {
