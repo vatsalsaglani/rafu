@@ -12,6 +12,8 @@ nonisolated struct CanvasIconSearchIndex: Sendable {
         let compactName: String
         let nameWords: [String]
         let initials: String
+        /// Initials without vendor words: "Amazon Simple Queue Service" -> "sqs".
+        let serviceInitials: String
         let keywords: [String]
         let categoryWords: [String]
     }
@@ -29,6 +31,9 @@ nonisolated struct CanvasIconSearchIndex: Sendable {
                         packID: pack.id, packName: pack.name, packOrder: order, entry: entry,
                         name: name, compactName: words.joined(), nameWords: words,
                         initials: String(words.compactMap(\.first)),
+                        serviceInitials: String(
+                            words.filter { !CanvasIconSearch.vendorWords.contains($0) }
+                                .compactMap(\.first)),
                         keywords: entry.keywords.flatMap {
                             CanvasIconSearch.words(CanvasIconSearch.normalized($0))
                         },
@@ -95,6 +100,10 @@ nonisolated struct CanvasIconSearchIndex: Sendable {
 }
 
 nonisolated enum CanvasIconSearch {
+    static let vendorWords: Set<String> = [
+        "amazon", "aws", "azure", "microsoft", "google", "cloud",
+    ]
+
     /// Lowercased, diacritics folded.
     static func normalized(_ text: String) -> String {
         text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil).lowercased()
@@ -123,7 +132,10 @@ nonisolated enum CanvasIconSearch {
                 }
             }
         }
-        if best < 55, token.count >= 2, item.initials.count >= 2, item.initials == token {
+        if best < 55, token.count >= 2,
+            (item.initials.count >= 2 && item.initials == token)
+                || (item.serviceInitials.count >= 2 && item.serviceInitials == token)
+        {
             best = 55
         }
         if best < 40, token.count >= 2, item.compactName.contains(token) {
@@ -135,7 +147,8 @@ nonisolated enum CanvasIconSearch {
             }
         }
         if best == 0, token.count >= 2,
-            let gaps = subsequenceGaps(of: token, in: item.compactName)
+            let gaps = subsequenceGaps(of: token, in: item.compactName),
+            gaps <= 2 * token.count
         {
             best = max(1, 15 - min(gaps, 14))
         }

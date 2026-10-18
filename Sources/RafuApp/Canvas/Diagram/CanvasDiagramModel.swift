@@ -280,6 +280,8 @@ nonisolated struct CanvasServiceIconMatch: Equatable, Identifiable, Sendable {
     let score: Int
 
     var id: String { "\(packID)/\(entry.id)" }
+    var iconID: String { entry.id }
+    var label: String { entry.name }
 
     var icon: CanvasServiceIcon {
         CanvasServiceIcon(packID: packID, iconID: entry.id, label: entry.name)

@@ -71,7 +71,7 @@ nonisolated enum CanvasIconPackLayout {
         let lowerName = name.lowercased()
         if folders.contains(where: {
             $0.contains("google") || $0.contains("gcp") || $0.contains("core-products")
-        }) || stem(of: lowerName).hasSuffix("-512-color") {
+        }) || stem(of: lowerName).contains("-512-color") {
             return .googleCloud
         }
         return nil
@@ -86,7 +86,7 @@ nonisolated enum CanvasIconPackLayout {
     // MARK: Names
 
     static func displayName(fileName: String, vendor: CanvasIconPackVendor) -> String {
-        var base = stem(of: fileName)
+        var base = strippingScaleSuffix(stem(of: fileName))
         switch vendor {
         case .aws:
             for prefix in ["Arch-Category_", "Arch_", "Res_"] where base.hasPrefix(prefix) {
@@ -110,11 +110,23 @@ nonisolated enum CanvasIconPackLayout {
             ? "Icon" : String(name.prefix(CanvasDiagramLimits.textScalars))
     }
 
+    /// "Arch_AWS-Lambda_64@5x" -> "Arch_AWS-Lambda_64".
+    static func strippingScaleSuffix(_ stem: String) -> String {
+        guard let at = stem.lastIndex(of: "@") else { return stem }
+        let tail = stem[stem.index(after: at)...].lowercased()
+        guard tail.count >= 2, tail.hasSuffix("x"), tail.dropLast().allSatisfy(\.isNumber) else {
+            return stem
+        }
+        return String(stem[..<at])
+    }
+
     /// Drops trailing size and theme tokens: "_48", "_Light", "-512", "-color", "-24px".
     static func strippingSuffixTokens(_ text: String, separator: Character) -> String {
         var parts = text.split(separator: separator, omittingEmptySubsequences: false)
             .map(String.init)
-        let noise: Set<String> = ["light", "dark", "color", "colour", "mono", "icon"]
+        let noise: Set<String> = [
+            "light", "dark", "color", "colour", "mono", "icon", "rgb", "cmyk",
+        ]
         while parts.count > 1, let last = parts.last {
             let lower = last.lowercased()
             let isSize =
@@ -208,8 +220,11 @@ nonisolated enum CanvasIconPackLayout {
         for path in paths where isIconPath(path) {
             let fileName = String(path.split(separator: "/").last ?? "")
             let ext = fileExtension(of: fileName)
-            let name = displayName(fileName: fileName, vendor: vendor)
-            let category = category(path: path, vendor: vendor, name: name)
+            let product = vendor == .googleCloud ? productFolder(path) : nil
+            let name = product ?? displayName(fileName: fileName, vendor: vendor)
+            let category =
+                product != nil
+                ? vendor.title : category(path: path, vendor: vendor, name: name)
             let rank = preference(fileName: fileName, ext: ext)
             let key = "\(category.lowercased())\u{1F}\(name.lowercased())"
             if let existing = picks[key],
@@ -239,6 +254,19 @@ nonisolated enum CanvasIconPackLayout {
             result.append(Candidate(sourcePath: pick.path, entry: entry, fileExtension: pick.ext))
         }
         return result
+    }
+
+    /// Google Cloud ships "<Product>/SVG/<File>-512-color.svg": the folder
+    /// holds the product's real name ("Cloud Storage", not "Cloud_Storage").
+    static func productFolder(_ path: String) -> String? {
+        let parts = path.split(separator: "/").map(String.init)
+        guard parts.count >= 3 else { return nil }
+        let format = parts[parts.count - 2].lowercased()
+        let product = parts[parts.count - 3]
+        guard format == "svg" || format == "png", !product.lowercased().contains("icons"),
+            CanvasDiagramText.isValid(product, allowsEmpty: false)
+        else { return nil }
+        return String(product.prefix(CanvasDiagramLimits.textScalars))
     }
 
     static func preference(fileName: String, ext: String) -> Int {

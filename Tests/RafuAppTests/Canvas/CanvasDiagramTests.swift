@@ -107,6 +107,16 @@ struct CanvasIconSearchTests {
         let index = CanvasIconSearchIndex(packs: [pack])
         #expect(index.search("redis").first?.entry.id == "cache")
         #expect(index.search("sqs").first?.entry.id == "sqs")
+        let aws = CanvasIconSearchIndex(packs: [
+            CanvasIconPack(
+                id: "aws", name: "AWS", vendor: .aws,
+                entries: [
+                    .init(
+                        id: "sqs", name: "Amazon Simple Queue Service", category: "Integration",
+                        file: "sqs.svg")
+                ])
+        ])
+        #expect(aws.search("sqs").first?.entry.id == "sqs")
         #expect(index.search("load bal").first?.entry.id == "lb")
         #expect(index.search("LOAD").first?.entry.id == "lb")
         #expect(index.search("ldblncr").first?.entry.id == "lb")
@@ -159,7 +169,9 @@ struct CanvasIconPackLayoutTests {
     private let google = [
         "Google Cloud Icons/BigQuery/SVG/BigQuery-512-color.svg",
         "Google Cloud Icons/BigQuery/PNG/BigQuery-512-color.png",
-        "Google Cloud Icons/Cloud Run/SVG/CloudRun-512-color.svg",
+        "Unique Icons/Cloud Run/SVG/CloudRun-512-color.svg",
+        "Unique Icons/Security Operations/SVG/SecOps-512-color-rgb.svg",
+        "Unique Icons/Cloud Run/.DS_Store",
     ]
 
     @Test("Each vendor layout is detected; an unknown tree is custom")
@@ -179,6 +191,9 @@ struct CanvasIconPackLayoutTests {
             names == [
                 "Analytics/Amazon Athena", "Compute/Amazon EC2", "Compute/Amazon EC2 Instance",
             ])
+        #expect(
+            CanvasIconPackLayout.displayName(fileName: "Arch_AWS-Lambda_64@5x.png", vendor: .aws)
+                == "AWS Lambda")
         let ec2 = candidates.first { $0.entry.name == "Amazon EC2" }
         #expect(ec2?.sourcePath.hasSuffix("Arch_Amazon-EC2_64.svg") == true)
         let instance = candidates.first { $0.entry.name == "Amazon EC2 Instance" }
@@ -197,12 +212,15 @@ struct CanvasIconPackLayoutTests {
         #expect(azureNames.contains("Databases/SQL Database"))
 
         let googleCandidates = CanvasIconPackLayout.candidates(paths: google, vendor: .googleCloud)
-        #expect(googleCandidates.map(\.entry.name).sorted() == ["BigQuery", "CloudRun"])
+        #expect(
+            googleCandidates.map(\.entry.name).sorted() == [
+                "BigQuery", "Cloud Run", "Security Operations",
+            ])
         #expect(googleCandidates.allSatisfy { $0.fileExtension == "svg" })
-        let bigQuery = googleCandidates.first { $0.entry.name == "BigQuery" }
-        #expect(bigQuery?.entry.category == "Google Cloud")
-        let run = googleCandidates.first { $0.entry.name == "CloudRun" }
-        #expect(run?.entry.category == "Cloud Run")
+        #expect(googleCandidates.allSatisfy { $0.entry.category == "Google Cloud" })
+        #expect(
+            CanvasIconPackLayout.displayName(fileName: "SecOps-512-color-rgb.svg", vendor: .custom)
+                == "SecOps")
     }
 
     @Test("Icon ids stay unique and every entry validates")

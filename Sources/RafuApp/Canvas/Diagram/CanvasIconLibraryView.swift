@@ -177,7 +177,7 @@ struct CanvasIconPackImportView: View {
                 .font(.headline)
                 .foregroundStyle(theme.palette.textPrimary)
             Text(
-                "Download an official icon set, then choose the ZIP file or its folder. Rafu copies SVG and PNG icons into its own support folder; nothing is uploaded. Use each vendor's icons under its terms."
+                "Download an official icon set with one click, or download it yourself and choose the ZIP file or its folder. Rafu copies SVG and PNG icons into its own support folder; nothing is uploaded. Use each vendor's icons under its terms."
             )
             .font(.callout)
             .foregroundStyle(theme.palette.textSecondary)
@@ -201,7 +201,7 @@ struct CanvasIconPackImportView: View {
                     .keyboardShortcut(.cancelAction)
                 Button("Choose ZIP or Folder…", action: choose)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(library.isImporting)
+                    .disabled(library.isImporting || library.download != nil)
             }
         }
         .padding(20)
@@ -210,13 +210,21 @@ struct CanvasIconPackImportView: View {
     }
 
     private var sources: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             ForEach([CanvasIconPackVendor.aws, .azure, .googleCloud], id: \.self) { vendor in
-                if let url = vendor.downloadPage {
-                    Link(destination: url) {
-                        Label("\(vendor.title) icons (official download page)", systemImage: "link")
+                CanvasIconPackSourceRow(vendor: vendor, library: library)
+            }
+            if let download = library.download {
+                HStack(spacing: 8) {
+                    if let fraction = download.fraction {
+                        ProgressView(value: fraction).frame(maxWidth: 200)
+                    } else {
+                        ProgressView().controlSize(.small)
                     }
-                    .help(url.absoluteString)
+                    Text("Downloading \(download.vendor.title) icons…").font(.callout)
+                    Button("Cancel") { library.cancelDownload() }
+                        .controlSize(.small)
+                        .accessibilityLabel("Cancel download")
                 }
             }
         }
@@ -254,6 +262,66 @@ struct CanvasIconPackImportView: View {
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             Task { await CanvasIconPackLibrary.shared.importPack(from: url) }
+        }
+    }
+}
+
+/// One vendor: its official page, and a one-click Download of the pinned file.
+private struct CanvasIconPackSourceRow: View {
+    @Environment(\.rafuTheme) private var theme
+    let vendor: CanvasIconPackVendor
+    let library: CanvasIconPackLibrary
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if let url = vendor.downloadPage {
+                Link(destination: url) {
+                    Label("\(vendor.title) icons (official page)", systemImage: "link")
+                }
+                .help(url.absoluteString)
+            }
+            Spacer(minLength: 8)
+            if let source = CanvasIconPackDownloads.source(for: vendor) {
+                Button("Download") { confirm(source) }
+                    .controlSize(.small)
+                    .disabled(library.download != nil || library.isImporting)
+                    .help(
+                        "Download \(CanvasIconPackDownloads.approximateSize(source.approximateBytes)) from \(source.url.host() ?? "the vendor")"
+                    )
+                    .accessibilityLabel("Download \(vendor.title) icons")
+            }
+        }
+    }
+
+    /// The user sees the vendor, the exact source, the size and the terms
+    /// before anything is fetched.
+    private func confirm(_ source: CanvasIconPackSource) {
+        let alert = NSAlert()
+        alert.messageText = "Download \(vendor.title) icons?"
+        let size = CanvasIconPackDownloads.approximateSize(source.approximateBytes)
+        alert.informativeText = """
+            Source: \(source.url.absoluteString)
+            Size: about \(size)
+
+            Rafu checks the file, then copies its SVG and PNG icons into its support folder. \
+            Use the icons under \(vendor.title)'s terms: \(source.pageURL.absoluteString)
+            """
+        alert.addButton(withTitle: "Download")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "View Terms")
+        let window = NSApp.keyWindow
+        Task {
+            let response: NSApplication.ModalResponse
+            if let window {
+                response = await alert.beginSheetModal(for: window)
+            } else {
+                response = alert.runModal()
+            }
+            switch response {
+            case .alertFirstButtonReturn: library.startDownload(source)
+            case .alertThirdButtonReturn: NSWorkspace.shared.open(source.pageURL)
+            default: break
+            }
         }
     }
 }

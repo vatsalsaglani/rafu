@@ -21,6 +21,15 @@ enum CanvasDiagramService {
         title: String, memberIDs: [CanvasCardID], in boardID: CanvasID, session: WorkspaceSession
     ) -> CanvasCardID? {
         guard let board = session.canvas.boards[boardID] else { return nil }
+        return createFrame(title: title, memberIDs: memberIDs, in: board, session: session)
+    }
+
+    /// The same, for a caller that already holds the board (agent tools).
+    @discardableResult
+    static func createFrame(
+        title: String, memberIDs: [CanvasCardID], in board: CanvasBoardState,
+        session: WorkspaceSession
+    ) -> CanvasCardID? {
         do {
             return try board.createFrame(title: title, memberIDs: memberIDs)
         } catch {

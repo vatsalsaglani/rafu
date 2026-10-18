@@ -130,3 +130,4 @@ Keep one focused subject per note. Add it to this index. Use an ADR instead when
 - [Linux Swift verification](linux-swift-verification.md): checking Swift changes in a Linux container without the macOS SDK (`swiftc -parse -swift-version 6`, `swift-format lint`, scratch SwiftPM packages) and why a Mac build stays mandatory.
 - [Canvas interaction](canvas-interaction.md): Canvas input map, Return to Board, z-order, snapping and zoom faces, edge layering and link states, note Read/Edit modes.
 - [Canvas whiteboard and Ensemble file](canvas-whiteboard-and-ensemble-file.md): whiteboard and Mermaid card kinds, saved-format compatibility, bounds, the `.rafuensemble` format, file-bound boards and their expected-version check, palette keys.
+- [Canvas diagrams](canvas-diagrams.md): icon packs (Common, vendor import and pinned one-click download), frames, PNG/PDF/GIF export.

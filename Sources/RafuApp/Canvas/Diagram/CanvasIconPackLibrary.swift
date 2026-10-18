@@ -12,12 +12,26 @@ final class CanvasIconPackLibrary {
 
     private(set) var packs: [CanvasIconPack]
     private(set) var isImporting = false
+    /// The running one-click download, if any.
+    private(set) var download: Download?
     private(set) var hasLoaded = false
     var notice: String?
     @ObservationIgnored private(set) var searchIndex: CanvasIconSearchIndex
     @ObservationIgnored let directory: URL
     @ObservationIgnored private let images = NSCache<NSString, NSImage>()
     @ObservationIgnored private var loadTask: Task<Void, Never>?
+    @ObservationIgnored private var downloadTask: Task<Void, Never>?
+
+    struct Download: Equatable {
+        let vendor: CanvasIconPackVendor
+        var received: Int64 = 0
+        var expected: Int64?
+
+        var fraction: Double? {
+            guard let expected, expected > 0 else { return nil }
+            return min(1, Double(received) / Double(expected))
+        }
+    }
 
     init(directory: URL = CanvasIconPackStore.defaultDirectory()) {
         self.directory = directory
@@ -77,8 +91,9 @@ final class CanvasIconPackLibrary {
         return "square.dashed"
     }
 
-    func importPack(from source: URL) async {
-        guard !isImporting else { return }
+    @discardableResult
+    func importPack(from source: URL) async -> Bool {
+        guard !isImporting else { return false }
         await loadIfNeeded()
         isImporting = true
         notice = nil
@@ -95,9 +110,53 @@ final class CanvasIconPackLibrary {
             install(next)
             images.removeAllObjects()
             notice = "Imported \(pack.entries.count) icons into \(pack.name)."
+            return true
         } catch {
             notice = error.localizedDescription
+            return false
         }
+    }
+
+    /// Downloads a pinned vendor pack and imports it. Only call after the
+    /// user confirmed. Any failure leaves no partial pack.
+    func startDownload(_ source: CanvasIconPackSource) {
+        guard download == nil, !isImporting else { return }
+        download = Download(vendor: source.vendor)
+        notice = nil
+        let folder = FileManager.default.temporaryDirectory.appending(
+            path: "rafu-icon-download-\(UUID().uuidString)", directoryHint: .isDirectory)
+        downloadTask = Task { [weak self] in
+            defer { try? FileManager.default.removeItem(at: folder) }
+            do {
+                let file = try await CanvasIconPackDownloads.download(
+                    source, into: folder,
+                    progress: { received, expected in
+                        Task { @MainActor [weak self] in
+                            guard self?.download?.vendor == source.vendor else { return }
+                            self?.download?.received = received
+                            self?.download?.expected = expected
+                        }
+                    })
+                try Task.checkCancellation()
+                self?.download = nil
+                guard let self else { return }
+                let imported = await importPack(from: file)
+                if !imported {
+                    let reason = notice.map { " (\($0))" } ?? ""
+                    notice = CanvasIconPackDownloads.failureMessage(for: source.vendor) + reason
+                }
+            } catch is CancellationError {
+                self?.notice = "Download cancelled."
+            } catch {
+                self?.notice = CanvasIconPackDownloads.failureMessage(for: source.vendor)
+            }
+            self?.download = nil
+            self?.downloadTask = nil
+        }
+    }
+
+    func cancelDownload() {
+        downloadTask?.cancel()
     }
 
     func remove(packID: String) async {
