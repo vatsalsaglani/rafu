@@ -1158,6 +1158,12 @@ final class WorkspaceTerminalController: Identifiable {
         onAttentionCleared?(id)
     }
 
+    /// True once the pty child process exists and has not ended. Input sent
+    /// before then is lost, so a caller that types a line waits for this.
+    var isProcessRunning: Bool {
+        terminalView?.process.running == true
+    }
+
     /// Sends a notification reply's already-sanitized, single-line text
     /// into this session's live pty, followed by a trailing newline — the
     /// agent is blocked on a prompt, so exactly one line can ever be
@@ -1167,7 +1173,10 @@ final class WorkspaceTerminalController: Identifiable {
     /// mounted) or the shell has already exited.
     @discardableResult
     func sendReply(_ text: String) -> Bool {
-        guard let terminalView else { return false }
+        // SwiftTerm's `LocalProcess.send` drops data silently while no child
+        // runs (an ordinary shell starts in a task after the view exists), so
+        // a reply to a process that has not started yet must report failure.
+        guard let terminalView, terminalView.process.running else { return false }
         if case .exited = status { return false }
         terminalView.send(txt: text + "\n")
         clearAttention()

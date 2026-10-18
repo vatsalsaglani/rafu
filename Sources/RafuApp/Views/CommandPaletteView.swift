@@ -1211,7 +1211,32 @@ struct CommandPaletteView: View {
                 },
             ])
         }
+        if let summary = session.visibleAgentSessionSummary {
+            commands.append(contentsOf: agentSessionResumeCommands(summary))
+        }
         return commands
+    }
+
+    /// Resume actions for the Agent Session tab on screen.
+    private func agentSessionResumeCommands(_ summary: AgentHistorySessionSummary)
+        -> [PaletteCommand]
+    {
+        [
+            .init(
+                title: "Agent Session: Resume in Terminal", symbolName: "terminal",
+                keywords: ["claude", "codex", "history", "continue"]
+            ) {
+                dismiss()
+                session.resumeAgentSession(summary)
+            },
+            .init(
+                title: "Agent Session: Resume in Ensemble", symbolName: "rectangle.3.group",
+                keywords: ["claude", "codex", "history", "continue", "board"]
+            ) {
+                dismiss()
+                session.resumeAgentSessionInEnsemble(summary)
+            },
+        ]
     }
 
     private func launchAgentTerminal(_ option: AgentTerminalOption) {

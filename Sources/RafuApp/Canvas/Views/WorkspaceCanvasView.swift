@@ -54,8 +54,9 @@ struct WorkspaceCanvasView: View {
                 } else {
                     boardSurface
                 }
-                // A compact capsule over the board, not a full-width strip.
-                if showsRestoredLinksNotice && pausedLinkCount > 0 {
+                // The list has no tool palette, so the notice sits at the top.
+                // On the board it stacks below the palette (`boardTopOverlay`).
+                if board.showsList, showsRestoredLinksNotice, pausedLinkCount > 0 {
                     pausedLinksNotice
                         .padding(.top, 10)
                         .transition(.opacity)
@@ -208,8 +209,7 @@ struct WorkspaceCanvasView: View {
             if board.cards.isEmpty, !tipDismissed {
                 emptyBoardTip
             }
-            // X5 whiteboard
-            CanvasToolPalette(board: board, session: session, tool: .forBoard(board.id))
+            boardTopOverlay
         }
         .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         .coordinateSpace(name: CanvasConnectionCoordinateSpace.board)
@@ -310,16 +310,25 @@ struct WorkspaceCanvasView: View {
             }
     }
 
+    /// Board shortcuts apply only while no card content and no inline title
+    /// field has the keys. Otherwise Return, Space, Delete, arrows, Tab and
+    /// the letter shortcuts reach the board before the field: Return opened
+    /// the card instead of saving the new name.
+    private var boardTakesKeys: Bool {
+        CanvasInlineRename.boardTakesKeys(
+            contentIsActive: board.contentIsActive, renamingCardID: board.renamingCardID)
+    }
+
     /// Stage 3: keyboard handling for the board.
     private func boardKeys(_ content: some View) -> some View {
         content
             .onKeyPress(.space, phases: [.down, .repeat, .up]) { event in
-                guard !board.contentIsActive else { return .ignored }
+                guard boardTakesKeys else { return .ignored }
                 spaceIsDown = event.phase != .up
                 return .handled
             }
             .onKeyPress("z", phases: .down) { event in
-                guard !board.contentIsActive, event.modifiers.contains(.command) else {
+                guard boardTakesKeys, event.modifiers.contains(.command) else {
                     return .ignored
                 }
                 if event.modifiers.contains(.shift) {
@@ -330,33 +339,33 @@ struct WorkspaceCanvasView: View {
                 return .handled
             }
             .onKeyPress("a", phases: .down) { event in
-                guard !board.contentIsActive, event.modifiers == .command else { return .ignored }
+                guard boardTakesKeys, event.modifiers == .command else { return .ignored }
                 board.select(Set(board.cards.map(\.id)))
                 return .handled
             }
             .onKeyPress("n", phases: .down) { event in
-                guard !board.contentIsActive, event.modifiers.isEmpty else { return .ignored }
+                guard boardTakesKeys, event.modifiers.isEmpty else { return .ignored }
                 CanvasAddKind.note.perform(on: board, session: session)
                 return .handled
             }
             .onKeyPress("t", phases: .down) { event in
-                guard !board.contentIsActive, event.modifiers.isEmpty else { return .ignored }
+                guard boardTakesKeys, event.modifiers.isEmpty else { return .ignored }
                 CanvasAddKind.terminal.perform(on: board, session: session)
                 return .handled
             }
             .onKeyPress(keys: [.delete, .deleteForward]) { _ in
-                guard !board.contentIsActive else { return .ignored }
+                guard boardTakesKeys else { return .ignored }
                 if board.deleteSelectedConnectionIfAny() { return .handled }
                 guard session.canCloseSelectedCanvasNodes else { return .ignored }
                 session.closeSelectedCanvasNodes()
                 return .handled
             }
             .onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow]) { event in
-                guard !board.contentIsActive else { return .ignored }
+                guard boardTakesKeys else { return .ignored }
                 return arrowKey(event) ? .handled : .ignored
             }
             .onKeyPress(.return, phases: .down) { event in
-                guard !board.contentIsActive, board.selection.count == 1,
+                guard boardTakesKeys, board.selection.count == 1,
                     let id = board.selection.first
                 else { return .ignored }
                 if event.modifiers == .option {
@@ -369,7 +378,7 @@ struct WorkspaceCanvasView: View {
                 return .handled
             }
             .onKeyPress(.tab, phases: .down) { event in
-                guard !board.contentIsActive else { return .ignored }
+                guard boardTakesKeys else { return .ignored }
                 let forward = !event.modifiers.contains(.shift)
                 let current = board.selection.count == 1 ? board.selection.first : nil
                 guard
@@ -385,12 +394,28 @@ struct WorkspaceCanvasView: View {
                     connectionDrag.cancel()
                     return .handled
                 }
-                guard !board.contentIsActive else { return .ignored }
+                guard boardTakesKeys else { return .ignored }
                 board.selection = []
                 board.clearConnectionSelection()
                 board.connectingFrom = nil
                 return .handled
             }
+    }
+
+    /// The X5 whiteboard tool palette and, below it, the paused-links notice.
+    /// Both are top-centre overlays; one stack keeps the notice under the
+    /// palette at every board width, so they never overlap.
+    private var boardTopOverlay: some View {
+        VStack(spacing: CanvasBoardTopOverlayMetrics.spacing) {
+            CanvasToolPalette(board: board, session: session, tool: .forBoard(board.id))
+            // A compact capsule over the board, not a full-width strip.
+            if showsRestoredLinksNotice && pausedLinkCount > 0 {
+                pausedLinksNotice
+                    .transition(.opacity)
+            }
+        }
+        .padding(.top, CanvasBoardTopOverlayMetrics.topInset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     /// "1 link paused · Resume Links ×" as one compact capsule at the top of
@@ -655,4 +680,11 @@ struct WorkspaceCanvasView: View {
         board.setViewport(
             CanvasZoomMetrics.viewport(scaling: start, to: scale, in: size, anchor: anchor))
     }
+}
+
+/// Spacing of the board's top-centre overlay stack: the tool palette, then
+/// the paused-links notice.
+nonisolated enum CanvasBoardTopOverlayMetrics {
+    static let topInset: CGFloat = 10
+    static let spacing: CGFloat = 8
 }

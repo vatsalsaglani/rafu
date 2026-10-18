@@ -155,6 +155,9 @@ final class WorkspaceSession {
     @ObservationIgnored let canvasImages = CanvasImagePool()
     let canvas: WorkspaceCanvasStore
     var canvasDialog: CanvasDialog?
+    /// Resume in Ensemble with no Ensemble open: the plan the "New
+    /// Ensemble" confirmation is about.
+    var agentEnsembleResumeAwaitingConfirmation: AgentHistoryEnsembleResumePlan?
     var pendingCanvasRemoval: CanvasID?
     var pendingCanvasDelete: CanvasSummary?
     var canvasTerminalOwners: [TerminalGroupID: CanvasID] = [:]
@@ -2512,6 +2515,7 @@ final class WorkspaceSession {
         canvasResources = [:]
         canvasTerminalOwners = [:]
         canvasDialog = nil
+        agentEnsembleResumeAwaitingConfirmation = nil
         pendingCanvasRemoval = nil
         pendingCanvasDelete = nil
         pendingCanvasTerminalRemoval = nil

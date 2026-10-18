@@ -68,8 +68,8 @@ struct CanvasToolPalette: View {
         )
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Whiteboard tools")
-        .padding(.top, 10)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // The board places the palette (`WorkspaceCanvasView.boardTopOverlay`)
+        // so the paused-links notice can stack below it.
     }
 
     private var expandedTools: some View {
