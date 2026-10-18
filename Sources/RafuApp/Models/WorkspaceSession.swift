@@ -934,12 +934,12 @@ final class WorkspaceSession {
             let snippet = controller.recentOutputSnippet()
             // Feed-vs-drop-down arbitration (terminal-notch-hud.md NC-C,
             // "Attention"): the event lands in the companion's cross-window
-            // attention feed only while the panel is pinned — a bare
-            // hover-dwell peek is now just the wings pill with no downward
-            // panel to route into — otherwise it spawns the separate v1
+            // attention feed whenever its panel is open — pinned, or peeking
+            // with hover-to-open on — and otherwise spawns the separate v1
             // drop-down; a bell never produces both.
             let arbitration = CompanionHoverPolicy.companionArbitration(
-                hoverState: NotchCompanionModel.shared.hoverState)
+                hoverState: NotchCompanionModel.shared.hoverState,
+                peekShowsPanel: NotchCompanionModel.shared.opensOnHover)
             if arbitration.routeToFeed {
                 NotchCompanionModel.shared.pushFeedItem(
                     CompanionFeedItem(
@@ -3257,6 +3257,8 @@ final class WorkspaceSession {
 
     func open(_ node: WorkspaceFileNode) {
         guard !node.isDirectory else { return }
+        // X5: a `.rafuensemble` file opens as a board tab, not as text.
+        if Self.isEnsembleFile(node.url) { return openEnsembleFile(at: node.url) }
         if let existing = openDocuments.first(where: { $0.url == node.url }) {
             select(existing)
             return

@@ -94,6 +94,59 @@ actor CanvasPersistenceStore {
         }
     }
 
+    // MARK: File-bound boards (X5)
+
+    private nonisolated struct FileBoardRecord: Codable, Equatable, Sendable {
+        var id: CanvasID
+        var path: String
+    }
+
+    nonisolated static let fileBoardIndexLimit = 32
+
+    /// Remembers that board `id` is bound to the workspace `.rafuensemble`
+    /// file at `relativePath`, so a restored workspace can reopen its tab. The
+    /// index keeps the newest `fileBoardIndexLimit` entries per workspace.
+    func rememberFileBoard(
+        _ id: CanvasID, relativePath: String, workspace: TerminalGroupWorkspaceKey
+    ) throws {
+        guard CanvasCardContent.validRelativePath(relativePath) else {
+            throw CanvasError.invalidPath
+        }
+        try withLock(workspace: workspace) { folder in
+            var records = readFileBoardIndex(folder).filter {
+                $0.id != id && $0.path != relativePath
+            }
+            records.append(.init(id: id, path: relativePath))
+            records = Array(records.suffix(Self.fileBoardIndexLimit))
+            let data = try JSONEncoder().encode(records)
+            let url = folder.appending(path: Self.fileBoardIndexName)
+            try data.write(to: url, options: .atomic)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600], ofItemAtPath: url.path)
+        }
+    }
+
+    /// The workspace-relative `.rafuensemble` path remembered for `id`.
+    func fileBoardPath(_ id: CanvasID, workspace: TerminalGroupWorkspaceKey) throws -> String? {
+        try withLock(workspace: workspace) { folder in
+            readFileBoardIndex(folder).last { $0.id == id }?.path
+        }
+    }
+
+    private nonisolated static let fileBoardIndexName = "ensemble-files.index"
+
+    private func readFileBoardIndex(_ folder: URL) -> [FileBoardRecord] {
+        let url = folder.appending(path: Self.fileBoardIndexName)
+        guard
+            let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+            size <= 64 * 1_024, let data = try? Data(contentsOf: url),
+            let records = try? JSONDecoder().decode([FileBoardRecord].self, from: data)
+        else { return [] }
+        return Array(
+            records.filter { CanvasCardContent.validRelativePath($0.path) }
+                .suffix(Self.fileBoardIndexLimit))
+    }
+
     private func fileURL(_ id: CanvasID, folder: URL) -> URL {
         folder.appending(path: id.rawValue.uuidString.lowercased() + ".json")
     }

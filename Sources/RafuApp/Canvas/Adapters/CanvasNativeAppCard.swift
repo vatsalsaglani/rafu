@@ -1,280 +1,50 @@
 import AppKit
-import CoreImage
 import Observation
-// ScreenCaptureKit's legacy picker objects have no Swift isolation annotation.
-// The picker filter is handed to MainActor once and is never mutated by Rafu.
-@preconcurrency import ScreenCaptureKit
 import SwiftUI
-import Synchronization
 
-/// Only a value ticket crosses callback queues. The picker filter never enters
-/// this lock. A cancelled owner leaves its request occupied until the SDK replies.
-nonisolated final class CanvasCaptureRequestGate: Sendable {
-    private let ticket = Mutex<UUID?>(nil)
-    func begin() -> UUID? {
-        ticket.withLock { value in
-            guard value == nil else { return nil }
-            let next = UUID()
-            value = next
-            return next
-        }
-    }
-    func snapshot() -> UUID? { ticket.withLock { $0 } }
-    func finish(_ expected: UUID) -> Bool {
-        ticket.withLock { value in
-            guard value == expected else { return false }
-            value = nil
-            return true
-        }
-    }
-}
-
-/// One picker observer routes each choice to its explicit pending owner.
-/// Captured content and window identities are never written to Canvas records.
-final class CanvasCapturePicker: NSObject, SCContentSharingPickerObserver {
-    static let shared = CanvasCapturePicker()
-    nonisolated private let requests = CanvasCaptureRequestGate()
-    private weak var pending: CanvasNativeAppController?
-    private var streams: [ObjectIdentifier: CanvasNativeAppController] = [:]
-    private override init() {
-        super.init()
-        SCContentSharingPicker.shared.add(self)
-    }
-
-    func choose(for controller: CanvasNativeAppController) {
-        guard requests.begin() != nil else {
-            controller.status = "Finish the open window picker first"
-            return
-        }
-        pending = controller
-        var configuration = SCContentSharingPickerConfiguration()
-        configuration.allowedPickerModes = [.singleWindow]
-        configuration.allowsChangingSelectedContent = false
-        let picker = SCContentSharingPicker.shared
-        picker.defaultConfiguration = configuration
-        picker.isActive = true
-        picker.present(using: .window)
-        controller.status = "Choose one window in the system picker"
-    }
-    func register(_ stream: SCStream, owner: CanvasNativeAppController) {
-        streams[ObjectIdentifier(stream)] = owner
-    }
-    func remove(_ stream: SCStream) {
-        streams[ObjectIdentifier(stream)] = nil
-        updateActive()
-    }
-    func cancel(_ owner: CanvasNativeAppController) {
-        if pending === owner { pending = nil }
-        updateActive()
-    }
-    private func updateActive() {
-        SCContentSharingPicker.shared.isActive = requests.snapshot() != nil || !streams.isEmpty
-    }
-
-    nonisolated func contentSharingPicker(
-        _ picker: SCContentSharingPicker, didCancelFor stream: SCStream?
-    ) {
-        let identity = stream.map(ObjectIdentifier.init)
-        let request = requests.snapshot()
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            if let identity {
-                streams[identity]?.stop()
-            } else {
-                guard let request, requests.finish(request) else { return }
-                pending?.status = "Window selection cancelled"
-                pending = nil
-            }
-            updateActive()
-        }
-    }
-    nonisolated func contentSharingPicker(
-        _ picker: SCContentSharingPicker,
-        didUpdateWith filter: SCContentFilter, for stream: SCStream?
-    ) {
-        if let stream {
-            let identity = ObjectIdentifier(stream)
-            Task { @MainActor [weak self] in self?.streams[identity]?.stop() }
-            return
-        }
-        // The SDK calls this off main. Keep the exact picker-authorized
-        // filter; do not rebuild it through a broader screen inventory.
-        // This one legacy SDK handoff relies on the file-scoped compatibility
-        // import. Rafu never mutates or shares the filter after this handoff.
-        guard let request = requests.snapshot() else { return }
-        Task { @MainActor [weak self, filter] in
-            guard let self, self.requests.finish(request) else { return }
-            let owner = self.pending
-            self.pending = nil
-            guard filter.style == .window else {
-                owner?.status = "Choose one window"
-                self.updateActive()
-                return
-            }
-            owner?.start(filter: filter)
-            self.updateActive()
-        }
-    }
-    nonisolated func contentSharingPickerStartDidFailWithError(_ error: any Error) {
-        guard let request = requests.snapshot() else { return }
-        Task { @MainActor [weak self] in
-            guard let self, self.requests.finish(request) else { return }
-            self.pending?.status = "Window preview is unavailable. You can still open the app."
-            self.pending = nil
-            self.updateActive()
-        }
-    }
-}
-
-nonisolated private enum CanvasCaptureEvent: Sendable {
-    case frame(CGImage)
-    case unavailable
-}
-
-/// Callback work stays on a serial capture queue. At most one pending frame
-/// crosses to MainActor; no Task is made for every captured frame.
-nonisolated private final class CanvasCaptureOutput: NSObject, SCStreamOutput, SCStreamDelegate {
-    let frames: AsyncStream<CanvasCaptureEvent>.Continuation
-    private let context = CIContext(options: [.cacheIntermediates: false])
-    init(_ frames: AsyncStream<CanvasCaptureEvent>.Continuation) { self.frames = frames }
-    func stream(
-        _ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
-        of type: SCStreamOutputType
-    ) {
-        guard type == .screen, sampleBuffer.isValid,
-            let buffer = sampleBuffer.imageBuffer
-        else { return }
-        if let attachments = CMSampleBufferGetSampleAttachmentsArray(
-            sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
-            let code = attachments.first?[.status] as? Int,
-            let status = SCFrameStatus(rawValue: code)
-        {
-            if status == .blank || status == .suspended || status == .stopped {
-                frames.yield(.unavailable)
-                return
-            }
-            guard status == .complete else { return }
-        }
-        let image = CIImage(cvPixelBuffer: buffer)
-        if let frame = context.createCGImage(image, from: image.extent) {
-            frames.yield(.frame(frame))
-        }
-    }
-    func stream(_ stream: SCStream, didStopWithError error: any Error) {
-        frames.yield(.unavailable)
-        frames.finish()
-    }
-}
-
+/// Per-card metadata owner. Docking state lives in `CanvasAppDocking`; this
+/// object routes the card's explicit actions to it. Creating it starts nothing.
 @Observable
 final class CanvasNativeAppController {
     let bundleID: String
-    static let referenceStatus = "App reference — no preview"
-    var status = CanvasNativeAppController.referenceStatus
-    private(set) var frame: CGImage?
-    private(set) var isCapturing = false
-    @ObservationIgnored private var stream: SCStream?
-    @ObservationIgnored private var output: CanvasCaptureOutput?
-    @ObservationIgnored private var framesTask: Task<Void, Never>?
-    @ObservationIgnored private var generation = UUID()
-    @ObservationIgnored private var pickerIsPending = false
-    @ObservationIgnored var canStart: (() -> Bool)?
+    let cardID: CanvasCardID
+    var status: String?
 
-    init(bundleID: String) { self.bundleID = bundleID }
+    init(bundleID: String, cardID: CanvasCardID) {
+        self.bundleID = bundleID
+        self.cardID = cardID
+    }
+
+    var dockState: CanvasDockState { CanvasAppDocking.shared.state(for: cardID) }
+    var isDocked: Bool { dockState.isDocked }
+
+    /// Opens or activates the app without docking it.
     func openApp() {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+        guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) != nil else {
             status = "The app is not installed"
             return
         }
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
-        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, _ in }
+        status = nil
+        CanvasAppDocking.launch(bundleID: bundleID)
     }
-    func chooseWindow() {
-        guard canStart?() == true else {
-            status = "Preview limit reached, or Canvas is hidden"
-            return
-        }
-        stop()
-        pickerIsPending = true
-        CanvasCapturePicker.shared.choose(for: self)
-    }
-    func start(filter: SCContentFilter) {
-        pickerIsPending = false
-        guard canStart?() == true else {
-            status = "Canvas is hidden or the preview limit is reached"
-            return
-        }
-        let ticket = UUID()
-        generation = ticket
-        let pair = AsyncStream<CanvasCaptureEvent>.makeStream(bufferingPolicy: .bufferingNewest(1))
-        let output = CanvasCaptureOutput(pair.continuation)
-        let configuration = SCStreamConfiguration()
-        configuration.width = 960
-        configuration.height = 540
-        configuration.queueDepth = 3
-        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 10)
-        configuration.capturesAudio = false
-        configuration.showsCursor = false
-        let stream = SCStream(filter: filter, configuration: configuration, delegate: output)
-        do {
-            try stream.addStreamOutput(
-                output, type: .screen,
-                sampleHandlerQueue: DispatchQueue(label: "dev.rafu.canvas.capture", qos: .utility))
-            self.stream = stream
-            self.output = output
-            isCapturing = true
-            CanvasCapturePicker.shared.register(stream, owner: self)
-            framesTask = Task { [weak self] in
-                for await event in pair.stream {
-                    guard let self, generation == ticket, !Task.isCancelled else { return }
-                    switch event {
-                    case .frame(let image): frame = image
-                    case .unavailable:
-                        stop()
-                        status = "The window preview is unavailable"
-                        return
-                    }
-                }
-            }
-            Task { [weak self] in
-                do {
-                    try await stream.startCapture()
-                    guard let self, generation == ticket else {
-                        try? await stream.stopCapture()
-                        return
-                    }
-                    status = "Live preview — input stays in the app"
-                } catch {
-                    guard let self, generation == ticket else { return }
-                    stop()
-                    status = "Preview access was denied or the window is unavailable"
-                }
-            }
-        } catch {
-            if generation == ticket {
-                stop()
-                status = "Preview access was denied or the window is unavailable"
-            }
+
+    /// The explicit Dock action. It may show the system permission prompt once.
+    func dock(appName: String, session: WorkspaceSession) {
+        status = nil
+        let cardID = cardID
+        let bundleID = bundleID
+        Task {
+            await CanvasAppDocking.shared.dock(
+                card: cardID, bundleID: bundleID, appName: appName, session: session,
+                prompt: true)
         }
     }
-    func stop() {
-        generation = UUID()
-        if pickerIsPending || stream != nil { CanvasCapturePicker.shared.cancel(self) }
-        pickerIsPending = false
-        framesTask?.cancel()
-        framesTask = nil
-        output?.frames.finish()
-        output = nil
-        if let stream {
-            CanvasCapturePicker.shared.remove(stream)
-            Task { try? await stream.stopCapture() }
-        }
-        stream = nil
-        frame = nil
-        isCapturing = false
-        status = "Paused — choose a window to resume"
-    }
+
+    func undock() { CanvasAppDocking.shared.undock(cardID) }
+
+    /// The board hid, paused, or removed this card. Docking re-evaluates: a
+    /// removed card gives the window back, a hidden one puts it away.
+    func stop() { CanvasAppDocking.shared.refresh(cardID) }
 }
 
 struct CanvasNativeAppCard: View {
@@ -285,97 +55,164 @@ struct CanvasNativeAppCard: View {
     @State private var controller: CanvasNativeAppController?
     @State private var visibilityOwner = UUID()
     @State private var appIcon: NSImage?
-    @State private var showsPictureNote = false
+
+    private var docking: CanvasAppDocking { .shared }
 
     var body: some View {
-        Group {
+        // A real VStack, not an empty Group, so the lifecycle hooks always run.
+        VStack(spacing: 0) {
             if let controller {
-                if let frame = controller.frame {
-                    picture(frame, controller: controller)
-                } else {
-                    reference(controller)
-                }
+                face(controller, state: docking.state(for: card.id))
             } else {
                 Text("Preparing app reference…").foregroundStyle(theme.palette.textSecondary)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear {
-            guard let resources = session.canvasResources[board.id],
-                resources.board === board
-            else { return }
-            controller = resources.nativeApp(for: card)
-            resources.showNative(card.id, owner: visibilityOwner)
-            if case .nativeApp(let bundleID) = card.content,
-                let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
-            {
-                appIcon = NSWorkspace.shared.icon(forFile: url.path)
-            }
+        .background { CanvasDockAnchor(cardID: card.id, owner: visibilityOwner) }
+        .onGeometryChange(for: CanvasDockFrames.self) { proxy in
+            CanvasDockFrames(
+                global: proxy.frame(in: .global),
+                board: proxy.frame(in: .named(CanvasConnectionCoordinateSpace.board)))
+        } action: { frames in
+            docking.updateGeometry(card.id, owner: visibilityOwner, frames: frames)
         }
+        .onAppear(perform: appear)
         .onDisappear {
             session.canvasResources[board.id]?.hideNative(card.id, owner: visibilityOwner)
+            docking.unmount(card.id, owner: visibilityOwner)
         }
     }
 
-    /// The app is a separate process. Its body is an icon, its name, and the
-    /// two ways to use it (review C8).
-    private func reference(_ controller: CanvasNativeAppController) -> some View {
-        VStack(spacing: 10) {
-            Group {
-                if let appIcon {
-                    Image(nsImage: appIcon).resizable().scaledToFit()
-                } else {
-                    Image(systemName: "macwindow").resizable().scaledToFit()
-                        .foregroundStyle(theme.palette.textSecondary)
-                }
+    private func appear() {
+        guard let resources = session.canvasResources[board.id],
+            resources.board === board
+        else { return }
+        controller = resources.nativeApp(for: card)
+        resources.showNative(card.id, owner: visibilityOwner)
+        docking.mount(card.id, owner: visibilityOwner)
+        if case .nativeApp(let bundleID) = card.content,
+            let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+        {
+            appIcon = NSWorkspace.shared.icon(forFile: url.path)
+        }
+    }
+
+    @ViewBuilder
+    private func face(_ controller: CanvasNativeAppController, state: CanvasDockState)
+        -> some View
+    {
+        switch state {
+        case .docked:
+            dockedFace(controller)
+        case .needsPermission:
+            permissionFace(controller)
+        default:
+            referenceFace(controller, state: state)
+        }
+    }
+
+    private var icon: some View {
+        Group {
+            if let appIcon {
+                Image(nsImage: appIcon).resizable().scaledToFit()
+            } else {
+                Image(systemName: "macwindow").resizable().scaledToFit()
+                    .foregroundStyle(theme.palette.textSecondary)
             }
-            .frame(width: 48, height: 48)
-            .accessibilityHidden(true)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func identity(_ state: CanvasDockState) -> some View {
+        VStack(spacing: 4) {
+            icon.frame(width: 48, height: 48)
             Text(card.title).font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(theme.palette.textPrimary).lineLimit(1)
-            Button("Open \(card.title)") { controller.openApp() }
-                .buttonStyle(RafuProminentButtonStyle())
-            if controller.isCapturing {
-                Button("Stop Window Preview") { controller.stop() }
-                    .buttonStyle(RafuSecondaryButtonStyle(compact: true))
-            } else {
-                Button("Show Window Preview…") { controller.chooseWindow() }
-                    .buttonStyle(RafuSecondaryButtonStyle(compact: true))
-            }
-            if controller.status != CanvasNativeAppController.referenceStatus {
-                Text(controller.status).font(.system(size: 11))
+            Text(state.label).font(.system(size: 11, weight: .medium))
+                .foregroundStyle(theme.palette.textSecondary)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(card.title), \(state.label)")
+    }
+
+    /// Not docked, docking, paused, undocked, or failed: the app's identity,
+    /// one sentence of state, and the two explicit ways to use it.
+    private func referenceFace(_ controller: CanvasNativeAppController, state: CanvasDockState)
+        -> some View
+    {
+        VStack(spacing: 10) {
+            identity(state)
+            if let detail = controller.status ?? state.detail(appName: card.title) {
+                Text(detail).font(.system(size: 11))
                     .foregroundStyle(theme.palette.textSecondary)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if state == .docking {
+                ProgressView().controlSize(.small)
+            } else if state.isDocked {
+                Button("Undock") { controller.undock() }
+                    .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+                    .help("Put the \(card.title) window back where it was")
+            } else {
+                Button("Dock \(card.title)") {
+                    controller.dock(appName: card.title, session: session)
+                }
+                .buttonStyle(RafuProminentButtonStyle())
+                .help("Place the real \(card.title) window over this card")
+                Button("Open \(card.title)") { controller.openApp() }
+                    .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+                    .help("Open \(card.title) in its own window")
             }
         }
         .padding(12)
     }
 
-    /// A picture never looks interactive: no text cursor, no hover highlight.
-    /// A click selects the card and explains where input goes.
-    private func picture(_ frame: CGImage, controller: CanvasNativeAppController) -> some View {
-        Image(decorative: frame, scale: 1).resizable().scaledToFit()
-            .padding(8)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(.rect)
-            .onTapGesture {
-                board.backToBoard()
-                board.select([card.id])
-                showsPictureNote = true
+    private func permissionFace(_ controller: CanvasNativeAppController) -> some View {
+        VStack(spacing: 10) {
+            identity(.needsPermission)
+            Text(CanvasDockState.needsPermission.detail(appName: card.title) ?? "")
+                .font(.system(size: 11))
+                .foregroundStyle(theme.palette.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Open Accessibility Settings") { docking.openAccessibilitySettings() }
+                .buttonStyle(RafuProminentButtonStyle(compact: true))
+            Button("Dock \(card.title)") {
+                controller.dock(appName: card.title, session: session)
             }
-            .popover(isPresented: $showsPictureNote) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(CanvasCardPresentation.previewCaption(appName: card.title))
-                        .font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
-                    Button("Open \(card.title)") {
-                        showsPictureNote = false
-                        controller.openApp()
-                    }
-                    .buttonStyle(RafuProminentButtonStyle(compact: true))
-                }
-                .padding(14).frame(width: 260)
+            .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+            .help("Try again after allowing Rafu")
+        }
+        .padding(12)
+    }
+
+    /// The real window sits over this body. When Rafu is in front it covers
+    /// the window; a click here brings the app forward again.
+    private func dockedFace(_ controller: CanvasNativeAppController) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .strokeBorder(theme.palette.borderSubtle, lineWidth: 1)
+                .padding(3)
+            VStack(spacing: 6) {
+                icon.frame(width: 24, height: 24).opacity(0.6)
+                Text("Click to show \(card.title)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.palette.textMuted)
             }
-            .accessibilityLabel("Picture of a \(card.title) window")
-            .accessibilityHint("Input goes to \(card.title), not to this picture.")
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(theme.palette.editorBackground.opacity(0.4))
+        .contentShape(.rect)
+        .onTapGesture {
+            board.select([card.id])
+            docking.bringForward(card.id)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(card.title), docked")
+        .accessibilityHint("Brings the \(card.title) window forward. Input goes to \(card.title).")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { docking.bringForward(card.id) }
+        .accessibilityAction(named: "Undock") { controller.undock() }
     }
 }

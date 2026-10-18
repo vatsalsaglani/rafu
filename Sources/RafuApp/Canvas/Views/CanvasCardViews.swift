@@ -93,10 +93,8 @@ struct CanvasCardShell: View {
     /// whiteboard items) draws through `CanvasWhiteboardCardFace`; a Mermaid
     /// diagram keeps the standard header and uses the face as its body.
     private var isWhiteboardItem: Bool {
-        switch card.content {
-        case .file, .image, .note, .terminal, .web, .nativeApp, .mermaid: false
-        default: true
-        }
+        // One rule, owned by the whiteboard face, for which kinds skip chrome.
+        !CanvasWhiteboardCardFace.usesCardChrome(card.content)
     }
 
     @ViewBuilder
@@ -271,7 +269,7 @@ struct CanvasCardShell: View {
                 }
             }
             if isDirtyFile { CanvasHeaderBadge(text: "Modified") }
-            if showsPreviewBadge { CanvasHeaderBadge(text: "Preview", symbol: "eye") }
+            if showsDockedBadge { CanvasHeaderBadge(text: "Docked", symbol: "pin.fill") }
             if let model = commands.noteModel, model.isEditing {
                 CanvasNoteFormatBar(
                     model: model, availableWidth: CGFloat(card.rect.width), showsEditingLabel: false
@@ -440,9 +438,9 @@ struct CanvasCardShell: View {
         }
     }
 
-    private var showsPreviewBadge: Bool {
+    private var showsDockedBadge: Bool {
         guard case .nativeApp = card.content else { return false }
-        return session.canvasResources[board.id]?.nativeApp(for: card)?.frame != nil
+        return CanvasAppDocking.shared.state(for: card.id).isDocked
     }
 
     // MARK: Hover
@@ -538,6 +536,7 @@ struct CanvasCardShell: View {
         board.select([card.id])
         raiseIfNeeded()
         guard clicks >= 2 else { return }
+        if CanvasWhiteboardEditing.shared.requestEditing(card) { return }  // X5 whiteboard
         if titleFrame.contains(location) {
             board.renamingCardID = card.id
         } else {

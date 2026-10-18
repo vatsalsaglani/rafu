@@ -131,6 +131,8 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$VERSION</string>
   <key>CFBundleVersion</key>
   <string>1</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Rafu asks Music and Spotify what is playing, and sends them play, pause, next, and previous, only when you use Now Playing in the notch.</string>
   <key>LSMinimumSystemVersion</key>
   <string>$MIN_SYSTEM_VERSION</string>
   <key>NSPrincipalClass</key>
@@ -147,6 +149,18 @@ cat >"$INFO_PLIST" <<PLIST
         <string>public.folder</string>
       </array>
     </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Rafu Ensemble</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>LSHandlerRank</key>
+      <string>Owner</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>dev.rafu.ensemble</string>
+      </array>
+    </dict>
   </array>
   <key>UTExportedTypeDeclarations</key>
   <array>
@@ -159,6 +173,23 @@ cat >"$INFO_PLIST" <<PLIST
       <array>
         <string>public.data</string>
       </array>
+    </dict>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>dev.rafu.ensemble</string>
+      <key>UTTypeDescription</key>
+      <string>Rafu Ensemble</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.json</string>
+      </array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array>
+          <string>rafuensemble</string>
+        </array>
+      </dict>
     </dict>
   </array>
 </dict>
@@ -193,6 +224,9 @@ test "$(plutil -extract CFBundleIconFile raw "$INFO_PLIST")" = "$APP_ICON_NAME"
 # breaks the SwiftUI drag pasteboard bridge (see
 # docs/references/drag-and-drop-custom-uttype.md).
 test "$(plutil -extract UTExportedTypeDeclarations.0.UTTypeIdentifier raw "$INFO_PLIST")" = "dev.vatsalsaglani.rafu.editor-drag"
+# Keep the Ensemble file type in lockstep with `UTType.rafuEnsemble` and
+# `CanvasEnsembleFile.typeIdentifier` (CanvasEnsembleFileActions.swift).
+test "$(plutil -extract UTExportedTypeDeclarations.1.UTTypeIdentifier raw "$INFO_PLIST")" = "dev.rafu.ensemble"
 test -f "$APP_RESOURCES/Themes/indigo.json"
 test -f "$APP_RESOURCES/Themes/khadi.json"
 test -f "$APP_RESOURCES/Themes/dracula.json"

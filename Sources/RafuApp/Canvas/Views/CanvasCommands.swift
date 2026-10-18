@@ -11,6 +11,7 @@ struct CanvasCommands: Commands {
                 .disabled(session?.rootURL == nil)
             Button("Open Canvas…") { session?.requestCanvasLibrary() }.disabled(
                 session?.rootURL == nil)
+            CanvasEnsembleFileCommandItems(session: session, board: board)  // X5 ensemble file
         }
         CommandMenu("Canvas") {
             if let board, let session {

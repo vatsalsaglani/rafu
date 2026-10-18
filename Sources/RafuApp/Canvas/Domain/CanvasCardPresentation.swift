@@ -55,6 +55,19 @@ nonisolated enum CanvasCardPresentation {
             return displayTitle(title: destination.address, content: content)
         case .nativeApp(let bundleID):
             return bundleID
+        case .mermaid(let source):
+            return CanvasCardSummaryText.firstLine(of: source, limit: 60)
+        case .shape(let shape):
+            return shape.label.map { CanvasCardSummaryText.firstLine(of: $0, limit: 60) }
+                ?? shape.kind.title
+        case .stroke(let stroke):
+            return stroke.kind.title
+        case .text(let text):
+            return CanvasCardSummaryText.firstLine(of: text.text, limit: 60)
+        case .frame(let frame):
+            return frame.title
+        case .serviceIcon(let icon):
+            return icon.label
         }
     }
 }

@@ -78,7 +78,8 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        ExternalOpenRequests.shared.enqueue(urls)
+        // `.rafuensemble` files open as board tabs (X5); folders as before.
+        ExternalOpenRequests.shared.enqueue(CanvasEnsembleOpenRouter.shared.route(urls))
         NSApp.activate(ignoringOtherApps: true)
     }
 }

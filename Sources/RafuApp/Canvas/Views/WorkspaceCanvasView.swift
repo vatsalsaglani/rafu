@@ -183,6 +183,10 @@ struct WorkspaceCanvasView: View {
                 .transition(cardTransition)
             }
             CanvasEdgeOverlay(board: board, session: session, drag: connectionDrag)
+            // X5 whiteboard
+            CanvasWhiteboardCreationLayer(
+                board: board, tool: .forBoard(board.id), viewportProject: project,
+                unproject: unproject)
             ForEach(interaction.guides, id: \.key) { guide in
                 guideLine(guide)
             }
@@ -204,6 +208,8 @@ struct WorkspaceCanvasView: View {
             if board.cards.isEmpty, !tipDismissed {
                 emptyBoardTip
             }
+            // X5 whiteboard
+            CanvasToolPalette(board: board, session: session, tool: .forBoard(board.id))
         }
         .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         .coordinateSpace(name: CanvasConnectionCoordinateSpace.board)
@@ -529,6 +535,12 @@ struct WorkspaceCanvasView: View {
             // Return on a selected note starts editing (Zoom to Card first below 50%).
             if model.beginEditing() { return }
         }
+        // Return on a selected whiteboard item or Mermaid card opens its editor.
+        if case .mermaid = card.content {
+            CanvasWhiteboardEditing.shared.request(card.id)
+            return
+        }
+        if CanvasWhiteboardEditing.shared.requestEditing(card) { return }
         if case .terminal = card.content,
             let primary = CanvasCardCommands(card: card, board: board, session: session).primary,
             primary.id == "start" || primary.id == "restart"
