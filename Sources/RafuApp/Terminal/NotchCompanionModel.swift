@@ -3,69 +3,6 @@ import Observation
 import RafuCore
 import SwiftUI
 
-/// The bounded, presentation-only slice of one active Ensemble workflow
-/// that the notch companion needs. It carries no prompt, artifact, process
-/// output, credential, or cost data.
-nonisolated struct ConductorNotchRunItem: Equatable, Identifiable, Sendable {
-    let workspaceID: UUID
-    let runID: String
-    let workflowName: String
-    let roleName: String
-    let stepNumber: Int
-    let stepCount: Int
-    let isGateWaiting: Bool
-
-    var id: String {
-        "\(workspaceID.uuidString.lowercased())/\(runID)"
-    }
-
-    var stepLabel: String {
-        "Step \(stepNumber) of \(stepCount)"
-    }
-
-    static func item(
-        manifest: ConductorRunManifest?,
-        state: ConductorWorkflowState,
-        workspaceID: UUID
-    ) -> Self? {
-        guard let manifest, !manifest.steps.isEmpty else { return nil }
-        let stepIndex: Int
-        let isGateWaiting: Bool
-        switch state {
-        case .preparing:
-            stepIndex = 0
-            isGateWaiting = false
-        case .runningStep(let index), .awaitingArtifact(let index):
-            stepIndex = index
-            isGateWaiting = false
-        case .awaitingGate(let index):
-            stepIndex = index
-            isGateWaiting = true
-        case .awaitingMergeGate:
-            stepIndex = manifest.steps.count - 1
-            isGateWaiting = true
-        case .idle, .awaitingPlanGate, .completed, .failed, .aborted:
-            // A parked plan gate has no "current step" — step 0 has not
-            // launched — so the companion tile simply has nothing to show
-            // yet, same as before any run started.
-            return nil
-        }
-        guard manifest.steps.indices.contains(stepIndex) else { return nil }
-        return Self(
-            workspaceID: workspaceID,
-            runID: manifest.id,
-            workflowName: manifest.workflowName,
-            roleName: manifest.steps[stepIndex].agentName,
-            stepNumber: stepIndex + 1,
-            stepCount: manifest.steps.count,
-            isGateWaiting: isGateWaiting)
-    }
-
-    static func primary(in items: [Self]) -> Self? {
-        items.first(where: \.isGateWaiting) ?? items.first
-    }
-}
-
 /// Persists whether the notch companion strip exists at all
 /// (terminal-notch-hud.md, "Resting": "A Settings toggle... default ON on
 /// notched displays, OFF on non-notch displays"). NC-E wires the real
@@ -160,18 +97,41 @@ final class NotchCompanionModel: NSObject {
     /// up with the physical housing without hardcoding a pixel value that
     /// could drift from a real screen's `safeAreaInsets.top`.
     private(set) var bandInset: CGFloat = 0
+    /// Height of the always-visible strip row: the notch band on a notched
+    /// screen (equal to `bandInset`), the pill's own height on a plain
+    /// display, where `bandInset` is 0 and the panel hangs below the menu bar.
+    private(set) var stripHeight: CGFloat = 0
+    /// Whether the strip hugs a physical notch. `false` for the floating pill
+    /// on a display without one: both sides are visible, so the wings can
+    /// carry more.
+    private(set) var hasPhysicalNotch = true
+
+    // MARK: - What the notch shows (Settings ▸ General ▸ Notch)
+
+    /// Sections offered as tabs in the open panel, in tab order. Reloaded by
+    /// `reloadDisplayPreferences()` — never read from `UserDefaults` in a view
+    /// body.
+    private(set) var visibleSections: [NotchSection] = NotchSection.allCases
+    private(set) var selectedSection: NotchSection = .ensembles
+    /// The mascot replaces the plain Rafu mark in the collapsed strip.
+    private(set) var isMascotEnabled = true
+    /// Hovering opens the panel (Cider's behaviour); off, hover only widens
+    /// the strip and a click opens the panel.
+    private(set) var opensOnHover = true
+    /// Show a floating pill on a display with no notch.
+    private(set) var allowsPill = false
+    /// Now Playing, read through public API only (`NotchNowPlaying`).
+    let nowPlaying = NotchNowPlaying()
+    @ObservationIgnored
+    var displayPreferences = NotchDisplayPreferenceStore()
+    @ObservationIgnored
+    private var bounceLedger = MascotBounceLedger()
     /// Every enabled provider's usage snapshot (agent-usage-providers.md,
     /// "Multi-provider display in the notch") — empty hides the whole
     /// usage area. Computed off-main by `refreshUsage()`; never populated
     /// synchronously, so panel presentation never blocks on file I/O (or,
     /// once network strategies land, a network round-trip).
     private(set) var usageSnapshots: [UsageSnapshot] = []
-    /// Whether the overflow grid (every enabled provider past the
-    /// front-line cap) is expanded — per-peek, never persisted, and always
-    /// reset to `false` when the panel collapses back to `.resting`
-    /// (`graceTimerFired()`/`escapePressed()`), so the NEXT peek always
-    /// starts collapsed.
-    private(set) var isUsageOverflowExpanded = false
     /// The user's front-line ordering (agent-usage-providers.md: "up to 4
     /// tiles the user picks and orders in Settings"). Not a test seam —
     /// every headless test either asserts `usageSnapshots` directly or
@@ -180,50 +140,15 @@ final class NotchCompanionModel: NSObject {
     private var usageStripOrderStore = UsageStripOrderStore()
 
     /// Up to `UsageDisplayPolicy.frontLineCap` snapshots, in the user's
-    /// order — the single muted line shown whenever the peek panel is
-    /// open (`CompanionUsageStripView`).
+    /// order — listed first in the Usage section.
     var usageFrontLine: [UsageSnapshot] {
         UsageDisplayPolicy.frontLine(from: usageSnapshots, order: usageStripOrderStore.order())
     }
 
-    /// Every enabled snapshot NOT selected into `usageFrontLine` — sits
-    /// behind the `▸ N more providers` disclosure, expanded (per-peek)
-    /// into a two-column grid via `toggleUsageOverflow()`.
+    /// Every enabled snapshot NOT selected into `usageFrontLine`. The Usage
+    /// section lists these after the front line.
     var usageOverflow: [UsageSnapshot] {
         UsageDisplayPolicy.overflow(from: usageSnapshots, frontLine: usageFrontLine)
-    }
-
-    /// Active C5 workflow runs across registered windows. This is derived
-    /// from already-live observable state: no polling, provider read, or
-    /// process probe is added to the companion's idle path.
-    var activeRunItems: [ConductorNotchRunItem] {
-        entries.flatMap { entry -> [ConductorNotchRunItem] in
-            guard let session = entry.session else { return [] }
-            // Every engine that can own a live run: C6's concurrent pool plus
-            // the window's singular controller. Reading only the latter would
-            // silently hide concurrent pipelines from the companion.
-            let controllers =
-                session.conductorConcurrentRuns.controllers + [session.conductorWorkflowController]
-            var seenRunIDs: Set<String> = []
-            return controllers.compactMap { controller in
-                guard
-                    let item = ConductorNotchRunItem.item(
-                        manifest: controller.manifest,
-                        state: controller.state,
-                        workspaceID: entry.id)
-                else { return nil }
-                // A run adopted by the singular controller may also still be
-                // listed by the pool; show it once.
-                guard seenRunIDs.insert(item.runID).inserted else { return nil }
-                return item
-            }
-        }
-    }
-
-    /// A waiting gate wins the compact strip's single slot so the state
-    /// that needs a decision is never hidden behind another active run.
-    var primaryActiveRunItem: ConductorNotchRunItem? {
-        ConductorNotchRunItem.primary(in: activeRunItems)
     }
 
     // MARK: - Weak session registry (mirrors `TerminalAttentionCenter`)
@@ -292,50 +217,17 @@ final class NotchCompanionModel: NSObject {
         TerminalAttentionCenter.shared.revealTerminalSession(sessionID)
     }
 
-    // MARK: - Layout constants (peek panel content sizing)
+    // MARK: - Limits
 
-    private static let editorRowHeight: CGFloat = 56
-    private static let emptyStateHeight: CGFloat = 64
-    /// One front-line provider's OWN row height (agent-usage-providers.md,
-    /// "Multi-provider display in the notch", amended 2026-07-23: per-row
-    /// front line — each of the up-to-`UsageDisplayPolicy.frontLineCap`
-    /// providers gets its own row rather than sharing one joined line).
-    /// Matches `usageGridRowHeight`: both are one line of the same 10.5pt
-    /// monospaced font. Multiplied by `usageFrontLine.count` in
-    /// `peekContentHeight()`.
-    private static let usageFrontLineRowHeight: CGFloat = 16
-    /// The usage front line's own top padding
-    /// (`CompanionUsageStripView`'s `.padding(.top, RafuMetrics.space2)`),
-    /// added ONCE regardless of front-line row count — was folded into the
-    /// single-line `usageFrontLineHeight` pre-redesign.
-    private static let usageFrontLineTopPadding: CGFloat = RafuMetrics.space2
-    /// The `▸ N more providers` disclosure line's own height, added only
-    /// when there is at least one overflow provider.
-    private static let usageDisclosureHeight: CGFloat = 18
-    /// One row of the two-column overflow grid — added `gridRows` times,
-    /// and only while `isUsageOverflowExpanded`.
-    private static let usageGridRowHeight: CGFloat = 16
-    /// A coarse fixed height per feed card, same approximation
-    /// `editorRowHeight` already makes (real content — snippet line count,
-    /// wrapped names — is not measured here). Sized for a card with a
-    /// header row, a ~3-line snippet, and a reply row.
-    private static let feedCardHeight: CGFloat = 150
     /// Feed items are ephemeral attention state, not history — capped so a
     /// long-running session with many transient bells never grows this
     /// unbounded (terminal-notch-hud.md NC-C).
     private static let maxFeedItems = 20
-    /// The pinned filter field's own height, added to `peekContentHeight()`
-    /// whenever `isSearchFieldVisible` — an estimate (text field intrinsic
-    /// height plus `CompanionSearchFieldView`'s own vertical padding), not
-    /// a measured value.
-    private static let searchFieldHeight: CGFloat = 36
     /// `isSearchFieldVisible` shows the field once the editors list is at
     /// least this long — below it, the list is already short enough that
     /// scanning it beats typing (a query already in progress stays visible
     /// regardless of count, see `isSearchFieldVisible`).
     private static let searchFieldThreshold = 6
-    private static let activeRunRowHeight: CGFloat = 48
-    private static let activeRunTopPadding: CGFloat = RafuMetrics.space2
 
     override init() {
         super.init()
@@ -417,7 +309,7 @@ final class NotchCompanionModel: NSObject {
         reposition(animated: animated)
     }
 
-    /// What `CompanionEditorsListView` actually renders — `editorRows`
+    /// What the Ensembles section lists — `editorRows`
     /// narrowed by `searchQuery` through the pure `CompanionEditorRow`
     /// filter (NC-A). The usage strip and attention feed are never filtered
     /// (terminal-notch-hud.md NC-B, "Search/filter": scope is the editors
@@ -442,7 +334,188 @@ final class NotchCompanionModel: NSObject {
     /// `CompanionWingsView`'s content gate — no glyph/count text renders
     /// behind the physical housing at notch-only width.
     var isStripExpanded: Bool {
-        hoverState != .resting || attentionCount > 0 || !activeRunItems.isEmpty
+        hoverState != .resting || attentionCount > 0
+    }
+
+    /// Whether the panel (tabs and content) is showing: pinned, or peeking
+    /// while hover-to-open is on. With it off, peeking is only the wider
+    /// wings strip and a click opens the panel.
+    var isPanelOpen: Bool {
+        hoverState == .pinned || (hoverState == .peeking && opensOnHover)
+    }
+
+    // MARK: - Agents (collapsed status, mascot, Ensembles, Up next)
+
+    /// The recognised agent CLI behind a terminal (`resolvedAgentProvider`,
+    /// `Support/AgentIdentity.swift`): the process spec's provider when Rafu
+    /// launched it, else whatever its terminal title says. `nil` for an
+    /// ordinary shell.
+    static func agentIdentity(of controller: WorkspaceTerminalController) -> ConductorCLIID? {
+        controller.resolvedAgentProvider
+    }
+
+    static func terminalInput(
+        for controller: WorkspaceTerminalController, windowID: UUID? = nil,
+        boardID: UUID? = nil, cardID: UUID? = nil
+    ) -> NotchTerminalInput {
+        NotchTerminalInput(
+            id: controller.id,
+            title: controller.displayName,
+            cli: agentIdentity(of: controller),
+            status: controller.status,
+            isProducingOutput: controller.isProducingOutput,
+            cause: controller.lastAttentionCause,
+            boardID: boardID,
+            cardID: cardID,
+            windowID: windowID,
+            trackedPhase: AgentActivityStore.shared.notchPhase(for: controller))
+    }
+
+    /// Every agent terminal in every registered window. Reads only the
+    /// terminal list and each controller's status flags, so a card drag on an
+    /// Ensemble never invalidates the collapsed strip that reads this.
+    var allAgentRows: [NotchAgentRow] {
+        entries.flatMap { entry -> [NotchAgentRow] in
+            guard let session = entry.session else { return [] }
+            return NotchAgentRow.rows(
+                from: session.terminal.sessions.map {
+                    Self.terminalInput(for: $0, windowID: entry.id)
+                })
+        }
+    }
+
+    /// Agents seen through hooks that run outside every Rafu terminal (X11).
+    /// They count toward the collapsed strip and the mascot.
+    var externalAgentRows: [NotchAgentRow] {
+        AgentActivityStore.shared.externalNotchRows(
+            excluding: entries.flatMap { $0.session?.terminal.sessions ?? [] })
+    }
+
+    var agentSummary: NotchAgentSummary {
+        NotchAgentSummary.summarize(allAgentRows + externalAgentRows)
+    }
+
+    var mascotState: RafuMascotState {
+        RafuMascotState.resolve(agents: allAgentRows + externalAgentRows)
+    }
+
+    /// Agents that ask the person to look, most urgent first (Up next).
+    var upNextRows: [NotchAgentRow] {
+        NotchAgentRow.byUrgency(allAgentRows.filter { $0.phase.needsAttention })
+    }
+
+    /// One window's open Ensembles with their agents, plus agents outside any
+    /// Ensemble. Reads each board's cards, so only the open Ensembles section
+    /// calls it.
+    func windowAgents(for entryID: UUID) -> NotchWindowAgents {
+        guard let session = entries.first(where: { $0.id == entryID })?.session else {
+            return .empty
+        }
+        return Self.windowAgents(for: session, windowID: entryID)
+    }
+
+    static func windowAgents(for session: WorkspaceSession, windowID: UUID) -> NotchWindowAgents {
+        var placement: [UUID: (board: UUID, card: UUID)] = [:]
+        var boards: [NotchBoardInput] = []
+        let open = session.canvas.boards.values.sorted {
+            $0.title.localizedStandardCompare($1.title) == .orderedAscending
+        }
+        for board in open {
+            let cards = board.cards
+            boards.append(
+                NotchBoardInput(id: board.id.rawValue, title: board.title, cardCount: cards.count))
+            for card in cards {
+                guard case .terminal(let groupID) = card.content,
+                    let group = session.terminal.terminalGroup(groupID)
+                else { continue }
+                for pane in group.panes {
+                    if let sessionID = pane.sessionID {
+                        placement[sessionID] = (board.id.rawValue, card.id.rawValue)
+                    }
+                }
+            }
+        }
+        let terminals = session.terminal.sessions.map { controller in
+            terminalInput(
+                for: controller, windowID: windowID,
+                boardID: placement[controller.id]?.board,
+                cardID: placement[controller.id]?.card)
+        }
+        return NotchWindowAgents.build(boards: boards, terminals: terminals)
+    }
+
+    /// Takes the person to an agent: its window, its Ensemble, its node.
+    /// Presentation only — it starts nothing and sends no input. An agent in a
+    /// terminal outside any Ensemble goes through the attention center's
+    /// existing reveal route. Collapses the panel afterwards.
+    func focusAgent(_ row: NotchAgentRow) {
+        entries.removeAll { $0.session == nil }
+        guard let windowID = row.windowID,
+            let session = entries.first(where: { $0.id == windowID })?.session
+        else { return }
+        if let boardRaw = row.boardID, let cardRaw = row.cardID,
+            let board = session.canvas.boards[CanvasID(rawValue: boardRaw)]
+        {
+            let card = CanvasCardID(rawValue: cardRaw)
+            session.presentCanvasBoard(board)
+            board.select([card])
+            board.revealCard(card)
+            session.terminal.terminalController(sessionID: row.id)?.clearAttention()
+            clearFeedItem(sessionID: row.id)
+            WorkspaceWindowRegistry.shared.focus(session: session)
+        } else {
+            revealFeedSession(row.id)
+        }
+        escapePressed()
+    }
+
+    /// Opens an Ensemble in its window. Presentation only.
+    func openEnsemble(windowID: UUID, boardID: UUID) {
+        entries.removeAll { $0.session == nil }
+        guard let session = entries.first(where: { $0.id == windowID })?.session,
+            let board = session.canvas.boards[CanvasID(rawValue: boardID)]
+        else { return }
+        session.presentCanvasBoard(board)
+        WorkspaceWindowRegistry.shared.focus(session: session)
+        escapePressed()
+    }
+
+    /// Lets the mascot bounce once per ready reply, however often it redraws.
+    func claimMascotBounce(_ id: UUID) -> Bool { bounceLedger.claim(id) }
+
+    // MARK: - Display preferences
+
+    /// Reads the notch's display preferences from defaults. Called when the
+    /// companion activates and when a Settings control changes one; a view
+    /// never reads defaults itself.
+    func reloadDisplayPreferences() {
+        let store = displayPreferences
+        visibleSections = store.visibleSections()
+        selectedSection = NotchSection.selection(
+            remembered: store.selectedSection(), visible: visibleSections)
+        isMascotEnabled = store.isMascotEnabled()
+        opensOnHover = store.opensOnHover()
+        allowsPill = store.showsPillOnPlainDisplays()
+        if panel != nil { syncNowPlaying() }
+    }
+
+    /// Now Playing listens (observers only, no Apple events) while the strip
+    /// exists and its section is on; otherwise it is stopped.
+    private func syncNowPlaying() {
+        if visibleSections.contains(.nowPlaying) { nowPlaying.start() } else { nowPlaying.stop() }
+    }
+
+    /// A Settings change: reload, then rebuild or reposition the strip (the
+    /// pill setting can add or remove it).
+    func displayPreferencesDidChange() {
+        activateIfEnabled()
+    }
+
+    func select(_ section: NotchSection) {
+        guard visibleSections.contains(section), section != selectedSection else { return }
+        selectedSection = section
+        displayPreferences.setSelectedSection(section)
+        if section == .usage { refreshUsage() }
     }
 
     /// The view's ONLY write path to `searchQuery` — per-keystroke and
@@ -508,26 +581,6 @@ final class NotchCompanionModel: NSObject {
         entries.removeAll { $0.session == nil }
         guard let session = entries.first(where: { $0.id == id })?.session else { return }
         WorkspaceWindowRegistry.shared.focus(session: session)
-    }
-
-    /// Opens the selected run in its owning workspace and collapses the
-    /// companion. Reading a manifest and selecting its canvas never starts
-    /// or resumes an agent process.
-    func openConductorRun(_ item: ConductorNotchRunItem) {
-        entries.removeAll { $0.session == nil }
-        guard
-            let session = entries.first(where: { $0.id == item.workspaceID })?.session
-        else { return }
-        session.showConductorRunDetail(item.runID)
-        WorkspaceWindowRegistry.shared.focus(session: session)
-        escapePressed()
-    }
-
-    /// Called by the SwiftUI observation bridge when a nested workflow
-    /// changes step or gate state. Geometry updates are immediate: step
-    /// transitions never receive decorative frame animation.
-    func activeRunsDidChange() {
-        reposition()
     }
 
     // MARK: - Attention feed (terminal-notch-hud.md NC-C)
@@ -652,9 +705,10 @@ final class NotchCompanionModel: NSObject {
     /// the correct end state, so this never no-ops into a half-torn-down
     /// window.
     func activateIfEnabled() {
+        reloadDisplayPreferences()
         guard preferenceStore.isEnabled(),
-            let metrics = NotchScreenAdapter.currentMetrics(),
-            NotchCompanionGeometry.restingStripFrame(for: metrics) != nil
+            let metrics = NotchScreenAdapter.companionMetrics(),
+            NotchCompanionGeometry.restingFrame(for: metrics, allowsPill: allowsPill) != nil
         else {
             teardown()
             return
@@ -683,9 +737,11 @@ final class NotchCompanionModel: NSObject {
     }
 
     private func presentPanel(metrics: NotchScreenMetrics) {
-        guard let frame = NotchCompanionGeometry.restingStripFrame(for: metrics) else { return }
+        guard
+            let frame = NotchCompanionGeometry.restingFrame(for: metrics, allowsPill: allowsPill)
+        else { return }
         theme = RafuThemeCatalog.resolvedForCurrentAppearance()
-        bandInset = NotchHUDGeometry.bandInset(for: metrics)
+        updateStripMetrics(metrics, restingFrame: frame)
         let panel = NotchHUDPanel(contentRect: frame)
         panel.onCancel = { [weak self] in self?.escapePressed() }
         // Key status went elsewhere (e.g. the user clicked out while a feed
@@ -720,7 +776,19 @@ final class NotchCompanionModel: NSObject {
         panel.hasShadow = false
         self.panel = panel
         panel.orderFrontRegardless()
+        syncNowPlaying()
         refreshEditorRows()
+    }
+
+    /// Records the strip's band, height and notch-ness from the screen the
+    /// companion is on, for the views that size themselves to them.
+    private func updateStripMetrics(_ metrics: NotchScreenMetrics, restingFrame: CGRect) {
+        // Assign only on change: `@Observable` notifies on every write.
+        let band = NotchHUDGeometry.bandInset(for: metrics)
+        if bandInset != band { bandInset = band }
+        let notched = NotchHUDGeometry.notchRect(for: metrics) != nil
+        if hasPhysicalNotch != notched { hasPhysicalNotch = notched }
+        if stripHeight != restingFrame.height { stripHeight = restingFrame.height }
     }
 
     @objc
@@ -761,13 +829,6 @@ final class NotchCompanionModel: NSObject {
         return task
     }
 
-    /// Expands/collapses the overflow grid (per-peek, unpersisted) —
-    /// `CompanionUsageStripView`'s `▸ N more providers` disclosure button.
-    func toggleUsageOverflow() {
-        isUsageOverflowExpanded.toggle()
-        reposition()
-    }
-
     private func startUsageTimerIfNeeded() {
         guard usageRefreshTimer == nil else { return }
         usageRefreshTimer = Timer.scheduledTimer(
@@ -783,6 +844,7 @@ final class NotchCompanionModel: NSObject {
     }
 
     private func teardown() {
+        nowPlaying.stop()
         cancelTimers()
         stopUsageTimer()
         usageRefreshTask?.cancel()
@@ -820,94 +882,39 @@ final class NotchCompanionModel: NSObject {
     /// environment to live in for a window-frame resize happening outside
     /// any view's `body`).
     private func reposition(animated: Bool = false) {
-        guard let panel, let metrics = NotchScreenAdapter.currentMetrics() else { return }
-        bandInset = NotchHUDGeometry.bandInset(for: metrics)
+        guard let panel, let metrics = NotchScreenAdapter.companionMetrics() else { return }
+        if let resting = NotchCompanionGeometry.restingFrame(for: metrics, allowsPill: allowsPill) {
+            updateStripMetrics(metrics, restingFrame: resting)
+        }
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        switch hoverState {
-        case .resting:
-            let restingFrame =
-                attentionCount > 0 || !activeRunItems.isEmpty
-                ? NotchCompanionGeometry.expandedStripFrame(for: metrics)
-                : NotchCompanionGeometry.restingStripFrame(for: metrics)
-            guard let frame = restingFrame else {
-                teardown()
-                return
-            }
-            panel.setFrame(frame, display: true, animate: animated && !reduceMotion)
-            panel.clickThroughRegions = []
-            panel.hasShadow = false
-        case .peeking:
-            guard let frame = NotchCompanionGeometry.expandedStripFrame(for: metrics) else {
-                teardown()
-                return
-            }
-            panel.setFrame(frame, display: true, animate: animated && !reduceMotion)
-            panel.clickThroughRegions = []
-            panel.hasShadow = false
-        case .pinned:
+        let shouldAnimate = animated && !reduceMotion
+        if isPanelOpen {
             let frame = NotchCompanionGeometry.peekPanelFrame(
                 for: metrics, contentHeight: peekContentHeight())
-            panel.setFrame(frame, display: true, animate: animated && !reduceMotion)
+            panel.setFrame(frame, display: true, animate: shouldAnimate)
             panel.clickThroughRegions = []
             panel.hasShadow = true
+            return
         }
+        let strip =
+            hoverState == .peeking || attentionCount > 0
+            ? NotchCompanionGeometry.expandedFrame(for: metrics, allowsPill: allowsPill)
+            : NotchCompanionGeometry.restingFrame(for: metrics, allowsPill: allowsPill)
+        guard let frame = strip else {
+            teardown()
+            return
+        }
+        panel.setFrame(frame, display: true, animate: shouldAnimate)
+        panel.clickThroughRegions = []
+        panel.hasShadow = false
     }
 
-    /// `internal`, not `private`, so `NotchCompanionModelTests` can assert
-    /// its per-provider-row growth directly (headless — no live panel/
-    /// screen needed since this reads only already-computed model state).
+    /// The open panel's total height: the strip row plus the fixed body.
+    /// Fixed on purpose (see `NotchCompanionGeometry.openPanelBodyHeight`):
+    /// content scrolls inside it, so switching tabs, a search keystroke, or a
+    /// feed card never resizes the window. `internal` so tests can assert it.
     func peekContentHeight() -> CGFloat {
-        // A coarse fixed height for the usage front line's rows, same
-        // approximation `feedCardHeight` already makes — zero when there is
-        // nothing to show (agent-usage-providers.md: the usage area is
-        // absent entirely with zero enabled/renderable providers).
-        let frontLine = usageFrontLine
-        let overflow = usageOverflow
-        let usageFrontLineTerm: CGFloat =
-            frontLine.isEmpty
-            ? 0
-            : Self.usageFrontLineTopPadding + CGFloat(frontLine.count)
-                * Self.usageFrontLineRowHeight
-        let usageDisclosureTerm: CGFloat = overflow.isEmpty ? 0 : Self.usageDisclosureHeight
-        let usageGridTerm: CGFloat
-        if isUsageOverflowExpanded, !overflow.isEmpty {
-            let rows = UsageDisplayPolicy.gridRows(for: overflow.count)
-            usageGridTerm = CGFloat(rows) * Self.usageGridRowHeight
-        } else {
-            usageGridTerm = 0
-        }
-        let searchHeight: CGFloat = isSearchFieldVisible ? Self.searchFieldHeight : 0
-        let activeRunHeight: CGFloat =
-            activeRunItems.isEmpty
-            ? 0
-            : Self.activeRunTopPadding
-                + CGFloat(activeRunItems.count) * Self.activeRunRowHeight
-                + CGFloat(max(activeRunItems.count - 1, 0)) * RafuMetrics.space1
-        // Sized from `visibleEditorRows` (the FILTERED list), not
-        // `editorRows` — the panel shrinks/grows as a query narrows/widens
-        // what is actually shown, same 0.6-of-screen `maxPeekHeight` cap
-        // `reposition()` already applies downstream.
-        let listHeight: CGFloat
-        if visibleEditorRows.isEmpty {
-            listHeight = Self.emptyStateHeight
-        } else {
-            let rows = CGFloat(visibleEditorRows.count) * Self.editorRowHeight
-            let spacing = CGFloat(max(visibleEditorRows.count - 1, 0)) * RafuMetrics.space2
-            listHeight = rows + spacing + RafuMetrics.space3 * 2
-        }
-        // The feed renders nothing (zero height) when empty — unlike the
-        // editors list, it has no empty state to reserve space for
-        // (terminal-notch-hud.md NC-C).
-        let feedHeight: CGFloat
-        if feedItems.isEmpty {
-            feedHeight = 0
-        } else {
-            let cards = CGFloat(feedItems.count) * Self.feedCardHeight
-            let spacing = CGFloat(max(feedItems.count - 1, 0)) * RafuMetrics.space2
-            feedHeight = cards + spacing + RafuMetrics.space3
-        }
-        return bandInset + searchHeight + activeRunHeight + usageFrontLineTerm
-            + usageDisclosureTerm + usageGridTerm + listHeight + feedHeight
+        stripHeight + NotchCompanionGeometry.openPanelBodyHeight
     }
 
     // MARK: - Hover / pin (terminal-notch-hud.md NC-A `CompanionHoverPolicy`)
@@ -948,14 +955,18 @@ final class NotchCompanionModel: NSObject {
         guard next != hoverState else { return }
         hoverState = next
         refreshTheme()
-        // No `refreshUsage()` here: peeking is now a band-height wings pill
-        // with no panel content — usage only shows once pinned (`clicked()`
-        // below).
+        // Usage is only worth reading once the panel shows it: a hover that
+        // opens the panel refreshes (TTL-gated); a hover that only widens the
+        // strip does not.
+        if isPanelOpen { refreshUsage() }
         refreshEditorRows(animated: true)
     }
 
     private func graceTimerFired() {
         graceTimer = nil
+        // Never collapse out from under a field the person is typing in: a
+        // pointer that drifts off the panel mid-reply must not discard it.
+        guard !isReplyEngaged, !isSearchEngaged else { return }
         let next = CompanionHoverPolicy.onHoverExitAfterGrace(hoverState)
         guard next != hoverState else { return }
         hoverState = next
@@ -966,9 +977,6 @@ final class NotchCompanionModel: NSObject {
             // persistence across peek open/close").
             searchQuery = ""
             disengageSearch()
-            // Same "next peek starts fresh" rule for the usage overflow
-            // grid (agent-usage-providers.md: "per-peek, never persisted").
-            isUsageOverflowExpanded = false
         }
         reposition(animated: true)
     }
@@ -1006,7 +1014,6 @@ final class NotchCompanionModel: NSObject {
         if next == .resting {
             searchQuery = ""
             disengageSearch()
-            isUsageOverflowExpanded = false
         }
         guard next != hoverState else { return }
         hoverState = next

@@ -8,14 +8,14 @@ struct CanvasPresentations: ViewModifier {
                 CanvasDialogView(dialog: dialog, session: session)
             }
             .confirmationDialog(
-                "Remove from Canvas?",
+                "Remove from Ensemble?",
                 isPresented: Binding(
                     get: { session.pendingCanvasRemoval != nil },
                     set: { if !$0 { session.pendingCanvasRemoval = nil } }),
                 titleVisibility: .visible
             ) {
                 if let id = session.pendingCanvasRemoval, let board = session.canvas.boards[id] {
-                    Button("Remove from Canvas") {
+                    Button("Remove from Ensemble") {
                         session.removeCanvasCards(id)
                     }
                     if board.selection.count == 1, hasTerminal(board) {
@@ -31,13 +31,13 @@ struct CanvasPresentations: ViewModifier {
                 )
             }
             .confirmationDialog(
-                "Delete saved Canvas?",
+                "Delete saved Ensemble?",
                 isPresented: Binding(
                     get: { session.pendingCanvasDelete != nil },
                     set: { if !$0 { session.pendingCanvasDelete = nil } }),
                 titleVisibility: .visible
             ) {
-                Button("Delete Canvas", role: .destructive) {
+                Button("Delete Ensemble", role: .destructive) {
                     guard let item = session.pendingCanvasDelete else { return }
                     session.pendingCanvasDelete = nil
                     Task { _ = await session.canvas.deleteSaved(item) }

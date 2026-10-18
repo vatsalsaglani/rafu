@@ -9,14 +9,12 @@ struct AuxiliaryEditorTabContent: View {
             switch tab {
             case .settings:
                 SettingsCanvas(session: session, showsTabStrip: false)
-            case .ensembleStart:
-                EnsembleStartCanvas(session: session, showsTabStrip: false)
-            case .ensembleNewRun:
-                ConductorNewRunCanvas(session: session, showsTabStrip: false)
-            case .graph:
-                ConductorGraphCanvas(session: session, showsTabStrip: false)
-            case .runDetail:
-                ConductorRunDetailCanvas(session: session, showsTabStrip: false)
+            case .agentSession(let reference):
+                AgentSessionPane(
+                    reference: reference,
+                    model: session.agentHistory.transcripts[reference.key],
+                    session: session,
+                    isActive: session.selectedAuxiliaryTab == tab)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

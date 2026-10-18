@@ -65,7 +65,7 @@ struct GitBlameHoverCard: View {
         HStack(spacing: RafuMetrics.space3) {
             Button("Copy SHA", action: copySHA)
             Button("Show in History", action: showInHistory)
-            Button("Open Blame Canvas", action: openBlameCanvas)
+            Button("Open Blame in Ensemble", action: openBlameCanvas)
             Spacer(minLength: 0)
         }
         .buttonStyle(.link)

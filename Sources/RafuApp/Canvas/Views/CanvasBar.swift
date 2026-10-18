@@ -27,16 +27,16 @@ struct CanvasBar: View {
             Button("Rename…", systemImage: "pencil") {
                 session.canvasDialog = .renameBoard(board.id)
             }
-            Button("Duplicate Canvas", systemImage: "plus.square.on.square") {
+            Button("Duplicate Ensemble", systemImage: "plus.square.on.square") {
                 session.saveCanvasCopy(board.id)
             }
             Divider()
             ForEach(recentCanvases) { item in
                 Button(item.title) { Task { await session.openCanvas(item.id) } }
             }
-            Button("Open Canvas…") { session.requestCanvasLibrary() }
+            Button("Open Ensemble…") { session.requestCanvasLibrary() }
             Divider()
-            Button("Close Canvas", systemImage: "xmark") { session.closeCanvas(board.id) }
+            Button("Close Ensemble", systemImage: "xmark") { session.closeCanvas(board.id) }
         } label: {
             HStack(spacing: 4) {
                 Text(board.title)
@@ -52,8 +52,8 @@ struct CanvasBar: View {
         .tint(theme.palette.textSecondary)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Canvas name and actions")
-        .accessibilityLabel("Canvas \(board.title)")
+        .help("Ensemble name and actions")
+        .accessibilityLabel("Ensemble \(board.title)")
     }
 
     private var recentCanvases: [CanvasSummary] {
@@ -115,7 +115,7 @@ struct CanvasBar: View {
             Button("Rename…", systemImage: "pencil") {
                 session.canvasDialog = .renameBoard(board.id)
             }
-            Button("Duplicate Canvas", systemImage: "plus.square.on.square") {
+            Button("Duplicate Ensemble", systemImage: "plus.square.on.square") {
                 session.saveCanvasCopy(board.id)
             }
             Divider()
@@ -133,8 +133,9 @@ struct CanvasBar: View {
                 CanvasLiveBridge.shared.resumeAll(in: board)
             }
             .disabled(!board.connections.contains { $0.behavior == .session })
+            CanvasDiagramMenuItems(board: board, session: session)  // X9 diagrams
             Divider()
-            Button("Close Canvas", systemImage: "xmark") { session.closeCanvas(board.id) }
+            Button("Close Ensemble", systemImage: "xmark") { session.closeCanvas(board.id) }
         } label: {
             Image(systemName: "ellipsis.circle")
                 .font(.system(size: 13, weight: .medium))
@@ -145,8 +146,8 @@ struct CanvasBar: View {
         .tint(theme.palette.textSecondary)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("More Canvas actions")
-        .accessibilityLabel("Canvas actions")
+        .help("More Ensemble actions")
+        .accessibilityLabel("Ensemble actions")
     }
 
     private var linkVisibility: Binding<CanvasLinkVisibility> {
@@ -229,14 +230,17 @@ struct CanvasZoomCapsule: View {
                 Button("50%") { board.zoom(toScale: 0.5) }
                 Button("200%") { board.zoom(toScale: 2) }
             } label: {
-                HStack(spacing: 2) {
+                HStack(spacing: 3) {
                     Text(board.viewport.scale, format: .percent.precision(.fractionLength(0)))
                         .monospacedDigit()
-                    Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(theme.palette.textSecondary)
                 }
-                .font(.system(size: 11.5, weight: .medium))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(theme.palette.textPrimary)
-                .frame(minWidth: 52)
+                .frame(minWidth: 50, minHeight: 24)
+                .contentShape(.rect)
             }
             .menuStyle(.borderlessButton)
             .tint(theme.palette.textSecondary)
@@ -254,8 +258,10 @@ struct CanvasZoomCapsule: View {
             .buttonStyle(RafuIconButtonStyle(size: 24, iconSize: 11))
             .help("Zoom In")
         }
-        .padding(2)
+        .padding(.horizontal, 3)
+        .frame(height: 28)
         .background(Capsule().fill(theme.palette.elevatedBackground))
         .overlay(Capsule().strokeBorder(theme.palette.borderSubtle))
+        .fixedSize()
     }
 }

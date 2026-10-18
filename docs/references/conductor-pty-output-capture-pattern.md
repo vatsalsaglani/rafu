@@ -1,5 +1,7 @@
 # Ensemble PTY output capture: safe off-main byte-tee without frame-budget violation
 
+> **Status (2026-10-18): Retired.** The feature this note describes was removed in the round-2 redesign (see docs/plans/phases/ensemble-canvas.md). Kept for history; do not use it as current guidance.
+
 - Applies to: `Sources/RafuApp/Conductor/Run/ConductorRunOutputCapture.swift`, `Sources/RafuApp/Terminal/RafuTerminalView.swift` (the `onOutputCapture` hook), and any future evidence capture from a live PTY stream
 - Last verified: Swift 6.2 / macOS 26 / SwiftTerm 1.14.0 / 2026-07-25 (phase C1)
 

@@ -1,5 +1,7 @@
 # Ensemble adapters: OpenCode, Cline, and Kimi CLI
 
+> **Status (2026-10-18): Partly current.** `OpenCodeAdapter.swift`, `ClineAdapter.swift`, and `KimiAdapter.swift` are kept in `Sources/RafuApp/Conductor/Adapters/`, so CLI versions, argv, auth metadata, and model discovery facts still apply. Text about run orchestration refers to the removed run feature (see docs/plans/phases/ensemble-canvas.md). Not re-verified against code in this round.
+
 ## Applies to
 
 Use this note when implementing, reviewing, or re-verifying Rafu's Ensemble

@@ -38,26 +38,63 @@ struct CanvasCardShell: View {
     }
 
     var body: some View {
+        if isWhiteboardItem {
+            whiteboardItem
+        } else {
+            standardCard
+        }
+    }
+
+    private var standardCard: some View {
         let scale = board.viewport.scale
         let face = CanvasZoomFace(scale: scale)
         let selected = board.selection.contains(card.id)
         let contentFocused = board.contentIsActive && board.focusedCardID == card.id
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        faceContent(face, scale: scale, selected: selected, contentFocused: contentFocused)
+        return faceContent(face, scale: scale, selected: selected, contentFocused: contentFocused)
             .background(theme.palette.elevatedBackground)
             .clipShape(shape)
             .background { surface(shape) }
             .overlay { border(shape, contentFocused: contentFocused) }
             .overlay { selectionRing(isOn: selected || isConnectionTarget) }
             .overlay { resizeOverlay(face, scale: scale, selected: selected) }
-            .overlay { portsOverlay(scale: scale, selected: selected) }
+            .overlay { portsOverlay(scale: scale) }
             .onHover { inside in hoverChanged(inside) }
             .onDisappear { hideTask?.cancel() }
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel(accessibilityTitle)
-            .accessibilityValue(headerState ?? "")
-            .accessibilityAddTraits(selected ? .isSelected : [])
-            .modifier(CanvasCardAccessibilityActions(card: card, board: board, session: session))
+            .modifier(cardAccessibility(selected: selected))
+    }
+
+    /// A whiteboard item (shape, stroke, text) has no header or card surface:
+    /// its face fills the frame and is itself the move handle. Selection,
+    /// resize and ports stay the same as for every other card.
+    private var whiteboardItem: some View {
+        let scale = board.viewport.scale
+        let selected = board.selection.contains(card.id)
+        return CanvasWhiteboardCardFace(card: card, board: board)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(.rect)
+            .gesture(headerGesture)
+            .contextMenu { CanvasCardMenuContent(card: card, board: board, session: session) }
+            .overlay { selectionRing(isOn: selected || isConnectionTarget) }
+            .overlay { resizeZones(scale: scale, selected: selected) }
+            .overlay { portsOverlay(scale: scale) }
+            .onHover { inside in hoverChanged(inside) }
+            .onDisappear { hideTask?.cancel() }
+            .modifier(cardAccessibility(selected: selected))
+    }
+
+    private func cardAccessibility(selected: Bool) -> CanvasCardAccessibility {
+        CanvasCardAccessibility(
+            card: card, board: board, session: session, label: accessibilityTitle,
+            value: headerState ?? "", isSelected: selected)
+    }
+
+    /// The card kinds this shell draws itself. Every other kind (the
+    /// whiteboard items) draws through `CanvasWhiteboardCardFace`; a Mermaid
+    /// diagram keeps the standard header and uses the face as its body.
+    private var isWhiteboardItem: Bool {
+        // One rule, owned by the whiteboard face, for which kinds skip chrome.
+        !CanvasWhiteboardCardFace.usesCardChrome(card.content)
     }
 
     @ViewBuilder
@@ -86,18 +123,25 @@ struct CanvasCardShell: View {
         -> some View
     {
         if face.showsLiveContent {
-            CanvasResizeZones(
-                size: CGSize(width: card.rect.width, height: card.rect.height),
-                scale: scale, showsHandles: selected,
-                changed: { edges, value in resizeChanged(edges, value) },
-                ended: { resizeEnded() })
+            resizeZones(scale: scale, selected: selected)
         }
     }
 
-    private func portsOverlay(scale: Double, selected: Bool) -> some View {
+    private func resizeZones(scale: Double, selected: Bool) -> some View {
+        CanvasResizeZones(
+            size: CGSize(width: card.rect.width, height: card.rect.height),
+            scale: scale, showsHandles: selected,
+            changed: { edges, value in resizeChanged(edges, value) },
+            ended: { resizeEnded() })
+    }
+
+    /// Ports appear only while the pointer is over the card (and stay while a
+    /// port is dragged). Keyboard and VoiceOver users connect through the
+    /// Connect action and the "Connect To" menu instead.
+    private func portsOverlay(scale: Double) -> some View {
         CanvasConnectionPorts(
             title: card.title,
-            isVisible: isHovering || selected || board.focusedCardID == card.id,
+            isVisible: isHovering,
             connect: { session.canvasDialog = .connection(board.id, card.id, nil) },
             changed: { updateConnectionDrag(card.id, $0) },
             ended: { finishConnectionDrag(card.id, $0) },
@@ -141,9 +185,7 @@ struct CanvasCardShell: View {
         let detailSize = max(12, 11 / scale)
         return VStack(alignment: .leading, spacing: 6 / max(scale, 0.1)) {
             HStack(spacing: 6) {
-                Image(systemName: card.content.symbol)
-                    .font(.system(size: titleSize))
-                    .foregroundStyle(theme.palette.textSecondary)
+                kindGlyph(size: titleSize)
                 Text(displayTitle)
                     .font(.system(size: titleSize, weight: .semibold))
                     .foregroundStyle(theme.palette.textPrimary)
@@ -175,15 +217,31 @@ struct CanvasCardShell: View {
 
     // MARK: Header
 
+    /// The vendor mark of the agent CLI a terminal runs, or the card type's
+    /// symbol. Vendor SVGs render through `AgentIconView` (SwiftUI only).
+    @ViewBuilder
+    private func kindGlyph(size: Double) -> some View {
+        if let cli = agentCLI {
+            AgentIconView(cli: cli, size: CGFloat(size) + 2)
+                .help(cli.displayName)
+                .accessibilityHidden(true)
+        } else {
+            Image(systemName: card.content.symbol)
+                .font(.system(size: size, weight: .medium))
+                .foregroundStyle(theme.palette.textSecondary)
+                .accessibilityHidden(true)
+        }
+    }
+
     private func header(scale: Double, selected: Bool, contentFocused: Bool) -> some View {
         let showsActions = isHovering || selected || board.focusedCardID == card.id
-        let titleSize = CanvasZoomMetrics.titleFontSize(scale: scale)
-        return HStack(spacing: 8) {
-            Image(systemName: card.content.symbol)
-                .font(.system(size: 13))
-                .foregroundStyle(theme.palette.textSecondary)
-                .frame(width: 16)
-                .accessibilityHidden(true)
+        // 12 pt semibold, never below 11 screen points while zoomed out.
+        let titleSize = max(
+            12,
+            CanvasZoomMetrics.minimumTitleScreenPoints / max(scale, CanvasZoomMetrics.minimumScale))
+        return HStack(spacing: 7) {
+            kindGlyph(size: 12)
+                .frame(width: 16, height: 16)
             if board.renamingCardID == card.id {
                 CanvasCardRenameField(
                     card: card, board: board, session: session, fontSize: titleSize)
@@ -203,14 +261,15 @@ struct CanvasCardShell: View {
                     CanvasHeaderBadge(text: state)
                 } else {
                     Text(state)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 11))
                         .foregroundStyle(theme.palette.textSecondary)
                         .lineLimit(1)
                         .monospacedDigit()
+                        .layoutPriority(-1)
                 }
             }
             if isDirtyFile { CanvasHeaderBadge(text: "Modified") }
-            if showsPreviewBadge { CanvasHeaderBadge(text: "Preview", symbol: "eye") }
+            if showsDockedBadge { CanvasHeaderBadge(text: "Docked", symbol: "pin.fill") }
             if let model = commands.noteModel, model.isEditing {
                 CanvasNoteFormatBar(
                     model: model, availableWidth: CGFloat(card.rect.width), showsEditingLabel: false
@@ -223,9 +282,10 @@ struct CanvasCardShell: View {
             }
             actionCluster(visible: showsActions)
         }
-        .padding(.horizontal, 12)
+        .padding(.leading, 10)
+        .padding(.trailing, 6)
         .frame(height: headerHeight)
-        .background(contentFocused ? theme.palette.accent.opacity(0.08) : Color.clear)
+        .background(contentFocused ? theme.palette.accent.opacity(0.06) : Color.clear)
         .contentShape(.rect)
         .gesture(headerGesture)
         .contextMenu { CanvasCardMenuContent(card: card, board: board, session: session) }
@@ -248,6 +308,7 @@ struct CanvasCardShell: View {
                     .frame(width: 24, height: 24)
             }
             .menuStyle(.borderlessButton)
+            .tint(theme.palette.textSecondary)
             .menuIndicator(.hidden)
             .fixedSize()
             .help("\(card.title) actions")
@@ -272,10 +333,11 @@ struct CanvasCardShell: View {
 
     private func surface(_ shape: RoundedRectangle) -> some View {
         let dark = theme.isDark
+        // Two quiet layers: a contact hairline and a soft ambient shadow.
         let rest: [(Double, CGFloat, CGFloat)] =
-            dark ? [(0.30, 1, 1), (0.22, 9, 6)] : [(0.08, 1, 1), (0.08, 9, 6)]
+            dark ? [(0.26, 1, 0.5), (0.16, 8, 4)] : [(0.06, 1, 0.5), (0.06, 8, 4)]
         let dragged: [(Double, CGFloat, CGFloat)] =
-            dark ? [(0.30, 2, 2), (0.30, 16, 14)] : [(0.12, 2, 2), (0.14, 16, 14)]
+            dark ? [(0.28, 2, 1), (0.26, 14, 10)] : [(0.08, 2, 1), (0.12, 14, 10)]
         let values = isLifted ? dragged : rest
         return shape.fill(theme.palette.elevatedBackground)
             .shadow(color: Color.black.opacity(values[0].0), radius: values[0].1, y: values[0].2)
@@ -329,13 +391,9 @@ struct CanvasCardShell: View {
                 .simultaneousGesture(
                     TapGesture(count: 2).onEnded { session.openCanvasFile(path) })
         } else {
-            Button {
-                activateCard()
-            } label: {
-                CanvasCardSummary(card: card)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(14).contentShape(.rect)
-            }.buttonStyle(.plain)
+            // Kinds this shell does not draw itself (a Mermaid diagram).
+            CanvasWhiteboardCardFace(card: card, board: board)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -346,12 +404,27 @@ struct CanvasCardShell: View {
     }
 
     private var accessibilityTitle: String {
-        "\(displayTitle), \(card.content.kindName)"
+        if let cli = agentCLI {
+            return "\(displayTitle), \(cli.displayName) \(card.content.kindName)"
+        }
+        return "\(displayTitle), \(card.content.kindName)"
     }
 
     private var terminalPane: TerminalPaneSnapshot? {
         guard case .terminal(let id) = card.content else { return nil }
         return session.terminal.terminalGroup(id)?.panes.first
+    }
+
+    /// The agent CLI this terminal runs: a direct agent terminal names its
+    /// provider; a live shell asks its controller (the Rafu-launched provider,
+    /// else detection from the terminal title).
+    private var agentCLI: ConductorCLIID? {
+        guard let pane = terminalPane else { return nil }
+        if case .directAgentTerminal(let provider) = pane.runtimeKind { return provider }
+        guard pane.status == .live,
+            let controller = session.terminal.terminalController(for: pane.id)
+        else { return nil }
+        return controller.resolvedAgentProvider
     }
 
     private var terminalReportedTitle: String? { terminalPane?.reportedTitle?.rawValue }
@@ -365,9 +438,9 @@ struct CanvasCardShell: View {
         }
     }
 
-    private var showsPreviewBadge: Bool {
+    private var showsDockedBadge: Bool {
         guard case .nativeApp = card.content else { return false }
-        return session.canvasResources[board.id]?.nativeApp(for: card)?.frame != nil
+        return CanvasAppDocking.shared.state(for: card.id).isDocked
     }
 
     // MARK: Hover
@@ -394,7 +467,8 @@ struct CanvasCardShell: View {
 
     private func raiseIfNeeded() {
         guard board.frontmostCardID != card.id else { return }
-        session.performCanvasEdit(board) { try board.reorder([card.id], toFront: true) }
+        let ids = board.cardIDsMovingTogether(with: [card.id])  // X9 diagrams: members stay above
+        session.performCanvasEdit(board) { try board.reorder(ids, toFront: true) }
     }
 
     private func toggleMembership() {
@@ -462,6 +536,7 @@ struct CanvasCardShell: View {
         board.select([card.id])
         raiseIfNeeded()
         guard clicks >= 2 else { return }
+        if CanvasWhiteboardEditing.shared.requestEditing(card) { return }  // X5 whiteboard
         if titleFrame.contains(location) {
             board.renamingCardID = card.id
         } else {
@@ -470,7 +545,8 @@ struct CanvasCardShell: View {
     }
 
     private func startMove() {
-        let ids = board.selection.contains(card.id) ? board.selection : [card.id]
+        let picked = board.selection.contains(card.id) ? board.selection : [card.id]
+        let ids = board.cardIDsMovingTogether(with: picked)  // X9 diagrams: frames carry members
         if !board.selection.contains(card.id) { board.select([card.id]) }
         board.backToBoard()
         focusBoard()
@@ -580,15 +656,23 @@ struct CanvasCardShell: View {
     }
 }
 
-/// VoiceOver actions for the commands that otherwise need a pointer or a menu.
-private struct CanvasCardAccessibilityActions: ViewModifier {
+/// The card's VoiceOver element: its name, state, selection, and actions for
+/// the commands that otherwise need a pointer or a menu.
+private struct CanvasCardAccessibility: ViewModifier {
     let card: CanvasCard
     let board: CanvasBoardState
     let session: WorkspaceSession
+    let label: String
+    let value: String
+    let isSelected: Bool
 
     func body(content: Content) -> some View {
         let commands = CanvasCardCommands(card: card, board: board, session: session)
         content
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(label)
+            .accessibilityValue(value)
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
             .accessibilityAction(named: "Zoom to Card") { commands.zoomToCard() }
             .accessibilityAction(named: "Connect") {
                 session.canvasDialog = .connection(board.id, card.id, nil)
@@ -599,34 +683,6 @@ private struct CanvasCardAccessibilityActions: ViewModifier {
             .accessibilityAction(named: "Move Down") { commands.move(dx: 0, dy: 8) }
             .accessibilityAction(named: "Make Larger") { commands.resize(dw: 8, dh: 8) }
             .accessibilityAction(named: "Make Smaller") { commands.resize(dw: -8, dh: -8) }
-            .accessibilityAction(named: "Remove from Canvas") { commands.requestRemoval() }
-    }
-}
-
-struct CanvasCardSummary: View {
-    let card: CanvasCard
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            switch card.content {
-            case .file(let path):
-                Label(path, systemImage: "doc.text").font(.callout)
-            case .image(let path):
-                Label(path, systemImage: "photo").font(.callout)
-                Text("Click to view the image.")
-            case .note(let snapshot):
-                Text(
-                    snapshot.isEmpty
-                        ? "An empty note. Click to edit." : String(snapshot.prefix(512))
-                )
-                .lineLimit(9)
-            case .terminal:
-                Label("Terminal", systemImage: "terminal")
-            case .web(let destination):
-                Label(destination.address, systemImage: "globe")
-            case .nativeApp:
-                EmptyView()
-            }
-        }
-        .font(.callout).foregroundStyle(.secondary)
+            .accessibilityAction(named: "Remove from Ensemble") { commands.requestRemoval() }
     }
 }

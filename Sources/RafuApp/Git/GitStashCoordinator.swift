@@ -5,15 +5,15 @@ import Foundation
 @MainActor
 enum GitStashCoordinator {
     static func refresh(session: WorkspaceSession) async {
-        guard let rootURL = session.rootURL, !session.isGitBusy else { return }
+        guard let rootURL = session.gitRootURL, !session.isGitBusy else { return }
         do {
             let stashes = try await GitService().stashList(at: rootURL)
-            guard session.rootURL == rootURL else { return }
+            guard session.gitRootURL == rootURL else { return }
             session.gitStashes = stashes
         } catch is CancellationError {
             return
         } catch {
-            guard session.rootURL == rootURL else { return }
+            guard session.gitRootURL == rootURL else { return }
             session.reportGitError(error)
         }
     }

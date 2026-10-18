@@ -11,6 +11,8 @@ let package = Package(
         .library(name: "RafuCore", targets: ["RafuCore"]),
         .executable(name: "RafuApp", targets: ["RafuApp"]),
         .executable(name: "rafu", targets: ["RafuCLI"]),
+        // The agent hook helper (X11), staged into Contents/Helpers.
+        .executable(name: "rafu-agent-events", targets: ["RafuAgentEventHelper"]),
     ],
     dependencies: [
         .package(
@@ -125,11 +127,11 @@ let package = Package(
                 // `swift run`, and the staged `.app`. See
                 // `Sources/RafuApp/Resources/Grammars/README.md`.
                 .copy("Resources/Grammars"),
-                // Read-only Ensemble workflow starters. C6 copies these
-                // Markdown files into a user-chosen repository or global
-                // scope; definitions are never edited in the bundle.
-                .copy("Resources/EnsembleTemplates"),
-                .copy("Resources/EnsembleSkills"),
+                // Built-in Common diagram icon pack manifest (SF Symbols only;
+                // vendor packs are imported by the user, never bundled).
+                .copy("Resources/DiagramPacks"),
+                // The Rafu Ensemble agent skill (X4), installed from Settings.
+                .copy("Resources/AgentSkills"),
             ],
             swiftSettings: [
                 .defaultIsolation(MainActor.self)
@@ -137,6 +139,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "RafuCLI",
+            dependencies: ["RafuCore"]
+        ),
+        .executableTarget(
+            name: "RafuAgentEventHelper",
             dependencies: ["RafuCore"]
         ),
         .testTarget(

@@ -119,7 +119,7 @@ final class WorkspaceWindowRegistry {
     }
 
     /// The one reuse order: key window first, then registration order. Both
-    /// projections below share it so CLI routing and Ensemble workspace
+    /// projections below share it so CLI routing and workspace
     /// resolution can never disagree about which window a request means.
     private func orderedEntries() -> [Entry] {
         // View bodies use these projections. Pruning here would invalidate the
@@ -140,9 +140,8 @@ final class WorkspaceWindowRegistry {
     }
 
     /// Live sessions in `snapshots()` order, for callers that must reach the
-    /// `WorkspaceSession` itself rather than just its root — currently the
-    /// Ensemble request service resolving which open workspace a `rafu
-    /// ensemble` invocation belongs to.
+    /// `WorkspaceSession` itself rather than just its root — for example the
+    /// live canvas bridge resolving which open workspace a request belongs to.
     ///
     /// An entry whose session or root has gone is dropped: a caller resolving
     /// a workspace wants the windows it can actually act on, and a nil hole

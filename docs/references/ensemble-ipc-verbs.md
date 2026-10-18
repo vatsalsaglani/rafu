@@ -1,5 +1,7 @@
 # Ensemble IPC verbs
 
+> **Status (2026-10-18): Retired.** The feature this note describes was removed in the round-2 redesign (see docs/plans/phases/ensemble-canvas.md). Kept for history; do not use it as current guidance.
+
 - **Applies to:** `rafu ensemble run|status|artifact|await|abort|note|grant|propose-merge`,
   their shared DTOs, app request service, event stream, state projection,
   capability enforcement, and exit codes

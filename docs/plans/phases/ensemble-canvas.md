@@ -1,0 +1,208 @@
+# Ensemble canvas (round 2)
+
+- Status: Implemented; awaiting macOS verification (user direction, 2026-10-18). Base: `main` at `5e01dca`.
+- Integration branch: `claude/rafu-macos-redesign-nqcu7h` (restarted from `main`).
+- Earlier spec still applies for visual rules: `macos-redesign.md`,
+  `docs/references/macos-redesign-visual-system.md`, `canvas-interaction.md`.
+- The user asked to ignore ADR constraints. Do not edit `docs/decisions/`.
+
+## User direction (summary)
+
+1. Fix the Canvas: a blue focus border is drawn around the board; dragging the
+   empty board does not pan; dragging files from the Files tree onto the board
+   does not work.
+2. Fix editor split view: dragging a tab to the left/right edge must split.
+3. Remove the old Ensemble feature (runs, workflows, coordinator, graph) and
+   rename **Canvas → Ensemble** in every user-visible string. One concept.
+4. Agents in an Ensemble orchestrate each other through MCP tools exposed by
+   Rafu: read the Ensemble, create/edit notes and nodes, add terminals and start
+   agent CLIs or commands in them, create edges/relationships, go live, send
+   tasks, open apps and inspect them. Ship a Rafu skill/plugin for Claude Code
+   and Codex that teaches this.
+5. Diagrams on the Ensemble: Mermaid rendered natively, and an Excalidraw-like
+   whiteboard (shapes, arrows, freehand, text, dropped PNGs).
+6. Our own saved format for an Ensemble.
+7. The right agent SVG icon (Claude, Codex, …) everywhere in the app.
+8. Use the empty titlebar row (workspace name, drag, double-click zoom, or better).
+9. Native apps visible directly in the node, with no screen sharing.
+10. Notch HUD rebuilt like Cider (`/home/user/vatsalsaglani/cider`, same
+    author): mascot, now playing, Ensembles and agents, usage.
+11. Make it look better.
+
+**Platform fact for item 9:** macOS has no public API to embed another app's
+live window in our view. Screen capture needs Screen Recording permission. The
+chosen approach is **docking**: with the user's Accessibility permission, Rafu
+moves and sizes the real app window so it sits exactly over the node and follows
+pan/zoom/scroll; the user interacts with the real app. Without permission the
+node shows the app icon and an explanation with "Open Accessibility Settings".
+
+## Workstreams and owned paths (all under `Sources/RafuApp/` unless noted)
+
+| ID | Model | Workstream | Owns |
+|---|---|---|---|
+| X1 | Opus | Canvas fixes, interaction, node polish | `Canvas/Views/WorkspaceCanvasView.swift`, `Canvas/Views/CanvasCard*.swift`, `CanvasBar.swift`, `CanvasAddMenu.swift`, `CanvasFileDropDelegate.swift`, `Canvas/Adapters/CanvasScrollBridge.swift`, `CanvasTerminalCard.swift`, `CanvasWebCard.swift`, `CanvasRepositoryCards.swift`, `Canvas/Integration/CanvasBoardState.swift` (interaction parts), `CanvasViewportActions.swift`; the Files-tree drag source (`Views/WorkspaceSidebarView.swift` drag code only) |
+| X3 | Sonnet | Remove old Ensemble feature | `Conductor/Run/**`, `Conductor/Library/**`, `Conductor/Ensemble/**` except `ConductorSkillInstaller.swift`, `Views/Conductor*`, `Views/Ensemble*`, Ensemble aux tabs/routes/commands/rail entry, `Sources/RafuCore/Ensemble*` + `rafu ensemble` CLI, their tests. KEEP agent CLI support: `ConductorCLIID`, `ConductorCLIIcons`, `Conductor/Adapters/**`, `ConductorAdapterRegistry`, model catalog/resolution/cache, anything the Agents settings pane or terminals use. |
+| X4 | Opus | Agent orchestration MCP tools + Rafu skill/plugin | `Sources/RafuCore/CanvasBridge/**`, `Canvas/Integration/CanvasLiveBridge.swift`, new `Canvas/Integration/CanvasAgentActions.swift`, `Conductor/Ensemble/ConductorSkillInstaller.swift`, `Settings/EnsembleSettingsTab.swift`, new skill/plugin resources under `Resources/AgentSkills/`, `Canvas/Integration/CanvasTerminalBootstrap.swift`, related tests |
+| X5 | Opus | Whiteboard, Mermaid node, file format | `Canvas/Domain/**` (new card kinds; keep `CanvasConnection` stable), `Canvas/Persistence/**`, `Canvas/Integration/WorkspaceCanvasStore.swift`, new `Canvas/Whiteboard/**`, new `Canvas/Adapters/CanvasMermaidCard.swift`, UTType/document registration in `Resources/` plist template and `App/` open-file routing for the new extension |
+| X6 | Opus | Native app docking | `Canvas/Adapters/CanvasNativeAppCard.swift`, `CanvasPreviewLoader.swift`, `CanvasWindowCloseGuard.swift`, new `Canvas/Integration/CanvasAppDocking.swift` |
+| X7 | Sonnet | Notch HUD like Cider | `Terminal/Notch*.swift`, `Views/Notch*.swift`, new `Notch/**`, mascot assets in `Resources/Mascot/`, notch settings rows in `Settings/RafuSettingsView.swift` (General notch section only) |
+| X8 | Sonnet | Workbench: titlebar, tab split, agent icons, polish | `Views/WorkspaceWindowView.swift`, `Views/FlatWindowChrome.swift`, `Views/EditorTabSwitcherView.swift`, `Editor/EditorTabSwitcher.swift`, `Editor/EditorLayout.swift`, `Views/EditorCanvasView.swift` (tab bar + group drop zones), `Support/Rafu*Styles.swift`, new `Support/AgentIdentity.swift`, `Views/WorkspaceTerminalsPanelView.swift` (icons only), `Views/WorkspaceStatusBar.swift`, `Views/CommandPaletteView.swift` |
+
+After X1–X8 merge, one sequential **R (rename) pass** changes user-visible
+"Canvas" to "Ensemble" everywhere. Workstreams must NOT do that rename
+themselves (to avoid conflicts). New strings may already say "Ensemble".
+
+## Cross-workstream contracts (exact names)
+
+- **Agent identity (X8 defines, everyone uses):** in `Support/AgentIdentity.swift`
+  - `extension ConductorCLIID { static func detect(command: String?, title: String?) -> ConductorCLIID? }`
+    (matches `claude`, `codex`, `opencode`, `gemini`, `cursor-agent`, `kimi`, `cline`
+    as the first word of a command or a terminal title; nil for shells).
+  - `struct AgentIconView: View { let cli: ConductorCLIID; var size: CGFloat = 16 }`
+    rendering the existing vendor SVG via `ConductorCLIIcons` (popover/SwiftUI
+    path; never inside `NSMenu`, where vendor SVGs render 1×1 pt).
+  X1 uses it in terminal node headers; X7 in the notch; X8 in tabs, terminal
+  panel, palette.
+- **Card kinds (X5 defines):** new `CanvasCardContent` cases
+  `.mermaid(source: String)`, `.shape(CanvasShape)`, `.stroke(CanvasStroke)`,
+  `.text(CanvasText)` (value types in `Canvas/Domain/CanvasWhiteboard.swift`).
+  Existing cases stay byte-compatible. X1's card shell renders unknown/new kinds
+  through `CanvasWhiteboardCardFace(card:board:)` which X5 provides.
+- **Agent actions (X4 defines):** `@MainActor enum CanvasAgentActions` with
+  async functions the bridge calls; it uses existing `WorkspaceSession` canvas
+  APIs and X5's kinds. Every mutation is undoable and visible.
+- **App docking (X6 defines, X4 calls):**
+  `CanvasAppDocking.shared.inspect(cardID:) async -> String?` (Accessibility
+  summary of the docked window) and `open(bundleID:in:)`.
+- **Ensemble file format (X5):** extension `.rafuensemble` (UTType
+  `dev.rafu.ensemble`, conforms to `public.json`), versioned JSON, assets by
+  workspace-relative path; opening one from the Files tree opens it as a tab.
+
+## Rules (all workstreams)
+
+1. Read `AGENTS.md`, this file, and the code you change. Base your branch on
+   the integration branch: `git checkout -b <branch> claude/rafu-macos-redesign-nqcu7h`
+   (worktrees may start on an old commit).
+2. No macOS SDK here. Swift 6.2 Linux toolchain: `/opt/swift/swift-6.2-RELEASE-ubuntu24.04/usr/bin`.
+   Before every commit: `swiftc -parse -swift-version 6 <files>`,
+   `swift-format format --in-place` and `swift-format lint --strict` on changed files.
+   Test pure logic in a scratch package outside the repo (see
+   `docs/references/linux-swift-verification.md`). CI uses **Swift 6.3 on macos-26**.
+3. Known compile traps: a `private var x = …` stored property in a struct makes
+   its memberwise init private (add an explicit init when other files construct
+   it); `_ = x` inside a ViewBuilder must be `let _ = x`; split very long
+   modifier chains; avoid mixed `Double`/`CGFloat` arithmetic; macOS 15 APIs only.
+4. Visual rules: gold only for focus/selection/live/primary; theme tokens only;
+   help + accessibility labels on icon-only controls; Reduce Motion paths.
+5. Security: agents act only through the visible Ensemble; every agent-started
+   process appears as a terminal node; per-Ensemble "Agent control" (Off / Ask /
+   Allow, default Ask) gates mutating tools; bounded payloads; no secrets or
+   message bodies in logs.
+6. Commit on `redesign2/<id>-<topic>`. Do not push. Handoff: branch, commits,
+   done, skipped (why), edits outside owned paths, tests, compile risks.
+
+## Addendum (2026-10-18): diagrams, icon packs, frames, export — workstream X9
+
+User direction: agents can create diagrams in an Ensemble through Rafu tools;
+icon packs for AWS, Google Cloud, Azure and common services (like Eraser.io);
+select items and convert them to a **frame**; export to PNG (and more); export
+an **animated GIF** where dots travel along arrows to show data flow.
+
+| ID | Model | Workstream | Owns |
+|---|---|---|---|
+| X9 | Opus | Diagram packs, frames, export | new `Canvas/Diagram/**`, new `Resources/DiagramPacks/` (built-in Common pack manifest only), export commands/menu items it adds via one marked line in the Canvas bar overflow menu |
+
+Contracts (exact names):
+- **Model types (X9 defines in `Canvas/Diagram/CanvasDiagramModel.swift`):**
+  `CanvasFrame` (title, memberIDs: [CanvasCardID], style token) and
+  `CanvasServiceIcon` (packID, iconID, label). Both Codable, Equatable, Sendable.
+- **Card kinds (X5 adds the cases):** `.frame(CanvasFrame)` and
+  `.serviceIcon(CanvasServiceIcon)` in `CanvasCardContent`, rendered through
+  `CanvasDiagramCardFace(card:board:)` (X9 provides). Frames draw behind their
+  members; moving a frame moves its members.
+- **Packs:** built-in **Common** pack drawn with SF Symbols (user, browser,
+  mobile, API, server, function, container, database, cache, queue, stream,
+  storage, CDN, DNS, load balancer, gateway, auth, monitoring, …). Vendor packs
+  (AWS Architecture Icons, Azure Architecture Icons, Google Cloud icons) are not
+  redistributed in the repo: "Import Icon Pack…" accepts the official ZIP or
+  folder the user downloads (links shown), detects the vendor layout,
+  indexes SVG/PNG into Application Support, and searches by name. An optional
+  downloader may be added only with a pinned official URL and SHA-256.
+- **API for X4 tools:** `@MainActor enum CanvasDiagramService` with
+  `searchIcons(query:limit:) -> [CanvasServiceIconMatch]`,
+  `createFrame(title:memberIDs:in:session:) -> CanvasCardID?`,
+  `export(boardID:target:format:session:) async throws -> URL` where target is
+  `.board | .frame(CanvasCardID) | .selection` and format is
+  `.png(scale:) | .pdf | .gif(seconds:fps:)`; files go to a workspace folder the
+  user can see (default `exports/`), never outside the workspace.
+- **Export rendering:** `ImageRenderer` for PNG/PDF; GIF via ImageIO
+  (`CGImageDestination`, `UTType.gif`) with frames where a dot travels each edge
+  in its direction. Native-view nodes (terminal, web, docked app) render their
+  summary face, not live content.
+
+## Addendum 2 (2026-10-18): Now Playing, workspaces, agent hooks, chat history — X10–X12
+
+User direction:
+1. Now Playing may use the private MediaRemote framework the way Cider does
+   (the BSD-3 `mediaremote-adapter`, run through `/usr/bin/perl`). The public
+   path stays as the fallback.
+2. Vendor icon packs (AWS, Azure, Google Cloud) get a one-click download (X9).
+3. A workspace can hold more than one folder; workspaces can be saved; a view
+   lists saved workspaces.
+4. Agent hooks, like Cider, track agent activity.
+5. Show Claude Code and Codex chat history in Rafu, grouped by project.
+
+| ID | Model | Workstream | Owns |
+|---|---|---|---|
+| X10 | Opus | Multi-folder and saved workspaces | `Sources/RafuCore/Workspace*` (descriptor, roots), `Sources/RafuApp/Workspace/**`, recents/saved stores, Files tree root handling in `Views/WorkspaceSidebarView.swift` (roots only), new `Views/Workspaces*.swift` (saved workspaces view), the `WindowTitlebarRow` workspace menu, `File` menu commands for Add Folder / Save Workspace, the `.rafuworkspace` UTType |
+| X11 | Opus | Agent hooks, activity tracking, Now Playing via MediaRemote | new `Sources/RafuAgentEventHelper/**` (helper executable), new `Sources/RafuApp/AgentTracking/**`, `Notch/NowPlaying*`, `Vendor/MediaRemoteAdapter/**`, hook install UI in the Agents settings pane, `script/build_and_run.sh` + packaging helper staging |
+| X12 | Opus | Agent chat history | new `Sources/RafuCore/AgentHistory/**` (read-only parsers), new `Sources/RafuApp/AgentHistory/**` (history tab and navigator entry), one navigator mode case, palette commands |
+
+Contracts:
+- **Workspace roots (X10):** `WorkspaceSession.roots: [WorkspaceRoot]`
+  (ordered, first is primary); `rootURL` stays and means the primary root, so
+  existing callers keep working. Saved workspace file: `.rafuworkspace`
+  (UTType `dev.rafu.workspace`, versioned JSON, folder bookmarks + display
+  name + window layout reference). Git/search work per root.
+- **Agent events (X11):** `AgentActivityStore` (`@MainActor @Observable`,
+  one per app) exposes `sessions: [TrackedAgentSession]` keyed by provider and
+  session id, with state `working | waitingForPermission | needsInput |
+  finished | ended`, `cwd`, last tool, and time. It matches a session to a
+  Rafu terminal by cwd + process tree when possible. Notch, titlebar activity
+  and Ensemble terminal nodes read it; they keep their output-based fallback.
+- **Agent history (X12):** read-only. Claude Code: `~/.claude/projects/*/*.jsonl`.
+  Codex: `~/.codex/sessions/**/rollout-*.jsonl` (+ `session_index`). Parsed off
+  the main actor, lazily, bounded per file; grouped by project path; "Resume"
+  opens a terminal running `claude --resume <id>` / `codex resume <id>` in that
+  folder only after the user clicks it. Nothing leaves the Mac; nothing is logged.
+
+Security rules for X11: hook installation is an explicit user action with a
+review of the exact file and entries; it merges into the provider's config
+without removing other hooks, keeps a backup, is reversible, and never runs at
+launch. The helper must never block or change the agent's decision (1 s alarm,
+exit 0 always, bounded input, private spool directory 0700, files 0600).
+
+## Status (2026-10-18)
+
+- Merged into the integration branch: workstreams X1, X3 to X12, and the R pass.
+- Verification: Linux parse + swift-format lint + scratch-package tests; macOS CI (Swift 6.3, macos-26) run via workflow_dispatch — see the PR for the latest result.
+- Mac review (2026-10-18): Apple Swift 6.4 / macOS 27.0.1, arm64. Lightning
+  built and launched through the canonical script. A separate fixture workspace
+  covered Markdown source/preview, board shape creation, Command-Return Mermaid
+  editing, PNG export (pixels inspected), editor split menus, narrow-board tools,
+  General/Agents/Ensemble Settings, a second folder, and saved-workspace reopen.
+- Review fixes: prepare Mermaid pixels before static export; enforce image caps
+  even for very large boards; resolve existing ancestors for new export paths;
+  place helper scripts/licences in Resources and enforce structured-bundle
+  signing; remove an implicit capture warning; expose drawing tools in a compact
+  menu when a split cannot fit the full palette; update stale run-based Settings
+  copy. See `canvas-diagrams.md`, `agent-hooks-and-now-playing.md`, and
+  `build-and-run.md` in `docs/references/`.
+- First full Mac test pass: 185 core tests and 2,399 app tests. The export writer
+  alias/escape regression was added afterward; repeat format, build, parallel,
+  and serial gates before merging. Test logs and final results belong to PR #3.
+- Remaining manual coverage: VoiceOver speech, live hook installation/provider
+  events, real AX window docking, and vendor pack downloads. UI automation did
+  not start native sidebar/tab drag sessions (no source callback was observed);
+  do not claim the file-drop or tab-drag path was verified by that pass. Board
+  drawing gestures and editor splits through the menu did work.

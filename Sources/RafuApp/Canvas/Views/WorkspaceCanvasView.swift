@@ -20,6 +20,7 @@ struct WorkspaceCanvasView: View {
     @State private var magnifyStart: CanvasViewport?
     @State private var magnifyLastScale = 1.0
     @State private var marqueeStart: CGPoint?
+    @State private var dragOrigin: CGPoint?
     @State private var presentationID = UUID()
     @State private var spaceIsDown = false
     @State private var isPanning = false
@@ -45,16 +46,22 @@ struct WorkspaceCanvasView: View {
                 .padding(10)
                 .background(theme.palette.sidebarBackground)
             }
-            Group {
-                CanvasBar(board: board, session: session)
-                if showsRestoredLinksNotice && pausedLinkCount > 0 { pausedLinksNotice }
-                Divider()
+            CanvasBar(board: board, session: session)
+            Divider()
+            ZStack(alignment: .top) {
                 if board.showsList {
                     CanvasListView(board: board, session: session)
                 } else {
                     boardSurface
                 }
+                // A compact capsule over the board, not a full-width strip.
+                if showsRestoredLinksNotice && pausedLinkCount > 0 {
+                    pausedLinksNotice
+                        .padding(.top, 10)
+                        .transition(.opacity)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(theme.palette.editorBackground)
@@ -121,9 +128,12 @@ struct WorkspaceCanvasView: View {
         // by the edge overlay.
         let connectionTarget = validConnectionTarget
         return ZStack(alignment: .topLeading) {
+            // Pan and marquee have one owner at a time: this grid gesture for
+            // a plain drag, or the board's high-priority gesture while Space
+            // is held (see `boardChrome`). The masks never enable both.
             grid
                 .contentShape(.rect)
-                .gesture(backgroundDrag)
+                .gesture(backgroundDrag, including: spaceIsDown ? .subviews : .all)
                 .onTapGesture {
                     board.backToBoard()
                     boardHasKeyboardFocus = true
@@ -173,6 +183,10 @@ struct WorkspaceCanvasView: View {
                 .transition(cardTransition)
             }
             CanvasEdgeOverlay(board: board, session: session, drag: connectionDrag)
+            // X5 whiteboard
+            CanvasWhiteboardCreationLayer(
+                board: board, tool: .forBoard(board.id), viewportProject: project,
+                unproject: unproject)
             ForEach(interaction.guides, id: \.key) { guide in
                 guideLine(guide)
             }
@@ -194,6 +208,8 @@ struct WorkspaceCanvasView: View {
             if board.cards.isEmpty, !tipDismissed {
                 emptyBoardTip
             }
+            // X5 whiteboard
+            CanvasToolPalette(board: board, session: session, tool: .forBoard(board.id))
         }
         .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         .coordinateSpace(name: CanvasConnectionCoordinateSpace.board)
@@ -256,9 +272,13 @@ struct WorkspaceCanvasView: View {
                             board.viewport.scale * factor, from: board.viewport,
                             size: geometry.size, anchor: point)
                     },
-                    hidden: {}
+                    hidden: {},
+                    drop: CanvasFileDrop.target(
+                        boardID: board.id, session: session, isTargeted: $isDropTargeted)
                 )
             )
+            // Space-drag pans over cards too. Without Space this mask disables
+            // the gesture and leaves the grid's own pan gesture in charge.
             .highPriorityGesture(backgroundDrag, including: spaceIsDown ? .all : .subviews)
             .gesture(
                 MagnifyGesture().onChanged { value in
@@ -280,7 +300,11 @@ struct WorkspaceCanvasView: View {
             .overlay(alignment: .bottomTrailing) {
                 CanvasZoomCapsule(board: board).padding(12)
             }
+            // The board takes keys, but it is a surface, not a control: the
+            // system focus ring would outline the whole board (and spill over
+            // the sidebar). Cards draw their own gold content-focus stroke.
             .focusable()
+            .focusEffectDisabled()
             .focused($boardHasKeyboardFocus)
             .onChange(of: boardHasKeyboardFocus) { _, focused in if !focused { spaceIsDown = false }
             }
@@ -369,43 +393,93 @@ struct WorkspaceCanvasView: View {
             }
     }
 
+    /// "1 link paused · Resume Links ×" as one compact capsule at the top of
+    /// the board. Shape and words carry the state, not colour.
     private var pausedLinksNotice: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "pause.circle").foregroundStyle(theme.palette.textSecondary)
-            Text(pausedLinkCount == 1 ? "1 link paused." : "\(pausedLinkCount) links paused.")
-                .font(.system(size: 12)).foregroundStyle(theme.palette.textSecondary)
+        HStack(spacing: 6) {
+            Image(systemName: "pause.circle")
+                .font(.system(size: 12))
+                .foregroundStyle(theme.palette.textSecondary)
+                .accessibilityHidden(true)
+            Text(pausedLinkCount == 1 ? "1 link paused" : "\(pausedLinkCount) links paused")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(theme.palette.textPrimary)
+            Text("·").foregroundStyle(theme.palette.textMuted).accessibilityHidden(true)
             Button("Resume Links") {
                 CanvasLiveBridge.shared.resumeAll(in: board)
                 showsRestoredLinksNotice = false
             }
-            .buttonStyle(RafuSecondaryButtonStyle(compact: true))
-            Spacer()
+            .buttonStyle(.plain)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(theme.palette.textPrimary)
+            .help("Resume every paused link on this Ensemble")
             Button {
                 showsRestoredLinksNotice = false
             } label: {
-                Image(systemName: "xmark")
+                Label("Dismiss", systemImage: "xmark")
             }
-            .buttonStyle(RafuIconButtonStyle(size: 22, iconSize: 10))
+            .buttonStyle(RafuIconButtonStyle(size: 18, iconSize: 9))
             .help("Dismiss")
             .accessibilityLabel("Dismiss")
         }
-        .padding(.horizontal, 12).padding(.vertical, 4)
+        .padding(.leading, 10).padding(.trailing, 4).padding(.vertical, 4)
+        .background(Capsule().fill(theme.palette.elevatedBackground))
+        .overlay(Capsule().strokeBorder(theme.palette.borderSubtle))
+        .fixedSize()
         .accessibilityElement(children: .contain)
     }
 
+    /// A small, quiet panel with the board's first moves.
     private var emptyBoardTip: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "rectangle.3.group")
-                .font(.system(size: 28)).foregroundStyle(theme.palette.textSecondary)
-                .accessibilityHidden(true)
-            Text("Double-click to add a card. Drag from a card's edge to connect.")
-                .font(.system(size: 13)).foregroundStyle(theme.palette.textSecondary)
-                .multilineTextAlignment(.center)
-            Button("Got It") { tipDismissed = true }
-                .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+        VStack(spacing: 14) {
+            VStack(spacing: 6) {
+                Image(systemName: "square.on.square.dashed")
+                    .font(.system(size: 24, weight: .light))
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .accessibilityHidden(true)
+                Text("An empty Ensemble")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(theme.palette.textPrimary)
+            }
+            VStack(alignment: .leading, spacing: 7) {
+                tipRow("cursorarrow.click.2", "Double-click the board to add a card")
+                tipRow("doc.on.doc", "Drag files here from the Files list or Finder")
+                tipRow("hand.draw", "Drag the board to pan; Shift-drag to select")
+                tipRow(
+                    "point.3.connected.trianglepath.dotted", "Drag from a card's edge to connect")
+            }
+            HStack(spacing: 8) {
+                Button("Add Note") { CanvasAddKind.note.perform(on: board, session: session) }
+                    .buttonStyle(RafuProminentButtonStyle(compact: true))
+                Button("Got It") { tipDismissed = true }
+                    .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+            }
         }
-        .padding(24)
+        .padding(20)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(theme.palette.elevatedBackground.opacity(0.92))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(theme.palette.borderSubtle)
+        )
+        .fixedSize()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func tipRow(_ symbol: String, _ text: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.system(size: 12))
+                .foregroundStyle(theme.palette.textSecondary)
+                .frame(width: 18)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.system(size: 12))
+                .foregroundStyle(theme.palette.textSecondary)
+        }
     }
 
     private func guideLine(_ guide: CanvasSnapGuide) -> some View {
@@ -461,6 +535,12 @@ struct WorkspaceCanvasView: View {
             // Return on a selected note starts editing (Zoom to Card first below 50%).
             if model.beginEditing() { return }
         }
+        // Return on a selected whiteboard item or Mermaid card opens its editor.
+        if case .mermaid = card.content {
+            CanvasWhiteboardEditing.shared.request(card.id)
+            return
+        }
+        if CanvasWhiteboardEditing.shared.requestEditing(card) { return }
         if case .terminal = card.content,
             let primary = CanvasCardCommands(card: card, board: board, session: session).primary,
             primary.id == "start" || primary.id == "restart"
@@ -471,16 +551,22 @@ struct WorkspaceCanvasView: View {
         board.clearConnectionSelection()
     }
 
+    /// The dot grid is the only thing that moves when an empty board pans.
+    /// Read the viewport here, in `body`, not inside the `Canvas` renderer:
+    /// the renderer runs outside Observation tracking, so a viewport read
+    /// only there never re-renders the grid and an empty board looked frozen.
     private var grid: some View {
-        Canvas { context, size in
-            let spacing = max(12, 24 * board.viewport.scale)
-            let ox = board.viewport.x.truncatingRemainder(dividingBy: spacing)
-            let oy = board.viewport.y.truncatingRemainder(dividingBy: spacing)
+        let viewport = board.viewport
+        let dot = theme.palette.textSecondary.opacity(0.25)
+        return Canvas { context, size in
+            let spacing = max(12, 24 * viewport.scale)
+            let ox = viewport.x.truncatingRemainder(dividingBy: spacing)
+            let oy = viewport.y.truncatingRemainder(dividingBy: spacing)
             for x in stride(from: ox - spacing, through: size.width, by: spacing) {
                 for y in stride(from: oy - spacing, through: size.height, by: spacing) {
                     context.fill(
                         Path(ellipseIn: CGRect(x: x, y: y, width: 1.5, height: 1.5)),
-                        with: .color(theme.palette.textSecondary.opacity(0.25)))
+                        with: .color(dot))
                 }
             }
         }
@@ -490,6 +576,15 @@ struct WorkspaceCanvasView: View {
     /// Drag on the background pans. Shift-drag draws a marquee and selects live.
     private var backgroundDrag: some Gesture {
         DragGesture(minimumDistance: 3).onChanged { value in
+            // A new start point is a new drag. SwiftUI may not call onEnded
+            // when a gesture mask flips mid-drag (Space pressed or released);
+            // without this reset the next drag would pan from a stale start.
+            if dragOrigin != value.startLocation {
+                dragOrigin = value.startLocation
+                panStart = nil
+                marqueeStart = nil
+                interaction.marquee = nil
+            }
             if panStart == nil && marqueeStart == nil {
                 if NSEvent.modifierFlags.contains(.shift) && !spaceIsDown {
                     marqueeStart = value.startLocation
@@ -524,6 +619,7 @@ struct WorkspaceCanvasView: View {
             interaction.marquee = nil
             marqueeStart = nil
             panStart = nil
+            dragOrigin = nil
             isPanning = false
         }
     }

@@ -1,11 +1,34 @@
 import SwiftUI
 
-/// The notch companion strip's content (terminal-notch-hud.md NC-B, amended
-/// by the RESTING/HOVER redesign): resting shows nothing at notch-only width
-/// (or the wings row, glyph-only content, once attention is active); a
-/// hover-dwell widens the strip to the wings pill with no downward panel;
-/// only a CLICK (pinning) grows a downward panel with the editors list.
-/// PRESENTATION ONLY — every value shown here already lives on
+/// Text colours for content drawn directly on the notch's black surface. The
+/// notch is always true black, so a light theme's dark text tokens would
+/// vanish on it: dark themes use their own tokens, light themes use fixed
+/// light inks. Cards and fields keep the theme's own fills and text pairs,
+/// which are legible against each other by construction.
+struct NotchInk {
+    let primary: Color
+    let secondary: Color
+    let muted: Color
+    let accent: Color
+
+    init(theme: RafuTheme) {
+        if theme.isDark {
+            primary = theme.palette.textPrimary
+            secondary = theme.palette.textSecondary
+            muted = theme.palette.textMuted
+        } else {
+            primary = Color.white.opacity(0.92)
+            secondary = Color.white.opacity(0.68)
+            muted = Color.white.opacity(0.5)
+        }
+        accent = theme.palette.accent
+    }
+}
+
+/// The notch companion's content (terminal-notch-hud.md NC-B, rebuilt like
+/// Cider's notch): a strip with the mascot and a compact status; hovering
+/// (or clicking) opens a fixed-size panel of tabs — Ensembles, Up next, Now
+/// Playing, Usage. PRESENTATION ONLY — every value shown here already lives on
 /// `NotchCompanionModel`; this view never touches a `WorkspaceSession`
 /// directly. The strip belongs to no scene, so the theme is injected into
 /// the environment manually, mirroring `NotchHUDView`.
@@ -19,30 +42,9 @@ struct NotchCompanionView: View {
     var body: some View {
         VStack(spacing: 0) {
             CompanionWingsView(model: model)
-            if model.hoverState == .pinned {
-                // Pinned ABOVE the scroll view — it must stay reachable
-                // (and visible) while the results below it scroll, not
-                // travel with them (terminal-notch-hud.md NC-B,
-                // "Search/filter").
-                if model.isSearchFieldVisible {
-                    CompanionSearchFieldView(model: model)
-                }
-                // Internal scroll: the panel's HEIGHT is capped by
-                // `NotchCompanionGeometry.peekPanelFrame` (many editor
-                // windows/feed cards must not march the panel off the
-                // bottom of the screen), so overflow scrolls here instead
-                // of growing the window.
-                ScrollView(.vertical) {
-                    VStack(spacing: RafuMetrics.space2) {
-                        CompanionActiveRunsView(model: model)
-                        CompanionUsageStripView(model: model)
-                        CompanionEditorsListView(model: model)
-                        CompanionAttentionFeedView(model: model)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .top)
-                }
-                .scrollIndicators(.automatic)
-                .transition(listTransition)
+            if model.isPanelOpen {
+                CompanionPanelView(model: model)
+                    .transition(panelTransition)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -62,9 +64,6 @@ struct NotchCompanionView: View {
             model.escapePressed()
             return .handled
         }
-        .onChange(of: model.activeRunItems) {
-            model.activeRunsDidChange()
-        }
         .animation(
             reduceMotion ? .easeOut(duration: 0.12) : .easeOut(duration: 0.18),
             value: model.hoverState
@@ -73,11 +72,8 @@ struct NotchCompanionView: View {
     }
 
     /// Always true black (terminal-notch-hud.md, "Resting": "housing-black
-    /// presence") — unlike `NotchHUDView`'s HUD, which also appears on
-    /// non-notch screens and keeps a themed fallback there, the companion
-    /// strip only ever exists on a notched screen
-    /// (`NotchCompanionModel.activateIfEnabled()` tears it down otherwise),
-    /// so there is no non-notch branch to account for.
+    /// presence"): on a notched screen it must merge with the housing, and the
+    /// floating pill on a plain display keeps the same look.
     private var surfaceColor: Color { Color.black }
 
     /// Bottom-rounded, flush with the screen's top edge — the strip reads
@@ -95,25 +91,25 @@ struct NotchCompanionView: View {
 
     /// Reduce Motion: cross-fade only, no slide (matching `NotchHUDView`'s
     /// transition rule).
-    private var listTransition: AnyTransition {
+    private var panelTransition: AnyTransition {
         reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top))
     }
 }
 
-/// The wings row (terminal-notch-hud.md, "Resting", amended by the
-/// RESTING/HOVER redesign): left wing is the Rafu mark, right wing is the
-/// open-editor count plus the attention dot + count (hidden entirely when
-/// calm). Both wings render NOTHING at notch-only width — `isStripExpanded`
-/// gates their content so no text ever draws behind the physical housing;
-/// content only appears once the strip has actually widened to the pill
-/// (attention while resting, hover-dwell, or pinned). The row IS the click
-/// target — since `NotchHUDPanel.clickThroughRegions` is always empty for
-/// this panel (see `NotchCompanionModel.presentPanel`'s doc comment), a
-/// single `onTapGesture` on the whole row covers the full strip, notch gap
-/// included.
+/// The wings row (terminal-notch-hud.md, "Resting"): the mascot (or the plain
+/// Rafu mark) on the left, the compact status on the right — a dot and count
+/// when something needs you, the live agent count, and the open-editor count
+/// when nothing else is running. The physical housing hides about 16pt beside
+/// the notch, so the resting strip keeps to one short item per side; the wider
+/// strip (attention, hover) and the pill on a plain display show everything.
+/// The row IS the click target — since `NotchHUDPanel.clickThroughRegions` is
+/// always empty for this panel (see `NotchCompanionModel.presentPanel`), a
+/// single tap on the whole row covers the full strip, notch gap included.
 struct CompanionWingsView: View {
     let model: NotchCompanionModel
     @Environment(\.rafuTheme) private var theme
+
+    private var ink: NotchInk { NotchInk(theme: theme) }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -121,83 +117,91 @@ struct CompanionWingsView: View {
             Spacer(minLength: 0)
             rightWing
         }
-        .frame(height: max(model.bandInset, 1))
+        .frame(height: max(model.stripHeight, 1))
         .contentShape(Rectangle())
         .onTapGesture { model.clicked() }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(summaryLabel)
         .accessibilityHint(
-            model.hoverState == .pinned
-                ? "Activates to collapse" : "Activates to show open editors"
+            model.isPanelOpen ? "Activates to pin or unpin" : "Activates to open the notch panel"
         )
         .accessibilityAddTraits(.isButton)
     }
 
-    /// The Rafu glyph, alone, ALWAYS visible (user decision 2026-07-22:
-    /// the resting strip carries compact wings sized so the glyph sits
-    /// clear of the physical cutout). No fixed wing width — the same
-    /// layout serves the compact resting strip and the expanded pill; the
-    /// outer Spacer pushes the wings apart to whatever width the frame
-    /// grants.
+    /// The mascot, alone at rest; a playing-music indicator joins it once the
+    /// strip is wide enough that the indicator is not behind the housing.
     private var leftWing: some View {
-        HStack(spacing: RafuMetrics.space2) {
-            RafuBrandMarkView()
-                .frame(width: 14, height: 14)
-            if let run = model.primaryActiveRunItem {
-                HStack(spacing: RafuMetrics.space1) {
-                    if run.isGateWaiting {
-                        Circle()
-                            .fill(theme.palette.accent)
-                            .frame(width: 6, height: 6)
-                            .accessibilityHidden(true)
-                    }
-                    Text(run.roleName)
-                        .font(.system(size: 10, weight: .semibold))
-                        .lineLimit(1)
-                    Text("\(run.stepNumber)/\(run.stepCount)")
-                        .font(.system(size: 10, design: .monospaced))
-                        .monospacedDigit()
-                        .foregroundStyle(theme.palette.textMuted)
-                }
-                .foregroundStyle(theme.palette.textPrimary)
+        HStack(spacing: RafuMetrics.space1) {
+            if model.isMascotEnabled {
+                RafuMascotView(
+                    state: model.mascotState, visible: true, size: 20,
+                    claimBounce: model.claimMascotBounce)
+            } else {
+                RafuBrandMarkView()
+                    .frame(width: 14, height: 14)
+            }
+            if showsPlaybackIndicator {
+                NotchPlaybackIndicator(motionActive: true)
             }
         }
-        .padding(.leading, RafuMetrics.space2 + 2)
+        .padding(.leading, RafuMetrics.space2 - 2)
     }
 
-    /// The open-editor count, always visible, plus the attention dot +
-    /// count once a session needs attention.
+    private var showsPlaybackIndicator: Bool {
+        model.nowPlaying.playing && model.visibleSections.contains(.nowPlaying)
+            && (model.isStripExpanded || !model.hasPhysicalNotch)
+    }
+
+    /// Attention first, then agents, then (when nothing is running) editors.
     private var rightWing: some View {
-        HStack(spacing: RafuMetrics.space1) {
+        let summary = model.agentSummary
+        let wide = model.isStripExpanded || !model.hasPhysicalNotch
+        return HStack(spacing: RafuMetrics.space2 - 2) {
             if model.attentionCount > 0 {
-                Circle()
-                    .fill(theme.palette.accent)
-                    .frame(width: 6, height: 6)
-                Text("\(model.attentionCount)")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(theme.palette.accent)
+                HStack(spacing: 3) {
+                    Circle()
+                        .fill(ink.accent)
+                        .frame(width: 6, height: 6)
+                    Text("\(model.attentionCount)")
+                        .foregroundStyle(ink.accent)
+                }
             }
-            Text("\(model.editorRows.count)")
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(theme.palette.textPrimary)
+            if summary.live > 0, wide || model.attentionCount == 0 {
+                HStack(spacing: 3) {
+                    Image(systemName: "point.3.connected.trianglepath.dotted")
+                        .font(.system(size: 9, weight: .medium))
+                    Text(Self.countText(summary.live))
+                }
+                .foregroundStyle(ink.primary)
+            }
+            if summary.live == 0 || wide {
+                HStack(spacing: 3) {
+                    if wide {
+                        Image(systemName: "macwindow")
+                            .font(.system(size: 9, weight: .medium))
+                    }
+                    Text("\(model.editorRows.count)")
+                }
+                .foregroundStyle(ink.secondary)
+            }
         }
+        .font(.system(size: 11, weight: .semibold, design: .rounded))
+        .monospacedDigit()
+        .lineLimit(1)
         .padding(.trailing, RafuMetrics.space2 + 2)
     }
 
-    /// "Rafu — N editors open" / "..., N terminals needing attention"
-    /// (terminal-notch-hud.md NC-E) — prefixed with the app name because
-    /// this element has no window title or menu-bar icon a VoiceOver user
-    /// could otherwise anchor it to.
+    private static func countText(_ count: Int) -> String {
+        count > 99 ? "99+" : String(count)
+    }
+
+    /// "Rafu — 3 agents, 1 needs you, 2 editors open" — prefixed with the app
+    /// name because this element has no window title or menu-bar icon a
+    /// VoiceOver user could otherwise anchor it to.
     private var summaryLabel: String {
-        let count = model.editorRows.count
-        var parts = ["\(count) editor\(count == 1 ? "" : "s") open"]
-        if let run = model.primaryActiveRunItem {
-            parts.append(
-                "Ensemble \(run.workflowName), \(run.stepLabel), \(run.roleName)"
-                    + (run.isGateWaiting ? ", gate waiting" : ""))
-        }
+        let editors = model.editorRows.count
+        var parts = [model.agentSummary.spokenSummary]
+        parts.append("\(editors) editor\(editors == 1 ? "" : "s") open")
         let attention = model.attentionCount
         if attention > 0 {
             parts.append(
@@ -207,273 +211,113 @@ struct CompanionWingsView: View {
     }
 }
 
-/// Active Ensemble workflows in the pinned companion. Each row is a real
-/// button with a keyboard/VoiceOver path to the owning run canvas; changing
-/// steps updates text immediately, without a transition animation.
-struct CompanionActiveRunsView: View {
+/// The open panel: a tab row (one tab per section the person turned on, plus
+/// a pin button) over the selected section's content. Fixed height, set by
+/// the window frame; each section scrolls inside it.
+struct CompanionPanelView: View {
     let model: NotchCompanionModel
-    @Environment(\.rafuTheme) private var theme
 
     var body: some View {
-        if !model.activeRunItems.isEmpty {
-            VStack(spacing: RafuMetrics.space1) {
-                ForEach(model.activeRunItems) { item in
-                    Button {
-                        model.openConductorRun(item)
-                    } label: {
-                        HStack(spacing: RafuMetrics.space2) {
-                            if item.isGateWaiting {
-                                Circle()
-                                    .fill(theme.palette.accent)
-                                    .frame(width: 7, height: 7)
-                                    .accessibilityHidden(true)
-                            }
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(item.workflowName)
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(theme.palette.textPrimary)
-                                    .lineLimit(1)
-                                Text(
-                                    "\(item.stepLabel) · \(item.roleName)"
-                                        + (item.isGateWaiting ? " · Gate waiting" : "")
-                                )
-                                .font(.system(size: 10))
-                                .foregroundStyle(
-                                    item.isGateWaiting
-                                        ? theme.palette.accent : theme.palette.textMuted
-                                )
-                                .lineLimit(1)
-                            }
-                            Spacer(minLength: RafuMetrics.space2)
-                            Image(systemName: "arrow.up.forward.app")
-                                .foregroundStyle(theme.palette.textMuted)
-                                .accessibilityHidden(true)
-                        }
-                        .padding(.horizontal, RafuMetrics.space2)
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(
-                        "\(item.workflowName), \(item.stepLabel), \(item.roleName)"
-                            + (item.isGateWaiting ? ", gate waiting" : "")
-                    )
-                    .accessibilityHint("Opens this Ensemble run in its workspace")
+        VStack(spacing: 0) {
+            CompanionTabBar(model: model)
+            Group {
+                switch model.selectedSection {
+                case .ensembles: CompanionEnsemblesSectionView(model: model)
+                case .upNext: CompanionUpNextSectionView(model: model)
+                case .nowPlaying: CompanionNowPlayingSectionView(model: model)
+                case .usage: CompanionUsageSectionView(model: model)
                 }
             }
-            .padding(.horizontal, RafuMetrics.space3)
-            .padding(.top, RafuMetrics.space2)
-            .frame(maxWidth: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
-/// The peek panel's usage area (agent-usage-providers.md, "Multi-provider
-/// display in the notch", amended 2026-07-23: per-row front line): a
-/// column-aligned, tiny-table front line of up to
-/// `UsageDisplayPolicy.frontLineCap` rows — one per provider, e.g.
-/// ```
-/// Claude   5h 33% · 7d 37%
-/// Codex    5h 12% · 7d 40%
-/// ```
-/// then — only when other enabled providers exist — a `▸ N more
-/// providers` disclosure that expands (per-peek) into a two-column grid
-/// of the rest. Hidden ENTIRELY when `model.usageFrontLine` is empty — no
-/// placeholder, no "usage unavailable" text. A monospaced font gives
-/// tabular numerals so tile values do not jitter as they refresh.
-///
-/// Replaces the pre-2026-07-23 design, which joined every front-line
-/// tile into ONE `.lineLimit(1)` line by four spaces: with ≥2 enabled
-/// providers whose tiles are wide (e.g. Claude carrying a per-model
-/// window), that line truncated MID-TILE — an ellipsized percentage. Each
-/// row now gets the full strip width, and `UsageDisplayPolicy.tileWindowCap`
-/// caps a multi-provider tile to its first two windows (uncapped for a
-/// SOLE front-line provider, via `frontLineWindowCap(providerCount:)`) so
-/// a row never has to truncate at all. `UsageDisplayPolicy.plainText`
-/// still underlies each row's rendering and its own
-/// `.accessibilityLabel` — see that function's doc comment.
-struct CompanionUsageStripView: View {
+/// Cider's pill picker, as a row of tab buttons. Each tab is a real button
+/// with a title for VoiceOver; counts are text, not colour alone.
+struct CompanionTabBar: View {
     let model: NotchCompanionModel
     @Environment(\.rafuTheme) private var theme
 
+    private var ink: NotchInk { NotchInk(theme: theme) }
+
     var body: some View {
-        if !model.usageFrontLine.isEmpty {
-            VStack(alignment: .leading, spacing: RafuMetrics.space1) {
-                frontLineRows
-                if !model.usageOverflow.isEmpty {
-                    disclosureButton
-                }
-                if model.isUsageOverflowExpanded, !model.usageOverflow.isEmpty {
-                    overflowGrid
-                }
+        HStack(spacing: RafuMetrics.space1) {
+            ForEach(model.visibleSections) { section in
+                tab(section)
             }
-            .padding(.horizontal, RafuMetrics.space3)
-            .padding(.top, RafuMetrics.space2)
-        }
-    }
-
-    /// One left-aligned, column-aligned row per front-line tile — `Grid`
-    /// gives the name column a shared width across rows so the strip scans
-    /// like a tiny table (see this type's doc comment). Each row is its
-    /// own accessibility element (`plainText(tile)`), which reads better
-    /// under VoiceOver than one combined multi-provider label ever did.
-    private var frontLineRows: some View {
-        Grid(
-            alignment: .leading, horizontalSpacing: RafuMetrics.space2,
-            verticalSpacing: RafuMetrics.space1
-        ) {
-            ForEach(frontLineTiles, id: \.providerID) { tile in
-                GridRow {
-                    Text(mutedRun(tile.displayName))
-                        .lineLimit(1)
-                    Text(windowsRun(tile))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(UsageDisplayPolicy.plainText(tile))
+            Spacer(minLength: RafuMetrics.space2)
+            Button {
+                model.clicked()
+            } label: {
+                Image(systemName: model.hoverState == .pinned ? "pin.fill" : "pin")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(model.hoverState == .pinned ? ink.accent : ink.secondary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .help(model.hoverState == .pinned ? "Unpin the notch" : "Pin the notch open")
+            .accessibilityLabel(model.hoverState == .pinned ? "Unpin notch" : "Pin notch")
         }
-        .font(.system(size: 10.5, design: .monospaced))
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, RafuMetrics.space3)
+        .padding(.vertical, RafuMetrics.space2)
     }
 
-    /// The front-line tiles, each capped by `frontLineWindowCap(providerCount:)`
-    /// — uncapped when this provider is the front line's SOLE row (it has
-    /// the width for every window), `tileWindowCap` otherwise.
-    private var frontLineTiles: [UsageDisplayPolicy.RenderedTile] {
-        let snapshots = model.usageFrontLine
-        let cap = UsageDisplayPolicy.frontLineWindowCap(providerCount: snapshots.count)
-        return snapshots.map { renderedTile($0, windowCap: cap) }
-    }
-
-    /// The overflow grid's tiles are always half-width, so they always cap
-    /// at `tileWindowCap` regardless of how many overflow providers exist.
-    private var overflowTiles: [UsageDisplayPolicy.RenderedTile] {
-        model.usageOverflow.map { renderedTile($0, windowCap: UsageDisplayPolicy.tileWindowCap) }
-    }
-
-    private func renderedTile(_ snapshot: UsageSnapshot, windowCap: Int?)
-        -> UsageDisplayPolicy.RenderedTile
-    {
-        UsageDisplayPolicy.renderedTile(
-            for: snapshot, displayName: displayName(for: snapshot), windowCap: windowCap)
-    }
-
-    private func displayName(for snapshot: UsageSnapshot) -> String {
-        UsageProviderRegistry.descriptor(for: snapshot.providerID)?.displayName
-            ?? snapshot.providerID.rawValue
-    }
-
-    /// A tile's window chunks only, ` · `-joined, WITHOUT the display name
-    /// prefix — `frontLineRows`/`overflowGrid` render the name in its own
-    /// column/position instead. Applies the theme's muted color everywhere
-    /// and overrides to accent (+semibold) only for `.high`/`.critical`
-    /// chunks, via `windowRun(_:)`.
-    private func windowsRun(_ tile: UsageDisplayPolicy.RenderedTile) -> AttributedString {
-        var result = AttributedString()
-        for (index, window) in tile.windows.enumerated() {
-            if index > 0 {
-                result += mutedRun(" · ")
-            }
-            result += windowRun(window)
-        }
-        return result
-    }
-
-    private func windowRun(_ window: UsageDisplayPolicy.RenderedWindow) -> AttributedString {
-        var run = AttributedString(window.text)
-        switch window.emphasis {
-        case .normal:
-            run.foregroundColor = theme.palette.textMuted
-        case .high, .critical:
-            run.foregroundColor = theme.palette.accent
-            run.font = .system(size: 10.5, weight: .semibold, design: .monospaced)
-        }
-        return run
-    }
-
-    private func mutedRun(_ text: String) -> AttributedString {
-        var run = AttributedString(text)
-        run.foregroundColor = theme.palette.textMuted
-        return run
-    }
-
-    private var disclosureButton: some View {
-        Button {
-            model.toggleUsageOverflow()
+    private func tab(_ section: NotchSection) -> some View {
+        let selected = model.selectedSection == section
+        let badge = badgeText(for: section)
+        return Button {
+            model.select(section)
         } label: {
-            Text(
-                "▸ \(model.usageOverflow.count) more provider\(model.usageOverflow.count == 1 ? "" : "s")"
+            HStack(spacing: 4) {
+                Image(systemName: section.symbol)
+                    .font(.system(size: 10, weight: .medium))
+                Text(section.title)
+                    .font(.system(size: 11, weight: selected ? .semibold : .regular))
+                    .lineLimit(1)
+                if let badge {
+                    Text(badge.text)
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(badge.isAttention ? ink.accent : ink.muted)
+                }
+            }
+            .foregroundStyle(selected ? ink.primary : ink.secondary)
+            .padding(.horizontal, RafuMetrics.space2)
+            .frame(height: 24)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(selected ? theme.palette.selection : Color.clear)
             )
-            .font(.system(size: 10, design: .monospaced))
-            .foregroundStyle(theme.palette.textMuted)
+            .contentShape(Capsule(style: .continuous))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(model.usageOverflow.count) more usage providers")
-        .accessibilityHint(
-            model.isUsageOverflowExpanded ? "Activates to collapse" : "Activates to expand"
-        )
-        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(section.title + (badge.map { ", " + $0.spoken } ?? ""))
+        .accessibilityAddTraits(
+            selected ? AccessibilityTraits([.isButton, .isSelected]) : AccessibilityTraits.isButton)
     }
 
-    private var overflowGrid: some View {
-        LazyVGrid(
-            columns: [
-                GridItem(.flexible(), alignment: .leading),
-                GridItem(.flexible(), alignment: .leading),
-            ],
-            alignment: .leading, spacing: RafuMetrics.space1
-        ) {
-            ForEach(overflowTiles, id: \.providerID) { tile in
-                Text(UsageDisplayPolicy.plainText(tile))
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(theme.palette.textMuted)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
+    private struct Badge {
+        let text: String
+        let spoken: String
+        let isAttention: Bool
+    }
+
+    private func badgeText(for section: NotchSection) -> Badge? {
+        switch section {
+        case .ensembles:
+            let live = model.agentSummary.live
+            return live > 0
+                ? Badge(text: "\(live)", spoken: "\(live) running", isAttention: false) : nil
+        case .upNext:
+            let waiting = model.upNextRows.count
+            return waiting > 0
+                ? Badge(text: "\(waiting)", spoken: "\(waiting) waiting", isAttention: true) : nil
+        case .nowPlaying, .usage:
+            return nil
         }
-    }
-}
-
-/// The peek panel's editors list (terminal-notch-hud.md, "Peek", item 2) —
-/// one card per open workspace window, narrowed by
-/// `model.searchQuery` through `model.visibleEditorRows`. Shown only while
-/// `hoverState == .pinned` (only a click grows the downward panel; see
-/// `NotchCompanionView`'s doc comment); empty-state text fills the same space per
-/// AGENTS' panel/tab top-alignment rule so a single-row (or zero-row) list
-/// never floats the whole strip toward the screen's vertical middle. NOT
-/// wrapped in an explicit animation — per-keystroke filtering must read as
-/// immediate (Reduce Motion parity with every other typing path), never as
-/// rows springing in/out.
-struct CompanionEditorsListView: View {
-    let model: NotchCompanionModel
-    @Environment(\.rafuTheme) private var theme
-
-    var body: some View {
-        Group {
-            if model.visibleEditorRows.isEmpty {
-                Text(emptyStateText)
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.palette.textMuted)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                VStack(spacing: RafuMetrics.space2) {
-                    ForEach(model.visibleEditorRows) { row in
-                        CompanionEditorRowView(row: row) {
-                            model.focusEditor(row.id)
-                        }
-                    }
-                }
-                .padding(RafuMetrics.space3)
-                .frame(maxWidth: .infinity, alignment: .top)
-            }
-        }
-    }
-
-    private var emptyStateText: String {
-        guard !model.searchQuery.isEmpty else { return "No open editors" }
-        return "No editors match “\(model.searchQuery)”"
     }
 }
 
@@ -486,7 +330,7 @@ struct CompanionEditorsListView: View {
 /// make the panel key — routed through `model.engageSearch()`/
 /// `disengageSearch()`, never `allowsKeyStatus` directly (see
 /// `NotchCompanionModel.updateKeyStatus()`).
-private struct CompanionSearchFieldView: View {
+struct CompanionSearchFieldView: View {
     @Bindable var model: NotchCompanionModel
     @FocusState private var searchFocused: Bool
     @Environment(\.rafuTheme) private var theme
@@ -552,7 +396,7 @@ private struct CompanionSearchFieldView: View {
 /// One editor window's row: name + window number, the git one-liner (hidden
 /// when no repository is open), and terminal chips — each chip shown only
 /// when its count is non-zero (terminal-notch-hud.md, "Peek", item 2).
-private struct CompanionEditorRowView: View {
+struct CompanionEditorRowView: View {
     let row: CompanionEditorRow
     let focus: () -> Void
     @Environment(\.rafuTheme) private var theme
@@ -634,7 +478,7 @@ private struct CompanionEditorRowView: View {
 /// The cross-window attention feed (terminal-notch-hud.md NC-C, "Peek", item
 /// 3): one card per session currently in `.bell`, newest first, shown below
 /// the editors list whenever the peek panel is open. Renders nothing when
-/// empty — unlike `CompanionEditorsListView`, the feed has no empty state to
+/// empty — unlike the Ensembles list, the feed has no empty state to
 /// reserve space for; the resting strip's right-wing dot is already the
 /// "anything waiting?" signal.
 struct CompanionAttentionFeedView: View {
@@ -665,7 +509,7 @@ struct CompanionAttentionFeedView: View {
 /// `NotchCompanionModel`'s panel key status (terminal-notch-hud.md NC-C) —
 /// mirroring `NotchHUDView`'s own `replyFocused` →
 /// `engageReply()`/`disengageReply()` recipe exactly.
-private struct CompanionFeedCardView: View {
+struct CompanionFeedCardView: View {
     let model: NotchCompanionModel
     let item: CompanionFeedItem
     @State private var replyText = ""

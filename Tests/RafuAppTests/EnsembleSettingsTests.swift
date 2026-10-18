@@ -1,5 +1,4 @@
 import Foundation
-import RafuCore
 import Testing
 
 @testable import RafuApp
@@ -23,25 +22,7 @@ func ensembleSettingsConstructionDoesNoIO() async throws {
     await model.load()
     #expect(providerCalls == 1)
     #expect(model.loadState == .ready)
-    #expect(model.metadata?.name == "ensemble-with-rafu")
-}
-
-@MainActor
-@Test("Ensemble Settings reports matching and mismatching verb versions")
-func ensembleSettingsVersionCompatibility() async {
-    let matching = EnsembleSettingsModel(
-        launcherVerbVersion: LauncherIPCProtocol.ensembleVerbVersion)
-    let mismatching = EnsembleSettingsModel(
-        launcherVerbVersion: LauncherIPCProtocol.ensembleVerbVersion + 1)
-
-    await matching.load()
-    await mismatching.load()
-
-    #expect(matching.verbVersionsMatch)
-    #expect(!mismatching.verbVersionsMatch)
-    #expect(
-        matching.metadata?.targetsVerbVersion
-            == LauncherIPCProtocol.ensembleVerbVersion)
+    #expect(model.metadata?.name == "rafu-ensemble")
 }
 
 @MainActor
@@ -62,7 +43,32 @@ func ensembleSettingsInstallResultState() async throws {
     #expect(!model.isInstalling)
     #expect(
         model.operationMessage
-            == "Installed at \(expected.path): 5 written, 0 replaced, 0 skipped.")
+            == "Installed at \(expected.path): 4 written, 0 replaced, 0 skipped.")
     #expect(model.pendingReplacement == nil)
     #expect(model.errorMessage == nil)
+}
+
+@MainActor
+@Test("Installing for Codex writes only inside the Codex skills folder")
+func ensembleSettingsInstallsForCodex() async throws {
+    let home = FileManager.default.temporaryDirectory
+        .appending(path: "rafu-settings-home-\(UUID().uuidString)", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: home) }
+    let model = EnsembleSettingsModel(homeDirectory: home)
+
+    await model.load()
+    await model.install(at: .codex)
+
+    let skill = home.appending(path: ".codex/skills/rafu-ensemble/SKILL.md")
+    #expect(FileManager.default.fileExists(atPath: skill.path))
+    #expect(!FileManager.default.fileExists(atPath: home.appending(path: ".claude").path))
+    #expect(model.errorMessage == nil)
+}
+
+@Test("Agent skill copy names both verified folders")
+func ensembleSkillCopyNamesVerifiedFolders() {
+    #expect(EnsembleSkillCopy.footer.contains("~/.claude/skills/rafu-ensemble"))
+    #expect(EnsembleSkillCopy.footer.contains("~/.codex/skills/rafu-ensemble"))
+    #expect(!EnsembleSkillCopy.summary.contains("Conductor"))
 }

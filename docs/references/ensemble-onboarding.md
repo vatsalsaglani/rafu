@@ -1,5 +1,7 @@
 # Ensemble guided onboarding ("New Ensemble…")
 
+> **Status (2026-10-18): Retired.** The feature this note describes was removed in the round-2 redesign (see docs/plans/phases/ensemble-canvas.md). Kept for history; do not use it as current guidance.
+
 ## Applies to
 
 The `EnsembleStartCanvas` opened by ⌘⇧E, the Rafu menu, the command palette,

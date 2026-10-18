@@ -6,10 +6,9 @@ import Testing
 
 private let expectedSkillFiles = [
     "SKILL.md",
-    "references/file-formats.md",
-    "references/patterns.md",
-    "references/troubleshooting.md",
-    "references/verbs.md",
+    "references/codex-agents-snippet.md",
+    "references/recipes.md",
+    "references/tools.md",
 ]
 
 private func makeSkillTestDirectory() throws -> URL {
@@ -20,8 +19,8 @@ private func makeSkillTestDirectory() throws -> URL {
 }
 
 @MainActor
-@Test("The five-file coordinator skill bundles with parseable versioned frontmatter")
-func bundledSkillPackResolvesAndTargetsCurrentVerbVersion() async throws {
+@Test("The Rafu agent skill bundles with parseable frontmatter")
+func bundledAgentSkillResolves() async throws {
     let catalog = try ConductorBundledSkillCatalog.bundled()
     #expect(catalog.manifest.map(\.relativePath).sorted() == expectedSkillFiles)
 
@@ -32,66 +31,36 @@ func bundledSkillPackResolvesAndTargetsCurrentVerbVersion() async throws {
     }
 
     let metadata = try await ConductorSkillInstaller(catalog: catalog).metadata()
-    #expect(metadata.name == "ensemble-with-rafu")
-    #expect(
-        metadata.description
-            == "Orchestrate parallel agent runs in Rafu via rafu ensemble — worktrees, gates, budgets"
-    )
-    #expect(metadata.targetsVerbVersion == LauncherIPCProtocol.ensembleVerbVersion)
+    #expect(metadata.name == "rafu-ensemble")
+    #expect(metadata.description.contains("Ensemble"))
+    #expect(!metadata.description.contains("Conductor"))
 }
 
 @MainActor
-@Test("verbs.md names every verb represented by the shipped parser")
-func skillVerbReferenceCoversParserCases() throws {
+@Test("The agent skill names every orchestration tool")
+func bundledAgentSkillCoversEveryTool() throws {
     let catalog = try ConductorBundledSkillCatalog.bundled()
-    let verbsFile = try #require(
-        catalog.manifest.first(where: { $0.relativePath == "references/verbs.md" }))
-    let text = try #require(String(data: catalog.data(for: verbsFile), encoding: .utf8))
-    let parser = EnsembleArgumentParser()
-    // Every verb the shipped parser accepts. C8-03 added the mutating four
-    // and C8-04 added propose-merge while this plan ran in parallel; the
-    // exhaustive switch below is what forces this list to be extended rather
-    // than silently drifting.
-    let invocations = try [
-        parser.parse(["status", "--json"]),
-        parser.parse(["artifact", "run-a", "0", "--json"]),
-        parser.parse(["await", "run-a", "--state", "completed", "--json"]),
-        parser.parse(["run", "implement", "--json"]),
-        parser.parse(["abort", "run-a"]),
-        parser.parse(["note", "run-a", "a bounded note"]),
-        parser.parse(["grant", "--json"]),
-        parser.parse(["propose-merge", "run-a", "--json"]),
-        parser.parse(["help"]),
-    ]
+    let reference = try catalog.data(for: .init(pathComponents: ["references", "tools.md"]))
+    let text = String(decoding: reference, as: UTF8.self)
+    for tool in CanvasAgentTool.allCases {
+        #expect(text.contains("`\(tool.rawValue)`"), "tools.md does not name \(tool.rawValue)")
+    }
+}
 
-    for invocation in invocations {
-        let verb =
-            switch invocation {
-            case .status:
-                "status"
-            case .artifact:
-                "artifact"
-            case .await:
-                "await"
-            case .run:
-                "run"
-            case .abort:
-                "abort"
-            case .note:
-                "note"
-            case .grant:
-                "grant"
-            case .proposeMerge:
-                "propose-merge"
-            case .help:
-                "help"
-            }
-        #expect(text.contains("`\(verb)`"), "Missing parser verb \(verb)")
+@Test("Skill frontmatter parsing reads keys and rejects a missing block")
+func skillFrontmatterParsing() throws {
+    let values = try ConductorBundledSkillCatalog.frontmatter(
+        "---\nname: rafu-ensemble\nDescription: Use it: well\n  nested: no\n---\n# Body")
+    #expect(values["name"] == "rafu-ensemble")
+    #expect(values["description"] == "Use it: well")
+    #expect(values["nested"] == nil)
+    #expect(throws: ConductorBundledSkillError.self) {
+        try ConductorBundledSkillCatalog.frontmatter("# No frontmatter")
     }
 }
 
 @MainActor
-@Test("A fresh skill install creates five files and an idempotent reinstall skips all five")
+@Test("A fresh skill install creates every file and an idempotent reinstall skips them")
 func skillInstallationIsFreshThenIdempotent() async throws {
     let destination = try makeSkillTestDirectory()
     defer { try? FileManager.default.removeItem(at: destination) }
@@ -142,7 +111,7 @@ func skillConflictRequiresConfirmedReplacement() async throws {
         at: .custom(destination),
         existingFilePolicy: .replaceConfirmed)
     #expect(confirmed.replaced == ["SKILL.md"])
-    #expect(confirmed.created.count == 4)
+    #expect(confirmed.created.count == expectedSkillFiles.count - 1)
     #expect(try String(contentsOf: skillFile, encoding: .utf8) != "user-authored skill")
 }
 
@@ -159,7 +128,7 @@ func skillInstallerRefusesUnsafeManifestPath() async throws {
 
     await #expect(
         throws: ConductorBundledSkillError.unsafeResourcePath(
-            "ensemble-with-rafu/references/../SKILL.md")
+            "rafu-ensemble/references/../SKILL.md")
     ) {
         _ = try await installer.install(at: .custom(destination))
     }
@@ -172,21 +141,29 @@ func skillInstallerRefusesUnsafeManifestPath() async throws {
 }
 
 @MainActor
-@Test("The Claude Code destination reports the exact verified skill path")
-func claudeCodeSkillDestinationIsExact() async throws {
+@Test(
+    "Claude Code and Codex destinations report the exact skill paths",
+    arguments: [
+        (ConductorSkillDestination.claudeCode, ".claude"),
+        (ConductorSkillDestination.codex, ".codex"),
+    ])
+func vendorSkillDestinationsAreExact(destination: ConductorSkillDestination, folder: String)
+    async throws
+{
     let fakeHome = try makeSkillTestDirectory()
     defer { try? FileManager.default.removeItem(at: fakeHome) }
     let catalog = try ConductorBundledSkillCatalog.bundled()
     let installer = ConductorSkillInstaller(catalog: catalog, homeDirectory: fakeHome)
-    let result = try await installer.install(at: .claudeCode)
+    let result = try await installer.install(at: destination)
     let expected =
         fakeHome
-        .appending(path: ".claude", directoryHint: .isDirectory)
+        .appending(path: folder, directoryHint: .isDirectory)
         .appending(path: "skills", directoryHint: .isDirectory)
         .appending(
             path: ConductorBundledSkillCatalog.skillIdentifier,
             directoryHint: .isDirectory)
 
     #expect(result.destinationDescription == expected.path)
-    #expect(result.created.count == 5)
+    #expect(installer.destinationRootURL(for: destination).path == expected.path)
+    #expect(result.created.count == expectedSkillFiles.count)
 }

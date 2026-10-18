@@ -12,6 +12,10 @@ final class ExternalOpenRequests {
     static let shared = ExternalOpenRequests()
 
     private(set) var pending: [URL] = []
+    /// `.rafuworkspace` files waiting for a fresh window
+    /// (`WorkspaceFileOpenRouter`). Only a window that has no workspace
+    /// takes one, so an open workspace is never replaced.
+    private(set) var pendingWorkspaceFiles: [URL] = []
 
     func enqueue(_ urls: [URL]) {
         let folders = urls.filter { url in
@@ -30,7 +34,40 @@ final class ExternalOpenRequests {
         return pending.removeFirst()
     }
 
-    var hasPending: Bool { !pending.isEmpty }
+    func enqueueWorkspaceFiles(_ urls: [URL]) {
+        let files = urls.filter(WorkspaceSession.isWorkspaceFile)
+        guard !files.isEmpty else { return }
+        pendingWorkspaceFiles.append(
+            contentsOf: files.prefix(8 - min(8, pendingWorkspaceFiles.count)))
+    }
+
+    func takeWorkspaceFile() -> URL? {
+        guard !pendingWorkspaceFiles.isEmpty else { return nil }
+        return pendingWorkspaceFiles.removeFirst()
+    }
+
+    var hasPending: Bool { !pending.isEmpty || !pendingWorkspaceFiles.isEmpty }
+
+    /// Folders that must open in a NEW window (Agent History's "Open Project
+    /// Folder"). Kept apart from `pending` because the key window consumes
+    /// `pending` itself, which would replace the workspace the user is in.
+    /// Only a fresh scene's startup takes these.
+    @ObservationIgnored private var pendingForNewWindow: [URL] = []
+
+    func enqueueForNewWindow(_ url: URL) {
+        pendingForNewWindow.append(url)
+    }
+
+    func cancelNewWindowRequest(_ url: URL) {
+        if let index = pendingForNewWindow.lastIndex(of: url) {
+            pendingForNewWindow.remove(at: index)
+        }
+    }
+
+    func takeForNewWindow() -> URL? {
+        guard !pendingForNewWindow.isEmpty else { return nil }
+        return pendingForNewWindow.removeFirst()
+    }
 }
 
 /// Receives `application(_:open:)` for folders passed by `open -a` (the CLI
@@ -41,6 +78,7 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
     private let terminationPersistence = WorkspaceTerminationPersistence()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        CanvasDiagramPanels.registerPaletteItems()  // X9 diagrams
         MemoryPressureMonitor.shared.start()
         LauncherIPCServer.shared.start()
         // Registering the reply-capable notification category and
@@ -55,6 +93,9 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
         // once at launch (idempotent; a no-op on a non-notch/disabled
         // machine, terminal-notch-hud.md NC-B).
         NotchCompanionModel.shared.activateIfEnabled()
+        // Watches the agent hook spool only if the person connected a
+        // provider in Settings ▸ Agents. Never installs or changes hooks.
+        AgentActivityStore.shared.start()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -78,7 +119,13 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        ExternalOpenRequests.shared.enqueue(urls)
+        // `.rafuensemble` files open as board tabs (X5); `.rafuworkspace`
+        // files open as saved workspaces (X10); folders as before.
+        let others = CanvasEnsembleOpenRouter.shared.route(urls)
+        for url in others where WorkspaceSession.isWorkspaceFile(url) {
+            WorkspaceFileOpenRouter.open(url)
+        }
+        ExternalOpenRequests.shared.enqueue(others.filter { !WorkspaceSession.isWorkspaceFile($0) })
         NSApp.activate(ignoringOtherApps: true)
     }
 }

@@ -37,7 +37,7 @@ struct EditorCanvasView: View {
         // Keep the same layout-tree identity while an auxiliary tab is open.
         // Only the owning group's content changes; every split stays visible.
         switch route {
-        case .settings, .ensembleStart, .ensembleNewRun, .graph, .runDetail:
+        case .settings:
             return .editor
         case .welcome, .empty:
             return session.auxiliaryTabs.isEmpty ? route : .editor
@@ -71,14 +71,6 @@ struct EditorCanvasView: View {
             if let openDiff = session.gitOpenDiff {
                 GitStandaloneDiffCanvas(openDiff: openDiff, session: session)
             }
-        case .graph:
-            ConductorGraphCanvas(session: session)
-        case .runDetail:
-            ConductorRunDetailCanvas(session: session)
-        case .ensembleStart:
-            EnsembleStartCanvas(session: session)
-        case .ensembleNewRun:
-            ConductorNewRunCanvas(session: session)
         case .settings:
             SettingsCanvas(session: session)
         case .editor:
@@ -214,7 +206,8 @@ private struct EditorGroupView: View {
                             if session.canvasTerminalOwners[terminalGroupID] != nil {
                                 ContentUnavailableView {
                                     Label(
-                                        "Terminal is in a Canvas", systemImage: "rectangle.3.group")
+                                        "Terminal is in an Ensemble",
+                                        systemImage: "rectangle.3.group")
                                 } description: {
                                     Text("Transfer its existing view to this tab to continue here.")
                                 } actions: {
@@ -359,16 +352,22 @@ private struct EditorGroupView: View {
                             EditorSplitPreviewOverlay(edge: hoveredDropEdge)
                         }
                     }
-                    // Canvas owns file drops while visible. The enclosing
-                    // editor target must not turn them into editor navigation.
+                    // A visible board owns FILE drops (they add nodes), so the
+                    // group must not turn them into editor navigation. It still
+                    // takes TAB drags, so an editor group can be split while a
+                    // board shows: the delegate declines files in that state
+                    // and the board's own target declines tabs
+                    // (`EditorDropRouting`).
                     .onDrop(
-                        of: selectedCanvas == nil ? [.rafuEditorDrag, .fileURL] : [],
+                        of: selectedCanvas == nil
+                            ? [.rafuEditorDrag, .fileURL] : [.rafuEditorDrag],
                         delegate: EditorDropDelegate(
                             groupID: group.id,
                             size: proxy.size,
                             hoveredEdge: $hoveredDropEdge,
                             isTargeted: $isDropTargeted,
-                            session: session
+                            session: session,
+                            canvasIsVisible: selectedCanvas != nil
                         )
                     )
                 }
@@ -551,6 +550,16 @@ private struct EditorDropDelegate: DropDelegate {
     @Binding var hoveredEdge: EditorSplitEdge?
     @Binding var isTargeted: Bool
     let session: WorkspaceSession
+    /// A board fills the group. The delegate then takes tab drags only; the
+    /// board keeps file drags (see `EditorDropRouting`).
+    var canvasIsVisible = false
+
+    func validateDrop(info: DropInfo) -> Bool {
+        guard canvasIsVisible else { return true }
+        return info.hasItemsConforming(to: [.rafuEditorDrag])
+            && EditorDropRouting.groupAccepts(
+                session.activeEditorDrag, canvasIsVisible: canvasIsVisible)
+    }
 
     func dropEntered(info: DropInfo) {
         isTargeted = true
@@ -940,21 +949,21 @@ private struct WorkspaceWelcomeView: View {
                 .buttonStyle(RafuProminentButtonStyle())
                 .controlSize(.large)
             HStack(alignment: .top, spacing: 16) {
-                if !recents.isEmpty {
-                    welcomeCard(title: "Recent Workspaces") { recentList }
+                // Saved workspaces and recent folders: the same list as the
+                // Workspaces window (⇧⌘1), opening in this window.
+                welcomeCard(title: "Workspaces", width: 380) {
+                    WorkspacesListView(model: .shared, session: session, placement: .welcome)
+                        .frame(height: 230)
                 }
                 welcomeCard(title: "Shortcuts") { WelcomeShortcutHints() }
             }
         }
         .padding(40)
-        .task { recents = recentsStore.load() }
     }
-
-    @State private var recents: [RecentWorkspaceEntry] = []
-    private let recentsStore = RecentWorkspacesStore()
 
     private func welcomeCard<Content: View>(
         title: String,
+        width: CGFloat = 260,
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -964,7 +973,7 @@ private struct WorkspaceWelcomeView: View {
             content()
         }
         .padding(14)
-        .frame(width: 260, alignment: .leading)
+        .frame(width: width, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
                 .fill(theme.palette.cardBackground)
@@ -973,76 +982,6 @@ private struct WorkspaceWelcomeView: View {
             RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
                 .strokeBorder(theme.palette.borderSubtle)
         )
-    }
-
-    private var recentList: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(recents.prefix(4)) { entry in
-                recentRow(entry)
-            }
-        }
-    }
-
-    private func recentRow(_ entry: RecentWorkspaceEntry) -> some View {
-        Button {
-            do {
-                let url = try recentsStore.resolve(entry)
-                session.openLocalWorkspace(at: url)
-            } catch {
-                recentsStore.remove(rootPath: entry.rootPath)
-                recents = recentsStore.load()
-            }
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "folder")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.palette.textSecondary)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(entry.displayName)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(theme.palette.textPrimary)
-                    RafuChip(
-                        text: (entry.rootPath as NSString).abbreviatingWithTildeInPath,
-                        foreground: theme.palette.textMuted
-                    )
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(
-                RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous))
-        }
-        .buttonStyle(WelcomeRecentButtonStyle())
-    }
-}
-
-private struct WelcomeRecentButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        StyleBody(configuration: configuration)
-    }
-
-    private struct StyleBody: View {
-        let configuration: Configuration
-        @Environment(\.rafuTheme) private var theme
-        @State private var isHovering = false
-
-        var body: some View {
-            configuration.label
-                .background(
-                    RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
-                        .fill(
-                            configuration.isPressed
-                                ? theme.palette.selection
-                                : isHovering ? theme.palette.hover : .clear
-                        )
-                )
-                .onHover { isHovering = $0 }
-                .animation(.easeOut(duration: 0.12), value: isHovering)
-        }
     }
 }
 
@@ -1055,6 +994,7 @@ private struct WelcomeShortcutHints: View {
             hint("Command Palette", keys: "⌘⇧P")
             hint("Search Workspace", keys: "⌘⇧F")
             hint("Source Control", keys: "⌘⇧G")
+            hint("All Workspaces", keys: "⌘⇧1")
         }
     }
 
@@ -1121,6 +1061,10 @@ private struct EditorGroupTabBar: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var tabFrames: [EditorTabID: CGRect] = [:]
     @State private var hoveredInsertionIndex: Int?
+    /// Visible width of the scrolling strip. The drop target stretches to at
+    /// least this width so the empty part of the bar (and an empty group's
+    /// whole bar) accepts a dragged tab.
+    @State private var stripViewportWidth: CGFloat = 0
 
     let group: EditorGroupState
     let terminalIdentities: [UUID: EditorTerminalIdentityPresentation]
@@ -1160,6 +1104,13 @@ private struct EditorGroupTabBar: View {
                     .background(ScrollerHidingConfigurator())
                     .onPreferenceChange(TabStripFramePreferenceKey.self) { tabFrames = $0 }
                     .overlay(alignment: .topLeading) { insertionIndicator }
+                    // The target covers the whole visible strip, not only the
+                    // tabs: dropping past the last tab appends, and an empty
+                    // group's bar still receives a tab. The leading alignment
+                    // keeps the content origin, so the tab frames above stay
+                    // valid for the drop location.
+                    .frame(minWidth: stripViewportWidth, alignment: .leading)
+                    .contentShape(Rectangle())
                     // The structurally scoped reorder target remains below
                     // the group's body split/move target.
                     .onDrop(
@@ -1175,6 +1126,11 @@ private struct EditorGroupTabBar: View {
                     )
                 }
                 .scrollIndicators(.hidden)
+                .onGeometryChange(for: CGFloat.self) {
+                    $0.size.width
+                } action: {
+                    stripViewportWidth = $0
+                }
                 // Tabs scroll under a trailing fade, so the fixed controls
                 // below never overlap (or clip) a tab or its close button.
                 .overlay(alignment: .trailing) {
@@ -1196,13 +1152,15 @@ private struct EditorGroupTabBar: View {
                     session.requestNewCanvas()
                 } label: {
                     Image(systemName: "plus.rectangle.on.rectangle")
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(theme.palette.textSecondary)
                         .frame(width: 28, height: 28)
+                        .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .fixedSize()
-                .help("New Canvas")
-                .accessibilityLabel("New Canvas")
+                .help("New Ensemble")
+                .accessibilityLabel("New Ensemble")
                 .disabled(session.rootURL == nil)
                 if let document = selectedDocument, document.supportsPresentationModes {
                     Divider().frame(height: 20)
@@ -1368,7 +1326,7 @@ private struct EditorGroupTabBar: View {
             }
         case .canvas(let id):
             overflowTabMenuButton(
-                title: session.canvas.boards[id]?.title ?? "Canvas", glyph: "rectangle.3.group",
+                title: session.canvas.boards[id]?.title ?? "Ensemble", glyph: "rectangle.3.group",
                 isDirty: false, tab: tab)
         case .restorable:
             EmptyView()
@@ -2192,7 +2150,7 @@ private struct EditorTabItem: View {
                     session.selectEditorTab(tabID, in: groupID)
                 } label: {
                     HStack(spacing: 6) {
-                        FileIconView(icon: icon, size: 11)
+                        FileIconView(icon: icon, size: 13)
                             .fixedSize()
                         Text(document.displayName)
                             .lineLimit(1)
@@ -2313,13 +2271,13 @@ private struct EditorTerminalTabItem: View {
                     HStack(spacing: 6) {
                         // An agent terminal shows its VENDOR mark; the generic
                         // terminal glyph remains the login-shell fallback.
-                        if let provider = controller.agentProvider {
-                            FileIconView(icon: ConductorCLIIcons.icon(for: provider), size: 12)
+                        if let provider = controller.resolvedAgentProvider {
+                            AgentIconView(cli: provider, size: 13)
                                 .fixedSize()
                                 .accessibilityHidden(true)
                         } else {
                             Image(systemName: "terminal")
-                                .font(.system(size: 11, weight: .medium))
+                                .font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .fixedSize()
                                 .accessibilityHidden(true)

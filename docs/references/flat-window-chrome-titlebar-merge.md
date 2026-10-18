@@ -82,6 +82,29 @@ throwaway TitleBarProto spike and the shipped implementation.
    would swallow clicks aimed at the sidebar header's leading edge at
    minimum sidebar width.
 
+## Titlebar row (2026-10-18)
+
+Last verified: Swift 6.2 Linux read-through, 2026-10-18; not yet run on macOS.
+
+`Sources/RafuApp/Views/WorkspaceTitlebarRow.swift` defines `WindowTitlebarRow`,
+the 28 pt row that replaced the hover cluster:
+
+- Centre: a workspace menu (recents, saved workspaces, Open Folder, Open
+  Workspace, Add Folder to Workspace, Save Workspace As, Show All Workspaces,
+  Reveal in Finder), a branch chip, and an agent activity capsule shown only
+  while agents run (opens the Terminals panel; text carries the meaning, not the
+  gold dot alone).
+- Trailing: a Search button (opens the palette, shown as ⌘P).
+- Everything else is a drag surface (`TitlebarDragSurface`, `WindowDragGesture`).
+  A double-click calls `TitlebarDoubleClick.perform(in:)`, which follows
+  `TitlebarDoubleClickAction.current()` (zoom, minimise, or none). The window
+  comes from the click event, so a second window never zooms the first. It does
+  nothing in full screen or with a sheet attached. This restores the
+  double-click-to-zoom that rule 3a recorded as lost, for this row only.
+- `WindowTitlebarRow` has an explicit `init(session:isFullScreen:)`. A private
+  stored property would make the synthesized memberwise init private on
+  Swift 6.3 (the source comment states this; it was not compiled here).
+
 ## Why it matters
 
 The pre-merge look (empty dark strip above the sidebar) read as dated

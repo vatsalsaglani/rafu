@@ -68,6 +68,62 @@ struct CanvasNodeInteractionTests {
         #expect(await session.canvas.flushAll())
     }
 
+    @Test("A drop ignores folders, keeps the files, and makes images image cards")
+    func dropIgnoresFoldersAndMakesImageCards() async throws {
+        let root = URL.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appending(path: "notes.md")
+        let picture = root.appending(path: "shot.PNG")
+        let folder = root.appending(path: "Sources", directoryHint: .isDirectory)
+        try Data("notes".utf8).write(to: file)
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: picture)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let (session, board) = try await fixture(root)
+        await session.addCanvasDroppedFiles(
+            [file, folder, picture], to: board.id, at: CGPoint(x: 40, y: 40))
+        #expect(board.cards.map(\.content) == [.file(path: "notes.md"), .image(path: "shot.PNG")])
+        #expect(board.errorMessage == nil)
+        await session.addCanvasDroppedFiles([folder], to: board.id, at: .zero)
+        #expect(board.cards.count == 2)
+        #expect(board.errorMessage == nil)
+        #expect(await session.canvas.flushAll())
+    }
+
+    @Test("Dropped file kinds follow the file extension")
+    func droppedFileKinds() {
+        #expect(
+            CanvasDroppedFileKind.content(forRelativePath: "a/b.png") == .image(path: "a/b.png"))
+        #expect(CanvasDroppedFileKind.content(forRelativePath: "B.JPEG") == .image(path: "B.JPEG"))
+        #expect(
+            CanvasDroppedFileKind.content(forRelativePath: "main.swift")
+                == .file(path: "main.swift"))
+        #expect(
+            CanvasDroppedFileKind.content(forRelativePath: "logo.svg") == .file(path: "logo.svg"))
+        #expect(CanvasDroppedFileKind.content(forRelativePath: ".png") == .file(path: ".png"))
+        #expect(
+            CanvasDroppedFileKind.content(forRelativePath: "x.png/README")
+                == .file(path: "x.png/README"))
+    }
+
+    @Test("A drop fits only when it has files and the board has room for all of them")
+    func dropCapacity() {
+        #expect(!CanvasDroppedFileKind.fits(count: 0, existing: 0))
+        #expect(CanvasDroppedFileKind.fits(count: 1, existing: 0))
+        #expect(CanvasDroppedFileKind.fits(count: 2, existing: CanvasLimits.cards - 2))
+        #expect(!CanvasDroppedFileKind.fits(count: 3, existing: CanvasLimits.cards - 2))
+        #expect(!CanvasDroppedFileKind.fits(count: 1, existing: CanvasLimits.cards))
+    }
+
+    @Test("The Add popover filters card kinds by title, case-insensitively")
+    func addPopoverMatches() {
+        #expect(CanvasAddKind.matches("") == CanvasAddKind.allCases)
+        #expect(CanvasAddKind.matches("  ") == CanvasAddKind.allCases)
+        #expect(CanvasAddKind.matches("TERM") == [.terminal])
+        #expect(CanvasAddKind.matches("app") == [.webApp, .macApp])
+        #expect(CanvasAddKind.matches("zzz").isEmpty)
+    }
+
     @Test("Close selected file node is immediate and never deletes its source file")
     func closeNode() async throws {
         let root = URL.temporaryDirectory.appending(path: UUID().uuidString)

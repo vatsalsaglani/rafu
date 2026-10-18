@@ -1,5 +1,7 @@
 # Ensemble pipeline engine: workflow execution, gates, and multi-role orchestration
 
+> **Status (2026-10-18): Retired.** The feature this note describes was removed in the round-2 redesign (see docs/plans/phases/ensemble-canvas.md). Kept for history; do not use it as current guidance.
+
 - Applies to: `Sources/RafuApp/Conductor/Run/ConductorWorkflowController.swift` (C5 pipeline engine) and related UI views (`ConductorRunsPanelView`, `ConductorRunDetailCanvas`), plus Views/WorkspaceSession seams that route run details to the canvas
 - Last verified: Swift 6.2 / macOS 26 / 2026-07-25 (phase C5);
   corrected 2026-07-26 against `ConductorRunEvidenceLayout`;

@@ -1,4 +1,5 @@
 import Foundation
+import RafuCore
 import SwiftUI
 
 struct CommandPaletteView: View {
@@ -9,7 +10,7 @@ struct CommandPaletteView: View {
     @Bindable var session: WorkspaceSession
     @State private var query = ""
     @State private var selectedIndex = 0
-    @State private var fileMatches: [String] = []
+    @State private var fileMatches: [WorkspaceFileMatch] = []
     @State private var symbolScan = SymbolScanState.idle
     @State private var workspaceSymbolMatches: [WorkspaceSymbolMatch] = []
     @State private var agentTerminalOptions: [AgentTerminalOption] = []
@@ -258,10 +259,13 @@ struct CommandPaletteView: View {
         } label: {
             HStack(spacing: 10) {
                 Group {
-                    if let fileIcon = row.fileIcon {
-                        FileIconView(icon: fileIcon, size: 13)
+                    if let agent = row.agent {
+                        AgentIconView(cli: agent, size: 16)
+                    } else if let fileIcon = row.fileIcon {
+                        FileIconView(icon: fileIcon, size: 16)
                     } else {
                         Image(systemName: row.symbolName)
+                            .font(.system(size: 13))
                             .foregroundStyle(iconColor(for: row, isSelected: isSelected))
                     }
                 }
@@ -385,22 +389,22 @@ struct CommandPaletteView: View {
     }
 
     /// `fileMatches` is already ranked and top-N limited by the background
-    /// index query (`runFileQuery`); this only turns the relative paths it
-    /// found into rows.
+    /// index query (`runFileQuery`); this only turns the paths it found into
+    /// rows. In a multi-folder workspace the detail names the folder.
     private func fileRows(matching term: String) -> [PaletteRow] {
-        fileMatches.map { relativePath in
-            let name = (relativePath as NSString).lastPathComponent
+        fileMatches.map { match in
+            let name = (match.relativePath as NSString).lastPathComponent
             let icon = FileIconProvider.fileIcon(named: name)
             return PaletteRow(
-                id: "file:\(relativePath)",
+                id: "file:\(match.id)",
                 symbolName: icon.symbol,
                 iconTint: icon.tint,
                 fileIcon: icon,
                 title: name,
-                detail: relativePath == name ? nil : relativePath
+                detail: match.displayPath == name ? nil : match.displayPath
             ) {
                 dismiss()
-                session.openFile(atRelativePath: relativePath)
+                session.openFile(match)
             }
         }
     }
@@ -420,7 +424,8 @@ struct CommandPaletteView: View {
             if Task.isCancelled { return }
         }
         do {
-            let results = try await session.queryFileIndex(term: term, limit: Self.maximumFileRows)
+            let results = try await session.queryWorkspaceFiles(
+                term: term, limit: Self.maximumFileRows)
             fileMatches = results
         } catch is CancellationError {
         } catch {
@@ -507,6 +512,7 @@ struct CommandPaletteView: View {
                 id: command.id ?? "command:\(command.title)",
                 symbolName: command.symbolName,
                 iconTint: nil,
+                agent: command.agent,
                 title: command.title,
                 detail: command.detail,
                 shortcut: command.shortcut,
@@ -589,28 +595,28 @@ struct CommandPaletteView: View {
     private func makeCommands() -> [PaletteCommand] {
         var commands: [PaletteCommand] = [
             .init(
-                title: "New Canvas…", symbolName: "rectangle.3.group",
+                title: "New Ensemble…", symbolName: "rectangle.3.group",
                 keywords: ["board", "spatial"]
             ) {
                 dismiss()
                 session.requestNewCanvas()
             },
             .init(
-                title: "Open Canvas…", symbolName: "rectangle.3.group",
+                title: "Open Ensemble…", symbolName: "rectangle.3.group",
                 keywords: ["board", "saved"]
             ) {
                 dismiss()
                 session.requestCanvasLibrary()
             },
             .init(
-                title: "Canvas: Zoom to Fit", symbolName: "arrow.up.left.and.arrow.down.right",
+                title: "Ensemble: Zoom to Fit", symbolName: "arrow.up.left.and.arrow.down.right",
                 keywords: ["board", "zoom"]
             ) {
                 dismiss()
                 session.selectedCanvas?.fitAll()
             },
             .init(
-                title: "Canvas: Tidy Up", symbolName: "square.grid.2x2",
+                title: "Ensemble: Tidy Up", symbolName: "square.grid.2x2",
                 keywords: ["board", "layout"]
             ) {
                 dismiss()
@@ -619,7 +625,7 @@ struct CommandPaletteView: View {
                 }
             },
             .init(
-                title: "Canvas: Return to Board", symbolName: "arrow.uturn.backward",
+                title: "Ensemble: Return to Board", symbolName: "arrow.uturn.backward",
                 keywords: ["focus", "board"]
             ) {
                 dismiss()
@@ -661,6 +667,21 @@ struct CommandPaletteView: View {
                 session.navigatorMode = .sourceControl
             },
             .init(
+                title: "Show Agent History", symbolName: "clock.arrow.circlepath",
+                keywords: ["claude", "codex", "chat", "sessions", "transcripts"],
+                shortcut: "⌘⇧H"
+            ) {
+                dismiss()
+                session.showAgentHistory()
+            },
+            .init(
+                title: "Search Agent History…", symbolName: "clock.arrow.circlepath",
+                keywords: ["claude", "codex", "chat", "find", "transcripts"]
+            ) {
+                dismiss()
+                session.showAgentHistory(focusSearch: true)
+            },
+            .init(
                 title: "Hide Utility Panel", symbolName: "sidebar.right",
                 keywords: ["close", "panel"]
             ) {
@@ -696,13 +717,6 @@ struct CommandPaletteView: View {
             ) {
                 dismiss()
                 session.navigatorMode = .terminals
-            },
-            .init(
-                title: "Show Runs", symbolName: "list.bullet.rectangle",
-                keywords: ["conductor", "agents", "workflow", "panel"]
-            ) {
-                dismiss()
-                session.navigatorMode = .runs
             },
             .init(
                 title: "Install rafu CLI", detail: "Installs to ~/.local/bin",
@@ -911,46 +925,6 @@ struct CommandPaletteView: View {
         if session.rootURL != nil {
             commands.append(
                 .init(
-                    id: "conductor.new-ensemble",
-                    title: "New Ensemble…",
-                    symbolName: "circle.hexagongrid",
-                    keywords: ["ensemble", "coordinator", "goal", "new"],
-                    shortcut: "⌘⇧E"
-                ) {
-                    dismiss()
-                    session.showEnsembleStart()
-                }
-            )
-        }
-
-        if session.rootURL != nil, session.canStartConductorWorkflowRun {
-            commands.append(
-                .init(
-                    id: "conductor.new-run",
-                    title: "New Run…",
-                    symbolName: "person.crop.rectangle.stack",
-                    keywords: ["ensemble", "agent", "role", "task", "workflow"]
-                ) {
-                    dismiss()
-                    session.showEnsembleNewRun()
-                }
-            )
-        }
-
-        if session.rootURL != nil {
-            commands.append(
-                .init(
-                    id: "conductor.show-graph",
-                    title: "Ensemble: Show Graph",
-                    symbolName: "point.3.connected.trianglepath.dotted",
-                    keywords: ["ensemble", "graph", "runs"]
-                ) {
-                    dismiss()
-                    session.showConductorGraph()
-                }
-            )
-            commands.append(
-                .init(
                     id: "terminal.new-agent",
                     title: "New Agent Terminal…",
                     symbolName: "terminal.badge",
@@ -970,68 +944,11 @@ struct CommandPaletteView: View {
                     title: "Agent Terminal: \(option.displayName)",
                     detail: option.launchVerificationNote,
                     symbolName: "terminal",
-                    keywords: ["agent", "terminal", option.displayName]
+                    keywords: ["agent", "terminal", option.displayName],
+                    agent: option.id
                 ) {
                     dismiss()
                     launchAgentTerminal(option)
-                }
-            )
-        }
-
-        // Verbs act on the engine owning the SELECTED run (C6 concurrency),
-        // so a gate in run B is not approved by a palette entry that read
-        // run A's state.
-        let selectedWorkflow = session.selectedWorkflowController
-
-        if case .awaitingGate = selectedWorkflow?.state, let selectedWorkflow {
-            commands.append(
-                .init(
-                    id: "conductor.approve-gate",
-                    title: "Approve Gate",
-                    symbolName: "checkmark.circle",
-                    keywords: ["ensemble", "workflow", "run"]
-                ) {
-                    dismiss()
-                    Task { await selectedWorkflow.approveGate() }
-                }
-            )
-            commands.append(
-                .init(
-                    id: "conductor.revise-gate-artifact",
-                    title: "Revise Gate Artifact",
-                    symbolName: "pencil.circle",
-                    keywords: ["ensemble", "workflow", "artifact"]
-                ) {
-                    dismiss()
-                    selectedWorkflow.reviseArtifact(in: session)
-                }
-            )
-        }
-
-        if let selectedWorkflow, selectedWorkflow.isInFlight {
-            commands.append(
-                .init(
-                    id: "conductor.abort-run",
-                    title: "Abort Run",
-                    symbolName: "xmark.circle",
-                    keywords: ["ensemble", "workflow", "stop"]
-                ) {
-                    dismiss()
-                    selectedWorkflow.abort()
-                }
-            )
-        }
-
-        if case .failed = selectedWorkflow?.state, let selectedWorkflow {
-            commands.append(
-                .init(
-                    id: "conductor.retry-failed-step",
-                    title: "Retry Failed Step",
-                    symbolName: "arrow.clockwise",
-                    keywords: ["ensemble", "workflow", "retry"]
-                ) {
-                    dismiss()
-                    Task { await selectedWorkflow.retryFailedStep() }
                 }
             )
         }
@@ -1227,56 +1144,58 @@ struct CommandPaletteView: View {
         }
         if let board = session.selectedCanvas {
             commands.append(contentsOf: [
-                .init(title: "Canvas: Add File…", symbolName: "doc.badge.plus", keywords: ["card"])
-                {
+                .init(
+                    title: "Ensemble: Add File…", symbolName: "doc.badge.plus", keywords: ["card"]
+                ) {
                     dismiss()
                     session.chooseCanvasFile(board.id, imageOnly: false)
                 },
-                .init(title: "Canvas: Add Image…", symbolName: "photo", keywords: ["card"]) {
+                .init(title: "Ensemble: Add Image…", symbolName: "photo", keywords: ["card"]) {
                     dismiss()
                     session.chooseCanvasFile(board.id, imageOnly: true)
                 },
-                .init(title: "Canvas: Add Note", symbolName: "note.text", keywords: ["card"]) {
+                .init(title: "Ensemble: Add Note", symbolName: "note.text", keywords: ["card"]) {
                     dismiss()
                     session.addCanvasNote(board.id)
                 },
                 .init(
-                    title: "Canvas: Add Terminal", symbolName: "terminal",
+                    title: "Ensemble: Add Terminal", symbolName: "terminal",
                     keywords: ["card"]
                 ) {
                     dismiss()
                     session.addCanvasStoppedTerminal(board.id)
                 },
-                .init(title: "Canvas: Add Web App…", symbolName: "globe", keywords: ["card"]) {
+                .init(title: "Ensemble: Add Web App…", symbolName: "globe", keywords: ["card"]) {
                     dismiss()
                     session.canvasDialog = .web(board.id)
                 },
                 .init(
-                    title: "Canvas: Add Mac App…", symbolName: "macwindow",
+                    title: "Ensemble: Add Mac App…", symbolName: "macwindow",
                     keywords: ["card"]
                 ) {
                     dismiss()
                     session.chooseCanvasApplication(board.id)
                 },
-                .init(title: "Canvas: Actual Size", symbolName: "1.square", keywords: ["zoom"]) {
+                .init(title: "Ensemble: Actual Size", symbolName: "1.square", keywords: ["zoom"]) {
                     dismiss()
                     board.zoom(1 / board.viewport.scale)
                 },
                 .init(
-                    title: "Canvas: Zoom In", symbolName: "plus.magnifyingglass", keywords: ["zoom"]
+                    title: "Ensemble: Zoom In", symbolName: "plus.magnifyingglass",
+                    keywords: ["zoom"]
                 ) {
                     dismiss()
                     board.zoom(1.2)
                 },
                 .init(
-                    title: "Canvas: Zoom Out", symbolName: "minus.magnifyingglass",
+                    title: "Ensemble: Zoom Out", symbolName: "minus.magnifyingglass",
                     keywords: ["zoom"]
                 ) {
                     dismiss()
                     board.zoom(1 / 1.2)
                 },
                 .init(
-                    title: "Canvas: Show List", symbolName: "list.bullet",
+                    title: "Ensemble: Show List", symbolName: "list.bullet",
                     keywords: ["cards", "connections"]
                 ) {
                     dismiss()
@@ -1284,7 +1203,7 @@ struct CommandPaletteView: View {
                     board.showsList = true
                 },
                 .init(
-                    title: "Canvas: Connect Selected Cards…",
+                    title: "Ensemble: Connect Selected Cards…",
                     symbolName: "point.3.connected.trianglepath.dotted", keywords: ["relationship"]
                 ) {
                     dismiss()
@@ -1315,6 +1234,9 @@ private struct PaletteRow: Identifiable {
     let symbolName: String
     let iconTint: FileIconProvider.Tint?
     var fileIcon: FileIconProvider.Icon? = nil
+    /// Set for rows that start or name an agent CLI; drawn with the shared
+    /// vendor mark instead of `symbolName`.
+    var agent: ConductorCLIID? = nil
     let title: String
     let detail: String?
     /// Keyboard shortcut glyphs shown right-aligned on the row, when the
@@ -1336,6 +1258,8 @@ private struct PaletteCommand {
     var keywords: [String]
     var shortcut: String? = nil
     var isEnabled = true
+    /// The agent CLI this command starts, if any (drawn as its vendor mark).
+    var agent: ConductorCLIID? = nil
     let action: @MainActor () -> Void
 
     var searchText: String { ([title, detail ?? ""] + keywords).joined(separator: " ") }

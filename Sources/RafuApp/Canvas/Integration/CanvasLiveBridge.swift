@@ -113,7 +113,7 @@ final class CanvasLiveBridge {
             guard !Task.isCancelled, controller.generation == generation, isCurrent() else {
                 return nil
             }
-            notice = "Session bridge unavailable. Use a new zsh or bash Canvas terminal."
+            notice = "Session bridge unavailable. Use a new zsh or bash Ensemble terminal."
             revision &+= 1
             return nil
         }
@@ -288,7 +288,7 @@ final class CanvasLiveBridge {
             return "Run claude or codex to connect"
         }
         if endpoint.provider == "codex", endpoint.threadID == nil {
-            return "Codex: ask it to list Canvas connections"
+            return "Codex: ask it to list Ensemble connections"
         }
         return "\(endpoint.provider == "claude" ? "Claude" : "Codex") connected"
     }
@@ -299,8 +299,9 @@ final class CanvasLiveBridge {
             source.generation == controller.generation, location(of: controller.id) != nil
         else { return .init(error: "This terminal session is no longer available.") }
         guard
-            ["bind", "suspend", "register", "list", "send", "receive", "unregister"].contains(
-                request.operation)
+            ["bind", "suspend", "register", "list", "send", "receive", "unregister", "tool"]
+                .contains(
+                    request.operation)
         else {
             return .init(error: "Unsupported bridge request.")
         }
@@ -405,6 +406,23 @@ final class CanvasLiveBridge {
             revision &+= 1
             return .init()
         case "list": return .init(peers: peers(for: controller.id))
+        case "tool":
+            guard let call = request.agentCall, let provider = source.provider,
+                let place = location(of: controller.id)
+            else { return .init(error: "Invalid Ensemble tool request.") }
+            let token = request.token
+            let clientID = request.clientID
+            let caller = CanvasAgentCaller(
+                session: place.session, board: place.board, card: place.card,
+                controllerID: controller.id, provider: provider
+            ) { [weak self] destination, text in
+                guard let self else { return .init(error: "Ensemble connection unavailable.") }
+                return await self.handle(
+                    CanvasBridgeRequest(
+                        token: token, operation: "send", clientID: clientID,
+                        provider: provider, destination: destination, text: text))
+            }
+            return await CanvasAgentActions.handle(call, caller: caller)
         case "receive":
             guard source.provider == "claude" else { return .init() }
             source.inbox = source.inbox.filter { message in
@@ -447,7 +465,7 @@ final class CanvasLiveBridge {
             }) {
                 return .init(
                     error:
-                        "This link is paused. Resume it in Rafu Canvas. Do not restart the terminals."
+                        "This link is paused. Resume it in Rafu Ensemble. Do not restart the terminals."
                 )
             }
             guard let targetID = liveTarget(from: controller.id, cardID: destinationID),
@@ -484,7 +502,7 @@ final class CanvasLiveBridge {
                     executable.hasPrefix("/")
                 else {
                     let reason =
-                        "Codex is waiting for its first Canvas tool call. Ask it to list Canvas connections."
+                        "Codex is waiting for its first Ensemble tool call. Ask it to list Ensemble connections."
                     recordFailure(route, reason)
                     return .init(error: reason)
                 }
@@ -495,7 +513,8 @@ final class CanvasLiveBridge {
                     try await CanvasCodexSession.send(
                         executable: executable, endpoint: endpoint,
                         threadID: threadID,
-                        text: "Canvas message from \(sourceCard.id.rawValue.uuidString):\n\(text)")
+                        text: "Ensemble message from \(sourceCard.id.rawValue.uuidString):\n\(text)"
+                    )
                 }
                 deliveries[deliveryID] = Delivery(
                     sourceToken: request.token, targetToken: targetToken, task: task)
@@ -520,6 +539,24 @@ final class CanvasLiveBridge {
             return .init()
         default: return .init(error: "Unsupported bridge request.")
         }
+    }
+
+    // MARK: Agent tools (X4)
+
+    /// True when a Live message link connects the caller's node to `cardID`.
+    func hasLiveRoute(from controllerID: UUID, to cardID: String) -> Bool {
+        guard let target = liveTarget(from: controllerID, cardID: cardID) else { return false }
+        return hasLiveEndpoint(target)
+    }
+
+    /// True after the terminal's private bridge shell was prepared; the shell
+    /// process starts in the same main-actor turn.
+    func hasBootstrap(controllerID: UUID) -> Bool { directories[controllerID] != nil }
+
+    /// The agent CLI connected in a terminal, if any.
+    func connectedProvider(controllerID: UUID) -> String? {
+        guard hasLiveEndpoint(controllerID) else { return nil }
+        return endpoints.values.first { $0.controller?.id == controllerID }?.provider
     }
 
     private func location(of controllerID: UUID) -> Location? {

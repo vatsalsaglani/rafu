@@ -1,5 +1,7 @@
 # Ensemble Claude Code and Codex adapters
 
+> **Status (2026-10-18): Partly current.** `ClaudeCodeAdapter.swift` and `CodexAdapter.swift` are kept in `Sources/RafuApp/Conductor/Adapters/`, so discovery, auth probes, model choices, and argv facts still apply. Text about run orchestration refers to the removed run feature (see docs/plans/phases/ensemble-canvas.md). Not re-verified against code in this round.
+
 - Applies to: `ClaudeCodeAdapter`, `CodexAdapter`, their shared bounded
   metadata-probe support, and C1 code that probes and invokes these adapters
 - Last verified: Claude Code 2.1.218, codex-cli 0.146.0-alpha.3, Swift 6.2.4,

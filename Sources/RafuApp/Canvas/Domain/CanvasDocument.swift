@@ -17,7 +17,17 @@ nonisolated enum CanvasLimits {
     static let noteBytes = 64 * 1_024
     static let documentBytes = 2 * 1_024 * 1_024
     static let webSurfaces = 2
-    static let captureStreams = 2
+    /// Whiteboard and Mermaid bounds (X5).
+    static let mermaidSourceBytes = 16 * 1_024
+    static let whiteboardTextBytes = 8 * 1_024
+    static let shapeLabelBytes = 1_024
+    static let strokePoints = 512
+    /// `.rafuensemble` file bounds: the whole file, the number of asset
+    /// entries, and embedded image bytes per asset and in total.
+    static let ensembleFileBytes = 4 * 1_024 * 1_024
+    static let ensembleAssets = 64
+    static let embeddedAssetBytes = 512 * 1_024
+    static let embeddedAssetsTotalBytes = 1_536 * 1_024
 }
 
 nonisolated enum CanvasError: Error, LocalizedError, Equatable, Sendable {
@@ -26,16 +36,16 @@ nonisolated enum CanvasError: Error, LocalizedError, Equatable, Sendable {
 
     var errorDescription: String? {
         switch self {
-        case .invalidDocument: "This Canvas contains invalid or excessive data."
-        case .unsupportedVersion: "This Canvas needs a newer version of Rafu."
-        case .capacity: "The Canvas resource limit has been reached."
-        case .conflict: "This Canvas changed in another window. Reload it or save a copy."
-        case .busy: "The Canvas store is busy. Try saving again."
-        case .unavailable: "The saved Canvas is unavailable."
+        case .invalidDocument: "This Ensemble contains invalid or excessive data."
+        case .unsupportedVersion: "This Ensemble needs a newer version of Rafu."
+        case .capacity: "The Ensemble resource limit has been reached."
+        case .conflict: "This Ensemble changed in another window. Reload it or save a copy."
+        case .busy: "The Ensemble store is busy. Try saving again."
+        case .unavailable: "The saved Ensemble is unavailable."
         case .invalidURL:
             "Use an http or https URL on localhost, 127.0.0.1, or [::1], without credentials."
         case .invalidPath: "Choose a file inside this workspace."
-        case .noteTooLarge: "A Canvas note can contain at most 64 KiB of UTF-8 text."
+        case .noteTooLarge: "An Ensemble note can contain at most 64 KiB of UTF-8 text."
         }
     }
 }
@@ -122,6 +132,15 @@ nonisolated enum CanvasCardContent: Codable, Equatable, Sendable {
     case terminal(groupID: TerminalGroupID)
     case web(destination: CanvasWebDestination)
     case nativeApp(bundleID: String)
+    /// Mermaid source rendered natively (X5). The live editor owns edits;
+    /// this is the committed source.
+    case mermaid(source: String)
+    case shape(CanvasShape)
+    case stroke(CanvasStroke)
+    case text(CanvasText)
+    /// Diagram kinds (X9 defines the value types in `Canvas/Diagram/`).
+    case frame(CanvasFrame)
+    case serviceIcon(CanvasServiceIcon)
 
     var kindName: String {
         switch self {
@@ -131,6 +150,12 @@ nonisolated enum CanvasCardContent: Codable, Equatable, Sendable {
         case .terminal: "Terminal"
         case .web: "Local Web App"
         case .nativeApp: "Native App"
+        case .mermaid: "Diagram"
+        case .shape(let shape): shape.kind.title
+        case .stroke(let stroke): stroke.kind.title
+        case .text: "Text"
+        case .frame: "Frame"
+        case .serviceIcon: "Icon"
         }
     }
 
@@ -142,6 +167,22 @@ nonisolated enum CanvasCardContent: Codable, Equatable, Sendable {
         case .terminal: "terminal"
         case .web: "globe"
         case .nativeApp: "macwindow"
+        case .mermaid: "point.3.connected.trianglepath.dotted"
+        case .shape(let shape):
+            switch shape.kind {
+            case .rectangle: "rectangle"
+            case .ellipse: "circle"
+            case .diamond: "diamond"
+            }
+        case .stroke(let stroke):
+            switch stroke.kind {
+            case .freehand: "scribble"
+            case .line: "line.diagonal"
+            case .arrow: "arrow.up.right"
+            }
+        case .text: "textformat"
+        case .frame: "rectangle.dashed"
+        case .serviceIcon: "cube"
         }
     }
 
@@ -162,6 +203,16 @@ nonisolated enum CanvasCardContent: Codable, Equatable, Sendable {
                 })
             else { throw CanvasError.invalidDocument }
         case .terminal: break
+        case .mermaid(let source):
+            guard CanvasStyleDecoding.validMermaidSource(source) else {
+                throw CanvasError.invalidDocument
+            }
+        case .shape(let shape): try shape.validate()
+        case .stroke(let stroke): try stroke.validate()
+        case .text(let text): try text.validate()
+        // X9 owns the frame and icon value types and their bounds.
+        case .frame(let frame): try frame.validate()
+        case .serviceIcon(let icon): try icon.validate()
         }
     }
 
@@ -247,6 +298,8 @@ nonisolated struct CanvasDocument: Codable, Equatable, Identifiable, Sendable {
     var connections: [CanvasConnection] = []
     var viewport = CanvasViewport()
     var terminalGroups: TerminalGroupWorkspaceRestoration?
+    /// X4: per-Ensemble Agent control. Absent means the default, Ask.
+    var agentControl: CanvasAgentControl?
 
     init(title: String, id: CanvasID = CanvasID()) {
         self.title = title
@@ -255,6 +308,7 @@ nonisolated struct CanvasDocument: Codable, Equatable, Identifiable, Sendable {
 
     private enum CodingKeys: CodingKey {
         case version, id, revision, title, cards, connections, viewport, terminalGroups
+        case agentControl
     }
 
     init(from decoder: any Decoder) throws {
@@ -274,6 +328,8 @@ nonisolated struct CanvasDocument: Codable, Equatable, Identifiable, Sendable {
         viewport = try container.decode(CanvasViewport.self, forKey: .viewport)
         terminalGroups = try container.decodeIfPresent(
             TerminalGroupWorkspaceRestoration.self, forKey: .terminalGroups)
+        agentControl = try container.decodeIfPresent(
+            CanvasAgentControl.self, forKey: .agentControl)
         try validate()
     }
 

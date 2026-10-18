@@ -6,6 +6,14 @@ enum CanvasAddKind: CaseIterable, Identifiable {
 
     var id: Self { self }
 
+    /// The kinds whose title contains `query` (case-insensitive), in menu
+    /// order. An empty query matches every kind.
+    static func matches(_ query: String) -> [CanvasAddKind] {
+        let text = query.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return allCases }
+        return allCases.filter { $0.title.localizedCaseInsensitiveContains(text) }
+    }
+
     var title: String {
         switch self {
         case .note: "Note"
@@ -59,6 +67,7 @@ struct CanvasAddMenuItems: View {
         Divider()
         item(.webApp)
         item(.macApp)
+        CanvasDiagramAddMenuItem(board: board, session: session)  // X9 diagrams
     }
 
     private func item(_ kind: CanvasAddKind) -> some View {
@@ -88,8 +97,8 @@ struct CanvasAddCardMenu: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .disabled(board.cards.count >= CanvasLimits.cards)
-        .help("Add to Canvas")
-        .accessibilityLabel("Add to Canvas")
+        .help("Add to Ensemble")
+        .accessibilityLabel("Add to Ensemble")
     }
 }
 
@@ -102,47 +111,108 @@ struct CanvasAddPopover: View {
     let boardPoint: CGPoint
     let dismiss: () -> Void
     @State private var query = ""
+    @State private var highlighted = 0
+    @State private var hovered: CanvasAddKind?
     @FocusState private var queryFocused: Bool
 
-    private var matches: [CanvasAddKind] {
-        let text = query.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { return CanvasAddKind.allCases }
-        return CanvasAddKind.allCases.filter { $0.title.localizedCaseInsensitiveContains(text) }
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            TextField("Add a card", text: $query)
-                .textFieldStyle(.plain)
-                .focused($queryFocused)
-                .onSubmit { if let first = matches.first { choose(first) } }
-                .padding(.horizontal, 8).padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: RafuMetrics.radiusWorkbenchField)
-                        .fill(theme.palette.fieldBackground)
-                )
-                .accessibilityLabel("Add a card")
-            ForEach(matches) { kind in
-                Button {
-                    choose(kind)
-                } label: {
-                    Label(kind.title, systemImage: kind.symbol)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 8).padding(.vertical, 3)
+        let kinds = CanvasAddKind.matches(query)
+        let current = kinds.indices.contains(highlighted) ? kinds[highlighted] : nil
+        VStack(alignment: .leading, spacing: 4) {
+            searchField(kinds)
+            Divider().padding(.vertical, 2)
+            ForEach(kinds) { kind in
+                row(kind, isHighlighted: kind == current)
             }
-            if matches.isEmpty {
-                Text("No matching card type").foregroundStyle(theme.palette.textSecondary)
-                    .padding(.horizontal, 8)
+            if kinds.isEmpty {
+                Text("No matching card type")
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
             }
         }
-        .font(.system(size: 13))
-        .padding(10)
-        .frame(width: 200)
+        .padding(8)
+        .frame(width: 220)
         .onAppear { queryFocused = true }
+        .onChange(of: query) { _, _ in highlighted = 0 }
         .onExitCommand { dismiss() }
+    }
+
+    private func searchField(_ matches: [CanvasAddKind]) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11))
+                .foregroundStyle(theme.palette.textSecondary)
+                .accessibilityHidden(true)
+            TextField("Add a card", text: $query)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .focused($queryFocused)
+                .onSubmit {
+                    if matches.indices.contains(highlighted) { choose(matches[highlighted]) }
+                }
+                .onKeyPress(.downArrow) {
+                    highlighted = min(highlighted + 1, max(0, matches.count - 1))
+                    return .handled
+                }
+                .onKeyPress(.upArrow) {
+                    highlighted = max(highlighted - 1, 0)
+                    return .handled
+                }
+                .accessibilityLabel("Add a card")
+        }
+        .padding(.horizontal, 8).padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusWorkbenchField)
+                .fill(theme.palette.fieldBackground)
+        )
+    }
+
+    /// One card type. The highlighted row (Return target) uses the selection
+    /// fill; hover uses the lighter hover fill. No gold.
+    private func row(_ kind: CanvasAddKind, isHighlighted: Bool) -> some View {
+        Button {
+            choose(kind)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: kind.symbol)
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .frame(width: 18)
+                    .accessibilityHidden(true)
+                Text(kind.title)
+                    .font(.system(size: 13))
+                    .foregroundStyle(theme.palette.textPrimary)
+                Spacer(minLength: 4)
+                if isHighlighted {
+                    Text("↩")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.palette.textMuted)
+                        .accessibilityHidden(true)
+                }
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 26)
+            .background(
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusDenseSelection)
+                    .fill(rowFill(kind, isHighlighted: isHighlighted))
+            )
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { inside in
+            if inside {
+                hovered = kind
+            } else if hovered == kind {
+                hovered = nil
+            }
+        }
+        .accessibilityLabel(kind.title)
+    }
+
+    private func rowFill(_ kind: CanvasAddKind, isHighlighted: Bool) -> Color {
+        if isHighlighted { return theme.palette.selection }
+        return hovered == kind ? theme.palette.hover : Color.clear
     }
 
     private func choose(_ kind: CanvasAddKind) {

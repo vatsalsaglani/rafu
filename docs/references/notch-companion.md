@@ -174,6 +174,35 @@ the non-notch fallback layout. General rule: a surface that exists to
 occupy fixed physical hardware must be anchored to the display owning that
 hardware, never to whichever display currently has focus.
 
+## Cider-style rebuild (2026-10-18; updates stale text above)
+
+Last verified: Swift 6.2 Linux read-through, 2026-10-18; not yet run on macOS.
+Rules 1 to 11 above were verified on the earlier strip and peek design. Treat
+statements about the resting strip, wings, and the editors-search field as
+possibly stale until a macOS pass; geometry and focus rules were not re-checked.
+
+What the code now has:
+
+- Mascot: `Sources/RafuApp/Notch/NotchMascotView.swift`,
+  `NotchMascotState.swift`, `NotchMascotGeometry.swift`.
+- Sections in `Sources/RafuApp/Views/NotchSectionViews.swift`: Ensembles
+  (open windows, their Ensembles, and agents, including agents outside any
+  Ensemble), Up next, Now Playing, Usage (compact meters from the existing usage
+  stores).
+- Hover opens the panel (`NotchDisplayPreferences`: "Hovering the notch opens
+  the panel", with a setting).
+- Now Playing: the bundled MediaRemote adapter is the first source when enabled
+  in Settings; Music and Spotify through public API are the fallback when it is
+  off, missing, or stops. See
+  [`agent-hooks-and-now-playing.md`](agent-hooks-and-now-playing.md).
+- Agent state comes from hooks via
+  `Sources/RafuApp/AgentTracking/AgentActivityStore.swift`; the notch,
+  titlebar, and Ensemble terminal nodes each keep an output-based fallback when
+  no hook session matches.
+
+Not verified: the contents of `Resources/Mascot/*.svg` (not read), and which
+older strip, wing, and peek types still exist.
+
 ## Why it matters
 
 The companion is a persistent, always-on overlay near the menu bar; any
@@ -241,3 +270,6 @@ rg -n "NotchScreenSelection|currentMetrics" Sources/RafuApp/Terminal
   (v1 attention HUD stack this builds on)
 - [`nonisolated-extension-isolation-trap.md`](nonisolated-extension-isolation-trap.md)
   (the general Swift-concurrency gotcha found while building NC-A)
+- [`agent-hooks-and-now-playing.md`](agent-hooks-and-now-playing.md) (X11:
+  hook-based agent phases in the notch, "Other agents", and the system Now
+  Playing source with its Music/Spotify fallback)

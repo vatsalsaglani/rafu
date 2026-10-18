@@ -244,15 +244,12 @@ struct CanvasCardPresentationTests {
                 title: "x", content: .note(snapshot: "")) == "x")
     }
 
-    @Test("Shell and folder names and the picture caption read plainly")
+    @Test("Shell and folder names read plainly")
     func bodyWords() {
         #expect(CanvasCardPresentation.shellName(.preferredShell) == "Default shell")
         #expect(CanvasCardPresentation.shellName(.approvedShellPath("/bin/zsh")) == "zsh")
         #expect(CanvasCardPresentation.folderName("") == "Workspace folder")
         #expect(CanvasCardPresentation.folderName("Sources/App") == "Sources/App")
-        #expect(
-            CanvasCardPresentation.previewCaption(appName: "Finder")
-                == "This is a picture of a Finder window. Keyboard and pointer input go to Finder.")
     }
 
     @Test("The summary line is one short, useful line per card type")

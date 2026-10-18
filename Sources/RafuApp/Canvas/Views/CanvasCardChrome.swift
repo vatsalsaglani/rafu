@@ -68,6 +68,14 @@ struct CanvasCardCommands {
             return Action(
                 id: "open", title: "Open \(card.title)", symbol: "arrow.up.forward.app"
             ) { resources?.nativeApp(for: card)?.openApp() }
+        case .mermaid, .shape, .text:  // X5 whiteboard
+            return Action(
+                id: "edit", title: CanvasWhiteboardEditing.editTitle(card.content),
+                symbol: "pencil"
+            ) { CanvasWhiteboardEditing.shared.request(card.id) }
+        default:
+            // Whiteboard and diagram kinds have no primary action.
+            return nil
         }
     }
 
@@ -90,17 +98,18 @@ struct CanvasCardCommands {
             return items
         case .nativeApp:
             guard let app = resources?.nativeApp(for: card) else { return [] }
-            if app.isCapturing {
+            if app.isDocked {
                 return [
                     Action(
-                        id: "stop-preview", title: "Stop Window Preview", symbol: "eye.slash"
-                    ) { app.stop() }
+                        id: "undock", title: "Undock \(card.title)",
+                        symbol: "rectangle.portrait.and.arrow.right"
+                    ) { app.undock() }
                 ]
             }
             return [
                 Action(
-                    id: "preview", title: "Show Window Preview…", symbol: "eye"
-                ) { app.chooseWindow() }
+                    id: "dock", title: "Dock \(card.title)", symbol: "rectangle.inset.filled"
+                ) { app.dock(appName: card.title, session: session) }
             ]
         default:
             return []
@@ -113,6 +122,11 @@ struct CanvasCardCommands {
         case .terminal(let groupID):
             guard let pane = session.terminal.terminalGroup(groupID)?.panes.first else {
                 return "Unavailable"
+            }
+            if let word = AgentActivityStore.shared.stateWord(
+                for: session.terminal.terminalController(for: pane.id))
+            {
+                return word
             }
             var code: Int32?
             if case .exited(let reported)? = session.terminal.terminalController(for: pane.id)?
@@ -202,6 +216,7 @@ struct CanvasCardMenuContent: View {
                     CanvasBridgePeer.mention(for: card.title), forType: .string)
             }
         }
+        CanvasDiagramCardMenuItems(card: card, board: board, session: session)  // X9 diagrams
         Divider()
         Button("Rename…", systemImage: "pencil") { board.renamingCardID = card.id }
         Button("Duplicate", systemImage: "plus.square.on.square") {
@@ -228,7 +243,7 @@ struct CanvasCardMenuContent: View {
             }
         }
         Divider()
-        Button("Remove from Canvas…", systemImage: "minus.circle", role: .destructive) {
+        Button("Remove from Ensemble…", systemImage: "minus.circle", role: .destructive) {
             commands.requestRemoval()
         }
     }

@@ -15,9 +15,7 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
     case search
     case sourceControl
     case terminals
-    /// Conductor runs (ADR 0018, conductor/C0-shim.md). The tolerant decode
-    /// below already protects restoration for builds that predate this case.
-    case runs
+    case history
 
     var title: String {
         switch self {
@@ -25,7 +23,7 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
         case .search: "Search"
         case .sourceControl: "Source Control"
         case .terminals: "Terminals"
-        case .runs: "Runs"
+        case .history: "History"
         }
     }
 
@@ -35,12 +33,13 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
         case .search: "magnifyingglass"
         case .sourceControl: "arrow.triangle.branch"
         case .terminals: "terminal"
-        case .runs: "list.bullet.rectangle"
+        case .history: "clock.arrow.circlepath"
         }
     }
 
     /// Tolerant decode: a persisted raw value this build does not know (an
-    /// older build reading a newer `RestorableWorkspace`) falls back to
+    /// older build reading a newer `RestorableWorkspace`, or a value for a
+    /// removed mode such as the retired `runs` navigator) falls back to
     /// `.files` instead of throwing. Without this, ONE unknown mode string
     /// fails the whole `RestorableWorkspace` decode and
     /// `restoreLastWorkspaceIfAvailable()`'s catch clears restoration —
@@ -108,6 +107,23 @@ final class WorkspaceSession {
     var descriptor: WorkspaceDescriptor? {
         didSet { cancelLocationNavigation() }
     }
+    /// Folders after the primary root, in workspace order (multi-folder
+    /// workspaces). Empty for a one-folder workspace. `rootURL` always means
+    /// the primary root. See `WorkspaceSession+Roots.swift`.
+    var additionalRootTrees: [WorkspaceRootTree] = []
+    /// The root Source Control works on; `nil` means the primary root.
+    var sourceControlRootID: UUID? {
+        didSet {
+            guard oldValue != sourceControlRootID else { return }
+            resetGitWorkbenchState()
+            Task { await refreshGit() }
+        }
+    }
+    /// IDs of roots that are inside a Git work tree, checked off the main
+    /// actor whenever the root list changes.
+    var gitRepositoryRootIDs: Set<UUID> = []
+    /// The `.rafuworkspace` file this window was opened from or saved to.
+    var workspaceFileURL: URL?
     var navigatorMode: WorkspaceNavigatorMode = .files {
         didSet { persistWorkspaceState() }
     }
@@ -242,53 +258,7 @@ final class WorkspaceSession {
     var openFolderErrorTitle = "Unable to Open Folder"
     var openFolderErrorMessage = ""
 
-    /// Conductor run seams (ADR 0018, conductor/C0-shim.md), pre-landed here
-    /// exactly as the git phase pre-landed its seams so C1's run engine and
-    /// C5's runs navigator fill them WITHOUT editing this shared file.
-    ///
-    /// C1 reloads persisted manifests eagerly (`reloadConductorRuns(for:)`,
-    /// called from both `openLocalWorkspace(at:)` and
-    /// `restoreLastWorkspaceIfAvailable()`), so this reflects `.rafu/runs/`
-    /// as read at the moment a workspace opens, replaces, or restores — not
-    /// only when the `.runs` navigator panel happens to be mounted.
-    var conductorRuns: [ConductorRunManifest] {
-        conductorRunController.runs
-    }
-    /// The run the `.runs` panel and (C5) the run-detail canvas are showing.
-    var selectedConductorRunID: String?
-
-    /// Non-nil while the editor canvas hosts the run-detail timeline (C5).
-    /// Distinct from `selectedConductorRunID` (the panel's own selection,
-    /// which persists across canvas visibility): revealing a live step's
-    /// terminal must REPLACE the canvas, not sit behind it, so
-    /// `revealTerminalSession(_:)` clears this while leaving the panel
-    /// selection alone.
-    var conductorRunCanvasID: String?
-
-    /// This window's run engine — C1 FILLS IT (`conductor/C1-single-role-runs
-    /// .md`). Pre-landed here because C1 may not add stored properties to
-    /// this shared file without stopping to report, and because one window
-    /// owns exactly one run controller, the same way it owns one terminal
-    /// manager.
-    ///
-    /// Constructing it does NO work: it only captures the adapter registry
-    /// (seven pure value types) and holds `.idle` state. Nothing runs, and
-    /// no `.rafu/` path is touched, until C1's explicit user-initiated run
-    /// (ADR 0018).
-    /// The adapter registry every conductor engine in this window resolves
-    /// against. Defaults to the real one; tests inject `FakeConductorAdapter`
-    /// so orchestration behaviour stays verifiable on a machine with no
-    /// vendor CLI installed — a CI runner has none, and a test that reaches
-    /// the real registry there fails with "agent adapter is unavailable"
-    /// while passing on any developer Mac that happens to have Claude Code.
-    @ObservationIgnored
-    private let conductorAdapters: [any ConductorCLIAdapter]
-
-    @ObservationIgnored
-    let conductorRunController: ConductorRunController
-
     init(
-        conductorAdapters: [any ConductorCLIAdapter] = ConductorAdapterRegistry.all,
         restorationStore: WorkspaceRestorationStore = WorkspaceRestorationStore(),
         closeSaveTracker: WorkspaceCloseSaveTracker = .shared,
         canvasStore: WorkspaceCanvasStore = WorkspaceCanvasStore()
@@ -296,136 +266,6 @@ final class WorkspaceSession {
         self.canvas = canvasStore
         self.closeSaveTracker = closeSaveTracker
         self.restorationStore = restorationStore
-        self.conductorAdapters = conductorAdapters
-        self.conductorRunController = ConductorRunController(adapters: conductorAdapters)
-    }
-
-    /// This window's C5 pipeline engine — a PEER of `conductorRunController`,
-    /// publishing every manifest write through it (`ConductorRunController
-    /// .publish`). `lazy` so a window that never starts a workflow run never
-    /// constructs it; `onGateReady` is wired once, here, rather than at every
-    /// call site.
-    @ObservationIgnored
-    private(set) lazy var conductorWorkflowController: ConductorWorkflowController = {
-        let controller = ConductorWorkflowController(
-            runsPublisher: conductorRunController,
-            adapters: conductorAdapters)
-        controller.onGateReady = { [weak self] event in
-            self?.raiseConductorGateAttention(event)
-        }
-        return controller
-    }()
-
-    /// This window's C6 bounded pool of pipeline engines — the durable owner
-    /// of every run started from the Runs panel. `conductorWorkflowController`
-    /// above remains the fallback for a run this pool no longer tracks (it
-    /// prunes completed/aborted runs) so historical selections still resolve.
-    /// Route every gate/abort/retry/reveal verb through
-    /// `workflowController(forRunID:)`, never the singular controller directly.
-    @ObservationIgnored
-    private(set) lazy var conductorConcurrentRuns: ConductorConcurrentRunCoordinator = {
-        let coordinator = ConductorConcurrentRunCoordinator(
-            runsPublisher: conductorRunController,
-            adapters: conductorAdapters)
-        coordinator.onGateReady = { [weak self] event in
-            self?.raiseConductorGateAttention(event)
-        }
-        return coordinator
-    }()
-
-    /// Resolves the engine that owns `runID`: the concurrent pool first, then
-    /// the singular controller when its current manifest matches. Returns
-    /// `nil` for a historical run no live engine owns — callers must treat that
-    /// as "no verbs available", not as an error.
-    func workflowController(forRunID runID: String?) -> ConductorWorkflowController? {
-        guard let runID else { return nil }
-        if let owned = conductorConcurrentRuns.controller(runID: runID) { return owned }
-        return conductorWorkflowController.manifest?.id == runID
-            ? conductorWorkflowController : nil
-    }
-
-    /// The engine driving the run the UI is currently showing, if any.
-    var selectedWorkflowController: ConductorWorkflowController? {
-        workflowController(forRunID: selectedConductorRunID)
-    }
-
-    /// Adopts a persisted, interrupted run (C7 recovery) into a live engine so
-    /// its Retry Step / Abort / Keep Worktree verbs work in this app process.
-    /// Idempotent: a run already owned by an engine is returned as-is. Returns
-    /// `nil` when the run cannot be adopted — the caller then shows it as
-    /// read-only history rather than offering verbs that would do nothing.
-    @discardableResult
-    func adoptInterruptedRun(_ runID: String) -> ConductorWorkflowController? {
-        if let existing = workflowController(forRunID: runID) { return existing }
-        guard let rootURL,
-            let manifest = conductorRuns.first(where: { $0.id == runID }),
-            manifest.steps.contains(where: { $0.status == .interrupted })
-        else { return nil }
-
-        let launcher = WorkspaceConductorRunLauncher(workspaceSession: self, runID: runID)
-        // Adopted into the singular controller, not the concurrent pool: the
-        // pool's `start` is for NEW runs (it reserves a run id and materializes
-        // a worktree), while this run's worktree already exists on disk.
-        guard
-            conductorWorkflowController.restoreInterrupted(
-                manifest: manifest,
-                workspaceRoot: rootURL,
-                launcher: launcher)
-        else { return nil }
-        return conductorWorkflowController
-    }
-
-    /// Whether this window may start another pipeline. C6 deliberately allows
-    /// several at once, so this is a CAP check (`activeLimit`), not an
-    /// is-anything-running check — the pre-C6 guard was the latter and would
-    /// have silently kept the concurrency story unreachable.
-    var canStartConductorWorkflowRun: Bool {
-        conductorRunController.canStartNewRun
-            && !conductorWorkflowController.isInFlight
-            && conductorConcurrentRuns.activeCount < conductorConcurrentRuns.activeLimit
-    }
-
-    private(set) var conductorCoordinatorSessions: [ConductorCoordinatorSession] = []
-
-    @ObservationIgnored
-    private var conductorCoordinatorEndHandlers: [String: @MainActor () -> Void] = [:]
-
-    func registerCoordinatorSession(
-        _ coordinatorSession: ConductorCoordinatorSession,
-        onEnd: @escaping @MainActor () -> Void = {}
-    ) {
-        if let index = conductorCoordinatorSessions.firstIndex(where: {
-            $0.id == coordinatorSession.id
-        }) {
-            conductorCoordinatorSessions[index] = coordinatorSession
-        } else {
-            conductorCoordinatorSessions.append(coordinatorSession)
-        }
-        conductorCoordinatorEndHandlers[coordinatorSession.id] = onEnd
-    }
-
-    func coordinatorSessionDidEnd(_ id: String) {
-        guard let index = conductorCoordinatorSessions.firstIndex(where: { $0.id == id }),
-            conductorCoordinatorSessions[index].endedAt == nil
-        else { return }
-        conductorCoordinatorSessions[index].endedAt = Date()
-        let onEnd = conductorCoordinatorEndHandlers.removeValue(forKey: id)
-        onEnd?()
-    }
-
-    private func endCoordinatorSession(for terminalSessionID: UUID) {
-        guard
-            let coordinatorID = conductorCoordinatorSessions.first(where: {
-                $0.terminalSessionID == terminalSessionID && $0.endedAt == nil
-            })?.id
-        else { return }
-        coordinatorSessionDidEnd(coordinatorID)
-    }
-
-    private func endAllCoordinatorSessions() {
-        for id in conductorCoordinatorSessions.filter({ $0.endedAt == nil }).map(\.id) {
-            coordinatorSessionDidEnd(id)
-        }
     }
 
     /// Single terminal teardown funnel for workspace replacement, window
@@ -446,7 +286,6 @@ final class WorkspaceSession {
         cancelLocationNavigation()
         endTerminalGroupLibrary()
         cleanupTerminalSessions(terminal.sessions.map(\.id))
-        endAllCoordinatorSessions()
         drainTerminalLifecycleCallbacks()
         terminal.shutdownAll()
         pendingTerminalGroupClose = nil
@@ -567,72 +406,17 @@ final class WorkspaceSession {
         navigatorMode = navigatorMode == mode ? .files : mode
     }
 
-    /// Reveals a Conductor run (ADR 0018). C0 only records the selection and
-    /// opens the `.runs` navigator so the seam is typed and exercised; C5
-    /// adds the editor-hosted run-detail canvas behind the same call, so no
-    /// caller changes when it lands. Reading run evidence starts nothing.
-    func openConductorRun(_ runID: String) {
-        installTerminalHandlersIfNeeded()
-        selectedConductorRunID = runID
-        navigatorMode = .runs
-        conductorRunController.revealLiveTerminal(for: runID, in: self)
-    }
-
-    /// Selects the run-detail tab in its editor group. The group's file
-    /// selection and live editor remain intact below the auxiliary content.
-    func showConductorRunDetail(_ runID: String) {
-        prepareAuxiliarySelection()
-        selectedConductorRunID = runID
-        navigatorMode = .runs
-        conductorRunCanvasID = runID
-        conductorGraphVisible = false
-        ensembleStartCanvasVisible = false
-        ensembleNewRunCanvasVisible = false
-        settingsVisible = false
-        selectedDocumentID = nil
-        selectedTreePath = nil
-        recordAuxiliaryTab(.runDetail(runID))
-    }
-
-    /// Closes run detail and returns to its group's selected file or terminal.
-    func closeConductorRunDetail() {
-        guard let conductorRunCanvasID else { return }
-        closeAuxiliaryTab(.runDetail(conductorRunCanvasID))
-    }
-
-    /// Hosts the workspace-wide Ensemble projection in the editor canvas.
-    /// Graph, run detail, and terminal are peer occupants: opening one clears
-    /// the other canvas route without changing the Runs panel selection.
-    var conductorGraphVisible = false
-
-    func showConductorGraph() {
-        prepareAuxiliarySelection()
-        conductorGraphVisible = true
-        conductorRunCanvasID = nil
-        ensembleStartCanvasVisible = false
-        ensembleNewRunCanvasVisible = false
-        settingsVisible = false
-        selectedDocumentID = nil
-        selectedTreePath = nil
-        navigatorMode = .runs
-        recordAuxiliaryTab(.graph)
-    }
-
-    func closeConductorGraph() {
-        closeAuxiliaryTab(.graph)
-    }
-
-    /// Ensemble creation tabs share an editor group with files. Only one
-    /// auxiliary route is selected, but open auxiliary tabs remain available.
-    var ensembleStartCanvasVisible = false
-    var ensembleNewRunCanvasVisible = false
-    @ObservationIgnored private var ensembleStartLaunchInProgress = false
-
     /// Hosts Settings as a window-scoped, non-restorable editor canvas.
     /// The native Settings scene remains the no-window fallback for ⌘,;
     /// focused workspace windows route here instead.
     var settingsVisible = false
-    var auxiliaryTabs: [WorkspaceAuxiliaryTab] = []
+    var auxiliaryTabs: [WorkspaceAuxiliaryTab] = [] {
+        // Agent History (X12): a transcript lives only while its tab is open.
+        didSet { agentHistory.retainTranscripts(for: auxiliaryTabs) }
+    }
+    /// Agent History (X12): this window's History navigator filter and the
+    /// transcripts of its open Agent Session tabs.
+    @ObservationIgnored let agentHistory = AgentHistoryWindowState()
     var auxiliaryTabGroups: [WorkspaceAuxiliaryTab: EditorGroupID] = [:]
 
     func showSettings() {
@@ -640,16 +424,9 @@ final class WorkspaceSession {
         if gitOpenDiff != nil {
             closeGitDiff()
         }
+        // Settings and an Agent Session tab are peers: hide the other one.
+        suspendAuxiliarySelection()
         settingsVisible = true
-        conductorRunCanvasID = nil
-        conductorGraphVisible = false
-        // UX-01 landed the creation canvases in parallel with this one, so
-        // neither branch cleared the other's flags. Settings is their peer:
-        // without these two lines the resolver's ordering silently becomes
-        // load-bearing (editor-canvas-routing.md, "Exclusivity lives in the
-        // mutators").
-        ensembleStartCanvasVisible = false
-        ensembleNewRunCanvasVisible = false
         selectedDocumentID = nil
         selectedTreePath = nil
         recordAuxiliaryTab(.settings)
@@ -657,55 +434,6 @@ final class WorkspaceSession {
 
     func closeSettings() {
         closeAuxiliaryTab(.settings)
-    }
-
-    /// C8-07's four "New Ensemble…" entry points share this guarded seam.
-    func showEnsembleStart() {
-        guard descriptor != nil else { return }
-        prepareAuxiliarySelection()
-        ensembleStartCanvasVisible = true
-        ensembleNewRunCanvasVisible = false
-        conductorGraphVisible = false
-        conductorRunCanvasID = nil
-        settingsVisible = false
-        selectedDocumentID = nil
-        selectedTreePath = nil
-        navigatorMode = .runs
-        recordAuxiliaryTab(.ensembleStart)
-    }
-
-    func closeEnsembleStart() {
-        closeAuxiliaryTab(.ensembleStart)
-    }
-
-    /// Coordinator launch reveals its terminal as part of starting Door 1.
-    /// Keep the copyable-goal confirmation canvas in front during that
-    /// internal reveal; an ordinary user-requested terminal reveal still
-    /// replaces the canvas.
-    func beginEnsembleStartLaunch() {
-        ensembleStartLaunchInProgress = true
-    }
-
-    func endEnsembleStartLaunch() {
-        ensembleStartLaunchInProgress = false
-    }
-
-    func showEnsembleNewRun() {
-        guard descriptor != nil, canStartConductorWorkflowRun else { return }
-        prepareAuxiliarySelection()
-        ensembleNewRunCanvasVisible = true
-        ensembleStartCanvasVisible = false
-        conductorGraphVisible = false
-        conductorRunCanvasID = nil
-        settingsVisible = false
-        selectedDocumentID = nil
-        selectedTreePath = nil
-        navigatorMode = .runs
-        recordAuxiliaryTab(.ensembleNewRun)
-    }
-
-    func closeEnsembleNewRun() {
-        closeAuxiliaryTab(.ensembleNewRun)
     }
 
     /// Drives `WorkspaceWindowView`'s `NavigationSplitView` column
@@ -899,7 +627,6 @@ final class WorkspaceSession {
     /// preserves its pane-tree order; teardown passes manager session order.
     private func cleanupTerminalSessions(_ sessionIDs: [UUID]) {
         for sessionID in sessionIDs {
-            endCoordinatorSession(for: sessionID)
             consumeTerminalLifecycleCallback(for: sessionID)
         }
     }
@@ -1084,7 +811,7 @@ final class WorkspaceSession {
         switch action {
         case .splitRight, .splitDown:
             guard selectedCanvasID == nil else {
-                return .init(isEnabled: false, reason: "Add another terminal card on the Canvas.")
+                return .init(isEnabled: false, reason: "Add another terminal card on the Ensemble.")
             }
             guard group.panes.count < TerminalGroupLimits.maximumPanesPerGroup else {
                 return .init(
@@ -1117,10 +844,6 @@ final class WorkspaceSession {
                 return .init(
                     isEnabled: false,
                     reason: "Agent Terminal profiles are not saved in this version.")
-            case .ensembleRole, .ensembleCoordinator:
-                return .init(
-                    isEnabled: false,
-                    reason: "Ensemble terminal panes cannot set a saved starting folder.")
             case .unavailableEnsemble:
                 return .init(
                     isEnabled: false,
@@ -1239,12 +962,12 @@ final class WorkspaceSession {
             let snippet = controller.recentOutputSnippet()
             // Feed-vs-drop-down arbitration (terminal-notch-hud.md NC-C,
             // "Attention"): the event lands in the companion's cross-window
-            // attention feed only while the panel is pinned — a bare
-            // hover-dwell peek is now just the wings pill with no downward
-            // panel to route into — otherwise it spawns the separate v1
+            // attention feed whenever its panel is open — pinned, or peeking
+            // with hover-to-open on — and otherwise spawns the separate v1
             // drop-down; a bell never produces both.
             let arbitration = CompanionHoverPolicy.companionArbitration(
-                hoverState: NotchCompanionModel.shared.hoverState)
+                hoverState: NotchCompanionModel.shared.hoverState,
+                peekShowsPanel: NotchCompanionModel.shared.opensOnHover)
             if arbitration.routeToFeed {
                 NotchCompanionModel.shared.pushFeedItem(
                     CompanionFeedItem(
@@ -1290,77 +1013,6 @@ final class WorkspaceSession {
             notifier.post(
                 TerminalAttentionNotification(
                     sessionID: controller.id, title: controller.displayName, body: snippet))
-        }
-    }
-
-    /// Surfaces a C5 gate becoming ready through the SAME HUD/notification
-    /// arbitration `notifyIfNeeded(for:)` uses for a terminal bell, but with
-    /// its OWN bounded strings: the workflow name and the step name that
-    /// reached the gate, and NOTHING else. Deliberately never calls
-    /// `recentOutputSnippet()` or reads an artifact/prompt — a gate
-    /// notification is a "come look" signal, not evidence (ADR 0018). The
-    /// event carries a FRESH `UUID`, never a real terminal session id
-    /// (coordinator decision): there is no live pty to reply into for a
-    /// gate, so an unrecognized id simply drops reply routing silently —
-    /// the same safe-by-construction fallback `TerminalAttentionCenter
-    /// .deliverReply` already has for any unknown id.
-    /// Whether the notch companion is currently showing this run's tile, which
-    /// makes its own attention dot the signal for this gate (ADR 0016: one
-    /// attention surface at a time). Reads already-live observable state — no
-    /// polling, no extra work on the idle path.
-    private func notchCompanionShowsActiveRun(_ runID: String) -> Bool {
-        let companion = NotchCompanionModel.shared
-        guard companion.preferenceStore.isEnabled() else { return false }
-        return companion.activeRunItems.contains { $0.runID == runID }
-    }
-
-    func raiseConductorGateAttention(_ event: ConductorGateReadyEvent) {
-        ConductorEnsembleEventCenter.shared.gateReady(event: event)
-        let runName = event.workflowName
-        let stepName = event.agentName
-        let preference = terminalAttentionSurfaceStore.surface()
-        let eventID = UUID()
-        // `runName`/`stepName` come from user-authored `.rafu/agents|
-        // workflows/*.md` frontmatter, capped at 1 MiB per FILE, not per
-        // field (advisor D6) — bound both to a short UTF-8 prefix before
-        // they ever reach a HUD event or notification body, mirroring
-        // `TerminalAttentionPolicy`'s private `boundedUTF8` idiom (not
-        // visible from here, so reproduced locally rather than widening
-        // that type's access).
-        let title = Self.boundedConductorAttentionString(runName)
-        let body = "\(Self.boundedConductorAttentionString(stepName)) is ready for review."
-
-        // ADR 0016 arbitration: when the companion strip is already showing
-        // this run's progress tile, its own attention dot IS the signal — a
-        // second notch drop-down for the same gate would be two surfaces
-        // shouting the same thing.
-        let companionShowsRun = notchCompanionShowsActiveRun(event.runID)
-        if !companionShowsRun, NotchHUDPolicy.surfaces(for: preference, authorized: false).hud {
-            resolvedAttentionHUD().show(
-                NotchHUDEvent(sessionID: eventID, title: title, snippet: body, color: nil),
-                theme: hudThemeProvider())
-        }
-
-        guard NotchHUDPolicy.surfaces(for: preference, authorized: true).notification else {
-            return
-        }
-        let notifier = resolvedAttentionNotifier()
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let authorized = await notifier.requestAuthorizationIfNeeded()
-            let surfaces = NotchHUDPolicy.surfaces(
-                for: self.terminalAttentionSurfaceStore.surface(), authorized: authorized)
-            guard surfaces.notification else { return }
-            notifier.post(
-                TerminalAttentionNotification(
-                    sessionID: eventID,
-                    title: title,
-                    body: body,
-                    // Approve is offered ONLY for a `[gate:remote]` step gate;
-                    // every other gate offers Open Run alone.
-                    kind: .ensembleGate(
-                        runID: event.runID,
-                        allowsApprove: event.safeToApproveRemotely)))
         }
     }
 
@@ -1505,6 +1157,33 @@ final class WorkspaceSession {
     /// Source-compatible entry point that creates a one-pane Terminal Group.
     func newTerminalTab(shell: TerminalShell? = nil) {
         newTerminalGroup(shell: shell)
+    }
+
+    /// Agent History (X12): a one-pane ordinary-shell Terminal Group that
+    /// starts in `directory`, which must be inside this workspace. Returns
+    /// `nil` (and starts nothing) for any other folder.
+    @discardableResult
+    func newTerminalGroup(startingIn directory: URL) -> TerminalGroupID? {
+        guard !isTerminalGroupModalInputBlocked, let rootURL,
+            let folder = terminalFolder(for: directory.path)
+        else { return nil }
+        installTerminalHandlersIfNeeded()
+        let shell = preferredTerminalShell()
+        let profile = TerminalPaneLaunchProfile(
+            shell: TerminalPaneShellChoice(approvedShellPath: shell.path) ?? .preferredShell,
+            startingFolder: folder)
+        do {
+            let group = try terminal.createLiveGroup(
+                instantiation: .ordinaryShell(
+                    startingDirectory: resolvedTerminalDirectory(folder, rootURL: rootURL),
+                    shell: shell,
+                    profile: profile))
+            revealTerminalGroup(group.id)
+            return group.id
+        } catch {
+            presentTerminalGroupError(error.localizedDescription)
+            return nil
+        }
     }
 
     func splitFocusedTerminalPane(_ placement: TerminalGroupSplitPlacement) {
@@ -1854,16 +1533,9 @@ final class WorkspaceSession {
             presentTerminalGroupError(error.localizedDescription)
             return
         }
-        // Terminal Groups occupy the same editor canvas slot as run detail,
-        // graph, Ensemble creation, and Settings. Keep the Runs selection so
-        // the panel remains stable while a terminal replaces its canvas.
-        conductorRunCanvasID = nil
-        conductorGraphVisible = false
-        if !ensembleStartLaunchInProgress {
-            ensembleStartCanvasVisible = false
-        }
-        ensembleNewRunCanvasVisible = false
-        settingsVisible = false
+        // Terminal Groups occupy the same editor canvas slot as Settings
+        // and Agent Session tabs.
+        suspendAuxiliarySelection()
         if let tab = editorLayout.tab(matching: .terminalGroup(groupID: groupID)),
             let editorGroupID = editorLayout.group(containing: tab.id)?.id
         {
@@ -1915,7 +1587,6 @@ final class WorkspaceSession {
             case .terminal(let sessionID) = tab.resource
         else { return }
         _ = editorLayout.closeTab(tabID)
-        endCoordinatorSession(for: sessionID)
         terminal.close(sessionID)
         synchronizeSelectionFromLayout()
         persistWorkspaceState()
@@ -1935,7 +1606,6 @@ final class WorkspaceSession {
         if let tab = editorLayout.tab(matching: .terminal(sessionID: sessionID)) {
             _ = editorLayout.closeTab(tab.id)
         }
-        endCoordinatorSession(for: sessionID)
         terminal.close(sessionID)
         synchronizeSelectionFromLayout()
         persistWorkspaceState()
@@ -2726,6 +2396,7 @@ final class WorkspaceSession {
         indexRebuildQueued = false
         fileIndexState = .idle
         Task { await fileIndex.shed() }
+        for tree in additionalRootTrees { tree.invalidateFileIndex() }
         // Bumped even though the shed above is a fire-and-forget actor call:
         // it always wins the race against a later `requestFileIndexRebuild`
         // enqueued from `ensureFileIndexReady`, because actor calls on
@@ -2800,11 +2471,18 @@ final class WorkspaceSession {
     }
 
     func openLocalWorkspace(at url: URL) {
+        openLocalWorkspace(at: url, plan: nil)
+    }
+
+    /// Opens `url` as the primary root. `plan` (a saved `.rafuworkspace`)
+    /// adds the other folders, the display name, and the file binding after
+    /// the primary root is open.
+    func openLocalWorkspace(at url: URL, plan: WorkspaceOpenPlan?) {
         canvas.refreshResourceSnapshots()
         if canvas.hasPendingWrites {
             Task { [weak self] in
                 guard let self, await canvas.flushAll() else { return }
-                openLocalWorkspace(at: url)
+                openLocalWorkspace(at: url, plan: plan)
             }
             return
         }
@@ -2829,6 +2507,7 @@ final class WorkspaceSession {
         // Old terminal/run callbacks still belong to the old descriptor and
         // security scope. Drain them before replacing any workspace state.
         teardownTerminalGroups()
+        tearDownAdditionalRoots()
         canvas.clearAfterWorkspaceFlush()
         canvasResources = [:]
         canvasTerminalOwners = [:]
@@ -2845,9 +2524,10 @@ final class WorkspaceSession {
         // A fresh authorization must not reuse an older bookmark for this path.
         restorationAuthorizationID = UUID()
         descriptor = WorkspaceDescriptor(
-            displayName: name,
+            displayName: plan?.displayName ?? name,
             location: .local(LocalWorkspaceReference(path: url.path))
         )
+        workspaceFileURL = plan?.fileURL
         navigationLadder = makeNavigationLadder(rootURL: url)
         openDocuments = []
         suspendAuxiliarySelection()
@@ -2864,26 +2544,14 @@ final class WorkspaceSession {
         languageIntelligence.workspaceDidClose()
         RecentWorkspacesStore().record(url: url, displayName: name)
         Task { await refreshWorkspace() }
-        reloadConductorRuns(for: url)
         startFileWatcher()
         languageIntelligence.workspaceDidOpen(root: url)
         beginTerminalGroupLibrary(for: url)
+        if let plan { applyAdditionalRoots(plan.additionalRoots) }
+        refreshGitRepositoryRoots()
         persistWorkspaceState()
 
         previousSecurityScopedURL?.stopAccessingSecurityScopedResource()
-    }
-
-    /// Loads persisted `.rafu/runs/` manifests for `url`, independent of
-    /// whether the `.runs` navigator panel is mounted (`ConductorRunsPanelView`
-    /// separately reloads on `.task(id:)` for its own live-attachment case —
-    /// this is a second, idempotent, read-only caller of the same
-    /// evidence-only path, not a replacement for it). Called from both
-    /// `openLocalWorkspace(at:)` and `restoreLastWorkspaceIfAvailable()`, the
-    /// two funnels that give a window a new workspace root.
-    private func reloadConductorRuns(for url: URL) {
-        Task { await conductorRunController.attachAndReload(workspaceRoot: url) }
-        conductorWorkflowController.attach(workspaceRoot: url)
-        conductorConcurrentRuns.attach(workspaceRoot: url)
     }
 
     /// Starts (or restarts) the FSEvents watcher on the current root so
@@ -2953,11 +2621,15 @@ final class WorkspaceSession {
         // the sidebar shows "Loading files…" forever after a superseded
         // refresh (e.g. rapid branch switches).
         defer { isLoadingTree = false }
+        let gitRoot = gitRootURL ?? rootURL
         do {
             async let tree: Void = reloadMaterializedDirectories(rootURL: rootURL)
-            async let git = gitService.snapshot(at: rootURL)
+            async let git = gitService.snapshot(at: gitRoot)
             try await tree
-            gitSnapshot = try await git
+            for rootTree in additionalRootTrees { await rootTree.reloadMaterializedDirectories() }
+            let snapshot = try await git
+            guard gitRootURL == gitRoot else { return }
+            gitSnapshot = snapshot
             if gitSnapshot == nil { resetGitWorkbenchState() }
             reconcileGitSelection()
             requestFileIndexRebuild()
@@ -3351,6 +3023,7 @@ final class WorkspaceSession {
     /// `fileIndexState` to `.building` synchronously, before this returns, so
     /// the palette's idle-state message never flashes "Open a folder" first.
     func ensureFileIndexReady() {
+        ensureAdditionalFileIndexesReady()
         guard rootURL != nil, fileIndexState == .idle, indexRebuildTask == nil else { return }
         requestFileIndexRebuild()
     }
@@ -3466,10 +3139,12 @@ final class WorkspaceSession {
         }
     }
 
-    private func refreshGitSnapshotOnly() async {
-        guard let rootURL else { return }
+    func refreshGitSnapshotOnly() async {
+        guard let rootURL = gitRootURL else { return }
         do {
-            gitSnapshot = try await gitService.snapshot(at: rootURL)
+            let snapshot = try await gitService.snapshot(at: rootURL)
+            guard self.gitRootURL == rootURL else { return }
+            gitSnapshot = snapshot
             if gitSnapshot == nil { resetGitWorkbenchState() }
             reconcileGitSelection()
         } catch is CancellationError {
@@ -3583,7 +3258,7 @@ final class WorkspaceSession {
     }
 
     func refreshGit() async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         // The working-tree peek diff is cached by (path, revision), which does
         // not change when the index changes (stage/unstage/commit here, in the
         // Source Control panel, or in a terminal). refreshGit runs after every
@@ -3591,7 +3266,10 @@ final class WorkspaceSession {
         // peek coherent with the actual index.
         workingTreeDiffCache = nil
         do {
-            guard let snapshot = try await gitService.snapshot(at: rootURL) else {
+            let refreshed = try await gitService.snapshot(at: rootURL)
+            // The Source Control root can change while Git runs.
+            guard self.gitRootURL == rootURL else { return }
+            guard let snapshot = refreshed else {
                 resetGitWorkbenchState()
                 return
             }
@@ -3629,7 +3307,9 @@ final class WorkspaceSession {
     /// unchanged; this is the explicit "Load More" continuation only —
     /// never automatic, never a background poll (GX3, ADR 0013).
     func loadMoreHistory() async {
-        guard let rootURL, let currentPage = gitHistoryPage, currentPage.hasMore, !isGitBusy else {
+        guard let rootURL = gitRootURL, let currentPage = gitHistoryPage, currentPage.hasMore,
+            !isGitBusy
+        else {
             return
         }
         isGitBusy = true
@@ -3637,7 +3317,7 @@ final class WorkspaceSession {
         do {
             let nextPage = try await gitService.history(
                 at: rootURL, limit: 100, offset: currentPage.commits.count)
-            guard self.rootURL == rootURL,
+            guard self.gitRootURL == rootURL,
                 let existing = gitHistoryPage,
                 existing.commits.count == currentPage.commits.count,
                 existing.offset == currentPage.offset
@@ -3650,13 +3330,15 @@ final class WorkspaceSession {
         } catch is CancellationError {
             return
         } catch {
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             reportGitError(error)
         }
     }
 
     func open(_ node: WorkspaceFileNode) {
         guard !node.isDirectory else { return }
+        // X5: a `.rafuensemble` file opens as a board tab, not as text.
+        if Self.isEnsembleFile(node.url) { return openEnsembleFile(at: node.url) }
         if let existing = openDocuments.first(where: { $0.url == node.url }) {
             select(existing)
             return
@@ -4337,7 +4019,7 @@ final class WorkspaceSession {
                 document.revision += 1
             }
             await refreshWorkspace()
-            if let rootURL { workspaceSearch.search(in: rootURL) }
+            if rootURL != nil { workspaceSearch.search(in: workspaceSearchRoots) }
         } catch {
             return
         }
@@ -4385,9 +4067,9 @@ final class WorkspaceSession {
     var selectedFolderURL: URL? {
         guard let rootURL else { return nil }
         guard let selectedTreePath else { return rootURL }
-        let rootPath = rootURL.standardizedFileURL.path
         let selected = URL(filePath: selectedTreePath).standardizedFileURL
-        guard selected.path == rootPath || selected.path.hasPrefix(rootPath + "/") else {
+        // Any root of a multi-folder workspace can hold the selection.
+        guard WorkspaceRootList.locate(absolutePath: selected.path, in: roots) != nil else {
             return rootURL
         }
         var isDirectory: ObjCBool = false
@@ -4407,14 +4089,17 @@ final class WorkspaceSession {
     /// Tree drop handler shared by the root list and per-folder rows: items
     /// already inside the workspace MOVE; items from outside (Finder) COPY in.
     func handleTreeDrop(_ urls: [URL], into directory: URL) async {
-        guard let rootURL else { return }
-        let rootPath = rootURL.standardizedFileURL.path
+        guard rootURL != nil else { return }
+        // Every folder of a multi-folder workspace counts as "inside": its
+        // items move; items from outside are copied in. A root never moves.
+        let roots = roots
         var changed = false
         for url in urls {
             let sourcePath = url.standardizedFileURL.path
+            let found = WorkspaceRootList.locate(absolutePath: sourcePath, in: roots)
             do {
-                if sourcePath == rootPath { continue }
-                if sourcePath.hasPrefix(rootPath + "/") {
+                if found?.relativePath.isEmpty == true { continue }
+                if found != nil {
                     let destination = try await fileService.move(url, into: directory)
                     rebindOpenDocuments(from: url, to: destination)
                 } else {
@@ -4521,7 +4206,7 @@ final class WorkspaceSession {
     }
 
     func setStaged(_ staged: Bool, change: GitChange) async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4533,7 +4218,7 @@ final class WorkspaceSession {
     /// Batch stage/unstage in one Git process, used by the Source Control
     /// tree view's folder tri-state checkbox.
     func setStaged(_ staged: Bool, paths: [String]) async {
-        guard let rootURL, !paths.isEmpty else { return }
+        guard let rootURL = gitRootURL, !paths.isEmpty else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4543,7 +4228,7 @@ final class WorkspaceSession {
     }
 
     func stageAll() async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4553,7 +4238,7 @@ final class WorkspaceSession {
     }
 
     func commit() async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4564,7 +4249,7 @@ final class WorkspaceSession {
     }
 
     func gitOpenChangeDiff(_ change: GitChange, scope: GitDiffScope) async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4593,7 +4278,7 @@ final class WorkspaceSession {
     }
 
     func gitSelectHistoryCommit(_ commit: GitCommitSummary) async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         gitSelectedHistoryCommitID = commit.id
         gitHistoryCommitChanges = []
         isGitHistoryDetailLoading = true
@@ -4614,7 +4299,7 @@ final class WorkspaceSession {
     }
 
     func gitOpenHistoryDiff(_ change: GitCommitFileChange) async {
-        guard let rootURL, let revision = gitSelectedHistoryCommitID else { return }
+        guard let rootURL = gitRootURL, let revision = gitSelectedHistoryCommitID else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4652,9 +4337,7 @@ final class WorkspaceSession {
             MemoryTimeline.shared.note(.diffClosed, source: memoryTimelineSource)
         }
         gitOpenDiff = nil
-        // A run diff opened from the run-detail canvas (C5) returns to the
-        // timeline, not a document fallback — the canvas is still hosting.
-        if wasSelected, conductorRunCanvasID == nil, let fallback = openDocuments.last {
+        if wasSelected, let fallback = openDocuments.last {
             select(fallback)
         }
     }
@@ -4664,7 +4347,7 @@ final class WorkspaceSession {
     /// Stages one hunk of the currently open working-tree diff via
     /// `git apply --cached`, using `GitHunkPatchBuilder` to build the patch.
     func stageHunk(_ hunk: GitDiffHunk) async {
-        guard let rootURL,
+        guard let rootURL = gitRootURL,
             let openDiff = gitOpenDiff,
             openDiff.scope == .workingTree,
             gitSnapshot?.changes.first(where: { $0.path == openDiff.diff.path })?.kind == .modified,
@@ -4705,7 +4388,7 @@ final class WorkspaceSession {
     /// `git apply --cached --reverse`, using `GitHunkPatchBuilder` to build
     /// the reverse patch.
     func unstageHunk(_ hunk: GitDiffHunk) async {
-        guard let rootURL,
+        guard let rootURL = gitRootURL,
             let openDiff = gitOpenDiff,
             openDiff.scope == .staged,
             gitSnapshot?.changes.first(where: { $0.path == openDiff.diff.path })?.kind == .modified,
@@ -4748,24 +4431,24 @@ final class WorkspaceSession {
     /// used to mark the "current" row. Prefers the git repository root (the
     /// worktree's own top), falling back to the opened folder.
     var currentWorktreePath: String? {
-        (gitSnapshot?.repositoryRoot ?? rootURL)?.standardizedFileURL.path
+        (gitSnapshot?.repositoryRoot ?? gitRootURL)?.standardizedFileURL.path
     }
 
     /// Loads `git worktree list` for the Source Control worktrees section.
     /// Called on explicit section expand and after worktree mutations — never
     /// polled, and never watches sibling worktrees.
     func loadWorktrees() async {
-        guard let rootURL, !isGitWorktreesLoading else { return }
+        guard let rootURL = gitRootURL, !isGitWorktreesLoading else { return }
         isGitWorktreesLoading = true
         defer { isGitWorktreesLoading = false }
         do {
             let worktrees = try await gitService.worktrees(at: rootURL)
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             gitWorktrees = worktrees
         } catch is CancellationError {
             return
         } catch {
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             reportGitError(error)
         }
     }
@@ -4790,18 +4473,18 @@ final class WorkspaceSession {
     /// `git worktree add -b <branch> <path>` vs checking out an existing
     /// branch at `<path>`.
     func addWorktree(at path: URL, branch: String?, createBranch: Bool) async {
-        guard let rootURL, !isGitBusy else { return }
+        guard let rootURL = gitRootURL, !isGitBusy else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
             try await gitService.addWorktree(
                 path: path, branch: branch, createBranch: createBranch, at: rootURL)
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             await loadWorktrees()
         } catch is CancellationError {
             return
         } catch {
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             reportGitError(error)
         }
     }
@@ -4809,17 +4492,17 @@ final class WorkspaceSession {
     /// Removes a worktree (never `--force`; git refuses dirty/locked and the
     /// real error surfaces), then refreshes the list.
     func removeWorktree(_ worktree: GitWorktree) async {
-        guard let rootURL, !isGitBusy, !worktree.isMain else { return }
+        guard let rootURL = gitRootURL, !isGitBusy, !worktree.isMain else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
             try await gitService.removeWorktree(path: worktree.path, at: rootURL)
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             await loadWorktrees()
         } catch is CancellationError {
             return
         } catch {
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             reportGitError(error)
         }
     }
@@ -4828,7 +4511,7 @@ final class WorkspaceSession {
 
     /// Pushes a new stash entry via `git stash push`.
     func stashChanges(message: String, includeUntracked: Bool) async {
-        guard let rootURL, !isGitBusy, !isGitHunkActionBusy else { return }
+        guard let rootURL = gitRootURL, !isGitBusy, !isGitHunkActionBusy else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4837,22 +4520,22 @@ final class WorkspaceSession {
                 includeUntracked: includeUntracked,
                 at: rootURL
             )
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             await refreshGit()
             let stashes = try await gitService.stashList(at: rootURL)
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             gitStashes = stashes
         } catch is CancellationError {
             return
         } catch {
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             reportGitError(error)
         }
     }
 
     /// Applies a stash entry without removing it.
     func applyStash(_ entry: GitStashEntry) async {
-        guard let rootURL, !isGitBusy, !isGitHunkActionBusy else { return }
+        guard let rootURL = gitRootURL, !isGitBusy, !isGitHunkActionBusy else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4860,31 +4543,31 @@ final class WorkspaceSession {
             guard current.first(where: { $0.index == entry.index }) == entry else {
                 throw GitServiceError.stashChanged
             }
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             try await gitService.stashApply(index: entry.index, at: rootURL)
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             await refreshGit()
             let stashes = try await gitService.stashList(at: rootURL)
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             gitStashes = stashes
         } catch is CancellationError {
             return
         } catch {
-            if self.rootURL == rootURL {
+            if self.gitRootURL == rootURL {
                 await refreshGit()
                 if let stashes = try? await gitService.stashList(at: rootURL) {
-                    guard self.rootURL == rootURL else { return }
+                    guard self.gitRootURL == rootURL else { return }
                     gitStashes = stashes
                 }
             }
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             reportGitError(error)
         }
     }
 
     /// Applies a stash entry and removes it.
     func popStash(_ entry: GitStashEntry) async {
-        guard let rootURL, !isGitBusy, !isGitHunkActionBusy else { return }
+        guard let rootURL = gitRootURL, !isGitBusy, !isGitHunkActionBusy else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4892,31 +4575,31 @@ final class WorkspaceSession {
             guard current.first(where: { $0.index == entry.index }) == entry else {
                 throw GitServiceError.stashChanged
             }
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             try await gitService.stashPop(index: entry.index, at: rootURL)
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             await refreshGit()
             let stashes = try await gitService.stashList(at: rootURL)
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             gitStashes = stashes
         } catch is CancellationError {
             return
         } catch {
-            if self.rootURL == rootURL {
+            if self.gitRootURL == rootURL {
                 await refreshGit()
                 if let stashes = try? await gitService.stashList(at: rootURL) {
-                    guard self.rootURL == rootURL else { return }
+                    guard self.gitRootURL == rootURL else { return }
                     gitStashes = stashes
                 }
             }
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             reportGitError(error)
         }
     }
 
     /// Discards a stash entry.
     func dropStash(_ entry: GitStashEntry) async {
-        guard let rootURL, !isGitBusy, !isGitHunkActionBusy else { return }
+        guard let rootURL = gitRootURL, !isGitBusy, !isGitHunkActionBusy else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4924,17 +4607,17 @@ final class WorkspaceSession {
             guard current.first(where: { $0.index == entry.index }) == entry else {
                 throw GitServiceError.stashChanged
             }
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             try await gitService.stashDrop(index: entry.index, at: rootURL)
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             await refreshGit()
             let stashes = try await gitService.stashList(at: rootURL)
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             gitStashes = stashes
         } catch is CancellationError {
             return
         } catch {
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             reportGitError(error)
         }
     }
@@ -4944,10 +4627,10 @@ final class WorkspaceSession {
     /// Opens a read-only blame canvas for the selected file, parsing
     /// `git blame` porcelain output via `GitBlameParser`.
     func openBlameForSelectedFile() async {
-        guard let rootURL,
+        guard let rootURL = gitRootURL,
             let document = selectedDocument,
             let gitSnapshot,
-            let rawRepositoryRoot = gitSnapshot.repositoryRoot ?? self.rootURL,
+            let rawRepositoryRoot = gitSnapshot.repositoryRoot ?? self.gitRootURL,
             !isGitBusy
         else { return }
         guard !document.isDirty else {
@@ -4972,13 +4655,13 @@ final class WorkspaceSession {
                 forRelativePath: relativePath,
                 at: repositoryRoot
             )
-            guard self.rootURL == rootURL, selectedDocumentID == document.id else { return }
+            guard self.gitRootURL == rootURL, selectedDocumentID == document.id else { return }
             gitOpenDiff = nil
             gitOpenBlame = blame
         } catch is CancellationError {
             return
         } catch {
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             reportGitError(error)
         }
     }
@@ -4996,7 +4679,7 @@ final class WorkspaceSession {
     /// hunk-peek/blame-hover lookups so both stay consistent with the
     /// existing gutter/blame resolution.
     private func gitRepositoryRelativePath(for document: EditorDocument) -> String? {
-        guard let gitSnapshot, let repositoryRoot = gitSnapshot.repositoryRoot ?? rootURL else {
+        guard let gitSnapshot, let repositoryRoot = gitSnapshot.repositoryRoot ?? gitRootURL else {
             return nil
         }
         let rootPath = repositoryRoot.standardizedFileURL.path
@@ -5062,7 +4745,7 @@ final class WorkspaceSession {
     /// HEAD OID, buffer revision) so both callers reuse one fetch.
     private func blame(for document: EditorDocument) async -> GitBlame? {
         guard !document.isDirty, !document.suppressesSyntax,
-            let gitSnapshot, let repositoryRoot = gitSnapshot.repositoryRoot ?? rootURL,
+            let gitSnapshot, let repositoryRoot = gitSnapshot.repositoryRoot ?? gitRootURL,
             let relativePath = gitRepositoryRelativePath(for: document)
         else { return nil }
 
@@ -5137,7 +4820,8 @@ final class WorkspaceSession {
     /// so opening the peek repeatedly at the same buffer state never
     /// re-diffs.
     func workingTreeDiff(for document: EditorDocument) async -> GitFileDiff? {
-        guard let rootURL, let relativePath = gitRepositoryRelativePath(for: document) else {
+        guard let rootURL = gitRootURL, let relativePath = gitRepositoryRelativePath(for: document)
+        else {
             return nil
         }
         let key = WorkingTreeDiffCacheKey(path: relativePath, revision: document.revision)
@@ -5161,7 +4845,7 @@ final class WorkspaceSession {
     /// through the normal Git error alert rather than silently retrying
     /// against a stale hunk.
     func stagePeekHunk(_ hunk: GitDiffHunk, in diff: GitFileDiff) async {
-        guard let rootURL, !isGitBusy, !isGitHunkActionBusy else { return }
+        guard let rootURL = gitRootURL, !isGitBusy, !isGitHunkActionBusy else { return }
         isGitHunkActionBusy = true
         defer { isGitHunkActionBusy = false }
         do {
@@ -5194,7 +4878,7 @@ final class WorkspaceSession {
     }
 
     func gitCreateBranch(named name: String) async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -5208,7 +4892,7 @@ final class WorkspaceSession {
     /// stays explicit). On success the refreshed snapshot flips the panel
     /// from the empty state to the full inspector.
     func gitInitializeRepository() async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -5219,7 +4903,7 @@ final class WorkspaceSession {
     }
 
     func gitCheckoutBranch(named name: String) async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -5230,7 +4914,7 @@ final class WorkspaceSession {
     }
 
     func gitMergeBranch(named name: String) async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -5244,7 +4928,7 @@ final class WorkspaceSession {
     }
 
     func gitFetch(remote: String? = nil) async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -5255,7 +4939,7 @@ final class WorkspaceSession {
     }
 
     func gitPull(strategy: GitPullStrategy = .merge) async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -5266,7 +4950,7 @@ final class WorkspaceSession {
     }
 
     func gitPush(remote: String? = nil) async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -5308,7 +4992,7 @@ final class WorkspaceSession {
     /// `GitHubPublishSheet`'s explicit "Create & Push" confirmation. A no-op
     /// unless `canPublishToGitHub` holds and no publish is already running.
     func publishToGitHub(name: String, visibility: GitHubRepositoryVisibility) async {
-        guard let rootURL, canPublishToGitHub, !isPublishingToGitHub else { return }
+        guard let rootURL = gitRootURL, canPublishToGitHub, !isPublishingToGitHub else { return }
         isPublishingToGitHub = true
         defer { isPublishingToGitHub = false }
         do {
@@ -5438,7 +5122,7 @@ final class WorkspaceSession {
     /// files are synthesized as all-added locally, also without a process.
     func gutterLineChanges(for document: EditorDocument) async -> GitGutterLineChanges? {
         guard let gitSnapshot,
-            let repositoryRoot = gitSnapshot.repositoryRoot ?? rootURL
+            let repositoryRoot = gitSnapshot.repositoryRoot ?? gitRootURL
         else { return nil }
         let rootPath = repositoryRoot.standardizedFileURL.path
         let filePath = document.url.standardizedFileURL.path
@@ -5507,7 +5191,7 @@ final class WorkspaceSession {
 
         do {
             try Task.checkCancellation()
-            guard let rootURL, let gitSnapshot else {
+            guard let rootURL = gitRootURL, let gitSnapshot else {
                 throw AIProviderError.selectedDiffsRequired
             }
 
@@ -5685,6 +5369,7 @@ final class WorkspaceSession {
 
     isolated deinit {
         liveness.stop()
+        for tree in additionalRootTrees { tree.stop() }
         navigationTask?.cancel()
         locationNavigationTask?.cancel()
         indexRebuildTask?.cancel()
@@ -5742,9 +5427,11 @@ final class WorkspaceSession {
             startFileWatcher()
             await refreshWorkspace()
             guard self.rootURL == resolved.url else { return }
+            await restoreAdditionalRoots(
+                restored.additionalRoots, workspaceFilePath: restored.workspaceFilePath)
+            guard self.rootURL == resolved.url else { return }
 
             languageIntelligence.workspaceDidOpen(root: resolved.url)
-            reloadConductorRuns(for: resolved.url)
             for relativePath in restored.openRelativePaths {
                 let url = resolved.url.appending(path: relativePath)
                 guard FileManager.default.fileExists(atPath: url.path) else { continue }
@@ -5886,8 +5573,15 @@ final class WorkspaceSession {
 
     private func makeWorkspaceStateSaveTask() -> Task<Void, Never>? {
         guard let rootURL else { return nil }
-        let openPaths = openDocuments.map { relativePath(for: $0.url) }
-        let selectedPath = selectedDocument.map { relativePath(for: $0.url) }
+        // Files from the other folders of a multi-folder workspace are not
+        // relative to the primary root, so they are not restored as tabs.
+        let primaryDocuments = openDocuments.filter { !isInAdditionalRoot($0.url) }
+        let openPaths = primaryDocuments.map { relativePath(for: $0.url) }
+        let selectedPath = selectedDocument.flatMap {
+            isInAdditionalRoot($0.url) ? nil : relativePath(for: $0.url)
+        }
+        let additionalRootURLs = additionalRootTrees.map(\.url)
+        let workspaceFilePath = workspaceFileURL?.path
         let navigatorMode = navigatorMode
         let canvasIDs = canvas.savedIDs
         let terminalGroupRestoration = terminalGroupWorkspaceRestoration()
@@ -5903,6 +5597,8 @@ final class WorkspaceSession {
             do {
                 let bookmark = try await restorationStore.makeBookmark(
                     for: bookmarkURL, authorizationID: authorizationID)
+                let additionalRoots = await WorkspaceRootBookmarks.restorableRoots(
+                    for: additionalRootURLs)
                 try Task.checkCancellation()
                 try await restorationStore.save(
                     RestorableWorkspace(
@@ -5912,7 +5608,8 @@ final class WorkspaceSession {
                         selectedRelativePath: selectedPath,
                         navigatorMode: navigatorMode,
                         editorLayout: EditorLayoutRestoration(layout: restorableEditorLayout),
-                        terminalGroupRestoration: terminalGroupRestoration, canvasIDs: canvasIDs
+                        terminalGroupRestoration: terminalGroupRestoration, canvasIDs: canvasIDs,
+                        additionalRoots: additionalRoots, workspaceFilePath: workspaceFilePath
                     )
                 )
             } catch {
@@ -5961,7 +5658,7 @@ final class WorkspaceSession {
                 case .ordinaryShell: kind = .ordinaryShell
                 case .directAgentTerminal, .unavailableAgentTerminal:
                     kind = .unavailableAgentTerminal
-                case .ensembleRole, .ensembleCoordinator, .unavailableEnsemble:
+                case .unavailableEnsemble:
                     kind = .unavailableEnsemble
                 }
                 return try? TerminalGroupOpenPaneRestorationRecord(
@@ -6009,7 +5706,7 @@ final class WorkspaceSession {
     /// `gitSnapshot.didSet`, so every snapshot refresh (and clear) keeps the
     /// file-tree decorations in sync without any per-row work.
     private func rebuildGitTreeBadges() {
-        guard let snapshot = gitSnapshot, let rootURL else {
+        guard let snapshot = gitSnapshot, let rootURL = gitRootURL else {
             if !gitTreeBadges.isEmpty { gitTreeBadges = [:] }
             return
         }
@@ -6037,20 +5734,6 @@ final class WorkspaceSession {
             (error as? LocalizedError)?.errorDescription
             ?? "Commit-message generation failed."
         return String(decoding: message.utf8.prefix(512), as: UTF8.self)
-    }
-
-    /// Same `String(decoding:as:)`-on-a-UTF-8-prefix idiom as
-    /// `boundedAIErrorMessage` above (and `TerminalAttentionPolicy`'s
-    /// private `boundedUTF8`) — truncating on a byte boundary repairs an
-    /// incomplete trailing multibyte sequence into one replacement
-    /// character rather than corrupting further bytes. 200 bytes mirrors
-    /// `TerminalAttentionPolicy.snippet`'s per-line cap: plenty for a HUD
-    /// pill or notification title, nowhere near the 1 MiB per-FILE cap that
-    /// bounds a `.rafu/agents|workflows/*.md` frontmatter field.
-    private static func boundedConductorAttentionString(
-        _ text: String, maxBytes: Int = 200
-    ) -> String {
-        String(decoding: text.utf8.prefix(maxBytes), as: UTF8.self)
     }
 
     private func synchronizeSelectionFromLayout(fallback: EditorDocument? = nil) {

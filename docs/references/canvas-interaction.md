@@ -58,6 +58,45 @@ pending).
 - **Pointer feedback:** resize zones use `pointerStyle`. Resizing applies
   per-type minimum sizes with resistance and a spring.
 
+### Pointer ownership, focus ring, and file drops (round 2, code-read only)
+
+- **One pan owner.** The grid's drag gesture is masked `.all` without Space and
+  `.subviews` with Space; the board's high-priority drag uses the opposite
+  masks. Exactly one pan/marquee gesture is enabled at a time. A new
+  `startLocation` resets stale pan state, because SwiftUI may not call
+  `onEnded` when a mask flips mid-drag.
+- **Empty-board pan.** The dot grid reads `board.viewport` in `body` and passes
+  values into the `Canvas` renderer. A viewport read only inside the renderer
+  is outside Observation tracking, so an empty board (no card reads the
+  viewport) never redrew while its viewport changed.
+- **No system focus ring.** The board is `.focusable()` for its keys and
+  `.focusEffectDisabled()`; the system ring outlined the whole board and could
+  spill over the sidebar. Cards keep their own gold content-focus stroke.
+- **`CanvasScrollBridge` takes no mouse events** (`hitTest` is nil). It
+  handles scroll/zoom through a local monitor and is also the board's AppKit
+  drop destination (`CanvasBoardDropTarget`) for the private editor drag type
+  and file URLs. AppKit routes a drag to a registered `NSView` under the
+  pointer; editors of the same group stay mounted (hidden) below the Canvas
+  overlay, and SwiftUI `.onDrop` did not receive drags over AppKit subtrees
+  (see `drag-and-drop-custom-uttype.md`, "AppKit subtree dead zone"). Both the
+  SwiftUI delegate and the bridge use `CanvasFileDrop`. Tab payloads are
+  rejected on both paths (`EditorDropRouting.canvasAccepts` in SwiftUI; the
+  bridge decodes the payload and accepts only `.file`).
+- **Dropped content.** Folders are skipped without an error; raster image
+  extensions become image cards; files outside the workspace still reject
+  the whole batch.
+- 2026-10-18 update (code-read only): the UI says "Ensemble" for the board. A
+  frame is created from a selection with the shortcut Control-Command-G
+  (`CanvasDiagramMenus.swift`, "Convert Selection to Frame"). Whiteboard tool
+  keys (V H R O D A L P X M I, Text on X because T adds a terminal) and the
+  `CanvasScrollBridge` `focusRingType = .none` setting are confirmed in code
+  (`Canvas/Whiteboard/CanvasWhiteboardTool.swift` `key`,
+  `Canvas/Adapters/CanvasScrollBridge.swift` lines 82 and 87).
+- Mac checks still required: plain drag pans an empty board; Shift-drag
+  marquee; Space-drag over a card; Files-tree and Finder drops with and
+  without open documents in the group; a tab dragged over a Canvas tab still
+  splits.
+
 ### Z-order is array order
 
 Stacking order is `board.cards` array order: the last card is on top.

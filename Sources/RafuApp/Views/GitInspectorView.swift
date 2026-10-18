@@ -30,6 +30,8 @@ struct SourceControlPanelView: View {
                 .help("Refresh Source Control")
             }
 
+            WorkspaceSourceControlRootPicker(session: session)
+
             if session.gitSnapshot != nil {
                 repositoryContext
                 GitInspectorView(session: session)
@@ -338,7 +340,7 @@ struct GitInspectorView: View {
                     .background(.regularMaterial, in: .rect(cornerRadius: 10))
             }
         }
-        .task(id: session.rootURL) { await refreshAllGitState() }
+        .task(id: session.gitRootURL) { await refreshAllGitState() }
         .confirmationDialog(
             pendingStashAction?.title ?? "Update stash?",
             isPresented: stashConfirmationBinding
@@ -585,7 +587,7 @@ struct GitInspectorView: View {
             }
         }
         .padding(.top, 4)
-        .task(id: session.rootURL) { await session.loadWorktrees() }
+        .task(id: session.gitRootURL) { await session.loadWorktrees() }
         .sheet(isPresented: $isAddWorktreeSheetPresented) {
             GitAddWorktreeSheet(session: session)
         }

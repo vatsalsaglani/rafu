@@ -18,16 +18,16 @@ struct CanvasEditorTabItem: View {
                         .accessibilityLabel("Modified")
                 }
                 AttachedWorkbenchTabCloseButton(
-                    accessibilityLabel: "Close Canvas", help: "Close Canvas"
+                    accessibilityLabel: "Close Ensemble", help: "Close Ensemble"
                 ) { session.closeCanvas(board.id) }
             }
         }
         .onDrag { session.beginEditorDrag(.tab(id: tab.id.rawValue.uuidString)) }
         .contextMenu {
-            Button("Rename Canvas…") { session.canvasDialog = .renameBoard(board.id) }
+            Button("Rename Ensemble…") { session.canvasDialog = .renameBoard(board.id) }
             Button("Split Left") { session.splitEditorTab(tab.id, at: .leading) }
             Button("Split Right") { session.splitEditorTab(tab.id, at: .trailing) }
-            Button("Close Canvas") { session.closeCanvas(board.id) }
+            Button("Close Ensemble") { session.closeCanvas(board.id) }
         }
     }
 }

@@ -4,6 +4,60 @@
 - Verified: 2026-10-18, macOS 27.0.1, Apple Swift 6.4, Swift 6.2 package mode,
   strict concurrency, arm64, deployment target macOS 15.
 
+## Native app node: docking replaces capture (2026-10-18, supersedes capture text below)
+
+Applies to the native app card. Last verified: Swift 6.2 Linux parse +
+read-through, 2026-10-18; not yet run on macOS.
+
+Rule: the native app node no longer captures a window. ScreenCaptureKit, the
+single-window picker, capture streams, `CanvasLimits.captureStreams`, and
+`previewCaption` were removed. The card now DOCKS the real app window over the
+card body: Rafu sets that window's position and size through the Accessibility
+API so it sits exactly over the card, and follows board pan, zoom, scroll, and
+Rafu window moves. The user types and clicks in the real app.
+
+Constraints stated in the header comment of `CanvasAppDocking.swift`:
+
+- Docking starts only from an explicit Dock action. Restoring a board never
+  docks, launches, or moves anything.
+- Rafu needs the user's Accessibility permission. Rendering only checks
+  `AXIsProcessTrusted()`; the Dock button prompts (`AXIsProcessTrustedWithOptions`)
+  once per launch. No Screen Recording permission is used.
+- Rafu sets only window position and size, and asks the window to raise
+  (`AXRaise`). It sends no synthetic keyboard or pointer input.
+- Rafu cannot keep another app's window above its own. When the user clicks
+  elsewhere in Rafu, the Rafu window covers the docked window; clicking the card
+  body brings the app forward.
+- Window text cannot scale, so docking needs 75% board zoom. Below that, and
+  whenever the card is not visible, the app is hidden and returns when the card
+  is visible again.
+- Accessibility calls are synchronous IPC to the other app. They run on the main
+  actor with a 0.25 s messaging timeout; an app that does not answer is undocked,
+  not retried every frame.
+
+Why it matters: the capture sections below describe removed behavior. Their
+privacy claims (no recording, no transmission) are replaced by the docking
+claims above: this feature moves another app's window, so its permission and
+no-synthetic-input rules are the boundary to review.
+
+Evidence: read-through of the code named below only. No macOS build, test, or
+launch was run for docking. Verify with:
+
+```sh
+rg -n "ScreenCaptureKit|captureStreams|previewCaption" Sources/RafuApp   # expect none
+rg -n "AXIsProcessTrusted|AXRaise" Sources/RafuApp/Canvas/Integration/CanvasAppDocking.swift
+```
+
+Related code: `Sources/RafuApp/Canvas/Integration/CanvasAppDocking.swift`,
+`Sources/RafuApp/Canvas/Integration/CanvasAppDockingModel.swift`,
+`Sources/RafuApp/Canvas/Adapters/CanvasNativeAppCard.swift`.
+
+Everything below that mentions ScreenCaptureKit, capture, preview, or the
+picker is history of the removed design and is SUPERSEDED. The capture-specific
+sections are: the ScreenCaptureKit paragraph of "Rules and observations", the
+native-app paragraph of "C2–C4 integration review", "SDK compatibility
+exception", and the capture bullets of the native UI pass.
+
 ## Rules and observations
 
 C0's three native boundary tests pass without starting a shell, browser load,
@@ -83,6 +137,8 @@ provided. Media playback needs a user action. Web subresources can contact
 external services; Connect explains this. Hiding the board destroys its web
 views. Restoring a board makes no web request.
 
+(SUPERSEDED for capture, see "Native app node: docking replaces capture".
+Bundle-identifier references and Open App still apply.)
 Native app references use bundle identifiers. Open App activates a separate app.
 Choose Window uses the ScreenCaptureKit single-window picker. A shared broker
 holds only one pending selection. Frames use one bufferingNewest(1) channel,
@@ -91,7 +147,7 @@ OCR, synthetic input, or transmission to an agent. Source loss, hidden cards,
 window occlusion, screen lock, and board close stop the preview. No automatic
 resume follows unlock or restoration.
 
-### SDK compatibility exception
+### SDK compatibility exception (SUPERSEDED: capture code removed)
 
 The macOS 27 ScreenCaptureKit SDK does not give the picker observer parameters a
 Swift actor or Sendable contract. `SCContentFilter` has mutable SDK properties
