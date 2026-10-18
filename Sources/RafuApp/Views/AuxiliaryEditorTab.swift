@@ -10,7 +10,7 @@ struct AuxiliaryEditorTabContent: View {
             case .settings:
                 SettingsCanvas(session: session, showsTabStrip: false)
             case .agentSession(let reference):
-                AgentSessionTranscriptView(
+                AgentSessionPane(
                     reference: reference,
                     model: session.agentHistory.transcripts[reference.key],
                     session: session,
