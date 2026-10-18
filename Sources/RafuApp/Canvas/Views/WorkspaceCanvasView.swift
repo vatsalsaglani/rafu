@@ -183,6 +183,10 @@ struct WorkspaceCanvasView: View {
                 .transition(cardTransition)
             }
             CanvasEdgeOverlay(board: board, session: session, drag: connectionDrag)
+            // X5 whiteboard
+            CanvasWhiteboardCreationLayer(
+                board: board, tool: .forBoard(board.id), viewportProject: project,
+                unproject: unproject)
             ForEach(interaction.guides, id: \.key) { guide in
                 guideLine(guide)
             }
@@ -204,6 +208,8 @@ struct WorkspaceCanvasView: View {
             if board.cards.isEmpty, !tipDismissed {
                 emptyBoardTip
             }
+            // X5 whiteboard
+            CanvasToolPalette(board: board, session: session, tool: .forBoard(board.id))
         }
         .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         .coordinateSpace(name: CanvasConnectionCoordinateSpace.board)

@@ -68,6 +68,11 @@ struct CanvasCardCommands {
             return Action(
                 id: "open", title: "Open \(card.title)", symbol: "arrow.up.forward.app"
             ) { resources?.nativeApp(for: card)?.openApp() }
+        case .mermaid, .shape, .text:  // X5 whiteboard
+            return Action(
+                id: "edit", title: CanvasWhiteboardEditing.editTitle(card.content),
+                symbol: "pencil"
+            ) { CanvasWhiteboardEditing.shared.request(card.id) }
         default:
             // Whiteboard and diagram kinds have no primary action.
             return nil
