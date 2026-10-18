@@ -107,16 +107,27 @@ extension WorkspaceSession {
         else { return }
         board.revealCard(cardID)
         let line = plan.line
-        Task(name: "Type the agent resume command into an Ensemble terminal") {
-            [weak self, weak board] in
-            guard let self, let board else { return }
-            let typed = await self.typeAgentResumeLine(
-                line, into: groupID, cardID: cardID, board: board)
-            if !typed {
-                self.presentAgentHistoryMessage(
-                    "The Ensemble terminal did not start in time. Type the command yourself: \(line)"
-                )
+        let boardID = board.id
+        let failure =
+            "The Ensemble terminal did not start in time. Type the command yourself: \(line)"
+        // Waits (at most fifteen seconds) for the node's shell process, then
+        // types one line. The session is held only for each short check.
+        Task(name: "Type the agent resume command into an Ensemble terminal") { [weak self] in
+            for attempt in 1...150 {
+                guard
+                    let step = self?.agentResumeTypingStep(
+                        line, into: groupID, cardID: cardID, boardID: boardID, attempt: attempt)
+                else { return }
+                switch step {
+                case .typed, .gone: return
+                case .failed:
+                    self?.presentAgentHistoryMessage(failure)
+                    return
+                case .waiting: break
+                }
+                do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
             }
+            self?.presentAgentHistoryMessage(failure)
         }
     }
 
@@ -147,7 +158,8 @@ extension WorkspaceSession {
             _ = try terminal.perform(.detachDeletedSavedLayout(record.id))
             _ = try terminal.perform(.parkGroup(snapshot.id))
             try board.add(title: snapshot.name.rawValue, content: .terminal(groupID: snapshot.id))
-            cardID = board.cards.first(where: { $0.content == .terminal(groupID: snapshot.id) })?
+            cardID =
+                board.cards.first(where: { $0.content == .terminal(groupID: snapshot.id) })?
                 .id
         }
         guard let cardID else { return nil }
@@ -156,29 +168,31 @@ extension WorkspaceSession {
         return cardID
     }
 
-    /// Waits (at most fifteen seconds) until the node's shell process runs,
-    /// then types one line; the pty keeps it until the shell reads it.
-    /// SwiftTerm drops input sent before the process exists, so the wait is
-    /// on the process, not on a timer. A start request that the card could
-    /// not act on yet (the board was still appearing) is asked again.
-    private func typeAgentResumeLine(
-        _ line: String, into groupID: TerminalGroupID, cardID: CanvasCardID,
-        board: CanvasBoardState
-    ) async -> Bool {
-        for attempt in 1...150 {
-            guard let pane = terminal.terminalGroup(groupID)?.panes.first else { return false }
-            if pane.status == .live, let controller = terminal.terminalController(for: pane.id),
-                controller.isProcessRunning
-            {
-                return controller.sendReply(line)
-            }
-            if pane.status == .stopped, attempt.isMultiple(of: 10),
-                board.terminalStartRequest == nil
-            {
-                board.terminalStartRequest = cardID
-            }
-            do { try await Task.sleep(for: .milliseconds(100)) } catch { return false }
+    /// One check of the resume node. The line is typed only when the shell
+    /// process runs: SwiftTerm drops input sent before the process exists, so
+    /// the wait is on the process, not on a timer; the pty keeps the line
+    /// until the shell reads it. A start request that the card could not act
+    /// on yet (the board was still appearing) is asked again.
+    private func agentResumeTypingStep(
+        _ line: String, into groupID: TerminalGroupID, cardID: CanvasCardID, boardID: CanvasID,
+        attempt: Int
+    ) -> AgentResumeTypingStep {
+        guard let pane = terminal.terminalGroup(groupID)?.panes.first else { return .gone }
+        if pane.status == .live, let controller = terminal.terminalController(for: pane.id),
+            controller.isProcessRunning
+        {
+            return controller.sendReply(line) ? .typed : .failed
         }
-        return false
+        if pane.status == .stopped, attempt.isMultiple(of: 10),
+            let board = canvas.boards[boardID], board.terminalStartRequest == nil
+        {
+            board.terminalStartRequest = cardID
+        }
+        return .waiting
     }
+}
+
+/// The result of one `agentResumeTypingStep`.
+private nonisolated enum AgentResumeTypingStep {
+    case typed, waiting, failed, gone
 }

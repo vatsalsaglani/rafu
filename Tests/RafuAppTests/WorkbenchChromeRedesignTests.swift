@@ -378,6 +378,36 @@ struct WorkbenchChromeRedesignTests {
         #expect(pill.contains(".lineLimit(1)"))
     }
 
+    @Test("The paused-links notice stacks below the tool palette, never over it")
+    func pausedLinksNoticeStacksBelowPalette() throws {
+        let source = try Self.source("Sources/RafuApp/Canvas/Views/WorkspaceCanvasView.swift")
+        let start = try #require(source.range(of: "private var boardTopOverlay: some View {"))
+        let end = try #require(
+            source.range(
+                of: "private var pausedLinksNotice", range: start.upperBound..<source.endIndex))
+        let overlay = String(source[start.upperBound..<end.lowerBound])
+        // One vertical stack: the palette first, then the notice.
+        let stack = try #require(
+            overlay.range(of: "VStack(spacing: CanvasBoardTopOverlayMetrics.spacing)"))
+        let palette = try #require(overlay.range(of: "CanvasToolPalette("))
+        let notice = try #require(overlay.range(of: "pausedLinksNotice"))
+        #expect(stack.lowerBound < palette.lowerBound)
+        #expect(palette.lowerBound < notice.lowerBound)
+        #expect(overlay.contains("if showsRestoredLinksNotice && pausedLinkCount > 0"))
+        // The board surface shows the palette only through this stack, and
+        // the list (no palette) keeps its own notice.
+        #expect(source.components(separatedBy: "CanvasToolPalette(").count == 2)
+        #expect(
+            source.contains("if board.showsList, showsRestoredLinksNotice, pausedLinkCount > 0"))
+        // The palette no longer places itself, so it cannot overlap.
+        let paletteFile = try Self.source(
+            "Sources/RafuApp/Canvas/Whiteboard/CanvasToolPalette.swift")
+        #expect(
+            !paletteFile.contains(
+                ".frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)"))
+        #expect(CanvasBoardTopOverlayMetrics.spacing == 8)
+    }
+
     private static func section(of source: String, from start: String, to end: String) throws
         -> String
     {

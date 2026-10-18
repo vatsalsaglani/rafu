@@ -15,7 +15,9 @@
   `CodexSessionTitles` for `session_index.jsonl`. No Codex rollout was on the
   machine, so the Codex fixtures are synthetic. The SwiftUI layer was checked
   with `swiftc -parse` and `swift-format lint --strict` only; a Mac build is
-  still required.
+  still required. Round-4 resume changes (2026-10-18): same checks, plus the
+  pure launch rules in a scratch package, plus SwiftTerm 1.14.0
+  `LocalProcess.send` read from its source. Not run on a Mac.
 
 ## Rule or observed behavior
 
@@ -120,12 +122,47 @@ the Settings toggles rescan explicitly. There is no file watching.
 `AgentHistoryResumeCommand.arguments` builds `["claude", "--resume", id]` or
 `["codex", "resume", id]`, and refuses an id with characters other than
 letters, digits, `-`, `_`, `.` (or a leading `-`). `shellLine` joins them with
-POSIX single quoting (`'` becomes `'\''`). Rafu opens an ordinary shell
-Terminal Group in the session's folder and types that one line only after
-the user clicks Resume in Terminal. The folder must be inside a Rafu window's
-workspace (Terminal Groups are bounded to the workspace root): this window,
-or another open window that then comes to the front. Otherwise Rafu says so
-and offers Open Project Folder. A missing folder is reported, not created.
+POSIX single quoting (`'` becomes `'\''`).
+
+**Resume in Terminal does not type into a shell** (round 4). It finds the CLI
+with the provider's adapter (`ConductorAdapterRegistry`, `probe()`), then
+opens an Agent Terminal (`openAgentTerminal(spec:)`) whose process is the CLI
+itself: `AgentHistoryResumeLaunch.specification` gives the absolute
+executable, the arguments without the program name, the session folder as the
+working directory, and the same one-key child environment as every Agent
+Terminal (the curated `PATH` with the executable's folder first). The pane is
+`.directAgentTerminal(provider:)`, so the tab shows the agent's mark and
+title. When the adapter does not find the CLI, Rafu shows
+`missingCLIMessage`, which ends with the exact command to run. The folder
+must be inside a Rafu window's primary workspace folder: this window, or
+another open window that then comes to the front. Otherwise Rafu says so and
+offers Open Project Folder. A missing folder is reported, not created.
+
+Why the old way failed: Rafu opened an ordinary shell and typed the line on a
+fixed timer (300 ms after the pane's view existed). An ordinary shell starts
+in a task after the view appears (`pendingShellStartup`, after
+`CanvasLiveBridge.prepare`), and SwiftTerm 1.14.0's `LocalProcess.send`
+returns without writing (`guard running else { return }`) while no child
+runs. `sendReply` still returned `true`, so the line could be lost with no
+message. `sendReply` now returns `false` until the process runs, and
+`WorkspaceTerminalController.isProcessRunning` exposes that state.
+
+**Resume in Ensemble** (row context menu, the Agent Session tab's More menu,
+and the palette entry "Agent Session: Resume in Ensemble") adds a terminal
+node to this window's current Ensemble: the Ensemble on screen, else the
+first Ensemble tab in the focused group, else in any group. With no Ensemble
+open, a confirmation offers "New Ensemble", which creates one named after the
+session. The node is a stopped ordinary shell in the session folder
+(workspace-relative; outside the primary folder is refused), named after the
+session title (one line, at most 72 characters). It is added as one undoable
+board edit, selected, focused, and started through the card's own start
+request. Rafu types the quoted line only when the shell process runs (checked
+every 100 ms, at most 15 s; the start request is repeated if the card could
+not act on it yet). The node types instead of launching the CLI directly so
+that it stays an ordinary, restartable, saved Ensemble terminal and `claude`
+resolves to the Ensemble bridge wrapper (board tools and links). Codex
+`resume` does not attach to the bridge (`CanvasBridgeLaunch.shouldAttach`).
+Agent control (Off / Ask / Allow) does not apply: the person asks for it.
 
 ### Open Project Folder
 
@@ -155,6 +192,13 @@ the folder is focused instead.
 - `Tests/RafuAppTests/AgentHistory/AgentHistoryTabTests.swift`: navigator
   mode encoding, tab identity, open/select/close releasing the transcript,
   Settings exclusivity, failure text without a path.
+- `Tests/RafuAppTests/AgentHistory/AgentHistoryResumeLaunchTests.swift`:
+  resume process specification per provider, unsafe ids, the missing-CLI
+  message, the child `PATH`, the Ensemble plan (relative folder, title), and
+  the Resume in Ensemble node (stopped shell, folder, selection, start
+  request, undo) and the "No Ensemble is open" confirmation. The pure parts
+  passed in a Linux scratch package (8 tests, default `MainActor`
+  isolation); the session tests need a Mac.
 - Structure of local Claude Code 2.1.x transcripts was confirmed by counting
   entry types and keys only (no text printed).
 
@@ -176,8 +220,9 @@ into a scratch package named `RafuCore` (see
   Addendum 2, X12 and the "Agent history (X12)" contract.
 - Code: `AgentHistoryScanner`, `ClaudeCodeHistoryParser`,
   `CodexHistoryParser`, `CodexSessionIndex`, `AgentTranscriptLoader`,
-  `AgentHistoryResumeCommand`, `AgentHistoryStore`,
+  `AgentHistoryResumeCommand`, `AgentHistoryResumeLaunch`, `AgentHistoryStore`,
   `AgentHistoryWindowState`, `AgentTranscriptModel`,
-  `WorkspaceSession+AgentHistory.swift`, `WorkspaceAuxiliaryTab.agentSession`.
+  `WorkspaceSession+AgentHistory.swift`, `WorkspaceSession+AgentResume.swift`,
+  `WorkspaceAuxiliaryTab.agentSession`.
 - Related notes: [`concurrency.md`](concurrency.md),
   [`editor-dependencies.md`](editor-dependencies.md) (MarkdownUI boundary).

@@ -58,6 +58,31 @@ pending).
 - **Pointer feedback:** resize zones use `pointerStyle`. Resizing applies
   per-type minimum sizes with resistance and a spring.
 
+### Inline card rename and board keys (round 4, code-read only)
+
+- The inline title field (`CanvasCardRenameField`) opens on a double-click on
+  the header title, on "Rename…" in the card menus, and from the list.
+  **Return** and **clicking away** (focus loss) save; **Esc** cancels. The
+  save is one undoable `board.edit`, the same as the Rename Card dialog.
+  `CanvasInlineRename.committedTitle` trims the draft and saves nothing when
+  it is unchanged or not a valid title (1 to 120 characters, no control
+  characters). A stored title wins over the automatic agent title; only the
+  automatic names "Terminal" and "Terminal Group N" show the agent title.
+- **Board shortcuts stand aside while a title field is open.** The board's
+  `.onKeyPress` handlers (Return, Space, Delete, arrows, Tab, Esc, N, T, ⌘A,
+  ⌘Z) are on an ancestor of the field and can take the key before `onSubmit`
+  (from code reading; confirm on a Mac). They now
+  check `CanvasInlineRename.boardTakesKeys` (no card content active and
+  `board.renamingCardID == nil`). Before this, a double-click selected the
+  card, so Return reached the board's "enter content" handler, which handled
+  the key: the field lost focus and the name was discarded. A rename from the
+  context menu did not select the card, so it seemed to work.
+- **The paused-links notice stacks below the tool palette.** Both are
+  top-centre overlays on the board, so they are one `VStack`
+  (`WorkspaceCanvasView.boardTopOverlay`: palette, then notice, 8 pt apart, 10
+  pt from the top). `CanvasToolPalette` no longer pads or frames itself. The
+  list view has no palette and keeps its own notice at the top.
+
 ### Pointer ownership, focus ring, and file drops (round 2, code-read only)
 
 - **One pan owner.** The grid's drag gesture is masked `.all` without Space and
@@ -222,7 +247,9 @@ Manual checks still required (from the handoff follow-ups plus the items this
 note names): Tab key reaching the board; terminal first-click focus; Ctrl-Tab
 with a terminal active versus board focus; Space + drag and Shift + drag; haptics on a Force Touch trackpad; terminals and web
 cards unmounting below 50%; Reduce Motion badge pulse; note Read/Edit toggling
-with undo; edge layering with overlapping cards.
+with undo; edge layering with overlapping cards; inline rename (double-click,
+type, Return / click away / Esc) on a terminal, note, and file card; the
+paused-links notice below the palette at a narrow split width.
 
 ## Related
 
