@@ -27,9 +27,6 @@ struct AppSupportRootTests {
                 InstallLayout.defaultBaseDirectory(identity: identity).path
                     == defaultRoot.path)
             #expect(
-                ConductorDefinitionLibrary.defaultUserLibraryRoot(identity: identity).path
-                    == defaultRoot.appending(path: "conductor").path)
-            #expect(
                 ThemeFileService.themesDirectory(identity: identity).path
                     == defaultRoot.appending(path: "Themes").path)
         }

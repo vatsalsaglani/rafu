@@ -100,3 +100,42 @@ themselves (to avoid conflicts). New strings may already say "Ensemble".
    message bodies in logs.
 6. Commit on `redesign2/<id>-<topic>`. Do not push. Handoff: branch, commits,
    done, skipped (why), edits outside owned paths, tests, compile risks.
+
+## Addendum (2026-10-18): diagrams, icon packs, frames, export — workstream X9
+
+User direction: agents can create diagrams in an Ensemble through Rafu tools;
+icon packs for AWS, Google Cloud, Azure and common services (like Eraser.io);
+select items and convert them to a **frame**; export to PNG (and more); export
+an **animated GIF** where dots travel along arrows to show data flow.
+
+| ID | Model | Workstream | Owns |
+|---|---|---|---|
+| X9 | Opus | Diagram packs, frames, export | new `Canvas/Diagram/**`, new `Resources/DiagramPacks/` (built-in Common pack manifest only), export commands/menu items it adds via one marked line in the Canvas bar overflow menu |
+
+Contracts (exact names):
+- **Model types (X9 defines in `Canvas/Diagram/CanvasDiagramModel.swift`):**
+  `CanvasFrame` (title, memberIDs: [CanvasCardID], style token) and
+  `CanvasServiceIcon` (packID, iconID, label). Both Codable, Equatable, Sendable.
+- **Card kinds (X5 adds the cases):** `.frame(CanvasFrame)` and
+  `.serviceIcon(CanvasServiceIcon)` in `CanvasCardContent`, rendered through
+  `CanvasDiagramCardFace(card:board:)` (X9 provides). Frames draw behind their
+  members; moving a frame moves its members.
+- **Packs:** built-in **Common** pack drawn with SF Symbols (user, browser,
+  mobile, API, server, function, container, database, cache, queue, stream,
+  storage, CDN, DNS, load balancer, gateway, auth, monitoring, …). Vendor packs
+  (AWS Architecture Icons, Azure Architecture Icons, Google Cloud icons) are not
+  redistributed in the repo: "Import Icon Pack…" accepts the official ZIP or
+  folder the user downloads (links shown), detects the vendor layout,
+  indexes SVG/PNG into Application Support, and searches by name. An optional
+  downloader may be added only with a pinned official URL and SHA-256.
+- **API for X4 tools:** `@MainActor enum CanvasDiagramService` with
+  `searchIcons(query:limit:) -> [CanvasServiceIconMatch]`,
+  `createFrame(title:memberIDs:in:session:) -> CanvasCardID?`,
+  `export(boardID:target:format:session:) async throws -> URL` where target is
+  `.board | .frame(CanvasCardID) | .selection` and format is
+  `.png(scale:) | .pdf | .gif(seconds:fps:)`; files go to a workspace folder the
+  user can see (default `exports/`), never outside the workspace.
+- **Export rendering:** `ImageRenderer` for PNG/PDF; GIF via ImageIO
+  (`CGImageDestination`, `UTType.gif`) with frames where a dot travels each edge
+  in its direction. Native-view nodes (terminal, web, docked app) render their
+  summary face, not live content.

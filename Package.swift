@@ -125,10 +125,6 @@ let package = Package(
                 // `swift run`, and the staged `.app`. See
                 // `Sources/RafuApp/Resources/Grammars/README.md`.
                 .copy("Resources/Grammars"),
-                // Read-only Ensemble workflow starters. C6 copies these
-                // Markdown files into a user-chosen repository or global
-                // scope; definitions are never edited in the bundle.
-                .copy("Resources/EnsembleTemplates"),
                 .copy("Resources/EnsembleSkills"),
             ],
             swiftSettings: [

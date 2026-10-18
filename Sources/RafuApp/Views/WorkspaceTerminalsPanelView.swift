@@ -387,7 +387,7 @@ private struct AgentProbeIdentity: Equatable {
 /// is bridged to `NSMenuItem`, which draws an image at its own size, and the
 /// vendored SVGs are authored `width="1em"` so `NSImage` reports 1×1 pt there
 /// and every mark drew as a dot (see `docs/references/agent-terminals.md`).
-/// Rows therefore use the same `FileIconView` source for every provider.
+/// Rows therefore use `AgentIconView` (the shared agent identity mark) for every provider.
 /// Opening the list starts nothing; only choosing a ready row launches.
 private struct AgentStartMenuView: View {
     let rows: [AgentLauncherRow]
@@ -479,7 +479,7 @@ private struct AgentLauncherMenuRow: View {
     var body: some View {
         Button(action: launch) {
             HStack(spacing: RafuMetrics.space2) {
-                FileIconView(icon: row.icon, size: 16)
+                AgentIconView(cli: row.id, size: 16)
                     .frame(width: 18, height: 18)
                     .opacity(row.isLaunchable ? 1 : 0.55)
                     .accessibilityHidden(true)
@@ -818,8 +818,8 @@ private struct TerminalSessionRowView: View {
             // rule against state by color alone without needing a badge the
             // size of a few pixels. The exited chip beside the name stays.
             Group {
-                if let provider = row.agentProvider {
-                    FileIconView(icon: ConductorCLIIcons.icon(for: provider), size: 15)
+                if let provider = row.resolvedAgentProvider {
+                    AgentIconView(cli: provider, size: 16)
                 } else {
                     Image(systemName: "terminal")
                         .font(.system(size: 12, weight: .medium))
@@ -1061,7 +1061,7 @@ private struct TerminalSessionRowView: View {
 
     private var accessibilityLabel: String {
         var parts = [row.displayName]
-        if let provider = row.agentProvider,
+        if let provider = row.resolvedAgentProvider,
             provider.displayName != row.displayName
         {
             parts.append(provider.displayName)
