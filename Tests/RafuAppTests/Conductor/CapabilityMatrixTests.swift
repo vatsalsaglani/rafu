@@ -27,26 +27,6 @@ func rosterDeclaresCapabilitiesConsistently() async {
     }
 }
 
-@Test("Reasoning effort is genuinely unwired — the role model carries no field for it")
-func reasoningEffortIsNotYetWired() {
-    // The matrix records this as a KNOWN GAP: Claude Code (`--effort`) and
-    // Cline (`--thinking`) both accept an effort level and Rafu passes
-    // neither. If someone adds the field, this test fails and the matrix
-    // must be updated in the same change rather than drifting.
-    let role = ConductorAgentDefinition(
-        name: "advisor",
-        provider: .claudeCode,
-        model: "",
-        autonomy: .readOnly,
-        handoffArtifact: "brief.md",
-        promptBody: "body")
-    let mirror = Mirror(reflecting: role)
-    let fields = Set(mirror.children.compactMap(\.label))
-    #expect(fields == ["name", "provider", "model", "autonomy", "handoffArtifact", "promptBody"])
-    #expect(!fields.contains("effort"))
-    #expect(!fields.contains("thinking"))
-}
-
 @Test("No adapter smuggles a reasoning-effort or resume flag into its argv")
 func noAdapterPassesUnwiredFlags() {
     // Guards the matrix's honesty: an adapter must not pass an effort or

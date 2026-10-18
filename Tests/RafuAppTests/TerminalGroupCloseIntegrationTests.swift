@@ -170,12 +170,6 @@ func workspaceSessionStaleCloseRequiresSecondConfirmation() async throws {
     let sessionID = try session.insertClassifiedTerminalSession(
         spec: spec, kind: .directAgentTerminal(provider: .codex)
     ) { cleanupCount += 1 }
-    var coordinatorCleanupCount = 0
-    session.registerCoordinatorSession(
-        ConductorCoordinatorSession(
-            id: "stale-close", provider: .codex, model: nil, goal: "Test",
-            terminalSessionID: sessionID, startedAt: Date(), endedAt: nil)
-    ) { coordinatorCleanupCount += 1 }
     let groupID = try #require(session.terminal.terminalGroupAndPane(containing: sessionID)?.0)
     let paneID = try #require(session.terminal.terminalGroupAndPane(containing: sessionID)?.1)
     session.terminal.terminalController(for: paneID)?.markRunningForTesting()
@@ -197,13 +191,11 @@ func workspaceSessionStaleCloseRequiresSecondConfirmation() async throws {
     #expect(refreshed != stale)
     #expect(session.terminal.terminalGroup(groupID)?.panes.count == 2)
     #expect(cleanupCount == 0)
-    #expect(coordinatorCleanupCount == 0)
 
     session.confirmTerminalGroupClose()
     #expect(session.terminal.terminalGroup(groupID) == nil)
     #expect(session.pendingTerminalGroupClose == nil)
     #expect(cleanupCount == 1)
-    #expect(coordinatorCleanupCount == 1)
 }
 
 @MainActor

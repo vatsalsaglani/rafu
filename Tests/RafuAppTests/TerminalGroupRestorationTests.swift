@@ -21,10 +21,15 @@ struct TerminalGroupRestorationTests {
         #expect(first.panes.allSatisfy { $0.explicitUserName == TerminalPaneName("Explicit pane") })
     }
 
-    @Test("Agent and Ensemble panes become fixed unavailable placeholders")
+    @Test("Agent and legacy Ensemble panes become fixed unavailable placeholders")
     func agentAndEnsemblePanesAreUnavailable() throws {
         let agent = try pane(runtimeKind: .directAgentTerminal(provider: .codex))
-        let ensemble = try pane(runtimeKind: .ensembleRole)
+        let ensemble = try TerminalPaneSnapshot(
+            id: TerminalPaneID(), sessionID: nil,
+            explicitUserName: TerminalPaneName("Explicit pane"),
+            reportedTitle: nil, runtimeKind: .unavailableEnsemble,
+            themeColor: .info, status: .unavailable, launchProfile: nil,
+            startAvailability: .unavailable)
         let root = TerminalGroupNode.split(
             id: TerminalGroupSplitID(), axis: .columns, fraction: 0.5,
             first: .pane(agent.id), second: .pane(ensemble.id))

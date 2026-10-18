@@ -258,10 +258,13 @@ struct CommandPaletteView: View {
         } label: {
             HStack(spacing: 10) {
                 Group {
-                    if let fileIcon = row.fileIcon {
-                        FileIconView(icon: fileIcon, size: 13)
+                    if let agent = row.agent {
+                        AgentIconView(cli: agent, size: 16)
+                    } else if let fileIcon = row.fileIcon {
+                        FileIconView(icon: fileIcon, size: 16)
                     } else {
                         Image(systemName: row.symbolName)
+                            .font(.system(size: 13))
                             .foregroundStyle(iconColor(for: row, isSelected: isSelected))
                     }
                 }
@@ -507,6 +510,7 @@ struct CommandPaletteView: View {
                 id: command.id ?? "command:\(command.title)",
                 symbolName: command.symbolName,
                 iconTint: nil,
+                agent: command.agent,
                 title: command.title,
                 detail: command.detail,
                 shortcut: command.shortcut,
@@ -696,13 +700,6 @@ struct CommandPaletteView: View {
             ) {
                 dismiss()
                 session.navigatorMode = .terminals
-            },
-            .init(
-                title: "Show Runs", symbolName: "list.bullet.rectangle",
-                keywords: ["conductor", "agents", "workflow", "panel"]
-            ) {
-                dismiss()
-                session.navigatorMode = .runs
             },
             .init(
                 title: "Install rafu CLI", detail: "Installs to ~/.local/bin",
@@ -911,46 +908,6 @@ struct CommandPaletteView: View {
         if session.rootURL != nil {
             commands.append(
                 .init(
-                    id: "conductor.new-ensemble",
-                    title: "New Ensemble…",
-                    symbolName: "circle.hexagongrid",
-                    keywords: ["ensemble", "coordinator", "goal", "new"],
-                    shortcut: "⌘⇧E"
-                ) {
-                    dismiss()
-                    session.showEnsembleStart()
-                }
-            )
-        }
-
-        if session.rootURL != nil, session.canStartConductorWorkflowRun {
-            commands.append(
-                .init(
-                    id: "conductor.new-run",
-                    title: "New Run…",
-                    symbolName: "person.crop.rectangle.stack",
-                    keywords: ["ensemble", "agent", "role", "task", "workflow"]
-                ) {
-                    dismiss()
-                    session.showEnsembleNewRun()
-                }
-            )
-        }
-
-        if session.rootURL != nil {
-            commands.append(
-                .init(
-                    id: "conductor.show-graph",
-                    title: "Ensemble: Show Graph",
-                    symbolName: "point.3.connected.trianglepath.dotted",
-                    keywords: ["ensemble", "graph", "runs"]
-                ) {
-                    dismiss()
-                    session.showConductorGraph()
-                }
-            )
-            commands.append(
-                .init(
                     id: "terminal.new-agent",
                     title: "New Agent Terminal…",
                     symbolName: "terminal.badge",
@@ -970,68 +927,11 @@ struct CommandPaletteView: View {
                     title: "Agent Terminal: \(option.displayName)",
                     detail: option.launchVerificationNote,
                     symbolName: "terminal",
-                    keywords: ["agent", "terminal", option.displayName]
+                    keywords: ["agent", "terminal", option.displayName],
+                    agent: option.id
                 ) {
                     dismiss()
                     launchAgentTerminal(option)
-                }
-            )
-        }
-
-        // Verbs act on the engine owning the SELECTED run (C6 concurrency),
-        // so a gate in run B is not approved by a palette entry that read
-        // run A's state.
-        let selectedWorkflow = session.selectedWorkflowController
-
-        if case .awaitingGate = selectedWorkflow?.state, let selectedWorkflow {
-            commands.append(
-                .init(
-                    id: "conductor.approve-gate",
-                    title: "Approve Gate",
-                    symbolName: "checkmark.circle",
-                    keywords: ["ensemble", "workflow", "run"]
-                ) {
-                    dismiss()
-                    Task { await selectedWorkflow.approveGate() }
-                }
-            )
-            commands.append(
-                .init(
-                    id: "conductor.revise-gate-artifact",
-                    title: "Revise Gate Artifact",
-                    symbolName: "pencil.circle",
-                    keywords: ["ensemble", "workflow", "artifact"]
-                ) {
-                    dismiss()
-                    selectedWorkflow.reviseArtifact(in: session)
-                }
-            )
-        }
-
-        if let selectedWorkflow, selectedWorkflow.isInFlight {
-            commands.append(
-                .init(
-                    id: "conductor.abort-run",
-                    title: "Abort Run",
-                    symbolName: "xmark.circle",
-                    keywords: ["ensemble", "workflow", "stop"]
-                ) {
-                    dismiss()
-                    selectedWorkflow.abort()
-                }
-            )
-        }
-
-        if case .failed = selectedWorkflow?.state, let selectedWorkflow {
-            commands.append(
-                .init(
-                    id: "conductor.retry-failed-step",
-                    title: "Retry Failed Step",
-                    symbolName: "arrow.clockwise",
-                    keywords: ["ensemble", "workflow", "retry"]
-                ) {
-                    dismiss()
-                    Task { await selectedWorkflow.retryFailedStep() }
                 }
             )
         }
@@ -1315,6 +1215,9 @@ private struct PaletteRow: Identifiable {
     let symbolName: String
     let iconTint: FileIconProvider.Tint?
     var fileIcon: FileIconProvider.Icon? = nil
+    /// Set for rows that start or name an agent CLI; drawn with the shared
+    /// vendor mark instead of `symbolName`.
+    var agent: ConductorCLIID? = nil
     let title: String
     let detail: String?
     /// Keyboard shortcut glyphs shown right-aligned on the row, when the
@@ -1336,6 +1239,8 @@ private struct PaletteCommand {
     var keywords: [String]
     var shortcut: String? = nil
     var isEnabled = true
+    /// The agent CLI this command starts, if any (drawn as its vendor mark).
+    var agent: ConductorCLIID? = nil
     let action: @MainActor () -> Void
 
     var searchText: String { ([title, detail ?? ""] + keywords).joined(separator: " ") }

@@ -184,10 +184,6 @@ struct WorkspaceWindowView: View {
         case .empty: "empty"
         case .blame: "blame:\(session.selectedDocumentID?.uuidString ?? "none")"
         case .standaloneDiff: "diff:\(session.gitOpenDiff?.id ?? "none")"
-        case .graph: "ensemble-graph"
-        case .runDetail: "run-detail:\(session.conductorRunCanvasID ?? "none")"
-        case .ensembleStart: "ensemble-start"
-        case .ensembleNewRun: "ensemble-new-run"
         case .settings: "settings"
         case .editor: "editor:\(session.selectedDocumentID?.uuidString ?? "none")"
         }

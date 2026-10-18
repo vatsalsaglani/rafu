@@ -5,19 +5,9 @@ import UserNotifications
 /// type only, no `UserNotifications` import, so `WorkspaceSession` and its
 /// tests stay headless.
 nonisolated struct TerminalAttentionNotification: Equatable, Sendable {
-    /// Which action set the notification offers. A terminal bell offers Reply;
-    /// an Ensemble gate offers Open Run, plus Approve ONLY when the workflow
-    /// author opted that gate in via `[gate:remote]` (C7) — approving work you
-    /// have not looked at is never something a run gains by default.
-    nonisolated enum Kind: Equatable, Sendable {
-        case terminalReply
-        case ensembleGate(runID: String, allowsApprove: Bool)
-    }
-
     let sessionID: UUID
     let title: String
     let body: String
-    var kind: Kind = .terminalReply
 }
 
 /// The seam between `WorkspaceSession` and the system notification center.
@@ -50,14 +40,6 @@ final class SystemTerminalAttentionNotifier: TerminalAttentionNotifying {
     // isolated state.
     nonisolated static let categoryIdentifier = "rafu.terminal.attention"
     nonisolated static let replyActionIdentifier = "rafu.terminal.reply"
-    /// Ensemble gate categories. Two of them, not one with a conditionally
-    /// hidden action: `UNNotificationCategory` actions are fixed at
-    /// registration, so "may I approve remotely" has to be a category choice
-    /// made when the notification is posted.
-    nonisolated static let gateCategoryIdentifier = "rafu.ensemble.gate"
-    nonisolated static let approvableGateCategoryIdentifier = "rafu.ensemble.gate.approvable"
-    nonisolated static let openRunActionIdentifier = "rafu.ensemble.openRun"
-    nonisolated static let approveGateActionIdentifier = "rafu.ensemble.approveGate"
 
     /// Registers the reply-capable notification category and installs the
     /// delegate that routes replies back into a live terminal. Call
@@ -82,34 +64,8 @@ final class SystemTerminalAttentionNotifier: TerminalAttentionNotifying {
             intentIdentifiers: [],
             options: []
         )
-        // Open Run is `.foreground` — it deliberately brings the window
-        // forward, because reviewing a gate IS looking at Rafu.
-        let openRunAction = UNNotificationAction(
-            identifier: openRunActionIdentifier,
-            title: "Open Run",
-            options: [.foreground]
-        )
-        // Approve carries no `.foreground`: the point of a remotely-approvable
-        // gate is not having to switch windows.
-        let approveAction = UNNotificationAction(
-            identifier: approveGateActionIdentifier,
-            title: "Approve",
-            options: []
-        )
-        let gateCategory = UNNotificationCategory(
-            identifier: gateCategoryIdentifier,
-            actions: [openRunAction],
-            intentIdentifiers: [],
-            options: []
-        )
-        let approvableGateCategory = UNNotificationCategory(
-            identifier: approvableGateCategoryIdentifier,
-            actions: [approveAction, openRunAction],
-            intentIdentifiers: [],
-            options: []
-        )
         let center = UNUserNotificationCenter.current()
-        center.setNotificationCategories([category, gateCategory, approvableGateCategory])
+        center.setNotificationCategories([category])
         center.delegate = replyRoutingDelegate
     }
 
@@ -137,15 +93,7 @@ final class SystemTerminalAttentionNotifier: TerminalAttentionNotifying {
         let content = UNMutableNotificationContent()
         content.title = notification.title
         content.body = notification.body
-        switch notification.kind {
-        case .terminalReply:
-            content.categoryIdentifier = Self.categoryIdentifier
-        case .ensembleGate(let runID, let allowsApprove):
-            content.categoryIdentifier =
-                allowsApprove
-                ? Self.approvableGateCategoryIdentifier : Self.gateCategoryIdentifier
-            content.userInfo["runID"] = runID
-        }
+        content.categoryIdentifier = Self.categoryIdentifier
         // Macos Notification Center persists bodies and may surface them on
         // the lock screen regardless of this setting — `.active` only
         // avoids the more disruptive time-sensitive/critical presentation,
@@ -194,26 +142,6 @@ private final class ReplyRoutingDelegate: NSObject, UNUserNotificationCenterDele
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         defer { completionHandler() }
-
-        // Ensemble gate actions (C7). A default tap on a gate notification
-        // routes to Open Run, never to Approve — approving is only ever an
-        // explicit press of an action the workflow author opted in to.
-        if let runID = response.notification.request.content.userInfo["runID"] as? String {
-            switch response.actionIdentifier {
-            case SystemTerminalAttentionNotifier.approveGateActionIdentifier:
-                Task { @MainActor in
-                    TerminalAttentionCenter.shared.approveEnsembleGate(runID: runID)
-                }
-            case SystemTerminalAttentionNotifier.openRunActionIdentifier,
-                UNNotificationDefaultActionIdentifier:
-                Task { @MainActor in
-                    TerminalAttentionCenter.shared.openEnsembleRun(runID: runID)
-                }
-            default:
-                break
-            }
-            return
-        }
 
         guard response.actionIdentifier == SystemTerminalAttentionNotifier.replyActionIdentifier,
             let textResponse = response as? UNTextInputNotificationResponse,

@@ -229,14 +229,17 @@ struct CanvasZoomCapsule: View {
                 Button("50%") { board.zoom(toScale: 0.5) }
                 Button("200%") { board.zoom(toScale: 2) }
             } label: {
-                HStack(spacing: 2) {
+                HStack(spacing: 3) {
                     Text(board.viewport.scale, format: .percent.precision(.fractionLength(0)))
                         .monospacedDigit()
-                    Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(theme.palette.textSecondary)
                 }
-                .font(.system(size: 11.5, weight: .medium))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(theme.palette.textPrimary)
-                .frame(minWidth: 52)
+                .frame(minWidth: 50, minHeight: 24)
+                .contentShape(.rect)
             }
             .menuStyle(.borderlessButton)
             .tint(theme.palette.textSecondary)
@@ -254,8 +257,10 @@ struct CanvasZoomCapsule: View {
             .buttonStyle(RafuIconButtonStyle(size: 24, iconSize: 11))
             .help("Zoom In")
         }
-        .padding(2)
+        .padding(.horizontal, 3)
+        .frame(height: 28)
         .background(Capsule().fill(theme.palette.elevatedBackground))
         .overlay(Capsule().strokeBorder(theme.palette.borderSubtle))
+        .fixedSize()
     }
 }

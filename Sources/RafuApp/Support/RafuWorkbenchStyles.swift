@@ -609,10 +609,20 @@ struct RafuUtilityPanelHeader<Context: View, Actions: View>: View {
 
     var body: some View {
         HStack(spacing: RafuMetrics.space2) {
-            Label(title, systemImage: icon)
-                .font(.callout.weight(.medium))
-                .foregroundStyle(theme.palette.textPrimary)
-                .accessibilityAddTraits(.isHeader)
+            // 13 pt glyph in the secondary tone, then the title: the same
+            // icon size as every other chrome glyph.
+            HStack(spacing: RafuMetrics.space1 + 2) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .frame(width: 16)
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(theme.palette.textPrimary)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
             context
             Spacer(minLength: RafuMetrics.space2)
             actions

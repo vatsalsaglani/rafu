@@ -4,6 +4,10 @@ import UniformTypeIdentifiers
 
 /// Match the editor's private-file precedence and explicit copy proposal.
 /// URL Transferable negotiation alone does not cover every sidebar provider.
+///
+/// This is the SwiftUI half of the board's drop target. AppKit can route the
+/// same drag to `CanvasScrollBridge` instead (see `CanvasBoardDropTarget`);
+/// both halves share `CanvasFileDrop`, so a drop is handled once either way.
 struct CanvasFileDropDelegate: DropDelegate {
     let boardID: CanvasID
     let session: WorkspaceSession
@@ -19,18 +23,20 @@ struct CanvasFileDropDelegate: DropDelegate {
     }
 
     func validateDrop(info: DropInfo) -> Bool {
-        guard session.rootURL != nil, let board = session.canvas.boards[boardID],
-            board.cards.count < CanvasLimits.cards
-        else { return false }
         if !info.itemProviders(for: [.rafuEditorDrag]).isEmpty {
-            return true
+            // A dragged editor TAB belongs to the editor group's edge-split
+            // target, not to the board (`EditorDropRouting`).
+            guard EditorDropRouting.canvasAccepts(session.activeEditorDrag) else { return false }
+            return CanvasFileDrop.accepts(count: 1, boardID: boardID, session: session)
         }
         let count = info.itemProviders(for: [.fileURL]).count
-        return count > 0 && count <= CanvasLimits.cards - board.cards.count
+        return CanvasFileDrop.accepts(count: count, boardID: boardID, session: session)
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: validateDrop(info: info) ? .copy : .cancel)
+        let valid = validateDrop(info: info)
+        if isTargeted.wrappedValue != valid { isTargeted.wrappedValue = valid }
+        return DropProposal(operation: valid ? .copy : .cancel)
     }
 
     func performDrop(info: DropInfo) -> Bool {
@@ -63,6 +69,78 @@ struct CanvasFileDropDelegate: DropDelegate {
 
 }
 
+/// The one drop policy for the board, shared by the SwiftUI delegate and the
+/// AppKit bridge.
+@MainActor
+enum CanvasFileDrop {
+    /// A workspace is open, the board exists, and the files fit on it.
+    static func accepts(count: Int, boardID: CanvasID, session: WorkspaceSession) -> Bool {
+        guard session.rootURL != nil, let board = session.canvas.boards[boardID] else {
+            return false
+        }
+        return CanvasDroppedFileKind.fits(count: count, existing: board.cards.count)
+    }
+
+    /// Adds the dropped files as cards at `location` (board view space).
+    /// Folders are ignored; files outside the workspace reject the batch.
+    @discardableResult
+    static func perform(
+        _ urls: [URL], fromFilesTree: Bool, boardID: CanvasID, at location: CGPoint,
+        session: WorkspaceSession
+    ) -> Bool {
+        guard accepts(count: urls.count, boardID: boardID, session: session) else { return false }
+        if fromFilesTree { session.clearEditorDrag() }
+        Task { [weak session] in
+            await session?.addCanvasDroppedFiles(urls, to: boardID, at: location)
+        }
+        return true
+    }
+
+    /// The AppKit half of the drop target for one board.
+    static func target(
+        boardID: CanvasID, session: WorkspaceSession, isTargeted: Binding<Bool>
+    ) -> CanvasBoardDropTarget {
+        CanvasBoardDropTarget(
+            accepts: { [weak session] count in
+                guard let session else { return false }
+                return accepts(count: count, boardID: boardID, session: session)
+            },
+            targeted: { value in
+                if isTargeted.wrappedValue != value { isTargeted.wrappedValue = value }
+            },
+            perform: { [weak session] urls, fromFilesTree, point in
+                guard let session else { return false }
+                return perform(
+                    urls, fromFilesTree: fromFilesTree, boardID: boardID, at: point,
+                    session: session)
+            })
+    }
+}
+
+/// Pure rules for what a dropped file becomes. Kept free of AppKit so the
+/// tests can check them directly.
+nonisolated enum CanvasDroppedFileKind {
+    /// Raster formats the image card decodes (ImageIO). SVG and PDF stay
+    /// file cards.
+    static let imageExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "gif", "heic", "heif", "tif", "tiff", "bmp", "webp",
+    ]
+
+    static func content(forRelativePath path: String) -> CanvasCardContent {
+        let name = path.split(separator: "/").last.map(String.init) ?? path
+        guard let dot = name.lastIndex(of: "."), dot != name.startIndex else {
+            return .file(path: path)
+        }
+        let ext = name[name.index(after: dot)...].lowercased()
+        return imageExtensions.contains(ext) ? .image(path: path) : .file(path: path)
+    }
+
+    /// At least one file, and no more than the board has room for.
+    static func fits(count: Int, existing: Int) -> Bool {
+        count > 0 && existing < CanvasLimits.cards && count <= CanvasLimits.cards - existing
+    }
+}
+
 nonisolated enum CanvasFileDropDecoder {
     static func url(for payload: EditorDragPayload) -> URL? {
         guard case .file(let path) = payload, path.hasPrefix("/"),
@@ -80,10 +158,14 @@ nonisolated enum CanvasFileDropDecoder {
 
     static func externalURL(_ data: Data) -> URL? {
         guard data.count <= 16 * 1_024,
-            let url = URL(dataRepresentation: data, relativeTo: nil), url.isFileURL,
-            url.path.utf8.count <= 4_096, !url.path.contains("\0")
+            let url = URL(dataRepresentation: data, relativeTo: nil), isAcceptable(url)
         else { return nil }
         return url
+    }
+
+    /// A local file URL with a bounded path and no NUL byte.
+    static func isAcceptable(_ url: URL) -> Bool {
+        url.isFileURL && url.path.utf8.count <= 4_096 && !url.path.contains("\0")
     }
 }
 
