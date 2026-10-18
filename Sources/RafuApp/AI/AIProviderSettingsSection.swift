@@ -19,13 +19,16 @@ nonisolated enum AIProviderDraftChange {
             value.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         if !trimmed(enteredAPIKey).isEmpty { return true }
-        return trimmed(name) != trimmed(saved.name)
-            || kind != saved.kind
-            || trimmed(baseURL) != saved.baseURL.absoluteString
-            || trimmed(model) != trimmed(saved.model)
-            || trimmed(modelAlias) != trimmed(saved.modelAlias ?? "")
-            || transport != saved.openAITransport
-            || maxOutputTokens != saved.maxOutputTokens
+        // Sequential checks keep the type checker fast (one long `||` chain
+        // of mixed comparisons risks "expression too complex").
+        if trimmed(name) != trimmed(saved.name) { return true }
+        if kind != saved.kind { return true }
+        if trimmed(baseURL) != saved.baseURL.absoluteString { return true }
+        if trimmed(model) != trimmed(saved.model) { return true }
+        let savedAlias: String = saved.modelAlias ?? ""
+        if trimmed(modelAlias) != trimmed(savedAlias) { return true }
+        if transport != saved.openAITransport { return true }
+        return maxOutputTokens != saved.maxOutputTokens
     }
 }
 
