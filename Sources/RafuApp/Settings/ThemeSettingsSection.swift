@@ -258,8 +258,12 @@ struct ThemeSettingsSection: View {
                 identifier.hasPrefix("user:") && !known.contains(identifier)
             }
             if isMissing(themeChoice) { themeChoice = RafuThemeChoice.system.rawValue }
-            if isMissing(lightChoice) { lightChoice = ThemeAppearancePreference.defaultLightIdentifier }
-            if isMissing(darkChoice) { darkChoice = ThemeAppearancePreference.defaultDarkIdentifier }
+            if isMissing(lightChoice) {
+                lightChoice = ThemeAppearancePreference.defaultLightIdentifier
+            }
+            if isMissing(darkChoice) {
+                darkChoice = ThemeAppearancePreference.defaultDarkIdentifier
+            }
             themeRevision &+= 1
         } catch {
             statusMessage = error.localizedDescription

@@ -171,7 +171,8 @@ struct SettingsPanePresentationTests {
         let installed = AdapterProbe(
             installed: true, executableURL: URL(fileURLWithPath: "/usr/local/bin/x"),
             version: "1.0")
-        func make(_ probe: AdapterProbe?, _ auth: AdapterAuthStatus?) -> ConductorSignInPresentation {
+        func make(_ probe: AdapterProbe?, _ auth: AdapterAuthStatus?) -> ConductorSignInPresentation
+        {
             ConductorSignInPresentation.make(probe: probe, auth: auth)
         }
         #expect(make(nil, nil).word == "Checking…")
@@ -195,8 +196,11 @@ struct SettingsPanePresentationTests {
             display.abbreviated("/Users/me/.local/bin/claude", home: "/Users/me")
                 == "~/.local/bin/claude")
         #expect(display.abbreviated("/Users/me", home: "/Users/me/") == "~")
-        #expect(display.abbreviated("/Users/mentor/bin/x", home: "/Users/me") == "/Users/mentor/bin/x")
-        #expect(display.abbreviated("/opt/homebrew/bin/codex", home: "/Users/me") == "/opt/homebrew/bin/codex")
+        #expect(
+            display.abbreviated("/Users/mentor/bin/x", home: "/Users/me") == "/Users/mentor/bin/x")
+        #expect(
+            display.abbreviated("/opt/homebrew/bin/codex", home: "/Users/me")
+                == "/opt/homebrew/bin/codex")
         #expect(display.abbreviated("/x", home: "/") == "/x")
     }
 

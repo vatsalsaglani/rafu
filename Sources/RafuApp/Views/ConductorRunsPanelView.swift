@@ -257,7 +257,9 @@ struct ConductorRunsPanelView: View {
             onClose: { session.navigatorMode = .files },
             actions: {
                 HStack(spacing: RafuMetrics.space1) {
-                    Button("Show Ensemble Graph", systemImage: "point.3.connected.trianglepath.dotted") {
+                    Button(
+                        "Show Ensemble Graph", systemImage: "point.3.connected.trianglepath.dotted"
+                    ) {
                         session.showConductorGraph()
                     }
                     .buttonStyle(RafuIconButtonStyle(size: 24))
@@ -806,7 +808,8 @@ private struct ConductorWorkflowLibraryRow: View {
                         ? "point.3.connected.trianglepath.dotted" : "exclamationmark.triangle"
                 )
                 .foregroundStyle(
-                    workflow.isLaunchable ? theme.palette.textSecondary : theme.palette.error)
+                    workflow.isLaunchable ? theme.palette.textSecondary : theme.palette.error
+                )
                 .frame(width: 18)
                 .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
@@ -850,7 +853,8 @@ private struct ConductorWorkflowLibraryRow: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
-            "\(workflow.displayName), \(workflow.scope.displayName), \(workflow.resolution.label)")
+            "\(workflow.displayName), \(workflow.scope.displayName), \(workflow.resolution.label)"
+        )
         .accessibilityAction(named: "Open", open)
     }
 

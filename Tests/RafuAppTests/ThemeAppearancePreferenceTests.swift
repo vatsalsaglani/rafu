@@ -12,8 +12,10 @@ struct ThemeAppearancePreferenceTests {
     @Test("The system identifier matches RafuThemeChoice.system")
     func systemIdentifierMatchesChoice() {
         #expect(ThemeAppearancePreference.systemIdentifier == RafuThemeChoice.system.rawValue)
-        #expect(RafuThemeChoice(rawValue: ThemeAppearancePreference.defaultLightIdentifier) == .khadi)
-        #expect(RafuThemeChoice(rawValue: ThemeAppearancePreference.defaultDarkIdentifier) == .indigo)
+        #expect(
+            RafuThemeChoice(rawValue: ThemeAppearancePreference.defaultLightIdentifier) == .khadi)
+        #expect(
+            RafuThemeChoice(rawValue: ThemeAppearancePreference.defaultDarkIdentifier) == .indigo)
     }
 
     @Test("An old System selection follows the system with Khadi light and Indigo dark")
@@ -98,8 +100,12 @@ struct ThemeAppearancePreferenceTests {
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
 
-        #expect(ThemeAppearancePreference.pairIdentifier(defaults: defaults, systemIsDark: false) == "khadi")
-        #expect(ThemeAppearancePreference.pairIdentifier(defaults: defaults, systemIsDark: true) == "indigo")
+        #expect(
+            ThemeAppearancePreference.pairIdentifier(defaults: defaults, systemIsDark: false)
+                == "khadi")
+        #expect(
+            ThemeAppearancePreference.pairIdentifier(defaults: defaults, systemIsDark: true)
+                == "indigo")
 
         defaults.set("githubLight", forKey: ThemeAppearancePreference.lightChoiceKey)
         defaults.set("dracula", forKey: ThemeAppearancePreference.darkChoiceKey)
@@ -118,8 +124,12 @@ struct ThemeAppearancePreferenceTests {
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
 
-        #expect(RafuThemeCatalog.systemPairTheme(systemScheme: .light, defaults: defaults).name == "Khadi")
-        #expect(RafuThemeCatalog.systemPairTheme(systemScheme: .dark, defaults: defaults).name == "Indigo")
+        #expect(
+            RafuThemeCatalog.systemPairTheme(systemScheme: .light, defaults: defaults).name
+                == "Khadi")
+        #expect(
+            RafuThemeCatalog.systemPairTheme(systemScheme: .dark, defaults: defaults).name
+                == "Indigo")
 
         defaults.set("githubLight", forKey: ThemeAppearancePreference.lightChoiceKey)
         defaults.set("dracula", forKey: ThemeAppearancePreference.darkChoiceKey)
@@ -132,6 +142,8 @@ struct ThemeAppearancePreferenceTests {
 
         // A deleted custom theme falls back to the built-in default.
         defaults.set("user:does-not-exist.json", forKey: ThemeAppearancePreference.darkChoiceKey)
-        #expect(RafuThemeCatalog.systemPairTheme(systemScheme: .dark, defaults: defaults).name == "Indigo")
+        #expect(
+            RafuThemeCatalog.systemPairTheme(systemScheme: .dark, defaults: defaults).name
+                == "Indigo")
     }
 }

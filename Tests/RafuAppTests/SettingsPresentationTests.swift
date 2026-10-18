@@ -109,7 +109,8 @@ struct SettingsPresentationTests {
         #expect(theme.contains("Light appearance"))
         #expect(theme.contains("Dark appearance"))
 
-        let servers = try Self.source("Sources/RafuApp/Settings/LanguageServersSettingsSection.swift")
+        let servers = try Self.source(
+            "Sources/RafuApp/Settings/LanguageServersSettingsSection.swift")
         #expect(servers.contains(".help(\"Refresh\")"))
         #expect(servers.contains("Table(rows)"))
 
