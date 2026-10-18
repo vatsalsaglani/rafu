@@ -1,6 +1,5 @@
 import AppKit
-import CoreMedia
-import ScreenCaptureKit
+import ApplicationServices
 import Testing
 import WebKit
 
@@ -42,20 +41,18 @@ struct CanvasFeasibilityTests {
         #expect(TerminalNewlineMonitor.registrationCount == originalRegistrations)
     }
 
-    @Test("Public capture settings permit a bounded single-window preview without starting capture")
-    func captureConfiguration() {
-        var picker = SCContentSharingPickerConfiguration()
-        picker.allowedPickerModes = [.singleWindow]
-        picker.allowsChangingSelectedContent = false
-        #expect(picker.allowedPickerModes == [.singleWindow])
-        let stream = SCStreamConfiguration()
-        stream.width = 960
-        stream.height = 540
-        stream.queueDepth = 3
-        stream.minimumFrameInterval = CMTime(value: 1, timescale: 10)
-        stream.capturesAudio = false
-        #expect(stream.width == 960 && stream.height == 540)
-        #expect(stream.queueDepth == 3 && !stream.capturesAudio)
+    @Test("Accessibility geometry values round-trip without permission or a prompt")
+    func dockingGeometryValues() throws {
+        var origin = CGPoint(x: -1_440, y: -300)
+        var size = CGSize(width: 640, height: 420)
+        let point = try #require(AXValueCreate(.cgPoint, &origin))
+        let extent = try #require(AXValueCreate(.cgSize, &size))
+        var readOrigin = CGPoint.zero
+        var readSize = CGSize.zero
+        #expect(AXValueGetValue(point, .cgPoint, &readOrigin))
+        #expect(AXValueGetValue(extent, .cgSize, &readSize))
+        #expect(readOrigin == origin && readSize == size)
+        #expect(CanvasAppDocking.accessibilitySettingsURL != nil)
     }
 
     @Test("A local app can use isolated nonpersistent web storage without a document web view")
