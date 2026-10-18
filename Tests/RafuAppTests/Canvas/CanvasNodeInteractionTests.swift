@@ -111,6 +111,77 @@ struct CanvasNodeInteractionTests {
         #expect(await session.canvas.flushAll())
     }
 
+    @Test("Close-and-remove accepts a terminal group already finalized by confirmation")
+    func closeTerminalNodeDoesNotParkDeletedGroup() async throws {
+        let root = URL.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (session, board) = try await fixture(root)
+        session.presentCanvasBoard(board)
+        session.addCanvasStoppedTerminal(board.id)
+        let card = try #require(board.cards.first)
+        guard case .terminal(let groupID) = card.content else {
+            Issue.record("Expected terminal card")
+            return
+        }
+        session.canvasTerminalOwners[groupID] = board.id
+        board.focus(card.id)
+        session.closeCanvasTerminalCard(board.id)
+        #expect(session.terminal.terminalGroup(groupID) == nil)
+        #expect(board.cards.isEmpty)
+        #expect(session.canvasTerminalOwners[groupID] == nil)
+        #expect(session.pendingCanvasTerminalRemoval == nil)
+        #expect(!session.isOpenFolderErrorPresented)
+        session.canvasResources[board.id]?.stopAll()
+        #expect(!session.isOpenFolderErrorPresented)
+        #expect(await session.canvas.flushAll())
+    }
+
+    @Test("Removing a terminal node parks its group and clears only its presentation lease")
+    func removingTerminalNodeKeepsGroupAndOtherNode() async throws {
+        let root = URL.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (session, board) = try await fixture(root)
+        session.presentCanvasBoard(board)
+        session.addCanvasStoppedTerminal(board.id)
+        session.addCanvasStoppedTerminal(board.id)
+        let first = board.cards[0]
+        let second = board.cards[1]
+        guard case .terminal(let firstGroup) = first.content,
+            case .terminal(let secondGroup) = second.content
+        else {
+            Issue.record("Expected terminal cards")
+            return
+        }
+        session.canvasTerminalOwners[firstGroup] = board.id
+        session.canvasTerminalOwners[secondGroup] = board.id
+        board.selection = [first.id]
+        session.removeCanvasCards(board.id)
+        #expect(board.cards.map(\.id) == [second.id])
+        #expect(session.terminal.terminalGroup(firstGroup) != nil)
+        #expect(session.canvasTerminalOwners[firstGroup] == nil)
+        #expect(session.canvasTerminalOwners[secondGroup] == board.id)
+        #expect(!session.isOpenFolderErrorPresented)
+        #expect(session.terminal.sessions.isEmpty)
+        #expect(await session.canvas.flushAll())
+    }
+
+    @Test("Late Canvas resource cleanup ignores a terminal group that no longer exists")
+    func lateCleanupDropsStaleTerminalOwner() async throws {
+        let root = URL.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (session, board) = try await fixture(root)
+        session.presentCanvasBoard(board)
+        let missingGroup = TerminalGroupID()
+        session.canvasTerminalOwners[missingGroup] = board.id
+        session.canvasResources[board.id]?.stopAll()
+        #expect(session.canvasTerminalOwners[missingGroup] == nil)
+        #expect(!session.isOpenFolderErrorPresented)
+        #expect(await session.canvas.flushAll())
+    }
+
     @Test("Canvas drop decoding accepts file payloads and rejects tabs and web URLs")
     func dropPayloads() throws {
         let file = URL(fileURLWithPath: "/tmp/canvas-file.swift")

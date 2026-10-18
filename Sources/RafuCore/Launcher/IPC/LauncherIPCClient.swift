@@ -33,8 +33,10 @@ public struct LauncherIPCClient: Sendable {
 
     private let connector: Connector
 
-    public init(socketURL: URL = LauncherIPCSocketPath.resolve()) {
-        connector = { try Self.connect(to: socketURL) }
+    public init(socketURL: URL = LauncherIPCSocketPath.resolve(), timeoutSeconds: Int = 2) {
+        connector = {
+            try Self.connect(to: socketURL, timeoutSeconds: max(1, min(30, timeoutSeconds)))
+        }
     }
 
     init(connector: @escaping Connector) {
@@ -55,7 +57,7 @@ public struct LauncherIPCClient: Sendable {
         return try exchange(LauncherIPCEnvelope(kind: kind, payload: request))
     }
 
-    private func exchange(_ envelope: LauncherIPCEnvelope) throws -> LauncherIPCResponse {
+    public func exchange(_ envelope: LauncherIPCEnvelope) throws -> LauncherIPCResponse {
         let fileDescriptor = try connector()
         defer { Darwin.close(fileDescriptor) }
 
@@ -64,7 +66,7 @@ public struct LauncherIPCClient: Sendable {
         return try Self.readResponse(from: fileDescriptor)
     }
 
-    private static func connect(to socketURL: URL) throws -> Int32 {
+    private static func connect(to socketURL: URL, timeoutSeconds: Int) throws -> Int32 {
         let fileDescriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
         guard fileDescriptor >= 0 else { throw systemCallError("socket") }
         do {
@@ -79,7 +81,7 @@ public struct LauncherIPCClient: Sendable {
                 ) == 0
             else { throw systemCallError("setsockopt") }
 
-            var timeout = timeval(tv_sec: 2, tv_usec: 0)
+            var timeout = timeval(tv_sec: timeoutSeconds, tv_usec: 0)
             let timeoutLength = socklen_t(MemoryLayout.size(ofValue: timeout))
             guard
                 Darwin.setsockopt(

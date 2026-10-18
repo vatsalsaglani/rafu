@@ -60,6 +60,26 @@ private func coldStartRequest(_ request: LauncherOpenRequest) -> LauncherOpenReq
 }
 
 let commandArguments = Array(CommandLine.arguments.dropFirst())
+if commandArguments.first == "_canvas-agent", commandArguments.count >= 2 {
+    exit(
+        CanvasBridgeLaunch.run(
+            provider: commandArguments[1], arguments: Array(commandArguments.dropFirst(2))))
+}
+if commandArguments.first == "_canvas-mcp", commandArguments.count == 2 {
+    let environment = ProcessInfo.processInfo.environment
+    guard let token = environment["RAFU_CANVAS_TOKEN"], let path = environment["RAFU_CANVAS_SOCKET"]
+    else { exit(EX_USAGE) }
+    let client = LauncherIPCClient(socketURL: URL(fileURLWithPath: path), timeoutSeconds: 20)
+    CanvasBridgeMCPServer.run(token: token, provider: commandArguments[1]) { request in
+        let response = try client.exchange(
+            LauncherIPCEnvelope(kind: .canvasBridge, canvasBridge: request))
+        guard case .canvasBridge(let result) = response else {
+            throw LauncherIPCClientError.disconnected
+        }
+        return result
+    }
+    exit(0)
+}
 let ensembleGate = EnsembleSubcommandGate.classify(
     firstArgument: commandArguments.first,
     hasFilesystemEntry: commandArguments.first == "ensemble"
@@ -169,7 +189,7 @@ do {
                 case .rejected(let reason):
                     writeError("rafu: Rafu.app rejected the request: \(reason)")
                     exit(EX_UNAVAILABLE)
-                case .ensemble:
+                case .ensemble, .canvasBridge:
                     writeError("rafu: Rafu.app returned an unexpected launcher response.")
                     exit(EX_UNAVAILABLE)
                 }

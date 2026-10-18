@@ -54,6 +54,44 @@ struct TerminalGroupFocusBridgeTests {
         #expect(terminalView.onDidBecomeFirstResponder == nil)
     }
 
+    @MainActor
+    @Test("Clicking an already-focused native terminal synchronizes Canvas selection")
+    func pointerFocusUpdatesCanvasAfterNativeResponderWasAssigned() throws {
+        let board = CanvasBoardState(document: CanvasDocument(title: "Focus regression"))
+        try board.add(title: "First terminal", content: .terminal(groupID: TerminalGroupID()))
+        try board.add(title: "Second terminal", content: .terminal(groupID: TerminalGroupID()))
+        let first = board.cards[0].id
+        let second = board.cards[1].id
+        board.focus(first)
+        board.backToBoard()
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 400),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        let terminal = RafuTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
+        window.contentView = terminal
+        #expect(window.makeFirstResponder(terminal))
+        let owner = NSObject()
+        var callbackCount = 0
+        terminal.setFirstResponderCallback(owner: owner) {
+            callbackCount += 1
+            board.focus(second)
+        }
+        defer { terminal.clearFirstResponderCallback(owner: owner) }
+        let event = try #require(
+            NSEvent.mouseEvent(
+                with: .leftMouseDown,
+                location: CGPoint(x: 40, y: 40), modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 1,
+                clickCount: 1, pressure: 1))
+        terminal.mouseDown(with: event)
+        #expect(window.firstResponder === terminal)
+        #expect(callbackCount == 1)
+        #expect(board.selection == [second])
+        #expect(board.focusedCardID == second)
+        #expect(board.contentIsActive)
+        withExtendedLifetime(window) {}
+    }
+
     @Test("Pointer responder callbacks preserve the terminal pane identity")
     func sourceForwardsThePaneIdentity() throws {
         let source = try Self.source("Sources/RafuApp/Terminal/EditorTerminalTabContent.swift")
@@ -64,7 +102,7 @@ struct TerminalGroupFocusBridgeTests {
         #expect(terminalView.contains("override func mouseDown(with event: NSEvent)"))
         #expect(
             terminalView.contains(
-                "guard let window, window.firstResponder !== self else { return }"))
+                "if window.firstResponder !== self {"))
         #expect(terminalView.contains("guard window.makeFirstResponder(self) else { return }"))
         #expect(terminalView.contains("onDidBecomeFirstResponder?()"))
         #expect(terminalView.contains("onDidBecomeFirstResponder?()"))

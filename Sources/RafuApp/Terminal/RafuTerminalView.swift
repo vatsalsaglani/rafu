@@ -178,12 +178,15 @@ final class RafuTerminalView: LocalProcessTerminalView {
 
     /// SwiftTerm does not leave `becomeFirstResponder()` open for a client
     /// subclass, and its pointer implementation does not request window
-    /// focus. Preserve that handling, then make the terminal first responder
-    /// and report only a successful pointer-driven responder change.
+    /// focus. Preserve that handling, then synchronize host selection whenever
+    /// the clicked terminal is first responder. AppKit can assign the responder
+    /// before mouseDown, while SwiftUI still has another card selected.
     override func mouseDown(with event: NSEvent) {
         super.mouseDown(with: event)
-        guard let window, window.firstResponder !== self else { return }
-        guard window.makeFirstResponder(self) else { return }
+        guard let window else { return }
+        if window.firstResponder !== self {
+            guard window.makeFirstResponder(self) else { return }
+        }
         onDidBecomeFirstResponder?()
     }
 

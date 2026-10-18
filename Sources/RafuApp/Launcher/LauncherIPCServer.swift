@@ -432,7 +432,7 @@ actor LauncherIPCServer {
                 logger.info("Request \(kind, privacy: .public) accepted")
             case .ensemble(.failure), .rejected:
                 logger.info("Request \(kind, privacy: .public) rejected")
-            case .ensemble:
+            case .ensemble, .canvasBridge:
                 logger.info("Request \(kind, privacy: .public) accepted")
             }
         } catch LauncherIPCFramingError.unsupportedWireVersion {
@@ -606,6 +606,7 @@ actor LauncherIPCServer {
     private nonisolated static func logName(for kind: LauncherIPCRequestKind) -> String {
         switch kind {
         case .handshake: "handshake"
+        case .canvasBridge: "canvasBridge"
         case .openFolder: "openFolder"
         case .goto: "goto"
         case .ensembleStatus: "ensembleStatus"
@@ -624,6 +625,9 @@ actor LauncherIPCServer {
     private static func defaultHandler(
         _ envelope: LauncherIPCEnvelope
     ) async -> LauncherIPCResponse {
+        if envelope.kind == .canvasBridge, let request = envelope.canvasBridge {
+            return .canvasBridge(await CanvasLiveBridge.shared.handle(request))
+        }
         if envelope.kind.isEnsemble {
             return await ConductorEnsembleRequestService.shared.handleAsync(envelope)
         }

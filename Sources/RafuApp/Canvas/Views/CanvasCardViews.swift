@@ -1,4 +1,5 @@
 import AppKit
+import RafuCore
 import SwiftUI
 
 struct CanvasAddCardMenu: View {
@@ -26,6 +27,10 @@ struct CanvasCardShell: View {
     let board: CanvasBoardState
     let session: WorkspaceSession
     var focusBoard: () -> Void = {}
+    var isConnectionTarget = false
+    var updateConnectionDrag: (CanvasCardID, CGPoint) -> Void = { _, _ in }
+    var finishConnectionDrag: (CanvasCardID, CGPoint) -> Void = { _, _ in }
+    var cancelConnectionDrag: (CanvasCardID) -> Void = { _ in }
     @State private var dragStart: CanvasRect?
     @State private var resizeStart: CanvasRect?
 
@@ -44,6 +49,24 @@ struct CanvasCardShell: View {
                 Menu {
                     Button("Focus") { board.focus(card.id) }
                     Button("Rename…") { session.canvasDialog = .renameCard(board.id, card.id) }
+                    if case .terminal = card.content {
+                        Button("Copy Mention") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(
+                                CanvasBridgePeer.mention(for: card.title), forType: .string)
+                        }
+                    }
+                    Menu("Connect to…") {
+                        ForEach(board.cards) { target in
+                            if target.id != card.id {
+                                Button(target.title) {
+                                    session.connectCanvasCards(
+                                        boardID: board.id, from: card.id, to: target.id)
+                                }
+                            }
+                        }
+                    }
+                    .disabled(board.cards.count < 2)
                     Button("Move Left") { move(dx: -20, dy: 0) }
                     Button("Move Right") { move(dx: 20, dy: 0) }
                     Button("Move Up") { move(dx: 0, dy: -20) }
@@ -97,7 +120,11 @@ struct CanvasCardShell: View {
             }
             Divider()
             HStack {
-                Text(card.content.kindName).font(.caption2).foregroundStyle(.secondary)
+                if case .terminal(let groupID) = card.content {
+                    CanvasTerminalSessionStatus(groupID: groupID, session: session)
+                } else {
+                    Text(card.content.kindName).font(.caption2).foregroundStyle(.secondary)
+                }
                 Spacer()
                 if case .file(let path) = card.content {
                     Button("Open File") { session.openCanvasFile(path) }
@@ -113,9 +140,9 @@ struct CanvasCardShell: View {
         .clipShape(.rect(cornerRadius: 8))
         .overlay {
             RoundedRectangle(cornerRadius: 8).stroke(
-                board.selection.contains(card.id)
+                isConnectionTarget || board.selection.contains(card.id)
                     ? theme.palette.accent : theme.palette.borderSubtle,
-                lineWidth: board.selection.contains(card.id) ? 2 : 1
+                lineWidth: isConnectionTarget ? 3 : (board.selection.contains(card.id) ? 2 : 1)
             )
             .allowsHitTesting(false)
         }
@@ -145,6 +172,16 @@ struct CanvasCardShell: View {
                     }
                 )
                 .accessibilityHidden(true)
+        }
+        .overlay(alignment: .trailing) {
+            CanvasConnectionHandle(
+                title: card.title,
+                connect: { session.canvasDialog = .connection(board.id, card.id, nil) },
+                changed: { updateConnectionDrag(card.id, $0) },
+                ended: { finishConnectionDrag(card.id, $0) },
+                cancelled: { cancelConnectionDrag(card.id) }
+            )
+            .offset(x: 12)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(card.title), \(card.content.kindName)")
@@ -279,6 +316,7 @@ struct CanvasListView: View {
                                 try board.edit {
                                     $0.connections.removeAll { $0.id == connection.id }
                                 }
+                                CanvasLiveBridge.shared.disable(connection.id, in: board)
                             }
                         }
                     }
@@ -292,7 +330,9 @@ struct CanvasListView: View {
     private func relationshipText(_ connection: CanvasConnection) -> String {
         let from = board.cards.first { $0.id == connection.from }?.title ?? "Missing card"
         let to = board.cards.first { $0.id == connection.to }?.title ?? "Missing card"
-        return
-            "\(from) → Related: \(connection.label) → \(to)"
+        if connection.behavior == .session {
+            return "\(from) ↔ Session link: \(connection.label) ↔ \(to)"
+        }
+        return "\(from) → Related: \(connection.label) → \(to)"
     }
 }

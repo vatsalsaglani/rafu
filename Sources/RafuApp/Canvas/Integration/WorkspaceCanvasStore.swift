@@ -188,6 +188,10 @@ final class WorkspaceCanvasStore {
     private func install(_ document: CanvasDocument) -> CanvasBoardState {
         boards[document.id]?.requestSave = nil
         let board = CanvasBoardState(document: document)
+        board.revokeSessionLinks = { [weak board] ids in
+            guard let board else { return }
+            for id in ids { CanvasLiveBridge.shared.disable(id, in: board) }
+        }
         board.requestSave = { [weak self, weak board] in
             guard let self, let board, self.boards[board.id] === board, board.saveTask == nil else {
                 return

@@ -20,6 +20,7 @@ final class CanvasBoardState: Identifiable {
     var connectingFrom: CanvasCardID?
     @ObservationIgnored var noteSnapshots: [CanvasCardID: @MainActor () throws -> String] = [:]
     @ObservationIgnored var requestSave: (@MainActor () -> Void)?
+    @ObservationIgnored var revokeSessionLinks: (([UUID]) -> Void)?
     @ObservationIgnored var stopLiveContent: (@MainActor () -> Void)?
     @ObservationIgnored var saveTask: Task<Bool, Never>?
     @ObservationIgnored private var undo: [CanvasDocument] = []
@@ -109,6 +110,7 @@ final class CanvasBoardState: Identifiable {
         guard changed != document else { return }
         remember(document, in: &undo)
         redo.removeAll()
+        revokeChangedLinks(replacing: changed)
         document = changed
         markDirty()
         requestSave?()
@@ -229,6 +231,7 @@ final class CanvasBoardState: Identifiable {
         leaveContent()
         remember(document, in: &redo)
         previous.revision = document.revision
+        revokeChangedLinks(replacing: previous)
         document = previous
         selection.formIntersection(Set(document.cards.map(\.id)))
         focusedCardID = nil
@@ -241,11 +244,22 @@ final class CanvasBoardState: Identifiable {
         leaveContent()
         remember(document, in: &undo)
         next.revision = document.revision
+        revokeChangedLinks(replacing: next)
         document = next
         selection.formIntersection(Set(document.cards.map(\.id)))
         focusedCardID = nil
         markDirty()
         requestSave?()
+    }
+
+    private func revokeChangedLinks(replacing next: CanvasDocument) {
+        let revoked = document.connections.filter { old in
+            !next.connections.contains(where: {
+                $0.id == old.id && $0.from == old.from && $0.to == old.to
+                    && $0.behavior == old.behavior
+            })
+        }.map(\.id)
+        if !revoked.isEmpty { revokeSessionLinks?(revoked) }
     }
 
     private func markDirty() {

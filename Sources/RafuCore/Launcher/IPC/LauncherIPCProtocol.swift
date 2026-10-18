@@ -44,6 +44,7 @@ public enum LauncherIPCProtocol {
 /// `rejected` response instead of a crash or a dropped connection.
 public enum LauncherIPCRequestKind: Hashable, Sendable {
     case handshake
+    case canvasBridge
     case openFolder
     case goto
     case ensembleStatus
@@ -65,7 +66,7 @@ public enum LauncherIPCRequestKind: Hashable, Sendable {
             .ensembleRun, .ensembleAbort, .ensembleNote, .ensembleGrant,
             .ensembleProposeMerge:
             true
-        case .handshake, .openFolder, .goto, .unknown:
+        case .handshake, .openFolder, .goto, .canvasBridge, .unknown:
             false
         }
     }
@@ -80,6 +81,7 @@ extension LauncherIPCRequestKind: Codable {
         let raw = try decoder.singleValueContainer().decode(String.self)
         switch raw {
         case "handshake": self = .handshake
+        case "canvasBridge": self = .canvasBridge
         case "openFolder": self = .openFolder
         case "goto": self = .goto
         case "ensembleStatus": self = .ensembleStatus
@@ -98,6 +100,7 @@ extension LauncherIPCRequestKind: Codable {
         var container = encoder.singleValueContainer()
         switch self {
         case .handshake: try container.encode("handshake")
+        case .canvasBridge: try container.encode("canvasBridge")
         case .openFolder: try container.encode("openFolder")
         case .goto: try container.encode("goto")
         case .ensembleStatus: try container.encode("ensembleStatus")
@@ -130,11 +133,13 @@ public struct LauncherIPCEnvelope: Codable, Hashable, Sendable {
     /// Present only for an Ensemble request kind. Optional so older peers
     /// continue decoding the v1 launcher envelope unchanged.
     public let ensemble: EnsembleRequestPayload?
+    public let canvasBridge: CanvasBridgeRequest?
 
     public init(
         kind: LauncherIPCRequestKind,
         payload: LauncherOpenRequest? = nil,
         ensemble: EnsembleRequestPayload? = nil,
+        canvasBridge: CanvasBridgeRequest? = nil,
         requestID: String = UUID().uuidString,
         wireVersion: Int = LauncherIPCProtocol.wireVersion,
         protocolVersion: Int = LauncherIPCProtocol.protocolVersion
@@ -145,6 +150,7 @@ public struct LauncherIPCEnvelope: Codable, Hashable, Sendable {
         self.kind = kind
         self.payload = payload
         self.ensemble = ensemble
+        self.canvasBridge = canvasBridge
     }
 }
 
@@ -156,6 +162,7 @@ public enum LauncherIPCResponse: Codable, Hashable, Sendable {
     case accepted(workspaceMatched: Bool, windowFocused: Bool, waitSupported: Bool)
     case rejected(reason: String)
     case ensemble(EnsembleResponsePayload)
+    case canvasBridge(CanvasBridgeResponse)
 }
 
 /// Resolves the deterministic, same-user socket path both the CLI and the

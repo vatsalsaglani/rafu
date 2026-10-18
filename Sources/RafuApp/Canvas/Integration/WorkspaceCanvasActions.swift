@@ -8,7 +8,7 @@ nonisolated enum CanvasDialog: Identifiable {
     case renameBoard(CanvasID)
     case renameCard(CanvasID, CanvasCardID)
     case web(CanvasID)
-    case connection(CanvasID, CanvasCardID, CanvasCardID)
+    case connection(CanvasID, CanvasCardID, CanvasCardID?)
     case connectionLabel(CanvasID, UUID)
     case reload(CanvasID)
 
@@ -19,7 +19,8 @@ nonisolated enum CanvasDialog: Identifiable {
         case .renameBoard(let id): "rename-\(id.rawValue)"
         case .renameCard(let board, let card): "rename-\(board.rawValue)-\(card.rawValue)"
         case .web(let id): "web-\(id.rawValue)"
-        case .connection(let id, let a, let b): "connect-\(id.rawValue)-\(a.rawValue)-\(b.rawValue)"
+        case .connection(let id, let a, let b):
+            "connect-\(id.rawValue)-\(a.rawValue)-\(b?.rawValue.uuidString ?? "choose")"
         case .connectionLabel(let id, let edge): "label-\(id.rawValue)-\(edge)"
         case .reload(let id): "reload-\(id.rawValue)"
         }
@@ -178,7 +179,28 @@ extension WorkspaceSession {
         guard let board = canvas.boards[id] else { return }
         let selected = board.cards.filter { board.selection.contains($0.id) }
         guard selected.count == 2 else { return }
-        canvasDialog = .connection(id, selected[0].id, selected[1].id)
+        connectCanvasCards(boardID: id, from: selected[0].id, to: selected[1].id)
+    }
+
+    func connectCanvasCards(boardID: CanvasID, from: CanvasCardID, to: CanvasCardID) {
+        guard let board = canvas.boards[boardID], from != to,
+            let source = board.cards.first(where: { $0.id == from }),
+            let target = board.cards.first(where: { $0.id == to })
+        else { return }
+        let behavior: CanvasConnectionBehavior
+        if case .terminal = source.content, case .terminal = target.content {
+            behavior = .session
+        } else {
+            behavior = .related
+        }
+        performCanvasEdit(board) {
+            try board.addConnection(
+                from: from, to: to,
+                label: behavior == .session ? "Session link" : "Related to", behavior: behavior)
+            if behavior == .session, let edge = board.connections.last {
+                CanvasLiveBridge.shared.enable(edge.id, in: board)
+            }
+        }
     }
 
     func requestCanvasCardRemoval(_ id: CanvasID) {
@@ -195,12 +217,23 @@ extension WorkspaceSession {
             }
             return id
         }
+        do {
+            // Remove the node before parking its group so a late native focus
+            // callback cannot find a card that is already being removed.
+            try board.removeSelection()
+        } catch {
+            board.errorMessage = error.localizedDescription
+            return
+        }
         canvasResources[id]?.stop(cards: selected)
         for groupID in groups
         where canvasTerminalOwners[groupID] == nil || canvasTerminalOwners[groupID] == id {
+            canvasTerminalOwners[groupID] = nil
+            // Close-and-remove finalizes the group before it removes the card.
+            // The remaining node reference is valid cleanup, not a park request.
+            guard terminal.terminalGroup(groupID) != nil else { continue }
             hideTerminalGroup(groupID)
         }
-        performCanvasEdit(board) { try board.removeSelection() }
         pendingCanvasRemoval = nil
     }
 

@@ -1010,6 +1010,8 @@ final class WorkspaceTerminalController: Identifiable {
     @ObservationIgnored
     private var terminalView: RafuTerminalView?
     @ObservationIgnored
+    private var pendingShellStartup: Task<Void, Never>?
+    @ObservationIgnored
     private var delegateProxy: DelegateProxy?
     @ObservationIgnored
     private var appliedStyleSignature = ""
@@ -1216,6 +1218,9 @@ final class WorkspaceTerminalController: Identifiable {
         }
         applyTheme(theme, to: view)
 
+        terminalView = view
+        status = .running
+
         // A Conductor session spawns its spec; everything else spawns the
         // login shell exactly as before. Only this call differs — status,
         // view retention, and `ProcessResourceRegistry` registration below
@@ -1245,18 +1250,37 @@ final class WorkspaceTerminalController: Identifiable {
                 execName: launch.execName,
                 currentDirectory: launch.currentDirectory
             )
+            registerProcessResources(for: view)
         } else {
-            view.startProcess(
-                executable: shell.path,
-                args: shell.loginArguments,
-                environment: nil,
-                execName: "-\(shell.basename)",
-                currentDirectory: startingDirectory
-            )
+            let expectedGeneration = generation
+            pendingShellStartup = Task { [weak self, weak view] in
+                guard let self, let view else { return }
+                let bridge = await CanvasLiveBridge.shared.prepare(self) { [weak self, weak view] in
+                    guard let self, let view else { return false }
+                    return self.generation == expectedGeneration && self.terminalView === view
+                }
+                guard !Task.isCancelled, self.generation == expectedGeneration,
+                    self.terminalView === view
+                else { return }
+                self.pendingShellStartup = nil
+                if let bridge {
+                    view.startProcess(
+                        executable: bridge.executable, args: bridge.arguments,
+                        environment: bridge.environment, execName: nil,
+                        currentDirectory: self.startingDirectory)
+                } else {
+                    view.startProcess(
+                        executable: self.shell.path, args: self.shell.loginArguments,
+                        environment: nil, execName: "-\(self.shell.basename)",
+                        currentDirectory: self.startingDirectory)
+                }
+                self.registerProcessResources(for: view)
+            }
         }
-        status = .running
-        terminalView = view
+        return view
+    }
 
+    private func registerProcessResources(for view: LocalProcessTerminalView) {
         let shellPid = view.process.shellPid
         if shellPid != 0 {
             let controllerID = id
@@ -1284,7 +1308,6 @@ final class WorkspaceTerminalController: Identifiable {
             }
         }
 
-        return view
     }
 
     func restart() {
@@ -1331,6 +1354,9 @@ final class WorkspaceTerminalController: Identifiable {
     }
 
     func shutdown() {
+        pendingShellStartup?.cancel()
+        pendingShellStartup = nil
+        CanvasLiveBridge.shared.remove(self)
         stopQuiescenceTracking()
         terminalView?.flushRenderedOutput()
         terminalView?.terminate()
@@ -1393,6 +1419,9 @@ final class WorkspaceTerminalController: Identifiable {
     /// released since it is unusable once the process is gone. Internal
     /// (not `fileprivate`) so tests can drive it directly.
     func processDidTerminate(exitCode: Int32?) {
+        pendingShellStartup?.cancel()
+        pendingShellStartup = nil
+        CanvasLiveBridge.shared.remove(self)
         stopQuiescenceTracking()
         status = .exited(code: exitCode)
         terminalView?.flushRenderedOutput()

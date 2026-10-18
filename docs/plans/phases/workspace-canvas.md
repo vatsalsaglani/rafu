@@ -1,5 +1,20 @@
 # Workspace Canvas and app cards
 
+Current live-session work follows ADR 0026. It supersedes the visual-only edge
+contract below for connected Claude/Codex terminal nodes. No Agent/task form is
+used. The checkpoint is pushed as `3704e9f`; subsequent bridge changes are local
+until verified. Core MCP and provider adapters, app routing, UI connections, and
+regression tests have separate owners; one coordinator runs all SwiftPM gates.
+
+
+- Follow-up scope, 2026-10-18: preserve CLI ANSI colours in Canvas shells;
+  use persisted terminal names as unambiguous bridge `@mentions`; add visible
+  drag-to-connect handles for any node types; fix terminal close-and-remove
+  cleanup and Codex transport disconnects during normal startup or use. Verify
+  large provider responses, repeated live exchanges, transformed connection
+  drags, names, and close behavior in the canonical Lightning app. Native CLI
+  `@file` completion stays under the CLI's control.
+
 - Current direction, 2026-10-18: the user authorized parallel agents and a
   checkpoint commit and push to `main`. These instructions supersede the
   sequential/local-only execution restrictions below. Finish file-drop nodes,
@@ -7,7 +22,9 @@
   The next work uses ordinary terminal cards and the user's interactive Claude
   Code/Codex sessions. Separate Agent/task forms and managed Start Run controls
   were rejected and removed before this checkpoint. Live-session communication
-  still requires implementation and provider verification after the push.
+  is implemented locally after the push. The visible Claude-to-Codex-to-Claude
+  marker exchange passed on 2026-10-18; see `canvas-live-sessions.md` for evidence
+  and provider limits. Final regression gates cover the integrated tree.
 
 - Status: Implementation authorized, 2026-10-17. Sequential execution in the primary checkout; local commits only. ADR 0025 records the accepted scope.
 - Date: 2026-10-17.

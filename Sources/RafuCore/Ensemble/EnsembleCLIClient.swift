@@ -147,7 +147,7 @@ public struct EnsembleCLIClient: EnsembleCLIClientProtocol, Sendable {
             throw EnsembleCLIClientError.failure(code: code, message: message)
         case .rejected(let reason):
             throw EnsembleCLIClientError.rejected(reason: reason)
-        case .accepted, .ensemble:
+        case .accepted, .ensemble, .canvasBridge:
             throw EnsembleCLIClientError.unexpectedResponse
         }
 

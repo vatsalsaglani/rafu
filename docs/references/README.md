@@ -123,3 +123,5 @@ Keep one focused subject per note. Add it to this index. Use an ADR instead when
 - [Terminal modified Return](terminal-modified-return.md): legacy newline bytes, negotiated keyboard input, and the bounded native event bridge.
 
 - [Canvas native boundaries and initial evidence](canvas-native-boundaries.md) — C0 probes, Swift picker value semantics, and bounded persistence.
+
+- [Canvas live sessions](canvas-live-sessions.md): provider interfaces, shell startup, and live connection checks.

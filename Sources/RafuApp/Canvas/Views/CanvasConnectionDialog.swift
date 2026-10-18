@@ -24,8 +24,10 @@ struct CanvasConnectionDialog: View {
                 ForEach(board?.cards ?? []) { Text($0.title).tag(Optional($0.id)) }
             }
             TextField("Label", text: $label).textFieldStyle(.roundedBorder)
-            Text("Related links show a relationship. They do not send commands or start work.")
-                .font(.callout).foregroundStyle(.secondary)
+            Text(
+                "Links between terminal cards let connected agent sessions send messages both ways. Other links show a relationship."
+            )
+            .font(.callout).foregroundStyle(.secondary)
             if let error { Text(error).foregroundStyle(.red) }
             HStack {
                 Spacer()
@@ -51,6 +53,15 @@ struct CanvasConnectionDialog: View {
 
     private func save() {
         guard let board, let from, let to else { return }
+        let behavior: CanvasConnectionBehavior
+        if let source = board.cards.first(where: { $0.id == from }),
+            let target = board.cards.first(where: { $0.id == to }),
+            case .terminal = source.content, case .terminal = target.content
+        {
+            behavior = .session
+        } else {
+            behavior = .related
+        }
         do {
             if let edgeID {
                 try board.edit { document in
@@ -59,10 +70,18 @@ struct CanvasConnectionDialog: View {
                     document.connections[index].from = from
                     document.connections[index].to = to
                     document.connections[index].label = label
-                    document.connections[index].behavior = .related
+                    document.connections[index].behavior = behavior
+                }
+                if behavior == .session {
+                    CanvasLiveBridge.shared.enable(edgeID, in: board)
+                } else {
+                    CanvasLiveBridge.shared.disable(edgeID, in: board)
                 }
             } else {
-                try board.addConnection(from: from, to: to, label: label, behavior: .related)
+                try board.addConnection(from: from, to: to, label: label, behavior: behavior)
+                if behavior == .session, let edge = board.connections.last {
+                    CanvasLiveBridge.shared.enable(edge.id, in: board)
+                }
             }
             session.canvasDialog = nil
         } catch { self.error = error.localizedDescription }

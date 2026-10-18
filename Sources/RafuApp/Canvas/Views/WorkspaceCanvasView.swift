@@ -13,6 +13,7 @@ struct WorkspaceCanvasView: View {
     @Environment(\.rafuTheme) private var theme
     let board: CanvasBoardState
     let session: WorkspaceSession
+    @State private var connectionDrag = CanvasConnectionDrag()
     @State private var panStart: CanvasViewport?
     @State private var magnifyStart: CanvasViewport?
     @State private var marqueeStart: CGPoint?
@@ -36,6 +37,7 @@ struct WorkspaceCanvasView: View {
             }
             Group {
                 toolbar
+                CanvasSessionLinksBar(board: board)
                 Divider()
                 if board.showsList {
                     CanvasListView(board: board, session: session)
@@ -55,7 +57,11 @@ struct WorkspaceCanvasView: View {
         )
         .onChange(of: board.changeStamp) { _, _ in session.canvasResources[board.id]?.prune() }
         .onAppear { session.canvasResources[board.id]?.present(owner: presentationID) }
-        .onDisappear { session.canvasResources[board.id]?.hide(owner: presentationID) }
+        .onDisappear {
+            connectionDrag.reset()
+            session.canvasResources[board.id]?.hide(owner: presentationID)
+        }
+        .onChange(of: board.showsList) { _, showsList in if showsList { connectionDrag.reset() } }
     }
 
     private var toolbar: some View {
@@ -108,6 +114,7 @@ struct WorkspaceCanvasView: View {
 
     private var boardSurface: some View {
         GeometryReader { geometry in
+            let connectionTarget = connectionDrag.target(in: board.cards, viewport: board.viewport)
             ZStack(alignment: .topLeading) {
                 grid
                     .contentShape(.rect)
@@ -142,6 +149,14 @@ struct WorkspaceCanvasView: View {
                             context.stroke(
                                 arrow, with: .color(theme.palette.textSecondary), lineWidth: 2)
                         }
+                        if connection.behavior == .session {
+                            var reverse = Path()
+                            reverse.move(to: CGPoint(x: start.x + 9, y: start.y - 5))
+                            reverse.addLine(to: start)
+                            reverse.addLine(to: CGPoint(x: start.x + 9, y: start.y + 5))
+                            context.stroke(
+                                reverse, with: .color(theme.palette.textSecondary), lineWidth: 2)
+                        }
                         context.draw(
                             Text(connection.label).font(.caption2).foregroundStyle(
                                 theme.palette.textSecondary),
@@ -150,15 +165,38 @@ struct WorkspaceCanvasView: View {
                 }
                 .allowsHitTesting(false).accessibilityHidden(true)
                 ForEach(visibleCards(in: geometry.size)) { card in
-                    CanvasCardShell(card: card, board: board, session: session) {
-                        boardHasKeyboardFocus = true
-                    }
+                    CanvasCardShell(
+                        card: card, board: board, session: session,
+                        focusBoard: { boardHasKeyboardFocus = true },
+                        isConnectionTarget: connectionTarget == card.id,
+                        updateConnectionDrag: { source, point in
+                            if connectionDrag.source == nil {
+                                board.backToBoard()
+                                boardHasKeyboardFocus = true
+                            }
+                            connectionDrag.update(from: source, at: point)
+                        },
+                        finishConnectionDrag: { source, point in
+                            if let drop = connectionDrag.finish(
+                                from: source, at: point, cards: board.cards,
+                                viewport: board.viewport)
+                            {
+                                session.connectCanvasCards(
+                                    boardID: board.id, from: drop.from, to: drop.to)
+                            }
+                        },
+                        cancelConnectionDrag: { source in
+                            if connectionDrag.source == source { connectionDrag.reset() }
+                        }
+                    )
                     .frame(width: card.rect.width, height: card.rect.height)
                     .scaleEffect(board.viewport.scale, anchor: .topLeading)
                     .offset(
                         x: card.rect.x * board.viewport.scale + board.viewport.x,
                         y: card.rect.y * board.viewport.scale + board.viewport.y)
                 }
+                CanvasConnectionDragPreview(
+                    drag: connectionDrag, cards: board.cards, viewport: board.viewport)
                 if let marquee {
                     Rectangle().stroke(theme.palette.accent, lineWidth: 1)
                         .background(theme.palette.accent.opacity(0.08))
@@ -179,6 +217,7 @@ struct WorkspaceCanvasView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
+            .coordinateSpace(name: CanvasConnectionCoordinateSpace.board)
             .onGeometryChange(for: CGSize.self) {
                 $0.size
             } action: {
@@ -245,7 +284,7 @@ struct WorkspaceCanvasView: View {
             }
             .overlay(alignment: .bottomLeading) {
                 Text(
-                    "Drop files to add nodes. Shift-drag selects nodes. ⌘⇧W closes selected nodes."
+                    "Drag a link handle to connect nodes. Shift-drag selects nodes. ⌘⇧W closes selected nodes."
                 )
                 .font(.caption2).foregroundStyle(.secondary)
                 .padding(8).background(theme.palette.editorBackground.opacity(0.9))
@@ -301,6 +340,10 @@ struct WorkspaceCanvasView: View {
                 return .handled
             }
             .onKeyPress(.escape) {
+                if connectionDrag.source != nil {
+                    connectionDrag.cancel()
+                    return .handled
+                }
                 guard !board.contentIsActive else { return .ignored }
                 board.selection = []
                 board.connectingFrom = nil

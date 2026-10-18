@@ -150,7 +150,7 @@ final class ConductorEnsembleRequestService {
                 return .ensemble(.failure(code: 64, message: "invalid artifact payload"))
             }
             return .ensemble(artifact(payload: payload, workspace: workspace))
-        case .handshake, .openFolder, .goto, .ensembleSubscribe,
+        case .canvasBridge, .handshake, .openFolder, .goto, .ensembleSubscribe,
             .ensembleRun, .ensembleAbort, .ensembleNote, .ensembleGrant,
             .ensembleProposeMerge, .unknown:
             return .ensemble(.failure(code: 64, message: "unsupported Ensemble request"))
@@ -203,7 +203,7 @@ final class ConductorEnsembleRequestService {
                 return .ensemble(.failure(code: 64, message: "invalid propose-merge payload"))
             }
             return .ensemble(await proposeMerge(payload: payload, workspace: workspace))
-        case .handshake, .openFolder, .goto, .ensembleSubscribe, .unknown:
+        case .canvasBridge, .handshake, .openFolder, .goto, .ensembleSubscribe, .unknown:
             return .ensemble(.failure(code: 64, message: "unsupported Ensemble request"))
         }
     }

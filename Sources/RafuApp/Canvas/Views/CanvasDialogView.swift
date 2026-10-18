@@ -1,3 +1,4 @@
+import RafuCore
 import SwiftUI
 
 struct CanvasDialogView: View {
@@ -35,6 +36,19 @@ struct CanvasBasicDialogView: View {
             } else {
                 TextField(placeholder, text: $text).textFieldStyle(.roundedBorder)
                     .onSubmit { submit() }
+                if case .renameCard(let boardID, let cardID) = dialog,
+                    let card = session.canvas.boards[boardID]?.cards.first(where: {
+                        $0.id == cardID
+                    }),
+                    case .terminal = card.content
+                {
+                    Text("Mention: \(CanvasBridgePeer.mention(for: text))")
+                        .font(.callout.monospaced()).textSelection(.enabled)
+                    Text(
+                        "Use this name in a prompt to a connected agent. Each connected terminal needs a different name."
+                    )
+                    .font(.callout).foregroundStyle(.secondary)
+                }
                 if case .web = dialog {
                     Text(
                         "Use a loopback URL. Credentials are not allowed. Query strings and fragments are removed before saving. The app can contact external services after you connect."
@@ -147,6 +161,7 @@ struct CanvasBasicDialogView: View {
                         title: String(destination.address.prefix(120)),
                         content: .web(destination: destination))
                 case .connection(let id, let from, let to):
+                    guard let to else { throw CanvasError.unavailable }
                     try session.canvas.boards[id]?.edit {
                         $0.connections.append(.init(from: from, to: to, label: text))
                     }

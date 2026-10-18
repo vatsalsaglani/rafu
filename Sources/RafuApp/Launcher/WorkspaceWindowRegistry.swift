@@ -52,7 +52,7 @@ final class WorkspaceWindowRegistry {
     private var pendingForNewWindow: [PendingNewWindowGoto] = []
     private var openWorkspaceWindowAction: (() -> Void)?
 
-    private init() {}
+    init() {}
 
     /// The `rootURL` parameter remains part of the frozen I0 call signature;
     /// the registry deliberately rebuilds it with a weak session capture so
@@ -62,6 +62,7 @@ final class WorkspaceWindowRegistry {
         window: NSWindow,
         rootURL _: @escaping () -> URL?
     ) {
+        pruneDeadEntries()
         let key = ObjectIdentifier(session)
         let identity: (UUID, Int)
         if let current = entries[key] {
@@ -96,18 +97,15 @@ final class WorkspaceWindowRegistry {
         let deadIDs = entries.values.compactMap { entry in
             entry.window == nil ? entry.windowID : nil
         }
+        guard !deadIDs.isEmpty else { return }
         entries = entries.filter { $0.value.window != nil }
         for id in deadIDs { pendingByWindowID.removeValue(forKey: id) }
     }
 
-    /// Live workspace window count — prunes dead entries first so a window
-    /// closed outside the registry (e.g. the red traffic-light button)
-    /// doesn't linger as a phantom count. Cmd+W's empty-window branch uses
-    /// this to distinguish "close only this window" from "this is the last
-    /// window; fall back to the existing quit-confirmation UX".
+    /// Read-only live count. Dead weak entries are excluded without publishing
+    /// a registry mutation while a SwiftUI view reads the projection.
     func liveWorkspaceWindowCount() -> Int {
-        pruneDeadEntries()
-        return entries.count
+        entries.values.count { $0.window != nil }
     }
 
     /// Closes exactly the tracked window for `session`, never
@@ -124,8 +122,10 @@ final class WorkspaceWindowRegistry {
     /// projections below share it so CLI routing and Ensemble workspace
     /// resolution can never disagree about which window a request means.
     private func orderedEntries() -> [Entry] {
-        pruneDeadEntries()
-        return entries.values.sorted { lhs, rhs in
+        // View bodies use these projections. Pruning here would invalidate the
+        // same observation that requested the snapshot and repeat the update.
+        // Registration and explicit lifecycle actions own registry cleanup.
+        entries.values.filter { $0.window != nil }.sorted { lhs, rhs in
             let lhsIsKey = lhs.window?.isKeyWindow == true
             let rhsIsKey = rhs.window?.isKeyWindow == true
             if lhsIsKey != rhsIsKey { return lhsIsKey }

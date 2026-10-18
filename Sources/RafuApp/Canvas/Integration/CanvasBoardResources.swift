@@ -108,6 +108,8 @@ final class CanvasBoardResources {
             let owned = session.canvasTerminalOwners.filter { $0.value == board.id }.map(\.key)
             for id in owned {
                 session.canvasTerminalOwners[id] = nil
+                // A confirmed group close can precede this deferred Canvas hide.
+                guard session.terminal.terminalGroup(id) != nil else { continue }
                 session.hideTerminalGroup(id)
             }
         }

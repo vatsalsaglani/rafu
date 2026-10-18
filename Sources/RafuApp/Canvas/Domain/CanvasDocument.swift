@@ -175,6 +175,7 @@ nonisolated struct CanvasCard: Codable, Equatable, Identifiable, Sendable {
 
 nonisolated enum CanvasConnectionBehavior: String, Codable, CaseIterable, Sendable {
     case related
+    case session
 }
 
 nonisolated struct CanvasConnection: Codable, Equatable, Identifiable, Sendable {
