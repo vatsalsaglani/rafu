@@ -9,8 +9,24 @@ nonisolated enum NotchCompanionGeometry {
     /// side").
     static let wingWidth: CGFloat = 90
 
-    /// The peek panel's width before clamping to the screen frame.
-    static let panelWidth: CGFloat = 420
+    /// The peek panel's width before clamping to the screen frame. Matches
+    /// Cider's expanded notch (440pt).
+    static let panelWidth: CGFloat = 440
+
+    /// The open panel's height BELOW the notch band: the tab row plus a fixed
+    /// content area that scrolls internally. Fixed, like Cider's expanded
+    /// notch (350pt), so switching tabs or a list growing never resizes the
+    /// window — the old content-measured height made the panel jump on every
+    /// feed card and search keystroke. Still clamped by `maxPeekHeight`.
+    static let openPanelBodyHeight: CGFloat = 340
+
+    /// A floating pill on a Mac with no notch: wide enough for the mascot, a
+    /// status line and the counts; as tall as the menu bar.
+    static let pillWidth: CGFloat = 220
+    static let pillMinimumHeight: CGFloat = 26
+
+    /// The pill's width while the pointer rests on it.
+    static let pillExpandedWidth: CGFloat = 260
 
     /// The peek panel never grows past this fraction of the screen height —
     /// beyond it, `NotchCompanionView`'s internal `ScrollView` takes over.
@@ -69,6 +85,35 @@ nonisolated enum NotchCompanionGeometry {
             width: width,
             height: notch.height
         )
+    }
+
+    /// The floating pill used on a display with no notch, when the person
+    /// asked for it: top-centre, hanging from the bottom edge of the menu bar
+    /// (`visibleFrame.maxY`) so it never covers menu bar items. `nil` on a
+    /// notched screen — the strip hugs the notch there instead.
+    static func pillFrame(for metrics: NotchScreenMetrics, expanded: Bool = false) -> CGRect? {
+        guard NotchHUDGeometry.notchRect(for: metrics) == nil else { return nil }
+        let menuBarHeight = metrics.frame.maxY - metrics.visibleFrame.maxY
+        let height = max(pillMinimumHeight, menuBarHeight)
+        let width = min(expanded ? pillExpandedWidth : pillWidth, metrics.frame.width)
+        let topY = metrics.visibleFrame.maxY
+        let x = min(
+            max(metrics.frame.midX - width / 2, metrics.frame.minX), metrics.frame.maxX - width)
+        let y = min(max(topY - height, metrics.frame.minY), metrics.frame.maxY - height)
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    /// The resting frame: the notch strip on a notched screen, else the pill
+    /// when `allowsPill`, else `nil` (no companion on this display).
+    static func restingFrame(for metrics: NotchScreenMetrics, allowsPill: Bool) -> CGRect? {
+        restingStripFrame(for: metrics) ?? (allowsPill ? pillFrame(for: metrics) : nil)
+    }
+
+    /// The wider "peek" frame shown while attention is active or the pointer
+    /// rests on the strip with hover-to-open off.
+    static func expandedFrame(for metrics: NotchScreenMetrics, allowsPill: Bool) -> CGRect? {
+        expandedStripFrame(for: metrics)
+            ?? (allowsPill ? pillFrame(for: metrics, expanded: true) : nil)
     }
 
     /// The left wing's hit-test rect in screen coordinates, flush against

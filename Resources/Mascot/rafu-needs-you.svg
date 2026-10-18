@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc" data-state="needs-you" style="--rafu-body:#E7EAF2;--rafu-shade:#A9B1C6;--rafu-ink:#151A24;--rafu-thread:#E3A857">
+  <title id="title">Rafu</title>
+  <desc id="desc">Rafu with one raised eye, an open mouth and an alert dot: an agent needs you. A round ball of mending yarn with a darning needle in its top. The thread through the needle is the theme accent. Colours are CSS variables (--rafu-body, --rafu-shade, --rafu-ink, --rafu-thread) that default to the Indigo theme; the app renders the same artwork natively with the active theme.</desc>
+  <defs>
+    <linearGradient id="body" x1=".2" y1=".1" x2=".85" y2="1">
+      <stop offset="0" stop-color="var(--rafu-body)"/><stop offset="1" stop-color="var(--rafu-shade)"/>
+    </linearGradient>
+    <clipPath id="ball"><ellipse cx="256" cy="300" rx="176" ry="160"/></clipPath>
+  </defs>
+  <style>
+    .sprite { transform-origin: 256px 452px; }
+    .needle { transform-origin: 300px 150px; }
+    .eye { transform-box: fill-box; transform-origin: center; animation: blink 6.7s linear infinite; }
+    @keyframes blink { 0%,40%,43%,76%,79%,100% { transform: scaleY(1); } 41.5%,77.5% { transform: scaleY(.09); } }
+    @keyframes breathe { 0%,90%,100% { transform: scale(1,1); } 95% { transform: scale(1.01,.99); } }
+    @keyframes sway { 0%,100% { transform: rotate(-9deg); } 50% { transform: rotate(9deg); } }
+    @keyframes look { 0%,100% { transform: translateX(-14px); } 50% { transform: translateX(14px); } }
+    @keyframes hop { 0%,70%,100% { transform: translateY(0); } 78% { transform: translateY(-14px); } 90% { transform: translateY(0); } }
+    svg[data-state="idle"] .sprite { animation: breathe 6.7s ease-in-out infinite; }
+    svg[data-state="working"] .needle { animation: sway 1.7s ease-in-out infinite; }
+    svg[data-state="working"] .gaze { animation: look 1.7s ease-in-out infinite; }
+    svg[data-state="working"] .eye { animation: none; }
+    svg[data-state="needs-you"] .sprite { animation: hop 4.2s ease-in-out infinite; }
+    svg[data-state="needs-you"] .eye { animation: none; }
+    svg[data-state="reply-ready"] .sprite { animation: hop 4s ease-in-out 1; }
+    svg[data-state="reply-ready"] .eye { animation: none; }
+    @media (prefers-reduced-motion: reduce) { .sprite, .needle, .gaze, .eye { animation: none !important; } }
+  </style>
+  <g class="sprite">
+    <g class="needle">
+      <path d="M300 150 L352 46" fill="none" stroke="var(--rafu-body)" stroke-width="15" stroke-linecap="round"/>
+      <circle cx="349" cy="52" r="5.5" fill="var(--rafu-ink)"/>
+      <path d="M349 52 C438 44 478 168 430 256 M349 52 C336 40 318 44 312 60" fill="none" stroke="var(--rafu-thread)" stroke-width="11" stroke-linecap="round"/>
+    </g>
+    <ellipse cx="256" cy="300" rx="176" ry="160" fill="url(#body)"/>
+    <ellipse cx="186" cy="208" rx="65" ry="38" fill="#fff" opacity=".28" transform="rotate(-24 186 208)"/>
+    <g clip-path="url(#ball)" fill="none" stroke="var(--rafu-thread)" stroke-width="12" stroke-linecap="round">
+      <path d="M70 270 C150 330 330 330 442 262" opacity=".55"/>
+      <path d="M70 360 C160 410 340 410 442 350" opacity=".55"/>
+      <path d="M150 150 C215 215 230 330 206 470" opacity=".35"/>
+    </g>
+    <g class="gaze">
+    <g class="eyes">
+      <g class="eye eye-left"><rect x="168" y="247.0" width="38" height="66" rx="19" fill="var(--rafu-ink)"/><circle cx="193" cy="263.0" r="6.5" fill="#fff" opacity=".9"/></g>
+      <g class="eye eye-right"><rect x="306" y="242.0" width="38" height="76" rx="19" fill="var(--rafu-ink)"/><circle cx="331" cy="258.0" r="6.5" fill="#fff" opacity=".9"/></g>
+    </g>
+    </g>
+    <ellipse cx="142" cy="344" rx="23" ry="14" fill="var(--rafu-thread)" opacity=".4"/>
+    <ellipse cx="370" cy="344" rx="23" ry="14" fill="var(--rafu-thread)" opacity=".4"/>
+    <ellipse cx="256" cy="362" rx="13" ry="15" fill="var(--rafu-ink)"/>
+  </g>
+  <circle cx="88" cy="118" r="38" fill="var(--rafu-thread)" stroke="#000" stroke-width="10"/>
+</svg>
