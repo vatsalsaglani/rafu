@@ -217,9 +217,13 @@ func agentLauncherProbingRowsCoverEveryProvider() {
         #expect(row.accessibilityLabel.contains(row.displayName))
         #expect(row.accessibilityLabel.contains("checking"))
     }
-    // The count is withheld until the probe resolves: "0 of 7 ready" mid-probe
-    // would be the same lie as an empty list.
-    #expect(AgentLauncherModel.headerTitle(rows: rows, isProbing: true) == "Agents (checking…)")
+    // One line, no ready count: "0 of 7 ready" mid-probe would be the same lie
+    // as an empty list.
+    #expect(
+        AgentLauncherModel.checkingLine(agentCount: rows.count)
+            == "Checking \(ConductorCLIID.allCases.count) agents…")
+    #expect(AgentLauncherModel.checkingLine(agentCount: 1) == "Checking 1 agent…")
+    for row in rows { #expect(row.stateLabel == "Checking…") }
 }
 
 @Test("Resolved rows carry name, state, and the availability reason as text")
@@ -263,8 +267,12 @@ func agentLauncherResolvedRowsCarryReasons() throws {
     #expect(caveated.accessibilityLabel == "Kimi CLI, ready, Launch shape unverified.")
 
     #expect(AgentLauncherModel.readyCount(rows) == 2)
-    #expect(
-        AgentLauncherModel.headerTitle(rows: rows, isProbing: false) == "Agents (2 of 4 ready)")
+
+    // The Start Agent menu shows one short state word per row.
+    #expect(ready.stateLabel == "Ready")
+    #expect(missing.stateLabel == "Not installed")
+    #expect(unauthenticated.stateLabel == "Not signed in")
+    #expect(caveated.stateLabel == "Ready")
 }
 
 @Test("Named launch cells retain full provider help in every state")
@@ -522,9 +530,9 @@ struct TerminalIdentityGlyphTests {
         #expect(panel.contains(#"Image(systemName: "terminal")"#))
         // Status survives as a WORD in the caption — the carrier that replaced
         // the glyph. Losing this line is the regression worth failing on.
-        #expect(
-            panel.contains(
-                #"\(TerminalSessionPresentation.label(row.status)) · \(row.shellName)"#))
+        #expect(panel.contains("TerminalNaming.subtitle(["))
+        #expect(panel.contains("TerminalSessionPresentation.label(row.status),"))
+        #expect(panel.contains("row.shellName, row.directoryLabel,"))
         // The status glyph now sits beside status text in the caption, not in
         // the identity well. This shape+text pair keeps attention and exit
         // legible without hue.
