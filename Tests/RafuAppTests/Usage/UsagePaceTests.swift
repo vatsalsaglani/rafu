@@ -428,6 +428,27 @@ func usageSnapshotRetention() {
     #expect(tooOld.snapshots.isEmpty)
 }
 
+@Test("A full usage window stops reporting exhausted once its reset passes")
+func paceExhaustedWindowAfterReset() {
+    let window = sessionWindow(percent: 100, resetIn: -60)
+    let pace = UsagePace.estimate(window: window, observedAt: paceNow, now: paceNow)
+    #expect(pace.state == .unknown)
+    #expect(pace.unknownReason == .resetPassed)
+    #expect(!pace.warning)
+}
+
+@Test("In-flight usage results respect a later disconnect or disable")
+func usageFreshResultsRespectCurrentConsent() {
+    let exact = makeSnapshot(.claude, [sessionWindow(percent: 40)])
+    let local = makeSnapshot(.codex, [sessionWindow(percent: 5)], source: .localReport)
+    let result = UsageSnapshotRetention.merge(
+        previous: [], previousObservedAt: [:], fresh: [exact, local], now: paceNow,
+        enabled: [.claude], networkConsent: [], registryOrder: [.claude, .codex])
+    #expect(result.snapshots.isEmpty)
+    #expect(result.observedAt.isEmpty)
+    #expect(result.staleProviderIDs.isEmpty)
+}
+
 // MARK: - Claude Code Keychain re-read after Connect
 
 private final class PaceKeychainCounter: Sendable {

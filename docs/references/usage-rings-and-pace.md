@@ -55,9 +55,8 @@ Every reason, in the order a refresh meets it:
   exists and neither the file nor the memory copy is usable. It is
   rate-limited to once per 15 minutes per process, a denial stops all
   re-reads until the next Connect or Disconnect, and only an unexpired
-  credential is cached (in memory, as before). This supersedes the earlier
-  "refresh never reads Claude Code's Keychain" rule in ADR 0017 at the
-  user's direction; the ADR text was not edited in this change.
+  credential is cached (in memory, as before). This is the bounded exception recorded in
+  [ADR 0027](../decisions/0027-connected-usage-refresh.md).
 - A failed refresh keeps the last good snapshot for up to 6 hours, marked
   stale ("Showing the last successful update"), only while the provider is
   enabled and — for exact data — network consent still exists.
@@ -76,8 +75,9 @@ reset time, and when the snapshot was observed. `elapsed = observedAt −
 | enough | otherwise | "On pace · ~N% spare at reset" |
 | unknown | no percent / observation older than 20 min / no reset / reset passed / no or bad length / elapsed under 15 min | one note per reason |
 
-Deviation from Cider: exhausted is checked before the freshness and timing
-checks, so a full window always says so.
+An elapsed reset takes priority over exhausted: a retained 100% window
+must ask for new data after its reset, not tell the user to keep waiting.
+The exhausted state still works without a known reset.
 
 ### Presentation rules
 
@@ -135,6 +135,14 @@ Used/Remaining; enable Reduce Motion; check VoiceOver on a ring.
   `Views/NotchSectionViews.swift`, `Settings/UsageSettingsTab.swift`,
   `Settings/SettingsPaneNavigation.swift`.
 - ADR: [`../decisions/0017-usage-provider-trust-transition.md`](../decisions/0017-usage-provider-trust-transition.md)
-  (Keychain rule superseded in part, see above).
+  and [ADR 0027](../decisions/0027-connected-usage-refresh.md).
 - References: [`usage-provider-contract.md`](usage-provider-contract.md),
   [`notch-companion.md`](notch-companion.md).
+
+## Mac integration review, 2026-10-19
+
+Reviewed with Apple Swift 6.4 on macOS 27.0.1 (26A434). Two regression
+cases were added: results arriving after Disable or Disconnect must not
+restore forbidden snapshots, and a retained full window must stop reporting
+exhausted after its reset. The synthetic tests cover both without reading
+Keychain or making provider requests.

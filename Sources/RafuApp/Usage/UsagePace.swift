@@ -86,6 +86,9 @@ nonisolated struct UsagePace: Equatable, Sendable {
         guard let used = UsageWindowPresentation.usedPercent(window) else {
             return unknown(.notReported)
         }
+        // A retained full window no longer describes the current limit
+        // after its reset. Ask for fresh data instead of saying to wait.
+        if let reset = window.resetsAt, reset <= now { return unknown(.resetPassed) }
         if used >= 100 {
             return UsagePace(
                 state: .exhausted, unknownReason: nil, note: "Limit reached · wait for reset",
@@ -410,9 +413,14 @@ nonisolated enum UsageSnapshotRetention {
     ) -> Result {
         var observedAt: [UsageProviderID: Date] = [:]
         var stale: Set<UsageProviderID> = []
-        var combined = fresh
-        let freshIDs = Set(fresh.map(\.providerID))
-        for snapshot in fresh { observedAt[snapshot.providerID] = now }
+        // Settings can change while a request is in flight. Apply the
+        // current enablement and consent to new results as well as old ones.
+        var combined = fresh.filter {
+            enabled.contains($0.providerID)
+                && ($0.source != .providerAPI || networkConsent.contains($0.providerID))
+        }
+        let freshIDs = Set(combined.map(\.providerID))
+        for snapshot in combined { observedAt[snapshot.providerID] = now }
 
         for snapshot in previous where !freshIDs.contains(snapshot.providerID) {
             let id = snapshot.providerID

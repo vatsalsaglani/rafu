@@ -1,6 +1,6 @@
 # ADR 0017: Separate local usage enablement from explicit provider-network consent
 
-- **Status:** Accepted
+- **Status:** Partially superseded by [ADR 0027](0027-connected-usage-refresh.md) for connected Claude Keychain reads and stale usage display
 - **Date:** 2026-07-23
 
 ## Context
