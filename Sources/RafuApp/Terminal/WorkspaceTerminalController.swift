@@ -966,6 +966,23 @@ final class WorkspaceTerminalController: Identifiable {
     @ObservationIgnored
     private(set) var shellProcessID: Int32?
 
+    /// The agent identity this terminal observed by itself: the foreground
+    /// process and the sticky title match (`TerminalAgentIdentityState`).
+    /// A small value, observable, so a tab icon updates when it changes.
+    /// `resolvedAgentProvider` (`Support/AgentIdentity.swift`) combines it
+    /// with the launch spec and the hook signal.
+    private(set) var agentIdentity = TerminalAgentIdentityState()
+    /// The Darwin calls behind foreground sampling. Tests install a fake.
+    @ObservationIgnored
+    var processInspector: any TerminalProcessInspecting = DarwinTerminalProcessInspector()
+    @ObservationIgnored private var foregroundSampleTask: Task<Void, Never>?
+    @ObservationIgnored private var foregroundSampleDeadline: ContinuousClock.Instant?
+    /// The last classified foreground group, so one program is described
+    /// once, not on every tick.
+    @ObservationIgnored private var foregroundCache:
+        (processID: Int32, state: TerminalForegroundState)?
+    @ObservationIgnored private var lastOutputDate: Date?
+
     /// `userName`, then the shell's own OSC 0/2 title report, then a
     /// generated fallback — the single source of truth for every place
     /// this session's name is shown (panel row, tab label, `.help` text).
@@ -1296,6 +1313,10 @@ final class WorkspaceTerminalController: Identifiable {
     private static let quiescencePolicy = TerminalQuiescencePolicy()
 
     private func noteOutputActivity(bytes: Int) {
+        // An output burst may mean a new program owns the terminal. The
+        // request coalesces, so one burst costs one sample.
+        lastOutputDate = Date()
+        scheduleForegroundSample(after: TerminalForegroundSampling.debounce)
         // Only while genuinely running: tracking during `.bell` would
         // re-fire attention (duplicate notifications) and `.exited` is dead.
         guard status == .running else { return }
@@ -1336,6 +1357,7 @@ final class WorkspaceTerminalController: Identifiable {
         pendingShellStartup = nil
         CanvasLiveBridge.shared.remove(self)
         stopQuiescenceTracking()
+        resetForegroundIdentity()
         terminalView?.terminate()
         terminalView = nil
         delegateProxy = nil
@@ -1399,6 +1421,7 @@ final class WorkspaceTerminalController: Identifiable {
         pendingShellStartup = nil
         CanvasLiveBridge.shared.remove(self)
         stopQuiescenceTracking()
+        resetForegroundIdentity()
         status = .exited(code: exitCode)
         shellProcessID = nil
         terminalView = nil
@@ -1422,6 +1445,101 @@ final class WorkspaceTerminalController: Identifiable {
     func updateTitle(_ newTitle: String) {
         let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         reportedTitle = trimmed.isEmpty ? nil : trimmed
+        // A title that names an agent is remembered; any other title keeps
+        // the memory (the agent may have replaced its own title). The
+        // foreground sample below decides when the agent is gone.
+        var identity = agentIdentity
+        identity.noteTitle(reportedTitle)
+        if identity != agentIdentity { agentIdentity = identity }
+        scheduleForegroundSample(after: TerminalForegroundSampling.debounce)
+    }
+
+    /// Records one foreground sample. Internal so tests can drive the
+    /// identity rules without a PTY.
+    func noteForeground(_ state: TerminalForegroundState) {
+        var identity = agentIdentity
+        identity.noteForeground(state)
+        if identity != agentIdentity { agentIdentity = identity }
+    }
+
+    // MARK: - Foreground sampling
+
+    /// Asks for one foreground sample no later than `delay` from now. A
+    /// sample already due sooner absorbs the request; a later one moves up.
+    /// Only an ordinary login shell samples: a spec-backed process is its
+    /// own group leader, so "leader == shell" would wrongly read as a shell
+    /// prompt. Does nothing without a live process.
+    private func scheduleForegroundSample(after delay: Duration) {
+        guard hasLiveProcess, isOrdinaryShellTerminal, terminalView != nil else { return }
+        let deadline = ContinuousClock.now.advanced(by: delay)
+        if foregroundSampleTask != nil, let pending = foregroundSampleDeadline,
+            pending <= deadline
+        {
+            return
+        }
+        foregroundSampleTask?.cancel()
+        foregroundSampleDeadline = deadline
+        foregroundSampleTask = Task { [weak self] in
+            try? await Task.sleep(until: deadline, clock: .continuous)
+            guard !Task.isCancelled, let self else { return }
+            self.foregroundSampleTask = nil
+            self.foregroundSampleDeadline = nil
+            await self.sampleForeground()
+        }
+    }
+
+    /// One sample. `tcgetpgrp` runs here, on the main actor, while the
+    /// view still owns the PTY descriptor: it is one non-blocking `ioctl`,
+    /// and reading the descriptor anywhere else could race its close and
+    /// reuse. Describing a new process (name, path, argv) runs off the
+    /// main actor.
+    private func sampleForeground() async {
+        guard hasLiveProcess, let view = terminalView, let shellPID = shellProcessID else {
+            return
+        }
+        let descriptor = view.process.childfd
+        let inspector = processInspector
+        guard descriptor >= 0,
+            let group = inspector.foregroundProcessGroup(ptyDescriptor: descriptor)
+        else { return }
+        let state: TerminalForegroundState
+        if group == shellPID {
+            state = .shell
+            foregroundCache = nil
+        } else if let cached = foregroundCache, cached.processID == group {
+            state = cached.state
+        } else {
+            let startGeneration = generation
+            let classified = await TerminalForegroundProbe.classify(
+                processID: group, inspector: inspector)
+            // The terminal may have restarted or exited meanwhile.
+            guard !Task.isCancelled, generation == startGeneration,
+                shellProcessID == shellPID, hasLiveProcess
+            else { return }
+            foregroundCache = (group, classified)
+            state = classified
+        }
+        noteForeground(state)
+        let secondsSinceOutput = lastOutputDate.map { Date().timeIntervalSince($0) }
+        if TerminalForegroundSampling.continuesPolling(
+            after: state, isVisible: terminalView?.window != nil,
+            secondsSinceOutput: secondsSinceOutput)
+        {
+            scheduleForegroundSample(after: TerminalForegroundSampling.pollInterval)
+        }
+    }
+
+    /// Stops sampling and forgets the observed identity (exit, close,
+    /// restart).
+    private func resetForegroundIdentity() {
+        foregroundSampleTask?.cancel()
+        foregroundSampleTask = nil
+        foregroundSampleDeadline = nil
+        foregroundCache = nil
+        lastOutputDate = nil
+        if agentIdentity != TerminalAgentIdentityState() {
+            agentIdentity = TerminalAgentIdentityState()
+        }
     }
 
     /// OSC 7 delivers the shell's cwd as a `file://host/path` URI; some

@@ -363,8 +363,8 @@ final class NotchCompanionModel: NSObject {
 
     /// The recognised agent CLI behind a terminal (`resolvedAgentProvider`,
     /// `Support/AgentIdentity.swift`): the process spec's provider when Rafu
-    /// launched it, else whatever its terminal title says. `nil` for an
-    /// ordinary shell.
+    /// launched it, else the hook session, the foreground process, or the
+    /// sticky title match. `nil` for an ordinary shell.
     static func agentIdentity(of controller: WorkspaceTerminalController) -> ConductorCLIID? {
         controller.resolvedAgentProvider
     }
@@ -375,7 +375,7 @@ final class NotchCompanionModel: NSObject {
     ) -> NotchTerminalInput {
         NotchTerminalInput(
             id: controller.id,
-            title: controller.displayName,
+            title: controller.presentedTitle,
             cli: agentIdentity(of: controller),
             status: controller.status,
             isProducingOutput: controller.isProducingOutput,
