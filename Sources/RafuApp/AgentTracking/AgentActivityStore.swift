@@ -178,7 +178,8 @@ final class AgentActivityStore {
             id: controller.id,
             processID: controller.shellProcessID,
             cwd: controller.currentDirectoryPath ?? controller.startingDirectory,
-            provider: controller.resolvedAgentProvider.flatMap(AgentHookProvider.init(cli:)))
+            // Not `resolvedAgentProvider`: that one asks this store first.
+            provider: controller.observedAgentProvider.flatMap(AgentHookProvider.init(cli:)))
     }
 }
 

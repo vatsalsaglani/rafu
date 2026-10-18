@@ -23,6 +23,13 @@ nonisolated struct TerminalSessionRow: Identifiable, Equatable, Sendable {
     /// Vendor identity for a tokenless Agent Terminal. `nil` for login
     /// shells and Ensemble run terminals.
     var agentProvider: ConductorCLIID? = nil
+    /// The controller's full agent resolution (hook, foreground process,
+    /// sticky title) when `isAgentIdentityResolved`; see
+    /// `resolvedAgentProvider`.
+    var detectedAgentProvider: ConductorCLIID? = nil
+    /// `true` for a row built from a live controller. A hand-built row keeps
+    /// the title fallback.
+    var isAgentIdentityResolved = false
 }
 
 /// Pure presentation helpers for `TerminalSessionRow` — symbol/label/string
@@ -112,6 +119,62 @@ nonisolated enum TerminalSessionPresentation {
         let head = name.prefix(headCount)
         let tail = name.suffix(tailCount)
         return "\(head)…\(tail)"
+    }
+
+    /// The agent-aware terminal name, shared by the editor tab strip, the tab
+    /// switcher, the Terminals panel, the notch, and Ensemble node headers.
+    ///
+    /// - A user-set name always wins.
+    /// - With no agent, the name is `displayName` unchanged.
+    /// - With an agent and a generic title (`isGenericTitle`), the agent's
+    ///   own name ("Claude Code", "Codex").
+    /// - With an agent and a meaningful title (a task name such as
+    ///   "✳ Fix tests"), that title.
+    static func title(
+        displayName: String, hasUserName: Bool, provider: ConductorCLIID?, shellName: String
+    ) -> String {
+        guard !hasUserName, let provider else { return displayName }
+        return isGenericTitle(displayName, shellName: shellName, provider: provider)
+            ? provider.displayName : displayName
+    }
+
+    /// For a surface with its own stored name (an Ensemble node, a Terminal
+    /// Group) whose name is automatic: the reported title when it is
+    /// meaningful, otherwise the agent's name.
+    static func agentTitle(reportedTitle: String?, provider: ConductorCLIID, shellName: String?)
+        -> String
+    {
+        guard let reportedTitle,
+            !isGenericTitle(reportedTitle, shellName: shellName, provider: provider)
+        else { return provider.displayName }
+        return reportedTitle
+    }
+
+    /// `true` for a title that says nothing an agent's own name would not:
+    /// empty or only glyphs (a spinner), "Terminal", the shell's name, the
+    /// generated "zsh 2" fallback, a path, or just the agent's own name
+    /// ("claude", "✳ Claude Code").
+    static func isGenericTitle(_ title: String, shellName: String?, provider: ConductorCLIID?)
+        -> Bool
+    {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.contains(where: { $0.isLetter || $0.isNumber }) else { return true }
+        if WorkspaceTerminalController.isPathLikeTitle(trimmed) { return true }
+        let lowered = trimmed.lowercased()
+        let words = String(lowered.drop(while: { !$0.isLetter && !$0.isNumber }))
+        if ["terminal", "terminal pane", "shell"].contains(words) { return true }
+        if let shellName, !shellName.isEmpty {
+            let shell = shellName.lowercased()
+            if words == shell { return true }
+            if words.hasPrefix(shell + " "),
+                words.dropFirst(shell.count + 1).allSatisfy({ $0.isASCII && $0.isNumber })
+            {
+                return true
+            }
+        }
+        if TerminalForegroundClassifier.shellNames.contains(words) { return true }
+        if let provider, AgentIdentityMatcher.isBareName(words, of: provider) { return true }
+        return false
     }
 }
 
@@ -491,7 +554,11 @@ nonisolated enum TerminalsPanelModel {
         controller: WorkspaceTerminalController?
     ) -> String {
         switch pane.runtimeKind {
-        case .ordinaryShell: controller?.shellDisplayName ?? "Shell"
+        // A shell that runs an agent CLI names the agent ("Claude Code —
+        // rafu"); it reverts to the shell when the agent exits.
+        case .ordinaryShell:
+            controller.flatMap { $0.hasLiveProcess ? $0.resolvedAgentProvider?.displayName : nil }
+                ?? controller?.shellDisplayName ?? "Shell"
         case .directAgentTerminal(let provider): provider.displayName
         case .unavailableAgentTerminal: "Agent Terminal"
         case .unavailableEnsemble: "Ensemble"
@@ -521,7 +588,9 @@ nonisolated enum TerminalsPanelModel {
                 needsAttention: TerminalSessionPresentation.needsAttention(controller.status),
                 hasUserName: controller.userName != nil,
                 sessionColor: controller.sessionColor,
-                agentProvider: controller.agentProvider
+                agentProvider: controller.agentProvider,
+                detectedAgentProvider: controller.resolvedAgentProvider,
+                isAgentIdentityResolved: true
             )
         }
     }
