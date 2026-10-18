@@ -493,8 +493,6 @@ nonisolated enum TerminalsPanelModel {
         switch pane.runtimeKind {
         case .ordinaryShell: controller?.shellDisplayName ?? "Shell"
         case .directAgentTerminal(let provider): provider.displayName
-        case .ensembleRole: "Ensemble role"
-        case .ensembleCoordinator: "Ensemble coordinator"
         case .unavailableAgentTerminal: "Agent Terminal"
         case .unavailableEnsemble: "Ensemble"
         }

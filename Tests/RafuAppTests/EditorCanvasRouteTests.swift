@@ -35,27 +35,9 @@ struct EditorCanvasRouteTests {
         #expect(EditorCanvasRoute.resolve(Inputs(hasGitOpenDiff: true)) == .standaloneDiff)
     }
 
-    @Test("Visible graph with no selected document routes to the graph")
-    func graph() {
-        #expect(EditorCanvasRoute.resolve(Inputs(conductorGraphVisible: true)) == .graph)
-    }
-
-    @Test("Run canvas id with no selected document routes to the run detail")
-    func runDetail() {
-        #expect(EditorCanvasRoute.resolve(Inputs(hasConductorRunCanvasID: true)) == .runDetail)
-    }
-
-    @Test("New Ensemble visibility routes to the start canvas")
-    func ensembleStart() {
-        #expect(
-            EditorCanvasRoute.resolve(Inputs(ensembleStartCanvasVisible: true)) == .ensembleStart)
-    }
-
-    @Test("New Run visibility routes to the Ensemble run canvas")
-    func ensembleNewRun() {
-        #expect(
-            EditorCanvasRoute.resolve(Inputs(ensembleNewRunCanvasVisible: true))
-                == .ensembleNewRun)
+    @Test("Visible Settings with no selected document routes to settings")
+    func settings() {
+        #expect(EditorCanvasRoute.resolve(Inputs(settingsVisible: true)) == .settings)
     }
 
     @Test("Tabs with no canvas open route to the editor")
@@ -72,10 +54,6 @@ struct EditorCanvasRouteTests {
             hasAnyEditorTabs: true,
             hasGitOpenBlame: true,
             hasGitOpenDiff: true,
-            hasConductorRunCanvasID: true,
-            conductorGraphVisible: true,
-            ensembleStartCanvasVisible: true,
-            ensembleNewRunCanvasVisible: true,
             hasSelectedDocument: true,
             hasSelectedDocumentID: true
         )
@@ -84,19 +62,16 @@ struct EditorCanvasRouteTests {
 
     // MARK: - The emptiness guard's exact condition set
 
-    /// The guard fires only when the layout has no tab AND all six tabless
-    /// canvases are closed. Each of the seven conditions is load-bearing:
-    /// flipping any one of them alone must take the route out of `.empty`.
+    /// The guard fires only when the layout has no tab AND every tabless
+    /// canvas is closed. Each condition is load-bearing: flipping any one of
+    /// them alone must take the route out of `.empty`.
     @Test(
         "Any single open surface defeats the emptiness guard",
         arguments: [
             Inputs(hasAnyEditorTabs: true),
             Inputs(hasGitOpenBlame: true),
             Inputs(hasGitOpenDiff: true),
-            Inputs(hasConductorRunCanvasID: true),
-            Inputs(conductorGraphVisible: true),
-            Inputs(ensembleStartCanvasVisible: true),
-            Inputs(ensembleNewRunCanvasVisible: true),
+            Inputs(settingsVisible: true),
         ]
     )
     func emptinessGuardConditions(inputs: EditorCanvasRoute.Inputs) {
@@ -134,59 +109,21 @@ struct EditorCanvasRouteTests {
         #expect(EditorCanvasRoute.resolve(inputs) == .blame)
     }
 
-    @Test("Blame beats every Ensemble canvas")
-    func blameBeatsConductorCanvases() {
+    @Test("Blame beats Settings")
+    func blameBeatsSettings() {
         let inputs = Inputs(
             hasGitOpenBlame: true,
-            hasConductorRunCanvasID: true,
-            conductorGraphVisible: true,
-            ensembleStartCanvasVisible: true,
-            ensembleNewRunCanvasVisible: true,
+            settingsVisible: true,
             hasSelectedDocument: true,
             hasSelectedDocumentID: true
         )
         #expect(EditorCanvasRoute.resolve(inputs) == .blame)
     }
 
-    @Test("Diff beats every Ensemble canvas when nothing is selected")
-    func diffBeatsConductorCanvases() {
-        let inputs = Inputs(
-            hasGitOpenDiff: true,
-            hasConductorRunCanvasID: true,
-            conductorGraphVisible: true,
-            ensembleStartCanvasVisible: true,
-            ensembleNewRunCanvasVisible: true
-        )
+    @Test("Diff beats Settings when nothing is selected")
+    func diffBeatsSettings() {
+        let inputs = Inputs(hasGitOpenDiff: true, settingsVisible: true)
         #expect(EditorCanvasRoute.resolve(inputs) == .standaloneDiff)
-    }
-
-    /// The graph is checked before the run detail. This ordering is inherited
-    /// verbatim from the chain.
-    @Test("Graph beats the run detail when both are open")
-    func graphBeatsRunDetail() {
-        let inputs = Inputs(
-            hasConductorRunCanvasID: true,
-            conductorGraphVisible: true,
-            ensembleStartCanvasVisible: true,
-            ensembleNewRunCanvasVisible: true)
-        #expect(EditorCanvasRoute.resolve(inputs) == .graph)
-    }
-
-    @Test("Run detail beats both Ensemble creation canvases")
-    func runDetailBeatsCreationCanvases() {
-        let inputs = Inputs(
-            hasConductorRunCanvasID: true,
-            ensembleStartCanvasVisible: true,
-            ensembleNewRunCanvasVisible: true)
-        #expect(EditorCanvasRoute.resolve(inputs) == .runDetail)
-    }
-
-    @Test("New Ensemble start beats New Run when both flags are set defensively")
-    func ensembleStartBeatsNewRun() {
-        let inputs = Inputs(
-            ensembleStartCanvasVisible: true,
-            ensembleNewRunCanvasVisible: true)
-        #expect(EditorCanvasRoute.resolve(inputs) == .ensembleStart)
     }
 
     // MARK: - A selected document beats every tabless canvas
@@ -195,10 +132,7 @@ struct EditorCanvasRouteTests {
         "A selected document id defeats every tabless canvas",
         arguments: [
             Inputs(hasGitOpenDiff: true, hasSelectedDocumentID: true),
-            Inputs(conductorGraphVisible: true, hasSelectedDocumentID: true),
-            Inputs(hasConductorRunCanvasID: true, hasSelectedDocumentID: true),
-            Inputs(ensembleStartCanvasVisible: true, hasSelectedDocumentID: true),
-            Inputs(ensembleNewRunCanvasVisible: true, hasSelectedDocumentID: true),
+            Inputs(settingsVisible: true, hasSelectedDocumentID: true),
         ]
     )
     func selectedDocumentBeatsCanvases(inputs: EditorCanvasRoute.Inputs) {
@@ -210,10 +144,7 @@ struct EditorCanvasRouteTests {
         let inputs = Inputs(
             hasAnyEditorTabs: true,
             hasGitOpenDiff: true,
-            hasConductorRunCanvasID: true,
-            conductorGraphVisible: true,
-            ensembleStartCanvasVisible: true,
-            ensembleNewRunCanvasVisible: true,
+            settingsVisible: true,
             hasSelectedDocument: true,
             hasSelectedDocumentID: true
         )

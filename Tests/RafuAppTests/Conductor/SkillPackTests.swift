@@ -41,56 +41,6 @@ func bundledSkillPackResolvesAndTargetsCurrentVerbVersion() async throws {
 }
 
 @MainActor
-@Test("verbs.md names every verb represented by the shipped parser")
-func skillVerbReferenceCoversParserCases() throws {
-    let catalog = try ConductorBundledSkillCatalog.bundled()
-    let verbsFile = try #require(
-        catalog.manifest.first(where: { $0.relativePath == "references/verbs.md" }))
-    let text = try #require(String(data: catalog.data(for: verbsFile), encoding: .utf8))
-    let parser = EnsembleArgumentParser()
-    // Every verb the shipped parser accepts. C8-03 added the mutating four
-    // and C8-04 added propose-merge while this plan ran in parallel; the
-    // exhaustive switch below is what forces this list to be extended rather
-    // than silently drifting.
-    let invocations = try [
-        parser.parse(["status", "--json"]),
-        parser.parse(["artifact", "run-a", "0", "--json"]),
-        parser.parse(["await", "run-a", "--state", "completed", "--json"]),
-        parser.parse(["run", "implement", "--json"]),
-        parser.parse(["abort", "run-a"]),
-        parser.parse(["note", "run-a", "a bounded note"]),
-        parser.parse(["grant", "--json"]),
-        parser.parse(["propose-merge", "run-a", "--json"]),
-        parser.parse(["help"]),
-    ]
-
-    for invocation in invocations {
-        let verb =
-            switch invocation {
-            case .status:
-                "status"
-            case .artifact:
-                "artifact"
-            case .await:
-                "await"
-            case .run:
-                "run"
-            case .abort:
-                "abort"
-            case .note:
-                "note"
-            case .grant:
-                "grant"
-            case .proposeMerge:
-                "propose-merge"
-            case .help:
-                "help"
-            }
-        #expect(text.contains("`\(verb)`"), "Missing parser verb \(verb)")
-    }
-}
-
-@MainActor
 @Test("A fresh skill install creates five files and an idempotent reinstall skips all five")
 func skillInstallationIsFreshThenIdempotent() async throws {
     let destination = try makeSkillTestDirectory()

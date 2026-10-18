@@ -13,10 +13,6 @@ nonisolated enum EditorCanvasRoute: Equatable {
     case empty
     case blame
     case standaloneDiff
-    case graph
-    case runDetail
-    case ensembleStart
-    case ensembleNewRun
     case settings
     case editor
 
@@ -26,8 +22,7 @@ nonisolated enum EditorCanvasRoute: Equatable {
     ///
     /// `hasSelectedDocument` and `hasSelectedDocumentID` are separate on
     /// purpose: the blame branch reads `session.selectedDocument` (an open
-    /// document *matching* the selected id) while the diff/graph/run branches
-    /// read `session.selectedDocumentID`. Those disagree whenever an id is
+    /// document *matching* the selected id) while the diff branch reads `session.selectedDocumentID`. Those disagree whenever an id is
     /// selected but no open document carries it, and the original chain
     /// treated the two cases differently.
     struct Inputs: Equatable, Sendable {
@@ -35,10 +30,6 @@ nonisolated enum EditorCanvasRoute: Equatable {
         var hasAnyEditorTabs: Bool
         var hasGitOpenBlame: Bool
         var hasGitOpenDiff: Bool
-        var hasConductorRunCanvasID: Bool
-        var conductorGraphVisible: Bool
-        var ensembleStartCanvasVisible: Bool
-        var ensembleNewRunCanvasVisible: Bool
         var settingsVisible: Bool
         var hasSelectedDocument: Bool
         var hasSelectedDocumentID: Bool
@@ -48,10 +39,6 @@ nonisolated enum EditorCanvasRoute: Equatable {
             hasAnyEditorTabs: Bool = false,
             hasGitOpenBlame: Bool = false,
             hasGitOpenDiff: Bool = false,
-            hasConductorRunCanvasID: Bool = false,
-            conductorGraphVisible: Bool = false,
-            ensembleStartCanvasVisible: Bool = false,
-            ensembleNewRunCanvasVisible: Bool = false,
             settingsVisible: Bool = false,
             hasSelectedDocument: Bool = false,
             hasSelectedDocumentID: Bool = false
@@ -60,10 +47,6 @@ nonisolated enum EditorCanvasRoute: Equatable {
             self.hasAnyEditorTabs = hasAnyEditorTabs
             self.hasGitOpenBlame = hasGitOpenBlame
             self.hasGitOpenDiff = hasGitOpenDiff
-            self.hasConductorRunCanvasID = hasConductorRunCanvasID
-            self.conductorGraphVisible = conductorGraphVisible
-            self.ensembleStartCanvasVisible = ensembleStartCanvasVisible
-            self.ensembleNewRunCanvasVisible = ensembleNewRunCanvasVisible
             self.settingsVisible = settingsVisible
             self.hasSelectedDocument = hasSelectedDocument
             self.hasSelectedDocumentID = hasSelectedDocumentID
@@ -80,10 +63,8 @@ nonisolated enum EditorCanvasRoute: Equatable {
         }
 
         // 2. A workspace with nothing whatsoever to render: no tab, and none
-        //    of the seven tabless canvases is open.
+        //    of the tabless canvases is open.
         if !inputs.hasAnyEditorTabs, !inputs.hasGitOpenDiff, !inputs.hasGitOpenBlame,
-            !inputs.hasConductorRunCanvasID, !inputs.conductorGraphVisible,
-            !inputs.ensembleStartCanvasVisible, !inputs.ensembleNewRunCanvasVisible,
             !inputs.settingsVisible
         {
             return .empty
@@ -95,28 +76,16 @@ nonisolated enum EditorCanvasRoute: Equatable {
             return .blame
         }
 
-        // 4-9. The tabless canvases. Each yields to a selected document id,
+        // 4-5. The tabless canvases. Each yields to a selected document id,
         //      so opening a file always returns the canvas to the editor.
         if inputs.hasGitOpenDiff, !inputs.hasSelectedDocumentID {
             return .standaloneDiff
-        }
-        if inputs.conductorGraphVisible, !inputs.hasSelectedDocumentID {
-            return .graph
-        }
-        if inputs.hasConductorRunCanvasID, !inputs.hasSelectedDocumentID {
-            return .runDetail
-        }
-        if inputs.ensembleStartCanvasVisible, !inputs.hasSelectedDocumentID {
-            return .ensembleStart
-        }
-        if inputs.ensembleNewRunCanvasVisible, !inputs.hasSelectedDocumentID {
-            return .ensembleNewRun
         }
         if inputs.settingsVisible, !inputs.hasSelectedDocumentID {
             return .settings
         }
 
-        // 10. The editor layout tree.
+        // 6. The editor layout tree.
         return .editor
     }
 }
@@ -132,10 +101,6 @@ extension EditorCanvasRoute.Inputs {
             hasAnyEditorTabs: session.hasAnyEditorTabs,
             hasGitOpenBlame: session.gitOpenBlame != nil,
             hasGitOpenDiff: session.gitOpenDiff != nil,
-            hasConductorRunCanvasID: session.conductorRunCanvasID != nil,
-            conductorGraphVisible: session.conductorGraphVisible,
-            ensembleStartCanvasVisible: session.ensembleStartCanvasVisible,
-            ensembleNewRunCanvasVisible: session.ensembleNewRunCanvasVisible,
             settingsVisible: session.settingsVisible,
             hasSelectedDocument: session.selectedDocument != nil,
             hasSelectedDocumentID: session.selectedDocumentID != nil

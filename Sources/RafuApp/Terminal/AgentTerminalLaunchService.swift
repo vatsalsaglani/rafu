@@ -109,7 +109,6 @@ struct AgentTerminalLaunchService {
     private let workspaceRoot: URL
     private let adapters: [any ConductorCLIAdapter]
     private let defaultModelStore: ConductorDefaultModelStore
-    private let roleLaunchService = ConductorRoleLaunchService()
 
     init(
         workspaceRoot: URL,
@@ -131,18 +130,18 @@ struct AgentTerminalLaunchService {
         for adapter in adapters {
             guard !Task.isCancelled else { break }
             let availability: AgentTerminalAvailability
-            do {
-                let resolved = try await roleLaunchService.resolve(adapter)
-                guard !Task.isCancelled else { break }
+            let probe = await adapter.probe()
+            guard !Task.isCancelled else { break }
+            if probe.installed, let executableURL = probe.executableURL {
                 let authStatus = await adapter.authStatus()
                 guard !Task.isCancelled else { break }
                 switch authStatus {
                 case .authenticated, .unknown:
-                    availability = .ready(resolved.executableURL)
+                    availability = .ready(executableURL)
                 case .notAuthenticated(let hint):
                     availability = .notAuthenticated(hint)
                 }
-            } catch {
+            } else {
                 availability = .notInstalled
             }
 
@@ -188,7 +187,6 @@ struct AgentTerminalLaunchService {
                     Self.curatedPath(prependingParentOf: executableURL)
             ],
             roleBadge: option.displayName,
-            outputLogURL: nil,
             resourceAttribution: "\(option.displayName) (agent terminal)",
             agentProvider: option.id
         )

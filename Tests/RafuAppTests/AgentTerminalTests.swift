@@ -71,7 +71,6 @@ func agentTerminalSpecHasNoEnsembleCapability() throws {
     #expect(spec.environment[RafuConductorEnvironment.runDirectory] == nil)
     #expect(spec.environment["RAFU_ENSEMBLE_TOKEN"] == nil)
     #expect(spec.arguments == ["--model", "sonnet"])
-    #expect(spec.outputLogURL == nil)
     #expect(spec.agentProvider == .claudeCode)
     #expect(spec.resourceAttribution == "Claude Code (agent terminal)")
 }

@@ -17,78 +17,18 @@ struct SettingsCanvasTests {
         #expect(EditorCanvasRoute.resolve(Inputs(settingsVisible: true)) == .settings)
     }
 
-    /// Every canvas activator must leave exactly one canvas showing.
-    ///
-    /// UX-01 (the two Ensemble creation canvases) and UX-02 (Settings) were
-    /// built in parallel, so neither branch's activators cleared the other's
-    /// flags; the cross-clears were added when they merged. Each branch was
-    /// internally correct and the union was not — the failure mode is "the
-    /// wrong screen appears" with no error, because the route tests assert
-    /// the resolver's ordering rather than the invariant that keeps that
-    /// ordering unreachable. This walks the whole matrix so the next parallel
-    /// pair cannot reintroduce the gap.
     @MainActor
-    @Test("Every canvas activator leaves exactly one canvas visible")
-    func everyActivatorIsExclusive() {
-        let flagsSet: (WorkspaceSession) -> Int = { session in
-            [
-                session.conductorRunCanvasID != nil,
-                session.conductorGraphVisible,
-                session.ensembleStartCanvasVisible,
-                session.ensembleNewRunCanvasVisible,
-                session.settingsVisible,
-            ].filter { $0 }.count
-        }
-
-        let activators: [(String, (WorkspaceSession) -> Void)] = [
-            ("showConductorRunDetail", { $0.showConductorRunDetail("run-x") }),
-            ("showConductorGraph", { $0.showConductorGraph() }),
-            ("showEnsembleStart", { $0.showEnsembleStart() }),
-            ("showEnsembleNewRun", { $0.showEnsembleNewRun() }),
-            ("showSettings", { $0.showSettings() }),
-        ]
-
-        // From every starting canvas, into every other canvas. The session
-        // needs a descriptor: the Ensemble activators guard on an open
-        // workspace (C8-07), so a bare session makes them no-op and the
-        // matrix would pass vacuously.
-        for (fromName, from) in activators {
-            for (toName, to) in activators {
-                let session = WorkspaceSession()
-                session.descriptor = WorkspaceDescriptor(
-                    displayName: "scratch",
-                    location: .local(LocalWorkspaceReference(path: "/tmp/scratch")))
-                from(session)
-                to(session)
-                #expect(
-                    flagsSet(session) == 1,
-                    "\(fromName) then \(toName) left \(flagsSet(session)) canvases visible")
-            }
-        }
-    }
-
-    @MainActor
-    @Test("Settings, run detail, and graph activators are mutually exclusive")
-    func canvasMutualExclusion() {
+    @Test("Showing and closing Settings toggles only the Settings canvas")
+    func settingsActivatorIsExclusive() {
         let session = WorkspaceSession()
 
-        session.conductorRunCanvasID = "run-1"
-        session.conductorGraphVisible = true
         session.showSettings()
         #expect(session.settingsVisible)
-        #expect(session.conductorRunCanvasID == nil)
-        #expect(!session.conductorGraphVisible)
+        #expect(session.selectedAuxiliaryTab == .settings)
 
-        session.showConductorRunDetail("run-2")
+        session.closeSettings()
         #expect(!session.settingsVisible)
-        #expect(session.conductorRunCanvasID == "run-2")
-        #expect(!session.conductorGraphVisible)
-
-        session.showSettings()
-        session.showConductorGraph()
-        #expect(!session.settingsVisible)
-        #expect(session.conductorRunCanvasID == nil)
-        #expect(session.conductorGraphVisible)
+        #expect(session.selectedAuxiliaryTab == nil)
     }
 
     @Test("A selected document beats Settings")

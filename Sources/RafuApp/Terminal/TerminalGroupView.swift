@@ -40,8 +40,6 @@ nonisolated enum TerminalPanePresentation {
         switch kind {
         case .ordinaryShell: "Shell"
         case .directAgentTerminal(let provider): provider.displayName
-        case .ensembleRole: "Ensemble role"
-        case .ensembleCoordinator: "Ensemble coordinator"
         case .unavailableAgentTerminal: "Agent Terminal"
         case .unavailableEnsemble: "Ensemble"
         }
@@ -67,7 +65,7 @@ nonisolated enum TerminalPanePresentation {
             "Agent Terminal profiles are not saved in this version."
         case .unavailableEnsemble:
             "Ensemble terminal profiles are not saved in this version."
-        case .ordinaryShell, .directAgentTerminal, .ensembleRole, .ensembleCoordinator:
+        case .ordinaryShell, .directAgentTerminal:
             nil
         }
     }
