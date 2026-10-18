@@ -6,11 +6,11 @@ nonisolated enum CanvasCardPresentation {
     /// `exitCode` is the controller's reported code when the shell has quit.
     static func terminalState(status: TerminalPaneStatus, exitCode: Int32?) -> String {
         switch status {
-        case .live, .idle: "Running"
-        case .stopped: "Not running"
-        case .unavailable: "Unavailable"
+        case .live, .idle: return "Running"
+        case .stopped: return "Not running"
+        case .unavailable: return "Unavailable"
         case .exited:
-            if let exitCode { "Exited (\(exitCode))" } else { "Exited" }
+            return exitCode.map { "Exited (\($0))" } ?? "Exited"
         }
     }
 
@@ -47,10 +47,14 @@ nonisolated enum CanvasCardPresentation {
             let first = CanvasCardSummaryText.firstLine(of: text, limit: 60)
             if let tasks { return first.isEmpty ? "\(tasks) tasks" : "\(tasks) tasks · \(first)" }
             return first
-        case .file(let path), .image(let path): URL(fileURLWithPath: path).lastPathComponent
-        case .terminal: terminalTitle ?? ""
-        case .web(let destination): displayTitle(title: destination.address, content: content)
-        case .nativeApp(let bundleID): bundleID
+        case .file(let path), .image(let path):
+            return URL(fileURLWithPath: path).lastPathComponent
+        case .terminal:
+            return terminalTitle ?? ""
+        case .web(let destination):
+            return displayTitle(title: destination.address, content: content)
+        case .nativeApp(let bundleID):
+            return bundleID
         }
     }
 }

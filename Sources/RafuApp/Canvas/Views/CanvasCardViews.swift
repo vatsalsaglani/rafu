@@ -104,8 +104,8 @@ struct CanvasCardShell: View {
     /// start size and scales, so the PTY sees one size change on mouse-up.
     @ViewBuilder private var sizedBody: some View {
         if let frozen = frozenBodySize {
-            let width = card.rect.width
-            let height = max(1, card.rect.height - headerHeight - 1)
+            let width = CGFloat(card.rect.width)
+            let height = max(1, CGFloat(card.rect.height) - headerHeight - 1)
             cardBody
                 .frame(width: frozen.width, height: frozen.height)
                 .scaleEffect(
@@ -457,15 +457,16 @@ struct CanvasCardShell: View {
 
     private func updateMove(_ translation: CGSize) {
         let scale = board.viewport.scale
-        var dx = translation.width / scale
-        var dy = translation.height / scale
+        var dx = Double(translation.width) / scale
+        var dy = Double(translation.height) / scale
         let ids = Set(moveOrigins.keys)
         let frames = moveOrigins.values.map(\.cgRect)
         if let first = frames.first, !NSEvent.modifierFlags.contains(.command) {
             let union = frames.dropFirst().reduce(first) { $0.union($1) }
             let others = board.cards.filter { !ids.contains($0.id) }.map(\.rect.cgRect)
             let snap = CanvasSnapper.snap(
-                moving: union.offsetBy(dx: dx, dy: dy), others: others, scale: scale)
+                moving: union.offsetBy(dx: CGFloat(dx), dy: CGFloat(dy)), others: others,
+                scale: scale)
             dx += snap.dx
             dy += snap.dy
             snappedX = snap.snappedX
@@ -513,7 +514,8 @@ struct CanvasCardShell: View {
             switch card.content {
             case .terminal, .web:
                 frozenBodySize = CGSize(
-                    width: card.rect.width, height: card.rect.height - headerHeight - 1)
+                    width: CGFloat(card.rect.width),
+                    height: CGFloat(card.rect.height) - headerHeight - 1)
             default: break
             }
         }
@@ -521,7 +523,8 @@ struct CanvasCardShell: View {
         let scale = board.viewport.scale
         let outcome = CanvasLayoutMath.resize(
             start, edges: edges,
-            dx: value.translation.width / scale, dy: value.translation.height / scale,
+            dx: Double(value.translation.width) / scale,
+            dy: Double(value.translation.height) / scale,
             minimum: card.content.minimumSize,
             aspect: card.content.keepsAspect ? start.width / start.height : nil,
             allowsResistance: !reduceMotion)

@@ -123,4 +123,37 @@ struct CanvasSnappingTests {
                 == "5 cards · edited 2 h ago")
         #expect(CanvasCardSummaryText.libraryDetail(cardCount: 1, modified: nil) == "1 card")
     }
+
+    @Test("Fitting centres the bounds and never zooms in past the limit")
+    func fitting() {
+        let bounds = CGRect(x: 100, y: 50, width: 400, height: 200)
+        let fit = CanvasZoomMetrics.viewport(fitting: bounds, in: CGSize(width: 1_000, height: 700))
+        #expect(fit.scale == 1)
+        #expect(fit.x == 200 && fit.y == 200)
+        let large = CGRect(x: 0, y: 0, width: 4_600, height: 300)
+        let shrunk = CanvasZoomMetrics.viewport(
+            fitting: large, in: CGSize(width: 1_000, height: 700))
+        #expect(shrunk.scale == 920.0 / 4_600.0)
+        let tiny = CGRect(x: 0, y: 0, width: 50_000, height: 50_000)
+        #expect(
+            CanvasZoomMetrics.viewport(fitting: tiny, in: CGSize(width: 1_000, height: 700)).scale
+                == CanvasZoomMetrics.minimumScale)
+        #expect(
+            CanvasZoomMetrics.viewport(fitting: .zero, in: CGSize(width: 1_000, height: 700))
+                == CanvasViewport())
+    }
+
+    @Test("Scaling about a point keeps the board point under that point")
+    func anchoredScaling() {
+        let start = CanvasViewport(scale: 1, x: 30, y: -20)
+        let anchor = CGPoint(x: 200, y: 100)
+        let boardPoint = CGPoint(x: (200 - 30) / 1.0, y: (100 + 20) / 1.0)
+        let next = CanvasZoomMetrics.viewport(
+            scaling: start, to: 2, in: CGSize(width: 1_000, height: 700), anchor: anchor)
+        #expect(next.scale == 2)
+        #expect(boardPoint.x * 2 + next.x == 200 && boardPoint.y * 2 + next.y == 100)
+        let centred = CanvasZoomMetrics.viewport(
+            scaling: start, to: 2, in: CGSize(width: 1_000, height: 700))
+        #expect((500 - centred.x) / 2 == (500 - start.x) / 1)
+    }
 }
