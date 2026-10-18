@@ -51,7 +51,7 @@ nonisolated enum CanvasDiagramExportPlan {
     }
 
     /// The union of `rects` grown by `padding`; nil when empty.
-    static func bounds(of rects: [CanvasRect], padding: Double = padding) -> CGRect? {
+    static func bounds(of rects: [CanvasRect], padding: Double = Self.padding) -> CGRect? {
         guard let first = rects.first else { return nil }
         var union = first.cgRect
         for rect in rects.dropFirst() { union = union.union(rect.cgRect) }
