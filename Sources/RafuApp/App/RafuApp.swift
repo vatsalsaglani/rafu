@@ -19,7 +19,17 @@ struct RafuApplication: App {
         .commands {
             RafuAppCommands()
             CanvasNoteCommands()
+            WorkspacesWindowCommands()
         }
+
+        // Saved workspaces and recent folders (Window > Show All Workspaces,
+        // ⇧⌘1). The scene's automatic Window-menu item is removed so that
+        // command is the one menu path.
+        Window("Workspaces", id: WorkspacesWindow.id) {
+            WorkspacesWindowView()
+        }
+        .defaultSize(width: 560, height: 480)
+        .commandsRemoved()
 
         Settings {
             RafuSettingsView()

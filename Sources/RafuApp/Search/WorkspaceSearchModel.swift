@@ -40,10 +40,18 @@ final class WorkspaceSearchModel {
     }
 
     func search(in rootURL: URL) {
+        search(in: [WorkspaceSearchRoot(url: rootURL, label: nil)])
+    }
+
+    /// Searches every root in order (multi-folder workspaces). Search
+    /// history stays keyed by the first (primary) root. Roots are searched
+    /// one after another; once the match limit is reached the rest are
+    /// skipped and the result is marked truncated.
+    func search(in roots: [WorkspaceSearchRoot]) {
         searchTask?.cancel()
         replacementPreview = nil
         errorMessage = nil
-        guard !query.isEmpty else {
+        guard !query.isEmpty, let rootURL = roots.first?.url else {
             result = nil
             isSearching = false
             return
@@ -51,11 +59,20 @@ final class WorkspaceSearchModel {
         let rootPath = rootURL.standardizedFileURL.path
         historyStore.record(query: query, forRootPath: rootPath)
         recentQueries = historyStore.queries(forRootPath: rootPath)
-        let request = makeRequest(rootURL: rootURL)
+        let requests = roots.map { (request: makeRequest(rootURL: $0.url), label: $0.label) }
         isSearching = true
         searchTask = Task(name: "Search workspace") { [weak self, service] in
             do {
-                let result = try await service.search(request)
+                var parts: [WorkspaceSearchResult] = []
+                var total = 0
+                for entry in requests {
+                    guard total < entry.request.limits.maximumTotalMatches else { break }
+                    let part = try await service.search(entry.request)
+                    total += part.totalMatchCount
+                    parts.append(WorkspaceSearchMerge.labelled(part, label: entry.label))
+                }
+                let result = WorkspaceSearchMerge.merge(
+                    parts, skippedRoots: parts.count < requests.count)
                 try Task.checkCancellation()
                 self?.result = result
                 self?.isSearching = false
@@ -72,17 +89,35 @@ final class WorkspaceSearchModel {
     }
 
     func previewReplacements(in rootURL: URL) {
+        previewReplacements(in: [WorkspaceSearchRoot(url: rootURL, label: nil)])
+    }
+
+    /// Replacement preview across every root, labelled like `search(in:)`.
+    func previewReplacements(in roots: [WorkspaceSearchRoot]) {
         searchTask?.cancel()
         errorMessage = nil
-        guard !query.isEmpty else { return }
-        let request = makeRequest(rootURL: rootURL)
+        guard !query.isEmpty, !roots.isEmpty else { return }
+        let requests = roots.map { (request: makeRequest(rootURL: $0.url), label: $0.label) }
         let replacement = replacement
         isSearching = true
         searchTask = Task(name: "Preview workspace replacements") { [weak self, service] in
             do {
-                async let searchResult = service.search(request)
-                async let preview = service.previewReplacement(request, replacement: replacement)
-                let (result, replacementPreview) = try await (searchResult, preview)
+                var results: [WorkspaceSearchResult] = []
+                var previews: [WorkspaceReplacementPreview] = []
+                var total = 0
+                for entry in requests {
+                    guard total < entry.request.limits.maximumTotalMatches else { break }
+                    async let searchResult = service.search(entry.request)
+                    async let preview = service.previewReplacement(
+                        entry.request, replacement: replacement)
+                    let (part, partPreview) = try await (searchResult, preview)
+                    total += part.totalMatchCount
+                    results.append(WorkspaceSearchMerge.labelled(part, label: entry.label))
+                    previews.append(WorkspaceSearchMerge.labelled(partPreview, label: entry.label))
+                }
+                let skipped = results.count < requests.count
+                let result = WorkspaceSearchMerge.merge(results, skippedRoots: skipped)
+                let replacementPreview = WorkspaceSearchMerge.merge(previews, skippedRoots: skipped)
                 try Task.checkCancellation()
                 self?.result = result
                 self?.replacementPreview = replacementPreview

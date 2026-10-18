@@ -5,6 +5,9 @@ struct WorkspaceSidebarView: View {
     @Bindable var session: WorkspaceSession
     @State private var renameNode: WorkspaceFileNode?
     @State private var renameText = ""
+    /// Root sections the user collapsed (multi-folder workspaces only).
+    /// Ephemeral window state; every root starts expanded.
+    @State private var collapsedRootIDs: Set<UUID> = []
 
     @Environment(\.rafuTheme) private var theme
 
@@ -26,15 +29,28 @@ struct WorkspaceSidebarView: View {
                 } else if session.descriptor == nil {
                     Text("Open a folder to begin")
                         .foregroundStyle(theme.palette.textSecondary)
-                } else {
-                    ForEach(session.loadedChildren[""] ?? [], id: \.id) { node in
-                        WorkspaceFileTreeItem(
-                            session: session,
-                            node: node,
-                            renameNode: $renameNode,
-                            renameText: $renameText
-                        )
+                } else if session.hasMultipleRoots, let primary = session.primaryRoot {
+                    // More than one folder: each root is a top-level
+                    // disclosure section, primary first. One folder looks
+                    // exactly as before.
+                    WorkspaceRootSection(
+                        session: session, root: primary, tree: nil,
+                        isExpanded: rootExpandedBinding(primary.id)
+                    ) {
+                        primaryRootItems
                     }
+                    ForEach(session.additionalRootTrees) { tree in
+                        WorkspaceRootSection(
+                            session: session, root: tree.root, tree: tree,
+                            isExpanded: rootExpandedBinding(tree.id)
+                        ) {
+                            WorkspaceRootTreeItems(
+                                session: session, tree: tree, renameNode: $renameNode,
+                                renameText: $renameText)
+                        }
+                    }
+                } else {
+                    primaryRootItems
                 }
             }
             .listStyle(.plain)
@@ -104,6 +120,13 @@ struct WorkspaceSidebarView: View {
             }
             .buttonStyle(RafuIconButtonStyle(size: 24))
             .help("New Folder")
+            Button("Add Folder to Workspace", systemImage: "plus.rectangle.on.folder") {
+                session.requestAddFolder()
+            }
+            .buttonStyle(RafuIconButtonStyle(size: 24))
+            .help("Add Folder to Workspace…")
+            .accessibilityLabel("Add Folder to Workspace")
+            .disabled(session.rootURL == nil)
         }
         .padding(.horizontal, 10)
         // The header sits directly below the titlebar row.
@@ -117,6 +140,31 @@ struct WorkspaceSidebarView: View {
 
     private var workspaceTitle: String {
         session.descriptor?.displayName ?? "Files"
+    }
+
+    @ViewBuilder
+    private var primaryRootItems: some View {
+        ForEach(session.loadedChildren[""] ?? [], id: \.id) { node in
+            WorkspaceFileTreeItem(
+                session: session,
+                node: node,
+                renameNode: $renameNode,
+                renameText: $renameText
+            )
+        }
+    }
+
+    private func rootExpandedBinding(_ id: UUID) -> Binding<Bool> {
+        Binding(
+            get: { !collapsedRootIDs.contains(id) },
+            set: { isExpanded in
+                if isExpanded {
+                    collapsedRootIDs.remove(id)
+                } else {
+                    collapsedRootIDs.insert(id)
+                }
+            }
+        )
     }
 
     private var renameBinding: Binding<Bool> {
@@ -145,6 +193,25 @@ struct WorkspaceFileTreeItem: View {
     let node: WorkspaceFileNode
     @Binding var renameNode: WorkspaceFileNode?
     @Binding var renameText: String
+    /// The additional root this row belongs to; nil for the primary root,
+    /// whose tree state lives on the session.
+    let rootTree: WorkspaceRootTree?
+
+    /// Explicit init: the private `@State` below would otherwise make the
+    /// synthesized memberwise init private, and tests build rows directly.
+    init(
+        session: WorkspaceSession,
+        node: WorkspaceFileNode,
+        renameNode: Binding<WorkspaceFileNode?>,
+        renameText: Binding<String>,
+        rootTree: WorkspaceRootTree? = nil
+    ) {
+        self.session = session
+        self.node = node
+        self._renameNode = renameNode
+        self._renameText = renameText
+        self.rootTree = rootTree
+    }
 
     var body: some View {
         if node.isDirectory {
@@ -156,7 +223,12 @@ struct WorkspaceFileTreeItem: View {
             .listRowInsets(Self.rowInsets)
             .listRowSeparator(.hidden)
             .onChange(of: expandedBinding.wrappedValue, initial: true) { _, isExpanded in
-                if isExpanded { session.loadChildrenIfNeeded(node.relativePath) }
+                guard isExpanded else { return }
+                if let rootTree {
+                    rootTree.loadChildrenIfNeeded(node.relativePath)
+                } else {
+                    session.loadChildrenIfNeeded(node.relativePath)
+                }
             }
         } else {
             row
@@ -171,9 +243,14 @@ struct WorkspaceFileTreeItem: View {
     /// inside the pane.
     private static let rowInsets = EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 12)
 
+    private var loadedChildren: [WorkspaceFileNode]? {
+        if let rootTree { return rootTree.loadedChildren[node.relativePath] }
+        return session.loadedChildren[node.relativePath]
+    }
+
     @ViewBuilder
     private var directoryContent: some View {
-        if let children = session.loadedChildren[node.relativePath] {
+        if let children = loadedChildren {
             if children.isEmpty {
                 Text("No items")
                     .font(.caption)
@@ -186,7 +263,8 @@ struct WorkspaceFileTreeItem: View {
                         session: session,
                         node: child,
                         renameNode: $renameNode,
-                        renameText: $renameText
+                        renameText: $renameText,
+                        rootTree: rootTree
                     )
                 }
             }
@@ -202,7 +280,13 @@ struct WorkspaceFileTreeItem: View {
     }
 
     private var expandedBinding: Binding<Bool> {
-        Binding(
+        if let rootTree {
+            return Binding(
+                get: { rootTree.expandedDirectories.contains(node.relativePath) },
+                set: { rootTree.setExpanded($0, node.relativePath) }
+            )
+        }
+        return Binding(
             get: { session.expandedDirectories.contains(node.relativePath) },
             set: { isExpanded in
                 if isExpanded {
@@ -262,7 +346,7 @@ struct WorkspaceFileTreeItem: View {
             node: node,
             isSelected: node.url.path == session.selectedTreePath,
             isDropTarget: isDropTargeted,
-            gitBadge: session.gitTreeBadges[node.relativePath]
+            gitBadge: session.gitTreeBadge(forRelativePath: node.relativePath, rootID: rootTree?.id)
         )
         .contentShape(.rect)
     }

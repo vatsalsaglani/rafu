@@ -25,6 +25,8 @@ struct WorkspaceUtilityPanelView: View {
             SourceControlPanelView(session: session)
         case .terminals:
             WorkspaceTerminalsPanelView(session: session)
+        case .history:
+            AgentHistoryPanelView(session: session)
         }
     }
 }
@@ -53,6 +55,7 @@ struct WorkspaceUtilityRail: View {
             railButton(.search)
             railButton(.sourceControl)
             railButton(.terminals)
+            railButton(.history)
             Spacer()
         }
         // The rail starts below the titlebar row (`WindowTitlebarRow`).
@@ -364,14 +367,16 @@ private struct WorkspaceSearchContent: View {
         )
     }
 
+    /// Every folder of the workspace, primary first; results are labelled
+    /// by folder when there is more than one.
     private func performSearch() {
-        guard let rootURL = session.rootURL else { return }
-        search.search(in: rootURL)
+        guard session.rootURL != nil else { return }
+        search.search(in: session.workspaceSearchRoots)
     }
 
     private func previewReplacements() {
-        guard let rootURL = session.rootURL else { return }
-        search.previewReplacements(in: rootURL)
+        guard session.rootURL != nil else { return }
+        search.previewReplacements(in: session.workspaceSearchRoots)
     }
 
     private func optionBinding(_ option: TextSearchOptions) -> Binding<Bool> {

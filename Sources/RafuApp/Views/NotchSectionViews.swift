@@ -362,12 +362,13 @@ struct CompanionNowPlayingSectionView: View {
                     ? context.date.timeIntervalSinceReferenceDate : 0
                 for layer in 0..<3 {
                     var path = Path()
-                    for x in stride(from: 0.0, through: size.width, by: 2) {
-                        let envelope = sin(x / size.width * .pi)
-                        let swing = player.playing ? 9.0 : 2.0
-                        let y =
-                            size.height / 2 + sin(x / 18 + time * 3 + Double(layer)) * envelope
-                            * swing
+                    let width = Double(size.width)
+                    let middle = Double(size.height) / 2
+                    for x in stride(from: 0.0, through: width, by: 2) {
+                        let envelope: Double = sin(x / width * .pi)
+                        let swing: Double = player.playing ? 9.0 : 2.0
+                        let phase: Double = x / 18 + time * 3 + Double(layer)
+                        let y: Double = middle + sin(phase) * envelope * swing
                         if x == 0 {
                             path.move(to: CGPoint(x: x, y: y))
                         } else {

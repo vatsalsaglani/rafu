@@ -288,11 +288,10 @@ final class NotchNowPlaying {
                 let token = distributed.addObserver(
                     forName: Notification.Name(name), object: nil, queue: .main
                 ) { [weak self] notification in
-                    MainActor.assumeIsolated {
-                        self?.accept(
-                            NowPlayingTrack.fromNotification(notification.userInfo),
-                            from: player)
-                    }
+                    // Read the Sendable track before the hop, so the
+                    // Notification itself never crosses into the main actor.
+                    let track = NowPlayingTrack.fromNotification(notification.userInfo)
+                    MainActor.assumeIsolated { self?.accept(track, from: player) }
                 }
                 observers.append((distributed, token))
             }

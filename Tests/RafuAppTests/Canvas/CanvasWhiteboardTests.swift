@@ -118,8 +118,8 @@ struct CanvasWhiteboardTests {
                 .validate()
         }
         let tooMany = (0...CanvasLimits.strokePoints).map { _ in [0, 0] }
-        let json = try JSONSerialization.data(
-            withJSONObject: ["kind": "freehand", "points": tooMany])
+        let object: [String: Any] = ["kind": "freehand", "points": tooMany]
+        let json = try JSONSerialization.data(withJSONObject: object)
         #expect(throws: CanvasError.invalidDocument) {
             try JSONDecoder().decode(CanvasStroke.self, from: json)
         }

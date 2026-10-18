@@ -40,6 +40,8 @@ struct RafuAppCommands: Commands {
             }
             .keyboardShortcut("o", modifiers: .command)
             .disabled(workspaceSession == nil)
+
+            WorkspaceOpenCommandItems(session: workspaceSession)
         }
 
         CommandGroup(replacing: .saveItem) {
@@ -50,6 +52,9 @@ struct RafuAppCommands: Commands {
             Button("Save Terminal Group As…") { performSaveTerminalGroupAs() }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
                 .disabled(disabled(.saveAs))
+
+            Divider()
+            WorkspaceSaveCommandItems(session: workspaceSession)
         }
 
         // Replaces the default File > Print… so ⌘P owns Go to File.
@@ -143,6 +148,13 @@ struct RafuAppCommands: Commands {
                 workspaceSession?.toggleUtilityPane(.sourceControl)
             }
             .keyboardShortcut("g", modifiers: [.command, .shift])
+
+            // Agent History (X12): ⌘⇧H, next to ⌘⇧F Search and ⌘⇧G Source Control.
+            Button("Show Agent History") {
+                workspaceSession?.toggleUtilityPane(.history)
+            }
+            .keyboardShortcut("h", modifiers: [.command, .shift])
+            .disabled(workspaceSession?.rootURL == nil)
 
             Divider()
 
