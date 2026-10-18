@@ -31,6 +31,8 @@ struct WorkspaceStatusBar: View {
 
             Spacer()
 
+            agentActivity
+
             GitHubAccountStatusView(session: session)
 
             if showsProcessMemory, let sample = memory.sample {
@@ -77,7 +79,7 @@ struct WorkspaceStatusBar: View {
             .accessibilityLabel("Open Settings")
             .help("Open Settings")
         }
-        .font(.caption)
+        .font(.system(size: 11))
         .foregroundStyle(theme.palette.textSecondary)
         .padding(.horizontal, 12)
         .frame(height: RafuMetrics.statusBarHeight)
@@ -93,6 +95,38 @@ struct WorkspaceStatusBar: View {
                     return
                 }
             }
+        }
+    }
+
+    /// Running agent sessions, with their vendor marks. Hidden when none run.
+    /// The count is words, not colour; the button opens the Terminals panel.
+    @ViewBuilder
+    private var agentActivity: some View {
+        let summary = AgentActivitySummary(sessions: session.terminal.sessions)
+        if summary.isActive {
+            Button {
+                session.navigatorMode = .terminals
+            } label: {
+                HStack(spacing: 5) {
+                    HStack(spacing: -2) {
+                        ForEach(summary.providers.prefix(3), id: \.self) { cli in
+                            AgentIconView(cli: cli, size: 13)
+                        }
+                    }
+                    .accessibilityHidden(true)
+                    Text(summary.label)
+                        .lineLimit(1)
+                    if summary.attentionLabel != nil {
+                        Image(systemName: "bell.fill")
+                            .font(.system(size: 10))
+                            .accessibilityHidden(true)
+                    }
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help("\(summary.accessibilityLabel). Show Terminals.")
+            .accessibilityLabel(summary.accessibilityLabel)
         }
     }
 

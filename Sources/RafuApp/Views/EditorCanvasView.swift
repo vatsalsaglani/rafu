@@ -1228,8 +1228,10 @@ private struct EditorGroupTabBar: View {
                     session.requestNewCanvas()
                 } label: {
                     Image(systemName: "plus.rectangle.on.rectangle")
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(theme.palette.textSecondary)
                         .frame(width: 28, height: 28)
+                        .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .fixedSize()
@@ -2224,7 +2226,7 @@ private struct EditorTabItem: View {
                     session.selectEditorTab(tabID, in: groupID)
                 } label: {
                     HStack(spacing: 6) {
-                        FileIconView(icon: icon, size: 11)
+                        FileIconView(icon: icon, size: 13)
                             .fixedSize()
                         Text(document.displayName)
                             .lineLimit(1)
@@ -2345,13 +2347,13 @@ private struct EditorTerminalTabItem: View {
                     HStack(spacing: 6) {
                         // An agent terminal shows its VENDOR mark; the generic
                         // terminal glyph remains the login-shell fallback.
-                        if let provider = controller.agentProvider {
-                            FileIconView(icon: ConductorCLIIcons.icon(for: provider), size: 12)
+                        if let provider = controller.resolvedAgentProvider {
+                            AgentIconView(cli: provider, size: 13)
                                 .fixedSize()
                                 .accessibilityHidden(true)
                         } else {
                             Image(systemName: "terminal")
-                                .font(.system(size: 11, weight: .medium))
+                                .font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .fixedSize()
                                 .accessibilityHidden(true)

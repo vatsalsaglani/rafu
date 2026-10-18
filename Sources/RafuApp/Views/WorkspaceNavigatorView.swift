@@ -31,50 +31,6 @@ struct WorkspaceUtilityPanelView: View {
     }
 }
 
-/// The window's titlebar row: the standard close / minimise / zoom buttons
-/// (always visible outside full screen, drawn by AppKit in the reserved
-/// leading space) followed by the one sidebar toggle as a plain toolbar icon.
-/// The rest of the row is a window-move surface. In full screen the system
-/// owns the (auto-hidden) buttons, so no space is reserved.
-struct WindowTitlebarRow: View {
-    @Bindable var session: WorkspaceSession
-    let isFullScreen: Bool
-
-    @Environment(\.rafuTheme) private var theme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    /// Height of the standard titlebar, so the system buttons and the toggle
-    /// share one centre line.
-    nonisolated static let height: CGFloat = 28
-    /// Width of the zone the system window buttons occupy (x ≈ 12…70).
-    nonisolated static let trafficLightSpan: CGFloat = 76
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Color.clear
-                .frame(width: isFullScreen ? 8 : Self.trafficLightSpan, height: Self.height)
-            Button("Toggle Sidebar", systemImage: "sidebar.left") {
-                if let animation = RafuMotion.resolve(
-                    RafuMotion.panelToggle, reduceMotion: reduceMotion)
-                {
-                    withAnimation(animation) { session.toggleSidebar() }
-                } else {
-                    session.toggleSidebar()
-                }
-            }
-            .buttonStyle(RafuIconButtonStyle(size: 24, iconSize: 13))
-            .help(session.isSidebarCollapsed ? "Show Sidebar (⌘B)" : "Hide Sidebar (⌘B)")
-            .accessibilityLabel("Toggle Sidebar")
-            .accessibilityValue(session.isSidebarCollapsed ? "Hidden" : "Shown")
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: Self.height)
-        .background(WindowDragHandle())
-        .background(theme.palette.sidebarBackground)
-    }
-}
-
 /// Slim column pinned to the window's LEFT edge, mirroring
 /// `WorkspaceUtilityRail` on the right. It is a window-move surface; the
 /// sidebar toggle lives in `WindowTitlebarRow` above it.

@@ -112,6 +112,36 @@ nonisolated enum AgentIdentityMatcher {
     }
 }
 
+/// Surfaces that list terminals ask these properties, not `agentProvider`
+/// alone: `agentProvider` is set only for a terminal Rafu launched as an
+/// agent. A user who types `claude` in a login shell is just as much an
+/// agent session, and its terminal title ("✳ claude") says so.
+extension WorkspaceTerminalController {
+    var resolvedAgentProvider: ConductorCLIID? {
+        agentProvider ?? ConductorCLIID.detect(command: nil, title: displayName)
+    }
+}
+
+extension AgentActivitySummary {
+    /// Counts the agent sessions among `sessions`: a terminal Rafu launched
+    /// as an agent, or one whose title names an agent CLI, with a live process.
+    init(sessions: [WorkspaceTerminalController]) {
+        self.init(
+            entries: sessions.map { controller in
+                Entry(
+                    provider: controller.resolvedAgentProvider,
+                    isLive: controller.hasLiveProcess,
+                    needsAttention: TerminalSessionPresentation.needsAttention(controller.status))
+            })
+    }
+}
+
+extension TerminalSessionRow {
+    nonisolated var resolvedAgentProvider: ConductorCLIID? {
+        agentProvider ?? ConductorCLIID.detect(command: nil, title: displayName)
+    }
+}
+
 /// The vendor mark for one agent CLI, drawn from `ConductorCLIIcons` (the
 /// template-tinted bundled SVG with a system-symbol fallback). SwiftUI views
 /// and popovers only: inside an `NSMenu` the SVG renders 1 x 1 pt, so menu
