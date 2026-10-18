@@ -177,8 +177,9 @@ nonisolated struct UsageRegistryReader: Sendable {
                     let refreshed = await UsageCredentialStore.shared
                         .refreshClaudeKeychainCredential(
                             now: now,
-                            keychainReader: UsageOAuthConnector
-                                .productionClaudeKeychainCredential)
+                            keychainReader: {
+                                UsageOAuthConnector.productionClaudeKeychainCredential()
+                            })
                 {
                     credentials[id] = refreshed
                 }

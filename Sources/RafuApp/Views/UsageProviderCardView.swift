@@ -195,7 +195,8 @@ private struct UsageCardBody: View {
                 UsagePaceLine(text: summary.text, warning: summary.warning, compact: true, ink: ink)
                     .help(
                         summary.text
-                            + ". Estimated from the window's average so far; model limits are separate.")
+                            + ". Estimated from the window's average so far; model limits are separate."
+                    )
             }
             if !compact {
                 if !rings.isEmpty {
@@ -309,11 +310,9 @@ private struct UsageRingCell: View {
             if !compact {
                 UsagePaceLine(text: pace.note, warning: pace.warning, compact: false, ink: ink)
                 if let hourly = pace.hourlyPercent {
-                    Text(
-                        "Average \(hourly.formatted(.number.precision(.fractionLength(0...2))))% of this limit per hour"
-                    )
-                    .font(.caption2)
-                    .foregroundStyle(ink.secondary)
+                    Text(UsageWindowPresentation.hourlyAverageText(hourly))
+                        .font(.caption2)
+                        .foregroundStyle(ink.secondary)
                 }
             }
         }

@@ -247,7 +247,18 @@ nonisolated enum UsageWindowPresentation {
         guard let reset = window.resetsAt else {
             return usedPercent(window) == nil ? "Not reported" : "Reset unknown"
         }
-        return reset > now ? "↻ " + UsagePace.durationLabel(reset.timeIntervalSince(now)) : "Reset due"
+        return reset > now
+            ? "↻ " + UsagePace.durationLabel(reset.timeIntervalSince(now)) : "Reset due"
+    }
+
+    /// `"Average 4.25% of this limit per hour"` — at most two decimals, no
+    /// trailing zeros, independent of the locale.
+    static func hourlyAverageText(_ hourly: Double) -> String {
+        guard hourly.isFinite else { return "Average not available" }
+        var number = String(format: "%.2f", (hourly * 100).rounded() / 100)
+        while number.hasSuffix("0"), number.contains(".") { number.removeLast() }
+        if number.hasSuffix(".") { number.removeLast() }
+        return "Average \(number)% of this limit per hour"
     }
 
     /// `"Just updated"` under a minute, then `"5m ago"`, `"2h 3m ago"`.

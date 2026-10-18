@@ -52,7 +52,8 @@ private struct UsageDisplayModeSection: View {
                     selection: Binding(
                         get: { companion.usageDisplayMode },
                         set: { companion.setUsageDisplayMode($0) }),
-                    title: { $0.title })
+                    title: { $0.title }
+                )
                 .accessibilityLabel("Rings show used or remaining usage")
             }
         } header: {

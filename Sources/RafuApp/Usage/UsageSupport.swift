@@ -42,8 +42,9 @@ nonisolated enum UsageFormat {
 /// `ISO8601DateFormatter` configuration rejects outright).
 nonisolated enum UsageDateParsing {
     static func parseISO8601Fractional(_ string: String) -> Date? {
-        if let date = Self.fractionalFormatter.date(from: string) ?? Self.formatter.date(
-            from: string)
+        if let date = Self.fractionalFormatter.date(from: string)
+            ?? Self.formatter.date(
+                from: string)
         {
             return date
         }

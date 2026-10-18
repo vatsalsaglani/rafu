@@ -17,20 +17,6 @@ struct UsageCardInk {
     /// grouped `Form` row in Settings).
     let cardBackground: Color?
 
-    init(
-        primary: Color, secondary: Color, muted: Color, track: Color, arc: Color,
-        warning: Color, critical: Color, cardBackground: Color?
-    ) {
-        self.primary = primary
-        self.secondary = secondary
-        self.muted = muted
-        self.track = track
-        self.arc = arc
-        self.warning = warning
-        self.critical = critical
-        self.cardBackground = cardBackground
-    }
-
     /// The notch panel is always dark, so light themes use white ink there
     /// (`NotchInk`) and a light track instead of the light theme's border.
     static func notch(theme: RafuTheme) -> UsageCardInk {
@@ -74,8 +60,7 @@ struct UsageRing: View {
     let ink: UsageCardInk
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    init(percent: Double?, level: UsageRingLevel, size: CGFloat, label: String, ink: UsageCardInk)
-    {
+    init(percent: Double?, level: UsageRingLevel, size: CGFloat, label: String, ink: UsageCardInk) {
         self.percent = percent
         self.level = level
         self.size = size

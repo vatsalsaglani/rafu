@@ -129,8 +129,9 @@ nonisolated struct ClaudeOAuthStrategy: UsageFetchStrategy {
                     windowMinutes: weeklyWindowMinutes))
         }
 
-        for (model, window) in [("Opus", response.sevenDayOpus), ("Sonnet", response.sevenDaySonnet)]
-        {
+        for (model, window) in [
+            ("Opus", response.sevenDayOpus), ("Sonnet", response.sevenDaySonnet),
+        ] {
             guard let window else { continue }
             append(
                 model: model, identity: nil, percent: window.utilization,
