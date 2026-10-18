@@ -101,10 +101,13 @@ struct MultiFolderWorkspaceTests {
         let libID = try #require(session.roots.last?.id)
 
         session.openFile(
-            WorkspaceFileMatch(rootID: libID, relativePath: "notes.txt", displayPath: "lib/notes.txt"))
+            WorkspaceFileMatch(
+                rootID: libID, relativePath: "notes.txt", displayPath: "lib/notes.txt"))
 
         let document = try #require(session.selectedDocument)
-        #expect(document.url.standardizedFileURL == fixture.lib.appending(path: "notes.txt").standardizedFileURL)
+        #expect(
+            document.url.standardizedFileURL
+                == fixture.lib.appending(path: "notes.txt").standardizedFileURL)
     }
 
     @Test("Workspace files are recognized by extension and get safe names")
@@ -163,7 +166,9 @@ struct MultiFolderValueTests {
     @Test("One root keeps its result unchanged; skipped roots mark truncation")
     func singleRootAndSkipped() {
         let single = result("a.swift", matches: 1)
-        #expect(WorkspaceSearchMerge.merge([WorkspaceSearchMerge.labelled(single, label: nil)]) == single)
+        #expect(
+            WorkspaceSearchMerge.merge([WorkspaceSearchMerge.labelled(single, label: nil)])
+                == single)
         #expect(WorkspaceSearchMerge.merge([single], skippedRoots: true).isTruncated)
     }
 
