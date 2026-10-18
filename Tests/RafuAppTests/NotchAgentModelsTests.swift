@@ -186,3 +186,39 @@ func mascotSVGAssetsExist() throws {
         }
     }
 }
+
+@Test(
+    "Resources/Mascot: each SVG is the 512-point thread sprite and stays in step with the geometry")
+func mascotSVGsMatchGeometry() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .appending(path: "Resources/Mascot")
+    let loop = RafuMascotGeometry.loopCenter
+    for mood in RafuMascotMood.allCases {
+        for still in [false, true] {
+            let file = root.appending(path: mood.assetName(still: still) + ".svg")
+            let text = try String(contentsOf: file, encoding: .utf8)
+            #expect(text.contains(#"viewBox="0 0 512 512""#))
+            #expect(text.contains("<title") && text.contains("<desc"))
+            // The silhouette starts where the native path starts.
+            #expect(text.contains(#"<path id="silhouette" d="M256 150 "#))
+            if !still {
+                // Animated variants stop for Reduce Motion and turn the loop
+                // around the same centre as the native view.
+                #expect(text.contains("prefers-reduced-motion: reduce"))
+                #expect(text.contains("transform-origin: \(Int(loop.x))px \(Int(loop.y))px"))
+            }
+        }
+    }
+}
+
+@Test("RafuMascotGeometry: needs-you eyes are widest, working eyes look down")
+func mascotEyePoses() {
+    let idle = RafuMascotGeometry.eyePose(for: .idle)
+    let working = RafuMascotGeometry.eyePose(for: .working)
+    let needsYou = RafuMascotGeometry.eyePose(for: .needsYou)
+    #expect(needsYou.width > idle.width && needsYou.height > idle.height)
+    #expect(working.centerY > idle.centerY)
+    #expect(working.height < idle.height)
+    #expect(RafuMascotGeometry.eyePose(for: .replyReady) == idle)
+}

@@ -200,8 +200,47 @@ What the code now has:
   titlebar, and Ensemble terminal nodes each keep an output-based fallback when
   no hook session matches.
 
-Not verified: the contents of `Resources/Mascot/*.svg` (not read), and which
-older strip, wing, and peek types still exist.
+Not verified: which older strip, wing, and peek types still exist.
+
+### Mascot: the thread sprite (2026-10-18)
+
+Last verified: Swift 6.2 Linux syntax, format and stub type checks, and
+cairosvg renders of the SVGs, 2026-10-18. Not yet built or seen on macOS.
+
+The yarn ball with a needle is replaced by a thread sprite: a small, round,
+soft body whose outline is one gold thread (a rim stroke and a stitched seam
+inside it), a thin antenna that ends in a thread loop like the eye of a
+needle, big dark glossy eyes with white catch-lights, a small smile, blush and
+two tiny feet.
+
+- Design source: `Resources/Mascot/rafu-{idle,working,needs-you,reply-ready}{,-still}.svg`,
+  512 × 512. The animated variants use CSS keyframes and stop under
+  `prefers-reduced-motion`; with no animation they show the still pose. The
+  still variants contain no `@keyframes` (a test checks this). Colours are CSS
+  variables (`--rafu-body-light`, `--rafu-body`, `--rafu-body-shade`,
+  `--rafu-rim`, `--rafu-thread`, `--rafu-blush`) with Indigo defaults.
+- Native rendering: `NotchMascotGeometry.swift` holds every path in the same
+  512-point space; `NotchMascotView.swift` draws it. Keep the numbers in step.
+  A test checks the shared silhouette start, the 512 view box and the loop
+  pivot in the animated SVGs.
+- Theme: the body gradient is the theme accent (lifted toward white in light
+  themes, because the notch is always black and light-theme accents are made
+  for paper). The rim, antenna, trail and sparkles are lighter accent tones,
+  and the blush mixes the accent with the `error` token. Only the eye and
+  mouth ink and the catch-lights are fixed colours. Increase Contrast replaces
+  the soft rim with a solid outline in the light end of the theme.
+- States (still pose / motion): idle — smile / slow breathing (about 1.5 %),
+  antenna sway, a blink every other breath, a glance now and then. Working —
+  eyes lower and look at the work, antenna leans −6° / antenna bobs, a short
+  thread trail circles the loop. Needs you — wide eyes, small open mouth, a
+  bead fills the loop / a small hop and a bead pulse every 2.8 s. Reply ready
+  — `^ ^` eyes, open smile, two sparkles at the loop / one bounce per reply
+  (`MascotBounceLedger`), then a sparse twinkle.
+- Motion is one `.task` per mood of explicit `withAnimation` steps and
+  `Task.sleep`; no timer. Hiding the view, a mood change or Reduce Motion
+  cancels it, and the view returns to the still pose.
+- Preview the SVGs without a browser: `cairosvg` does not resolve CSS `var()`,
+  so replace each `var(--name, #hex)` with its fallback before you render.
 
 ## Why it matters
 
