@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-enum MarkdownPresentationMode: String, CaseIterable, Codable, Sendable {
+nonisolated enum MarkdownPresentationMode: String, CaseIterable, Codable, Sendable {
     case edit
     case preview
     case split

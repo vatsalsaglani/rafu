@@ -298,7 +298,7 @@ struct RafuWorkbenchStyleContractTests {
         let tail = source[contract.lowerBound...]
         let end = try #require(tail.range(of: "extension RafuThemePalette"))
         let resolverSource = String(tail[..<end.lowerBound])
-        #expect(resolverSource.contains("case editorGroup(isFocused: Bool)"))
+        #expect(resolverSource.contains("case editorGroup(isFocused: Bool,"))
         #expect(resolverSource.contains("case managerRow(isCurrent: Bool, needsAttention: Bool)"))
         #expect(!resolverSource.contains("status:"))
     }

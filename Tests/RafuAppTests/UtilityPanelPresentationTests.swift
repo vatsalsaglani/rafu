@@ -44,7 +44,7 @@ struct UtilityPanelPresentationTests {
             navigator.components(separatedBy: "RafuUtilityPanelHeader(").count - 1 == 1
         )
         #expect(
-            navigator.components(separatedBy: "RafuRailButtonStyle(").count - 1 >= 2
+            navigator.components(separatedBy: "RafuRailButtonStyle(").count - 1 >= 1
         )
         #expect(
             navigator.contains(

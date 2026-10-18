@@ -442,7 +442,7 @@ private struct WorkspaceSearchContent: View {
         var before = AttributedString(snippet.prefix)
         before.foregroundColor = theme.palette.textSecondary
         var hit = AttributedString(snippet.match)
-        hit.font = .caption.monospaced().bold()
+        hit.font = Font.caption.monospaced().bold()
         hit.foregroundColor = theme.palette.textPrimary
         hit.backgroundColor = Color(nsColor: theme.editorFindMatchBackgroundColor)
         var after = AttributedString(snippet.suffix)

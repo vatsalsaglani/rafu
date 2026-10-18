@@ -2823,21 +2823,25 @@ private struct DocumentFindBar: View {
                 Button("Next Match", systemImage: "chevron.right") { state.findNext() }
                     .buttonStyle(RafuIconButtonStyle(size: 22))
                     .help("Next Match")
-                RafuOptionToggle(
-                    glyph: .text("Aa"), label: "Match Case",
-                    isOn: optionBinding(.caseSensitive))
-                RafuOptionToggle(
-                    glyph: .text("ab", underlined: true), label: "Whole Word",
-                    isOn: optionBinding(.wholeWord))
-                RafuOptionToggle(
-                    glyph: .text(".*", monospaced: true), label: "Regular Expression",
-                    isOn: optionBinding(.regularExpression))
-                RafuOptionToggle(
-                    glyph: .symbol("selection.pin.in.out"), label: "Find in Selection",
-                    isOn: Binding(
-                        get: { state.isLimitedToSelection },
-                        set: { state.setLimitedToSelection($0) }
-                    ))
+                // A `ViewBuilder` block holds at most ten children, so the
+                // option toggles are grouped. `Group` adds no layout of its own.
+                Group {
+                    RafuOptionToggle(
+                        glyph: .text("Aa"), label: "Match Case",
+                        isOn: optionBinding(.caseSensitive))
+                    RafuOptionToggle(
+                        glyph: .text("ab", underlined: true), label: "Whole Word",
+                        isOn: optionBinding(.wholeWord))
+                    RafuOptionToggle(
+                        glyph: .text(".*", monospaced: true), label: "Regular Expression",
+                        isOn: optionBinding(.regularExpression))
+                    RafuOptionToggle(
+                        glyph: .symbol("selection.pin.in.out"), label: "Find in Selection",
+                        isOn: Binding(
+                            get: { state.isLimitedToSelection },
+                            set: { state.setLimitedToSelection($0) }
+                        ))
+                }
                 Spacer(minLength: 0)
                 Button("Done", action: close)
                     .buttonStyle(RafuSecondaryButtonStyle(compact: true))
