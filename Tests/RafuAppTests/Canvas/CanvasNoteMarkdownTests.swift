@@ -271,7 +271,8 @@ struct CanvasNoteMarkdownTests {
 
     @Test("Plain text drops markers and keeps link labels")
     func plainText() {
-        #expect(CanvasNoteMarkdown.plainText("**bold** and `code` and *em*") == "bold and code and em")
+        #expect(
+            CanvasNoteMarkdown.plainText("**bold** and `code` and *em*") == "bold and code and em")
         #expect(CanvasNoteMarkdown.plainText("see [docs](a/b.md) ![alt](x.png)") == "see docs alt")
         #expect(CanvasNoteMarkdown.plainText("snake_case stays") == "snake_case stays")
     }

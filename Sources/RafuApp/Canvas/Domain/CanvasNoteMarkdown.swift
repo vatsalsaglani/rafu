@@ -210,7 +210,8 @@ nonisolated enum CanvasNoteMarkdown {
         return tasks(in: text, lines: all, roles: roles)
     }
 
-    private static func tasks(in text: [UInt16], lines: [Line], roles: [FenceRole]) -> [TaskMarker] {
+    private static func tasks(in text: [UInt16], lines: [Line], roles: [FenceRole]) -> [TaskMarker]
+    {
         var result: [TaskMarker] = []
         for (index, line) in lines.enumerated() where roles[index] == .none {
             guard let found = taskMarker(text, line) else { continue }
@@ -222,7 +223,8 @@ nonisolated enum CanvasNoteMarkdown {
         return result
     }
 
-    private static func taskMarker(_ text: [UInt16], _ line: Line) -> (offset: Int, checked: Bool)? {
+    private static func taskMarker(_ text: [UInt16], _ line: Line) -> (offset: Int, checked: Bool)?
+    {
         var position = line.start
         let end = line.contentEnd
         while position < end, text[position] == 32 || text[position] == 9 || text[position] == 62 {
@@ -347,7 +349,9 @@ nonisolated enum CanvasNoteMarkdown {
         }
         var end = start + 1
         while end < count, !isBlank(text, lines[end]), roles[end] == .none {
-            if let level = setextLevel(text, lines[end]) { return (.heading(level: level), end + 1) }
+            if let level = setextLevel(text, lines[end]) {
+                return (.heading(level: level), end + 1)
+            }
             if startsBlock(text, lines[end]) { break }
             end += 1
         }

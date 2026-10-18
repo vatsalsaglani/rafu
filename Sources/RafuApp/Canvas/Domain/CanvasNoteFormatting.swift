@@ -145,7 +145,8 @@ nonisolated enum CanvasNoteFormatting {
         {
             let inner = String(selected.dropFirst(marker.count).dropLast(marker.count))
             let ambiguous =
-                italic && inner.hasPrefix("*") && !(selected.hasPrefix("***")
+                italic && inner.hasPrefix("*")
+                && !(selected.hasPrefix("***")
                     && selected.hasSuffix("***"))
             if !ambiguous {
                 return CanvasNoteFormatResult(
@@ -274,7 +275,8 @@ nonisolated enum CanvasNoteFormatting {
         }
         let first = index(containing: selection.location)
         let last =
-            selection.length > 0 ? index(containing: selection.location + selection.length - 1)
+            selection.length > 0
+            ? index(containing: selection.location + selection.length - 1)
             : first
         return all[first...max(first, last)]
     }
@@ -283,7 +285,8 @@ nonisolated enum CanvasNoteFormatting {
         _ command: LineCommand, in text: String, selection: NSRange
     ) -> CanvasNoteFormatResult {
         let units = Array(text.utf16)
-        let covered = affectedLines(units, CanvasNoteMarkdown.lines(in: units), selection: selection)
+        let covered = affectedLines(
+            units, CanvasNoteMarkdown.lines(in: units), selection: selection)
         let pieces = covered.map { line -> (parts: Parts, terminator: String) in
             let content = String(decoding: units[line.start..<line.contentEnd], as: UTF16.self)
             let terminator = String(decoding: units[line.contentEnd..<line.end], as: UTF16.self)
@@ -341,7 +344,8 @@ nonisolated enum CanvasNoteFormatting {
         let newSelection: NSRange
         if selection.length == 0 && pieces.count == 1 {
             let delta = newLength - range.length
-            let caret = min(max(selection.location + delta, range.location), range.location + newLength)
+            let caret = min(
+                max(selection.location + delta, range.location), range.location + newLength)
             newSelection = NSRange(location: caret, length: 0)
         } else {
             newSelection = NSRange(location: range.location, length: newLength)
