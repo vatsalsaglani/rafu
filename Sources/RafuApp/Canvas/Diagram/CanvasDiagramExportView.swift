@@ -9,6 +9,7 @@ struct CanvasDiagramExportScene {
         let curve: CanvasEdgeCurve
         let isMessageLink: Bool
         let label: String?
+        let labelPlacement: CanvasEdgeLabelPlacement
     }
 
     struct Item: Identifiable {
@@ -31,24 +32,33 @@ struct CanvasDiagramExportScene {
         let dy = -Double(bounds.minY)
         var rects: [CanvasCardID: CGRect] = [:]
         var items: [Item] = []
+        var frames: Set<CanvasCardID> = []
+        var obstacles: [CGRect] = []
         for card in cards {
             let rect = CanvasFrameLayout.moved(card.rect, dx: dx, dy: dy).cgRect
             rects[card.id] = rect
             items.append(Item(card: card, rect: rect))
+            if card.content.hasDerivedSize {
+                frames.insert(card.id)
+            } else {
+                obstacles.append(rect)
+            }
         }
         let connections = document.connections.filter {
             ids.contains($0.from) && ids.contains($0.to)
         }
         let routes = CanvasEdgeGeometry.routes(
             for: connections.map { CanvasEdgeInput(id: $0.id, from: $0.from, to: $0.to) },
-            rects: rects)
+            rects: rects, background: frames)
         let byID = Dictionary(
             connections.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         edges = routes.compactMap { route in
             guard let connection = byID[route.id] else { return nil }
             return Edge(
                 id: route.id, curve: route.curve, isMessageLink: connection.isMessageLink,
-                label: connection.customLabel)
+                label: connection.customLabel,
+                labelPlacement: CanvasEdgeGeometry.labelPlacement(
+                    for: route.curve, avoiding: obstacles))
         }
         self.bounds = CGRect(origin: .zero, size: bounds.size)
         self.items = items
@@ -93,8 +103,10 @@ struct CanvasDiagramExportView: View {
             }
             ForEach(scene.edges) { edge in
                 if let label = edge.label {
-                    CanvasDiagramEdgeLabel(text: label)
-                        .position(edge.curve.midpoint)
+                    CanvasDiagramEdgeLabel(
+                        text: label, maximumWidth: edge.labelPlacement.maximumWidth
+                    )
+                    .position(edge.labelPlacement.center)
                 }
             }
         }
@@ -133,20 +145,24 @@ nonisolated struct CanvasDiagramArrowhead: Shape {
     }
 }
 
+/// An edge label pill, truncated with an ellipsis to fit between the cards.
 struct CanvasDiagramEdgeLabel: View {
     @Environment(\.rafuTheme) private var theme
     let text: String
+    var maximumWidth = 160.0
 
     var body: some View {
-        Text(text)
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(theme.palette.textSecondary)
-            .lineLimit(1)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
+        CanvasEdgeLabelWidthLayout(maximumWidth: CGFloat(maximumWidth)) {
+            Text(text)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(theme.palette.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+        }
             .background(Capsule().fill(theme.palette.elevatedBackground))
             .overlay(Capsule().strokeBorder(theme.palette.borderSubtle))
-            .fixedSize()
     }
 }
 

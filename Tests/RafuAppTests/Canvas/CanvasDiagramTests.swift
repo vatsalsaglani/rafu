@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import RafuCore
 import Testing
 
 @testable import RafuApp
@@ -298,6 +299,20 @@ struct CanvasFrameLayoutTests {
         let huge = try #require(
             CanvasFrameLayout.enclosingRect([rect(0, 0), rect(5_000, 5_000)]))
         #expect(huge.isValid)
+    }
+
+    @Test("The agent-side frame preview matches the app's frame rect")
+    func agentBoundsMatch() throws {
+        let rects = [rect(100, 200), rect(300, 260, 100, 80), rect(-40, 500, 160, 128)]
+        let app = try #require(CanvasFrameLayout.enclosingRect(rects))
+        let agent = try #require(
+            CanvasAgentDiagramLayout.bounds(
+                rects.map {
+                    CanvasAgentRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height)
+                }))
+        #expect(CanvasRect(x: agent.x, y: agent.y, width: agent.width, height: agent.height) == app)
+        #expect(CanvasAgentDiagramLayout.framePadding == CanvasFrameLayout.padding)
+        #expect(CanvasAgentDiagramLayout.frameTitleBand == CanvasFrameLayout.titleBand)
     }
 
     @Test("Moving a frame moves its members, nested members too, and nothing else")

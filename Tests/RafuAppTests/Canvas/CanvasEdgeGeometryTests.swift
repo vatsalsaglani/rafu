@@ -133,7 +133,7 @@ struct CanvasEdgeGeometryTests {
         #expect(Set(routes.map { $0.start.y }).count == 10)
     }
 
-    @Test("A third card on the straight segment adds a 24 pt bend away from its centre")
+    @Test("A third card on the straight segment bends the edge away from it until it clears")
     func thirdNodeBend() throws {
         let a = CanvasCardID()
         let b = CanvasCardID()
@@ -152,9 +152,13 @@ struct CanvasEdgeGeometryTests {
         #expect(near(bentUp.curve.control2.y, straight.curve.control2.y - 24))
 
         var above = base
-        above[c] = CGRect(x: 200, y: -10, width: 100, height: 100)  // centre above the line
+        let blocker = CGRect(x: 200, y: -10, width: 100, height: 100)  // centre above the line
+        above[c] = blocker
         let bentDown = try #require(CanvasEdgeGeometry.routes(for: [edge], rects: above).first)
-        #expect(near(bentDown.curve.control1.y, straight.curve.control1.y + 24))
+        // 24 pt is not enough to clear a card that reaches 40 pt below the line.
+        #expect(bentDown.curve.control1.y > straight.curve.control1.y + 24)
+        #expect(near(bentDown.curve.control1.y, bentDown.curve.control2.y))
+        #expect(CanvasEdgeGeometry.crossingCount(of: bentDown.curve, with: [blocker]) == 0)
 
         var clear = base
         clear[c] = CGRect(x: 200, y: 200, width: 100, height: 100)
@@ -162,6 +166,81 @@ struct CanvasEdgeGeometryTests {
         #expect(unchanged == straight)
         #expect(bentUp.curve.start == straight.curve.start)
         #expect(bentUp.curve.end == straight.curve.end)
+    }
+
+    @Test("A long edge arcs over a row of cards it skips; frames are no obstacle")
+    func skipEdgeArcsOverRow() throws {
+        let first = CanvasCardID()
+        let last = CanvasCardID()
+        let frame = CanvasCardID()
+        var rects: [CanvasCardID: CGRect] = [
+            first: CGRect(x: 0, y: 0, width: 160, height: 128),
+            last: CGRect(x: 1_200, y: 0, width: 160, height: 128),
+            frame: CGRect(x: -32, y: -68, width: 1_424, height: 228),
+        ]
+        var middle: [CGRect] = []
+        for index in 1...3 {
+            let rect = CGRect(x: Double(index) * 300, y: 0, width: 160, height: 128)
+            rects[CanvasCardID()] = rect
+            middle.append(rect)
+        }
+        let edge = CanvasEdgeInput(id: edgeID, from: first, to: last)
+        let route = try #require(
+            CanvasEdgeGeometry.routes(for: [edge], rects: rects, background: [frame]).first)
+        #expect(CanvasEdgeGeometry.crossingCount(of: route.curve, with: middle) == 0)
+
+        // Inside a frame with nothing in the way, an edge stays straight.
+        let short = CanvasEdgeInput(id: UUID(), from: first, to: last)
+        let open = [first: rects[first]!, last: rects[last]!, frame: rects[frame]!]
+        let straight = try #require(
+            CanvasEdgeGeometry.routes(for: [short], rects: open, background: [frame]).first)
+        #expect(near(straight.curve.control1.y, straight.curve.start.y))
+    }
+
+    @Test("A label sits halfway along the visible edge and narrows to fit between cards")
+    func labelPlacement() {
+        // A straight edge from the right border of one card to the left border
+        // of the next, 80 pt apart.
+        let left = CGRect(x: 0, y: 0, width: 160, height: 128)
+        let right = CGRect(x: 240, y: 0, width: 160, height: 128)
+        let curve = CanvasEdgeCurve(
+            start: CGPoint(x: 160, y: 64), control1: CGPoint(x: 192, y: 64),
+            control2: CGPoint(x: 208, y: 64), end: CGPoint(x: 240, y: 64))
+        let placement = CanvasEdgeGeometry.labelPlacement(for: curve, avoiding: [left, right])
+        #expect(nearPoint(placement.center, CGPoint(x: 200, y: 64)))
+        // 80 pt between the cards, less 6 pt of clearance on each side.
+        #expect(near(placement.maximumWidth, 68))
+
+        // With room, the width is the normal limit.
+        let roomy = CanvasEdgeGeometry.labelPlacement(
+            for: curve, avoiding: [CGRect(x: -400, y: 0, width: 100, height: 100)])
+        #expect(near(roomy.maximumWidth, 160))
+        // Cards above or below the pill's row set no limit.
+        let stacked = CanvasEdgeGeometry.labelPlacement(
+            for: curve, avoiding: [CGRect(x: 150, y: 100, width: 100, height: 100)])
+        #expect(near(stacked.maximumWidth, 160))
+        // Cards that touch leave only the smallest pill (an ellipsis).
+        let tight = CanvasEdgeCurve(
+            start: CGPoint(x: 160, y: 64), control1: CGPoint(x: 161, y: 64),
+            control2: CGPoint(x: 163, y: 64), end: CGPoint(x: 164, y: 64))
+        let squeezed = CanvasEdgeGeometry.labelPlacement(
+            for: tight, avoiding: [left, CGRect(x: 164, y: 0, width: 160, height: 128)])
+        #expect(near(squeezed.maximumWidth, CanvasEdgeGeometry.minimumLabelWidth))
+    }
+
+    @Test("The visible midpoint is halfway along the curve by length")
+    func visibleMidpoint() {
+        let symmetric = CanvasEdgeCurve(
+            start: CGPoint(x: 0, y: 0), control1: CGPoint(x: 0, y: 100),
+            control2: CGPoint(x: 100, y: 100), end: CGPoint(x: 100, y: 0))
+        #expect(nearPoint(CanvasEdgeGeometry.visibleMidpoint(of: symmetric), symmetric.midpoint))
+        // Control points bunched at the start: t = 0.5 is past the middle.
+        let lopsided = CanvasEdgeCurve(
+            start: CGPoint(x: 0, y: 0), control1: CGPoint(x: 10, y: 0),
+            control2: CGPoint(x: 20, y: 0), end: CGPoint(x: 300, y: 0))
+        let middle = CanvasEdgeGeometry.visibleMidpoint(of: lopsided)
+        #expect(abs(Double(middle.x) - 150) < 2)
+        #expect(Double(lopsided.midpoint.x) < 100)
     }
 
     @Test("Edges with a missing card or a single card are skipped")

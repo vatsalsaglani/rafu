@@ -11,6 +11,8 @@ nonisolated struct CanvasEdgeDisplay: Identifiable {
     let state: CanvasLinkState?
     let fromTitle: String
     let toTitle: String
+    /// Where the pill goes and how wide it may be without covering a card.
+    let label: CanvasEdgeLabelPlacement
 
     var id: UUID { connection.id }
     var isMessageLink: Bool { connection.isMessageLink }
@@ -44,12 +46,22 @@ enum CanvasEdgeScene {
 
         var rects: [CanvasCardID: CGRect] = [:]
         var titles: [CanvasCardID: String] = [:]
+        // Frames sit behind their members: no edge bends around one, and no
+        // label has to keep clear of one.
+        var frames: Set<CanvasCardID> = []
+        var obstacles: [CGRect] = []
         for card in board.cards {
-            rects[card.id] = CanvasConnectionDrag.screenRect(of: card, viewport: viewport)
+            let rect = CanvasConnectionDrag.screenRect(of: card, viewport: viewport)
+            rects[card.id] = rect
             titles[card.id] = card.title
+            if card.content.hasDerivedSize {
+                frames.insert(card.id)
+            } else {
+                obstacles.append(rect)
+            }
         }
         let inputs = connections.map { CanvasEdgeInput(id: $0.id, from: $0.from, to: $0.to) }
-        let routes = CanvasEdgeGeometry.routes(for: inputs, rects: rects)
+        let routes = CanvasEdgeGeometry.routes(for: inputs, rects: rects, background: frames)
         let byID = Dictionary(
             connections.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let states = bridge.linkStates(in: board)
@@ -62,7 +74,9 @@ enum CanvasEdgeScene {
                     connection: connection, route: route,
                     state: connection.isMessageLink ? (states[connection.id] ?? .paused) : nil,
                     fromTitle: titles[connection.from] ?? "Card",
-                    toTitle: titles[connection.to] ?? "Card"))
+                    toTitle: titles[connection.to] ?? "Card",
+                    label: CanvasEdgeGeometry.labelPlacement(
+                        for: route.curve, avoiding: obstacles)))
         }
         // Message links draw last so a relationship never hides one.
         return result.filter { !$0.isMessageLink } + result.filter { $0.isMessageLink }
@@ -136,6 +150,28 @@ private nonisolated struct CanvasEdgeHitShape: Shape {
 }
 
 // MARK: Layer below the cards
+
+/// Sizes its one subview to its ideal width, at most `maximumWidth`. A long
+/// one-line text then truncates with an ellipsis, and a short one keeps its
+/// own width, so the pill around it fits the text.
+struct CanvasEdgeLabelWidthLayout: Layout {
+    let maximumWidth: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let child = subviews.first else { return .zero }
+        let ideal = child.sizeThatFits(.unspecified)
+        return child.sizeThatFits(
+            ProposedViewSize(width: min(ideal.width, maximumWidth), height: ideal.height))
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        subviews.first?.place(
+            at: CGPoint(x: bounds.midX, y: bounds.midY), anchor: .center,
+            proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
+    }
+}
 
 /// Edges above the board and below the cards (review 7.6, Layering). The
 /// matching `CanvasEdgeOverlay` draws what must sit above the cards.
@@ -349,21 +385,26 @@ private struct CanvasEdgeView: View {
         case .none:
             EmptyView()
         case .text(let text):
-            Text(text)
-                .font(.system(size: 11))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .foregroundStyle(pillForeground)
-                .padding(.horizontal, 8)
-                .frame(maxWidth: isHovered ? 480 : 160, minHeight: 20, maxHeight: 20)
-                .fixedSize(horizontal: true, vertical: false)
+            // No wider than the space between the cards around it; the
+            // tooltip and the accessibility label keep the full text.
+            CanvasEdgeLabelWidthLayout(
+                maximumWidth: isHovered ? 480 : CGFloat(display.label.maximumWidth)
+            ) {
+                Text(text)
+                    .font(.system(size: 11))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(pillForeground)
+                    .padding(.horizontal, 8)
+                    .frame(height: 20)
+            }
                 .background(theme.palette.elevatedBackground, in: Capsule())
                 .overlay(Capsule().strokeBorder(pillBorder, lineWidth: 1))
                 .overlay(
                     Capsule().strokeBorder(theme.palette.textPrimary.opacity(pulse), lineWidth: 1.5)
                 )
                 .modifier(interaction(tooltip: tooltip, exposesToAccessibility: false))
-                .position(display.route.midpoint)
+                .position(display.label.center)
         case .glyph(let glyph):
             Text(glyph)
                 .font(.system(size: 10, weight: .semibold))
@@ -375,7 +416,7 @@ private struct CanvasEdgeView: View {
                     Circle().strokeBorder(theme.palette.textPrimary.opacity(pulse), lineWidth: 1.5)
                 )
                 .modifier(interaction(tooltip: tooltip, exposesToAccessibility: false))
-                .position(display.route.midpoint)
+                .position(display.label.center)
         }
     }
 

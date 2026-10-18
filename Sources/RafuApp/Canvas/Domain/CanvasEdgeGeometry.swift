@@ -129,6 +129,12 @@ nonisolated struct CanvasEdgeRoute: Equatable, Identifiable, Sendable {
     var midpoint: CGPoint { curve.midpoint }
 }
 
+/// A label pill's centre and its widest allowed width, in the edge's space.
+nonisolated struct CanvasEdgeLabelPlacement: Equatable, Sendable {
+    let center: CGPoint
+    let maximumWidth: Double
+}
+
 nonisolated struct CanvasPortCandidate: Equatable, Sendable {
     let side: CanvasPortSide
     let point: CGPoint
@@ -267,9 +273,11 @@ nonisolated enum CanvasEdgeGeometry {
 
     /// Routes every edge whose two cards are in `rects`. Edges that share a
     /// side spread 8 pt apart, ordered by the other end's position, so they do
-    /// not cross at the port.
+    /// not cross at the port. Cards in `background` (frames) can be edge ends
+    /// but are not obstacles: an edge inside a frame does not bend around it.
     static func routes(
-        for edges: [CanvasEdgeInput], rects: [CanvasCardID: CGRect]
+        for edges: [CanvasEdgeInput], rects: [CanvasCardID: CGRect],
+        background: Set<CanvasCardID> = []
     ) -> [CanvasEdgeRoute] {
         struct Resolved {
             let edge: CanvasEdgeInput
@@ -339,10 +347,17 @@ nonisolated enum CanvasEdgeGeometry {
             var control1 = CGPoint(
                 x: start.x + startNormal.x * reach, y: start.y + startNormal.y * reach)
             var control2 = CGPoint(x: end.x + endNormal.x * reach, y: end.y + endNormal.y * reach)
-            let others = rects.filter { $0.key != item.edge.from && $0.key != item.edge.to }
+            let others = rects.filter {
+                $0.key != item.edge.from && $0.key != item.edge.to
+                    && !background.contains($0.key)
+            }
             if let bend = bendVector(from: start, to: end, avoiding: others) {
-                control1 = CGPoint(x: control1.x + bend.x, y: control1.y + bend.y)
-                control2 = CGPoint(x: control2.x + bend.x, y: control2.y + bend.y)
+                let scale = CGFloat(
+                    clearingBendScale(
+                        start: start, control1: control1, control2: control2, end: end,
+                        bend: bend, avoiding: Array(others.values)))
+                control1 = CGPoint(x: control1.x + bend.x * scale, y: control1.y + bend.y * scale)
+                control2 = CGPoint(x: control2.x + bend.x * scale, y: control2.y + bend.y * scale)
             }
             routes.append(
                 CanvasEdgeRoute(
@@ -376,6 +391,51 @@ nonisolated enum CanvasEdgeGeometry {
         let sign: Double = (away.x * perpendicular.x + away.y * perpendicular.y) >= 0 ? 1 : -1
         return CGPoint(
             x: perpendicular.x * sign * bendClearance, y: perpendicular.y * sign * bendClearance)
+    }
+
+    /// How many times the 24 pt bend the curve needs so that it clears every
+    /// card in `others`: the first of 1, 2.5, 4.5, 6.5 and 9 (24 to 216 pt)
+    /// whose sampled curve crosses no card. When none clears all cards, the
+    /// one that crosses the fewest wins, the smallest on a tie. So a long edge
+    /// that skips several cards on one line arcs over them.
+    static func clearingBendScale(
+        start: CGPoint, control1: CGPoint, control2: CGPoint, end: CGPoint, bend: CGPoint,
+        avoiding others: [CGRect]
+    ) -> Double {
+        var best = (scale: 1.0, crossings: Int.max)
+        for scale in bendScales {
+            let factor = CGFloat(scale)
+            let curve = CanvasEdgeCurve(
+                start: start,
+                control1: CGPoint(
+                    x: control1.x + bend.x * factor, y: control1.y + bend.y * factor),
+                control2: CGPoint(
+                    x: control2.x + bend.x * factor, y: control2.y + bend.y * factor),
+                end: end)
+            let crossings = crossingCount(of: curve, with: others)
+            if crossings == 0 { return scale }
+            if crossings < best.crossings { best = (scale, crossings) }
+        }
+        return best.scale
+    }
+
+    static let bendScales: [Double] = [1, 2.5, 4.5, 6.5, 9]
+
+    /// The number of cards that the sampled curve crosses. Cards outside the
+    /// curve's control polygon box are skipped without sampling.
+    static func crossingCount(of curve: CanvasEdgeCurve, with others: [CGRect]) -> Int {
+        let xs = [curve.start.x, curve.control1.x, curve.control2.x, curve.end.x]
+        let ys = [curve.start.y, curve.control1.y, curve.control2.y, curve.end.y]
+        let minX = xs.min() ?? 0
+        let minY = ys.min() ?? 0
+        let box = CGRect(
+            x: minX, y: minY, width: (xs.max() ?? 0) - minX, height: (ys.max() ?? 0) - minY)
+        let nearby = others.filter { $0.intersects(box) }
+        guard !nearby.isEmpty else { return 0 }
+        let points = curve.sampled(segments: 24)
+        return nearby.filter { rect in
+            (1..<points.count).contains { segment(points[$0 - 1], points[$0], intersects: rect) }
+        }.count
     }
 
     /// Liang–Barsky clip of the segment against `rect`.
@@ -422,6 +482,67 @@ nonisolated enum CanvasEdgeGeometry {
             control2 = CGPoint(x: end.x + back.x * reach, y: end.y + back.y * reach)
         }
         return CanvasEdgeCurve(start: start, control1: control1, control2: control2, end: end)
+    }
+
+    // MARK: Labels
+
+    /// The label pill height and the space it keeps from card borders.
+    static let labelHeight = 20.0
+    static let labelClearance = 6.0
+    /// The narrowest pill: the padding and an ellipsis.
+    static let minimumLabelWidth = 28.0
+
+    /// The point halfway along the curve by length. The curve runs from card
+    /// border to card border, so this is the middle of the visible part of
+    /// the edge, not of the centre-to-centre line.
+    static func visibleMidpoint(of curve: CanvasEdgeCurve, segments: Int = 32) -> CGPoint {
+        let points = curve.sampled(segments: segments)
+        var lengths: [Double] = [0]
+        for index in 1..<points.count {
+            let dx = Double(points[index].x) - Double(points[index - 1].x)
+            let dy = Double(points[index].y) - Double(points[index - 1].y)
+            lengths.append((lengths.last ?? 0) + hypot(dx, dy))
+        }
+        let half = (lengths.last ?? 0) / 2
+        guard half > 0 else { return curve.midpoint }
+        for index in 1..<points.count where lengths[index] >= half {
+            let span = lengths[index] - lengths[index - 1]
+            let t = span > 0 ? (half - lengths[index - 1]) / span : 0
+            let ax = Double(points[index - 1].x)
+            let ay = Double(points[index - 1].y)
+            let bx = Double(points[index].x)
+            let by = Double(points[index].y)
+            return CGPoint(x: ax + (bx - ax) * t, y: ay + (by - ay) * t)
+        }
+        return curve.midpoint
+    }
+
+    /// Where a label pill goes and how wide it may be so that it covers no
+    /// card in `cards` (the edge's own two cards and the cards around it, not
+    /// frames). A card that spans the centre's column cannot be avoided by
+    /// width and sets no limit. Text wider than `maximumWidth` truncates with
+    /// an ellipsis; the full text stays in the tooltip and the accessibility
+    /// label.
+    static func labelPlacement(
+        for curve: CanvasEdgeCurve, avoiding cards: [CGRect], limit: Double = 160
+    ) -> CanvasEdgeLabelPlacement {
+        let center = visibleMidpoint(of: curve)
+        let x = Double(center.x)
+        let y = Double(center.y)
+        let top = y - labelHeight / 2 - labelClearance
+        let bottom = y + labelHeight / 2 + labelClearance
+        var halfWidth = limit / 2
+        for card in cards {
+            // Only cards beside the pill's row limit its width.
+            guard Double(card.maxY) > top, Double(card.minY) < bottom else { continue }
+            if Double(card.maxX) <= x {
+                halfWidth = min(halfWidth, x - Double(card.maxX) - labelClearance)
+            } else if Double(card.minX) >= x {
+                halfWidth = min(halfWidth, Double(card.minX) - x - labelClearance)
+            }
+        }
+        let width = max(minimumLabelWidth, min(limit, 2 * halfWidth))
+        return CanvasEdgeLabelPlacement(center: center, maximumWidth: width)
     }
 
     // MARK: Hit testing
