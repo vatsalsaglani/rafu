@@ -1239,12 +1239,12 @@ final class WorkspaceSession {
             let snippet = controller.recentOutputSnippet()
             // Feed-vs-drop-down arbitration (terminal-notch-hud.md NC-C,
             // "Attention"): the event lands in the companion's cross-window
-            // attention feed only while the panel is pinned — a bare
-            // hover-dwell peek is now just the wings pill with no downward
-            // panel to route into — otherwise it spawns the separate v1
+            // attention feed whenever its panel is open — pinned, or peeking
+            // with hover-to-open on — and otherwise spawns the separate v1
             // drop-down; a bell never produces both.
             let arbitration = CompanionHoverPolicy.companionArbitration(
-                hoverState: NotchCompanionModel.shared.hoverState)
+                hoverState: NotchCompanionModel.shared.hoverState,
+                peekShowsPanel: NotchCompanionModel.shared.opensOnHover)
             if arbitration.routeToFeed {
                 NotchCompanionModel.shared.pushFeedItem(
                     CompanionFeedItem(
@@ -1304,14 +1304,11 @@ final class WorkspaceSession {
     /// gate, so an unrecognized id simply drops reply routing silently —
     /// the same safe-by-construction fallback `TerminalAttentionCenter
     /// .deliverReply` already has for any unknown id.
-    /// Whether the notch companion is currently showing this run's tile, which
-    /// makes its own attention dot the signal for this gate (ADR 0016: one
-    /// attention surface at a time). Reads already-live observable state — no
-    /// polling, no extra work on the idle path.
+    /// Whether the notch companion is currently showing this run's tile. It no
+    /// longer does: the rebuilt notch lists open Ensembles and their agents,
+    /// not workflow runs, so a gate always raises its own attention surface.
     private func notchCompanionShowsActiveRun(_ runID: String) -> Bool {
-        let companion = NotchCompanionModel.shared
-        guard companion.preferenceStore.isEnabled() else { return false }
-        return companion.activeRunItems.contains { $0.runID == runID }
+        false
     }
 
     func raiseConductorGateAttention(_ event: ConductorGateReadyEvent) {

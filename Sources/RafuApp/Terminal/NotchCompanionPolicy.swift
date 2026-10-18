@@ -60,12 +60,18 @@ nonisolated enum CompanionHoverPolicy {
     /// with no downward panel to route a card into — so a new bell routes
     /// into the attention feed ONLY while pinned; both `.resting` and
     /// `.peeking` surface the event through the v1 drop-down.
+    ///
+    /// `peekShowsPanel` is true while hover-to-open is on: a peek then IS the
+    /// open panel, so a bell routes into its feed instead of drawing a second
+    /// drop-down over the panel. Default `false` keeps the original table.
     static func companionArbitration(
-        hoverState: CompanionHoverState
+        hoverState: CompanionHoverState,
+        peekShowsPanel: Bool = false
     ) -> (routeToFeed: Bool, showDropDown: Bool) {
         switch hoverState {
         case .pinned: (true, false)
-        case .resting, .peeking: (false, true)
+        case .peeking: peekShowsPanel ? (true, false) : (false, true)
+        case .resting: (false, true)
         }
     }
 }
@@ -224,7 +230,7 @@ nonisolated struct CompanionEditorRow: Identifiable, Equatable, Sendable {
 /// the tile TEXT each renders to — `Name · 5h 82% · 7d 41%` (cost-only:
 /// `Name · $41.20`). `Emphasis` is a plain `Sendable` enum, never a
 /// `Color`, so this type stays UI-agnostic and headless-testable —
-/// `CompanionUsageStripView` (`NotchCompanionView.swift`) maps `Emphasis`
+/// the usage views (`NotchSectionViews.swift`) map `Emphasis`
 /// to a theme color/weight when building its `AttributedString`.
 ///
 /// Landed in W0's S2 stage (ahead of the S4 companion-model/view wiring)
@@ -347,19 +353,19 @@ nonisolated enum UsageDisplayPolicy {
     /// providers occupy the front line: `nil` (uncapped) for exactly one
     /// provider — a sole row has the width for every window — and
     /// `tileWindowCap` for two or more. A pure helper so
-    /// `CompanionUsageStripView`'s cap-selection logic is headless-testable
+    /// the former text strip's cap-selection logic is headless-testable
     /// without a live `NotchCompanionModel`/screen.
     static func frontLineWindowCap(providerCount: Int) -> Int? {
         providerCount > 1 ? tileWindowCap : nil
     }
 
     /// `"<displayName> · <window> · <window>"` — the ONE join format the
-    /// pre-W0 `CompanionUsageStripView.tileSummary` used
+    /// pre-W0 the pre-W0 `tileSummary` used
     /// (`"\(tile.agent) · " + windows.joined(" · ")`), preserved exactly so
     /// a no-emphasis line renders byte-identical to before (see
     /// `UsageCoreTests`' rendering-parity test). Also each front-line/
     /// overflow row's `.accessibilityLabel` in the per-row redesign
-    /// (2026-07-23) — see `CompanionUsageStripView`.
+    /// (2026-07-23) — see `NotchUsageMeter` for the meter rendering that replaced the text strip.
     static func plainText(_ tile: RenderedTile) -> String {
         guard !tile.windows.isEmpty else { return tile.displayName }
         return "\(tile.displayName) · " + tile.windows.map(\.text).joined(separator: " · ")
@@ -367,7 +373,7 @@ nonisolated enum UsageDisplayPolicy {
 
     /// The full front-line string — every tile's `plainText`, joined by
     /// four spaces, matching the pre-W0 strip's tile separator exactly.
-    /// `CompanionUsageStripView` stopped using this for its own rendering
+    /// The notch stopped using this for its own rendering
     /// once the front line moved to one row per provider (2026-07-23) —
     /// each row now carries its own `plainText` accessibility label
     /// instead of one combined, 4-space-joined line — but it stays a pure,
@@ -380,7 +386,7 @@ nonisolated enum UsageDisplayPolicy {
     /// A window's rendered text: `"<label> <percent>%"` (append `⚠` at
     /// `criticalUsageThreshold`+), `"<label> <compact tokens> tok"`, or the
     /// bare label when neither is set — identical shape to the pre-W0
-    /// `CompanionUsageStripView.windowSummary`.
+    /// `windowSummary`.
     private static func windowText(_ window: UsageWindow) -> String {
         if let percent = window.percent {
             var text = "\(window.label) \(Int(percent.rounded()))%"

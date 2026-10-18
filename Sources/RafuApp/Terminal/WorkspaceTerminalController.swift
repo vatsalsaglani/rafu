@@ -941,6 +941,17 @@ final class WorkspaceTerminalController: Identifiable {
     /// after an empty/whitespace-only report clears it. Never wins over
     /// `userName`.
     private(set) var reportedTitle: String?
+    /// True while output is arriving: set by the first output of a burst and
+    /// cleared by the quiescence tick once the session has been quiet for
+    /// `TerminalQuiescencePolicy.quietSeconds`. The notch reads it to tell an
+    /// agent that is working from one that is waiting. A timing flag only;
+    /// output content is never inspected. Observable, so a view that reads it
+    /// updates when it flips (a few times per agent turn, not per byte).
+    private(set) var isProducingOutput = false
+    /// What last put this session in `.bell`: the program's own signal (BEL,
+    /// OSC 9/777) or a detected finish (output burst, then silence). Lets the
+    /// notch word "needs you" and "reply ready" differently.
+    private(set) var lastAttentionCause: TerminalAttentionCause?
     /// Color TAG (terminal-manager.md T-D) — a theme palette token, never a
     /// raw color, so themes restyle it. `nil` shows no dot/stripe. Not
     /// persisted (sessions don't restore across relaunch).
@@ -1196,6 +1207,7 @@ final class WorkspaceTerminalController: Identifiable {
         view.processDelegate = proxy
         view.onBell = { [weak self] in
             guard let self else { return }
+            self.lastAttentionCause = .signal
             self.onBell?(self.id)
         }
         // Agent CLIs signal "turn finished / input needed" with OSC 9/777
@@ -1205,6 +1217,7 @@ final class WorkspaceTerminalController: Identifiable {
         // snippet/notification/HUD machinery downstream is unchanged.
         view.onNotification = { [weak self] _ in
             guard let self else { return }
+            self.lastAttentionCause = .signal
             self.onBell?(self.id)
         }
         view.installNotificationHandlers()
@@ -1327,6 +1340,7 @@ final class WorkspaceTerminalController: Identifiable {
         // Only while genuinely running: tracking during `.bell` would
         // re-fire attention (duplicate notifications) and `.exited` is dead.
         guard status == .running else { return }
+        if !isProducingOutput { isProducingOutput = true }
         quiescenceState = Self.quiescencePolicy.advance(quiescenceState, bytes: bytes, at: Date())
         guard quiescenceTimer == nil else { return }
         quiescenceTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) {
@@ -1340,8 +1354,12 @@ final class WorkspaceTerminalController: Identifiable {
     private func quiescenceTick() {
         let (fired, next) = Self.quiescencePolicy.checkQuiescence(quiescenceState, at: Date())
         quiescenceState = next
-        if fired { onBell?(id) }
+        if fired {
+            lastAttentionCause = .completion
+            onBell?(id)
+        }
         if case .idle = next {
+            if isProducingOutput { isProducingOutput = false }
             quiescenceTimer?.invalidate()
             quiescenceTimer = nil
         }
@@ -1351,6 +1369,7 @@ final class WorkspaceTerminalController: Identifiable {
         quiescenceTimer?.invalidate()
         quiescenceTimer = nil
         quiescenceState = .idle
+        if isProducingOutput { isProducingOutput = false }
     }
 
     func shutdown() {

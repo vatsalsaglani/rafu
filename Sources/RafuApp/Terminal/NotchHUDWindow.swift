@@ -12,8 +12,19 @@ enum NotchScreenAdapter {
             visibleFrame: screen.visibleFrame,
             safeAreaTopInset: screen.safeAreaInsets.top,
             auxiliaryTopLeft: screen.auxiliaryTopLeftArea,
-            auxiliaryTopRight: screen.auxiliaryTopRightArea
+            auxiliaryTopRight: screen.auxiliaryTopRightArea,
+            isBuiltin: isBuiltin(screen)
         )
+    }
+
+    /// Cider's `BuiltinDisplay` test: the screen's `CGDirectDisplayID` is the
+    /// built-in panel. `NSScreenNumber` is the documented key for that id.
+    private static func isBuiltin(_ screen: NSScreen) -> Bool {
+        guard
+            let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")]
+                as? NSNumber
+        else { return false }
+        return CGDisplayIsBuiltin(number.uint32Value) != 0
     }
 
     /// Screen choice (N-1): a NOTCHED screen if one is attached, otherwise
@@ -28,6 +39,17 @@ enum NotchScreenAdapter {
         if let main = NSScreen.main { candidates.append(main) }
         candidates.append(contentsOf: NSScreen.screens)
         return NotchScreenSelection.preferred(from: candidates.map(metrics(for:)))
+    }
+
+    /// The companion's screen: a notched screen, else the built-in display,
+    /// else the active window's screen — see
+    /// `NotchScreenSelection.preferredForCompanion(from:)`.
+    static func companionMetrics() -> NotchScreenMetrics? {
+        var candidates: [NSScreen] = []
+        if let keyScreen = NSApp?.keyWindow?.screen { candidates.append(keyScreen) }
+        if let main = NSScreen.main { candidates.append(main) }
+        candidates.append(contentsOf: NSScreen.screens)
+        return NotchScreenSelection.preferredForCompanion(from: candidates.map(metrics(for:)))
     }
 }
 
