@@ -119,6 +119,102 @@ struct CanvasConnectionDragTests {
         #expect(await session.canvas.flushAll())
     }
 
+    @Test("The preview starts at the source port that faces the target")
+    func facingPort() throws {
+        let source = card("Source", x: 400, y: 400)
+        let above = card("Above", x: 400, y: 0)
+        let left = card("Left", x: 0, y: 400)
+        for (target, side, point) in [
+            (above, CanvasPortSide.top, CGPoint(x: 520, y: 400)),
+            (left, CanvasPortSide.left, CGPoint(x: 400, y: 480)),
+        ] {
+            var drag = CanvasConnectionDrag()
+            let center = CGPoint(x: target.rect.x + 120, y: target.rect.y + 80)
+            drag.update(from: source.id, at: center)
+            let port = try #require(drag.startPort(in: [source, target], viewport: .init()))
+            #expect(port.side == side)
+            #expect(port.point == point)
+            #expect(drag.start(in: [source, target], viewport: .init()) == point)
+        }
+        // Over empty board the pointer direction decides.
+        var drag = CanvasConnectionDrag()
+        drag.update(from: source.id, at: CGPoint(x: 520, y: 900))
+        #expect(drag.startPort(in: [source], viewport: .init())?.side == .bottom)
+    }
+
+    @Test("A pointer within 24 points of a target port snaps to it and targets that card")
+    func snapsToPort() throws {
+        let source = card("Source", x: 20, y: 40)
+        let target = card("Target", x: 500, y: 100)  // left port at (500, 180)
+        let cards = [source, target]
+        var drag = CanvasConnectionDrag()
+        drag.update(from: source.id, at: CGPoint(x: 480, y: 190))
+        let snap = try #require(drag.snap(in: cards, viewport: .init()))
+        #expect(snap.card == target.id)
+        #expect(snap.side == .left)
+        #expect(snap.point == CGPoint(x: 500, y: 180))
+        #expect(drag.target(in: cards, viewport: .init()) == target.id)
+        // A target that does not accept a connection never snaps.
+        #expect(drag.snap(in: cards, viewport: .init(), accepts: { _ in false }) == nil)
+
+        var far = CanvasConnectionDrag()
+        far.update(from: source.id, at: CGPoint(x: 450, y: 190))
+        #expect(far.snap(in: cards, viewport: .init()) == nil)
+        #expect(far.target(in: cards, viewport: .init()) == nil)
+
+        // The radius is in screen points, so zoom does not widen it.
+        let zoomed = CanvasViewport(scale: 0.5, x: 0, y: 0)
+        var small = CanvasConnectionDrag()
+        small.update(from: source.id, at: CGPoint(x: 250 - 20, y: 90))
+        #expect(small.snap(in: cards, viewport: zoomed)?.card == target.id)
+        small.update(from: source.id, at: CGPoint(x: 250 - 30, y: 90))
+        #expect(small.snap(in: cards, viewport: zoomed) == nil)
+    }
+
+    @Test("Finishing records how the drag ended")
+    func outcomes() throws {
+        let source = card("Source", x: 20, y: 40)
+        let target = card("Target", x: 500, y: 100)
+        let cards = [source, target]
+
+        var drag = CanvasConnectionDrag()
+        #expect(drag.outcome == nil)
+        let overTarget = CGPoint(x: 600, y: 160)
+        drag.update(from: source.id, at: overTarget)
+        _ = drag.finish(from: source.id, at: overTarget, cards: cards, viewport: .init())
+        let dropped = try #require(drag.outcome)
+        #expect(dropped.kind == .dropped(CanvasConnectionDrop(from: source.id, to: target.id)))
+        #expect(dropped.serial == 1)
+        #expect(drag.source == nil)
+
+        let empty = CGPoint(x: 900, y: 900)
+        drag.update(from: source.id, at: empty)
+        #expect(
+            drag.finish(from: source.id, at: empty, cards: cards, viewport: .init()) == nil)
+        let emptyOutcome = try #require(drag.outcome)
+        #expect(emptyOutcome.kind == .emptyBoard(source: source.id, point: empty))
+        #expect(emptyOutcome.serial == 2)
+
+        let onSource = CGPoint(x: 50, y: 60)
+        drag.update(from: source.id, at: onSource)
+        _ = drag.finish(from: source.id, at: onSource, cards: cards, viewport: .init())
+        #expect(drag.outcome?.kind == .cancelled)
+
+        // Escape wins even if the pointer is released over a target.
+        drag.update(from: source.id, at: overTarget)
+        drag.cancel()
+        #expect(!drag.isActive)
+        #expect(
+            drag.finish(from: source.id, at: overTarget, cards: cards, viewport: .init()) == nil)
+        #expect(drag.outcome?.kind == .cancelled)
+        #expect(drag.outcome?.serial == 4)
+
+        // Resetting keeps the last outcome, so the overlay cannot miss it.
+        drag.reset()
+        #expect(drag.outcome?.serial == 4)
+        #expect(!drag.isActive)
+    }
+
     private func card(_ name: String, x: Double, y: Double) -> CanvasCard {
         CanvasCard(
             title: name, rect: .init(x: x, y: y, width: 240, height: 160),

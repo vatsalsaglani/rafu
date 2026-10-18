@@ -37,7 +37,6 @@ struct WorkspaceCanvasView: View {
             }
             Group {
                 toolbar
-                CanvasSessionLinksBar(board: board)
                 Divider()
                 if board.showsList {
                     CanvasListView(board: board, session: session)
@@ -68,6 +67,7 @@ struct WorkspaceCanvasView: View {
         HStack(spacing: 10) {
             Text(board.title).font(.headline).lineLimit(1)
             if board.isDirty { Text("Modified").font(.caption).foregroundStyle(.secondary) }
+            CanvasLinkStatusItem(board: board)
             Spacer()
             CanvasAddCardMenu(board: board, session: session)
             Button("Arrange") { session.performCanvasEdit(board) { try board.arrange() } }
@@ -124,46 +124,8 @@ struct WorkspaceCanvasView: View {
                         boardHasKeyboardFocus = true
                         board.selection = []
                     }
-                Canvas { context, _ in
-                    for connection in board.connections {
-                        guard let a = board.cards.first(where: { $0.id == connection.from }),
-                            let b = board.cards.first(where: { $0.id == connection.to })
-                        else { continue }
-                        let start = project(
-                            CGPoint(x: a.rect.x + a.rect.width, y: a.rect.y + a.rect.height / 2))
-                        let end = project(CGPoint(x: b.rect.x, y: b.rect.y + b.rect.height / 2))
-                        var path = Path()
-                        path.move(to: start)
-                        path.addCurve(
-                            to: end, control1: CGPoint(x: start.x + 50, y: start.y),
-                            control2: CGPoint(x: end.x - 50, y: end.y))
-                        context.stroke(
-                            path, with: .color(theme.palette.textSecondary),
-                            style: StrokeStyle(
-                                lineWidth: 1, dash: [5, 4]))
-                        do {
-                            var arrow = Path()
-                            arrow.move(to: CGPoint(x: end.x - 9, y: end.y - 5))
-                            arrow.addLine(to: end)
-                            arrow.addLine(to: CGPoint(x: end.x - 9, y: end.y + 5))
-                            context.stroke(
-                                arrow, with: .color(theme.palette.textSecondary), lineWidth: 2)
-                        }
-                        if connection.behavior == .session {
-                            var reverse = Path()
-                            reverse.move(to: CGPoint(x: start.x + 9, y: start.y - 5))
-                            reverse.addLine(to: start)
-                            reverse.addLine(to: CGPoint(x: start.x + 9, y: start.y + 5))
-                            context.stroke(
-                                reverse, with: .color(theme.palette.textSecondary), lineWidth: 2)
-                        }
-                        context.draw(
-                            Text(connection.label).font(.caption2).foregroundStyle(
-                                theme.palette.textSecondary),
-                            at: CGPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 - 10))
-                    }
-                }
-                .allowsHitTesting(false).accessibilityHidden(true)
+                CanvasEdgeLayer(
+                    board: board, session: session, focusBoard: { boardHasKeyboardFocus = true })
                 ForEach(visibleCards(in: geometry.size)) { card in
                     CanvasCardShell(
                         card: card, board: board, session: session,
@@ -195,8 +157,7 @@ struct WorkspaceCanvasView: View {
                         x: card.rect.x * board.viewport.scale + board.viewport.x,
                         y: card.rect.y * board.viewport.scale + board.viewport.y)
                 }
-                CanvasConnectionDragPreview(
-                    drag: connectionDrag, cards: board.cards, viewport: board.viewport)
+                CanvasEdgeOverlay(board: board, session: session, drag: connectionDrag)
                 if let marquee {
                     Rectangle().stroke(theme.palette.accent, lineWidth: 1)
                         .background(theme.palette.accent.opacity(0.08))
