@@ -922,6 +922,23 @@ struct CommandPaletteView: View {
             },
         ]
 
+        // Agent handoff: only while an Agent Session tab is on screen.
+        if session.rootURL != nil, session.agentHistory.visibleSession != nil {
+            for target in AgentHistoryProvider.allCases {
+                commands.append(
+                    .init(
+                        id: "agent-handoff.\(target.rawValue)",
+                        title: "Continue Session in \(target.displayName)…",
+                        symbolName: "arrow.turn.up.right",
+                        keywords: ["handoff", "continue", "switch", "agent", "claude", "codex"]
+                    ) {
+                        dismiss()
+                        session.presentVisibleAgentSessionHandoff(target: target)
+                    }
+                )
+            }
+        }
+
         if session.rootURL != nil {
             commands.append(
                 .init(

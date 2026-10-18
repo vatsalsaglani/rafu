@@ -291,6 +291,7 @@ private struct WorkspaceWindowPresentations: ViewModifier {
             .sheet(isPresented: $session.agentTerminalSheetPresented) {
                 AgentTerminalSheet(session: session)
             }
+            .agentHandoffSheet(session: session)
             .sheet(isPresented: ignoreSuggestionPresentedBinding) {
                 IgnoreSuggestionSheet(session: session)
             }
