@@ -61,9 +61,10 @@ payload cached in `WorkspaceSession.activeEditorDrag`:
 So the board no longer swallows tab drags, and a tab dragged to the editor edge
 reaches the group's edge-split target.
 
-Not verified in code (stated in the handoff only): that left/right edge bands
-are the split edges, and that splitting a sole tab is a no-op. Not verified:
-any macOS drag run.
+Splitting a group by its own only tab is a no-op: `EditorLayout.swift`
+returns nil before it removes the tab (`source.tabs.count == 1`). Not verified
+in code: that the left/right edge bands are the split edges. Not verified: any
+macOS drag run.
 
 ## Why it matters
 

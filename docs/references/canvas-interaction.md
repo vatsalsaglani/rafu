@@ -85,6 +85,13 @@ pending).
 - **Dropped content.** Folders are skipped without an error; raster image
   extensions become image cards; files outside the workspace still reject
   the whole batch.
+- 2026-10-18 update (code-read only): the UI says "Ensemble" for the board. A
+  frame is created from a selection with the shortcut Control-Command-G
+  (`CanvasDiagramMenus.swift`, "Convert Selection to Frame"). Whiteboard tool
+  keys (V H R O D A L P X M I, Text on X because T adds a terminal) and the
+  `CanvasScrollBridge` `focusRingType = .none` setting are confirmed in code
+  (`Canvas/Whiteboard/CanvasWhiteboardTool.swift` `key`,
+  `Canvas/Adapters/CanvasScrollBridge.swift` lines 82 and 87).
 - Mac checks still required: plain drag pans an empty board; Shift-drag
   marquee; Space-drag over a card; Files-tree and Finder drops with and
   without open documents in the group; a tab dragged over a Canvas tab still

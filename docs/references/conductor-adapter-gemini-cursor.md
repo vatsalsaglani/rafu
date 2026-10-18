@@ -1,5 +1,7 @@
 # Gemini CLI and Cursor CLI Ensemble adapters
 
+> **Status (2026-10-18): Partly current.** `GeminiCLIAdapter.swift` and `CursorAdapter.swift` are kept in `Sources/RafuApp/Conductor/Adapters/`, so invocation, auth, and credential-boundary facts still apply. Text about run orchestration refers to the removed run feature (see docs/plans/phases/ensemble-canvas.md). Not re-verified against code in this round.
+
 - **Applies to:** C4 binary discovery, capability probes, delegated-auth
   classification, model choices, and invocation construction for Gemini CLI
   and Cursor Agent CLI
