@@ -111,17 +111,16 @@ struct EditorSplitDropTests {
         #expect(layout.groupIDs == [created, group.id])
     }
 
-    @Test("Splitting a group by its only tab changes nothing and leaves no empty group")
-    func soleTabSelfSplitIsNoOp() {
+    @Test("Splitting a group by its only tab moves the tab into the new pane")
+    func soleTabSelfSplitMovesTab() throws {
         let only = EditorTabState(resource: .file(URL(fileURLWithPath: "/tmp/only.swift")))
         let group = EditorGroupState(tabs: [only])
         var layout = EditorLayoutState(root: .group(group), focusedGroupID: group.id)
-        let before = layout
 
-        for edge in [EditorSplitEdge.leading, .trailing, .top, .bottom] {
-            #expect(layout.split(group: group.id, at: edge, moving: only.id) == nil)
-        }
-        #expect(layout == before)
+        let created = try #require(layout.split(group: group.id, at: .trailing, moving: only.id))
+        #expect(layout.groupIDs == [group.id, created])
+        #expect(layout.group(id: created)?.tabs.map(\.id) == [only.id])
+        #expect(layout.group(id: group.id)?.tabs.isEmpty == true)
     }
 
     @Test("A sole tab from another group can still split a different group")

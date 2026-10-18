@@ -368,13 +368,6 @@ nonisolated struct EditorLayoutState: Codable, Equatable, Sendable {
         var movedTab: EditorTabState?
         var sourceGroupID: EditorGroupID?
         if let tabID {
-            // Splitting a group by its own only tab would leave an empty
-            // group beside the tab. Nothing changes, so report no split.
-            if let source = root.group(containing: tabID), source.id == groupID,
-                source.tabs.count == 1
-            {
-                return nil
-            }
             guard let removed = root.removeTab(tabID) else { return nil }
             movedTab = removed.tab
             sourceGroupID = removed.groupID

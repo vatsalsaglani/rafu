@@ -424,6 +424,8 @@ final class WorkspaceSession {
         if gitOpenDiff != nil {
             closeGitDiff()
         }
+        // Settings and an Agent Session tab are peers: hide the other one.
+        suspendAuxiliarySelection()
         settingsVisible = true
         selectedDocumentID = nil
         selectedTreePath = nil

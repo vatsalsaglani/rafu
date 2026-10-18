@@ -75,12 +75,9 @@ struct CanvasDiagramExportSheet: View {
     @ViewBuilder private var options: some View {
         switch kind {
         case .png:
-            Picker("Scale", selection: $scale) {
-                Text("1×").tag(1)
-                Text("2×").tag(2)
-                Text("3×").tag(3)
+            LabeledContent("Scale") {
+                RafuSegmentedPicker(items: [1, 2, 3], selection: $scale) { "\($0)×" }
             }
-            .pickerStyle(.segmented)
         case .pdf:
             Text("Vector PDF, one page.")
                 .foregroundStyle(theme.palette.textSecondary)

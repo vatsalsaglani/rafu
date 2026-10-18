@@ -102,21 +102,16 @@ private struct CanvasAgentControlPicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Agent control").font(.headline)
-            Picker(
-                "Agent control",
+            RafuSegmentedPicker(
+                items: CanvasAgentControlMode.allCases,
                 selection: Binding(
                     get: { board.agentControlMode },
                     set: { mode in
                         board.setAgentControlMode(mode)
                         if mode != .allow { CanvasAgentCenter.shared.forgetGrants(on: board.id) }
-                    })
-            ) {
-                ForEach(CanvasAgentControlMode.allCases, id: \.self) { mode in
-                    Text(mode.title).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+                    }),
+                fillsWidth: true
+            ) { $0.title }
             Text(Self.explanation(board.agentControlMode))
                 .font(.caption)
                 .foregroundStyle(theme.palette.textSecondary)

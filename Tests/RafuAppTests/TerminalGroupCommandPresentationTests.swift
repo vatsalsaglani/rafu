@@ -504,7 +504,8 @@ func terminalGroupCommandAndPaletteShortcutAudit() throws {
         ".keyboardShortcut(\"s\", modifiers: [.command, .shift])",
         ".keyboardShortcut(.tab, modifiers: [.control])",
         ".keyboardShortcut(\"a\", modifiers: [.command, .shift])",
-        ".keyboardShortcut(\"e\", modifiers: [.command, .shift])",
+        // ⌘⇧E belonged to the removed old "New Ensemble…" run flow; the board
+        // now called Ensemble keeps ⌥⌘N (CanvasCommands.swift).
     ] {
         #expect(commands.contains(text))
     }

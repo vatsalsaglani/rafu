@@ -4,7 +4,7 @@ import SwiftUI
 /// The read-only "Agent Session" editor tab: one transcript, newest entry
 /// last. The model (and so the parsed text) belongs to this tab and is
 /// released when the tab closes.
-struct AgentSessionTabView: View {
+struct AgentSessionTranscriptView: View {
     let reference: AgentSessionTabReference
     let model: AgentTranscriptModel?
     let session: WorkspaceSession
