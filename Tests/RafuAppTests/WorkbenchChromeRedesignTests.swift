@@ -362,14 +362,20 @@ struct WorkbenchChromeRedesignTests {
             ))
     }
 
-    @Test("Canvas link notices use current bridge state and edge pills keep intrinsic width")
+    @Test(
+        "Canvas link notices use current bridge state and edge pills keep intrinsic width up to the gap"
+    )
     func canvasLinkStatusLayout() throws {
         let source = try Self.source("Sources/RafuApp/Canvas/Views/WorkspaceCanvasView.swift")
         #expect(!source.contains("@State private var pausedLinkCount"))
         #expect(source.contains("private var pausedLinkCount: Int"))
         #expect(source.contains("if showsRestoredLinksNotice && pausedLinkCount > 0"))
         let pill = try Self.source("Sources/RafuApp/Canvas/Views/CanvasEdgeLayer.swift")
-        #expect(pill.contains(".fixedSize(horizontal: true, vertical: false)"))
+        // A pill keeps its text's own width, capped at the space between the
+        // cards beside it (round 3): a long label truncates, never wraps.
+        #expect(pill.contains("CanvasEdgeLabelWidthLayout("))
+        #expect(pill.contains("child.sizeThatFits(.unspecified)"))
+        #expect(pill.contains(".lineLimit(1)"))
     }
 
     private static func section(of source: String, from start: String, to end: String) throws
