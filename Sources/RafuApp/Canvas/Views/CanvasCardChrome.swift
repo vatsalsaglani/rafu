@@ -235,11 +235,14 @@ struct CanvasCardMenuContent: View {
                 Button("Move Right  →") { commands.move(dx: 8, dy: 0) }
                 Button("Move Up  ↑") { commands.move(dx: 0, dy: -8) }
                 Button("Move Down  ↓") { commands.move(dx: 0, dy: 8) }
-                Divider()
-                Button("Make Narrower  ⌥⌘←") { commands.resize(dw: -8, dh: 0) }
-                Button("Make Wider  ⌥⌘→") { commands.resize(dw: 8, dh: 0) }
-                Button("Make Shorter  ⌥⌘↑") { commands.resize(dw: 0, dh: -8) }
-                Button("Make Taller  ⌥⌘↓") { commands.resize(dw: 0, dh: 8) }
+                // A frame fits its members; it has no size of its own.
+                if !card.content.hasDerivedSize {
+                    Divider()
+                    Button("Make Narrower  ⌥⌘←") { commands.resize(dw: -8, dh: 0) }
+                    Button("Make Wider  ⌥⌘→") { commands.resize(dw: 8, dh: 0) }
+                    Button("Make Shorter  ⌥⌘↑") { commands.resize(dw: 0, dh: -8) }
+                    Button("Make Taller  ⌥⌘↓") { commands.resize(dw: 0, dh: 8) }
+                }
             }
         }
         Divider()

@@ -32,9 +32,11 @@ extension CanvasBoardState {
     func sendSelectionToBack() throws { try reorder(selection, toFront: false) }
 
     /// Resizes the single selected card by a delta in board units, keeping its
-    /// minimum size and, for images, its shape.
+    /// minimum size and, for images, its shape. A frame's size is derived from
+    /// its members, so a frame does not resize.
     func resizeSelection(dw: Double, dh: Double) throws {
-        guard selection.count == 1, let card = cards.first(where: { selection.contains($0.id) })
+        guard selection.count == 1, let card = cards.first(where: { selection.contains($0.id) }),
+            !card.content.hasDerivedSize
         else { return }
         let edges: CanvasResizeEdges =
             dw != 0 && dh != 0 ? [.right, .bottom] : (dw != 0 ? .right : .bottom)

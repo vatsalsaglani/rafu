@@ -90,41 +90,77 @@ nonisolated enum CanvasFrameLayout {
         return result
     }
 
-    // MARK: Following
+    // MARK: Derived bounds
 
-    /// What one frame observes: its rect and the rects of its members.
-    struct FollowState: Equatable, Sendable {
-        var frame: CanvasRect
-        var memberIDs: [CanvasCardID]
-        var memberRects: [CanvasRect]
+    /// The nodes after one board edit. This is the one rule for frame bounds:
+    ///
+    /// 1. Follow: a frame whose origin changed carries each of its members
+    ///    (transitively) that did not change in the same edit, by the same
+    ///    offset. So moving a frame on its own (keyboard, Align, an agent
+    ///    `node_update`) moves its members.
+    /// 2. Fit: each frame with at least one member on the board gets
+    ///    `enclosingRect` of its members. Inner frames fit first. A frame with
+    ///    no member on the board keeps its rect.
+    /// 3. Stack: each frame goes just behind its earliest member.
+    ///
+    /// `previous` is the state before the edit; nil skips the follow step
+    /// (a document that was just loaded).
+    static func normalized(_ nodes: [Node], previous: [Node]?) -> [Node] {
+        var result = nodes
+        if let previous { result = followed(result, previous: previous) }
+        return stackedFramesBehindMembers(fitted(result))
     }
 
-    static func followState(frameID: CanvasCardID, in nodes: [Node]) -> FollowState? {
-        guard let frame = nodes.first(where: { $0.id == frameID }) else { return nil }
-        let members = closure(of: [frameID], in: nodes).subtracting([frameID])
-        let ordered = nodes.filter { members.contains($0.id) }
-        return FollowState(
-            frame: frame.rect, memberIDs: ordered.map(\.id), memberRects: ordered.map(\.rect))
-    }
-
-    /// The member moves that make members follow a frame that was moved on its
-    /// own. A resize (size changed) moves nothing. A member that also changed
-    /// in the same step (it moved with the frame, or an undo restored it)
-    /// stays where it is, so nothing moves twice.
-    static func followMoves(from old: FollowState, to new: FollowState) -> [CanvasCardID:
-        CanvasRect]
-    {
-        guard old.frame.width == new.frame.width, old.frame.height == new.frame.height,
-            old.memberIDs == new.memberIDs, old.memberRects.count == new.memberRects.count
-        else { return [:] }
-        let dx = new.frame.x - old.frame.x
-        let dy = new.frame.y - old.frame.y
-        guard dx != 0 || dy != 0 else { return [:] }
-        var result: [CanvasCardID: CanvasRect] = [:]
-        for (index, id) in new.memberIDs.enumerated()
-        where old.memberRects[index] == new.memberRects[index] {
-            result[id] = moved(new.memberRects[index], dx: dx, dy: dy)
+    /// Step 1 of `normalized`: members follow a frame whose origin changed.
+    /// A member that also changed in this edit (it moved with the frame, or
+    /// it is new) stays where it is, so nothing moves twice.
+    static func followed(_ nodes: [Node], previous: [Node]) -> [Node] {
+        let old = Dictionary(
+            previous.map { ($0.id, $0.rect) }, uniquingKeysWith: { first, _ in first })
+        let index = Dictionary(
+            nodes.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var result = nodes
+        for frame in nodes where frame.frameMembers != nil {
+            guard let before = old[frame.id], let position = index[frame.id] else { continue }
+            let now = result[position].rect
+            let dx = now.x - before.x
+            let dy = now.y - before.y
+            guard dx != 0 || dy != 0 else { continue }
+            let members = closure(of: [frame.id], in: result).subtracting([frame.id])
+            for id in members {
+                guard let member = index[id], let was = old[id], result[member].rect == was
+                else { continue }
+                result[member].rect = moved(was, dx: dx, dy: dy)
+            }
         }
+        return result
+    }
+
+    /// Step 2 of `normalized`: every frame with a member on the board
+    /// encloses its members. Nested frames resolve inner first; a membership
+    /// cycle uses the stored rect of the frame that closes the cycle.
+    static func fitted(_ nodes: [Node]) -> [Node] {
+        let index = Dictionary(
+            nodes.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var result = nodes
+        // false: being fitted (a cycle reached it); true: fitted.
+        var state: [CanvasCardID: Bool] = [:]
+        func fit(_ position: Int) {
+            let id = result[position].id
+            guard state[id] == nil else { return }
+            state[id] = false
+            if let members = result[position].frameMembers {
+                var rects: [CanvasRect] = []
+                for member in members where member != id {
+                    guard let memberPosition = index[member] else { continue }
+                    fit(memberPosition)
+                    rects.append(result[memberPosition].rect)
+                }
+                if let rect = enclosingRect(rects) { result[position].rect = rect }
+            }
+            state[id] = true
+        }
+        for position in result.indices { fit(position) }
         return result
     }
 
