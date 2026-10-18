@@ -17,7 +17,17 @@ nonisolated enum CanvasLimits {
     static let noteBytes = 64 * 1_024
     static let documentBytes = 2 * 1_024 * 1_024
     static let webSurfaces = 2
-    static let captureStreams = 2
+    /// Whiteboard and Mermaid bounds (X5).
+    static let mermaidSourceBytes = 16 * 1_024
+    static let whiteboardTextBytes = 8 * 1_024
+    static let shapeLabelBytes = 1_024
+    static let strokePoints = 512
+    /// `.rafuensemble` file bounds: the whole file, the number of asset
+    /// entries, and embedded image bytes per asset and in total.
+    static let ensembleFileBytes = 4 * 1_024 * 1_024
+    static let ensembleAssets = 64
+    static let embeddedAssetBytes = 512 * 1_024
+    static let embeddedAssetsTotalBytes = 1_536 * 1_024
 }
 
 nonisolated enum CanvasError: Error, LocalizedError, Equatable, Sendable {
@@ -122,6 +132,15 @@ nonisolated enum CanvasCardContent: Codable, Equatable, Sendable {
     case terminal(groupID: TerminalGroupID)
     case web(destination: CanvasWebDestination)
     case nativeApp(bundleID: String)
+    /// Mermaid source rendered natively (X5). The live editor owns edits;
+    /// this is the committed source.
+    case mermaid(source: String)
+    case shape(CanvasShape)
+    case stroke(CanvasStroke)
+    case text(CanvasText)
+    /// Diagram kinds (X9 defines the value types in `Canvas/Diagram/`).
+    case frame(CanvasFrame)
+    case serviceIcon(CanvasServiceIcon)
 
     var kindName: String {
         switch self {
@@ -131,6 +150,12 @@ nonisolated enum CanvasCardContent: Codable, Equatable, Sendable {
         case .terminal: "Terminal"
         case .web: "Local Web App"
         case .nativeApp: "Native App"
+        case .mermaid: "Diagram"
+        case .shape(let shape): shape.kind.title
+        case .stroke(let stroke): stroke.kind.title
+        case .text: "Text"
+        case .frame: "Frame"
+        case .serviceIcon: "Icon"
         }
     }
 
@@ -142,6 +167,22 @@ nonisolated enum CanvasCardContent: Codable, Equatable, Sendable {
         case .terminal: "terminal"
         case .web: "globe"
         case .nativeApp: "macwindow"
+        case .mermaid: "point.3.connected.trianglepath.dotted"
+        case .shape(let shape):
+            switch shape.kind {
+            case .rectangle: "rectangle"
+            case .ellipse: "circle"
+            case .diamond: "diamond"
+            }
+        case .stroke(let stroke):
+            switch stroke.kind {
+            case .freehand: "scribble"
+            case .line: "line.diagonal"
+            case .arrow: "arrow.up.right"
+            }
+        case .text: "textformat"
+        case .frame: "rectangle.dashed"
+        case .serviceIcon: "cube"
         }
     }
 
@@ -162,6 +203,15 @@ nonisolated enum CanvasCardContent: Codable, Equatable, Sendable {
                 })
             else { throw CanvasError.invalidDocument }
         case .terminal: break
+        case .mermaid(let source):
+            guard CanvasStyleDecoding.validMermaidSource(source) else {
+                throw CanvasError.invalidDocument
+            }
+        case .shape(let shape): try shape.validate()
+        case .stroke(let stroke): try stroke.validate()
+        case .text(let text): try text.validate()
+        // X9 owns the frame and icon value types and their bounds.
+        case .frame, .serviceIcon: break
         }
     }
 

@@ -3257,6 +3257,8 @@ final class WorkspaceSession {
 
     func open(_ node: WorkspaceFileNode) {
         guard !node.isDirectory else { return }
+        // X5: a `.rafuensemble` file opens as a board tab, not as text.
+        if Self.isEnsembleFile(node.url) { return openEnsembleFile(at: node.url) }
         if let existing = openDocuments.first(where: { $0.url == node.url }) {
             select(existing)
             return

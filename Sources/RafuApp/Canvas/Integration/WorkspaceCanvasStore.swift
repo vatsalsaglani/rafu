@@ -8,13 +8,23 @@ final class WorkspaceCanvasStore {
     private(set) var library: [CanvasSummary] = []
     var libraryNotice: String?
     var isLoading = false
+    /// Boards bound to a workspace `.rafuensemble` file (X5). They save to that
+    /// file instead of the Application Support store. Small metadata only.
+    private(set) var fileBindings: [CanvasID: CanvasEnsembleFileBinding] = [:]
     @ObservationIgnored private let persistence: CanvasPersistenceStore
+    @ObservationIgnored private let files: CanvasEnsembleFileStore
+    @ObservationIgnored private(set) var root: URL?
     @ObservationIgnored private(set) var workspace: TerminalGroupWorkspaceKey?
     @ObservationIgnored private var generation = UUID()
     @ObservationIgnored var prepareResourceSnapshot: ((inout CanvasDocument) -> Void)?
     @ObservationIgnored var onBoardHidden: ((CanvasID) -> Void)?
 
-    init(persistence: CanvasPersistenceStore = .shared) { self.persistence = persistence }
+    init(
+        persistence: CanvasPersistenceStore = .shared, files: CanvasEnsembleFileStore = .shared
+    ) {
+        self.persistence = persistence
+        self.files = files
+    }
 
     var hasPendingWrites: Bool {
         boards.values.contains { $0.isDirty || $0.isSaving || $0.saveTask != nil }
@@ -27,8 +37,10 @@ final class WorkspaceCanvasStore {
         guard await flushAll() else { return false }
         for id in boards.keys { onBoardHidden?(id) }
         boards = [:]
+        fileBindings = [:]
         library = []
         workspace = key
+        root = root.standardizedFileURL
         generation = UUID()
         await refreshLibrary()
         return true
@@ -48,8 +60,10 @@ final class WorkspaceCanvasStore {
             onBoardHidden?(board.id)
         }
         boards = [:]
+        fileBindings = [:]
         library = []
         workspace = nil
+        root = nil
         generation = UUID()
     }
 
@@ -101,6 +115,11 @@ final class WorkspaceCanvasStore {
         let ticket = generation
         do {
             guard let document = try await persistence.load(id, workspace: workspace) else {
+                // A restored tab may belong to a workspace `.rafuensemble` file.
+                if let path = try await persistence.fileBoardPath(id, workspace: workspace) {
+                    guard ticket == generation else { return nil }
+                    return await openFile(atRelativePath: path, preferredID: id)?.board
+                }
                 throw CanvasError.unavailable
             }
             guard ticket == generation else { return nil }
@@ -111,6 +130,95 @@ final class WorkspaceCanvasStore {
         }
     }
 
+    /// Opens the workspace `.rafuensemble` file at `relativePath` as a board
+    /// bound to that file, or returns the board already bound to it. A file
+    /// whose board ID is already open under another source gets a fresh ID
+    /// (written back on its next save). Returns embedded images that are not
+    /// in the workspace, so the caller can offer to restore them.
+    func openFile(atRelativePath relativePath: String, preferredID: CanvasID? = nil) async
+        -> (board: CanvasBoardState, missingEmbeddedImages: [String: Data])?
+    {
+        if let id = fileBindings.first(where: { $0.value.relativePath == relativePath })?.key,
+            let board = boards[id]
+        {
+            return (board, [:])
+        }
+        guard let workspace, let root else { return nil }
+        guard boards.count < CanvasLimits.boards else {
+            libraryNotice = CanvasError.capacity.localizedDescription
+            return nil
+        }
+        let ticket = generation
+        do {
+            let snapshot = try await files.read(relativePath: relativePath, root: root)
+            guard ticket == generation else { return nil }
+            var document = snapshot.document
+            if let preferredID, boards[preferredID] == nil {
+                document.id = preferredID
+            } else if boards[document.id] != nil {
+                document.id = CanvasID()
+            }
+            let board = install(document)
+            fileBindings[document.id] = snapshot.binding
+            try? await persistence.rememberFileBoard(
+                document.id, relativePath: relativePath, workspace: workspace)
+            return (board, snapshot.missingEmbeddedImages)
+        } catch {
+            if generation == ticket { libraryNotice = error.localizedDescription }
+            return nil
+        }
+    }
+
+    /// Save As: writes a snapshot of board `id` to a new workspace file and
+    /// opens that file as its own bound board. The original board is kept
+    /// unchanged, like "Save Copy".
+    func saveAsFile(_ id: CanvasID, to url: URL) async -> CanvasBoardState? {
+        guard let board = boards[id], let root, let workspace else { return nil }
+        let ticket = generation
+        do {
+            var snapshot = try board.snapshot()
+            prepareResourceSnapshot?(&snapshot)
+            snapshot.id = CanvasID()
+            snapshot.revision = 1
+            snapshot.terminalGroups = nil
+            guard
+                let binding = try await files.write(
+                    snapshot, to: url, root: root, embedImagesFrom: nil)
+            else { throw CanvasError.invalidPath }
+            guard ticket == generation else { return nil }
+            fileBindings[snapshot.id] = binding
+            let saved = install(snapshot)
+            try? await persistence.rememberFileBoard(
+                snapshot.id, relativePath: binding.relativePath, workspace: workspace)
+            return saved
+        } catch {
+            board.errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Export: writes a portable snapshot of board `id` anywhere the user
+    /// chose, embedding small workspace images. Nothing is bound or opened.
+    func exportFile(_ id: CanvasID, to url: URL) async -> Bool {
+        guard let board = boards[id], let root else { return false }
+        do {
+            var snapshot = try board.snapshot()
+            prepareResourceSnapshot?(&snapshot)
+            snapshot.terminalGroups = nil
+            _ = try await files.write(snapshot, to: url, root: nil, embedImagesFrom: root)
+            return true
+        } catch {
+            board.errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Writes embedded images that a file carried to their workspace paths.
+    func restoreEmbeddedImages(_ images: [String: Data]) async throws -> Int {
+        guard let root else { return 0 }
+        return try await files.restore(images: images, root: root)
+    }
+
     func reload(_ id: CanvasID) async -> Bool {
         guard let workspace else { return false }
         if let pending = boards[id]?.saveTask {
@@ -119,8 +227,18 @@ final class WorkspaceCanvasStore {
         }
         let ticket = generation
         do {
-            guard let document = try await persistence.load(id, workspace: workspace) else {
-                throw CanvasError.unavailable
+            var document: CanvasDocument
+            if let binding = fileBindings[id], let root {
+                let snapshot = try await files.read(relativePath: binding.relativePath, root: root)
+                document = snapshot.document
+                document.id = id
+                guard ticket == generation else { return false }
+                fileBindings[id] = snapshot.binding
+            } else {
+                guard let saved = try await persistence.load(id, workspace: workspace) else {
+                    throw CanvasError.unavailable
+                }
+                document = saved
             }
             guard ticket == generation else { return false }
             onBoardHidden?(id)
@@ -161,6 +279,7 @@ final class WorkspaceCanvasStore {
     func forgetClosed(_ id: CanvasID) {
         onBoardHidden?(id)
         boards[id] = nil
+        fileBindings[id] = nil
     }
 
     func save(_ id: CanvasID) async -> Bool {
@@ -219,8 +338,19 @@ final class WorkspaceCanvasStore {
                 var snapshot = try board.snapshot()
                 prepareResourceSnapshot?(&snapshot)
                 board.isSaving = true
-                let saved = try await persistence.save(
-                    snapshot, expectedRevision: board.revision, workspace: workspace)
+                let saved: CanvasDocument
+                if let binding = fileBindings[board.id], let root {
+                    // The file format never writes terminal layouts; the board
+                    // keeps them in memory so its resources stay stable.
+                    let result = try await files.save(
+                        snapshot, expectedRevision: board.revision, binding: binding, root: root)
+                    guard boards[board.id] === board else { return false }
+                    fileBindings[board.id] = result.binding
+                    saved = result.document
+                } else {
+                    saved = try await persistence.save(
+                        snapshot, expectedRevision: board.revision, workspace: workspace)
+                }
                 board.acceptSaved(saved, stamp: stamp)
                 board.errorMessage = nil
             } catch {
