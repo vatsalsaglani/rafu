@@ -5,9 +5,9 @@
   `Sources/RafuApp/Usage/UsagePace.swift`, the Claude OAuth parser
   (`ClaudeOAuthStrategy.parseUsage`), and the refresh-time Claude Code
   Keychain re-read (`UsageCredentialStore.refreshClaudeKeychainCredential`).
-- Last verified: Swift 6.2 Linux toolchain (syntax, `swift-format`, and a
-  scratch SwiftPM package for the pure logic), 2026-10-18. Not yet verified
-  with a macOS build, the repo test suite, or a GUI launch.
+- Last verified: Apple Swift 6.4, macOS 27.0.1 (26A434), 2026-10-19.
+  Native build, full parallel and serial tests, and Lightning launch.
+  Settings loaded live Claude and Codex usage with exact-source labels.
 
 ## Rule or observed behavior
 
@@ -146,3 +146,9 @@ cases were added: results arriving after Disable or Disconnect must not
 restore forbidden snapshots, and a retained full window must stop reporting
 exhausted after its reset. The synthetic tests cover both without reading
 Keychain or making provider requests.
+
+The macOS accessibility tree exposed the custom Used/Remaining control as
+two buttons with the same inherited accessibility label. The display-mode
+control now contains separate accessible buttons, and the shared themed
+segmented control exposes the selected trait. Its theme colors stay intact. Check both option names and selection in the accessibility
+tree; visual labels alone do not prove keyboard or VoiceOver usability.
