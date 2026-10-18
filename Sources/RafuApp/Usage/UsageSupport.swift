@@ -42,7 +42,34 @@ nonisolated enum UsageFormat {
 /// `ISO8601DateFormatter` configuration rejects outright).
 nonisolated enum UsageDateParsing {
     static func parseISO8601Fractional(_ string: String) -> Date? {
-        Self.fractionalFormatter.date(from: string) ?? Self.formatter.date(from: string)
+        if let date = Self.fractionalFormatter.date(from: string) ?? Self.formatter.date(
+            from: string)
+        {
+            return date
+        }
+        return truncatingExtraFractionDigits(string).flatMap {
+            Self.fractionalFormatter.date(from: $0)
+        }
+    }
+
+    /// Server timestamps can carry microseconds and an offset
+    /// (`"2026-07-23T12:00:00.123456+00:00"`). Not every
+    /// `ISO8601DateFormatter` build accepts more than three fraction
+    /// digits, so this keeps the first three and drops the rest. `nil` when
+    /// there is nothing to truncate or the value is implausibly long.
+    static func truncatingExtraFractionDigits(_ string: String) -> String? {
+        guard string.utf8.count <= 64,
+            let timeSeparator = string.firstIndex(of: "T"),
+            let dot = string.firstIndex(of: "."), timeSeparator < dot
+        else { return nil }
+        let fractionStart = string.index(after: dot)
+        let fractionEnd =
+            string[fractionStart...].firstIndex { !($0.isASCII && $0.isNumber) }
+            ?? string.endIndex
+        let digits = string[fractionStart..<fractionEnd]
+        guard digits.count > 3 else { return nil }
+        return String(string[..<fractionStart]) + String(digits.prefix(3))
+            + String(string[fractionEnd...])
     }
 
     /// A fresh formatter per call — `ISO8601DateFormatter` is not

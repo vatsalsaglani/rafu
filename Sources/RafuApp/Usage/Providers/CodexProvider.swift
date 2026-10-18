@@ -69,7 +69,9 @@ nonisolated struct CodexOAuthStrategy: UsageFetchStrategy {
         let windows = [rateLimit.primaryWindow, rateLimit.secondaryWindow].compactMap(
             Self.mapWindow)
         guard !windows.isEmpty else { throw CodexOAuthStrategyError.invalidResponse }
-        return UsageSnapshot(providerID: .codex, windows: windows, costLine: nil, identity: nil)
+        return UsageSnapshot(
+            providerID: .codex, windows: windows, costLine: nil, identity: nil,
+            source: .providerAPI)
     }
 
     private static func credential(
@@ -94,7 +96,16 @@ nonisolated struct CodexOAuthStrategy: UsageFetchStrategy {
             tokens: nil,
             resetsAt: source.resetAt > 0
                 ? Date(timeIntervalSince1970: source.resetAt)
-                : nil)
+                : nil,
+            windowMinutes: windowMinutes(seconds: source.limitWindowSeconds))
+    }
+
+    /// Whole minutes for a positive window of at most one year; `nil`
+    /// otherwise, so an absurd value can never trap the `Int` conversion.
+    static func windowMinutes(seconds: Double) -> Int? {
+        let minutes = (seconds / 60).rounded()
+        guard minutes.isFinite, minutes >= 1, minutes <= 525_600 else { return nil }
+        return Int(minutes)
     }
 
     private struct Response: Decodable {
@@ -228,7 +239,9 @@ nonisolated struct CodexLocalRolloutStrategy: UsageFetchStrategy {
                     tokens: nil, resetsAt: nil))
         }
         guard !windows.isEmpty else { return nil }
-        return UsageSnapshot(providerID: .codex, windows: windows, costLine: nil, identity: nil)
+        return UsageSnapshot(
+            providerID: .codex, windows: windows, costLine: nil, identity: nil,
+            source: .localReport)
     }
 
     /// `window_minutes` → a human label, generic rather than hardcoded to

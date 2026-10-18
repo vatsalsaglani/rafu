@@ -34,6 +34,25 @@ nonisolated struct UsageWindow: Equatable, Sendable {
     let percent: Double?
     let tokens: Int?
     let resetsAt: Date?
+    /// The window's length in minutes (300 for a 5-hour session, 10_080 for
+    /// a weekly limit) when the provider reports or documents it. Additive:
+    /// it defaults to `nil`, so every existing
+    /// `UsageWindow(label:percent:tokens:resetsAt:)` call keeps compiling.
+    /// `UsagePace` needs it, with `resetsAt`, to find the window's start.
+    var windowMinutes: Int? = nil
+}
+
+/// Where a snapshot's numbers came from, so a card can say "Estimated from
+/// local transcripts" instead of implying an exact percentage. Additive and
+/// `.unspecified` for every provider that does not set it.
+nonisolated enum UsageDataSource: Equatable, Sendable {
+    case unspecified
+    /// The provider's own usage endpoint (exact percentages).
+    case providerAPI
+    /// A local token total that only estimates usage (no percentage).
+    case localEstimate
+    /// A percentage the provider's CLI wrote to a local file.
+    case localReport
 }
 
 /// One provider's usage, as a fetch strategy resolves it. `renderable`
@@ -50,6 +69,8 @@ nonisolated struct UsageSnapshot: Equatable, Sendable {
     /// Account email/handle — Settings-only, NEVER rendered in the notch
     /// (agent-usage-providers.md, "Registration panel").
     let identity: String?
+    /// Additive, defaulted — see `UsageDataSource`.
+    var source: UsageDataSource = .unspecified
 
     /// `false` means this snapshot carries nothing worth showing — no
     /// window data and no cost line. Both `UsageRegistryReader.snapshots`
