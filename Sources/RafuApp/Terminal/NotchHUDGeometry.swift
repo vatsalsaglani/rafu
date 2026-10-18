@@ -20,6 +20,10 @@ nonisolated struct NotchScreenMetrics: Equatable, Sendable {
     let auxiliaryTopLeft: CGRect?
     /// `NSScreen.auxiliaryTopRightArea` — nil on non-notch displays.
     let auxiliaryTopRight: CGRect?
+    /// Whether this is the Mac's built-in display (`CGDisplayIsBuiltin`).
+    /// `var` with a default so the memberwise initializer keeps it optional:
+    /// every existing call site that builds metrics without it stays valid.
+    var isBuiltin: Bool = false
 }
 
 /// The HUD's two presentations (terminal-notch-hud.md N-4): a compact pill
@@ -122,6 +126,21 @@ nonisolated enum NotchScreenSelection {
     /// follow-the-key-window behavior for the non-notch fallback layout.
     static func preferred(from candidates: [NotchScreenMetrics]) -> NotchScreenMetrics? {
         candidates.first { NotchHUDGeometry.notchRect(for: $0) != nil } ?? candidates.first
+    }
+
+    /// The companion's screen. Same as `preferred(from:)`, except that with no
+    /// notched screen attached the built-in display wins before the active
+    /// window's screen (Cider's `BuiltinDisplay` rule): a floating pill on a
+    /// Mac without a notch belongs on the laptop's own screen, not on
+    /// whichever external monitor currently holds the key window. The
+    /// attention drop-down keeps following the key window; only the
+    /// always-on companion is anchored to the built-in display.
+    static func preferredForCompanion(from candidates: [NotchScreenMetrics])
+        -> NotchScreenMetrics?
+    {
+        candidates.first { NotchHUDGeometry.notchRect(for: $0) != nil }
+            ?? candidates.first { $0.isBuiltin }
+            ?? candidates.first
     }
 }
 
