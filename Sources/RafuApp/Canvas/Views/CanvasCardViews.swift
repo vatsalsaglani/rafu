@@ -403,8 +403,20 @@ struct CanvasCardShell: View {
 
     // MARK: Header state
 
+    /// The card title. A terminal node that still has its automatic title
+    /// ("Terminal") and runs an agent shows the agent's task title, or its
+    /// name ("Claude Code"), beside the agent's mark. A renamed node keeps
+    /// its name.
     private var displayTitle: String {
-        CanvasCardPresentation.displayTitle(title: card.title, content: card.content)
+        if TerminalNaming.isAutomaticGroupName(card.title), let cli = agentCLI {
+            let controller = terminalPane.flatMap {
+                session.terminal.terminalController(for: $0.id)
+            }
+            return TerminalSessionPresentation.agentTitle(
+                reportedTitle: controller?.reportedTitle ?? terminalReportedTitle, provider: cli,
+                shellName: controller?.shellDisplayName)
+        }
+        return CanvasCardPresentation.displayTitle(title: card.title, content: card.content)
     }
 
     private var accessibilityTitle: String {

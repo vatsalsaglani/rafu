@@ -1315,7 +1315,7 @@ private struct EditorGroupTabBar: View {
         case .terminal(let sessionID):
             if let controller = session.terminal.sessions.first(where: { $0.id == sessionID }) {
                 overflowTabMenuButton(
-                    title: TerminalSessionPresentation.tabLabel(controller.displayName),
+                    title: TerminalSessionPresentation.tabLabel(controller.presentedTitle),
                     glyph: "terminal", isDirty: false, tab: tab)
             }
         case .terminalGroup(let terminalGroupID):
@@ -2262,7 +2262,7 @@ private struct EditorTerminalTabItem: View {
     @Bindable var session: WorkspaceSession
 
     var body: some View {
-        let title = TerminalSessionPresentation.tabLabel(controller.displayName)
+        let title = TerminalSessionPresentation.tabLabel(controller.presentedTitle)
         AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true) {
             HStack(spacing: 6) {
                 Button {
@@ -2418,13 +2418,35 @@ private struct EditorTerminalGroupTabItem: View {
         }
     }
 
+    /// The agent in the focused pane, when the group still has its automatic
+    /// name: the tab then shows the agent's mark and name (or its task
+    /// title) instead of "Terminal Group 2". A user-chosen name always wins.
+    private var focusedAgent: (cli: ConductorCLIID, title: String)? {
+        guard TerminalNaming.isAutomaticGroupName(snapshot.name.rawValue),
+            let controller = session.terminal.terminalController(for: snapshot.focusedPaneID),
+            controller.hasLiveProcess,
+            let cli = controller.resolvedAgentProvider
+        else { return nil }
+        let title = TerminalSessionPresentation.agentTitle(
+            reportedTitle: controller.userName ?? controller.reportedTitle, provider: cli,
+            shellName: controller.shellDisplayName)
+        return (cli, title)
+    }
+
     var body: some View {
-        let title = snapshot.name.rawValue
+        let agent = focusedAgent
+        let title = agent?.title ?? snapshot.name.rawValue
         AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true) {
             HStack(spacing: 6) {
-                Image(systemName: "rectangle.3.group")
-                    .foregroundStyle(theme.palette.textSecondary)
-                    .accessibilityHidden(true)
+                if let agent {
+                    AgentIconView(cli: agent.cli, size: 13)
+                        .fixedSize()
+                        .accessibilityHidden(true)
+                } else {
+                    Image(systemName: "rectangle.3.group")
+                        .foregroundStyle(theme.palette.textSecondary)
+                        .accessibilityHidden(true)
+                }
                 if isRenaming {
                     TextField("Terminal Group name", text: $renameText)
                         .textFieldStyle(.plain)
