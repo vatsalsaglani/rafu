@@ -647,6 +647,7 @@ struct CanvasLiveBridgeTests {
         fixture.bridge.enable(fixture.edge, in: fixture.board)
         let initial = await fixture.bridge.handle(fixture.request(0, "list"))
         #expect(initial.peers.first?.connected == false)
+        #expect(initial.peers.first?.linkState == "disconnected")
         #expect(initial.peers.first?.provider == nil)
 
         var registration = fixture.request(1, "register", provider: "codex")
@@ -659,6 +660,7 @@ struct CanvasLiveBridgeTests {
         #expect(claudePeers.peers.first?.title == fixture.cards[1].title)
         #expect(claudePeers.peers.first?.kind == "Terminal")
         #expect(claudePeers.peers.first?.connected == true)
+        #expect(claudePeers.peers.first?.linkState == "live")
         let codexPeers = await fixture.bridge.handle(fixture.request(1, "list", provider: "codex"))
         #expect(codexPeers.peers.first?.provider == "claude")
         let encoded = String(decoding: try JSONEncoder().encode(claudePeers), as: UTF8.self)
@@ -667,8 +669,13 @@ struct CanvasLiveBridgeTests {
         #expect(!encoded.contains("rafu-cdx-"))
 
         fixture.bridge.disable(fixture.edge, in: fixture.board)
-        #expect(
-            await fixture.bridge.handle(fixture.request(0, "list")).peers.first?.provider == nil)
+        let paused = await fixture.bridge.handle(fixture.request(0, "list"))
+        #expect(paused.peers.first?.provider == nil)
+        #expect(paused.peers.first?.connected == false)
+        #expect(paused.peers.first?.linkState == "paused")
+        let denied = await fixture.bridge.handle(
+            fixture.request(0, "send", destination: 1, text: "blocked"))
+        #expect(denied.error?.contains("Resume it in Rafu Canvas") == true)
         fixture.bridge.enable(fixture.edge, in: fixture.board)
         fixture.controllers[1].restart()
         let stopped = await fixture.bridge.handle(fixture.request(0, "list"))

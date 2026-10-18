@@ -356,6 +356,7 @@ private struct CanvasEdgeView: View {
                 .foregroundStyle(pillForeground)
                 .padding(.horizontal, 8)
                 .frame(maxWidth: isHovered ? 480 : 160, minHeight: 20, maxHeight: 20)
+                .fixedSize(horizontal: true, vertical: false)
                 .background(theme.palette.elevatedBackground, in: Capsule())
                 .overlay(Capsule().strokeBorder(pillBorder, lineWidth: 1))
                 .overlay(

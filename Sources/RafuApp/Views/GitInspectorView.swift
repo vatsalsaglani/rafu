@@ -143,6 +143,7 @@ struct SourceControlPanelView: View {
                 branchMenuLabel
             }
             .menuStyle(.borderlessButton)
+            .tint(theme.palette.textSecondary)
             .menuIndicator(.hidden)
             .help("Switch, create, or merge branches — \(snapshot.branch)")
             .accessibilityLabel("Branch \(snapshot.branch)")
@@ -227,6 +228,7 @@ struct SourceControlPanelView: View {
             .contentShape(.capsule)
         }
         .menuStyle(.borderlessButton)
+        .tint(theme.palette.textSecondary)
         .menuIndicator(.hidden)
         .fixedSize()
         .help(disabledHelp ?? syncHelp)
@@ -486,6 +488,7 @@ struct GitInspectorView: View {
             .contentShape(.rect)
         }
         .menuStyle(.borderlessButton)
+        .tint(theme.palette.textSecondary)
         .menuIndicator(.hidden)
         .fixedSize()
         .help("View as List or Tree")
@@ -1033,6 +1036,7 @@ private struct GitStashRow: View {
                         .contentShape(.rect)
                 }
                 .menuStyle(.borderlessButton)
+                .tint(theme.palette.textSecondary)
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .help("Stash Actions")
@@ -1126,6 +1130,7 @@ private struct GitWorktreeRow: View {
                     .contentShape(.rect)
             }
             .menuStyle(.borderlessButton)
+            .tint(theme.palette.textSecondary)
             .menuIndicator(.hidden)
             .fixedSize()
             .help("Worktree Actions")

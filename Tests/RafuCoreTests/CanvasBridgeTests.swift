@@ -36,9 +36,10 @@ private func canvasRPC(_ method: String, params: [String: Any] = [:], id: Int? =
     let legacy = Data(#"{"id":"peer","title":"Terminal","kind":"Terminal","connected":true}"#.utf8)
     #expect(try JSONDecoder().decode(CanvasBridgePeer.self, from: legacy).provider == nil)
     #expect(try JSONDecoder().decode(CanvasBridgePeer.self, from: legacy).mention == nil)
+    #expect(try JSONDecoder().decode(CanvasBridgePeer.self, from: legacy).linkState == nil)
     let peer = CanvasBridgePeer(
         id: "peer", title: "Terminal", kind: "Terminal", connected: true, provider: "codex",
-        mention: "@terminal")
+        mention: "@terminal", linkState: "live")
     #expect(
         try JSONDecoder().decode(CanvasBridgePeer.self, from: JSONEncoder().encode(peer)) == peer)
 }

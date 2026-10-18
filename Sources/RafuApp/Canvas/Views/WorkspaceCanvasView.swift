@@ -26,7 +26,11 @@ struct WorkspaceCanvasView: View {
     @State private var isDropTargeted = false
     @FocusState private var boardHasKeyboardFocus: Bool
     @AppStorage("canvasEmptyBoardTipDismissed") private var tipDismissed = false
-    @State private var pausedLinkCount = 0
+    @State private var showsRestoredLinksNotice = false
+
+    private var pausedLinkCount: Int {
+        CanvasLiveBridge.shared.linkStates(in: board).values.count { $0.kind == .paused }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,7 +47,7 @@ struct WorkspaceCanvasView: View {
             }
             Group {
                 CanvasBar(board: board, session: session)
-                if pausedLinkCount > 0 { pausedLinksNotice }
+                if showsRestoredLinksNotice && pausedLinkCount > 0 { pausedLinksNotice }
                 Divider()
                 if board.showsList {
                     CanvasListView(board: board, session: session)
@@ -79,9 +83,7 @@ struct WorkspaceCanvasView: View {
         .onAppear {
             session.canvasResources[board.id]?.present(owner: presentationID)
             // A reopened board restores message links Paused; say so once.
-            pausedLinkCount = CanvasLiveBridge.shared.linkStates(in: board).values.count {
-                $0.kind == .paused
-            }
+            showsRestoredLinksNotice = pausedLinkCount > 0
         }
         .onDisappear {
             connectionDrag.reset()
@@ -193,6 +195,7 @@ struct WorkspaceCanvasView: View {
                 emptyBoardTip
             }
         }
+        .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         .coordinateSpace(name: CanvasConnectionCoordinateSpace.board)
         .onGeometryChange(for: CGSize.self) {
             $0.size
@@ -373,12 +376,12 @@ struct WorkspaceCanvasView: View {
                 .font(.system(size: 12)).foregroundStyle(theme.palette.textSecondary)
             Button("Resume Links") {
                 CanvasLiveBridge.shared.resumeAll(in: board)
-                pausedLinkCount = 0
+                showsRestoredLinksNotice = false
             }
             .buttonStyle(RafuSecondaryButtonStyle(compact: true))
             Spacer()
             Button {
-                pausedLinkCount = 0
+                showsRestoredLinksNotice = false
             } label: {
                 Image(systemName: "xmark")
             }

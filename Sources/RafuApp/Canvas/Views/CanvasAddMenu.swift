@@ -84,6 +84,7 @@ struct CanvasAddCardMenu: View {
                 .frame(width: 24, height: 24)
         }
         .menuStyle(.borderlessButton)
+        .tint(theme.palette.textSecondary)
         .menuIndicator(.hidden)
         .fixedSize()
         .disabled(board.cards.count >= CanvasLimits.cards)

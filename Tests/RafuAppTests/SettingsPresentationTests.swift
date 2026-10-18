@@ -118,6 +118,17 @@ struct SettingsPresentationTests {
         #expect(!ensemble.contains("Verb version"))
     }
 
+    @Test("Agent model labels can shrink without hiding the refresh control")
+    func agentModelCellHasBoundedLabel() throws {
+        let source = try Self.source("Sources/RafuApp/Settings/ConductorSettingsTab.swift")
+        let cell = try #require(
+            source.components(separatedBy: "private struct ConductorDefaultModelCell: View").last)
+        #expect(cell.contains(".pickerStyle(.inline)"))
+        #expect(cell.contains(".truncationMode(.middle)"))
+        #expect(cell.contains(".frame(minWidth: 0, maxWidth: .infinity)"))
+        #expect(cell.contains(".frame(width: 18)"))
+    }
+
     private static func source(_ path: String, file: StaticString = #filePath) throws -> String {
         var directory = URL(fileURLWithPath: "\(file)").deletingLastPathComponent()
         while directory.path != "/" {

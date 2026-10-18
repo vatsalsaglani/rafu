@@ -327,6 +327,43 @@ struct WorkbenchChromeRedesignTests {
         #expect(!source.contains("Button(\"Search Workspace\""))
     }
 
+    @Test("Native secondary menus explicitly override the inherited gold tint")
+    func nativeMenusAreNeutral() throws {
+        for path in [
+            "Sources/RafuApp/Views/GitInspectorView.swift",
+            "Sources/RafuApp/Canvas/Views/CanvasBar.swift",
+            "Sources/RafuApp/Canvas/Views/CanvasAddMenu.swift",
+        ] {
+            let source = try Self.source(path)
+            let menus = source.components(separatedBy: ".menuStyle(.borderlessButton)").dropFirst()
+            #expect(!menus.isEmpty)
+            for menu in menus {
+                #expect(
+                    menu.trimmingCharacters(in: .whitespacesAndNewlines)
+                        .hasPrefix(".tint(theme.palette.textSecondary)"), Comment(rawValue: path))
+            }
+        }
+    }
+
+    @Test("Large cards cannot expand the Canvas viewport or push controls off screen")
+    func canvasViewportStaysBounded() throws {
+        let source = try Self.source("Sources/RafuApp/Canvas/Views/WorkspaceCanvasView.swift")
+        #expect(
+            source.contains(
+                ".frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)"
+            ))
+    }
+
+    @Test("Canvas link notices use current bridge state and edge pills keep intrinsic width")
+    func canvasLinkStatusLayout() throws {
+        let source = try Self.source("Sources/RafuApp/Canvas/Views/WorkspaceCanvasView.swift")
+        #expect(!source.contains("@State private var pausedLinkCount"))
+        #expect(source.contains("private var pausedLinkCount: Int"))
+        #expect(source.contains("if showsRestoredLinksNotice && pausedLinkCount > 0"))
+        let pill = try Self.source("Sources/RafuApp/Canvas/Views/CanvasEdgeLayer.swift")
+        #expect(pill.contains(".fixedSize(horizontal: true, vertical: false)"))
+    }
+
     private static func section(of source: String, from start: String, to end: String) throws
         -> String
     {

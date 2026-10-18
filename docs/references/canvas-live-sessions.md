@@ -405,3 +405,11 @@ and multiple turns. Claude's own auto-mode permission check declined one
 channel-triggered reply; a direct authorized prompt sent it successfully. Rafu
 must preserve that provider permission boundary. These checks do not prove
 arbitrary network-failure recovery or every provider version.
+
+## Paused-link diagnostics (verified 2026-10-18, macOS 27.0.1, Swift 6.4)
+
+The message bridge reports `connected` as permission to deliver a message, not merely the presence of a running CLI. Peer responses also expose `linkState` (`live`, `paused`, `disconnected`, `failed`, or `related`). A paused edge must be resumed in Canvas. Restarting either terminal does not resume an edge. The MCP instructions explain this distinction; explicit sends to a paused peer return the same recovery step. No pause permission is bypassed. Older peer responses without this optional field still decode.
+
+Evidence: the CC1 and Codex sessions changed from Paused to Live when the existing edge was resumed, without restarting either CLI. A real check then passed from Codex to CC1 and back through `send_message`, with `LINK_OK` visible in Codex. Claude’s startup channel notice alone did not establish a missing bridge. Check the current link state and MCP status before diagnosing startup failure. Regression coverage: `CanvasLiveBridgeTests.livePeerProviders` and `canvasPeerProviderRemainsCompatibleWithOlderResponses`; run `./script/test.sh --filter CanvasLiveBridgeTests` and `./script/test.sh --filter CanvasBridgeTests`. The edge badge uses intrinsic width within its text limit, so a short state label does not fill the hover width.
+
+The restore notice derives its paused count from current bridge state. Only its dismissal is view state. Keeping the initial count in `@State` left a paused banner visible after an individual link was resumed. `WorkbenchChromeRedesignTests.canvasLinkStatusLayout` guards the observation boundary and compact badge layout.

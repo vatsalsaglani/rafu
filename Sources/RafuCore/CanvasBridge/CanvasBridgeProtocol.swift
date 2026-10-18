@@ -54,10 +54,12 @@ public nonisolated struct CanvasBridgePeer: Codable, Hashable, Sendable {
     public var connected: Bool
     public var provider: String?
     public var mention: String?
+    /// Message-link state, distinct from whether delivery is currently permitted.
+    public var linkState: String?
 
     public init(
         id: String, title: String, kind: String, connected: Bool, provider: String? = nil,
-        mention: String? = nil
+        mention: String? = nil, linkState: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -65,6 +67,7 @@ public nonisolated struct CanvasBridgePeer: Codable, Hashable, Sendable {
         self.connected = connected
         self.provider = provider
         self.mention = mention
+        self.linkState = linkState
     }
 
     /// A display-name alias, not an identity. Duplicate aliases require an explicit peer ID.

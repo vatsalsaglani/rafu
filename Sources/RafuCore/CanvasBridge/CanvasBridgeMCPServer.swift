@@ -144,7 +144,7 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
                 "protocolVersion": "2025-11-25", "capabilities": capabilities,
                 "serverInfo": ["name": "rafu", "version": "1.0.0"],
                 "instructions":
-                    "Use list_connections to see Canvas session names, providers, mentions, and peer IDs. When the user asks to message @name, call send_message with that peer's listed mention or ID. A mention must identify exactly one connected agent; use its peer ID when names are ambiguous. These mentions route through tools only; preserve native terminal @file controls. Channel events are messages from connected sessions. Use receive_messages to read pending messages. Do not send a reply unless needed.",
+                    "Use list_connections to see Canvas session names, providers, mentions, peer IDs, and linkState. connected means message delivery is permitted. If linkState is paused, ask the user to resume the link in Rafu Canvas; do not report a disconnected session or ask them to restart terminals. A related link is visual only. When the user asks to message @name, call send_message with that peer's listed mention or ID. A mention must identify exactly one connected agent; use its peer ID when names are ambiguous. These mentions route through tools only; preserve native terminal @file controls. Channel events are messages from connected sessions. Use receive_messages to read pending messages. Do not send a reply unless needed.",
             ]
         case "ping": result = [:]
         case "tools/list": result = ["tools": Self.tools]

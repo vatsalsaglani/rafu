@@ -49,6 +49,7 @@ struct CanvasBar: View {
             }
         }
         .menuStyle(.borderlessButton)
+        .tint(theme.palette.textSecondary)
         .menuIndicator(.hidden)
         .fixedSize()
         .help("Canvas name and actions")
@@ -95,6 +96,7 @@ struct CanvasBar: View {
                 .frame(width: 24, height: 24)
         }
         .menuStyle(.borderlessButton)
+        .tint(theme.palette.textSecondary)
         .menuIndicator(.hidden)
         .fixedSize()
         .help("Arrange cards")
@@ -140,6 +142,7 @@ struct CanvasBar: View {
                 .frame(width: 24, height: 24)
         }
         .menuStyle(.borderlessButton)
+        .tint(theme.palette.textSecondary)
         .menuIndicator(.hidden)
         .fixedSize()
         .help("More Canvas actions")
@@ -236,6 +239,7 @@ struct CanvasZoomCapsule: View {
                 .frame(minWidth: 52)
             }
             .menuStyle(.borderlessButton)
+            .tint(theme.palette.textSecondary)
             .menuIndicator(.hidden)
             .fixedSize()
             .help("Zoom: fit, selection, actual size")

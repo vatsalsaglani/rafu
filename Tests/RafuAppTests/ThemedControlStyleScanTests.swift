@@ -15,7 +15,8 @@ import Testing
 ///
 /// - `TabView` — its macOS bar paints the selected tab with the system
 ///   accent and ignores `.tint`, exactly as `Picker(.segmented)` does.
-///   Settings now draws `SettingsPaneStrip` instead.
+///   The macOS redesign permits native toolbar tabs only in the standard
+///   Settings window. Workbench content still uses themed controls.
 /// - Stock SwiftUI controls Rafu does not hand-draw (`Toggle`'s switch,
 ///   determinate `ProgressView`, `Slider`, `Stepper`, `ColorPicker`, text
 ///   selection). Scanning for `Toggle(` is hopeless — dozens of legitimate
@@ -53,8 +54,15 @@ struct ThemedControlStyleScanTests {
             {
                 // The scan is the guard's subject; its own literals must not
                 // trip it, and neither may prose explaining the rule.
-                guard !line.contains("themed-control-scan:allow") else { continue }
+                guard !line.contains("themed-control-scan:allow"),
+                    !line.trimmingCharacters(in: .whitespaces).hasPrefix("//")
+                else { continue }
                 for needle in banned where line.contains(needle) {
+                    if needle == "TabView",
+                        file == root.appending(path: "Settings/RafuSettingsView.swift")
+                    {
+                        continue
+                    }
                     offenders.append(
                         "\(file.lastPathComponent):\(index + 1) — \(needle)")
                 }
@@ -65,7 +73,7 @@ struct ThemedControlStyleScanTests {
             offenders.isEmpty,
             """
             Use RafuSegmentedPicker / RafuProminentButtonStyle / \
-            SettingsPaneStrip, and install themes with View.rafuTheme(_:) so \
+            native toolbar tabs only in the Settings window, and install themes with View.rafuTheme(_:) so \
             stock controls inherit the theme tint: \
             \(offenders.joined(separator: ", "))
             """

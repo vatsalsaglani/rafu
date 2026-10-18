@@ -442,6 +442,14 @@ final class CanvasLiveBridge {
             } else {
                 destinationID = destination
             }
+            if peers(for: controller.id).contains(where: {
+                $0.id == destinationID && $0.linkState == "paused"
+            }) {
+                return .init(
+                    error:
+                        "This link is paused. Resume it in Rafu Canvas. Do not restart the terminals."
+                )
+            }
             guard let targetID = liveTarget(from: controller.id, cardID: destinationID),
                 let targetToken = endpoints.first(where: { $0.value.controller?.id == targetID })?
                     .key,
@@ -533,6 +541,7 @@ final class CanvasLiveBridge {
 
     private func peers(for controllerID: UUID) -> [CanvasBridgePeer] {
         guard let source = location(of: controllerID) else { return [] }
+        let states = linkStates(in: source.board)
         var seen = Set<CanvasCardID>()
         var peers: [CanvasBridgePeer] = source.board.connections.compactMap { edge in
             let other =
@@ -553,7 +562,8 @@ final class CanvasLiveBridge {
                 kind: card.content.kindName,
                 connected: connected, provider: provider,
                 mention: connected && provider != nil
-                    ? CanvasBridgePeer.mention(for: card.title) : nil)
+                    ? CanvasBridgePeer.mention(for: card.title) : nil,
+                linkState: states[edge.id]?.word.lowercased() ?? "related")
         }
         // Bound both the launcher response and the MCP result's second JSON encoding.
         if let encoded = try? JSONEncoder().encode(CanvasBridgeResponse(peers: peers)),

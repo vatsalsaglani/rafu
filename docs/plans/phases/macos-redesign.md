@@ -1,6 +1,7 @@
 # macOS redesign: "One Gold Thread"
 
-- Status: Implemented on the integration branch; macOS build and test pending.
+- Status: Implemented; local macOS build and UI follow-up completed. See the
+  local verification scope below; full accessibility and haptic checks remain.
   Started on user direction, 2026-10-18. See "Status and results" at the end.
 - Source specification: [`macos-redesign/review.html`](macos-redesign/review.html)
   (open it in a browser, or grep it). Finding IDs (C1–C19, E1–E12, G1–G16,
@@ -330,7 +331,27 @@ A1 (Canvas), A2 (panels and settings) and A3 (chrome and editor) were
 read-only compile audits; their fixes are listed under "Verification actually
 done". They do not replace a compiler run.
 
-### Required macOS verification (not done)
+### Local macOS follow-up (2026-10-18)
+
+Checked on macOS 27.0.1 with Apple Swift 6.4 in Swift 6.2 language mode.
+The full app builds and the canonical Lightning launch passes. The first
+parallel run found one stale source-policy test that banned the native
+Settings tabs now required by this phase. The exception is limited to the
+standard Settings host; workbench controls retain the theme guard.
+
+The local UI pass found and fixed clipped model refresh controls in Agents
+settings, inherited gold tint on secondary Git and Canvas menus, and Canvas
+zoom controls pushed off screen by a large card in a smaller window. See
+`docs/references/macos-redesign-visual-system.md` for the native layout rules.
+
+Checks exercised: native Settings tabs and model menu, Canvas note editing,
+Control-Tab return to the board, terminal typing, T to create a stopped card,
+selected terminal removal, editor Find, a second independent workspace,
+and Source Control with a working-tree diff in a test repository.
+Haptics, VoiceOver speech, live agent traffic, and the full OS accessibility
+settings matrix are not covered by this local pass.
+
+### Required macOS verification
 
 Run on a Mac, in the order from `AGENTS.md`: `swift-format format --fix`, then
 `--lint`, `swift build`, `./script/test.sh` (parallel), `./script/test.sh

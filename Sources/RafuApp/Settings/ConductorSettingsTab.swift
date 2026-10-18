@@ -34,23 +34,23 @@ struct ConductorSettingsSection: View {
                             Label(row.displayName, systemImage: conductorAgentSymbol(row.id))
                                 .lineLimit(1)
                         }
-                        .width(min: 100, ideal: 120)
+                        .width(min: 90, ideal: 110, max: 120)
                         TableColumn("Version") { row in
                             Text(ConductorAgentDisplay.versionText(model.probe(for: row.id)))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
-                        .width(min: 56, ideal: 70, max: 100)
+                        .width(min: 48, ideal: 60, max: 70)
                         TableColumn("Sign-in") { row in
                             let state = model.signInPresentation(for: row.id)
                             Label(state.word, systemImage: state.systemImage)
                                 .lineLimit(1)
                         }
-                        .width(min: 110, ideal: 124)
+                        .width(min: 90, ideal: 104, max: 110)
                         TableColumn("Default model") { row in
                             ConductorDefaultModelCell(row: row, model: model)
                         }
-                        .width(min: 170, ideal: 210)
+                        .width(min: 140, ideal: 170)
                     }
                     .frame(height: 30 + 28 * CGFloat(model.rows.count))
                 }
@@ -373,19 +373,29 @@ private struct ConductorDefaultModelCell: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Picker("Default model", selection: model.defaultModelBinding(for: row.id)) {
-                Text(ConductorModelResolution.unsetLabel).tag("")
-                ForEach(model.availableModels(for: row.id)) { choice in
-                    Text(choice.displayName).tag(choice.id)
+            Menu {
+                Picker("Default model", selection: model.defaultModelBinding(for: row.id)) {
+                    Text(ConductorModelResolution.unsetLabel).tag("")
+                    ForEach(model.availableModels(for: row.id)) { choice in
+                        Text(choice.displayName).tag(choice.id)
+                    }
+                    if let resolved = model.resolvedModelChoice(for: row.id),
+                        resolved.source == .custom
+                    {
+                        Text("\(resolved.displayName) (custom)").tag(resolved.id)
+                    }
                 }
-                if let resolved = model.resolvedModelChoice(for: row.id),
-                    resolved.source == .custom
-                {
-                    Text("\(resolved.displayName) (custom)").tag(resolved.id)
-                }
+                .pickerStyle(.inline)
+            } label: {
+                Text(
+                    model.resolvedModelChoice(for: row.id)?.displayName
+                        ?? ConductorModelResolution.unsetLabel
+                )
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
+            .frame(minWidth: 0, maxWidth: .infinity)
             .accessibilityLabel("\(row.displayName) default model")
 
             if row.supportsModelDiscovery {
@@ -399,6 +409,8 @@ private struct ConductorDefaultModelCell: View {
                 .disabled(model.modelRefreshState(for: row.id) == .refreshing)
                 .help("Refresh models")
                 .accessibilityLabel("Refresh \(row.displayName) models")
+                .frame(width: 18)
+                .fixedSize()
             } else {
                 Color.clear.frame(width: 18, height: 1).accessibilityHidden(true)
             }

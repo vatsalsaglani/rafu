@@ -4,11 +4,10 @@
   from the macOS redesign (`docs/plans/phases/macos-redesign.md`), as implemented
   in `Sources/RafuApp/Support/` and the workbench, Source Control, terminal,
   Ensemble, Settings, and Canvas views.
-- Last verified: Swift 6.2 Linux toolchain (swift.org, ubuntu24.04), Ubuntu
-  24.04, 2026-10-18. This is a syntax, lint, and scratch-test check only.
-  **A macOS build is pending**, so none of the visual behaviour here has been
-  seen on a Mac. The Apple documentation facts for haptics were read from
-  Apple's documentation JSON.
+- Last verified on Mac: Apple Swift 6.4 (Swift 6.2 language mode), macOS
+  27.0.1 (26A434), 2026-10-18. The app builds and the canonical Lightning
+  launch check passes. See the phase plan for the scope of the UI checks.
+  The earlier Linux syntax and scratch-test checks remain recorded there.
 
 ## Rule or observed behavior
 
@@ -127,11 +126,26 @@ on non-user events break Apple's guidance and cannot be felt on most Macs.
   `https://developer.apple.com/tutorials/data/documentation/appkit/nshapticfeedbackmanager.json`
   and the SwiftUI `sensoryfeedback` page (see
   [`linux-swift-verification.md`](linux-swift-verification.md)).
-- No on-device visual or haptic check was done.
+- Mac UI checks found that borderless native `Menu` controls use the inherited
+  tint even when their label has a neutral `foregroundStyle`. Set a neutral
+  `.tint` on secondary Git and Canvas menus. A label color alone does not
+  enforce the gold budget.
+- The native Agents table also adds column spacing to the declared widths.
+  Keep the non-model columns bounded at the 680-point Settings window width.
+  Use a shrinkable menu label and reserve the refresh button width; a menu
+  Picker's intrinsic label can otherwise push the refresh control outside the
+  table. Reproduce with a long custom model ID in Settings > Agents. Open the
+  model menu and confirm the complete value is still available.
+- Bound the board layer to the GeometryReader viewport before attaching the
+  zoom overlay. A scaled card keeps its unscaled layout size in SwiftUI. Without
+  the explicit frame, a large card can expand the ZStack and push the zoom
+  controls beyond the right edge in a smaller window. Reproduce by opening a
+  board with a large terminal card at 58% in an 1100-point window.
+- Force Touch haptics have not been checked.
 
 ## Verification
 
-Pending on a Mac: build and run `./script/build_and_run.sh --verify`, then a
+Build and run `./script/build_and_run.sh --verify`, then run a
 visual pass that checks gold appears only in the five places above, in Light
 and Dark, with Increase Contrast and Reduce Motion on. Haptics need a Force
 Touch trackpad.
