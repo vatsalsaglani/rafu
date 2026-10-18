@@ -1,5 +1,7 @@
 # Ensemble PTY spawn: `forkpty` under parallel tests, and the child's missing `PATH`
 
+> **Status (2026-10-18): Retired.** The feature this note describes was removed in the round-2 redesign (see docs/plans/phases/ensemble-canvas.md). Kept for history; do not use it as current guidance. A grep of `Sources/` finds no `forkpty` use.
+
 - Applies to: `Sources/RafuApp/Conductor/` (adapter `invocation(...)` and
   `RafuConductorEnvironment`), `Sources/RafuApp/Terminal/`
   (`WorkspaceTerminalController`'s `TerminalProcessSpec` seam), and any

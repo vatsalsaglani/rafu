@@ -1,5 +1,7 @@
 # Ensemble graph canvas
 
+> **Status (2026-10-18): Retired.** The feature this note describes was removed in the round-2 redesign (see docs/plans/phases/ensemble-canvas.md). Kept for history; do not use it as current guidance.
+
 - Applies to: the editor-hosted Ensemble graph, its Runs-panel Activity feed,
   and coordinator attribution introduced by C8-06
 - Last verified: Swift 6.3.3, Xcode 26.6, macOS 26.5.2, 2026-07-26

@@ -40,6 +40,31 @@ The tab strip registers ONLY `.rafuEditorDrag` (a private UTType defined in the 
 - Finder file drops reach the body handler (open in new tab or split)
 - A sidebar file dropped directly on the tab bar is now a harmless no-op (previously it would wrongly force-split)
 
+## Ensemble board drop routing (2026-10-18)
+
+Last verified: Swift 6.2 Linux read-through, 2026-10-18; not yet run on macOS.
+
+When an Ensemble board (Canvas) fills an editor group, the board and the group
+both register the private `.rafuEditorDrag` type. SwiftUI gives a drag to the
+deepest matching target, so the board used to swallow a dragged TAB, decode it
+as "not a file", and do nothing: the group could not be split while a board
+showed. `Sources/RafuApp/Editor/EditorDropRouting.swift` now decides, from the
+payload cached in `WorkspaceSession.activeEditorDrag`:
+
+- `EditorDropRouting.groupAccepts(_:canvasIsVisible:)`: true when no board is
+  visible; with a board visible, true only for a `.tab` payload.
+- `EditorDropRouting.canvasAccepts(_:)`: false for a `.tab` payload, true
+  otherwise. A tab never becomes a node. Files stay with the board.
+- A `nil` payload means the drag began in another window; neither side can
+  classify it, so the board (the deeper target) keeps it.
+
+So the board no longer swallows tab drags, and a tab dragged to the editor edge
+reaches the group's edge-split target.
+
+Not verified in code (stated in the handoff only): that left/right edge bands
+are the split edges, and that splitting a sole tab is a no-op. Not verified:
+any macOS drag run.
+
 ## Why it matters
 
 Reorder vs. split is a foundational UI interaction; users expect it to work predictably. The prior bug where EVERY tab-bar drop split was a regression that made it impossible to reorder tabs within a single group. The three-zone model is standard in most IDEs (VS Code, Sublime Text) and is intuitive once the user discovers it. The structural scope fix (not a hit-test priority fix) makes the behavior deterministic and testable.

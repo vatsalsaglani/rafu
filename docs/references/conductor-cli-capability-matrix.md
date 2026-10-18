@@ -1,5 +1,7 @@
 # Ensemble CLI capability matrix — modes, models, effort, sessions
 
+> **Status (2026-10-18): Partly current.** The per-CLI facts (flags, auth, model listing, plan/act modes) still apply because the adapters in `Sources/RafuApp/Conductor/Adapters/**` are kept. Statements about run orchestration, run launch, and "wired" status for runs describe the removed run feature (see docs/plans/phases/ensemble-canvas.md). Not re-verified against code in this round.
+
 - **Applies to:** every Ensemble adapter. This is the cross-CLI comparison;
   the per-family notes
   ([claude-codex](conductor-adapter-claude-codex.md),

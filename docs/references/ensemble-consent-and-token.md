@@ -1,5 +1,7 @@
 # Ensemble consent, capability token, and grant
 
+> **Status (2026-10-18): Retired.** The feature this note describes was removed in the round-2 redesign (see docs/plans/phases/ensemble-canvas.md). Kept for history; do not use it as current guidance.
+
 ## Applies to
 
 This note applies to the interactive Ensemble coordinator launch, its

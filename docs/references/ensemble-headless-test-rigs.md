@@ -1,5 +1,7 @@
 # Ensemble headless test rigs: notifier injection, socket serialization, bounded event awaits
 
+> **Status (2026-10-18): Retired.** The feature this note describes was removed in the round-2 redesign (see docs/plans/phases/ensemble-canvas.md). Kept for history; do not use it as current guidance.
+
 - Applies to: `Tests/RafuAppTests/Conductor/*`, `Tests/RafuCoreTests/Ensemble/*`, and any test that reaches `WorkspaceSession`, a real `LauncherIPCServer` socket, or `ConductorEnsembleEventCenter`
 - Last verified: Swift 6.2 / macOS 26 / 2026-07-26 (phase C8-04)
 

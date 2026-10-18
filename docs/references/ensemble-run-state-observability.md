@@ -1,5 +1,7 @@
 # Ensemble run-state observability: terminal transitions must stamp step status
 
+> **Status (2026-10-18): Retired.** The feature this note describes was removed in the round-2 redesign (see docs/plans/phases/ensemble-canvas.md). Kept for history; do not use it as current guidance.
+
 - Applies to: `Sources/RafuApp/Conductor/Run/ConductorWorkflowController.swift`, `ConductorRunController.swift`, `ConductorEnsembleEventCenter`, `ConductorEnsembleStateProjection`, `Sources/RafuCore/Ensemble/EnsembleCommandRunner.swift`
 - Last verified: Swift 6.2 / macOS 26 / 2026-07-26 (phase C8-04)
 
