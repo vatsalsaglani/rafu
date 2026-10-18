@@ -46,6 +46,9 @@ final class AgentHistoryWindowState {
 
     /// The Agent Session tab on screen, if one is.
     var visibleSession: AgentSessionTabReference?
+    /// The pending "Continue in …" review sheet, if one is open. Holds only
+    /// the chosen session and agent, never transcript text.
+    var handoffRequest: AgentHandoffRequest?
     private(set) var transcripts: [AgentHistorySessionKey: AgentTranscriptModel] = [:]
 
     @ObservationIgnored private var messageSearchTask: Task<Void, Never>?
