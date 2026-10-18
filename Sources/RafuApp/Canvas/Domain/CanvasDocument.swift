@@ -17,7 +17,6 @@ nonisolated enum CanvasLimits {
     static let noteBytes = 64 * 1_024
     static let documentBytes = 2 * 1_024 * 1_024
     static let webSurfaces = 2
-    static let captureStreams = 2
     /// Whiteboard and Mermaid bounds (X5).
     static let mermaidSourceBytes = 16 * 1_024
     static let whiteboardTextBytes = 8 * 1_024

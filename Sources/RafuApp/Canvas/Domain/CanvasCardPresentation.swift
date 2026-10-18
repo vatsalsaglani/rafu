@@ -35,10 +35,6 @@ nonisolated enum CanvasCardPresentation {
         relativePath.isEmpty || relativePath == "." ? "Workspace folder" : relativePath
     }
 
-    static func previewCaption(appName: String) -> String {
-        "This is a picture of a \(appName) window. Keyboard and pointer input go to \(appName)."
-    }
-
     /// One line for the 25-50% summary face.
     static func summaryLine(for content: CanvasCardContent, terminalTitle: String?) -> String {
         switch content {
