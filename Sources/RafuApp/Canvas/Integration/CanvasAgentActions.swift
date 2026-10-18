@@ -1133,7 +1133,12 @@ enum CanvasAgentKinds {
         switch kind {
         case "mermaid": return .mermaid(source: text ?? "flowchart LR\n  A --> B")
         case "shape":
-            return .shape(CanvasShape(kind: CanvasShape.Kind(rawValue: shape ?? "") ?? .rectangle))
+            return .shape(
+                CanvasShape(
+                    kind: CanvasShapeKind(rawValue: shape ?? "") ?? .rectangle,
+                    label: text.map {
+                        String($0.utf8.count <= CanvasLimits.shapeLabelBytes ? $0 : "")
+                    }.flatMap { $0.isEmpty ? nil : $0 }))
         case "text": return .text(CanvasText(text: text ?? "Text"))
         default: return .note(snapshot: text ?? "")
         }
