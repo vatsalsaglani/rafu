@@ -1737,36 +1737,60 @@ private struct GitSideBySideDiffView: View {
         )
     }
 
+    /// One header (G8): path breadcrumb, the real comparison, and "+n −n".
+    /// The tab already carries the file title, so it is not repeated here.
     private var diffHeader: some View {
-        RafuCardHeaderRow {
-            HStack(spacing: 8) {
-                Image(systemName: "arrow.left.arrow.right")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(theme.palette.info)
-                RafuChip(text: openDiff.title, foreground: theme.palette.textPrimary)
-                Text(openDiff.subtitle)
-                    .font(.caption)
+        let components = GitDiffHeaderPresentation.breadcrumb(for: openDiff.diff.path)
+        let fileName = (openDiff.diff.path as NSString).lastPathComponent
+        return RafuCardHeaderRow {
+            HStack(spacing: 6) {
+                FileIconView(icon: FileIconProvider.fileIcon(named: fileName), size: 12)
+                    .accessibilityHidden(true)
+                ForEach(Array(components.enumerated()), id: \.offset) { item in
+                    if item.offset > 0 {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(theme.palette.textMuted)
+                            .accessibilityHidden(true)
+                    }
+                    let isLast = item.offset == components.count - 1
+                    Text(item.element)
+                        .font(.system(size: 12, weight: isLast ? .semibold : .regular))
+                        .foregroundStyle(
+                            isLast ? theme.palette.textPrimary : theme.palette.textSecondary
+                        )
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Text("·")
+                    .foregroundStyle(theme.palette.textMuted)
+                    .accessibilityHidden(true)
+                Text(GitDiffHeaderPresentation.comparisonLabel(for: openDiff.scope))
+                    .font(.system(size: 12))
                     .foregroundStyle(theme.palette.textSecondary)
                     .lineLimit(1)
+                    .fixedSize()
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                "\(openDiff.diff.path), \(GitDiffHeaderPresentation.comparisonLabel(for: openDiff.scope))"
+            )
         } trailing: {
             diffStats
         }
     }
 
     private var diffStats: some View {
-        let additions = openDiff.diff.hunks
-            .flatMap(\.rows)
-            .count { $0.newLine != nil && ($0.kind == .addition || $0.kind == .modification) }
-        let deletions = openDiff.diff.hunks
-            .flatMap(\.rows)
-            .count { $0.oldLine != nil && ($0.kind == .deletion || $0.kind == .modification) }
+        let counts = GitDiffHeaderPresentation.lineCounts(for: openDiff.diff)
         return HStack(spacing: 6) {
             RafuChip(
-                text: "+\(additions)", foreground: theme.palette.gitAdded, monospacedDigit: true)
+                text: "+\(counts.added)", foreground: theme.palette.gitAdded, monospacedDigit: true)
             RafuChip(
-                text: "−\(deletions)", foreground: theme.palette.gitDeleted, monospacedDigit: true)
+                text: "−\(counts.deleted)", foreground: theme.palette.gitDeleted,
+                monospacedDigit: true)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(counts.added) lines added, \(counts.deleted) lines removed")
     }
 
     private var diffTable: some View {
@@ -1804,19 +1828,17 @@ private struct GitSideBySideDiffView: View {
 
     private func hunkHeader(_ hunk: GitDiffHunk) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: "ellipsis")
-                .font(.caption2)
-                .foregroundStyle(theme.palette.textMuted)
+            // G8: no decorative "···" — the diff model has a fixed context
+            // size, so there is no real "Show More Context" action to offer.
             Text(hunk.header)
                 .font(.caption.monospaced())
-                .foregroundStyle(theme.palette.accent)
+                .foregroundStyle(theme.palette.textSecondary)
             Spacer(minLength: 12)
             if let action = hunkAction {
-                Button(action.title, systemImage: action.systemImage) {
+                Button(action.title) {
                     perform(action, on: hunk)
                 }
-                .buttonStyle(.borderless)
-                .controlSize(.small)
+                .buttonStyle(RafuSecondaryButtonStyle(compact: true))
                 .disabled(session.isGitBusy || session.isGitHunkActionBusy)
                 .help(action.help)
             }

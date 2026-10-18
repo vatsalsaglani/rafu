@@ -95,7 +95,7 @@ struct UtilityPanelPresentationTests {
         #expect(inspector.contains("case .changes:"))
         #expect(inspector.contains("case .worktrees:"))
         #expect(inspector.contains("case .history:"))
-        #expect(inspector.contains(".frame(minHeight: 40)"))
+        #expect(inspector.contains(".frame(height: GitPanelMetrics.fileRowHeight)"))
         #expect(inspector.contains("RafuMetrics.radiusDenseCard"))
         #expect(inspector.contains(".padding(RafuMetrics.utilityBodyInset)"))
         #expect(inspector.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
@@ -108,7 +108,7 @@ struct UtilityPanelPresentationTests {
 
         #expect(source.contains("items: GitInspectorSection.allCases"))
         #expect(source.contains("selection: $session.gitInspectorSection"))
-        #expect(source.contains("fillsWidth: true"))
+        #expect(source.contains("GitSectionPicker("))
         #expect(source.contains(".accessibilityLabel(\"Source Control section\")"))
         #expect(source.contains(".accessibilityValue(session.gitInspectorSection.title)"))
         #expect(
@@ -116,7 +116,7 @@ struct UtilityPanelPresentationTests {
                 .count - 1 >= 2
         )
         #expect(
-            GitInspectorSection.allCases == [.changes, .worktrees, .history]
+            GitInspectorSection.allCases == [.changes, .history, .worktrees]
         )
     }
 
@@ -133,7 +133,7 @@ struct UtilityPanelPresentationTests {
         #expect(dropdown.contains("RafuDropdownRowPresentation.resolve("))
         #expect(dropdown.contains(".help(text(item))"))
         #expect(dropdown.contains(".truncationMode(.middle)"))
-        #expect(git.contains(".help(\"Switch branches — \\(snapshot.branch)\")"))
+        #expect(git.contains(".help(\"Switch, create, or merge branches — \\(snapshot.branch)\")"))
         #expect(status.contains("\"Current branch \\(presentation.label) — switch branches\""))
     }
 

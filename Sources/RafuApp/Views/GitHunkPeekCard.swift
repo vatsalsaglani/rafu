@@ -2,7 +2,8 @@ import SwiftUI
 
 /// Hunk-peek popover content (GX2): the −/+ rows for one hunk, sliced
 /// verbatim from the already-captured working-tree diff via `HunkPeekSlice`
-/// — never a re-diff. Footer offers Stage Hunk and Open Full Diff; there is
+/// — never a re-diff. The header names the real comparison (working tree
+/// against the index). Footer offers a neutral Stage Hunk and Open Full Diff; there is
 /// no discard action here (ADR 0013 excludes discard-from-peek as
 /// destructive). When the hunk was truncated (over `HunkPeekSlice.maximumRows`
 /// rows) the body shows a summary and only "Open Full Diff" is offered.
@@ -37,7 +38,7 @@ struct GitHunkPeekCard: View {
 
     private var header: some View {
         HStack(spacing: RafuMetrics.space2) {
-            Text("Working Tree ↔ HEAD")
+            Text(GitDiffHeaderPresentation.comparisonLabel(for: .workingTree))
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(theme.palette.textSecondary)
             Spacer(minLength: RafuMetrics.space2)
@@ -71,7 +72,7 @@ struct GitHunkPeekCard: View {
         HStack(spacing: RafuMetrics.space2) {
             if !isTruncated {
                 Button("Stage Hunk", action: stageHunk)
-                    .buttonStyle(RafuProminentButtonStyle(compact: true))
+                    .buttonStyle(RafuSecondaryButtonStyle(compact: true))
                     .disabled(isBusy)
             }
             Button("Open Full Diff", action: openFullDiff)
