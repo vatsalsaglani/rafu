@@ -81,10 +81,10 @@ final class AgentHandoffModel {
     @ObservationIgnored private var conversation: AgentHandoffConversation?
     @ObservationIgnored private var plan: AgentHandoffPlan?
     @ObservationIgnored private var imageResults: [Int: AgentHandoffImageResult] = [:]
-    @ObservationIgnored private var loadTask: Task<Void, Never>?
-    @ObservationIgnored private var decodeTask: Task<Void, Never>?
-    @ObservationIgnored private var attachmentTask: Task<Void, Never>?
-    @ObservationIgnored private var writeTask: Task<Void, Never>?
+    @ObservationIgnored private(set) var loadTask: Task<Void, Never>?
+    @ObservationIgnored private(set) var decodeTask: Task<Void, Never>?
+    @ObservationIgnored private(set) var attachmentTask: Task<Void, Never>?
+    @ObservationIgnored private(set) var writeTask: Task<Void, Never>?
 
     init(request: AgentHandoffRequest, projectRoot: URL?) {
         self.request = request
