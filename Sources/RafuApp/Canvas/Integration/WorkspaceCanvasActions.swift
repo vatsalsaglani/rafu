@@ -95,7 +95,7 @@ extension WorkspaceSession {
     }
 
     func saveCanvas(_ id: CanvasID) {
-        Task(name: "Save requested Canvas") { [weak self] in
+        Task(name: "Save requested Ensemble") { [weak self] in
             guard let self else { return }
             _ = await canvas.save(id)
             scheduleCanvasWorkspaceSave()
@@ -111,11 +111,11 @@ extension WorkspaceSession {
     }
 
     func saveCanvasCopy(_ id: CanvasID) {
-        Task(name: "Save Canvas copy") { [weak self] in
+        Task(name: "Save Ensemble copy") { [weak self] in
             guard let self else { return }
             guard let board = await canvas.saveCopy(id) else {
                 canvas.boards[id]?.errorMessage =
-                    canvas.libraryNotice ?? "The Canvas copy could not be saved."
+                    canvas.libraryNotice ?? "The Ensemble copy could not be saved."
                 return
             }
             presentCanvasBoard(board)
@@ -135,7 +135,7 @@ extension WorkspaceSession {
 
     @discardableResult
     func closeCanvas(_ id: CanvasID, discarding: Bool = false) -> Task<Void, Never> {
-        Task(name: "Close Canvas") { [weak self] in
+        Task(name: "Close Ensemble") { [weak self] in
             guard let self, let closing = canvas.boards[id] else { return }
             if !discarding {
                 guard await canvas.save(id) else {

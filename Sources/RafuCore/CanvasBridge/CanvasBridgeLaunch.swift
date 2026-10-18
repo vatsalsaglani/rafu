@@ -103,7 +103,7 @@ public nonisolated enum CanvasBridgeLaunch {
             return 126
         } catch {
             FileHandle.standardError.write(
-                Data("Rafu: The Canvas agent launch could not be prepared.\n".utf8))
+                Data("Rafu: The Ensemble agent launch could not be prepared.\n".utf8))
             return 127
         }
     }

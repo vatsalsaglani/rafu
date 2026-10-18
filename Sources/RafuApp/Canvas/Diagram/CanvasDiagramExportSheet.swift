@@ -62,7 +62,7 @@ struct CanvasDiagramExportSheet: View {
 
     private var targetPicker: some View {
         Picker("Export", selection: $target) {
-            Text("Whole Canvas").tag(CanvasDiagramExportTarget.board)
+            Text("Whole Ensemble").tag(CanvasDiagramExportTarget.board)
             if !board.selection.isEmpty {
                 Text("Selection").tag(CanvasDiagramExportTarget.selection)
             }

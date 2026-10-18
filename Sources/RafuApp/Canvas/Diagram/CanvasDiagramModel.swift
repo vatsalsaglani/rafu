@@ -40,7 +40,7 @@ nonisolated enum CanvasDiagramError: Error, LocalizedError, Equatable, Sendable 
         switch self {
         case .invalidValue: "The diagram item contains invalid or excessive data."
         case .noWorkspace: "Open a workspace folder first."
-        case .boardUnavailable: "The Canvas is not open."
+        case .boardUnavailable: "The Ensemble is not open."
         case .nothingToExport: "There is nothing to export. Select cards or add a frame."
         case .outsideWorkspace: "Exports must stay inside the workspace folder."
         case .renderFailed: "The export could not be rendered."

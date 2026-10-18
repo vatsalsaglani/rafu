@@ -77,7 +77,7 @@ final class WorkspaceCanvasStore {
             guard generation == ticket else { return }
             library = result.boards
             libraryNotice =
-                result.unavailableCount == 0 ? nil : "One or more saved Canvases are unavailable."
+                result.unavailableCount == 0 ? nil : "One or more saved Ensembles are unavailable."
         } catch { if generation == ticket { libraryNotice = error.localizedDescription } }
     }
 
@@ -287,7 +287,7 @@ final class WorkspaceCanvasStore {
         if let pending = board.saveTask { return await pending.value }
         board.refreshResources(prepareResourceSnapshot)
         guard board.isDirty else { return true }
-        let task = Task(name: "Flush Canvas changes") { [weak self, weak board] in
+        let task = Task(name: "Flush Ensemble changes") { [weak self, weak board] in
             guard let self, let board else { return false }
             let result = await self.writeUntilClean(board)
             board.saveTask = nil
@@ -315,7 +315,7 @@ final class WorkspaceCanvasStore {
             guard let self, let board, self.boards[board.id] === board, board.saveTask == nil else {
                 return
             }
-            board.saveTask = Task(name: "Save Canvas changes") { [weak self, weak board] in
+            board.saveTask = Task(name: "Save Ensemble changes") { [weak self, weak board] in
                 try? await Task.sleep(for: .milliseconds(250))
                 guard let self, let board else { return false }
                 let result = await self.writeUntilClean(board)
