@@ -78,7 +78,8 @@ struct CanvasCardShell: View {
                 connect: { session.canvasDialog = .connection(board.id, card.id, nil) },
                 changed: { updateConnectionDrag(card.id, $0) },
                 ended: { finishConnectionDrag(card.id, $0) },
-                cancelled: { cancelConnectionDrag(card.id) }
+                cancelled: { cancelConnectionDrag(card.id) },
+                viewportScale: scale
             )
         }
         .onHover { inside in hoverChanged(inside) }

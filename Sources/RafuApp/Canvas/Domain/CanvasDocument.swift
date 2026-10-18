@@ -193,6 +193,28 @@ nonisolated struct CanvasConnection: Codable, Equatable, Identifiable, Sendable 
     var label = "Related to"
     var behavior: CanvasConnectionBehavior = .related
 
+    /// Labels are required by the saved format, so an unlabelled link keeps one
+    /// of these placeholders. They are not shown as a label pill.
+    static let relationshipPlaceholderLabel = "Related to"
+    static let messageLinkPlaceholderLabel = "Session link"
+
+    var isMessageLink: Bool { behavior == .session }
+
+    /// The label the user chose, or nil for an unlabelled link.
+    var customLabel: String? {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == Self.relationshipPlaceholderLabel
+            || trimmed == Self.messageLinkPlaceholderLabel
+        {
+            return nil
+        }
+        return trimmed
+    }
+
+    static func placeholderLabel(for behavior: CanvasConnectionBehavior) -> String {
+        behavior == .session ? messageLinkPlaceholderLabel : relationshipPlaceholderLabel
+    }
+
     init(
         id: UUID = UUID(), from: CanvasCardID, to: CanvasCardID,
         label: String = "Related to", behavior: CanvasConnectionBehavior = .related

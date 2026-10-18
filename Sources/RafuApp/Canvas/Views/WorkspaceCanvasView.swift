@@ -26,6 +26,7 @@ struct WorkspaceCanvasView: View {
     @State private var isDropTargeted = false
     @FocusState private var boardHasKeyboardFocus: Bool
     @AppStorage("canvasEmptyBoardTipDismissed") private var tipDismissed = false
+    @State private var pausedLinkCount = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,6 +43,7 @@ struct WorkspaceCanvasView: View {
             }
             Group {
                 CanvasBar(board: board, session: session)
+                if pausedLinkCount > 0 { pausedLinksNotice }
                 Divider()
                 if board.showsList {
                     CanvasListView(board: board, session: session)
@@ -74,7 +76,13 @@ struct WorkspaceCanvasView: View {
         .onChange(of: board.cards.count) { _, count in
             if count > 0 { tipDismissed = true }
         }
-        .onAppear { session.canvasResources[board.id]?.present(owner: presentationID) }
+        .onAppear {
+            session.canvasResources[board.id]?.present(owner: presentationID)
+            // A reopened board restores message links Paused; say so once.
+            pausedLinkCount = CanvasLiveBridge.shared.linkStates(in: board).values.count {
+                $0.kind == .paused
+            }
+        }
         .onDisappear {
             connectionDrag.reset()
             session.canvasResources[board.id]?.hide(owner: presentationID)
@@ -92,7 +100,13 @@ struct WorkspaceCanvasView: View {
 
     private var boardSurface: some View {
         GeometryReader { geometry in
-            let connectionTarget = connectionDrag.target(in: board.cards, viewport: board.viewport)
+            // Only a valid target gets the shell's outline; invalid ones are dimmed
+            // by the edge overlay.
+            let connectionTarget = connectionDrag.source.flatMap { source in
+                connectionDrag.target(in: board.cards, viewport: board.viewport).flatMap {
+                    board.canConnect(from: source, to: $0) ? $0 : nil
+                }
+            }
             ZStack(alignment: .topLeading) {
                 grid
                     .contentShape(.rect)
@@ -110,46 +124,8 @@ struct WorkspaceCanvasView: View {
                         }
                     )
                     .pointerStyle(isPanning ? .grabActive : .grabIdle)
-                Canvas { context, _ in
-                    for connection in board.connections {
-                        guard let a = board.cards.first(where: { $0.id == connection.from }),
-                            let b = board.cards.first(where: { $0.id == connection.to })
-                        else { continue }
-                        let start = project(
-                            CGPoint(x: a.rect.x + a.rect.width, y: a.rect.y + a.rect.height / 2))
-                        let end = project(CGPoint(x: b.rect.x, y: b.rect.y + b.rect.height / 2))
-                        var path = Path()
-                        path.move(to: start)
-                        path.addCurve(
-                            to: end, control1: CGPoint(x: start.x + 50, y: start.y),
-                            control2: CGPoint(x: end.x - 50, y: end.y))
-                        context.stroke(
-                            path, with: .color(theme.palette.textSecondary),
-                            style: StrokeStyle(
-                                lineWidth: 1, dash: [5, 4]))
-                        do {
-                            var arrow = Path()
-                            arrow.move(to: CGPoint(x: end.x - 9, y: end.y - 5))
-                            arrow.addLine(to: end)
-                            arrow.addLine(to: CGPoint(x: end.x - 9, y: end.y + 5))
-                            context.stroke(
-                                arrow, with: .color(theme.palette.textSecondary), lineWidth: 2)
-                        }
-                        if connection.behavior == .session {
-                            var reverse = Path()
-                            reverse.move(to: CGPoint(x: start.x + 9, y: start.y - 5))
-                            reverse.addLine(to: start)
-                            reverse.addLine(to: CGPoint(x: start.x + 9, y: start.y + 5))
-                            context.stroke(
-                                reverse, with: .color(theme.palette.textSecondary), lineWidth: 2)
-                        }
-                        context.draw(
-                            Text(connection.label).font(.caption2).foregroundStyle(
-                                theme.palette.textSecondary),
-                            at: CGPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 - 10))
-                    }
-                }
-                .allowsHitTesting(false).accessibilityHidden(true)
+                CanvasEdgeLayer(
+                    board: board, session: session, focusBoard: { boardHasKeyboardFocus = true })
                 ForEach(visibleCards(in: geometry.size)) { card in
                     CanvasCardShell(
                         card: card, board: board, session: session,
@@ -183,8 +159,7 @@ struct WorkspaceCanvasView: View {
                     )
                     .transition(cardTransition)
                 }
-                CanvasConnectionDragPreview(
-                    drag: connectionDrag, cards: board.cards, viewport: board.viewport)
+                CanvasEdgeOverlay(board: board, session: session, drag: connectionDrag)
                 ForEach(interaction.guides, id: \.key) { guide in
                     guideLine(guide)
                 }
@@ -364,10 +339,35 @@ struct WorkspaceCanvasView: View {
                 }
                 guard !board.contentIsActive else { return .ignored }
                 board.selection = []
+                board.clearConnectionSelection()
                 board.connectingFrom = nil
                 return .handled
             }
         }
+    }
+
+    private var pausedLinksNotice: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "pause.circle").foregroundStyle(theme.palette.textSecondary)
+            Text(pausedLinkCount == 1 ? "1 link paused." : "\(pausedLinkCount) links paused.")
+                .font(.system(size: 12)).foregroundStyle(theme.palette.textSecondary)
+            Button("Resume Links") {
+                CanvasLiveBridge.shared.resumeAll(in: board)
+                pausedLinkCount = 0
+            }
+            .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+            Spacer()
+            Button {
+                pausedLinkCount = 0
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(RafuIconButtonStyle(size: 22, iconSize: 10))
+            .help("Dismiss")
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(.horizontal, 12).padding(.vertical, 4)
+        .accessibilityElement(children: .contain)
     }
 
     private var emptyBoardTip: some View {

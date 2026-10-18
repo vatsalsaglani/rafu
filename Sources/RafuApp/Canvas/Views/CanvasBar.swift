@@ -123,6 +123,14 @@ struct CanvasBar: View {
             Picker("Show Links", selection: linkVisibility) {
                 ForEach(CanvasLinkVisibility.allCases, id: \.self) { Text($0.title).tag($0) }
             }
+            Button("Pause All Links", systemImage: "pause.circle") {
+                CanvasLiveBridge.shared.pauseAll(in: board)
+            }
+            .disabled(!board.connections.contains { $0.behavior == .session })
+            Button("Resume All Links", systemImage: "play.circle") {
+                CanvasLiveBridge.shared.resumeAll(in: board)
+            }
+            .disabled(!board.connections.contains { $0.behavior == .session })
             Divider()
             Button("Close Canvas", systemImage: "xmark") { session.closeCanvas(board.id) }
         } label: {

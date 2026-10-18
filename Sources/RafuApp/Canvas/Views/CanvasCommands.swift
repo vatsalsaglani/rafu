@@ -94,6 +94,14 @@ struct CanvasCommands: Commands {
                 }
             }
             .disabled(board == nil)
+            Button("Pause All Links") {
+                if let board { CanvasLiveBridge.shared.pauseAll(in: board) }
+            }
+            .disabled(board?.connections.contains { $0.behavior == .session } != true)
+            Button("Resume All Links") {
+                if let board { CanvasLiveBridge.shared.resumeAll(in: board) }
+            }
+            .disabled(board?.connections.contains { $0.behavior == .session } != true)
             Button("Connect Selected Cards…") {
                 if let board { session?.requestCanvasConnection(board.id) }
             }

@@ -236,13 +236,14 @@ extension WorkspaceSession {
         } else {
             behavior = .related
         }
+        // An identical link is not created twice (review 7.5, invalid targets).
+        guard !board.hasConnection(from: from, to: to) else { return }
+        // A new message link starts Paused: no message passes until the user
+        // chooses Resume (review 7.5, step 5a).
         performCanvasEdit(board) {
             try board.addConnection(
                 from: from, to: to,
-                label: behavior == .session ? "Session link" : "Related to", behavior: behavior)
-            if behavior == .session, let edge = board.connections.last {
-                CanvasLiveBridge.shared.enable(edge.id, in: board)
-            }
+                label: CanvasConnection.placeholderLabel(for: behavior), behavior: behavior)
         }
     }
 

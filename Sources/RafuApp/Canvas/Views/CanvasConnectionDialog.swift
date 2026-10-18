@@ -98,16 +98,13 @@ struct CanvasConnectionDialog: View {
                     document.connections[index].label = stored
                     document.connections[index].behavior = behavior
                 }
-                if behavior == .session {
-                    CanvasLiveBridge.shared.enable(edgeID, in: board)
-                } else {
+                // Editing never resumes a link; message links start and stay Paused
+                // until the user chooses Resume.
+                if behavior != .session {
                     CanvasLiveBridge.shared.disable(edgeID, in: board)
                 }
             } else {
                 try board.addConnection(from: from, to: to, label: stored, behavior: behavior)
-                if behavior == .session, let edge = board.connections.last {
-                    CanvasLiveBridge.shared.enable(edge.id, in: board)
-                }
             }
             session.canvasDialog = nil
         } catch { self.error = error.localizedDescription }

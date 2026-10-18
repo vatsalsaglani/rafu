@@ -376,4 +376,13 @@ final class CanvasBoardState: Identifiable {
             bytes -= cost(history.removeFirst())
         }
     }
+
+    // MARK: Edge interaction (W6b)
+    /// The selected edge. Selecting a card clears it (`clearConnectionSelection()`).
+    var selectedConnectionID: UUID?
+    /// The edge under the pointer; drawn above the cards while hovered.
+    var hoveredConnectionID: UUID?
+    /// The edge whose label popover is open, and whether it was just created.
+    var labelEditorConnectionID: UUID?
+    var labelEditorIsForNewConnection = false
 }
