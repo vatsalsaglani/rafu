@@ -469,7 +469,8 @@ struct CanvasCardShell: View {
 
     private func raiseIfNeeded() {
         guard board.frontmostCardID != card.id else { return }
-        session.performCanvasEdit(board) { try board.reorder([card.id], toFront: true) }
+        let ids = board.cardIDsMovingTogether(with: [card.id])  // X9 diagrams: members stay above
+        session.performCanvasEdit(board) { try board.reorder(ids, toFront: true) }
     }
 
     private func toggleMembership() {
@@ -545,7 +546,8 @@ struct CanvasCardShell: View {
     }
 
     private func startMove() {
-        let ids = board.selection.contains(card.id) ? board.selection : [card.id]
+        let picked = board.selection.contains(card.id) ? board.selection : [card.id]
+        let ids = board.cardIDsMovingTogether(with: picked)  // X9 diagrams: frames carry members
         if !board.selection.contains(card.id) { board.select([card.id]) }
         board.backToBoard()
         focusBoard()

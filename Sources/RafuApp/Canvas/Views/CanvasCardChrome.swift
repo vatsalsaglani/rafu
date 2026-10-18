@@ -205,6 +205,7 @@ struct CanvasCardMenuContent: View {
                     CanvasBridgePeer.mention(for: card.title), forType: .string)
             }
         }
+        CanvasDiagramCardMenuItems(card: card, board: board, session: session)  // X9 diagrams
         Divider()
         Button("Rename…", systemImage: "pencil") { board.renamingCardID = card.id }
         Button("Duplicate", systemImage: "plus.square.on.square") {
