@@ -925,11 +925,12 @@ enum CanvasAgentActions {
                 content: .nativeApp(bundleID: app.bundleID))
             try insert(card, into: board)
         }
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
-        _ = try await NSWorkspace.shared.openApplication(at: app.url, configuration: configuration)
+        let docked = await CanvasAgentKinds.open(
+            bundleID: app.bundleID, card: card.id, session: caller.session)
         return ok(
-            "Opened \(app.name) in node \"\(card.title)\". Use app_inspect to read its window.",
+            docked
+                ? "Opened \(app.name) and docked it in node \"\(card.title)\". Use app_inspect to read its window."
+                : "Opened \(app.name). It is not docked in node \"\(card.title)\": the user must allow Rafu in System Settings > Privacy & Security > Accessibility, then choose Dock in the node.",
             node: card.id)
     }
 
@@ -1202,6 +1203,14 @@ enum CanvasAgentKinds {
 
     static func inspect(_ card: CanvasCardID) async -> String? {
         await CanvasAppDocking.shared.inspect(cardID: card)
+    }
+
+    /// Launches the app and docks it in its card. Never prompts for
+    /// permission; without it the app opens undocked.
+    static func open(bundleID: String, card: CanvasCardID, session: WorkspaceSession) async
+        -> Bool
+    {
+        await CanvasAppDocking.shared.open(bundleID: bundleID, in: card, session: session)
     }
 
     static func displayName(agent: String) -> String {
