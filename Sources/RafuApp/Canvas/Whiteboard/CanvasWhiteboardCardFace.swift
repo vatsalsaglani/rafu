@@ -156,7 +156,7 @@ extension View {
 // MARK: Shape
 
 /// A rectangle (rounded), ellipse or diamond that insets for its border.
-struct CanvasShapeOutline: InsettableShape {
+nonisolated struct CanvasShapeOutline: InsettableShape {
     let kind: CanvasShapeKind
     var inset: CGFloat = 0
 
@@ -265,7 +265,7 @@ struct CanvasShapeFace: View {
 
 /// The path of a stroke in its card: a smoothed freehand curve or a straight
 /// segment, plus open arrowheads.
-struct CanvasStrokePath: Shape {
+nonisolated struct CanvasStrokePath: Shape {
     let stroke: CanvasStroke
 
     func path(in rect: CGRect) -> Path {

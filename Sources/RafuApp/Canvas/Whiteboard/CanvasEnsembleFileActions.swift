@@ -45,7 +45,7 @@ extension WorkspaceSession {
         }
     }
 
-    /// "Save Canvas As…": writes the board to a new file in the workspace and
+    /// "Save Ensemble As…": writes the board to a new file in the workspace and
     /// opens that file as its own tab. The current board is kept as it is.
     func requestSaveCanvasAs(_ id: CanvasID) {
         guard let rootURL, let board = canvas.boards[id] else { return }
@@ -59,7 +59,7 @@ extension WorkspaceSession {
             guard response == .OK, let self, let url = panel.url, self.rootURL == rootURL else {
                 return
             }
-            Task(name: "Save Canvas as file") {
+            Task(name: "Save Ensemble as file") {
                 guard let saved = await self.canvas.saveAsFile(id, to: url) else { return }
                 self.restoreCanvasTerminalReferences(saved)
                 self.presentCanvasBoard(saved)
@@ -68,7 +68,7 @@ extension WorkspaceSession {
         }
     }
 
-    /// "Export Canvas…": writes a portable copy anywhere, with small
+    /// "Export Ensemble…": writes a portable copy anywhere, with small
     /// workspace images embedded. Nothing opens and nothing is bound.
     func requestExportCanvas(_ id: CanvasID) {
         guard rootURL != nil, let board = canvas.boards[id] else { return }
@@ -79,7 +79,7 @@ extension WorkspaceSession {
         panel.message = "Small images are embedded so the file opens elsewhere."
         panel.begin { [weak self] response in
             guard response == .OK, let self, let url = panel.url else { return }
-            Task(name: "Export Canvas file") { _ = await self.canvas.exportFile(id, to: url) }
+            Task(name: "Export Ensemble file") { _ = await self.canvas.exportFile(id, to: url) }
         }
     }
 
@@ -120,17 +120,17 @@ extension WorkspaceSession {
     }
 }
 
-/// File menu items for the Ensemble file format, placed after "Open Canvas…".
+/// File menu items for the Ensemble file format, placed after "Open Ensemble…".
 struct CanvasEnsembleFileCommandItems: View {
     let session: WorkspaceSession?
     let board: CanvasBoardState?
 
     var body: some View {
-        Button("Save Canvas As…") {
+        Button("Save Ensemble As…") {
             if let board { session?.requestSaveCanvasAs(board.id) }
         }
         .disabled(board == nil || session?.rootURL == nil)
-        Button("Export Canvas…") {
+        Button("Export Ensemble…") {
             if let board { session?.requestExportCanvas(board.id) }
         }
         .disabled(board == nil || session?.rootURL == nil)

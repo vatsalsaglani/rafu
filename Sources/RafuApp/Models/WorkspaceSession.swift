@@ -800,7 +800,7 @@ final class WorkspaceSession {
         switch action {
         case .splitRight, .splitDown:
             guard selectedCanvasID == nil else {
-                return .init(isEnabled: false, reason: "Add another terminal card on the Canvas.")
+                return .init(isEnabled: false, reason: "Add another terminal card on the Ensemble.")
             }
             guard group.panes.count < TerminalGroupLimits.maximumPanesPerGroup else {
                 return .init(

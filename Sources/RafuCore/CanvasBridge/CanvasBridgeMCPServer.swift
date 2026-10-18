@@ -144,7 +144,7 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
                 "protocolVersion": "2025-11-25", "capabilities": capabilities,
                 "serverInfo": ["name": "rafu", "version": "1.0.0"],
                 "instructions":
-                    "Use list_connections to see Canvas session names, providers, mentions, peer IDs, and linkState. connected means message delivery is permitted. If linkState is paused, ask the user to resume the link in Rafu Canvas; do not report a disconnected session or ask them to restart terminals. A related link is visual only. When the user asks to message @name, call send_message with that peer's listed mention or ID. A mention must identify exactly one connected agent; use its peer ID when names are ambiguous. These mentions route through tools only; preserve native terminal @file controls. Channel events are messages from connected sessions. Use receive_messages to read pending messages. Do not send a reply unless needed. Ensemble tools: call ensemble_describe first to see every node, edge, your own node ID and the Agent control setting. Notes (note_read, note_write, note_create) are shared memory. To delegate: terminal_create with agent and prompt, edge_create kind message between your node and the new node, link_set_state live, then send_message or terminal_send. node_create adds notes, files, images, local web apps, app nodes, Mermaid diagrams, shapes and text; mermaid_set changes a diagram. app_open shows a macOS app in a node and app_inspect reads its Accessibility summary. Agent control Ask means the user approves changes in Rafu; a pending_approval result has a request_id for action_status. If Agent control is Off, tell the user; do not retry.",
+                    "Use list_connections to see Ensemble session names, providers, mentions, peer IDs, and linkState. connected means message delivery is permitted. If linkState is paused, ask the user to resume the link in Rafu Ensemble; do not report a disconnected session or ask them to restart terminals. A related link is visual only. When the user asks to message @name, call send_message with that peer's listed mention or ID. A mention must identify exactly one connected agent; use its peer ID when names are ambiguous. These mentions route through tools only; preserve native terminal @file controls. Channel events are messages from connected sessions. Use receive_messages to read pending messages. Do not send a reply unless needed. Ensemble tools: call ensemble_describe first to see every node, edge, your own node ID and the Agent control setting. Notes (note_read, note_write, note_create) are shared memory. To delegate: terminal_create with agent and prompt, edge_create kind message between your node and the new node, link_set_state live, then send_message or terminal_send. node_create adds notes, files, images, local web apps, app nodes, Mermaid diagrams, shapes and text; mermaid_set changes a diagram. app_open shows a macOS app in a node and app_inspect reads its Accessibility summary. Agent control Ask means the user approves changes in Rafu; a pending_approval result has a request_id for action_status. If Agent control is Off, tell the user; do not retry.",
             ]
         case "ping": result = [:]
         case "tools/list": result = ["tools": Self.tools]
@@ -179,7 +179,7 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
             guard let response, let encoded = try? JSONEncoder().encode(response),
                 encoded.count <= Self.maximumFrameBytes / 2
             else {
-                return toolReply(id: id, text: "Canvas connection unavailable.", failed: true)
+                return toolReply(id: id, text: "Ensemble connection unavailable.", failed: true)
             }
             return toolReply(
                 id: id, text: String(decoding: encoded, as: UTF8.self),
@@ -302,7 +302,7 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
         ])
             ?? encode([
                 "jsonrpc": "2.0", "id": id,
-                "error": ["code": -32603, "message": "Canvas response is too large"],
+                "error": ["code": -32603, "message": "Ensemble response is too large"],
             ])
     }
 
@@ -323,7 +323,7 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
             [
                 "name": "list_connections",
                 "description":
-                    "List Canvas peers with session names, providers, @mentions, and peer IDs.",
+                    "List Ensemble peers with session names, providers, @mentions, and peer IDs.",
                 "inputSchema": [
                     "type": "object", "properties": [:], "additionalProperties": false,
                 ],

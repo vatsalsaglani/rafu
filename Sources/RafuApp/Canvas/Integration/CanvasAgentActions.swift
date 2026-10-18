@@ -589,8 +589,13 @@ enum CanvasAgentActions {
             content = CanvasAgentKinds.serviceIcon(packID: packID, iconID: iconID, label: label)
             title = title ?? label
         default:
-            content = CanvasAgentKinds.whiteboard(
-                kind: kind, text: call.text ?? call.title, shape: call.shape)
+            let text = call.text ?? call.title
+            if let limit = CanvasAgentKinds.textLimit(kind: kind),
+                let text, text.utf8.count > limit
+            {
+                throw CanvasAgentToolError.textTooLarge(kilobytes: limit / 1_024)
+            }
+            content = CanvasAgentKinds.whiteboard(kind: kind, text: text, shape: call.shape)
         }
         let name = String((title ?? defaultTitle(kind, board: caller.board)).prefix(120))
         let card = CanvasCard(
@@ -1129,11 +1134,26 @@ enum CanvasAgentKinds {
 
     static func mermaid(_ source: String) -> CanvasCardContent { .mermaid(source: source) }
 
+    /// The board's own byte bound for the text of a whiteboard kind, so an
+    /// agent gets a clear limit error instead of a generic "invalid data".
+    static func textLimit(kind: String) -> Int? {
+        switch kind {
+        case "mermaid": CanvasLimits.mermaidSourceBytes
+        case "text": CanvasLimits.whiteboardTextBytes
+        default: nil
+        }
+    }
+
     static func whiteboard(kind: String, text: String?, shape: String?) -> CanvasCardContent {
         switch kind {
         case "mermaid": return .mermaid(source: text ?? "flowchart LR\n  A --> B")
         case "shape":
-            return .shape(CanvasShape(kind: CanvasShape.Kind(rawValue: shape ?? "") ?? .rectangle))
+            return .shape(
+                CanvasShape(
+                    kind: CanvasShapeKind(rawValue: shape ?? "") ?? .rectangle,
+                    label: text.map {
+                        String($0.utf8.count <= CanvasLimits.shapeLabelBytes ? $0 : "")
+                    }.flatMap { $0.isEmpty ? nil : $0 }))
         case "text": return .text(CanvasText(text: text ?? "Text"))
         default: return .note(snapshot: text ?? "")
         }

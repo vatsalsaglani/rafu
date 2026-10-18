@@ -206,7 +206,8 @@ private struct EditorGroupView: View {
                             if session.canvasTerminalOwners[terminalGroupID] != nil {
                                 ContentUnavailableView {
                                     Label(
-                                        "Terminal is in a Canvas", systemImage: "rectangle.3.group")
+                                        "Terminal is in an Ensemble",
+                                        systemImage: "rectangle.3.group")
                                 } description: {
                                     Text("Transfer its existing view to this tab to continue here.")
                                 } actions: {
@@ -1158,8 +1159,8 @@ private struct EditorGroupTabBar: View {
                 }
                 .buttonStyle(.plain)
                 .fixedSize()
-                .help("New Canvas")
-                .accessibilityLabel("New Canvas")
+                .help("New Ensemble")
+                .accessibilityLabel("New Ensemble")
                 .disabled(session.rootURL == nil)
                 if let document = selectedDocument, document.supportsPresentationModes {
                     Divider().frame(height: 20)
@@ -1325,7 +1326,7 @@ private struct EditorGroupTabBar: View {
             }
         case .canvas(let id):
             overflowTabMenuButton(
-                title: session.canvas.boards[id]?.title ?? "Canvas", glyph: "rectangle.3.group",
+                title: session.canvas.boards[id]?.title ?? "Ensemble", glyph: "rectangle.3.group",
                 isDirty: false, tab: tab)
         case .restorable:
             EmptyView()

@@ -412,7 +412,7 @@ struct WorkspaceCanvasView: View {
             .buttonStyle(.plain)
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(theme.palette.textPrimary)
-            .help("Resume every paused link on this canvas")
+            .help("Resume every paused link on this Ensemble")
             Button {
                 showsRestoredLinksNotice = false
             } label: {
@@ -437,7 +437,7 @@ struct WorkspaceCanvasView: View {
                     .font(.system(size: 24, weight: .light))
                     .foregroundStyle(theme.palette.textSecondary)
                     .accessibilityHidden(true)
-                Text("An empty canvas")
+                Text("An empty Ensemble")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(theme.palette.textPrimary)
             }

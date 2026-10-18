@@ -6,16 +6,18 @@ struct CanvasCommands: Commands {
 
     var body: some Commands {
         CommandGroup(after: .newItem) {
-            Button("New Canvas…") { session?.requestNewCanvas() }
+            Button("New Ensemble…") { session?.requestNewCanvas() }
                 .keyboardShortcut("n", modifiers: [.command, .option])
                 .disabled(session?.rootURL == nil)
-            Button("Open Canvas…") { session?.requestCanvasLibrary() }.disabled(
+            Button("Open Ensemble…") { session?.requestCanvasLibrary() }.disabled(
                 session?.rootURL == nil)
             CanvasEnsembleFileCommandItems(session: session, board: board)  // X5 ensemble file
         }
-        CommandMenu("Canvas") {
+        CommandMenu("Ensemble") {
             if let board, let session {
-                Menu("Add to Canvas") { CanvasAddMenuItems(board: board, session: session) }
+                Menu("Add to Ensemble") { CanvasAddMenuItems(board: board, session: session) }
+                // X9 diagrams
+                CanvasDiagramMenuItems(board: board, session: session, showsShortcut: true)
             }
             Divider()
             Button("Board") {
@@ -119,8 +121,8 @@ struct CanvasCommands: Commands {
             .keyboardShortcut(.tab, modifiers: .control)
             .disabled(board?.contentIsActive != true)
             Divider()
-            Button("Undo Canvas Layout") { board?.performUndo() }.disabled(board?.canUndo != true)
-            Button("Redo Canvas Layout") { board?.performRedo() }.disabled(board?.canRedo != true)
+            Button("Undo Ensemble Layout") { board?.performUndo() }.disabled(board?.canUndo != true)
+            Button("Redo Ensemble Layout") { board?.performRedo() }.disabled(board?.canRedo != true)
             Button("Close Selected Cards") { session?.closeSelectedCanvasNodes() }
                 .keyboardShortcut("w", modifiers: [.command, .shift])
                 .disabled(session?.canCloseSelectedCanvasNodes != true)
@@ -129,7 +131,7 @@ struct CanvasCommands: Commands {
             }.disabled(board?.selection.isEmpty != false)
         }
         CommandGroup(after: .help) {
-            Button("Canvas Shortcuts") { session?.canvasDialog = .shortcuts }
+            Button("Ensemble Shortcuts") { session?.canvasDialog = .shortcuts }
                 .disabled(session == nil)
         }
     }

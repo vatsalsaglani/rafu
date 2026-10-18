@@ -77,7 +77,7 @@ struct CanvasListView: View {
                     Button("Duplicate") { session.duplicateCanvasCard(board.id, id) }
                 }
                 Divider()
-                Button("Remove from Canvas…", role: .destructive) {
+                Button("Remove from Ensemble…", role: .destructive) {
                     board.select(ids)
                     session.closeSelectedCanvasNodes()
                 }

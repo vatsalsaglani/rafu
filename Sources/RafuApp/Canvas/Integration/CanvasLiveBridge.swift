@@ -113,7 +113,7 @@ final class CanvasLiveBridge {
             guard !Task.isCancelled, controller.generation == generation, isCurrent() else {
                 return nil
             }
-            notice = "Session bridge unavailable. Use a new zsh or bash Canvas terminal."
+            notice = "Session bridge unavailable. Use a new zsh or bash Ensemble terminal."
             revision &+= 1
             return nil
         }
@@ -288,7 +288,7 @@ final class CanvasLiveBridge {
             return "Run claude or codex to connect"
         }
         if endpoint.provider == "codex", endpoint.threadID == nil {
-            return "Codex: ask it to list Canvas connections"
+            return "Codex: ask it to list Ensemble connections"
         }
         return "\(endpoint.provider == "claude" ? "Claude" : "Codex") connected"
     }
@@ -465,7 +465,7 @@ final class CanvasLiveBridge {
             }) {
                 return .init(
                     error:
-                        "This link is paused. Resume it in Rafu Canvas. Do not restart the terminals."
+                        "This link is paused. Resume it in Rafu Ensemble. Do not restart the terminals."
                 )
             }
             guard let targetID = liveTarget(from: controller.id, cardID: destinationID),
@@ -502,7 +502,7 @@ final class CanvasLiveBridge {
                     executable.hasPrefix("/")
                 else {
                     let reason =
-                        "Codex is waiting for its first Canvas tool call. Ask it to list Canvas connections."
+                        "Codex is waiting for its first Ensemble tool call. Ask it to list Ensemble connections."
                     recordFailure(route, reason)
                     return .init(error: reason)
                 }
@@ -513,7 +513,8 @@ final class CanvasLiveBridge {
                     try await CanvasCodexSession.send(
                         executable: executable, endpoint: endpoint,
                         threadID: threadID,
-                        text: "Canvas message from \(sourceCard.id.rawValue.uuidString):\n\(text)")
+                        text: "Ensemble message from \(sourceCard.id.rawValue.uuidString):\n\(text)"
+                    )
                 }
                 deliveries[deliveryID] = Delivery(
                     sourceToken: request.token, targetToken: targetToken, task: task)
