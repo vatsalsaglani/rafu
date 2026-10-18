@@ -11,6 +11,8 @@ struct NotchSettingsSection: View {
     @AppStorage(NotchDisplayPreferenceStore.openOnHoverKey) private var opensOnHover = true
     @AppStorage(NotchDisplayPreferenceStore.plainDisplayPillKey) private var pillOnPlainDisplays =
         false
+    @AppStorage(NotchDisplayPreferenceStore.systemNowPlayingKey) private var systemNowPlaying =
+        true
 
     var body: some View {
         Section {
@@ -37,12 +39,20 @@ struct NotchSettingsSection: View {
                 NotchSectionToggle(section: section)
                     .disabled(!companionEnabled)
             }
+            Toggle("Now Playing: read what any app plays", isOn: $systemNowPlaying)
+                .help(
+                    "Uses the bundled MediaRemote adapter, as Cider does, to show what any app plays (browsers and video too) without an Automation prompt. It relies on a private macOS framework. Off, or when the adapter is missing or stops, Rafu asks Music and Spotify instead."
+                )
+                .disabled(!companionEnabled)
         } header: {
             Text("Notch")
         } footer: {
             Text(
-                "Choose the sections the notch panel offers. Ensembles stays on if you turn every section off. Now Playing reads Music and Spotify only, and asks macOS for permission the first time you connect it."
+                "Choose the sections the notch panel offers. Ensembles stays on if you turn every section off. Now Playing reads system media through the bundled adapter; with that off, it reads Music and Spotify only and asks macOS for permission the first time you connect it."
             )
+        }
+        .onChange(of: systemNowPlaying) { _, _ in
+            NotchCompanionModel.shared.nowPlaying.sourcePreferenceDidChange()
         }
         .onChange(of: companionEnabled) { _, _ in
             NotchCompanionModel.shared.displayPreferencesDidChange()

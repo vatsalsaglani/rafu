@@ -99,6 +99,9 @@ nonisolated struct NotchTerminalInput: Equatable, Sendable {
     let cardID: UUID?
     /// The notch's id for the workspace window that owns the terminal.
     let windowID: UUID?
+    /// The phase from agent hooks (`AgentActivityStore`), when a hook
+    /// session matches this terminal. Wins over the output-based phase.
+    let trackedPhase: NotchAgentPhase?
 
     init(
         id: UUID,
@@ -109,7 +112,8 @@ nonisolated struct NotchTerminalInput: Equatable, Sendable {
         cause: TerminalAttentionCause? = nil,
         boardID: UUID? = nil,
         cardID: UUID? = nil,
-        windowID: UUID? = nil
+        windowID: UUID? = nil,
+        trackedPhase: NotchAgentPhase? = nil
     ) {
         self.id = id
         self.title = title
@@ -120,6 +124,7 @@ nonisolated struct NotchTerminalInput: Equatable, Sendable {
         self.boardID = boardID
         self.cardID = cardID
         self.windowID = windowID
+        self.trackedPhase = trackedPhase
     }
 }
 
@@ -155,10 +160,11 @@ nonisolated struct NotchAgentRow: Identifiable, Equatable, Sendable {
                 id: terminal.id,
                 title: terminal.title,
                 cli: cli,
-                phase: NotchAgentPhase.resolve(
-                    status: terminal.status,
-                    isProducingOutput: terminal.isProducingOutput,
-                    cause: terminal.cause),
+                phase: terminal.trackedPhase
+                    ?? NotchAgentPhase.resolve(
+                        status: terminal.status,
+                        isProducingOutput: terminal.isProducingOutput,
+                        cause: terminal.cause),
                 boardID: terminal.boardID,
                 cardID: terminal.cardID,
                 windowID: terminal.windowID)

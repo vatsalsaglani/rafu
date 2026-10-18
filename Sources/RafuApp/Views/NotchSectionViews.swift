@@ -33,6 +33,7 @@ struct CompanionEnsemblesSectionView: View {
                         ForEach(model.visibleEditorRows) { row in
                             CompanionWindowGroupView(model: model, row: row)
                         }
+                        TrackedAgentsNotchView(model: model)
                     }
                     .padding(.horizontal, RafuMetrics.space3)
                     .padding(.bottom, RafuMetrics.space3)
@@ -248,9 +249,11 @@ struct CompanionUpNextSectionView: View {
 
 // MARK: - Now Playing
 
-/// What Music or Spotify is playing, ported from Cider's Now Playing tab with
-/// public API only (see `NotchNowPlaying`). Until the person connects, Rafu
-/// sends no Apple events; the track still appears when a player announces it.
+/// What is playing, ported from Cider's Now Playing tab (see
+/// `NotchNowPlaying`): system media through the bundled adapter, or Music
+/// and Spotify as the fallback. On the fallback, until the person connects,
+/// Rafu sends no Apple events; the track still appears when a player
+/// announces it.
 struct CompanionNowPlayingSectionView: View {
     let model: NotchCompanionModel
     @Environment(\.rafuTheme) private var theme
@@ -294,6 +297,7 @@ struct CompanionNowPlayingSectionView: View {
         if player.hasTrack {
             return [player.artist, player.source].filter { !$0.isEmpty }.joined(separator: " · ")
         }
+        if player.isSystemMedia { return "Play something in any app on this Mac." }
         if player.needsPermission {
             return
                 "Allow Rafu to control Music and Spotify in System Settings ▸ Privacy & Security ▸ Automation."
@@ -317,6 +321,8 @@ struct CompanionNowPlayingSectionView: View {
                 ) { player.togglePlayback() }
                 transport("Next track", symbol: "forward.fill") { player.next() }
             }
+        } else if player.isSystemMedia {
+            transport("Check now playing", symbol: "arrow.clockwise") { player.refresh() }
         } else if player.needsPermission {
             Button("Open Automation Settings") { Self.openAutomationSettings() }
                 .buttonStyle(RafuSecondaryButtonStyle(compact: true))

@@ -960,6 +960,11 @@ final class WorkspaceTerminalController: Identifiable {
     /// `WorkspaceSession.parkedTerminalSessions`'s ordering. `0` until
     /// parked at least once.
     private(set) var parkSequence: Int = 0
+    /// The PID of the spawned shell (or directly spawned agent) while it
+    /// runs; `nil` before start and after exit. Agent hook tracking
+    /// (`AgentActivityStore`) matches a hook's parent PID chain to it.
+    @ObservationIgnored
+    private(set) var shellProcessID: Int32?
 
     /// `userName`, then the shell's own OSC 0/2 title report, then a
     /// generated fallback — the single source of truth for every place
@@ -1248,6 +1253,7 @@ final class WorkspaceTerminalController: Identifiable {
 
     private func registerProcessResources(for view: LocalProcessTerminalView) {
         let shellPid = view.process.shellPid
+        shellProcessID = shellPid != 0 ? shellPid : nil
         if shellPid != 0 {
             let controllerID = id
             // An attributed child is named by role and vendor; an Agent
@@ -1335,6 +1341,7 @@ final class WorkspaceTerminalController: Identifiable {
         delegateProxy = nil
         appliedStyleSignature = ""
         status = .exited(code: nil)
+        shellProcessID = nil
 
         let controllerID = id
         Task {
@@ -1393,6 +1400,7 @@ final class WorkspaceTerminalController: Identifiable {
         CanvasLiveBridge.shared.remove(self)
         stopQuiescenceTracking()
         status = .exited(code: exitCode)
+        shellProcessID = nil
         terminalView = nil
         delegateProxy = nil
         appliedStyleSignature = ""

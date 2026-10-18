@@ -367,7 +367,8 @@ final class NotchCompanionModel: NSObject {
             cause: controller.lastAttentionCause,
             boardID: boardID,
             cardID: cardID,
-            windowID: windowID)
+            windowID: windowID,
+            trackedPhase: AgentActivityStore.shared.notchPhase(for: controller))
     }
 
     /// Every agent terminal in every registered window. Reads only the
@@ -383,9 +384,20 @@ final class NotchCompanionModel: NSObject {
         }
     }
 
-    var agentSummary: NotchAgentSummary { NotchAgentSummary.summarize(allAgentRows) }
+    /// Agents seen through hooks that run outside every Rafu terminal (X11).
+    /// They count toward the collapsed strip and the mascot.
+    var externalAgentRows: [NotchAgentRow] {
+        AgentActivityStore.shared.externalNotchRows(
+            excluding: entries.flatMap { $0.session?.terminal.sessions ?? [] })
+    }
 
-    var mascotState: RafuMascotState { RafuMascotState.resolve(agents: allAgentRows) }
+    var agentSummary: NotchAgentSummary {
+        NotchAgentSummary.summarize(allAgentRows + externalAgentRows)
+    }
+
+    var mascotState: RafuMascotState {
+        RafuMascotState.resolve(agents: allAgentRows + externalAgentRows)
+    }
 
     /// Agents that ask the person to look, most urgent first (Up next).
     var upNextRows: [NotchAgentRow] {

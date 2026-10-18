@@ -35,7 +35,7 @@ nonisolated enum NotchSection: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .ensembles: "Open Ensembles and the agents running in them."
         case .upNext: "Agents that need you or have a reply ready, with quick replies."
-        case .nowPlaying: "What Music or Spotify is playing, with transport controls."
+        case .nowPlaying: "What is playing on this Mac, with transport controls."
         case .usage: "Agent usage limits and token totals."
         }
     }
@@ -67,6 +67,7 @@ nonisolated struct NotchDisplayPreferenceStore: Sendable {
     static let plainDisplayPillKey = "notchPillOnPlainDisplays"
     static let selectedSectionKey = "notchSelectedSection"
     static let musicConnectedKey = "notchNowPlayingConnected"
+    static let systemNowPlayingKey = "notchNowPlayingSystemMedia"
 
     private let suiteName: String?
 
@@ -126,5 +127,14 @@ nonisolated struct NotchDisplayPreferenceStore: Sendable {
     func isNowPlayingConnected() -> Bool { flag(Self.musicConnectedKey, default: false) }
     func setNowPlayingConnected(_ value: Bool) {
         defaults.set(value, forKey: Self.musicConnectedKey)
+    }
+
+    /// Read Now Playing from macOS (any app, through the bundled MediaRemote
+    /// adapter) instead of asking Music and Spotify. On by default; the
+    /// Music/Spotify path stays as the fallback when the adapter is missing
+    /// or stops.
+    func usesSystemNowPlaying() -> Bool { flag(Self.systemNowPlayingKey, default: true) }
+    func setUsesSystemNowPlaying(_ value: Bool) {
+        defaults.set(value, forKey: Self.systemNowPlayingKey)
     }
 }

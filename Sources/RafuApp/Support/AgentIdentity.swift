@@ -125,13 +125,16 @@ extension WorkspaceTerminalController {
 extension AgentActivitySummary {
     /// Counts the agent sessions among `sessions`: a terminal Rafu launched
     /// as an agent, or one whose title names an agent CLI, with a live process.
-    init(sessions: [WorkspaceTerminalController]) {
+    /// Attention prefers hook state (`AgentActivityStore`: approval or an
+    /// answer pending) and keeps the terminal's own bell as the fallback.
+    init(sessions: [WorkspaceTerminalController], tracking: AgentActivityStore = .shared) {
         self.init(
             entries: sessions.map { controller in
                 Entry(
                     provider: controller.resolvedAgentProvider,
                     isLive: controller.hasLiveProcess,
-                    needsAttention: TerminalSessionPresentation.needsAttention(controller.status))
+                    needsAttention: tracking.needsAttention(controller)
+                        || TerminalSessionPresentation.needsAttention(controller.status))
             })
     }
 }
