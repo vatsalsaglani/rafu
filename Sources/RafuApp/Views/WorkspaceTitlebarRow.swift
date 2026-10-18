@@ -20,6 +20,13 @@ struct WindowTitlebarRow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var recents: [RecentWorkspaceEntry] = []
 
+    /// Explicit init: private stored properties would otherwise make the
+    /// synthesized memberwise init private (Swift 6.3).
+    init(session: WorkspaceSession, isFullScreen: Bool) {
+        self.session = session
+        self.isFullScreen = isFullScreen
+    }
+
     /// Height of the standard titlebar, so the system buttons and the toggle
     /// share one centre line.
     nonisolated static let height: CGFloat = 28
