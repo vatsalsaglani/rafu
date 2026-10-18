@@ -1,0 +1,1603 @@
+<title>Rafu Mac Redesign</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: one reading column (max 980px) of numbered deliverables; wide tables and SVG mockups scroll inside their own frames.
+   Palette: the page wears Rafu's own themes — Khadi (light) and Indigo (dark) — with one gold thread as accent. */
+:root{
+  --bg:#F1EDE3; --surface:#FAF7F0; --raised:#FFFFFF; --line:#E3DCCB; --line2:#CFC6B2;
+  --fg:#2B2F3A; --fg2:#5D6474; --muted:#8A90A0;
+  --accent:#A2701F; --accent-soft:rgba(162,112,31,.12);
+  --info:#3557B7; --success:#2E7D46; --warn:#8F6A10; --error:#B3362E;
+  --info-soft:rgba(53,87,183,.10); --success-soft:rgba(46,125,70,.10); --error-soft:rgba(179,54,46,.10); --warn-soft:rgba(143,106,16,.12);
+  /* mockups always show the Indigo dark theme of the app */
+  --m-app:#10141C; --m-deck:#151A24; --m-raised:#1B212D; --m-node:#1A202B; --m-line:#262E3E; --m-line2:#3A455C;
+  --m-fg:#E7EAF2; --m-fg2:#9AA3B8; --m-muted:#67718A; --m-gold:#E3A857; --m-info:#82A7F0; --m-green:#7CC08A; --m-red:#E06C75; --m-teal:#74BFCB; --m-violet:#C3A6F0;
+  --serif: ui-serif, "New York", "Iowan Old Style", Georgia, serif;
+  --sans: system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#10141C; --surface:#151A24; --raised:#1B212D; --line:#262E3E; --line2:#3A455C;
+  --fg:#E7EAF2; --fg2:#9AA3B8; --muted:#67718A;
+  --accent:#E3A857; --accent-soft:rgba(227,168,87,.13);
+  --info:#82A7F0; --success:#7CC08A; --warn:#D4A24E; --error:#E06C75;
+  --info-soft:rgba(130,167,240,.12); --success-soft:rgba(124,192,138,.12); --error-soft:rgba(224,108,117,.13); --warn-soft:rgba(212,162,78,.13);
+  color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#10141C; --surface:#151A24; --raised:#1B212D; --line:#262E3E; --line2:#3A455C;
+  --fg:#E7EAF2; --fg2:#9AA3B8; --muted:#67718A;
+  --accent:#E3A857; --accent-soft:rgba(227,168,87,.13);
+  --info:#82A7F0; --success:#7CC08A; --warn:#D4A24E; --error:#E06C75;
+  --info-soft:rgba(130,167,240,.12); --success-soft:rgba(124,192,138,.12); --error-soft:rgba(224,108,117,.13); --warn-soft:rgba(212,162,78,.13);
+  color-scheme:dark }
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:15px/1.6 var(--sans);-webkit-font-smoothing:antialiased}
+.wrap{max-width:1020px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:40px 96px}
+h1,h2,h3{font-family:var(--serif);text-wrap:balance;letter-spacing:-.01em;line-height:1.2}
+h1{font-size:clamp(30px,5vw,44px);margin:0 0 10px;font-weight:600}
+h2{font-size:26px;margin:72px 0 6px;font-weight:600;padding-top:18px;border-top:1px solid var(--line)}
+h3{font-size:19px;margin:36px 0 8px;font-weight:600}
+h4{font:600 13px/1.4 var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--fg2);margin:28px 0 8px}
+p{margin:0 0 12px;max-width:72ch}
+.lede{font-size:17px;color:var(--fg2);max-width:68ch}
+.eyebrow{font:600 12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin-bottom:14px}
+.num{font-family:var(--mono);color:var(--accent);font-weight:600;margin-right:10px;font-size:.8em}
+a{color:var(--info)}
+code,.mono{font-family:var(--mono);font-size:.88em}
+code{background:var(--accent-soft);padding:1px 5px;border-radius:4px}
+ul,ol{padding-left:22px;max-width:74ch;margin:0 0 12px} li{margin:3px 0}
+.thread{height:2px;margin:26px 0 0;background:repeating-linear-gradient(90deg,var(--accent) 0 9px,transparent 9px 15px);opacity:.75;max-width:220px}
+.meta{display:flex;flex-wrap:wrap;gap:8px 18px;color:var(--fg2);font-size:13px;margin-top:18px}
+.meta span b{color:var(--fg);font-weight:600}
+nav.toc{margin-top:34px;display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:2px 24px;font-size:14px}
+nav.toc a{color:var(--fg);text-decoration:none;display:flex;gap:10px;padding:5px 0;border-bottom:1px solid var(--line)}
+nav.toc a:hover{color:var(--accent)} nav.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+nav.toc a span{font-family:var(--mono);color:var(--accent);min-width:22px}
+.legend{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 4px}
+.tag{display:inline-block;font:600 11px/1.55 var(--mono);letter-spacing:.03em;padding:0 7px;border-radius:999px;border:1px solid currentColor;white-space:nowrap;vertical-align:1px}
+.tag.seen{color:var(--success)} .tag.code{color:var(--info)} .tag.test{color:var(--warn)} .tag.new{color:var(--accent)} .tag.ref{color:var(--fg2)}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:16px 0}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.cols>*{min-width:0}
+.callout{border-left:2px solid var(--accent);padding:4px 0 4px 16px;margin:18px 0;color:var(--fg)}
+.scroll{overflow-x:auto;margin:14px 0;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.45}
+th,td{text-align:left;vertical-align:top;padding:9px 12px;border-bottom:1px solid var(--line)}
+th{font:600 12px/1.3 var(--sans);color:var(--fg2);background:var(--raised);position:sticky;top:0;white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.k{white-space:nowrap;font-family:var(--mono);font-size:12.5px;color:var(--fg2)}
+td .tag{margin:1px 0}
+.wide table{min-width:880px}
+.mid table{min-width:700px}
+.dot{font-family:var(--mono);font-weight:700}
+.h{color:var(--success)} .m{color:var(--warn)} .l{color:var(--muted)}
+/* findings */
+.screen{margin:26px 0 8px;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px}
+.screen h3{margin:0}
+.screen .files{font:12px/1.5 var(--mono);color:var(--fg2)}
+.f{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:14px 16px;margin:10px 0}
+.f header{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:baseline;margin-bottom:6px}
+.f header b{font:600 13px/1.3 var(--mono);color:var(--accent)}
+.f header .where{font-size:13px;color:var(--fg2)}
+.f dl{display:grid;grid-template-columns:96px 1fr;gap:4px 14px;margin:0;font-size:14px}
+.f dt{color:var(--fg2);font-size:12.5px;font-weight:600;padding-top:2px}
+.f dd{margin:0;min-width:0}
+@media (max-width:560px){.f dl{grid-template-columns:1fr}.f dt{padding-top:6px}}
+/* mockups */
+figure{margin:22px 0}
+.mock{overflow-x:auto;border-radius:12px;background:var(--m-app);border:1px solid var(--line2)}
+.mock svg{display:block;width:100%;min-width:760px;height:auto}
+figcaption{font-size:13px;color:var(--fg2);margin-top:8px;max-width:80ch}
+.notes{counter-reset:n;list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:6px 22px;font-size:14px;max-width:none}
+.notes li{display:flex;gap:10px;align-items:flex-start}
+.notes li b.n{flex:none;width:22px;height:22px;border-radius:50%;background:var(--accent);color:var(--bg);font:700 12px/22px var(--mono);text-align:center;margin-top:1px}
+svg text{font-family:var(--sans)}
+svg .t{fill:var(--m-fg)} svg .t2{fill:var(--m-fg2)} svg .tm{fill:var(--m-muted)} svg .tg{fill:var(--m-gold)}
+svg .mono{font-family:var(--mono)}
+svg .serif{font-family:var(--serif)}
+svg .app{fill:var(--m-app)} svg .deck{fill:var(--m-deck)} svg .raised{fill:var(--m-raised)} svg .node{fill:var(--m-node)}
+svg .ln{stroke:var(--m-line);fill:none} svg .ln2{stroke:var(--m-line2);fill:none}
+svg .callout circle{fill:var(--m-gold)} svg .callout text{fill:#10141C;font:700 12px var(--mono);text-anchor:middle}
+.swatch{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:6px;border:1px solid var(--line2)}
+@media (prefers-reduced-motion:no-preference){nav.toc a{transition:color .12s ease-out}}
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">Design review · Rafu Lightning 0.1.0-dev · 18 Oct 2026 catalog</div>
+  <h1>Rafu Mac Redesign</h1>
+  <p class="lede">A review of all 44 screens in <code>docs/screenshots</code>, and one proposal that makes Rafu calm, precise and native to the Mac. The Canvas gets the most attention: nodes, terminal focus, edges, live agent links and Markdown notes.</p>
+  <div class="thread" aria-hidden="true"></div>
+  <div class="meta">
+    <span><b>44 of 44</b> images opened</span>
+    <span><b>0</b> images inaccessible</span>
+    <span><b>2</b> images partly unreadable (clipped panel)</span>
+    <span><b>0</b> interactions tested</span>
+    <span>Language: Simplified Technical English</span>
+  </div>
+  <nav class="toc" aria-label="Contents">
+    <a href="#evidence"><span>00</span>Evidence and limits</a>
+    <a href="#assessment"><span>01</span>Honest assessment</a>
+    <a href="#direction"><span>02</span>Visual direction</a>
+    <a href="#top15"><span>03</span>The 15 highest-impact changes</a>
+    <a href="#screens"><span>04</span>Screen-by-screen review</a>
+    <a href="#labels"><span>05</span>Labels, buttons and icons</a>
+    <a href="#specs"><span>06</span>Design specifications</a>
+    <a href="#canvas"><span>07</span>Canvas interaction specification</a>
+    <a href="#motion"><span>08</span>Motion and haptics</a>
+    <a href="#layouts"><span>09</span>Annotated layouts</a>
+    <a href="#sequence"><span>10</span>Implementation sequence</a>
+    <a href="#criteria"><span>11</span>Acceptance criteria</a>
+  </nav>
+</header>
+
+<!-- ============================================================ 00 -->
+<h2 id="evidence"><span class="num">00</span>Evidence and limits</h2>
+<p>I read the repository README and the screenshot catalog README. Then I opened each of the 44 JPEG files. All files open and decode. Each main-window image is 2200 × 1297 px. The local files on this branch are the same as <code>main</code>.</p>
+<p>Each finding has an evidence tag. A finding without the <span class="tag seen">Seen</span> tag is not proven by a screenshot.</p>
+<div class="legend">
+  <span class="tag seen">Seen</span> <span style="font-size:13px;color:var(--fg2)">visible in the named screenshot</span>
+  <span class="tag code">Code</span> <span style="font-size:13px;color:var(--fg2)">read in source, not run</span>
+  <span class="tag test">Needs test</span> <span style="font-size:13px;color:var(--fg2)">an assumption to verify in the app</span>
+  <span class="tag ref">Refine</span> <span style="font-size:13px;color:var(--fg2)">changes an existing capability</span>
+  <span class="tag new">New</span> <span style="font-size:13px;color:var(--fg2)">a new capability</span>
+</div>
+
+<h3>Images with limits</h3>
+<p>No image is inaccessible. These images do not show all of the content that the catalog describes. I do not infer the missing parts.</p>
+<div class="scroll mid"><table>
+<tr><th>Image</th><th>Limit</th><th>Effect on this review</th></tr>
+<tr><td class="k">ensemble-workflows.jpg</td><td>The catalog says "Workflow library". The image shows the Canvas. The Ensemble panel at the right is clipped: the section header shows "itory" and the row shows "eview…" and "Workflow Actio".</td><td>I cannot review the workflow list. I report the clipped panel as a layout defect.</td></tr>
+<tr><td class="k">menu-ensemble-workflow.jpg</td><td>The same clipped panel. The menu itself (Open, Duplicate, Reveal in Finder) is readable.</td><td>Menu reviewed. Row layout not reviewed.</td></tr>
+<tr><td class="k">resources.jpg</td><td>The Resources popover covers the lower Source Control panel and is cut at the bottom ("Language Servers — All Windows").</td><td>The language-server section of the popover is not reviewed.</td></tr>
+<tr><td class="k">canvas-picker.jpg, canvas-connect.jpg, command-palette.jpg</td><td>Crops of a sheet or panel. The surrounding window is not visible.</td><td>I review the sheet only, not its position in the window.</td></tr>
+<tr><td class="k">All images</td><td>Dark appearance only. No running terminal, no live agent session, no Canvas edge, no active Ensemble run, no error state, no light theme.</td><td>Edge, terminal-focus and note designs are specified from the catalog text and source code, not from screenshots.</td></tr>
+</table></div>
+<div class="callout"><b>No edge is visible in any screenshot.</b> The Canvas list in <code>canvas-list.jpg</code> shows an empty "Relationships" section. The current edge drawing is known only from <code>WorkspaceCanvasView.swift</code> <span class="tag code">Code</span>. All edge findings carry that tag.</div>
+
+<!-- ============================================================ 01 -->
+<h2 id="assessment"><span class="num">01</span>Honest assessment</h2>
+<p class="lede">Rafu has a good palette and a sound architecture. It does not yet look like one designed application. It looks like many careful features, each with its own controls.</p>
+
+<div class="cols">
+<div class="panel">
+<h4 style="margin-top:0">Keep these</h4>
+<ul>
+<li>The Indigo palette. It is dark, cool and quiet. Code and Markdown read well on it (<code>editor.jpg</code>, <code>markdown-split.jpg</code>).</li>
+<li>The Markdown preview typography: a clear H1, good line length, real bullets.</li>
+<li>The side-by-side diff: calm red and green rows with word-level marks (<code>git-diff.jpg</code>).</li>
+<li>The terminal pane header: name, state, and three familiar icons (pencil, play, close) in <code>terminal-editor.jpg</code>.</li>
+<li>Honest privacy text: "Rafu never starts one on its own", "Keys stay in this Mac's Keychain".</li>
+<li>The command palette: one field, prefixes, keyboard hints.</li>
+<li>Empty states with a symbol, a title and one line of text.</li>
+<li>The stash menu: the destructive item is last, after a separator (<code>menu-git-stash.jpg</code>).</li>
+</ul></div>
+<div class="panel">
+<h4 style="margin-top:0">Fix these</h4>
+<ul>
+<li><b>Gold is everywhere.</b> A gold frame surrounds the editor in every main image. Gold also marks ellipsis icons, sync icons, text buttons and branch names. Gold no longer means "focus" or "important".</li>
+<li><b>Too many text buttons.</b> The Canvas has 6 toolbar buttons, 5 zoom buttons and a "Focus" button on every card. The Canvas list has 10 bordered buttons for 5 rows.</li>
+<li><b>The right panel breaks at its width.</b> Labels wrap inside words: "Worktree s", "Workflo ws", "Ca se", "Who le Wor d". One panel is clipped.</li>
+<li><b>The Canvas is a set of floating panels.</b> Cards look equal, overlap with no depth cue, and carry headers, footers, link circles and help text at the same time.</li>
+<li><b>Settings is a tab</b> with its own sidebar. With Files and Source Control open, the window shows three sidebars.</li>
+<li><b>Words come from the code</b>, not from the user: "Parked", "Leave Content", "Session bridge stopped", "Bounded lifecycle events", "Verb version", "1 panes".</li>
+</ul></div>
+</div>
+
+<div class="scroll mid"><table>
+<tr><th>Area</th><th>Current quality</th><th>Main reason</th></tr>
+<tr><td>Editor and Markdown</td><td><span class="dot h">●●●○</span> Good</td><td>Quiet canvas, good type. The permanent gold frame and wide find bar reduce it.</td></tr>
+<tr><td>Git</td><td><span class="dot m">●●○○</span> Fair</td><td>Correct model, but a 290 pt panel causes wraps, truncation and two-line rows.</td></tr>
+<tr><td>Terminals</td><td><span class="dot m">●●○○</span> Fair</td><td>Good pane header. The manager list has identical names and an agent grid of truncated tiles.</td></tr>
+<tr><td>Canvas</td><td><span class="dot l">●○○○</span> Weak</td><td>No visible edges, no depth, redundant controls, help text instead of affordances.</td></tr>
+<tr><td>Ensemble</td><td><span class="dot m">●●○○</span> Fair</td><td>Clear safety copy. Three columns at once, all-caps headers, one off-theme gray surface, one clipped panel.</td></tr>
+<tr><td>Settings</td><td><span class="dot m">●●○○</span> Fair</td><td>Complete content. Non-standard location, full-width popups, long repeated blocks.</td></tr>
+</table></div>
+<p style="color:var(--fg2);font-size:13px">These ratings are a judgement from static screenshots. They do not measure behaviour.</p>
+
+<!-- ============================================================ 02 -->
+<h2 id="direction"><span class="num">02</span>Visual direction: "One Gold Thread"</h2>
+<p class="lede">Rafu means darning: a careful repair with one thread. The interface is the cloth. It is quiet, even and neutral. Gold is the thread. It appears only where something is joined, focused or alive.</p>
+
+<div class="cols">
+<div class="panel">
+<h4 style="margin-top:0">The look</h4>
+<ul>
+<li><b>Cloth surfaces.</b> Three tonal steps of indigo (backing, deck, raised). Hairlines separate them. No glass, no gradients, no texture.</li>
+<li><b>One thread of gold.</b> Gold marks keyboard focus inside content, the current selection, a live agent link and the one primary button in a view. Nothing else is gold.</li>
+<li><b>Stitches for relationships.</b> A plain relationship is a short dashed line, like a running stitch. A live agent link is a solid gold thread. The metaphor is functional, not decorative.</li>
+<li><b>Literary text, technical data.</b> New York for Markdown and note prose. SF Pro for interface text. SF Mono for code, paths, hashes and counts.</li>
+<li><b>Depth only where space is real.</b> The workbench stays flat. The Canvas is a spatial surface, so its nodes get one soft shadow that shows stack order.</li>
+</ul></div>
+<div class="panel">
+<h4 style="margin-top:0">The feel</h4>
+<ul>
+<li><b>Calm at rest.</b> Controls that are not needed now are hidden until hover, selection or keyboard focus. They are always in a menu.</li>
+<li><b>Precise under the pointer.</b> Drag, resize and connect follow the pointer 1:1. Snaps are instant. Feedback comes from guides, not from bounce.</li>
+<li><b>Immediate under the keyboard.</b> Typing, cursor movement, terminal input, tab changes and list navigation have no animation.</li>
+<li><b>Honest about state.</b> Each state has a word and a shape, and then a colour. A paused link says "Paused".</li>
+<li><b>Native first.</b> Standard Settings window, standard menus, standard sheets, standard focus rings in the theme colour.</li>
+</ul></div>
+</div>
+
+<h3>The gold budget</h3>
+<p>Use this test for each gold pixel: "Is this focus, selection, a live link, or the primary action?" If the answer is no, use a neutral token.</p>
+<div class="scroll mid"><table>
+<tr><th>Gold now (seen)</th><th>Where</th><th>Proposed token</th></tr>
+<tr><td>1 pt frame around the editor deck</td><td>every main-window image</td><td><code>borderSubtle</code>; gold only on the focused terminal or note node</td></tr>
+<tr><td>Card ellipsis "·~" glyphs</td><td><code>01-canvas-overview.jpg</code> (5 cards)</td><td><code>textSecondary</code>, shown on hover or selection</td></tr>
+<tr><td>Row ellipsis "···"</td><td><code>terminal-manager.jpg</code>, <code>git-worktrees.jpg</code></td><td><code>textSecondary</code></td></tr>
+<tr><td>Sync icon, "main ···" ellipsis</td><td><code>git-changes.jpg</code></td><td><code>textSecondary</code>; gold only while a sync runs that the user started</td></tr>
+<tr><td>"Stash Actions", "Open", "Delete", "New from Template" text buttons</td><td>Git, Terminals, Ensemble panels</td><td>Neutral icon menu or neutral bordered button</td></tr>
+<tr><td>"main" branch name in History</td><td><code>git-history.jpg</code></td><td><code>textPrimary</code> in a neutral capsule</td></tr>
+<tr><td>Popup chevron squares</td><td><code>canvas-connect.jpg</code>, Settings</td><td>System popup appearance (system accent comes from the theme tint)</td></tr>
+<tr><td>Selected settings pane row fill</td><td><code>settings-*.jpg</code></td><td><code>selection</code> fill; gold text not needed</td></tr>
+</table></div>
+
+<h3>Surfaces</h3>
+<div class="scroll mid"><table>
+<tr><th>Role</th><th>Indigo (dark)</th><th>Khadi (light)</th><th>Use</th></tr>
+<tr><td>Backing</td><td><span class="swatch" style="background:#10141C"></span><code>#10141C</code> appBackground</td><td><span class="swatch" style="background:#F1EDE3"></span><code>#F1EDE3</code></td><td>Window, Files, rails, status bar, Canvas board</td></tr>
+<tr><td>Deck</td><td><span class="swatch" style="background:#151A24"></span><code>#151A24</code> editorBackground</td><td><span class="swatch" style="background:#FAF7F0"></span><code>#FAF7F0</code></td><td>Editor, right panel, sheets</td></tr>
+<tr><td>Raised</td><td><span class="swatch" style="background:#1B212D"></span><code>#1B212D</code> elevatedBackground</td><td><span class="swatch" style="background:#FFFFFF"></span><code>#FFFFFF</code></td><td>Canvas nodes, popovers, menus, cards in forms</td></tr>
+<tr><td>Hairline</td><td><span class="swatch" style="background:#262E3E"></span><code>#262E3E</code> borderSubtle</td><td><span class="swatch" style="background:#E3DCCB"></span><code>#E3DCCB</code></td><td>All structural borders</td></tr>
+<tr><td>Thread</td><td><span class="swatch" style="background:#E3A857"></span><code>#E3A857</code> accent</td><td><span class="swatch" style="background:#A2701F"></span><code>#A2701F</code></td><td>Focus, selection, live link, primary action</td></tr>
+<tr><td>Link text</td><td><span class="swatch" style="background:#82A7F0"></span><code>#82A7F0</code> info</td><td><span class="swatch" style="background:#3557B7"></span><code>#3557B7</code></td><td>Hyperlinks in notes and Markdown (keeps gold free)</td></tr>
+</table></div>
+<p>All values are existing theme tokens. The direction needs no new required theme key. One optional derived key, <code>canvasNodeBackground</code> (default: <code>elevatedBackground</code>), lets a theme tune node contrast.</p>
+
+<!-- ============================================================ 03 -->
+<h2 id="top15"><span class="num">03</span>The 15 highest-impact changes</h2>
+<p>Ranked by (visual benefit + interaction benefit) ÷ effort. H = high, M = medium, L = low. Effort: S ≤ 2 days, M ≤ 1 week, L > 1 week, for one engineer. Effort is an estimate.</p>
+<div class="scroll wide"><table>
+<tr><th>#</th><th>Change</th><th>Evidence</th><th>Visual</th><th>UX</th><th>Effort</th><th>Type</th></tr>
+<tr><td class="k">1</td><td><b>Quiet the deck.</b> Change the permanent gold deck border to <code>borderSubtle</code>. Use one focus language: theme-tinted system focus ring on controls, 1.5 pt gold inner ring on a focused content node. Remove blue system rings.</td><td>All main images; blue rings in <code>find.jpg</code>, <code>canvas-connect.jpg</code>, <code>terminal-editor.jpg</code></td><td class="h">H</td><td class="h">H</td><td>S</td><td><span class="tag ref">Refine</span></td></tr>
+<tr><td class="k">2</td><td><b>Fix the narrow-panel breaks.</b> Minimum right-panel width 300 pt (default 340). Section pickers never wrap. Search toggles become icon toggles. Fix the clipped Ensemble panel.</td><td><code>git-changes.jpg</code>, <code>search.jpg</code>, <code>ensemble-runs.jpg</code>, <code>ensemble-workflows.jpg</code></td><td class="h">H</td><td class="h">H</td><td>S</td><td><span class="tag ref">Refine</span></td></tr>
+<tr><td class="k">3</td><td><b>One Canvas bar.</b> Replace the title row and 6 text buttons with: canvas name pull-down · Board/List segmented control · "+" pull-down · Arrange menu · overflow menu. Replace 5 zoom buttons with one "− 100% +" control.</td><td><code>01-canvas-overview.jpg</code></td><td class="h">H</td><td class="h">H</td><td>S</td><td><span class="tag ref">Refine</span></td></tr>
+<tr><td class="k">4</td><td><b>Neutral accents.</b> Apply the gold budget (section 02) to every ellipsis, sync icon and text button.</td><td>Canvas, Git, Terminals, Ensemble images</td><td class="h">H</td><td class="m">M</td><td>S</td><td><span class="tag ref">Refine</span></td></tr>
+<tr><td class="k">5</td><td><b>New node chrome.</b> 32 pt header (glyph, title, state, hover actions). No footer. Edge and corner resize zones. Soft shadow and bring-to-front on interaction.</td><td><code>01-canvas-overview.jpg</code>, <code>ensemble-workflows.jpg</code></td><td class="h">H</td><td class="h">H</td><td>M</td><td><span class="tag ref">Refine</span></td></tr>
+<tr><td class="k">6</td><td><b>Click a terminal, type at once.</b> First click in a terminal body gives it keyboard focus and shows a gold ring and "Return to Board" button. <kbd>⌃Tab</kbd> or a click on the board returns focus.</td><td>Catalog text <span class="tag code">Code</span></td><td class="m">M</td><td class="h">H</td><td>M</td><td><span class="tag ref">Refine</span></td></tr>
+<tr><td class="k">7</td><td><b>Drag to connect.</b> Four ports appear on hover. Drag from a port, see valid targets highlight, drop to connect. The Connect sheet stays as the accessible path.</td><td><code>canvas-connect.jpg</code>, link circles in <code>01</code></td><td class="m">M</td><td class="h">H</td><td>M</td><td><span class="tag ref">Refine</span></td></tr>
+<tr><td class="k">8</td><td><b>Readable, selectable edges.</b> Side-aware routing, constant-width strokes, label pills, 12 pt hit area, per-edge state badge (Live, Paused, Disconnected, Failed), context menu.</td><td><code>WorkspaceCanvasView.swift</code> <span class="tag code">Code</span></td><td class="h">H</td><td class="h">H</td><td>L</td><td><span class="tag ref">Refine</span> <span class="tag new">New</span></td></tr>
+<tr><td class="k">9</td><td><b>Markdown notes.</b> Notes render with the shared native Markdown renderer in Read mode and edit in TextKit in Edit mode. Task boxes toggle in Read mode.</td><td><code>CanvasNoteEditor.swift</code> is plain monospaced text <span class="tag code">Code</span></td><td class="h">H</td><td class="h">H</td><td>M</td><td><span class="tag new">New</span></td></tr>
+<tr><td class="k">10</td><td><b>Source Control rows.</b> One-line file rows, status shape + letter, relative time, commit details in the editor area, generate button inside the message field.</td><td><code>git-changes.jpg</code>, <code>git-history.jpg</code>, <code>git-commit-details.jpg</code></td><td class="m">M</td><td class="h">H</td><td>S</td><td><span class="tag ref">Refine</span></td></tr>
+<tr><td class="k">11</td><td><b>Standard Settings window.</b> <kbd>⌘,</kbd> opens the existing <code>Settings</code> scene. Grouped forms, right-aligned labels, popups at content width.</td><td><code>settings-*.jpg</code>; <code>RafuApp.swift:23</code> <span class="tag code">Code</span></td><td class="h">H</td><td class="m">M</td><td>M</td><td><span class="tag ref">Refine</span></td></tr>
+<tr><td class="k">12</td><td><b>Terminals panel.</b> "Start Agent" pull-down instead of the 7-tile grid. Real names from command and folder. "Not running" instead of "Parked".</td><td><code>terminal-manager.jpg</code></td><td class="m">M</td><td class="m">M</td><td>S</td><td><span class="tag ref">Refine</span></td></tr>
+<tr><td class="k">13</td><td><b>Canvas list as a table.</b> Columns, row selection, Delete key and context menu instead of 10 buttons. A Relationships table with an empty state.</td><td><code>canvas-list.jpg</code></td><td class="m">M</td><td class="m">M</td><td>S</td><td><span class="tag ref">Refine</span></td></tr>
+<tr><td class="k">14</td><td><b>Spatial tools.</b> Snapping guides, marquee selection feedback, Align/Distribute, Zoom to Selection, semantic zoom.</td><td><code>menu-canvas.jpg</code> (Align Left/Top only)</td><td class="m">M</td><td class="h">H</td><td>M</td><td><span class="tag new">New</span></td></tr>
+<tr><td class="k">15</td><td><b>Words.</b> One glossary: card (not node), Return to Board, Not running, Message link, 1 pane. Title case for headers. No all caps.</td><td>Many images</td><td class="l">L</td><td class="h">H</td><td>S</td><td><span class="tag ref">Refine</span></td></tr>
+</table></div>
+
+<!-- ============================================================ 04 -->
+<h2 id="screens"><span class="num">04</span>Screen-by-screen review</h2>
+<p>Coordinates are approximate, in the 2000 px-wide display scale of each image (multiply by 1.1 for source pixels). "Benefit" includes the tradeoff.</p>
+
+<!-- ---------------- CANVAS ---------------- -->
+<div class="screen"><h3>Canvas board</h3><span class="files">01-canvas-overview.jpg · ensemble-workflows.jpg (Canvas part)</span></div>
+
+<div class="f"><header><b>C1</b><span class="where">01-canvas-overview.jpg · Canvas toolbar, top right (x 1500–1930, y 72)</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Six bordered controls: "Add Card ▾", "Arrange", "Connect…", "Focus", "List", and an ellipsis-circle with a chevron. "Connect…" and "Focus" are disabled at rest, so a third of the bar is grey noise. At 12 pt the ellipsis-circle reads as a face.</dd>
+<dt>Change</dt><dd>One bar: [Board | List] icon segmented control · "+" pull-down (Add to Canvas) · "Arrange" icon pull-down · "ellipsis.circle" pull-down. Remove "Connect…" and "Focus" from the bar; they become port drag, card header actions, context menu and shortcuts.</dd>
+<dt>Benefit</dt><dd>Six controls become four, all enabled. Tradeoff: icons need tooltips and accessibility labels; first-time users lose the visible word "Connect". The ports and the empty-board tip replace it.</dd></dl></div>
+
+<div class="f"><header><b>C2</b><span class="where">01 · Title row "Canvas UI Check" (y 72)</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>The title repeats the selected tab text and uses a 38 pt row only for that text and the buttons.</dd>
+<dt>Change</dt><dd>Make the name a pull-down at the leading end of the same bar: "Canvas UI Check ⌄" → Rename…, Duplicate, Open Canvas… (recent list), Close Canvas.</dd>
+<dt>Benefit</dt><dd>The name becomes navigation. It replaces the separate Saved Canvases sheet as the common path. No height lost.</dd></dl></div>
+
+<div class="f"><header><b>C3</b><span class="where">01 · Card header ellipsis "·~" (x 781, y 225 and four more)</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>An ellipsis plus chevron in gold on every card. Five gold marks with no meaning pull the eye away from content.</dd>
+<dt>Change</dt><dd>A neutral 13 pt "ellipsis" icon in <code>textSecondary</code>. Show it on hover, on selection, and on keyboard focus. Right-click on the header opens the same menu.</dd>
+<dt>Benefit</dt><dd>The board is calm at rest. Tradeoff: the menu is not visible on unselected cards; the context menu and VoiceOver actions keep it reachable.</dd></dl></div>
+
+<div class="f"><header><b>C4</b><span class="where">01 · Card footers "Note / Focus ↘", "Native App / Focus ↘", "Session bridge stopped / Focus ↘"</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Every card has a 34 pt footer with a type word, a "Focus" text button and a resize glyph. "Focus" appears 4 times on one board. The type word repeats the header icon.</dd>
+<dt>Change</dt><dd>Remove the footer. Type: header glyph plus accessibility label. Focus: "Zoom to Card" icon (<code>arrow.up.left.and.arrow.down.right</code>) in the header hover cluster, double-click on the header background, and <kbd>⌥Return</kbd>. Resize: edges and corners (section 07). Terminal session state moves into the header as a state word.</dd>
+<dt>Benefit</dt><dd>About 10% more content area per card. One meaning per control. Tradeoff: resize is less visible; the cursor changes on the edge and the selected card shows corner handles.</dd></dl></div>
+
+<div class="f"><header><b>C5</b><span class="where">01 · Link circles on the right edges (x 810, y 356; x 1380, y 407; x 1869, y 769)</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>One 28 pt chain-icon circle sits on each right edge, half outside the card. It is always visible. Connections can start only from the right side.</dd>
+<dt>Change</dt><dd>Four 8 pt ports at the side midpoints. They appear on hover and on selection, and grow to 12 pt under the pointer. Hit area 20 × 20 pt.</dd>
+<dt>Benefit</dt><dd>Quieter cards; connections leave from the nearest side, so edges are shorter. Tradeoff: ports are hidden at rest; the empty-board tip and the "Connect To ▸" menu item teach them.</dd></dl></div>
+
+<div class="f"><header><b>C6</b><span class="where">01 · Terminal cards: "Stopped" + "Start" (x 1350, y 254) and centred "Start this terminal when you are ready."</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Two messages for one state. The action ("Start", 46 pt wide) sits 450 pt away from the message that asks for it.</dd>
+<dt>Change</dt><dd>Header shows "Not running". The body shows one centred block: shell name, folder, and a primary "Start Shell" button. Press <kbd>Return</kbd> on a selected stopped terminal to start it.</dd>
+<dt>Benefit</dt><dd>One clear next step, near the eye. Nothing starts without a visible user action.</dd></dl></div>
+
+<div class="f"><header><b>C7</b><span class="where">01 · "Terminal" card overlaps "Canvas Terminal" (y 493); ensemble-workflows.jpg · "First.swift" covers three cards</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Cards overlap with no depth cue. In <code>01</code> the lower card hides the upper card's footer. In <code>ensemble-workflows.jpg</code> the "Terminal" title shows only "nal". Selection is only a 2 pt gold border.</dd>
+<dt>Change</dt><dd>Two-layer shadow on all nodes (section 06). A click or drag brings a card to the front. Selection adds a 1.5 pt gold ring outside the border. Snapping keeps a 16 pt gap by default. "Tidy Up" removes overlaps.</dd>
+<dt>Benefit</dt><dd>Stack order is visible. Tradeoff: the rest of the workbench stays flat, so shadows appear only on the Canvas.</dd></dl></div>
+
+<div class="f"><header><b>C8</b><span class="where">01 · "Finder" native-app card body</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Three lines of text and two small buttons: "App reference — no preview", "Open App", "Choose Window…", "Window preview only. Use Open App for keyboard and pointer input." A generic window glyph replaces the app icon.</dd>
+<dt>Change</dt><dd>Show the real app icon (48 pt) and name. Primary: "Open Finder". Secondary: "Show Window Preview…". With a preview, the header shows a "Preview" badge with <code>eye</code> glyph; pointer over the picture shows "Picture of a Finder window. Open Finder to use it."</dd>
+<dt>Benefit</dt><dd>The capability difference is visible without reading. Tradeoff: one tooltip replaces the permanent sentence; the badge stays.</dd></dl></div>
+
+<div class="f"><header><b>C9</b><span class="where">01 · Bottom-left hint "Drag a link handle to connect nodes. Shift-drag selects nodes. ⌘⇧W closes selected nodes."</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Permanent help text on the work surface. It says "nodes" while the rest of the UI says "cards".</dd>
+<dt>Change</dt><dd>Remove it. Show an empty-board tip once ("Double-click to add a card. Drag from a card's edge to connect.") and add Help ▸ Canvas Shortcuts.</dd>
+<dt>Benefit</dt><dd>Clean board. Tradeoff: experienced users lose nothing; new users get the tip when the board is empty.</dd></dl></div>
+
+<div class="f"><header><b>C10</b><span class="where">01 · Zoom group, bottom right: "−", "100%", "+", "1:1", "Fit All"</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Five bordered controls. "1:1" and "100%" mean the same. The cursor in the capture hides "Fit All", which shows how small the targets are.</dd>
+<dt>Change</dt><dd>One capsule: "−" · "100% ⌄" · "+". The percentage opens: Zoom to Fit <kbd>⌘9</kbd>, Zoom to Selection <kbd>⌥⌘9</kbd>, Actual Size <kbd>⌘0</kbd>, 50%, 200%. The same items go in the View menu.</dd>
+<dt>Benefit</dt><dd>Three targets instead of five, standard Mac shortcuts (Preview uses <kbd>⌘0</kbd> and <kbd>⌘9</kbd>).</dd></dl></div>
+
+<div class="f"><header><b>C11</b><span class="where">01 vs canvas-list.jpg · card type glyphs</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>The same glyph is gold on the board and blue in the list.</dd>
+<dt>Change</dt><dd><code>textSecondary</code> glyphs in both. The glyph carries type; colour is not needed.</dd>
+<dt>Benefit</dt><dd>Consistency; frees gold.</dd></dl></div>
+
+<div class="f"><header><b>C12</b><span class="where">ensemble-workflows.jpg · "First.swift" file card body</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>"First.swift" appears three times (header, body row, and the tab). The body shows an explanation ("Open in the existing editor to keep its text and undo history.") instead of the file.</dd>
+<dt>Change</dt><dd>Body: a read-only, syntax-coloured excerpt of the first 40 lines (bounded, from the open buffer when one exists). Header action "Open in Editor" (<code>arrow.up.forward.square</code>). Double-click the body opens the file in the editor at that line.</dd>
+<dt>Benefit</dt><dd>The card shows what it represents. Tradeoff: a bounded read on board open; load lazily and only for visible cards.</dd></dl></div>
+
+<div class="screen"><h3>Canvas list, picker and connect sheet</h3><span class="files">canvas-list.jpg · canvas-picker.jpg · canvas-connect.jpg</span></div>
+
+<div class="f"><header><b>C13</b><span class="where">canvas-list.jpg · rows with "Select" and "Remove…" buttons</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Ten bordered buttons for five rows. The type word is 10 pt and sits next to the buttons, far from the name. "Relationships" has a header and empty space, but no empty-state text.</dd>
+<dt>Change</dt><dd>A native <code>Table</code>: Name, Type, Links, State. Click selects (the board selection follows). Double-click = Show on Board. <kbd>⌫</kbd> = Remove from Canvas… Context menu has all card actions. A second table lists links: From → To, Label, Kind, State. Empty text: "No links. Drag from the edge of a card to another card."</dd>
+<dt>Benefit</dt><dd>Faster, keyboard-first, VoiceOver-friendly. Tradeoff: none.</dd></dl></div>
+
+<div class="f"><header><b>C14</b><span class="where">canvas-list.jpg · "Board" text button in the toolbar</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>"List" becomes "Board" in the same place. A label that changes meaning is hard to read as a state.</dd>
+<dt>Change</dt><dd>Segmented control with two icons (<code>square.on.square.dashed</code> Board, <code>list.bullet</code> List). <kbd>⌃⌘1</kbd>/<kbd>⌃⌘2</kbd> when the Canvas has focus.</dd>
+<dt>Benefit</dt><dd>The current mode is visible.</dd></dl></div>
+
+<div class="f"><header><b>C15</b><span class="where">canvas-picker.jpg · "Saved Canvases" sheet</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Each row has a large bordered trash button. There is no Open button, no default action, no search and no metadata. The most visible action is the destructive one. Only "Cancel" closes the sheet.</dd>
+<dt>Change</dt><dd>"Open Canvas" sheet: search field, rows with name and "5 cards · edited 2 h ago", default button "Open" (<kbd>Return</kbd>), double-click opens. Delete via context menu or a "−" button under the list, with confirmation. Also reachable from the canvas name pull-down (C2).</dd>
+<dt>Benefit</dt><dd>The safe action is the obvious one. Tradeoff: delete is one step deeper, which is correct.</dd></dl></div>
+
+<div class="f"><header><b>C16</b><span class="where">canvas-connect.jpg · "Connect Cards" sheet</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>The From popup starts at x 243 and the To popup at x 180, so the labels have no common column. The label field has no label; its default text "Related to" is pre-selected and looks like a placeholder. Popup chevrons are gold but the text-field focus ring is system blue.</dd>
+<dt>Change</dt><dd>Drag-to-connect is the main path (section 07). Keep the sheet for keyboard and VoiceOver: a grouped form with right-aligned "From:", "To:", "Label:" and "Kind:" (Relationship / Message link, shown only when both ends are terminals). Placeholder "Label (optional)"; empty by default. Theme focus ring.</dd>
+<dt>Benefit</dt><dd>Aligned, honest form; a clear choice between a visual link and a message link.</dd></dl></div>
+
+<div class="screen"><h3>Canvas menus</h3><span class="files">menu-canvas.jpg · menu-canvas-note.jpg · menu-canvas-file.jpg · menu-canvas-terminal.jpg · menu-canvas-native-app.jpg · menu-canvas-add-card.jpg</span></div>
+
+<div class="f"><header><b>C17</b><span class="where">menu-canvas.jpg · Canvas overflow menu</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Nine items, no separators, no shortcuts. Undo and Redo repeat the Edit menu. Only two alignment commands exist (Align Left, Align Top). "Save" suggests that a canvas can be unsaved.</dd>
+<dt>Change</dt><dd>Groups: [Rename…, Duplicate Canvas] — [Select All <kbd>⌘A</kbd>] — [Arrange ▸ Tidy Up, Align Left/Centre/Right/Top/Middle/Bottom, Distribute Horizontally/Vertically, Bring to Front, Send to Back] — [Show Links ▸ All / Message Links Only / None] — [Close Canvas]. Remove Undo/Redo (Edit menu owns them). If the canvas autosaves, remove "Save" <span class="tag test">Needs test</span>.</dd>
+<dt>Benefit</dt><dd>Scannable groups; complete alignment set.</dd></dl></div>
+
+<div class="f"><header><b>C18</b><span class="where">menu-canvas-note/file/terminal/native-app.jpg · card menus</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Eleven flat items. Six of them (Move Left/Right/Up/Down, Make Larger/Smaller) are 55% of the menu and belong to the keyboard and direct manipulation. The main action of each type is not in its menu: "Open File" (file), "Start" (terminal) and "Open App" (native app) live only on the card.</dd>
+<dt>Change</dt><dd>Same order for every type: [primary action: Edit Note / Open in Editor / Start Shell or Stop / Open App] — [Zoom to Card, Connect To ▸, Copy Mention (terminal)] — [Rename…, Duplicate] — [Arrange ▸ Bring to Front, Send to Back, Move and Resize ▸ (the six commands, with arrow-key shortcuts shown)] — [Remove from Canvas…]. Keep the six move/size commands as VoiceOver custom actions.</dd>
+<dt>Benefit</dt><dd>The first item is always the thing the card does. Tradeoff: move/size commands are one level deeper; arrow keys make them faster.</dd></dl></div>
+
+<div class="f"><header><b>C19</b><span class="where">menu-canvas-add-card.jpg · "Add Card" menu</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Text only, no grouping, no shortcuts. "Local Web App…" and "Native macOS App…" are technical and long.</dd>
+<dt>Change</dt><dd>Groups with SF Symbols: [Note <code>note.text</code>, Terminal <code>apple.terminal</code>] — [File… <code>doc</code>, Image… <code>photo</code>] — [Web App… <code>globe</code>, Mac App… <code>macwindow</code>]. Shortcuts shown when the board has focus (section 07).</dd>
+<dt>Benefit</dt><dd>Faster recognition; consistent with all other action menus.</dd></dl></div>
+
+<!-- ---------------- EDITOR ---------------- -->
+<div class="screen"><h3>Editor, find, search, Markdown, palette</h3><span class="files">editor.jpg · find.jpg · search.jpg · markdown-split.jpg · command-palette.jpg · menu-tabs.jpg · resources.jpg</span></div>
+
+<div class="f"><header><b>E1</b><span class="where">editor.jpg (and every main image) · gold 1 pt frame around the editor deck</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>A gold frame is always on. The same gold is the theme's <code>focusRing</code> and <code>accent</code>. A permanent focus colour stops meaning focus. It also frames the code like a warning.</dd>
+<dt>Change</dt><dd>Deck border = <code>borderSubtle</code>. Gold appears only on the focused editor-hosted terminal and on focused Canvas content.</dd>
+<dt>Benefit</dt><dd>The single largest calm-down of the app. Tradeoff: the deck is less "branded"; the brand moves to meaning.</dd></dl></div>
+
+<div class="f"><header><b>E2</b><span class="where">editor.jpg · top-left corner (x 0–60, y 0–50)</span><span class="tag seen">Seen</span><span class="tag test">Needs test</span></header><dl>
+<dt>Problem</dt><dd>No window close/minimise/zoom buttons are visible in any main image. The top-left shows only the sidebar toggle in a gold outline. The capture tool can hide them, so this is not proven.</dd>
+<dt>Change</dt><dd>If they are hidden in the app, restore the standard buttons. Draw the sidebar toggle as a plain toolbar icon (no gold outline) right of them.</dd>
+<dt>Benefit</dt><dd>Standard window control.</dd></dl></div>
+
+<div class="f"><header><b>E3</b><span class="where">editor.jpg · Files sidebar header and tree</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>No workspace name, so multiple windows look the same. The "Folder" disclosure chevron is at x 58, 46 pt left of its icon, which breaks the outline rhythm.</dd>
+<dt>Change</dt><dd>Header: workspace name (13 pt semibold) with a pull-down for recent workspaces; icons Filter, New File, New Folder at the trailing end. Standard outline: chevron 4 pt left of the icon, 16 pt indent per level, 24 pt rows.</dd>
+<dt>Benefit</dt><dd>Orientation in multi-window use; native outline look.</dd></dl></div>
+
+<div class="f"><header><b>E4</b><span class="where">editor.jpg · tab bar</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Every tab shows a close "×" all the time; six × marks in one row add noise.</dd>
+<dt>Change</dt><dd>Show "×" on the selected tab and on hover. A dirty document shows a dot in that place; hover changes the dot to "×" (Safari/Xcode pattern).</dd>
+<dt>Benefit</dt><dd>Cleaner bar; dirty state gets a stable place.</dd></dl></div>
+
+<div class="f"><header><b>E5</b><span class="where">find.jpg · find bar</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>The find field is about 1,350 pt wide. "1 of 1", the arrows, the three toggles and close sit at the far right, far from the text the user types. The field focus ring is system blue.</dd>
+<dt>Change</dt><dd>Field width 260–420 pt. Order: [field] [1 of 1] [‹ ›] [Aa] [ab] [.*] [in selection] — trailing [Done]. Replace row aligns to the same columns. Theme-tinted focus ring.</dd>
+<dt>Benefit</dt><dd>Shorter eye travel; same layout as Xcode and Safari.</dd></dl></div>
+
+<div class="f"><header><b>E6</b><span class="where">search.jpg · Search panel toggles and results</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Toggle labels break inside words: "Ca se", "Who le Wor d", "Reg ex". Result lines wrap to two lines. File headers are low-contrast grey.</dd>
+<dt>Change</dt><dd>Three icon toggles (Aa, ab, .*) 24 × 22 pt with tooltips and labels "Match Case", "Whole Word", "Regular Expression". One-line results, truncated around the match, match in bold with <code>findMatchBackground</code>. File header: icon, name, folder in <code>textSecondary</code>, count capsule.</dd>
+<dt>Benefit</dt><dd>Removes the most visible defect in the catalog.</dd></dl></div>
+
+<div class="f"><header><b>E7</b><span class="where">search.jpg · two magnifiers (Files header x 190; right rail x 1975)</span><span class="tag seen">Seen</span><span class="tag test">Needs test</span></header><dl>
+<dt>Problem</dt><dd>Two search icons. If both open workspace search, one is redundant. If they differ, nothing says how.</dd>
+<dt>Change</dt><dd>Rail icon = workspace search. Files header icon = "Filter Files" with a <code>line.3.horizontal.decrease</code> glyph.</dd>
+<dt>Benefit</dt><dd>One meaning per symbol.</dd></dl></div>
+
+<div class="f"><header><b>E8</b><span class="where">markdown-split.jpg · mode icons (pencil, eye, split) at top right</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Three separate icons; only the selected one has a gold outline. They read as three actions, not one choice.</dd>
+<dt>Change</dt><dd>One three-segment control: Source, Preview, Split. Tooltips with shortcuts. The preview typography stays as it is.</dd>
+<dt>Benefit</dt><dd>Mode is legible as a state.</dd></dl></div>
+
+<div class="f"><header><b>E9</b><span class="where">command-palette.jpg · rows and footer</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Rows show no shortcuts. The footer "Close" uses a counter-clockwise arrow glyph, not the Esc key. "Canvas: Leave Content" is internal wording.</dd>
+<dt>Change</dt><dd>Right-aligned shortcut glyphs on rows. Footer: "↑↓ Navigate · ↩ Open · esc Close". Rename to "Canvas: Return to Board".</dd>
+<dt>Benefit</dt><dd>The palette teaches shortcuts.</dd></dl></div>
+
+<div class="f"><header><b>E10</b><span class="where">menu-tabs.jpg · tab list menu</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Works well. Minor: no file icons, no dirty state.</dd>
+<dt>Change</dt><dd>Add the tab glyph and a dirty dot. Keep the check mark.</dd>
+<dt>Benefit</dt><dd>Small; consistent with tabs.</dd></dl></div>
+
+<div class="f"><header><b>E11</b><span class="where">resources.jpg · Resources popover</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>A five-line grey paragraph comes before the numbers. The popover covers the Source Control panel, including (by comparison with <code>settings-general.jpg</code>) its "Initialize Repository" button. The bottom is clipped. The status bar shows 150.1 MB while the popover shows 145.1 MB.</dd>
+<dt>Change</dt><dd>Summary line first ("Rafu 145 MB · 2 terminals 1.1 MB · 0 language servers"). Explanation behind an ⓘ button. Maximum height = window height − 40 pt, then scroll. Update the status bar and popover from one sample.</dd>
+<dt>Benefit</dt><dd>Numbers first; nothing hidden or clipped.</dd></dl></div>
+
+<div class="f"><header><b>E12</b><span class="where">all main images · status bar</span><span class="tag seen">Seen</span><span class="tag test">Needs test</span></header><dl>
+<dt>Problem</dt><dd>"Local" at the left and "Local editor" at the right. The second label does not say what it controls.</dd>
+<dt>Change</dt><dd>Left: connection ("Local"), branch. Right: memory, language-server state, settings. Rename or remove "Local editor" after its function is confirmed.</dd>
+<dt>Benefit</dt><dd>No repeated words in the bar.</dd></dl></div>
+
+<!-- ---------------- GIT ---------------- -->
+<div class="screen"><h3>Source Control</h3><span class="files">git-changes.jpg · git-diff.jpg · git-history.jpg · git-commit-details.jpg · git-worktrees.jpg · menu-git-branch.jpg · menu-git-stash.jpg · menu-git-sync.jpg · menu-git-worktree.jpg</span></div>
+
+<div class="f"><header><b>G1</b><span class="where">git-changes.jpg · section picker "Changes | Worktree s | History" (y 155)</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>"Worktrees" breaks into "Worktree / s" (and "Worktre / es" in <code>git-worktrees.jpg</code>). The panel is about 290 pt wide.</dd>
+<dt>Change</dt><dd>Minimum panel width 300 pt, default 340 pt. The picker uses <code>lineLimit(1)</code> and fixed segment widths; below 320 pt it shows icons with tooltips. Order: Changes (with count), History, Worktrees.</dd>
+<dt>Benefit</dt><dd>No broken words. Tradeoff: the editor loses 50 pt when the panel is open.</dd></dl></div>
+
+<div class="f"><header><b>G2</b><span class="where">git-changes.jpg · file rows</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Each row has two lines: the name and then the same name as its path ("Checklist.md / Checklist.md"). The status letter (A, M) is 9 pt and coloured only.</dd>
+<dt>Change</dt><dd>One 24 pt line: checkbox, file icon, name, folder path in <code>textSecondary</code> only when not at the root, and a status letter in a 16 pt rounded square with tooltip ("Added", "Modified"). Shape plus letter plus colour.</dd>
+<dt>Benefit</dt><dd>Twice the rows in the same height; state is not colour-only.</dd></dl></div>
+
+<div class="f"><header><b>G3</b><span class="where">git-changes.jpg · Files sidebar "U" vs Git panel "A" for Checklist.md</span><span class="tag seen">Seen</span><span class="tag test">Needs test</span></header><dl>
+<dt>Problem</dt><dd>The same file shows two different status letters in two places.</dd>
+<dt>Change</dt><dd>Use one status vocabulary in both. If the file is untracked, show "U" (untracked) in both; if it is staged as added, show "A" in both.</dd>
+<dt>Benefit</dt><dd>Trust in the status display.</dd></dl></div>
+
+<div class="f"><header><b>G4</b><span class="where">git-changes.jpg · branch header "main ···", gold sync icon, chevron at far right, "No upstream"</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Three controls with unclear roles. The gold sync icon looks like a warning or a running task. The far-right chevron has no label.</dd>
+<dt>Change</dt><dd>One branch pull-down "⑂ main ⌄" (Switch To ▸, Create Branch…, Merge into Current ▸, Rename…, Delete…). One neutral sync button that shows "↑0 ↓0" when there is an upstream; with no remote it shows "No remote" in <code>textSecondary</code> and its menu offers "Add Remote…".</dd>
+<dt>Benefit</dt><dd>Branch and sync are two clear objects.</dd></dl></div>
+
+<div class="f"><header><b>G5</b><span class="where">git-changes.jpg · "2 changed files" row with stash, list and folder icons (folder icon gold-filled)</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>A gold-filled icon marks a view preference as if it were important.</dd>
+<dt>Change</dt><dd>One "View as" pull-down (List, Tree) in neutral style; "Stash Changes…" as a neutral icon with tooltip and in the panel overflow menu.</dd>
+<dt>Benefit</dt><dd>Gold budget kept.</dd></dl></div>
+
+<div class="f"><header><b>G6</b><span class="where">git-changes.jpg · stash row "Canvas notes" + "Stash Actions ⌄"</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>The name wraps to two lines because a gold text button "Stash Actions" takes half the row. Under the name, the metadata shows as broken glyph fragments.</dd>
+<dt>Change</dt><dd>One line: archive glyph, name, relative date ("2 h ago"). "···" menu on hover, same items in the context menu. Fix the metadata text.</dd>
+<dt>Benefit</dt><dd>Readable row; the menu is still one click.</dd></dl></div>
+
+<div class="f"><header><b>G7</b><span class="where">git-changes.jpg · commit composer</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Good structure. The sparkle (generate) icon is far from the field it fills. "all 2 changed files" reads as a fragment.</dd>
+<dt>Change</dt><dd>Put the generate button inside the message field at its trailing edge, tooltip "Draft Message with AI (⌥⌘G)". Caption: "Commits 2 files". <kbd>⌘Return</kbd> commits. Commit is the one gold button in the panel.</dd>
+<dt>Benefit</dt><dd>Cause and effect sit together. AI stays explicit (no automatic draft).</dd></dl></div>
+
+<div class="f"><header><b>G8</b><span class="where">git-diff.jpg · diff header and hunk header</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>"Diff • Demo.swift" appears in the tab and again in the header. The hunk header starts with "···", which looks like a menu; the catalog says it is decorative. "Stage Hunk" is gold.</dd>
+<dt>Change</dt><dd>Header: path breadcrumb, "Working Tree ↔ HEAD", "+1 −1". Replace "···" with a real "Show More Context" button or remove it. "Stage Hunk": small neutral bordered button; "Discard Hunk…" in the hunk context menu <span class="tag new">New</span>.</dd>
+<dt>Benefit</dt><dd>No false affordance.</dd></dl></div>
+
+<div class="f"><header><b>G9</b><span class="where">git-diff.jpg · dashed gold line above the "Diff • Demo.swift" tab</span><span class="tag seen">Seen</span><span class="tag test">Needs test</span></header><dl>
+<dt>Problem</dt><dd>A dashed gold line marks the tab. Its meaning is not shown. It may mark a preview tab.</dd>
+<dt>Change</dt><dd>If it marks a preview tab, use an italic title (Xcode and VS Code convention) and no colour.</dd>
+<dt>Benefit</dt><dd>A known convention; gold kept for meaning.</dd></dl></div>
+
+<div class="f"><header><b>G10</b><span class="where">git-history.jpg · commit row</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>The title is cut to "Add demo wor…" because the time "2 min, 26 sec" takes two lines. The ref shows as ASCII "HEAD -> main".</dd>
+<dt>Change</dt><dd>Line 1: title (full width). Line 2: <span class="mono">8be02b5</span> · author · "2 min ago". Refs as neutral capsules "HEAD" "main" after the title. Relative time without seconds after the first minute.</dd>
+<dt>Benefit</dt><dd>The message, which is the most important text, is readable.</dd></dl></div>
+
+<div class="f"><header><b>G11</b><span class="where">git-commit-details.jpg · details block at the panel bottom</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Details appear about 450 pt below the selected row. The full hash wraps with an inserted dash ("…fd3f–fc02…"), which can cause a wrong copy.</dd>
+<dt>Change</dt><dd>Open commit details in the editor area, with message, author, date, hash with a Copy button, and the file list. Break hashes without a hyphen glyph.</dd>
+<dt>Benefit</dt><dd>Space for the detail; correct hash.</dd></dl></div>
+
+<div class="f"><header><b>G12</b><span class="where">git-worktrees.jpg · "WORKTREES (1)" and row</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>All-caps header here; title case in "Changes (2)" and "Stashes (1)". The name is cut ("rafu-sc…") while "main worktree" wraps to two lines.</dd>
+<dt>Change</dt><dd>Title case "Worktrees". Row: name (full, one line) and path; "Main" as a capsule; branch in <code>textSecondary</code>.</dd>
+<dt>Benefit</dt><dd>One header style; full names.</dd></dl></div>
+
+<div class="f"><header><b>G13</b><span class="where">menu-git-branch.jpg · branch menu</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Two items (Merge into Current, Create Branch…). No "Switch To". This menu has icons; the Canvas menus have none.</dd>
+<dt>Change</dt><dd>Items as in G4. Rule for all action menus: SF Symbol on every item, or on none; use them on every action menu (macOS 26 style), not on list menus such as the tab list.</dd>
+<dt>Benefit</dt><dd>Menus look like one family.</dd></dl></div>
+
+<div class="f"><header><b>G14</b><span class="where">menu-git-stash.jpg</span><span class="tag seen">Seen</span></header><dl>
+<dt>Problem</dt><dd>None. Good pattern: Apply, Pop…, separator, Drop… with a trash glyph.</dd>
+<dt>Change</dt><dd>Keep. Use this pattern for all destructive items.</dd>
+<dt>Benefit</dt><dd>—</dd></dl></div>
+
+<div class="f"><header><b>G15</b><span class="where">menu-git-sync.jpg · Fetch All, Pull ▸, Push</span><span class="tag seen">Seen</span><span class="tag test">Needs test</span></header><dl>
+<dt>Problem</dt><dd>The fixture has no remote, but the three items look enabled.</dd>
+<dt>Change</dt><dd>Disable them when no remote exists; tooltip "This repository has no remote." Add "Add Remote…".</dd>
+<dt>Benefit</dt><dd>No action that can only fail.</dd></dl></div>
+
+<div class="f"><header><b>G16</b><span class="where">menu-git-worktree.jpg</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>The menu covers the row it acts on. The selected row ring is system blue.</dd>
+<dt>Change</dt><dd>Open the menu below the "···" button. Theme ring. Add "Reveal in Finder" and "Open in Terminal".</dd>
+<dt>Benefit</dt><dd>Context stays visible.</dd></dl></div>
+
+<!-- ---------------- TERMINALS ---------------- -->
+<div class="screen"><h3>Terminals</h3><span class="files">terminal-manager.jpg · terminal-editor.jpg · menu-terminal-group.jpg · menu-terminal-pane.jpg</span></div>
+
+<div class="f"><header><b>T1</b><span class="where">terminal-manager.jpg · "Agents (checking…)" grid</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Seven bordered tiles take 230 pt above the list. Names are cut: "Claude…", "OpenCo…", "Gemini…", "Cursor…". Each tile has its own spinner. The Gemini tile has no icon, only a dot.</dd>
+<dt>Change</dt><dd>One row: "Start Agent ⌄" pull-down. Menu items: icon, full name, state ("Ready", "Not signed in"). One line under it while it checks: "Checking 7 agents…". Fix the missing icon.</dd>
+<dt>Benefit</dt><dd>230 pt returned to the terminal list; full names.</dd></dl></div>
+
+<div class="f"><header><b>T2</b><span class="where">terminal-manager.jpg · group rows</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Five rows named "Terminal", each "Parked · 1 panes · 0 live". The user cannot tell them apart. "Parked" is internal. "1 panes" is wrong grammar.</dd>
+<dt>Change</dt><dd>Automatic names from the folder and command ("zsh — fixtures", "claude — api"). State words: "Running", "Not running". "1 pane". Session colour as a 6 pt dot with the name.</dd>
+<dt>Benefit</dt><dd>Rows become distinguishable.</dd></dl></div>
+
+<div class="f"><header><b>T3</b><span class="where">terminal-manager.jpg · header "Terminals 6", "+", chevron, close</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>The chevron next to "+" chooses a shell but looks like "collapse".</dd>
+<dt>Change</dt><dd>One split pull-down: "+" starts the default shell; its arrow lists shells.</dd>
+<dt>Benefit</dt><dd>Standard split-button meaning.</dd></dl></div>
+
+<div class="f"><header><b>T4</b><span class="where">terminal-editor.jpg · stopped pane</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Good header icons. The empty state has no button; the play icon is 900 pt away at the top right.</dd>
+<dt>Change</dt><dd>Add "Start Shell" (primary) under "Terminal Pane Stopped". Keep the header icons.</dd>
+<dt>Benefit</dt><dd>The next step is where the eye is.</dd></dl></div>
+
+<div class="f"><header><b>T5</b><span class="where">terminal-editor.jpg · "Canvas Terminal" tab cut by the new-tab button; dashed blue line under the tab bar</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>The tab's close button is clipped. A dashed blue line runs across the tab bar.</dd>
+<dt>Change</dt><dd>Tabs scroll under a fade; trailing controls never overlap tabs. Theme focus ring on the tab bar.</dd>
+<dt>Benefit</dt><dd>No clipped control.</dd></dl></div>
+
+<div class="f"><header><b>T6</b><span class="where">terminal-editor.jpg · Saved Terminal Groups "Open  Delete"</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>"Open" and "Delete" are two gold text links of equal weight, 8 pt apart.</dd>
+<dt>Change</dt><dd>Double-click opens. "···" menu: Open, Rename…, separator, Delete….</dd>
+<dt>Benefit</dt><dd>Destructive action separated.</dd></dl></div>
+
+<div class="f"><header><b>T7</b><span class="where">menu-terminal-group.jpg</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>"Rename" and "Save" open further steps but have no ellipsis. "Start All Restartable Panes" is long.</dd>
+<dt>Change</dt><dd>"Rename…", "Save Layout…", "Start All Panes" (tooltip explains "restartable").</dd>
+<dt>Benefit</dt><dd>Mac ellipsis convention.</dd></dl></div>
+
+<div class="f"><header><b>T8</b><span class="where">menu-terminal-pane.jpg · pane row "Shell · Stopped · ."</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>A trailing dot with no text after it. The Color submenu has no swatches.</dd>
+<dt>Change</dt><dd>Remove empty separators. Show colour swatches in the submenu.</dd>
+<dt>Benefit</dt><dd>Small polish.</dd></dl></div>
+
+<!-- ---------------- ENSEMBLE ---------------- -->
+<div class="screen"><h3>Ensemble</h3><span class="files">ensemble-runs.jpg · ensemble-new.jpg · ensemble-new-run.jpg · ensemble-workflows.jpg · ensemble-activity.jpg · ensemble-graph.jpg · menu-ensemble-workflow.jpg</span></div>
+
+<div class="f"><header><b>N1</b><span class="where">ensemble-runs.jpg · panel header and picker</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Header icons: graph, a flower-like glyph, "+", close. Two glyphs are not familiar. Picker shows "Workflo / ws". The empty state uses the only filled gold button, "New Run…" — this is correct.</dd>
+<dt>Change</dt><dd>"+" pull-down: New Run…, New Ensemble…, New Workflow from Template…. Graph button with tooltip "Show Ensemble Graph". Picker without wraps (G1 rule).</dd>
+<dt>Benefit</dt><dd>One creation entry point.</dd></dl></div>
+
+<div class="f"><header><b>N2</b><span class="where">ensemble-new.jpg · New Ensemble form</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Three columns at once: goal editor, coordinator column and the Ensemble panel with its own empty state. Headers are all caps; "ALLOWED CLIS" loses the lowercase "s". Each CLI is a 75 pt card; seven cards push Budget below the fold.</dd>
+<dt>Change</dt><dd>Collapse the utility panel while a full-tab form is open, or show Runs there. Title-case headers ("Lead Coordinator", "Budget", "Allowed CLIs"). Coordinator as 32 pt radio rows; the model popup appears only on the chosen row. Budget as form rows with right-aligned steppers. Sticky footer with Close and Start Coordinator.</dd>
+<dt>Benefit</dt><dd>The whole form fits in one view at 1297 px height.</dd></dl></div>
+
+<div class="f"><header><b>N3</b><span class="where">ensemble-new-run.jpg · form card</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>The form sits on a neutral grey card that is not an Indigo token. "Agent file" has a left label; "Model override" has a label above. "Task prompt" has no visible field edge. "Base reference HEAD" looks like static text.</dd>
+<dt>Change</dt><dd>Grouped form on theme surfaces. One label column. Bordered prompt editor with placeholder. Base reference as a combo box (branches, tags, HEAD).</dd>
+<dt>Benefit</dt><dd>On-theme, scannable, honest controls.</dd></dl></div>
+
+<div class="f"><header><b>N4</b><span class="where">ensemble-workflows.jpg, menu-ensemble-workflow.jpg · clipped panel</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>The panel content is cut on the left: "itory", "eview…", "Workflow Actio". The header has a wide gold text button "New from Template ⌄". The row has an "Open" button and the menu also has "Open". The cause of the clip is not visible <span class="tag test">Needs test</span>.</dd>
+<dt>Change</dt><dd>Move "New from Template" into the "+" menu. Workflow row: name and path, double-click opens, "···" menu (Open, Duplicate, Reveal in Finder). Test the panel at its minimum width.</dd>
+<dt>Benefit</dt><dd>The panel fits; one Open.</dd></dl></div>
+
+<div class="f"><header><b>N5</b><span class="where">ensemble-graph.jpg + ensemble-activity.jpg · two empty states</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>The graph tab and the Activity panel show two empty states side by side. "Bounded Ensemble lifecycle events" is engineering wording.</dd>
+<dt>Change</dt><dd>When the graph tab is open, the panel shows Runs with "New Run…". Copy: "Run events appear here while this workspace is open."</dd>
+<dt>Benefit</dt><dd>One message, one action.</dd></dl></div>
+
+<div class="f"><header><b>N6</b><span class="where">ensemble-activity.jpg · front-matter card "Review Only 2 FIELDS"</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>The card says "2 FIELDS" and shows one row (the name is the title). All caps.</dd>
+<dt>Change</dt><dd>"2 fields" in <code>textSecondary</code>, or no count.</dd>
+<dt>Benefit</dt><dd>Accurate, quieter.</dd></dl></div>
+
+<!-- ---------------- SETTINGS ---------------- -->
+<div class="screen"><h3>Settings</h3><span class="files">settings-general.jpg · settings-appearance.jpg · settings-ai.jpg · settings-language-servers.jpg · settings-usage.jpg · settings-agents.jpg · settings-ensemble.jpg</span></div>
+
+<div class="f"><header><b>S1</b><span class="where">settings-general.jpg · Settings as an editor tab</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Settings opens as a tab with its own sidebar. With Files and Source Control open there are three sidebars. Mac users expect <kbd>⌘,</kbd> to open a separate Settings window. <code>RafuApp.swift</code> already declares a <code>Settings</code> scene, used as a fallback <span class="tag code">Code</span>.</dd>
+<dt>Change</dt><dd>Always open the <code>Settings</code> scene: 680 pt wide window, toolbar-style pane icons (General, Appearance, AI, Language Servers, Usage, Agents, Ensemble), grouped forms. Remove the Settings tab.</dd>
+<dt>Benefit</dt><dd>Native, and the workspace stays a workspace. Tradeoff: Settings no longer sits beside code; a separate window is the standard answer to that.</dd></dl></div>
+
+<div class="f"><header><b>S2</b><span class="where">settings-general.jpg · "Terminal attention: Both" popup (x 750–1565)</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>The popup is about 810 pt wide for the word "Both". "Version 0.1.0-dev" has no value column.</dd>
+<dt>Change</dt><dd><code>Form</code> with <code>.formStyle(.grouped)</code> and <code>LabeledContent</code>. Popups at content width (minimum 140 pt), trailing-aligned.</dd>
+<dt>Benefit</dt><dd>Standard macOS settings look.</dd></dl></div>
+
+<div class="f"><header><b>S3</b><span class="where">settings-appearance.jpg · theme cards and four icon buttons</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>"Active theme: System" and no card shows a selected state. Four icon-only buttons (copy, import, reload, folder) need the sentence below to explain them.</dd>
+<dt>Change</dt><dd>Two pickers: "Light appearance: Khadi" and "Dark appearance: Indigo" <span class="tag new">New</span>, plus "Follow System". Cards act as radio buttons with a gold ring and check mark. Labelled buttons: "Duplicate…", "Import…", "Reload Themes", "Show Theme Folder".</dd>
+<dt>Benefit</dt><dd>The choice is visible on the card. Rarely used commands get words. Note: "Notion" and "GitHub" theme names use third-party brands <span class="tag test">Needs test</span> (legal check).</dd></dl></div>
+
+<div class="f"><header><b>S4</b><span class="where">settings-ai.jpg · provider row and form</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>A wide "+ ⌄" pull-down next to the provider popup reads as an empty popup. Labels are left-aligned beside full-width fields.</dd>
+<dt>Change</dt><dd>Provider list (table) with "+" and "−" buttons under it (macOS list-edit convention); detail form at the right with right-aligned labels. "Save" is the default button only when the form changed. "Test Connection" stays secondary.</dd>
+<dt>Benefit</dt><dd>Clear add/remove model.</dd></dl></div>
+
+<div class="f"><header><b>S5</b><span class="where">settings-language-servers.jpg</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Each server uses four text lines. "Refresh" is bold text and reads as a header. "Packs" repeats as its own disclosure. The Custom Servers card is narrower than the others. Workspace Trust is cut at the bottom.</dd>
+<dt>Change</dt><dd>Table: Server, Languages, Status, Size, Action. Refresh as an icon button with tooltip. Equal section widths.</dd>
+<dt>Benefit</dt><dd>One screen shows all servers.</dd></dl></div>
+
+<div class="f"><header><b>S6</b><span class="where">settings-usage.jpg · notch order and providers</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Ten small up/down chevrons for ordering. Two to three lines of privacy text per provider make a long page.</dd>
+<dt>Change</dt><dd>Drag-to-reorder list with grab handles; Move Up/Down in the context menu and as VoiceOver actions. Provider rows: toggle, name, status capsule, Connect/Disconnect. The privacy text stays visible before the first Connect, so consent is informed, then moves behind a "What Rafu reads" disclosure.</dd>
+<dt>Benefit</dt><dd>Shorter page; consent text still shown at the decision.</dd></dl></div>
+
+<div class="f"><header><b>S7</b><span class="where">settings-agents.jpg</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Seven blocks of five lines. "Default model" popups have two widths (with and without "Refresh models"), so the right edge is jagged. "Custom model identifier" + "Use" repeats seven times. Full home-folder paths are shown.</dd>
+<dt>Change</dt><dd>Agents table: toggle, icon, name, version, sign-in state, default model. Select a row to show a detail area. Default model is one combo box (list plus free text), which removes "Use". Refresh is an icon inside the row. Paths shown as "~/.local/bin/claude" with Reveal in Finder.</dd>
+<dt>Benefit</dt><dd>One screen instead of three; aligned edges.</dd></dl></div>
+
+<div class="f"><header><b>S8</b><span class="where">settings-ensemble.jpg · "Verb version Skill 2 • Rafu 2"</span><span class="tag seen">Seen</span><span class="tag ref">Refine</span></header><dl>
+<dt>Problem</dt><dd>Internal term "Verb version".</dd>
+<dt>Change</dt><dd>"Skill version 2 · needs Rafu 2 or later".</dd>
+<dt>Benefit</dt><dd>Plain words.</dd></dl></div>
+
+<!-- ============================================================ 05 -->
+<h2 id="labels"><span class="num">05</span>Labels, buttons, icons and action placement</h2>
+<h3>Placement rules</h3>
+<div class="scroll mid"><table>
+<tr><th>Presentation</th><th>Use it when</th><th>Examples</th></tr>
+<tr><td><b>Text button</b></td><td>The action is the main next step in a view, commits or sends something, or has no familiar symbol.</td><td>Commit, Start Shell, Open Finder, Run, Start Coordinator, Stage All, Test Connection, Install…</td></tr>
+<tr><td><b>Icon button</b> (tooltip + accessibility label required)</td><td>A familiar symbol exists and the action repeats often.</td><td>+, refresh, close, sidebar, zoom −/+, play, rename (pencil), filter, graph</td></tr>
+<tr><td><b>Segmented control</b></td><td>The user picks one mode of the same view.</td><td>Board/List, Source/Preview/Split, Changes/History/Worktrees</td></tr>
+<tr><td><b>Pull-down menu</b></td><td>Several related actions share one entry point.</td><td>+ (Add to Canvas), branch, sync, Start Agent, Arrange</td></tr>
+<tr><td><b>Contextual</b> (hover, selection, focus — always also in a menu)</td><td>The action applies to one object and is not needed at rest.</td><td>Card actions, ports, row "···", Stage Hunk on hover</td></tr>
+<tr><td><b>Menu bar only</b> (+ shortcut + palette)</td><td>Rare, global or expert actions.</td><td>Align, Distribute, Show Links, Zoom to Selection, Duplicate Canvas</td></tr>
+</table></div>
+
+<h3>Before and after</h3>
+<div class="scroll wide"><table>
+<tr><th>Screen</th><th>Now (seen)</th><th>Proposed</th><th>Form</th><th>Keyboard</th></tr>
+<tr><td>Canvas bar</td><td>"Canvas UI Check" title row</td><td>"Canvas UI Check ⌄" name pull-down</td><td>Pull-down</td><td>—</td></tr>
+<tr><td>Canvas bar</td><td>"+ Add Card ⌄"</td><td>"+" (tooltip "Add to Canvas")</td><td>Icon pull-down</td><td>board: N note, T terminal, F file</td></tr>
+<tr><td>Canvas bar</td><td>"Arrange"</td><td><code>rectangle.3.group</code> Arrange menu (Tidy Up, Align ▸, Distribute ▸)</td><td>Icon pull-down</td><td>— (<kbd>⌥⌘T</kbd> is Hide Toolbar)</td></tr>
+<tr><td>Canvas bar</td><td>"Connect…" (disabled)</td><td>Removed. Ports, card menu "Connect To ▸"</td><td>Contextual</td><td><kbd>⌥⌘L</kbd> with 2 cards selected</td></tr>
+<tr><td>Canvas bar</td><td>"Focus" (disabled)</td><td>Removed. Header "Zoom to Card" icon</td><td>Contextual</td><td><kbd>⌥Return</kbd></td></tr>
+<tr><td>Canvas bar</td><td>"List" / "Board"</td><td>Board | List icons</td><td>Segmented</td><td><kbd>⌃⌘1</kbd> / <kbd>⌃⌘2</kbd></td></tr>
+<tr><td>Canvas bar</td><td>ellipsis-circle + chevron</td><td><code>ellipsis.circle</code></td><td>Icon pull-down</td><td>—</td></tr>
+<tr><td>Zoom</td><td>"−" "100%" "+" "1:1" "Fit All"</td><td>"−" "100% ⌄" "+"</td><td>Capsule, % opens menu</td><td><kbd>⌘−</kbd> <kbd>⌘=</kbd> <kbd>⌘0</kbd> <kbd>⌘9</kbd> <kbd>⌥⌘9</kbd></td></tr>
+<tr><td>Card header</td><td>gold "·~"</td><td>neutral <code>ellipsis</code></td><td>Contextual</td><td>Right-click; VoiceOver <kbd>VO-⇧-M</kbd></td></tr>
+<tr><td>Card footer</td><td>"Note", "Native App", "File" type words</td><td>Removed (header glyph + accessibility label)</td><td>—</td><td>—</td></tr>
+<tr><td>Card footer</td><td>"Focus" ×4</td><td>Header icon on hover</td><td>Contextual</td><td><kbd>⌥Return</kbd></td></tr>
+<tr><td>File card</td><td>"Open File" text</td><td><code>arrow.up.forward.square</code> "Open in Editor"</td><td>Header icon</td><td><kbd>⌘O</kbd> on selected card</td></tr>
+<tr><td>Terminal card</td><td>"Stopped" + small "Start"</td><td>Header "Not running"; body "Start Shell" button</td><td>Text (primary)</td><td><kbd>Return</kbd> on selected card</td></tr>
+<tr><td>App card</td><td>"Open App", "Choose Window…" + sentence</td><td>"Open Finder" (primary), "Show Window Preview…"; header "Preview" badge</td><td>Text</td><td><kbd>⌘O</kbd></td></tr>
+<tr><td>Card edge</td><td>chain circle, right edge only</td><td>4 ports on hover</td><td>Contextual</td><td>Connect sheet <kbd>⌥⌘L</kbd></td></tr>
+<tr><td>Board</td><td>Permanent hint sentence</td><td>Empty-board tip + Help ▸ Canvas Shortcuts</td><td>—</td><td>—</td></tr>
+<tr><td>Canvas list</td><td>"Select", "Remove…" per row</td><td>Row selection; context menu</td><td>Table</td><td><kbd>⌫</kbd> Remove…, <kbd>Return</kbd> Show on Board</td></tr>
+<tr><td>Saved Canvases</td><td>Trash button per row; Cancel</td><td>Search, "Open" default, "−" under list</td><td>Sheet</td><td><kbd>Return</kbd> Open, <kbd>esc</kbd> Cancel</td></tr>
+<tr><td>Find bar</td><td>wide field, toggles far right</td><td>compact group next to field; "Done"</td><td>Icons + text</td><td><kbd>⌘F</kbd>, <kbd>⌘G</kbd>, <kbd>⇧⌘G</kbd>, <kbd>⌥⌘F</kbd></td></tr>
+<tr><td>Search panel</td><td>"Ca se", "Who le Wor d", "Reg ex"</td><td>Aa, ab, .* toggles</td><td>Icon toggles</td><td>none by default (<kbd>⌥⌘C</kbd> is Copy Style in text views)</td></tr>
+<tr><td>Markdown</td><td>pencil, eye, split icons</td><td>Source | Preview | Split</td><td>Segmented</td><td><kbd>⇧⌘V</kbd> toggles preview (verify)</td></tr>
+<tr><td>Git header</td><td>"main ···", gold sync, chevron</td><td>"⑂ main ⌄" + neutral "↑0 ↓0"</td><td>Pull-downs</td><td>Switch Branch <kbd>⌥⌘B</kbd></td></tr>
+<tr><td>Git list</td><td>stash / list / gold folder icons</td><td>"View as ⌄", stash icon</td><td>Icons</td><td>—</td></tr>
+<tr><td>Stash row</td><td>gold "Stash Actions ⌄"</td><td>"···" on hover</td><td>Contextual</td><td>—</td></tr>
+<tr><td>Commit</td><td>sparkle icon in header</td><td>sparkle inside message field</td><td>Icon</td><td><kbd>⌥⌘G</kbd> draft, <kbd>⌘Return</kbd> commit</td></tr>
+<tr><td>Diff</td><td>gold "⊕ Stage Hunk"</td><td>neutral "Stage Hunk" on hunk hover + always on keyboard focus</td><td>Small text button</td><td>— (<kbd>⌥⌘S</kbd> is often Save All)</td></tr>
+<tr><td>Terminals header</td><td>"+" and chevron</td><td>split "+ ⌄"</td><td>Split pull-down</td><td><kbd>⌃⇧`</kbd> (proposal)</td></tr>
+<tr><td>Agents</td><td>7 tiles with spinners</td><td>"Start Agent ⌄"</td><td>Pull-down</td><td>—</td></tr>
+<tr><td>Saved groups</td><td>gold "Open" "Delete"</td><td>double-click; "···" menu</td><td>Contextual</td><td>—</td></tr>
+<tr><td>Ensemble header</td><td>graph, flower glyph, "+", close; "New from Template ⌄"</td><td>graph, "+ ⌄" (New Run…, New Ensemble…, New Workflow…), close</td><td>Icons</td><td>New Run <kbd>⌥⌘R</kbd> (proposal)</td></tr>
+<tr><td>Workflow row</td><td>"Open" button + "··· Workflow Actions"</td><td>double-click; "···"</td><td>Contextual</td><td>—</td></tr>
+<tr><td>Appearance</td><td>4 unlabeled icon buttons</td><td>Duplicate…, Import…, Reload Themes, Show Theme Folder</td><td>Text buttons</td><td>—</td></tr>
+<tr><td>Language servers</td><td>bold text "Refresh"</td><td>refresh icon button</td><td>Icon</td><td>—</td></tr>
+<tr><td>Usage</td><td>10 ^/v buttons</td><td>drag handles</td><td>Direct + menu</td><td>VoiceOver actions</td></tr>
+<tr><td>Agents settings</td><td>"Custom model identifier" + "Use" ×7</td><td>one combo box per agent</td><td>Combo box</td><td>—</td></tr>
+</table></div>
+<p style="font-size:13px;color:var(--fg2)">Shortcuts marked "proposal" or "verify" need a conflict check against the current menu map and common CLI keys before adoption.</p>
+
+<!-- ============================================================ 06 -->
+<h2 id="specs"><span class="num">06</span>Design specifications</h2>
+
+<h3>Typography</h3>
+<div class="scroll wide"><table>
+<tr><th>Role</th><th>Face</th><th>Size / line</th><th>Weight</th><th>Tracking</th><th>Use</th></tr>
+<tr><td>Window and sheet title</td><td>SF Pro</td><td>15 / 20</td><td>Semibold</td><td>−0.1</td><td>Sheet titles, settings pane titles</td></tr>
+<tr><td>Section header</td><td>SF Pro</td><td>13 / 18</td><td>Semibold</td><td>0</td><td>"Changes", "Worktrees", "Lead Coordinator" (title case, never caps)</td></tr>
+<tr><td>Body / control</td><td>SF Pro</td><td>13 / 18</td><td>Regular</td><td>0</td><td>Rows, buttons, menus, form labels</td></tr>
+<tr><td>Secondary</td><td>SF Pro</td><td>12 / 16</td><td>Regular</td><td>0</td><td>Paths, metadata, captions (<code>textSecondary</code>)</td></tr>
+<tr><td>Small caption</td><td>SF Pro</td><td>11 / 14</td><td>Medium</td><td>+0.1</td><td>Badges, capsules, edge labels. Never below 11 pt.</td></tr>
+<tr><td>Card title</td><td>SF Pro</td><td>13 / 16</td><td>Semibold</td><td>0</td><td>Canvas node headers (constant screen size, see 07)</td></tr>
+<tr><td>Code and data</td><td>SF Mono (theme editor font)</td><td>13 / 19.5 editor; 12 / 16 in panels</td><td>Regular</td><td>0</td><td>Code, paths in tables, hashes, counts, line:col (tabular figures)</td></tr>
+<tr><td>Note and Markdown prose</td><td>New York (theme <code>markdownPreview.prose</code>)</td><td>15 / 24 preview; 14 / 21 in notes</td><td>Regular</td><td>0</td><td>Markdown preview, Read-mode notes</td></tr>
+<tr><td>Note heading 1 / 2 / 3</td><td>New York / New York / SF Pro</td><td>20/26 · 17/22 · 14/19</td><td>Semibold</td><td>−0.2 / −0.1 / 0</td><td>Notes</td></tr>
+</table></div>
+<p>Rules: all type uses Dynamic Type-like scaling from the theme <code>ui.size</code> (13 pt base). Use <code>.monospacedDigit()</code> for counts and timers. Two weights in one view at most (Regular, Semibold).</p>
+
+<h3>Spacing and sizes</h3>
+<div class="cols">
+<div class="scroll"><table>
+<tr><th>Token</th><th>Value</th><th>Use</th></tr>
+<tr><td class="k">space1</td><td>4 pt</td><td>icon-to-label, chip padding</td></tr>
+<tr><td class="k">space2</td><td>8 pt</td><td>control gaps, row padding</td></tr>
+<tr><td class="k">space3</td><td>12 pt</td><td>panel inset, card header padding</td></tr>
+<tr><td class="k">space4</td><td>16 pt</td><td>section gap, node gap (snap)</td></tr>
+<tr><td class="k">space6</td><td>24 pt</td><td>settings group gap</td></tr>
+<tr><td class="k">space8</td><td>32 pt</td><td>empty-state block spacing</td></tr>
+</table></div>
+<div class="scroll"><table>
+<tr><th>Element</th><th>Size</th></tr>
+<tr><td>Tab bar</td><td>30 pt (now 28)</td></tr>
+<tr><td>Canvas / panel bar</td><td>36 pt</td></tr>
+<tr><td>Dense list row</td><td>24 pt (one line), 40 pt (two lines)</td></tr>
+<tr><td>Icon button</td><td>24 × 24 pt visual, 28 × 28 pt hit; glyph 13 pt</td></tr>
+<tr><td>Push button</td><td>regular control size (≈22 pt); small (≈19 pt) only in dense rows</td></tr>
+<tr><td>Node header</td><td>32 pt</td></tr>
+<tr><td>Status bar</td><td>24 pt</td></tr>
+<tr><td>Right panel</td><td>min 300, default 340, max 520 pt</td></tr>
+</table></div>
+</div>
+
+<h3>Shape, borders, shadows</h3>
+<div class="scroll wide"><table>
+<tr><th>Object</th><th>Radius</th><th>Border</th><th>Shadow (dark / light)</th></tr>
+<tr><td>Workbench deck</td><td>6 pt</td><td>1 pt <code>borderSubtle</code></td><td>none</td></tr>
+<tr><td>Editor group</td><td>5 pt</td><td>hairline seam</td><td>none</td></tr>
+<tr><td>Canvas node, rest</td><td>8 pt</td><td>1 pt <code>borderSubtle</code></td><td>0 1 2 rgba(0,0,0,.30) + 0 6 18 rgba(0,0,0,.22) / 0 1 2 rgba(43,47,58,.08) + 0 6 18 rgba(43,47,58,.08)</td></tr>
+<tr><td>Canvas node, hover</td><td>8 pt</td><td>1 pt <code>borderStrong</code> at 50%</td><td>same as rest</td></tr>
+<tr><td>Canvas node, selected</td><td>8 pt</td><td>1 pt <code>borderSubtle</code> + 1.5 pt <code>accent</code> ring, 2 pt outside</td><td>rest</td></tr>
+<tr><td>Canvas node, content focus</td><td>8 pt</td><td>1.5 pt <code>accent</code> inner stroke; header fill <code>accentSoft</code> 8%</td><td>rest</td></tr>
+<tr><td>Canvas node, dragged</td><td>8 pt</td><td>as selected</td><td>0 2 4 rgba(0,0,0,.30) + 0 14 32 rgba(0,0,0,.30)</td></tr>
+<tr><td>Popover, menu</td><td>system</td><td>system</td><td>system</td></tr>
+<tr><td>Capsule, chip</td><td>full</td><td>none; fill <code>chipBackground</code></td><td>none</td></tr>
+<tr><td>Field</td><td>5 pt</td><td>1 pt <code>borderSubtle</code>; focus = system ring tinted <code>focusRing</code></td><td>none</td></tr>
+</table></div>
+
+<h3>Focus states</h3>
+<ul>
+<li><b>Controls</b> (buttons, fields, rows): the system keyboard focus ring, tinted by the theme <code>focusRing</code>. Never system blue in a non-blue theme. Appears instantly.</li>
+<li><b>Content containers</b> (editor-hosted terminal, Canvas terminal/note/web node): 1.5 pt gold inner stroke plus a header tint. One container has this state at a time.</li>
+<li><b>Board focus</b>: no ring on the board. Selected nodes show the selection ring. A board-focus hint in the Canvas bar shows "Board" in <code>textSecondary</code> for VoiceOver users and screen readers.</li>
+<li><b>Increase Contrast</b>: borders use <code>borderStrong</code>; focus stroke becomes 2.5 pt; shadows stay.</li>
+<li><b>Reduce Transparency</b>: no change needed (no materials are used).</li>
+</ul>
+
+<h3>Colour roles</h3>
+<div class="scroll mid"><table>
+<tr><th>Meaning</th><th>Token</th><th>Always paired with</th></tr>
+<tr><td>Focus, selection, live link, primary action</td><td><code>accent</code></td><td>ring shape, "Live" word, button shape</td></tr>
+<tr><td>Added / success</td><td><code>success</code> / <code>git.added</code></td><td>"A" letter, "+" glyph, check glyph</td></tr>
+<tr><td>Modified / warning</td><td><code>git.modified</code> / <code>warning</code></td><td>"M" letter, triangle glyph</td></tr>
+<tr><td>Deleted / error / failed link</td><td><code>error</code></td><td>"D" letter, <code>exclamationmark.triangle</code>, "Failed" word</td></tr>
+<tr><td>Hyperlink, info</td><td><code>info</code></td><td>underline on hover, link cursor</td></tr>
+<tr><td>Paused, disconnected, inactive</td><td><code>textSecondary</code> / <code>textMuted</code></td><td>pause or slash glyph, word</td></tr>
+</table></div>
+
+<!-- ============================================================ 07 -->
+<h2 id="canvas"><span class="num">07</span>Canvas interaction specification</h2>
+<p class="lede">One rule organises the Canvas: <b>the header moves the card; the body uses the content.</b> Everything else follows from it. This section says "node" for the model and "card" for the user-visible word.</p>
+
+<h3>7.1 Node anatomy</h3>
+<figure>
+<div class="mock" role="img" aria-label="Diagram of a terminal node with content focus and a Markdown note node in Read mode, with numbered parts.">
+<svg viewBox="0 0 1000 440" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <pattern id="dots" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="0.9" fill="#262E3E"/></pattern>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity=".35"/></filter>
+  </defs>
+  <rect width="1000" height="440" class="app"/>
+  <rect width="1000" height="440" fill="url(#dots)"/>
+  <!-- terminal node -->
+  <g filter="url(#sh)"><rect x="60" y="60" width="470" height="300" rx="8" class="node" stroke="#262E3E"/></g>
+  <rect x="61.5" y="61.5" width="467" height="297" rx="7" fill="none" stroke="#E3A857" stroke-width="1.5"/>
+  <path d="M61.5 92 V68.5 a7 7 0 0 1 7 -7 H521.5 a7 7 0 0 1 7 7 V92 Z" fill="#E3A857" fill-opacity=".08"/>
+  <line x1="61" y1="92" x2="529" y2="92" stroke="#262E3E"/>
+  <text x="76" y="81" class="t2 mono" font-size="11">&gt;_</text>
+  <text x="98" y="81" class="t" font-size="13" font-weight="600">claude — api</text>
+  <circle cx="198" cy="77" r="3.5" fill="#7CC08A"/>
+  <text x="206" y="81" class="t2" font-size="12">Running</text>
+  <rect x="292" y="68" width="148" height="20" rx="10" fill="#1B212D" stroke="#3A455C"/>
+  <text x="366" y="82" class="t" font-size="11" text-anchor="middle">Return to Board  ⌃⇥</text>
+  <text x="458" y="82" class="t2" font-size="13">⤢</text>
+  <text x="480" y="82" class="t2" font-size="13">↗</text>
+  <text x="503" y="82" class="t2" font-size="14">⋯</text>
+  <g class="mono" font-size="12">
+    <text x="78" y="118"><tspan fill="#74BFCB">~/api ❯</tspan><tspan fill="#E7EAF2"> claude</tspan></text>
+    <text x="78" y="138" fill="#9AA3B8">╭ Claude Code · /Users/…/api</text>
+    <text x="78" y="156" fill="#9AA3B8">│ Read src/routes.ts (212 lines)</text>
+    <text x="78" y="174" fill="#7CC08A">│ ✓ 14 tests passed</text>
+    <text x="78" y="192" fill="#D4A24E">│ ! lint: 1 warning in auth.ts</text>
+    <text x="78" y="210" fill="#C3A6F0">│ → message from @tests received</text>
+    <text x="78" y="232" fill="#E7EAF2">&gt; fix the warning, then tell @tests</text>
+  </g>
+  <rect x="331" y="221" width="8" height="15" fill="#E7EAF2"/>
+  <!-- ports -->
+  <circle cx="295" cy="60" r="4" fill="#151A24" stroke="#9AA3B8" stroke-width="1.5"/>
+  <circle cx="60" cy="210" r="4" fill="#151A24" stroke="#9AA3B8" stroke-width="1.5"/>
+  <circle cx="295" cy="360" r="4" fill="#151A24" stroke="#9AA3B8" stroke-width="1.5"/>
+  <circle cx="530" cy="210" r="6.5" fill="#E3A857" stroke="#10141C" stroke-width="2"/>
+  <!-- resize handles -->
+  <g fill="#E7EAF2" stroke="#10141C" stroke-width="1.5">
+    <rect x="525" y="355" width="9" height="9" rx="2"/><rect x="56" y="355" width="9" height="9" rx="2"/>
+  </g>
+  <!-- live link stub -->
+  <path d="M537 210 C 560 210, 575 210, 596 210" stroke="#E3A857" stroke-width="1.5" fill="none"/>
+  <!-- note node -->
+  <g filter="url(#sh)"><rect x="600" y="60" width="340" height="300" rx="8" class="node" stroke="#262E3E"/></g>
+  <line x1="601" y1="92" x2="939" y2="92" stroke="#262E3E"/>
+  <text x="615" y="81" class="t2" font-size="12">≡</text>
+  <text x="633" y="81" class="t" font-size="13" font-weight="600">Release checklist</text>
+  <rect x="842" y="69" width="34" height="18" rx="9" fill="#232B3B"/>
+  <text x="859" y="82" class="t2 mono" font-size="11" text-anchor="middle">3/5</text>
+  <text x="886" y="82" class="t2" font-size="13">✎</text>
+  <text x="910" y="82" class="t2" font-size="14">⋯</text>
+  <text x="616" y="122" class="t serif" font-size="17" font-weight="600">Before merge</text>
+  <g font-size="13">
+    <rect x="617" y="134" width="12" height="12" rx="3" fill="#E3A857"/><path d="M620 140 l2.5 2.5 l4.5 -5" stroke="#201709" stroke-width="1.6" fill="none"/>
+    <text x="637" y="145" class="t2 serif">Run the full test suite</text>
+    <rect x="617" y="156" width="12" height="12" rx="3" fill="#E3A857"/><path d="M620 162 l2.5 2.5 l4.5 -5" stroke="#201709" stroke-width="1.6" fill="none"/>
+    <text x="637" y="167" class="t2 serif">Review <tspan class="mono" font-size="11.5" fill="#E7EAF2">auth.ts</tspan> warning</text>
+    <rect x="617.5" y="178.5" width="11" height="11" rx="3" fill="none" stroke="#67718A"/>
+    <text x="637" y="189" class="t serif">Update the <tspan fill="#82A7F0" text-decoration="underline">migration notes</tspan></text>
+  </g>
+  <rect x="616" y="202" width="2" height="34" fill="#3A455C"/>
+  <text x="626" y="215" class="t2 serif" font-size="13" font-style="italic">Ship only after @tests</text>
+  <text x="626" y="231" class="t2 serif" font-size="13" font-style="italic">reports green.</text>
+  <rect x="616" y="248" width="308" height="62" rx="6" fill="#151A24" stroke="#262E3E"/>
+  <text x="628" y="268" class="mono" font-size="11.5" fill="#9AA3B8">$ swift test --parallel</text>
+  <text x="628" y="286" class="mono" font-size="11.5" fill="#9AA3B8">$ ./script/build_and_run.sh</text>
+  <text x="903" y="266" class="tm" font-size="11">⧉</text>
+  <!-- callouts -->
+  <g class="callout">
+    <g transform="translate(150,40)"><circle r="11"/><text y="4">1</text></g>
+    <g transform="translate(222,40)"><circle r="11"/><text y="4">2</text></g>
+    <g transform="translate(366,40)"><circle r="11"/><text y="4">3</text></g>
+    <g transform="translate(482,40)"><circle r="11"/><text y="4">4</text></g>
+    <g transform="translate(560,190)"><circle r="11"/><text y="4">5</text></g>
+    <g transform="translate(548,385)"><circle r="11"/><text y="4">6</text></g>
+    <g transform="translate(40,300)"><circle r="11"/><text y="4">7</text></g>
+    <g transform="translate(860,40)"><circle r="11"/><text y="4">8</text></g>
+    <g transform="translate(960,150)"><circle r="11"/><text y="4">9</text></g>
+    <g transform="translate(960,280)"><circle r="11"/><text y="4">10</text></g>
+  </g>
+  <text x="60" y="400" class="tm" font-size="12">Terminal node: content focus (keyboard goes to the shell)</text>
+  <text x="600" y="400" class="tm" font-size="12">Note node: Read mode (rendered Markdown)</text>
+</svg></div>
+<figcaption>Proposed node anatomy. Indigo theme values. Not a screenshot.</figcaption>
+</figure>
+<ol class="notes">
+<li><b class="n">1</b><span><b>Header = move handle.</b> 32 pt. Drag anywhere in it to move. Glyph and title in constant screen size.</span></li>
+<li><b class="n">2</b><span><b>State word + shape.</b> "Running", "Not running", "Exited (1)". The dot is secondary.</span></li>
+<li><b class="n">3</b><span><b>Content-focus control.</b> Appears only while the body has keyboard focus. Click it, press <kbd>⌃⇥</kbd>, or click the board to return.</span></li>
+<li><b class="n">4</b><span><b>Hover actions.</b> Zoom to Card, primary action (Open in Editor / Open App), "⋯" menu. Hidden at rest, visible on hover, selection and keyboard focus.</span></li>
+<li><b class="n">5</b><span><b>Port under the pointer.</b> 8 pt → 12 pt, gold. Drag to connect. The gold line is a live message link.</span></li>
+<li><b class="n">6</b><span><b>Resize.</b> 8 pt hit zones on all edges; corner handles show on selection.</span></li>
+<li><b class="n">7</b><span><b>Content focus ring.</b> 1.5 pt gold inner stroke and an 8% gold header tint. One node at a time.</span></li>
+<li><b class="n">8</b><span><b>Note progress.</b> Task count "3/5" stays readable when zoomed out.</span></li>
+<li><b class="n">9</b><span><b>Tasks toggle in Read mode.</b> The click edits the Markdown source and is undoable.</span></li>
+<li><b class="n">10</b><span><b>Code block.</b> SF Mono on the deck colour, copy button on hover, horizontal scroll inside.</span></li>
+</ol>
+
+<h3>7.2 Input map</h3>
+<div class="scroll wide"><table>
+<tr><th>Input</th><th>Where</th><th>Result</th><th>Notes</th></tr>
+<tr><td>Drag</td><td>Board background</td><td>Pan</td><td>Cursor: open hand → closed hand.</td></tr>
+<tr><td>Two-finger scroll</td><td>Anywhere on board, not over scrollable content</td><td>Pan with native momentum</td><td>Over a focused terminal or note, scroll goes to the content.</td></tr>
+<tr><td>Hold <kbd>Space</kbd> + drag</td><td>Anywhere, board focus</td><td>Pan, also over cards</td><td><span class="tag new">New</span> Ignored while content has focus (Space types).</td></tr>
+<tr><td>Pinch / <kbd>⌘</kbd>+scroll</td><td>Board</td><td>Zoom around the pointer, 10%–400%</td><td>Soft detent at 100% (haptic, section 08).</td></tr>
+<tr><td><kbd>⇧</kbd>-drag</td><td>Background</td><td>Marquee selection</td><td>Existing. Marquee: 1 pt gold border, 8% gold fill. Nodes inside get the selection ring live.</td></tr>
+<tr><td>Click</td><td>Background</td><td>Deselect all; board focus</td><td>Existing.</td></tr>
+<tr><td>Click</td><td>Header</td><td>Select node (only this one); board focus; bring to front</td><td>Does not enter content.</td></tr>
+<tr><td><kbd>⌘</kbd>/<kbd>⇧</kbd>-click</td><td>Header or body</td><td>Toggle node in selection</td><td>Existing behaviour.</td></tr>
+<tr><td>Drag</td><td>Header</td><td>Move (all selected nodes)</td><td>1:1. Guides and snap. Hold <kbd>⌘</kbd> to disable snap.</td></tr>
+<tr><td>Click</td><td>Body</td><td>Content focus at once (terminal gets keys; note places caret or follows link)</td><td>Existing behaviour, now with a clear ring.</td></tr>
+<tr><td>Double-click</td><td>Header title text</td><td>Inline rename</td><td><kbd>Return</kbd> saves, <kbd>esc</kbd> cancels.</td></tr>
+<tr><td>Double-click</td><td>Header background</td><td>Zoom to Card</td><td>Animated 260 ms (Reduce Motion: instant).</td></tr>
+<tr><td>Double-click</td><td>Empty board</td><td>Add popover at that point</td><td><span class="tag new">New</span> Type-ahead: "no" → Note.</td></tr>
+<tr><td><kbd>Return</kbd></td><td>One selected node</td><td>Enter content. On a stopped terminal: Start Shell.</td><td>An explicit key press, same as the button. It starts the shell only; it never runs a command.</td></tr>
+<tr><td><kbd>⌃⇥</kbd></td><td>Content focus</td><td>Return to Board; node stays selected</td><td>macOS convention for moving focus out of a view that consumes Tab. <span class="tag test">Needs test</span> with CLIs.</td></tr>
+<tr><td><kbd>esc</kbd></td><td>Board focus</td><td>Deselect</td><td>In content, <kbd>esc</kbd> goes to the content (vim, CLIs). Notes in Edit mode: <kbd>esc</kbd> ends editing.</td></tr>
+<tr><td>Arrow keys</td><td>Board, nodes selected</td><td>Move 8 pt; with <kbd>⇧</kbd> 40 pt</td><td>Replaces menu Move commands as the fast path.</td></tr>
+<tr><td><kbd>⌥⌘</kbd>+arrows</td><td>Board, one node</td><td>Resize 8 pt (right/bottom edge)</td><td>Replaces Make Larger/Smaller as the fast path.</td></tr>
+<tr><td><kbd>Tab</kbd> / <kbd>⇧Tab</kbd></td><td>Board</td><td>Select next/previous node in reading order (top-left to bottom-right)</td><td><span class="tag new">New</span> Viewport follows.</td></tr>
+<tr><td><kbd>⌫</kbd></td><td>Board, selection</td><td>Remove from Canvas (with undo; confirmation when a terminal is running)</td><td>Never deletes source files.</td></tr>
+</table></div>
+
+<h3>7.3 Node types and capability signals</h3>
+<div class="scroll wide"><table>
+<tr><th>Type</th><th>Body accepts input?</th><th>Header glyph</th><th>Header state</th><th>Primary action</th><th>Min size</th><th>Overflow</th></tr>
+<tr><td>Note</td><td>Yes (Read: links, tasks, selection. Edit: text)</td><td><code>note.text</code></td><td>task count "3/5"</td><td>Edit Note</td><td>200 × 120</td><td>Vertical scroll</td></tr>
+<tr><td>File</td><td>Read-only excerpt; select and copy</td><td>file-type icon</td><td>"Modified" capsule when dirty in editor</td><td>Open in Editor</td><td>220 × 140</td><td>Vertical scroll, first 400 lines max</td></tr>
+<tr><td>Image</td><td>No (view only)</td><td><code>photo</code></td><td>pixel size</td><td>Open in Editor (media preview)</td><td>120 × 90</td><td>Scale to fit; aspect kept on resize</td></tr>
+<tr><td>Terminal</td><td>Yes, full PTY input</td><td><code>apple.terminal</code></td><td>Running / Not running / Exited (code)</td><td>Start Shell / Stop</td><td>320 × 180 (≈ 40 × 8 cells)</td><td>Terminal scrollback; resize changes PTY size once on release</td></tr>
+<tr><td>Web app</td><td>Yes (loopback page)</td><td><code>globe</code></td><td>host:port, "Not loaded" when hidden</td><td>Reload</td><td>320 × 220</td><td>Page scroll</td></tr>
+<tr><td>Mac app</td><td><b>No.</b> Picture only.</td><td>real app icon</td><td>"Preview" badge with <code>eye</code>; "Paused" when hidden</td><td>Open App</td><td>220 × 160</td><td>Scale to fit</td></tr>
+</table></div>
+<p><b>Preview versus real app.</b> A Mac-app node never looks interactive. Its body has no text cursor and no hover highlight. The pointer stays an arrow. A click on the picture selects the node and shows a small popover: "This is a picture of a Finder window. Keyboard and pointer input go to Finder." with the button "Open Finder". The header badge "Preview" is always visible while a picture shows. With no picture, the body shows the app icon and "Open Finder" (C8).</p>
+
+<h3>7.4 Creation</h3>
+<ul>
+<li><b>Double-click empty board</b> → popover at the point: Note, Terminal, File…, Image…, Web App…, Mac App…. Type to filter. <kbd>Return</kbd> creates. The node appears centred on the point. <span class="tag new">New</span></li>
+<li><b>"+" in the Canvas bar</b> → same list; the node appears at the viewport centre, offset 24 pt from the last new node.</li>
+<li><b>Drop files</b> from Finder or the Files sidebar → one File/Image node per file (exists: <code>CanvasFileDropDelegate.swift</code> <span class="tag code">Code</span>). Drop target: dashed gold outline on the board while dragging.</li>
+<li><b>Paste</b> plain text on the board → Note with that text. Paste an image → Image node. <span class="tag new">New</span></li>
+<li><b>Board single-key shortcuts</b> (board focus only, never in content): <kbd>N</kbd> Note, <kbd>T</kbd> Terminal. <span class="tag new">New</span> <span class="tag test">Needs test</span> with Full Keyboard Access.</li>
+<li><b>Drag from a port to empty board</b> → popover "Connect to new…" (Note, Terminal). Creates and connects in one step. <span class="tag new">New</span></li>
+</ul>
+
+<h3>7.5 Making a connection</h3>
+<div class="scroll wide"><table>
+<tr><th>Step</th><th>What the user sees</th><th>Rules</th></tr>
+<tr><td>1. Hover a node</td><td>Four ports fade in (100 ms).</td><td>Ports also show when the node is selected or keyboard-focused.</td></tr>
+<tr><td>2. Press on a port</td><td>Port grows to 12 pt, gold.</td><td>Pressing the body or header never starts a connection.</td></tr>
+<tr><td>3. Drag</td><td>A dashed gold preview curve follows the pointer 1:1. Valid targets get a 1.5 pt gold outline and show their ports. Invalid targets dim to 60% and the cursor shows "not allowed".</td><td>Invalid: the source itself, an existing identical link, a board at the 200-link limit.</td></tr>
+<tr><td>4. Snap</td><td>Within 24 screen-pt of a target port, the preview end jumps to it; the port grows. Optional haptic (section 08).</td><td>Nearest facing port wins.</td></tr>
+<tr><td>5a. Drop on target</td><td>The edge draws in (240 ms). A small label field appears at the midpoint: "Label (optional)". <kbd>Return</kbd> or click away to skip.</td><td>Terminal ↔ terminal: the label popover also shows "Message link ✓ / Relationship only". Default: Message link, created <b>Paused</b> until the user selects Resume, so no message passes without an explicit choice <span class="tag test">Needs test</span> vs current default.</td></tr>
+<tr><td>5b. Drop on empty board</td><td>"Connect to new…" popover.</td><td>—</td></tr>
+<tr><td>5c. <kbd>esc</kbd> or drop on source</td><td>Preview retracts to the port (160 ms).</td><td>Nothing is created.</td></tr>
+<tr><td>Keyboard path</td><td>Select two nodes, press <kbd>⌥⌘L</kbd> → Connect sheet prefilled (C16).</td><td>Card menu "Connect To ▸" lists other nodes.</td></tr>
+</table></div>
+
+<h3>7.6 Edges</h3>
+<p>Current drawing <span class="tag code">Code</span>: every edge leaves the right-middle of the source and enters the left-middle of the target, with fixed 50 pt control points. All edges are a 1 pt dashed <code>textSecondary</code> line; a session link differs only by a second arrowhead. Labels sit 10 pt above the midpoint with no background. The edge layer has <code>allowsHitTesting(false)</code> and <code>accessibilityHidden(true)</code>, so edges cannot be selected, deleted or read by VoiceOver. The layer draws under the cards, so an overlapping card hides edges. Pause and resume exist only for all links at once, in <code>CanvasSessionLinksBar</code>.</p>
+
+<figure>
+<div class="mock" role="img" aria-label="Legend of proposed edge styles: relationship, live message link, message event, paused, disconnected, failed, selected, drag preview.">
+<svg viewBox="0 0 1000 400" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1000" height="400" class="app"/>
+  <g font-size="12">
+  <!-- row 1 relationship -->
+  <text x="24" y="42" class="t" font-weight="600">Relationship</text><text x="24" y="58" class="tm" font-size="11">visual only</text>
+  <path d="M240 46 H700" stroke="#9AA3B8" stroke-width="1" stroke-dasharray="5 4"/>
+  <path d="M691 41 L700 46 L691 51" stroke="#9AA3B8" stroke-width="1.5" fill="none"/>
+  <rect x="432" y="36" width="76" height="20" rx="10" fill="#1B212D" stroke="#262E3E"/><text x="470" y="50" class="t2" font-size="11" text-anchor="middle">spec for</text>
+  <text x="724" y="50" class="t2" font-size="12">1 pt dashed · open arrow · label pill</text>
+  <!-- row 2 live -->
+  <text x="24" y="88" class="t" font-weight="600">Message link · Live</text><text x="24" y="104" class="tm" font-size="11">terminal ↔ terminal</text>
+  <path d="M250 92 H690" stroke="#E3A857" stroke-width="1.5"/>
+  <path d="M690 87 L700 92 L690 97 Z" fill="#E3A857"/><path d="M250 87 L240 92 L250 97 Z" fill="#E3A857"/>
+  <rect x="436" y="82" width="68" height="20" rx="10" fill="#1B212D" stroke="#E3A857"/><text x="470" y="96" fill="#E3A857" font-size="11" text-anchor="middle">⇄ Live</text>
+  <text x="724" y="96" class="t2">1.5 pt solid gold · filled arrows both ends</text>
+  <!-- row 3 event -->
+  <text x="24" y="134" class="t" font-weight="600">Message event</text><text x="24" y="150" class="tm" font-size="11">one per real message</text>
+  <path d="M250 138 H690" stroke="#E3A857" stroke-width="1.5"/>
+  <path d="M690 133 L700 138 L690 143 Z" fill="#E3A857"/><path d="M250 133 L240 138 L250 143 Z" fill="#E3A857"/>
+  <circle cx="590" cy="138" r="7" fill="#E3A857" fill-opacity=".25"/><circle cx="590" cy="138" r="3.5" fill="#E3A857"/>
+  <path d="M520 138 H584" stroke="#E3A857" stroke-width="3" stroke-opacity=".35"/>
+  <rect x="436" y="128" width="68" height="20" rx="10" fill="#1B212D" stroke="#E3A857"/><text x="470" y="142" fill="#E3A857" font-size="11" text-anchor="middle">⇄ Live · 3</text>
+  <text x="724" y="142" class="t2">dot travels once, 500 ms · count in badge</text>
+  <!-- row 4 paused -->
+  <text x="24" y="180" class="t" font-weight="600">Message link · Paused</text><text x="24" y="196" class="tm" font-size="11">no sends; restored links</text>
+  <path d="M250 184 H690" stroke="#9AA3B8" stroke-width="1.5"/>
+  <path d="M690 179 L700 184 L690 189 Z" fill="#9AA3B8"/><path d="M250 179 L240 184 L250 189 Z" fill="#9AA3B8"/>
+  <rect x="428" y="174" width="84" height="20" rx="10" fill="#1B212D" stroke="#3A455C"/><text x="470" y="188" class="t2" font-size="11" text-anchor="middle">‖ Paused</text>
+  <text x="724" y="188" class="t2">1.5 pt solid grey · pause glyph + word</text>
+  <!-- row 5 disconnected -->
+  <text x="24" y="226" class="t" font-weight="600">Disconnected</text><text x="24" y="242" class="tm" font-size="11">session ended or changed</text>
+  <path d="M250 230 H690" stroke="#67718A" stroke-width="1.5" stroke-dasharray="2 4" stroke-linecap="round"/>
+  <path d="M690 225 L700 230 L690 235" stroke="#67718A" stroke-width="1.5" fill="none"/><path d="M250 225 L240 230 L250 235" stroke="#67718A" stroke-width="1.5" fill="none"/>
+  <rect x="412" y="220" width="116" height="20" rx="10" fill="#1B212D" stroke="#3A455C"/><text x="470" y="234" class="t2" font-size="11" text-anchor="middle">⊘ Disconnected</text>
+  <text x="724" y="234" class="t2">dotted · hollow arrows · "Start a new terminal"</text>
+  <!-- row 6 failed -->
+  <text x="24" y="272" class="t" font-weight="600">Failed</text><text x="24" y="288" class="tm" font-size="11">send refused, consent missing</text>
+  <path d="M250 276 H690" stroke="#E06C75" stroke-width="1.5" stroke-dasharray="7 3"/>
+  <path d="M690 271 L700 276 L690 281 Z" fill="#E06C75"/><path d="M250 271 L240 276 L250 281 Z" fill="#E06C75"/>
+  <rect x="430" y="266" width="80" height="20" rx="10" fill="#1B212D" stroke="#E06C75"/><text x="470" y="280" fill="#E06C75" font-size="11" text-anchor="middle">△ Failed</text>
+  <text x="724" y="280" class="t2">long dash · warning glyph · reason on hover</text>
+  <!-- row 7 selected -->
+  <text x="24" y="318" class="t" font-weight="600">Selected</text><text x="24" y="334" class="tm" font-size="11">any kind</text>
+  <path d="M240 322 H700" stroke="#E3A857" stroke-width="6" stroke-opacity=".22" stroke-linecap="round"/>
+  <path d="M240 322 H700" stroke="#9AA3B8" stroke-width="1" stroke-dasharray="5 4"/>
+  <circle cx="240" cy="322" r="5" fill="#E7EAF2" stroke="#10141C" stroke-width="2"/><circle cx="700" cy="322" r="5" fill="#E7EAF2" stroke="#10141C" stroke-width="2"/>
+  <text x="724" y="326" class="t2">gold halo · drag ends to reconnect · ⌫</text>
+  <!-- row 8 preview -->
+  <text x="24" y="364" class="t" font-weight="600">Drag preview</text><text x="24" y="380" class="tm" font-size="11">while connecting</text>
+  <path d="M240 368 C 380 368, 470 368, 600 368" stroke="#E3A857" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <circle cx="240" cy="368" r="6" fill="#E3A857"/><circle cx="600" cy="368" r="4" fill="none" stroke="#E3A857" stroke-width="1.5"/>
+  <text x="724" y="372" class="t2">dashed gold · follows pointer 1:1</text>
+  </g>
+</svg></div>
+<figcaption>Proposed edge vocabulary. Each state differs in line pattern, arrowhead and badge word, not only in colour.</figcaption>
+</figure>
+
+<div class="scroll wide"><table>
+<tr><th>Property</th><th>Specification</th></tr>
+<tr><td>Anchors</td><td>Each end uses the port on the side that faces the other node (compare centre-to-centre angle: |dx| &gt; |dy| → left/right, else top/bottom). Several edges on one side spread 8 pt apart, sorted by the other end's position, so they do not cross at the port.</td></tr>
+<tr><td>Routing</td><td>Cubic Bézier. Control points leave each port perpendicular to its side, at distance <code>clamp(0.4 × d, 24, 160)</code>. If the straight segment crosses a third node, add 24 pt of extra bend away from that node's centre (one pass, no full path-finding).</td></tr>
+<tr><td>Layering</td><td>Edges draw above the board and below nodes. Where a node covers an edge, the edge is hidden, but its arrowhead and the 4 pt next to each port draw above the node border, so the connection point stays visible. A selected or hovered edge draws above all nodes at full opacity.</td></tr>
+<tr><td>Stroke width</td><td>Constant in screen points at every zoom (non-scaling): 1 pt relationship, 1.5 pt message link.</td></tr>
+<tr><td>Arrowheads</td><td>Relationship: open chevron 9 × 10 pt at the "To" end. Message link: filled triangle 10 × 10 pt at both ends (messages pass both ways). Disconnected: hollow chevrons.</td></tr>
+<tr><td>Labels</td><td>Pill at the curve midpoint (t = 0.5), 11 pt, 20 pt high, max 160 pt then truncate with tooltip. Background <code>elevatedBackground</code>, 1 pt border. The line breaks around the pill. Message links always show the state badge; the label follows it ("⇄ Live · review").</td></tr>
+<tr><td>Hit area</td><td>12 screen-pt invisible stroke around the curve; the pill is also a hit target.</td></tr>
+<tr><td>Hover</td><td>Stroke +0.5 pt; full label; tooltip: "claude — api ⇄ codex — tests · Live · 3 messages in 10 min".</td></tr>
+<tr><td>Selection</td><td>Click: gold halo (6 pt at 22%) and round handles at both ends. <kbd>⌫</kbd> deletes (undo). Drag an end handle to another node to reconnect; drop on empty board to delete (with undo).</td></tr>
+<tr><td>Context menu</td><td>Rename Label…, Reverse Direction (relationship only), Pause Link / Resume Link (message link), Show Message Log…, Delete Link.</td></tr>
+<tr><td>Accessibility</td><td>Each edge is an accessibility element: "Message link from claude — api to codex — tests, Live, label review". Custom actions: Pause, Resume, Delete, Go to Source, Go to Target. Edges also appear in the List view (C13).</td></tr>
+<tr><td>Global control</td><td>Keep "Pause All Links" in the Canvas menu and a compact status item in the Canvas bar ("2 live · 1 paused") that opens a popover with per-link toggles. Replace the full-width <code>CanvasSessionLinksBar</code>.</td></tr>
+</table></div>
+
+<h4>Activity effects: only real events</h4>
+<ul>
+<li>A dot travels along a message link <b>once per accepted message</b>, in the direction of the message. Duration 500 ms.</li>
+<li>If more than 3 messages arrive within 2 s on one edge, show no extra dots; the badge count increases ("⇄ Live · 7"). The count resets after 10 minutes of no messages.</li>
+<li>No idle animation. No marching dashes. A live link at rest is a still, solid gold line.</li>
+<li>State changes cross-fade the stroke pattern (160 ms) and swap the badge word. VoiceOver announces "Link to codex — tests paused".</li>
+</ul>
+
+<h4>Readability when zoomed out or overlapped</h4>
+<div class="scroll mid"><table>
+<tr><th>Zoom</th><th>Edges</th><th>Nodes</th></tr>
+<tr><td>≥ 75%</td><td>Full: labels, badges, arrowheads</td><td>Full live content</td></tr>
+<tr><td>50–75%</td><td>Labels hidden; message-link badges kept (glyph + word)</td><td>Content scaled; terminals render but do not resize the PTY</td></tr>
+<tr><td>25–50%</td><td>Badges become 16 pt glyph-only circles (⇄, ‖, ⊘, △), shape-coded</td><td>Summary face: glyph, title, state, one line (last command, "3/5 tasks", file name). Titles stay ≥ 11 screen-pt.</td></tr>
+<tr><td>&lt; 25%</td><td>Relationships hidden; message links drawn 1.5 pt without badges</td><td>Silhouette with title only</td></tr>
+</table></div>
+<p>A "Show Links" menu (All / Message Links Only / None) lets the user remove clutter in dense boards.</p>
+
+<h4>When a connected node changes</h4>
+<div class="scroll mid"><table>
+<tr><th>Event</th><th>Edge behaviour</th></tr>
+<tr><td>Node moves</td><td>Anchors and curve update every frame, 1:1 with the drag. Anchor side can switch when the node crosses the other node's centre line; the switch is instant (no animation).</td></tr>
+<tr><td>Node resizes</td><td>Ports stay at side midpoints; the edge follows.</td></tr>
+<tr><td>Node removed from Canvas</td><td>Its edges are removed with it in one undo step. Undo restores node and edges. Message links restore Paused.</td></tr>
+<tr><td>Terminal stops or exits</td><td>Message link → Disconnected. Badge: "⊘ Disconnected". Hover: "This session ended. Start the terminal again to reconnect."</td></tr>
+<tr><td>CLI changes conversation (<code>/new</code>, resume, fork)</td><td>Disconnected, reason "The conversation changed. Start a new terminal to link it."</td></tr>
+<tr><td>Send refused (limit, consent, unsupported version)</td><td>Failed, with the reason in the tooltip and in Show Message Log…. The link stays until the user acts.</td></tr>
+<tr><td>Node hidden by another tab (presentation lease)</td><td>Edge drawn normally; the node shows "Shown in tab 'Terminal'" in its body. Link state does not change.</td></tr>
+<tr><td>Mac-app window closes</td><td>Node returns to app reference. Relationships stay.</td></tr>
+<tr><td>Board reopens</td><td>All message links restore Paused. One Canvas-bar notice: "2 links paused. Resume…".</td></tr>
+</table></div>
+
+<h3>7.7 Terminal focus</h3>
+<ul>
+<li><b>First click enters.</b> A mouse-down in a terminal body makes the terminal the first responder in the same event. The user can type at once. No second click.</li>
+<li><b>Visible state.</b> Gold inner stroke, header tint, block cursor solid (not blinking when Reduce Motion is on), "Return to Board ⌃⇥" in the header.</li>
+<li><b>Keys go to the CLI.</b> All keys without <kbd>⌘</kbd> go to the PTY: <kbd>esc</kbd>, <kbd>⌃C</kbd>, <kbd>⌃D</kbd>, <kbd>⌃R</kbd>, <kbd>Tab</kbd>, arrows, <kbd>⌥</kbd> as Meta when the user enabled it. <kbd>⌘</kbd> shortcuts go to the menu bar, except <kbd>⌘C</kbd>/<kbd>⌘V</kbd>/<kbd>⌘K</kbd> (copy, paste, clear) which the terminal handles. <kbd>⌃⇥</kbd> is the only extra key Rafu takes. <span class="tag test">Needs test</span> with Claude Code, Codex and vim.</li>
+<li><b>Native colours.</b> The terminal body uses the terminal palette and ANSI colours unchanged. Node chrome stays neutral around it. Rafu does not tint output.</li>
+<li><b>Scroll.</b> With content focus, scroll goes to the terminal scrollback. Without focus, scroll pans the board. A second finger pause (no movement for 300 ms) is not needed; focus decides.</li>
+<li><b>Selection and copy.</b> Text selection inside the terminal with drag; <kbd>⌘C</kbd> copies. Drag inside the body never moves the node.</li>
+<li><b>Resize.</b> During a resize drag the content scales visually; the PTY gets one size change on mouse-up. This avoids reflow storms in the CLI.</li>
+<li><b>Leaving.</b> Click on the board, click on another node, <kbd>⌃⇥</kbd>, or the header button. Focus leaves; selection stays on the terminal.</li>
+</ul>
+
+<h3>7.8 Notes with native Markdown</h3>
+<p><span class="tag new">New</span> Today a note is a plain monospaced <code>NSTextView</code> <span class="tag code">Code</span>. The proposal keeps that TextKit 2 view for editing and adds a Read mode that renders through the existing shared native Markdown boundary (MarkdownUI). No web view.</p>
+<div class="scroll wide"><table>
+<tr><th>Aspect</th><th>Read mode (default)</th><th>Edit mode</th></tr>
+<tr><td>Enter</td><td>Default when a note is created from paste or reopened. <kbd>esc</kbd>, <kbd>⌘Return</kbd> or a click outside leaves Edit mode.</td><td>Pencil button in the header, <kbd>Return</kbd> on a selected note, double-click on text (caret goes to the matching source line), or start typing on a selected empty note.</td></tr>
+<tr><td>Shows</td><td>Rendered Markdown in New York 14/21.</td><td>Source in SF Pro 13/20 (not monospaced) with light syntax: headings semibold and larger, <code>**</code> and <code>`</code> markers in <code>textMuted</code>, code spans in SF Mono.</td></tr>
+<tr><td>Links</td><td>Click opens (workspace paths open in Rafu, URLs in the browser). Link colour <code>info</code>, underline on hover, pointing-hand cursor.</td><td>Plain text; <kbd>⌘</kbd>-click opens.</td></tr>
+<tr><td>Tasks</td><td>Click a checkbox: toggles <code>[ ]</code>/<code>[x]</code> in the source; undoable; the header count updates.</td><td>Edit the text; <kbd>⇧⌘L</kbd> toggles a task item (Apple Notes convention).</td></tr>
+<tr><td>Selection and copy</td><td>Text is selectable across blocks; <kbd>⌘C</kbd> copies Markdown source for the selection. Drag in the body selects; it never moves the node.</td><td>Normal text editing.</td></tr>
+<tr><td>Scroll</td><td>Inside the node, with focus. The node header carries the title, so the content scrolls fully.</td><td>Same. Caret is kept visible.</td></tr>
+<tr><td>Focus ring</td><td>Gold inner stroke while the note has content focus.</td><td>Same, plus "Editing" word in header.</td></tr>
+<tr><td>Transition</td><td colspan="2">Cross-fade 120 ms between rendered and source views; the block under the pointer (or the caret block) stays at the same screen position. Reduce Motion: instant swap.</td></tr>
+</table></div>
+
+<h4>Element styling (Read mode, at 100%)</h4>
+<div class="scroll mid"><table>
+<tr><th>Element</th><th>Style</th></tr>
+<tr><td>H1 / H2 / H3</td><td>New York 20/26 semibold · New York 17/22 semibold · SF Pro 14/19 semibold. 12 pt above, 6 pt below. A note's first heading becomes the header title when the note has no name.</td></tr>
+<tr><td>Paragraph</td><td>New York 14/21, <code>textPrimary</code>, 8 pt between paragraphs. Max measure 68 ch; wider nodes add side padding.</td></tr>
+<tr><td>Lists</td><td>Bullets "•" and numbers in <code>textSecondary</code>, 18 pt hanging indent, 2 pt between items.</td></tr>
+<tr><td>Task items</td><td>12 pt rounded square, 1 pt <code>textMuted</code> border; checked = gold fill with dark check; checked text in <code>textSecondary</code>, no strike-through (keeps it readable).</td></tr>
+<tr><td>Quote</td><td>2 pt left rule <code>borderStrong</code>, 12 pt indent, italic <code>textSecondary</code>.</td></tr>
+<tr><td>Inline code</td><td>SF Mono at 0.9 em, <code>chipBackground</code>, 3 pt radius, 3 pt side padding.</td></tr>
+<tr><td>Code block</td><td>SF Mono 12/17 on <code>editorBackground</code>, 1 pt border, 6 pt radius, 10 pt padding, horizontal scroll inside, copy button on hover (top right), language name in <code>textMuted</code>. Syntax colours from the editor theme where the language is known.</td></tr>
+<tr><td>Rule, table, image</td><td>Hairline rule. Tables with hairline rows and horizontal scroll. Images from workspace paths only, bounded size, lazy load.</td></tr>
+</table></div>
+
+<h4>Formatting controls</h4>
+<ul>
+<li><b>Shortcuts</b> (primary path): <kbd>⌘B</kbd> bold, <kbd>⌘I</kbd> italic, <kbd>⌘K</kbd> link, <kbd>⌘E</kbd> inline code, <kbd>⇧⌘7</kbd> bullets, <kbd>⇧⌘9</kbd> numbers, <kbd>⇧⌘L</kbd> task, <kbd>⌥⌘1</kbd>–<kbd>⌥⌘3</kbd> heading levels, <kbd>⌥⌘0</kbd> body text. Verify each against the existing menu map.</li>
+<li><b>Format menu</b> in the menu bar while a note is in Edit mode: all of the above, so each shortcut is discoverable.</li>
+<li><b>Compact header toolbar</b> in Edit mode only, when the node is ≥ 320 pt wide: Bold, Italic, Code, Link, Task (5 icons). Narrower nodes show a single "Aa" pull-down instead.</li>
+<li><b>Markdown typing</b> stays valid: typing <code>- [ ] </code> creates a task. No auto-conversion that hides the source.</li>
+<li><b>No</b> floating selection toolbar, colour pickers, fonts or sticky-note colours.</li>
+</ul>
+
+<h4>Notes at different zoom levels</h4>
+<p>Text below 9 screen-pt is not readable. So: ≥ 75% full rendering. 50–75% rendering scaled, code blocks collapse to their first 3 lines. 25–50% summary face: title (≥ 11 screen-pt), first paragraph clipped to 2 lines, task count. &lt; 25% title only. Edit mode is available only at ≥ 50%; entering it below 50% first zooms to the note (260 ms).</p>
+
+<h4>Look beside terminals and files</h4>
+<p>A note uses the same node chrome as every other node. Its body is the only one with serif text, which separates prose from code and terminal output at a glance. No paper texture, no tilt, no coloured sticky backgrounds, no accent stripe.</p>
+
+<!-- ============================================================ 08 -->
+<h2 id="motion"><span class="num">08</span>Motion and optional haptics</h2>
+<p class="lede">Motion explains where something came from or where it went. It never decorates. Pointer-driven changes follow the pointer 1:1 with no easing. Animations run only for discrete, system-driven changes.</p>
+
+<h3>Motion table</h3>
+<p>Springs use SwiftUI <code>.spring(response:dampingFraction:)</code>. Curves use SwiftUI names. "Retarget" means a new trigger starts from the current presentation value (SwiftUI and Core Animation do this by default for additive animations).</p>
+<div class="scroll wide"><table>
+<tr><th>Trigger</th><th>Purpose</th><th>Properties</th><th>Timing</th><th>Interruption</th><th>Reduce Motion</th><th>Performance</th></tr>
+<tr><td>Pointer enters an icon button, row or node header</td><td>Show target</td><td>Background fill opacity 0 → 1 (<code>hover</code> token)</td><td>In 100 ms <code>easeOut</code>; out 160 ms <code>easeOut</code></td><td>Retarget</td><td>Same (opacity only)</td><td>Layer opacity only</td></tr>
+<tr><td>Press a button</td><td>Confirm press</td><td>Fill → pressed tone</td><td>In 0 ms; release 120 ms <code>easeOut</code></td><td>Retarget</td><td>Same</td><td>No scale (Mac controls do not scale)</td></tr>
+<tr><td>Keyboard focus moves</td><td>Show focus</td><td>Focus ring</td><td><b>0 ms</b></td><td>—</td><td>Same</td><td>System ring</td></tr>
+<tr><td>Node selected / deselected</td><td>Show selection</td><td>Ring opacity 0 → 1; ports opacity</td><td>80 ms <code>easeOut</code></td><td>Retarget</td><td>Same</td><td>One overlay layer per node</td></tr>
+<tr><td>Hover actions on node header</td><td>Reveal context controls</td><td>Opacity 0 → 1</td><td>Show 100 ms after 0 ms; hide after 300 ms delay, 160 ms</td><td>Re-enter cancels the hide</td><td>Same</td><td>Opacity only</td></tr>
+<tr><td>Node created</td><td>Show origin</td><td>Opacity 0 → 1, scale 0.96 → 1 from the creation point</td><td><code>.spring(response: 0.28, dampingFraction: 0.9)</code> (≈ 240 ms, no overshoot visible)</td><td>A move during the spring cancels it and snaps to final</td><td>Opacity 0 → 1, 120 ms</td><td>Transform on the node layer; content renders once</td></tr>
+<tr><td>Node removed</td><td>Show it left</td><td>Opacity → 0, scale → 0.98; its edges fade with it</td><td>140 ms <code>easeIn</code></td><td>Undo during fade restores at once</td><td>Opacity 100 ms</td><td>Remove view after completion</td></tr>
+<tr><td>Node drag starts</td><td>"Lifted"</td><td>Shadow to dragged values</td><td>120 ms <code>easeOut</code></td><td>Drop during lift retargets to rest</td><td>Instant shadow change</td><td>Shadow path set explicitly (no offscreen pass)</td></tr>
+<tr><td>Node drag moves</td><td>Direct manipulation</td><td>Position</td><td><b>1:1, no animation</b></td><td>—</td><td>Same</td><td>Transform only; edges recompute per frame</td></tr>
+<tr><td>Snap to guide / gap</td><td>Show alignment</td><td>Position jumps to guide; 1 pt gold guide line appears</td><td>Jump 0 ms; guide in 0 ms, out 150 ms after release</td><td>Moving away hides guide at once</td><td>Same</td><td>At most 2 guides drawn</td></tr>
+<tr><td>Drop node</td><td>"Set down"</td><td>Shadow to rest</td><td>160 ms <code>easeOut</code></td><td>New drag retargets</td><td>Instant</td><td>—</td></tr>
+<tr><td>Resize below minimum</td><td>Show limit</td><td>Size resists (30% of excess, max 12 pt), then returns</td><td>Return <code>.spring(response: 0.25, dampingFraction: 0.85)</code></td><td>New drag retargets</td><td>Hard stop at minimum, no return motion</td><td>PTY resize only on mouse-up</td></tr>
+<tr><td>Ports appear (connect)</td><td>Offer targets</td><td>Port opacity, size 8 → 12 pt under pointer</td><td>100 ms <code>easeOut</code></td><td>Retarget</td><td>Opacity only</td><td>—</td></tr>
+<tr><td>Valid target under drag</td><td>Confirm target</td><td>Outline opacity 0 → 1</td><td>100 ms <code>easeOut</code></td><td>Leaving retargets</td><td>Same</td><td>—</td></tr>
+<tr><td>Invalid target under drag</td><td>Refuse</td><td>Node opacity 1 → 0.6; "not allowed" cursor</td><td>100 ms</td><td>Retarget</td><td>Same</td><td>No shake</td></tr>
+<tr><td>Connection cancelled</td><td>Show nothing was made</td><td>Preview curve retracts to its port (trim end 1 → 0)</td><td>160 ms <code>easeIn</code></td><td>New drag replaces it</td><td>Preview disappears at once</td><td>One shape layer</td></tr>
+<tr><td>Edge created</td><td>Show the new link</td><td>Stroke trim 0 → 1 from source to target</td><td>240 ms <code>easeOut</code>, once</td><td>Node move during draw: finish instantly</td><td>Opacity 0 → 1, 120 ms</td><td>One shape layer</td></tr>
+<tr><td>Message accepted on a live link</td><td>Show a real event and its direction</td><td>4 pt dot + 3 pt fading trail along the curve</td><td>500 ms <code>easeInOut</code>; max one dot per edge at a time; bursts (&gt;3 in 2 s) → badge count only</td><td>New message while a dot runs: badge count +1, no second dot</td><td>No travel. Badge count changes; badge border brightens 0 → 1 → 0 over 300 ms</td><td>TimelineView runs only while a dot exists; stops when idle</td></tr>
+<tr><td>Link state changes (Live, Paused, Disconnected, Failed)</td><td>Show new state</td><td>Stroke pattern cross-fade; badge word swap</td><td>160 ms <code>easeInOut</code></td><td>Latest state wins</td><td>Instant swap</td><td>VoiceOver announcement each change</td></tr>
+<tr><td>Action succeeds (commit, link saved, theme imported)</td><td>Confirm</td><td>Button label → "✓ Committed" then back</td><td>Swap 120 ms; hold 1.2 s; back 160 ms</td><td>New press cancels hold</td><td>Same (text change, no motion)</td><td>—</td></tr>
+<tr><td>Action fails</td><td>Explain</td><td>Inline message appears under the control; field border <code>error</code></td><td>Appear 0 ms (no delay before bad news)</td><td>—</td><td>Same</td><td>No shake</td></tr>
+<tr><td>Note Read ↔ Edit</td><td>Keep place while mode changes</td><td>Cross-fade rendered and source views; anchor block keeps screen position</td><td>120 ms <code>easeInOut</code></td><td>Toggle again reverses from current</td><td>Instant swap</td><td>Both views exist only during the fade</td></tr>
+<tr><td>Zoom by button, menu, shortcut, double-click</td><td>Keep orientation</td><td>Board scale and offset</td><td>Zoom ±: 180 ms; Zoom to Fit / Card / Selection: 260 ms; <code>easeInOut</code></td><td>Pinch or scroll during zoom: stop and hand over 1:1</td><td>Instant</td><td>Scale transform only; PTYs not resized; nodes switch face (7.6) after the zoom ends</td></tr>
+<tr><td>Pinch zoom, scroll pan</td><td>Direct manipulation</td><td>Scale, offset</td><td><b>1:1</b>; pan momentum from NSScrollView</td><td>—</td><td>Same</td><td>—</td></tr>
+<tr><td>Right panel open / close</td><td>Show where it went</td><td>Panel width 0 ↔ W; editor width</td><td>200 ms <code>easeInOut</code></td><td>Toggle again reverses</td><td>Instant</td><td>Animate split position, not content layout per frame (snapshot content)</td></tr>
+<tr><td>Popover, menu, sheet, Settings window</td><td>System</td><td>System</td><td>System default</td><td>System</td><td>System honours Reduce Motion</td><td>Do not add custom animation</td></tr>
+<tr><td>Long task in a panel (fetch, install)</td><td>Show progress</td><td>Native progress indicator</td><td>System</td><td>—</td><td>System</td><td>Hide when done</td></tr>
+</table></div>
+
+<h3>No animation, ever</h3>
+<ul>
+<li>Typing, caret movement, text selection, scrolling a document.</li>
+<li>Terminal input and terminal output.</li>
+<li>Tab switch, editor-group switch, command palette open and navigation.</li>
+<li>Arrow-key navigation in lists, file tree, search results, Canvas node selection by <kbd>Tab</kbd>.</li>
+<li>Keyboard focus rings.</li>
+<li>Node move and resize by arrow keys (each press is a discrete jump).</li>
+<li>Diff hunk staging (the row changes state in place).</li>
+<li>Idle edges, idle nodes, idle status items. No pulsing dots, no marching dashes, no breathing borders.</li>
+</ul>
+
+<h3>Optional haptics</h3>
+<p>Verified on Apple's documentation (18 Oct 2026):</p>
+<ul>
+<li>AppKit <code>NSHapticFeedbackManager</code> gives access to haptic feedback "on a system with a Force Touch trackpad". Patterns: <code>.generic</code>, <code>.alignment</code>, <code>.levelChange</code>. Performance times: <code>.default</code> (next screen update), <code>.now</code>, <code>.drawCompleted</code>.</li>
+<li>The default performer is chosen "based on the current input device, accessibility settings, and user preferences". A mouse or an external trackpad without Force Touch gives no feedback.</li>
+<li>Apple says haptics are "intended to be provided in response to a user action" and "Do not use it to provide feedback for events that are not user initiated." So <b>no haptic for incoming agent messages</b>.</li>
+<li>SwiftUI <code>sensoryFeedback</code> (macOS 14+): <code>.alignment</code> plays on iOS and macOS; <code>.levelChange</code> plays on macOS only; <code>.success</code>, <code>.error</code>, <code>.impact</code>, <code>.selection</code> play only on iOS/watchOS. So <b>no success or failure haptic on the Mac</b>.</li>
+</ul>
+<div class="scroll wide"><table>
+<tr><th>Moment</th><th>API and pattern</th><th>Time</th><th>Visual pair (always present)</th><th>Throttle</th></tr>
+<tr><td>Node snaps to an alignment guide or the 16 pt gap while dragged</td><td><code>NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .drawCompleted)</code> (or SwiftUI <code>.sensoryFeedback(.alignment, trigger:)</code>)</td><td>When the snapped frame draws</td><td>Gold guide line</td><td>Once per guide entry; max 1 per 100 ms</td></tr>
+<tr><td>Connection preview snaps to a valid port</td><td><code>.alignment</code></td><td><code>.drawCompleted</code></td><td>Port grows, target outline</td><td>Once per port entry</td></tr>
+<tr><td>Resize reaches minimum size</td><td><code>.alignment</code> (Apple lists "reaching the beginning/minimum")</td><td><code>.drawCompleted</code></td><td>Resistance, cursor change</td><td>Once per drag</td></tr>
+<tr><td>Pinch zoom passes 100%</td><td><code>.alignment</code></td><td><code>.drawCompleted</code></td><td>Zoom readout shows "100%" and holds for 6% of travel</td><td>Once per crossing</td></tr>
+<tr><td>Not used</td><td colspan="4">Incoming messages, link state changes, success, failure, hover, menu open, button press, notifications. These are not user-initiated or have no Mac pattern.</td></tr>
+</table></div>
+<p><b>Setting:</b> Settings ▸ General ▸ "Haptic feedback on the Canvas" (default on). The system "Force Click and haptic feedback" setting still applies through the default performer. Haptics never carry information that the screen does not show.</p>
+
+<!-- ============================================================ 09 -->
+<h2 id="layouts"><span class="num">09</span>Annotated layout proposals</h2>
+<p>Vector mockups in the Indigo theme. They show layout, hierarchy and states. They are not pixel specifications; section 06 holds the values.</p>
+
+<h3>9.1 Canvas</h3>
+<figure>
+<div class="mock" role="img" aria-label="Proposed Canvas layout with a compact Canvas bar, six node types, a live message link, two relationships and a zoom capsule.">
+<svg viewBox="0 0 1200 760" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <pattern id="dots2" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="0.9" fill="#232A38"/></pattern>
+    <filter id="sh2" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity=".35"/></filter>
+    <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#1F2634"/><line x1="0" y1="0" x2="0" y2="6" stroke="#262E3E" stroke-width="2"/></pattern>
+  </defs>
+  <rect width="1200" height="760" rx="10" class="app"/>
+  <!-- titlebar / tabs -->
+  <circle cx="20" cy="19" r="6" fill="#FF5F57"/><circle cx="40" cy="19" r="6" fill="#FEBC2E"/><circle cx="60" cy="19" r="6" fill="#28C840"/>
+  <rect x="80" y="11" width="18" height="15" rx="3" fill="none" stroke="#9AA3B8" stroke-width="1.3"/><line x1="86" y1="11" x2="86" y2="26" stroke="#9AA3B8" stroke-width="1.3"/>
+  <path d="M120 38 V14 a4 4 0 0 1 4 -4 H286 a4 4 0 0 1 4 4 V38" fill="#151A24" stroke="#262E3E"/>
+  <text x="134" y="29" class="t2" font-size="11">▦</text><text x="152" y="29" class="t" font-size="12.5" font-weight="500">Canvas UI Check</text><text x="272" y="29" class="t2" font-size="12">×</text>
+  <text x="310" y="29" class="t2" font-size="12.5">routes.ts</text>
+  <text x="400" y="29" class="t2" font-size="12.5">Terminal</text>
+  <!-- rail -->
+  <g fill="none" stroke="#9AA3B8" stroke-width="1.4">
+    <circle cx="1178" cy="56" r="6"/><line x1="1182" y1="60" x2="1187" y2="65"/>
+    <path d="M1172 92 v14 M1184 92 v4 a6 6 0 0 1 -6 6 h-6"/>
+    <rect x="1169" y="128" width="18" height="14" rx="2"/>
+    <rect x="1169" y="166" width="18" height="14" rx="2"/>
+  </g>
+  <!-- deck -->
+  <rect x="8" y="38" width="1146" height="694" rx="6" fill="#151A24" stroke="#262E3E"/>
+  <!-- canvas bar -->
+  <text x="22" y="61" class="t" font-size="13" font-weight="600">Canvas UI Check</text><text x="130" y="61" class="t2" font-size="11">⌄</text>
+  <rect x="610" y="46" width="150" height="22" rx="11" fill="#1B212D" stroke="#262E3E"/>
+  <text x="685" y="61" font-size="11" text-anchor="middle"><tspan fill="#E3A857">⇄ 1 live</tspan><tspan fill="#9AA3B8"> · 0 paused</tspan></text>
+  <rect x="930" y="46" width="64" height="22" rx="5" fill="#1B212D" stroke="#262E3E"/><rect x="931" y="47" width="31" height="20" rx="4" fill="#2C3547"/>
+  <text x="946" y="61" class="t" font-size="11" text-anchor="middle">▦</text><text x="978" y="61" class="t2" font-size="11" text-anchor="middle">☰</text>
+  <text x="1012" y="62" class="t2" font-size="15">+</text><text x="1024" y="61" class="t2" font-size="9">⌄</text>
+  <rect x="1050" y="51" width="7" height="12" rx="1.5" fill="none" stroke="#9AA3B8" stroke-width="1.2"/><rect x="1060" y="54" width="7" height="9" rx="1.5" fill="none" stroke="#9AA3B8" stroke-width="1.2"/><rect x="1070" y="49" width="7" height="14" rx="1.5" fill="none" stroke="#9AA3B8" stroke-width="1.2"/>
+  <circle cx="1110" cy="57" r="8" fill="none" stroke="#9AA3B8" stroke-width="1.2"/><text x="1110" y="61" class="t2" font-size="10" text-anchor="middle">⋯</text>
+  <!-- board -->
+  <rect x="9" y="74" width="1144" height="657" fill="#10141C"/>
+  <rect x="9" y="74" width="1144" height="657" fill="url(#dots2)"/>
+  <line x1="9" y1="74" x2="1153" y2="74" stroke="#262E3E"/>
+
+  <!-- edges -->
+  <path d="M360 230 C 400 230, 400 230, 440 230" stroke="#9AA3B8" stroke-dasharray="5 4" fill="none"/>
+  <path d="M431 225 L440 230 L431 235" stroke="#9AA3B8" stroke-width="1.5" fill="none"/>
+  <rect x="378" y="205" width="44" height="18" rx="9" fill="#1B212D" stroke="#262E3E"/><text x="400" y="218" class="t2" font-size="10.5" text-anchor="middle">spec</text>
+  <path d="M360 540 C 400 540, 400 560, 440 560" stroke="#9AA3B8" stroke-dasharray="5 4" fill="none"/>
+  <path d="M431 555 L440 560 L431 565" stroke="#9AA3B8" stroke-width="1.5" fill="none"/>
+  <path d="M640 380 V 430" stroke="#E3A857" stroke-width="1.5"/>
+  <path d="M635 390 L640 380 L645 390 Z" fill="#E3A857"/><path d="M635 420 L640 430 L645 420 Z" fill="#E3A857"/>
+  <rect x="652" y="396" width="78" height="20" rx="10" fill="#1B212D" stroke="#E3A857"/><text x="691" y="410" fill="#E3A857" font-size="10.5" text-anchor="middle">⇄ Live · 3</text>
+  <circle cx="640" cy="414" r="6" fill="#E3A857" fill-opacity=".25"/><circle cx="640" cy="414" r="3" fill="#E3A857"/>
+  <path d="M840 560 C 870 560, 870 500, 900 500" stroke="#9AA3B8" stroke-dasharray="5 4" fill="none"/>
+  <path d="M891 495 L900 500 L891 505" stroke="#9AA3B8" stroke-width="1.5" fill="none"/>
+
+  <!-- N1 note -->
+  <g filter="url(#sh2)"><rect x="60" y="110" width="300" height="250" rx="8" fill="#1A202B" stroke="#262E3E"/></g>
+  <line x1="61" y1="142" x2="359" y2="142" stroke="#262E3E"/>
+  <text x="74" y="131" class="t2" font-size="12">≡</text><text x="92" y="131" class="t" font-size="12.5" font-weight="600">Release checklist</text>
+  <rect x="314" y="119" width="34" height="17" rx="8.5" fill="#232B3B"/><text x="331" y="131" class="t2 mono" font-size="10.5" text-anchor="middle">3/5</text>
+  <text x="76" y="168" class="t serif" font-size="15" font-weight="600">Before merge</text>
+  <g font-size="12">
+  <rect x="77" y="179" width="11" height="11" rx="3" fill="#E3A857"/><text x="96" y="189" class="t2 serif">Run the full test suite</text>
+  <rect x="77" y="199" width="11" height="11" rx="3" fill="#E3A857"/><text x="96" y="209" class="t2 serif">Review the auth warning</text>
+  <rect x="77.5" y="219.5" width="10" height="10" rx="3" fill="none" stroke="#67718A"/><text x="96" y="229" class="t serif">Update <tspan fill="#82A7F0" text-decoration="underline">migration notes</tspan></text>
+  <rect x="77.5" y="239.5" width="10" height="10" rx="3" fill="none" stroke="#67718A"/><text x="96" y="249" class="t serif">Tag <tspan class="mono" font-size="11">v0.2.0</tspan></text>
+  </g>
+  <rect x="76" y="266" width="268" height="40" rx="5" fill="#151A24" stroke="#262E3E"/><text x="86" y="290" class="mono" font-size="10.5" fill="#9AA3B8">$ swift test --parallel</text>
+
+  <!-- N2 terminal focused -->
+  <g filter="url(#sh2)"><rect x="440" y="100" width="400" height="280" rx="8" fill="#1A202B" stroke="#262E3E"/></g>
+  <rect x="441.5" y="101.5" width="397" height="277" rx="7" fill="none" stroke="#E3A857" stroke-width="1.5"/>
+  <path d="M441.5 132 V108.5 a7 7 0 0 1 7 -7 H831.5 a7 7 0 0 1 7 7 V132 Z" fill="#E3A857" fill-opacity=".08"/>
+  <line x1="441" y1="132" x2="839" y2="132" stroke="#262E3E"/>
+  <text x="455" y="121" class="t2 mono" font-size="10.5">&gt;_</text><text x="476" y="121" class="t" font-size="12.5" font-weight="600">claude — api</text>
+  <circle cx="568" cy="117" r="3" fill="#7CC08A"/><text x="575" y="121" class="t2" font-size="11">Running</text>
+  <rect x="680" y="109" width="140" height="18" rx="9" fill="#1B212D" stroke="#3A455C"/><text x="750" y="122" class="t" font-size="10.5" text-anchor="middle">Return to Board  ⌃⇥</text>
+  <g class="mono" font-size="11">
+    <text x="456" y="154"><tspan fill="#74BFCB">~/api ❯</tspan><tspan fill="#E7EAF2"> claude</tspan></text>
+    <text x="456" y="172" fill="#9AA3B8">│ Read src/routes.ts</text>
+    <text x="456" y="190" fill="#7CC08A">│ ✓ 14 tests passed</text>
+    <text x="456" y="208" fill="#D4A24E">│ ! 1 lint warning in auth.ts</text>
+    <text x="456" y="226" fill="#C3A6F0">│ ← @tests: suite green on main</text>
+    <text x="456" y="248" fill="#E7EAF2">&gt; fix the warning, then ask @tests</text>
+  </g>
+  <rect x="676" y="238" width="7" height="13" fill="#E7EAF2"/>
+  <circle cx="640" cy="380" r="4" fill="#151A24" stroke="#E3A857" stroke-width="1.5"/>
+
+  <!-- N3 terminal -->
+  <g filter="url(#sh2)"><rect x="440" y="430" width="400" height="240" rx="8" fill="#1A202B" stroke="#262E3E"/></g>
+  <line x1="441" y1="462" x2="839" y2="462" stroke="#262E3E"/>
+  <text x="455" y="451" class="t2 mono" font-size="10.5">&gt;_</text><text x="476" y="451" class="t" font-size="12.5" font-weight="600">codex — tests</text>
+  <circle cx="574" cy="447" r="3" fill="#7CC08A"/><text x="581" y="451" class="t2" font-size="11">Running</text>
+  <g class="mono" font-size="11">
+    <text x="456" y="484"><tspan fill="#74BFCB">~/api ❯</tspan><tspan fill="#E7EAF2"> codex</tspan></text>
+    <text x="456" y="502" fill="#9AA3B8">▌ Running swift test…</text>
+    <text x="456" y="520" fill="#7CC08A">✓ AuthTests (12)</text>
+    <text x="456" y="538" fill="#7CC08A">✓ RoutesTests (2)</text>
+    <text x="456" y="556" fill="#C3A6F0">→ sent to @api</text>
+  </g>
+  <circle cx="640" cy="430" r="4" fill="#151A24" stroke="#E3A857" stroke-width="1.5"/>
+
+  <!-- N4 file -->
+  <g filter="url(#sh2)"><rect x="60" y="420" width="300" height="230" rx="8" fill="#1A202B" stroke="#262E3E"/></g>
+  <line x1="61" y1="452" x2="359" y2="452" stroke="#262E3E"/>
+  <text x="74" y="441" fill="#4F8FD9" font-size="11" font-weight="700">TS</text><text x="96" y="441" class="t" font-size="12.5" font-weight="600">routes.ts</text>
+  <rect x="164" y="429" width="58" height="17" rx="8.5" fill="#2A2617"/><text x="193" y="441" fill="#D2B958" font-size="10" text-anchor="middle">Modified</text>
+  <text x="330" y="442" class="t2" font-size="12">↗</text>
+  <g class="mono" font-size="10.5">
+    <text x="74" y="474" fill="#4B5670">1</text><text x="92" y="474"><tspan fill="#C3A6F0">import</tspan><tspan fill="#E7EAF2"> { Router } </tspan><tspan fill="#C3A6F0">from</tspan><tspan fill="#7CC08A"> "./router"</tspan></text>
+    <text x="74" y="491" fill="#4B5670">2</text>
+    <text x="74" y="508" fill="#4B5670">3</text><text x="92" y="508"><tspan fill="#C3A6F0">export const</tspan><tspan fill="#82A7F0"> routes</tspan><tspan fill="#E7EAF2"> = [</tspan></text>
+    <text x="74" y="525" fill="#4B5670">4</text><text x="92" y="525" fill="#E7EAF2">  { path: <tspan fill="#7CC08A">"/login"</tspan>, auth },</text>
+    <text x="74" y="542" fill="#4B5670">5</text><text x="92" y="542" fill="#E7EAF2">  { path: <tspan fill="#7CC08A">"/me"</tspan>, me },</text>
+    <text x="74" y="559" fill="#4B5670">6</text><text x="92" y="559" fill="#E7EAF2">]</text>
+  </g>
+
+  <!-- N5 native app preview -->
+  <g filter="url(#sh2)"><rect x="900" y="110" width="220" height="200" rx="8" fill="#1A202B" stroke="#262E3E"/></g>
+  <line x1="901" y1="142" x2="1119" y2="142" stroke="#262E3E"/>
+  <rect x="913" y="119" width="15" height="15" rx="4" fill="#4C8DEB"/><text x="936" y="131" class="t" font-size="12.5" font-weight="600">Finder</text>
+  <rect x="1046" y="119" width="64" height="17" rx="8.5" fill="#232B3B" stroke="#3A455C"/><text x="1078" y="131" class="t2" font-size="10" text-anchor="middle">◉ Preview</text>
+  <rect x="914" y="154" width="192" height="122" rx="4" fill="url(#hatch)"/>
+  <rect x="924" y="164" width="172" height="102" rx="4" fill="#232A36" stroke="#3A455C"/>
+  <rect x="924" y="164" width="44" height="102" fill="#1E2430"/><rect x="976" y="176" width="40" height="30" rx="3" fill="#2E3747"/><rect x="1024" y="176" width="40" height="30" rx="3" fill="#2E3747"/><rect x="976" y="214" width="40" height="30" rx="3" fill="#2E3747"/>
+  <text x="1010" y="296" class="tm" font-size="10.5" text-anchor="middle">Picture only · Open Finder to use it</text>
+
+  <!-- N6 web -->
+  <g filter="url(#sh2)"><rect x="900" y="400" width="220" height="200" rx="8" fill="#1A202B" stroke="#262E3E"/></g>
+  <line x1="901" y1="432" x2="1119" y2="432" stroke="#262E3E"/>
+  <circle cx="920" cy="416" r="6" fill="none" stroke="#9AA3B8" stroke-width="1.2"/><text x="934" y="421" class="t" font-size="12.5" font-weight="600">localhost:5173</text>
+  <text x="1010" y="505" class="t2" font-size="12" text-anchor="middle">Not loaded</text>
+  <rect x="975" y="518" width="70" height="22" rx="5" fill="#2C3547"/><text x="1010" y="533" class="t" font-size="11.5" text-anchor="middle">Load</text>
+
+  <!-- zoom capsule -->
+  <rect x="1010" y="690" width="128" height="26" rx="13" fill="#1B212D" stroke="#262E3E"/>
+  <text x="1030" y="708" class="t2" font-size="14" text-anchor="middle">−</text><text x="1074" y="707" class="t mono" font-size="11" text-anchor="middle">100% ⌄</text><text x="1118" y="708" class="t2" font-size="14" text-anchor="middle">+</text>
+
+  <!-- callouts -->
+  <g class="callout">
+    <g transform="translate(160,90)"><circle r="11"/><text y="4">1</text></g>
+    <g transform="translate(685,90)"><circle r="11"/><text y="4">2</text></g>
+    <g transform="translate(1080,92)"><circle r="11"/><text y="4">3</text></g>
+    <g transform="translate(860,140)"><circle r="11"/><text y="4">4</text></g>
+    <g transform="translate(760,405)"><circle r="11"/><text y="4">5</text></g>
+    <g transform="translate(400,190)"><circle r="11"/><text y="4">6</text></g>
+    <g transform="translate(40,140)"><circle r="11"/><text y="4">7</text></g>
+    <g transform="translate(40,450)"><circle r="11"/><text y="4">8</text></g>
+    <g transform="translate(1140,150)"><circle r="11"/><text y="4">9</text></g>
+    <g transform="translate(990,703)"><circle r="11"/><text y="4">10</text></g>
+  </g>
+</svg></div>
+<figcaption>Canvas proposal. Compare with <code>01-canvas-overview.jpg</code>: no title row, no footers, no link circles, no hint text, four bar controls instead of six, one zoom capsule instead of five buttons.</figcaption>
+</figure>
+<ol class="notes">
+<li><b class="n">1</b><span>Canvas name pull-down (Rename, Duplicate, Open Canvas…, Close). Replaces the title row and the Saved Canvases entry.</span></li>
+<li><b class="n">2</b><span>Link status item. Opens a popover with per-link Pause/Resume. Replaces the full-width links bar.</span></li>
+<li><b class="n">3</b><span>Board | List segmented control, "+" Add, Arrange, overflow. Four controls, all enabled.</span></li>
+<li><b class="n">4</b><span>Focused terminal: gold inner ring, header tint, "Return to Board ⌃⇥". Native ANSI colours.</span></li>
+<li><b class="n">5</b><span>Live message link: short vertical route between facing ports, filled arrows both ends, badge with word and count, one dot per real message.</span></li>
+<li><b class="n">6</b><span>Relationship: dashed, open arrow, label pill.</span></li>
+<li><b class="n">7</b><span>Markdown note in Read mode: New York prose, tasks toggle in place, link in <code>info</code> blue.</span></li>
+<li><b class="n">8</b><span>File node shows the file, with "Modified" capsule and "Open in Editor".</span></li>
+<li><b class="n">9</b><span>Mac-app node: "Preview" badge, hatched frame, caption. It cannot look interactive.</span></li>
+<li><b class="n">10</b><span>Zoom capsule: −, percentage menu, +.</span></li>
+</ol>
+
+<h3>9.2 Editor with Source Control</h3>
+<figure>
+<div class="mock" role="img" aria-label="Proposed editor and Source Control layout with a Files sidebar, diff editor and a 340 point Source Control panel.">
+<svg viewBox="0 0 1200 760" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="760" rx="10" class="app"/>
+  <circle cx="20" cy="19" r="6" fill="#FF5F57"/><circle cx="40" cy="19" r="6" fill="#FEBC2E"/><circle cx="60" cy="19" r="6" fill="#28C840"/>
+  <rect x="80" y="11" width="18" height="15" rx="3" fill="none" stroke="#9AA3B8" stroke-width="1.3"/><line x1="86" y1="11" x2="86" y2="26" stroke="#9AA3B8" stroke-width="1.3"/>
+  <!-- files sidebar -->
+  <text x="18" y="62" class="t" font-size="12.5" font-weight="600">rafu-screen-catalog</text><text x="150" y="62" class="t2" font-size="10">⌄</text>
+  <g fill="none" stroke="#9AA3B8" stroke-width="1.2" transform="translate(10,0)"><path d="M178 54 h12 l-4 5 v5 l-4 2 v-7 z"/><rect x="198" y="53" width="10" height="12" rx="1.5"/><line x1="203" y1="56" x2="203" y2="62"/><line x1="200" y1="59" x2="206" y2="59"/></g>
+  <g font-size="12.5">
+    <text x="26" y="96" fill="#6FAECB">▤</text><text x="44" y="96" fill="#6FAECB">Checklist.md</text><text x="206" y="96" fill="#6FAECB" class="mono" font-size="11">U</text>
+    <rect x="12" y="106" width="210" height="24" rx="4" fill="#242C3C"/>
+    <text x="26" y="122" fill="#F05138">◆</text><text x="44" y="122" class="t">Demo.swift</text><text x="206" y="122" fill="#D2B958" class="mono" font-size="11">M</text>
+    <text x="26" y="148" class="t2">▤</text><text x="44" y="148" class="t">README.md</text>
+  </g>
+  <!-- deck -->
+  <rect x="236" y="38" width="918" height="694" rx="6" fill="#151A24" stroke="#262E3E"/>
+  <!-- tabs -->
+  <rect x="236" y="38" width="572" height="30" fill="#10141C"/>
+  <path d="M244 68 V46 a4 4 0 0 1 4 -4 H412 a4 4 0 0 1 4 4 V68" fill="#151A24" stroke="#262E3E"/>
+  <text x="258" y="60" class="t2" font-size="11">⇆</text><text x="276" y="60" class="t" font-size="12.5" font-style="italic">Diff · Demo.swift</text><text x="398" y="60" class="t2" font-size="12">×</text>
+  <text x="436" y="60" class="t2" font-size="12.5">README.md</text>
+  <!-- diff header -->
+  <text x="250" y="90" class="t2" font-size="12">rafu-screen-catalog › <tspan fill="#E7EAF2">Demo.swift</tspan>  ·  Working Tree ↔ HEAD</text>
+  <text x="742" y="90" fill="#7CC08A" class="mono" font-size="11.5">+1</text><text x="770" y="90" fill="#E06C75" class="mono" font-size="11.5">−1</text>
+  <line x1="236" y1="102" x2="808" y2="102" stroke="#262E3E"/>
+  <rect x="236" y="103" width="572" height="26" fill="#1B212D"/>
+  <text x="250" y="120" class="tm mono" font-size="11">@@ −4,6 +4,6 @@ struct Greeting {</text>
+  <rect x="706" y="108" width="88" height="17" rx="4" fill="#151A24" stroke="#3A455C"/><text x="750" y="120" class="t" font-size="10.5" text-anchor="middle">Stage Hunk</text>
+  <line x1="522" y1="129" x2="522" y2="420" stroke="#262E3E"/>
+  <g class="mono" font-size="11.5">
+    <text x="252" y="150" fill="#4B5670">4</text><text x="276" y="150" class="t">  let name: String</text>
+    <text x="538" y="150" fill="#4B5670">4</text><text x="562" y="150" class="t">  let name: String</text>
+    <text x="252" y="172" fill="#4B5670">6</text><text x="276" y="172" class="t">  var message: String {</text>
+    <text x="538" y="172" fill="#4B5670">6</text><text x="562" y="172" class="t">  var message: String {</text>
+    <rect x="237" y="180" width="285" height="20" fill="#E06C75" fill-opacity=".14"/><rect x="523" y="180" width="285" height="20" fill="#7CC08A" fill-opacity=".14"/>
+    <text x="252" y="194" fill="#E06C75">7</text><text x="264" y="194" fill="#E06C75">−</text><text x="276" y="194" class="t">    "<tspan fill="#E06C75">Hello</tspan>, \(name)!"</text>
+    <text x="538" y="194" fill="#7CC08A">7</text><text x="550" y="194" fill="#7CC08A">+</text><text x="562" y="194" class="t">    "<tspan fill="#7CC08A">Welcome</tspan>, \(name)!"</text>
+    <text x="252" y="216" fill="#4B5670">8</text><text x="276" y="216" class="t">  }</text>
+    <text x="538" y="216" fill="#4B5670">8</text><text x="562" y="216" class="t">  }</text>
+  </g>
+  <!-- right panel -->
+  <line x1="808" y1="38" x2="808" y2="732" stroke="#262E3E"/>
+  <text x="824" y="60" class="t2" font-size="12">⑂</text><text x="840" y="60" class="t" font-size="13" font-weight="600">main</text><text x="874" y="60" class="t2" font-size="10">⌄</text>
+  <rect x="900" y="47" width="78" height="20" rx="10" fill="#1B212D" stroke="#262E3E"/><text x="939" y="61" class="t2" font-size="10.5" text-anchor="middle">No remote</text>
+  <text x="1104" y="61" class="t2" font-size="13">↻</text><text x="1128" y="61" class="t2" font-size="14">⋯</text>
+  <rect x="822" y="80" width="318" height="24" rx="5" fill="#1B212D" stroke="#262E3E"/><rect x="823" y="81" width="106" height="22" rx="4" fill="#2C3547"/>
+  <text x="876" y="96" class="t" font-size="11.5" text-anchor="middle">Changes  2</text><text x="981" y="96" class="t2" font-size="11.5" text-anchor="middle">History</text><text x="1087" y="96" class="t2" font-size="11.5" text-anchor="middle">Worktrees</text>
+  <text x="824" y="134" class="t" font-size="12.5" font-weight="600">Changes</text>
+  <text x="1048" y="134" class="t2" font-size="11">View as ⌄</text><rect x="1118" y="124" width="14" height="12" rx="2" fill="none" stroke="#9AA3B8" stroke-width="1.2"/>
+  <g font-size="12.5">
+    <rect x="824.5" y="150.5" width="12" height="12" rx="3" fill="none" stroke="#67718A"/><text x="846" y="161" fill="#9AA3B8">▤</text><text x="864" y="161" class="t">Checklist.md</text>
+    <rect x="1116" y="148" width="18" height="16" rx="4" fill="#6FAECB" fill-opacity=".18"/><text x="1125" y="160" fill="#6FAECB" class="mono" font-size="10.5" text-anchor="middle">U</text>
+    <rect x="824.5" y="174.5" width="12" height="12" rx="3" fill="none" stroke="#67718A"/><text x="846" y="185" fill="#F05138">◆</text><text x="864" y="185" class="t">Demo.swift</text>
+    <rect x="1116" y="172" width="18" height="16" rx="4" fill="#D2B958" fill-opacity=".18"/><text x="1125" y="184" fill="#D2B958" class="mono" font-size="10.5" text-anchor="middle">M</text>
+  </g>
+  <text x="824" y="226" class="t2" font-size="11">⌄</text><text x="838" y="226" class="t" font-size="12.5" font-weight="600">Stashes</text><text x="892" y="226" class="t2 mono" font-size="11">1</text>
+  <text x="826" y="252" class="t2" font-size="12">▭</text><text x="846" y="252" class="t" font-size="12.5">Canvas notes</text><text x="1134" y="252" class="t2" font-size="11.5" text-anchor="end">2 h ago</text>
+  <!-- commit -->
+  <line x1="809" y1="600" x2="1153" y2="600" stroke="#262E3E"/>
+  <rect x="822" y="614" width="318" height="56" rx="5" fill="#10141C" stroke="#3A455C"/>
+  <text x="834" y="634" class="tm" font-size="12">Message</text>
+  <text x="1120" y="636" fill="#9AA3B8" font-size="13">✦</text>
+  <text x="824" y="690" class="t2" font-size="11">Commits 2 files</text>
+  <rect x="972" y="680" width="74" height="24" rx="5" fill="#2C3547"/><text x="1009" y="696" class="t" font-size="11.5" text-anchor="middle">Stage All</text>
+  <rect x="1054" y="680" width="86" height="24" rx="5" fill="#E3A857"/><text x="1097" y="696" fill="#201709" font-size="11.5" font-weight="600" text-anchor="middle">Commit</text>
+  <!-- rail + status -->
+  <g fill="none" stroke="#9AA3B8" stroke-width="1.4"><circle cx="1178" cy="56" r="6"/><line x1="1182" y1="60" x2="1187" y2="65"/></g>
+  <rect x="1166" y="84" width="24" height="26" rx="5" fill="#242C3C"/><path d="M1172 90 v14 M1184 90 v4 a6 6 0 0 1 -6 6 h-6" fill="none" stroke="#E7EAF2" stroke-width="1.4"/>
+  <g fill="none" stroke="#9AA3B8" stroke-width="1.4"><rect x="1169" y="128" width="18" height="14" rx="2"/><rect x="1169" y="166" width="18" height="14" rx="2"/></g>
+  <circle cx="18" cy="747" r="3" fill="#7CC08A"/><text x="28" y="751" class="t2" font-size="11">Local</text><text x="70" y="751" class="t2" font-size="11">⑂ main</text>
+  <text x="1150" y="751" class="t2 mono" font-size="11" text-anchor="end">145 MB</text>
+  <!-- callouts -->
+  <g class="callout">
+    <g transform="translate(130,40)"><circle r="11"/><text y="4">1</text></g>
+    <g transform="translate(330,26)"><circle r="11"/><text y="4">2</text></g>
+    <g transform="translate(680,90)"><circle r="11"/><text y="4">3</text></g>
+    <g transform="translate(694,148)"><circle r="11"/><text y="4">4</text></g>
+    <g transform="translate(990,26)"><circle r="11"/><text y="4">5</text></g>
+    <g transform="translate(1100,112)"><circle r="11"/><text y="4">6</text></g>
+    <g transform="translate(1150,168)"><circle r="11"/><text y="4">7</text></g>
+    <g transform="translate(1010,248)"><circle r="11"/><text y="4">8</text></g>
+    <g transform="translate(1100,612)"><circle r="11"/><text y="4">9</text></g>
+    <g transform="translate(230,26)"><circle r="11"/><text y="4">10</text></g>
+  </g>
+</svg></div>
+<figcaption>Editor and Git proposal. Compare with <code>git-changes.jpg</code> and <code>git-diff.jpg</code>.</figcaption>
+</figure>
+<ol class="notes">
+<li><b class="n">1</b><span>Workspace name in the Files header, with Filter and New icons.</span></li>
+<li><b class="n">2</b><span>Preview tab marked by italic title, not by a dashed gold line. Close only on hover/selected tab.</span></li>
+<li><b class="n">3</b><span>One diff header: breadcrumb, comparison, counts. The tab is not repeated.</span></li>
+<li><b class="n">4</b><span>Neutral "Stage Hunk"; no decorative ellipsis.</span></li>
+<li><b class="n">5</b><span>Branch pull-down and a neutral "No remote" capsule instead of a gold sync icon.</span></li>
+<li><b class="n">6</b><span>Section picker at 340 pt: no wrapped words.</span></li>
+<li><b class="n">7</b><span>One-line rows; status letter in a shape, with tooltip; same letters as the Files sidebar.</span></li>
+<li><b class="n">8</b><span>Stash row on one line with relative date; menu on hover.</span></li>
+<li><b class="n">9</b><span>Generate button inside the message field; Commit is the one gold button.</span></li>
+<li><b class="n">10</b><span>Deck border neutral. No permanent gold frame.</span></li>
+</ol>
+
+<h3>9.3 Settings window</h3>
+<figure>
+<div class="mock" role="img" aria-label="Proposed standard Settings window with toolbar panes and the Agents pane as a table with one expanded row.">
+<svg viewBox="0 0 1000 600" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1000" height="600" class="app"/>
+  <rect x="120" y="20" width="760" height="560" rx="12" fill="#151A24" stroke="#3A455C"/>
+  <circle cx="142" cy="40" r="6" fill="#FF5F57"/><circle cx="162" cy="40" r="6" fill="#FEBC2E"/><circle cx="182" cy="40" r="6" fill="#28C840"/>
+  <text x="500" y="44" class="t" font-size="13" font-weight="600" text-anchor="middle">Agents</text>
+  <!-- toolbar panes -->
+  <g font-size="10.5" text-anchor="middle">
+    <g transform="translate(250,0)"><circle cx="0" cy="74" r="9" fill="none" stroke="#9AA3B8" stroke-width="1.3"/><text y="102" class="t2">General</text></g>
+    <g transform="translate(330,0)"><circle cx="0" cy="74" r="9" fill="none" stroke="#9AA3B8" stroke-width="1.3"/><circle cx="-3" cy="72" r="2" fill="#9AA3B8"/><text y="102" class="t2">Appearance</text></g>
+    <g transform="translate(410,0)"><text y="79" class="t2" font-size="16">✦</text><text y="102" class="t2">AI</text></g>
+    <g transform="translate(490,0)"><rect x="-9" y="65" width="18" height="18" rx="3" fill="none" stroke="#9AA3B8" stroke-width="1.3"/><text y="102" class="t2">Languages</text></g>
+    <g transform="translate(570,0)"><path d="M-9 82 v-6 M-3 82 v-10 M3 82 v-14 M9 82 v-8" stroke="#9AA3B8" stroke-width="2"/><text y="102" class="t2">Usage</text></g>
+    <rect x="610" y="58" width="80" height="52" rx="7" fill="#242C3C"/>
+    <g transform="translate(650,0)"><circle cx="-4" cy="72" r="5" fill="none" stroke="#E7EAF2" stroke-width="1.3"/><circle cx="6" cy="74" r="4" fill="none" stroke="#E7EAF2" stroke-width="1.3"/><path d="M-12 84 a8 6 0 0 1 16 0 M2 84 a6 5 0 0 1 12 0" fill="none" stroke="#E7EAF2" stroke-width="1.3"/><text y="102" class="t" font-weight="600">Agents</text></g>
+    <g transform="translate(730,0)"><circle cx="0" cy="74" r="3" fill="#9AA3B8"/><circle cx="-8" cy="70" r="2.5" fill="#9AA3B8"/><circle cx="8" cy="70" r="2.5" fill="#9AA3B8"/><circle cx="0" cy="83" r="2.5" fill="#9AA3B8"/><text y="102" class="t2">Ensemble</text></g>
+  </g>
+  <line x1="121" y1="118" x2="879" y2="118" stroke="#262E3E"/>
+  <!-- group box -->
+  <text x="160" y="146" class="t" font-size="13" font-weight="600">Agent CLIs</text>
+  <text x="160" y="164" class="t2" font-size="11.5">Rafu starts these only from a visible action. Rafu holds no tokens.</text>
+  <rect x="160" y="176" width="680" height="300" rx="8" fill="#1B212D" stroke="#262E3E"/>
+  <g font-size="10.5" class="tm"><text x="232" y="196">Agent</text><text x="410" y="196">Version</text><text x="500" y="196">Sign-in</text><text x="640" y="196">Default model</text></g>
+  <line x1="160" y1="204" x2="840" y2="204" stroke="#262E3E"/>
+  <!-- rows -->
+  <g font-size="12">
+    <!-- row1 expanded -->
+    <rect x="161" y="205" width="678" height="96" fill="#242C3C" fill-opacity=".55"/>
+    <rect x="176" y="214" width="26" height="15" rx="7.5" fill="#E3A857"/><circle cx="194" cy="221.5" r="5.5" fill="#FFF9EE"/>
+    <text x="214" y="226" fill="#D97757" font-size="13">✳</text><text x="232" y="226" class="t" font-weight="600">Claude Code</text>
+    <text x="410" y="226" class="t2 mono" font-size="11">2.1.302</text>
+    <text x="500" y="226" fill="#7CC08A">✓</text><text x="514" y="226" class="t2">Signed in</text>
+    <rect x="640" y="213" width="110" height="20" rx="5" fill="#2C3547"/><text x="650" y="227" class="t" font-size="11.5">Opus</text><text x="738" y="227" class="t2" font-size="10">⌄</text>
+    <text x="232" y="256" class="t2" font-size="11.5">Location</text><text x="300" y="256" class="t mono" font-size="11">~/.local/bin/claude</text><text x="452" y="256" fill="#82A7F0" font-size="11.5">Show in Finder</text>
+    <text x="232" y="284" class="t2" font-size="11.5">Custom model</text><rect x="320" y="271" width="220" height="20" rx="5" fill="#10141C" stroke="#3A455C"/><text x="330" y="285" class="tm" font-size="11.5">Type a model ID</text>
+    <line x1="160" y1="301" x2="840" y2="301" stroke="#262E3E"/>
+    <!-- row2 -->
+    <rect x="176" y="312" width="26" height="15" rx="7.5" fill="#E3A857"/><circle cx="194" cy="319.5" r="5.5" fill="#FFF9EE"/>
+    <text x="214" y="324" class="t2" font-size="12">◎</text><text x="232" y="324" class="t">Codex</text>
+    <text x="410" y="324" class="t2 mono" font-size="11">0.163.0</text>
+    <text x="500" y="324" fill="#7CC08A">✓</text><text x="514" y="324" class="t2">Signed in</text>
+    <rect x="640" y="311" width="130" height="20" rx="5" fill="#2C3547"/><text x="650" y="325" class="t" font-size="11.5">GPT-5.6 Terra</text><text x="758" y="325" class="t2" font-size="10">⌄</text>
+    <line x1="160" y1="340" x2="840" y2="340" stroke="#262E3E"/>
+    <!-- row3 -->
+    <rect x="176" y="351" width="26" height="15" rx="7.5" fill="#E3A857"/><circle cx="194" cy="358.5" r="5.5" fill="#FFF9EE"/>
+    <text x="214" y="363" class="t2" font-size="12">▢</text><text x="232" y="363" class="t">OpenCode</text>
+    <text x="410" y="363" class="t2 mono" font-size="11">1.19.3</text>
+    <text x="500" y="363" fill="#7CC08A">✓</text><text x="514" y="363" class="t2">Signed in</text>
+    <rect x="640" y="350" width="150" height="20" rx="5" fill="#2C3547"/><text x="650" y="364" class="t" font-size="11.5">opencode-go/kimi-k3</text><text x="778" y="364" class="t2" font-size="10">⌄</text>
+    <text x="808" y="364" class="t2" font-size="12">↻</text>
+    <line x1="160" y1="379" x2="840" y2="379" stroke="#262E3E"/>
+    <!-- row4 -->
+    <rect x="176" y="390" width="26" height="15" rx="7.5" fill="#E3A857"/><circle cx="194" cy="397.5" r="5.5" fill="#FFF9EE"/>
+    <text x="214" y="402" class="t2" font-size="12">◇</text><text x="232" y="402" class="t">Cline</text>
+    <text x="410" y="402" class="t2 mono" font-size="11">unknown</text>
+    <text x="500" y="402" fill="#D4A24E">△</text><text x="514" y="402" class="t2">Update needed</text>
+    <rect x="640" y="389" width="110" height="20" rx="5" fill="#2C3547"/><text x="650" y="403" class="t" font-size="11.5">CLI default</text><text x="738" y="403" class="t2" font-size="10">⌄</text>
+    <line x1="160" y1="418" x2="840" y2="418" stroke="#262E3E"/>
+    <!-- row5 -->
+    <rect x="176" y="429" width="26" height="15" rx="7.5" fill="#E3A857"/><circle cx="194" cy="436.5" r="5.5" fill="#FFF9EE"/>
+    <text x="214" y="441" class="t2" font-size="12">K</text><text x="232" y="441" class="t">Kimi CLI</text>
+    <text x="410" y="441" class="t2 mono" font-size="11">0.29.1</text>
+    <text x="500" y="441" class="t2">?</text><text x="514" y="441" class="t2">Unknown</text>
+    <rect x="640" y="428" width="110" height="20" rx="5" fill="#2C3547"/><text x="650" y="442" class="t" font-size="11.5">CLI default</text><text x="738" y="442" class="t2" font-size="10">⌄</text>
+  </g>
+  <text x="500" y="468" class="tm" font-size="11" text-anchor="middle">+ 2 more (Gemini CLI, Cursor CLI) — scroll</text>
+  <text x="160" y="506" class="t2" font-size="11.5">Unknown sign-in does not block runs. Rafu reads only the CLI's own status command.</text>
+  <rect x="740" y="530" width="100" height="24" rx="5" fill="#2C3547"/><text x="790" y="546" class="t" font-size="11.5" text-anchor="middle">Refresh All</text>
+  <g class="callout">
+    <g transform="translate(650,130)"><circle r="11"/><text y="4">1</text></g>
+    <g transform="translate(150,222)"><circle r="11"/><text y="4">2</text></g>
+    <g transform="translate(860,222)"><circle r="11"/><text y="4">3</text></g>
+    <g transform="translate(560,282)"><circle r="11"/><text y="4">4</text></g>
+    <g transform="translate(860,402)"><circle r="11"/><text y="4">5</text></g>
+  </g>
+</svg></div>
+<figcaption>Settings proposal: the standard <code>Settings</code> scene, toolbar panes, a grouped table. Compare with <code>settings-agents.jpg</code> (seven 5-line blocks, jagged popups).</figcaption>
+</figure>
+<ol class="notes">
+<li><b class="n">1</b><span>Standard Settings window (<kbd>⌘,</kbd>), toolbar panes with symbol + label. The window title is the pane name.</span></li>
+<li><b class="n">2</b><span>Enable switch first in each row; Indigo accent tints the system switch.</span></li>
+<li><b class="n">3</b><span>Default-model popups sized to content and aligned on one column. Refresh is an icon only where supported.</span></li>
+<li><b class="n">4</b><span>Selecting a row expands details: short path with Show in Finder, one combo field for a custom model (no "Use" button).</span></li>
+<li><b class="n">5</b><span>Sign-in state as glyph + word: ✓ Signed in, △ Update needed, ? Unknown.</span></li>
+</ol>
+
+<!-- ============================================================ 10 -->
+<h2 id="sequence"><span class="num">10</span>Implementation sequence</h2>
+<p>Early steps change tokens, copy and layout constants. They make the app look better within days and carry little risk. Later steps change interaction and need tests and measurements. Each step follows the repository workflow (advisor brief → implementor → verification → documentor).</p>
+<div class="scroll wide"><table>
+<tr><th>Step</th><th>Content</th><th>Findings</th><th>Proof</th></tr>
+<tr><td class="k">A · Calm the surface<br>(≈ 1 week)</td><td>Neutral deck border. Theme-tinted focus rings everywhere. Gold budget (ellipses, sync, text buttons). Title-case headers. Glossary pass. Right-panel width 300/340 pt and no-wrap pickers. Search toggles as icons. Tab close on hover. Find bar compaction. Status bar labels.</td><td>E1, E4–E6, E9, E12, G1, G5, G12, N1, N2 (headers), T2 (words), T7, 15</td><td>Before/after captures of the same 44 screens; serial and parallel tests; launch check with a second window.</td></tr>
+<tr><td class="k">B · Panels and menus<br>(≈ 1–2 weeks)</td><td>Source Control rows, branch and sync pull-downs, commit field. Stash and worktree rows. Terminals panel: Start Agent menu, names, split "+". Ensemble "+" menu and clipping fix. Menu grammar (ellipsis, separators, icons on all action menus).</td><td>G2–G16, T1–T8, N1, N4–N6</td><td>Panel at 300 pt and 520 pt; VoiceOver pass on rows; menu inventory diff against <code>docs/screenshots/README.md</code>.</td></tr>
+<tr><td class="k">C · Canvas chrome<br>(≈ 1–2 weeks)</td><td>One Canvas bar, name pull-down, segmented Board/List, zoom capsule. Node header (state word, hover actions), no footers, ports, resize zones, shadow and bring-to-front. Canvas List as tables. Open Canvas sheet. File excerpt and Mac-app "Preview" badge.</td><td>C1–C19</td><td>Canvas with 100 cards: frame time while panning (Instruments, Release). Keyboard-only walk-through.</td></tr>
+<tr><td class="k">D · Focus and connect<br>(≈ 2 weeks)</td><td>First-click terminal focus, <kbd>⌃⇥</kbd> Return to Board, keyboard map (arrows, <kbd>Tab</kbd>, <kbd>Return</kbd>). Drag-to-connect with targets, snap, cancel. Connect sheet as accessible path.</td><td>7.2, 7.5, 7.7</td><td>CLI key test matrix (Claude Code, Codex, vim, less): every key in 7.7 reaches the PTY.</td></tr>
+<tr><td class="k">E · Edges and live states<br>(≈ 2–3 weeks)</td><td>Side-aware routing, hit-testing, selection, reconnection, context menu, per-edge state badges, event dots, link status popover, zoom faces, Show Links menu. Accessibility elements for edges.</td><td>7.6</td><td>200 edges at 10%–400% zoom: no dropped frames on move; event dot idle cost 0 (no running timeline).</td></tr>
+<tr><td class="k">F · Markdown notes<br>(≈ 1–2 weeks)</td><td>Read mode via the shared native Markdown renderer; Edit mode in TextKit; task toggling; Format menu and shortcuts; zoom summary face.</td><td>7.8</td><td>Memory with 20 notes open; typing latency in Edit mode (signposts, p95 ≤ 1 frame).</td></tr>
+<tr><td class="k">G · Settings window<br>(≈ 1 week)</td><td>Settings scene only; toolbar panes; grouped forms; Appearance cards as radio; AI provider list; Language Servers and Agents tables; Usage drag order.</td><td>S1–S8</td><td><kbd>⌘,</kbd> from any window; one Settings window for all workspace windows.</td></tr>
+<tr><td class="k">H · Motion and haptics<br>(≈ 1 week)</td><td>Apply section 08 values; Reduce Motion paths; optional haptics with the General setting.</td><td>08</td><td>Reduce Motion on/off captures; Force Touch trackpad check; mouse check (no feedback, no error).</td></tr>
+</table></div>
+
+<!-- ============================================================ 11 -->
+<h2 id="criteria"><span class="num">11</span>Acceptance criteria</h2>
+<div class="cols">
+<div class="panel">
+<h4 style="margin-top:0">Visual</h4>
+<ul>
+<li>No permanent gold frame. Gold appears only for focus, selection, live links and one primary action per view (audit all 44 screens).</li>
+<li>No word breaks inside a word in any control at the panel minimum width (300 pt).</li>
+<li>No clipped panel content at minimum widths.</li>
+<li>No all-caps headers; title case everywhere.</li>
+<li>Popups in Settings are content-width; right edges in a group align.</li>
+<li>Only theme tokens in workbench surfaces (no off-theme grey, as in <code>ensemble-new-run.jpg</code>).</li>
+<li>Canvas bar has at most 4 controls plus the name and status item; zoom has 3.</li>
+<li>Every Canvas node has no footer; card type is legible from the header glyph.</li>
+<li>Khadi (light) captures exist for every screen and pass the same checks.</li>
+</ul></div>
+<div class="panel">
+<h4 style="margin-top:0">Interaction</h4>
+<ul>
+<li>Drag on a header always moves; drag in a body never moves.</li>
+<li>One click in a terminal body lets the next key reach the PTY.</li>
+<li><kbd>esc</kbd>, <kbd>⌃C</kbd>, <kbd>⌃D</kbd>, <kbd>Tab</kbd> reach the CLI while focused; <kbd>⌃⇥</kbd> returns to the board.</li>
+<li>A connection can be made with the pointer only, and with the keyboard only.</li>
+<li>Every edge can be selected, relabelled, paused/resumed (message links) and deleted; each action is undoable.</li>
+<li>Each link state is distinguishable in a greyscale capture.</li>
+<li>Saved boards reopen with message links Paused and say so once.</li>
+<li>A Mac-app node never shows a text cursor or hover highlight in its picture.</li>
+<li>Note tasks toggle in Read mode and undo with <kbd>⌘Z</kbd>.</li>
+<li>Every icon-only control has a tooltip; every hidden contextual action is also in a menu.</li>
+</ul></div>
+<div class="panel">
+<h4 style="margin-top:0">Accessibility</h4>
+<ul>
+<li>VoiceOver reads each node (type, title, state) and each edge (kind, ends, state, label).</li>
+<li>VoiceOver custom actions cover Move, Resize, Connect, Pause/Resume, Remove.</li>
+<li>Full Keyboard Access reaches every control, including the Canvas bar, ports (via Connect sheet) and edges (via List).</li>
+<li>Text contrast ≥ 4.5:1 for body and ≥ 3:1 for large text and UI glyphs in Indigo and Khadi; edge strokes ≥ 3:1 against the board.</li>
+<li>Increase Contrast thickens focus and borders as in section 06.</li>
+<li>Reduce Motion removes all travel, scale and spring motion listed in section 08.</li>
+<li>No information only in colour or only in haptics.</li>
+<li>Minimum text 11 pt at 100%; node titles ≥ 11 screen-pt at every zoom.</li>
+</ul></div>
+<div class="panel">
+<h4 style="margin-top:0">Performance (Release build, measured)</h4>
+<ul>
+<li>Canvas pan and zoom with 100 nodes and 200 edges: p95 frame ≤ 16.7 ms on the reference Mac (Instruments).</li>
+<li>Typing in editor, terminal and note: p95 ≤ one frame (signposts), unchanged from before.</li>
+<li>Idle board: 0 running animations, 0 timeline updates; CPU at idle within 1% of the pre-change baseline.</li>
+<li>Board zoom never resizes a PTY; a resize drag causes one PTY size change.</li>
+<li>Idle workspace memory stays below the 150 MB target; note Read mode adds ≤ 1 MB per visible note (measure).</li>
+<li>File-node excerpts load lazily for visible nodes only.</li>
+<li>Haptic calls ≤ 10 per second worst case; none when no Force Touch trackpad is present.</li>
+</ul></div>
+</div>
+
+<div class="callout" style="margin-top:36px"><b>What this review did not do.</b> It did not run the app, test any interaction, or measure performance. Findings tagged <span class="tag test">Needs test</span> and all <span class="tag code">Code</span> findings need confirmation in Rafu Lightning before implementation.</div>
+
+<p style="margin-top:48px;color:var(--fg2);font-size:13px">Sources: the 44 images in <code>docs/screenshots</code> and its README; <code>WorkspaceCanvasView.swift</code>, <code>CanvasSessionLinksBar.swift</code>, <code>CanvasNoteEditor.swift</code>, <code>RafuMetrics</code>, <code>Resources/Themes/indigo.json</code> and <code>khadi.json</code>. Apple documentation: <a href="https://developer.apple.com/documentation/appkit/nshapticfeedbackmanager">NSHapticFeedbackManager</a>, <a href="https://developer.apple.com/documentation/appkit/nshapticfeedbackperformer">NSHapticFeedbackPerformer</a>, <a href="https://developer.apple.com/documentation/swiftui/sensoryfeedback">SensoryFeedback</a>.</p>
+
+</div>

@@ -18,11 +18,15 @@ struct RafuApplication: App {
         .windowStyle(.hiddenTitleBar)
         .commands {
             RafuAppCommands()
+            CanvasNoteCommands()
         }
 
         Settings {
             RafuSettingsView()
         }
-        .defaultSize(width: 760, height: 620)
+        .defaultSize(
+            width: SettingsPresentationLayout.windowWidth,
+            height: SettingsPresentationLayout.idealPaneHeight
+        )
     }
 }

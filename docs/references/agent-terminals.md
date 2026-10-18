@@ -133,6 +133,12 @@ before handing the `NSImage` to AppKit — and is deliberately **not** used: UX-
 moved agent identity out of the menu entirely, which is also the product
 direction (no popups for a primary action).
 
+**macOS redesign update (macOS build verification pending):** the Terminals
+panel now offers "Start Agent ⌄", which opens a **popover**, not a `Menu`. This
+1×1 pt `NSMenu` behaviour is the reason a popover is used: its rows are normal
+SwiftUI views and render the vendor mark through `FileIconView` at 16 pt. The
+nuance above still applies to any other `Menu` that would carry a vendor mark.
+
 ## Inline agent launcher contract (UX-03)
 
 The Terminals panel's `+` menu now carries shell choices only. Agents launch
@@ -147,7 +153,16 @@ from an inline **Agents** section between the panel header and the session list:
   activates by Return/Space. UX-03 mints **no** per-agent global chord: ⌘⇧ is
   already taken by n/f/g/l/k/p/e/a, and ⌘⇧A opens the Agent Terminal sheet.
 
-### The launcher is an icon-only grid (UX2-03)
+### The launcher was an icon-only grid (UX2-03; superseded)
+
+> **Superseded by the macOS redesign (macOS build verification pending).** The
+> icon grid below is no longer the launcher. "Start Agent ⌄" opens a popover
+> list that shows each agent's full name and its state. While the probe runs, the
+> popover reads "Checking N agents…" instead of the `Agents (checking…)` header
+> described below. The grid text is kept as history for the rules that still
+> hold: unavailable providers stay visible with a reason, the name is never
+> carried by an icon alone, and `nil` (probing) must never look like `[]`
+> (resolved and empty).
 
 The original anatomy — full-width rows with mark, name, and a status line, in a
 240 pt scroller — read as heavy for what is a seven-item launcher. It is now a
@@ -209,7 +224,7 @@ file tree at the agent assets would rewrite byte-pinned decoration for no
 product gain.
 
 One asset did need correcting: dogfooding showed the lobe `codex` mark was not
-recognisable as Codex, which matters more now that the launcher is icon-only.
+recognisable as Codex, which mattered more while the launcher was icon-only.
 UX2-03 refreshed `agent-codex.svg` from the same pinned 1.94.0 catalog using the
 `openai` slug — the fix went through the documented refresh path, *not* by
 pointing the agent catalog at the file tree's `codex.svg`. Do the same for any

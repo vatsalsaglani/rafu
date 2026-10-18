@@ -6,6 +6,24 @@
 - **Last verified:** Swift 6.2 language mode (Swift 6.3.3, Xcode 26.6),
   macOS 26.5.2, on 2026-07-26 (UX-02; pane strip and full-width canvas, UX2-01).
 
+## macOS redesign update: Settings is a standard scene only (macOS build verification pending)
+
+Settings now opens **only** as the standard SwiftUI `Settings` scene, with
+`TabView` panes in a 680 pt wide window. ⌘, and the status-bar gear both call
+`openSettings`. `SettingsCommandRouter` was deleted. Consequently the
+editor-hosted Settings tab, the routing rules, and the `SettingsCommandRouter`
+descriptions below are history, not current behaviour.
+
+The settings-tab code remains but is **unreachable**, and is listed for cleanup
+after the first green Mac build: `WorkspaceSession.showSettings`,
+`closeSettings`, `settingsVisible`; `WorkspaceAuxiliaryTab.settings`;
+`EditorCanvasRoute.settings` and the `.settings` cases that switch on it; and
+the `SettingsCanvas` stub, which now only opens the window and closes the tab.
+Also unused: `RafuSettingsSection`, `RafuSettingsRow`, `LanguageServerCatalogRow`.
+The "Seven-pane layout" and pane-lifetime text describes the retired
+`SettingsPaneStrip` host; the handoff did not say whether the strip still backs
+the scene, so re-verify it on a Mac before relying on it.
+
 **Proposed successor:** the Settings section of
 [`workbench-presentation-upgrade.md`](../plans/phases/workbench-presentation-upgrade.md)
 proposes compact adaptive category navigation and a bounded, left-aligned

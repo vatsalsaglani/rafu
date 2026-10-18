@@ -517,6 +517,7 @@ struct EnsembleStartCanvas: View {
     @State private var expertWorkflowStartError: String?
 
     @FocusState private var isNameFieldFocused: Bool
+    @FocusState private var isExpertPromptFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -729,7 +730,7 @@ struct EnsembleStartCanvas: View {
 
     private var coordinatorSection: some View {
         EnsembleControlSection(
-            title: "Lead coordinator", systemImage: "person.badge.shield.checkmark"
+            title: "Lead Coordinator", systemImage: "person.badge.shield.checkmark"
         ) {
             if model.cliOptions.isEmpty {
                 HStack(spacing: RafuMetrics.space2) {
@@ -741,26 +742,19 @@ struct EnsembleStartCanvas: View {
             } else {
                 EnsembleCLISelectionList(options: model.cliOptions) { option in
                     let isSelected = model.selectedProvider == option.id
-                    let resolution = model.modelResolution(for: option.id)
                     EnsembleCLISelectionRow(
                         option: option,
                         selection: .lead(isSelected: isSelected),
                         unavailableReason: model.disableReason(option.id),
                         activate: { selectProvider(option) }
                     ) {
-                        if isSelected, let coordinatorResolution = model.coordinatorModelResolution
-                        {
+                        if let coordinatorResolution = model.coordinatorModelResolution {
                             EnsembleModelField(
                                 label: "Lead coordinator model",
                                 available: model.availableModels(for: option.id),
                                 resolution: coordinatorResolution,
                                 value: $model.model
                             )
-                        } else {
-                            Text(resolution.detailedLabel)
-                                .font(.caption)
-                                .foregroundStyle(theme.palette.textMuted)
-                                .accessibilityLabel("Resolved model: \(resolution.detailedLabel)")
                         }
                     }
                     .accessibilityElement(children: .contain)
@@ -776,34 +770,50 @@ struct EnsembleStartCanvas: View {
         // deliberately absent from v1 UI — the grant type supports it, but no
         // per-provider usage editor exists yet.
         EnsembleControlSection(
-            title: "Budget grant", systemImage: "gauge.with.dots.needle.33percent"
+            title: "Budget", systemImage: "gauge.with.dots.needle.33percent"
         ) {
-            Stepper(
-                "Max concurrent child runs: \(model.maxConcurrent)",
-                value: $model.maxConcurrent,
-                in: 1...max(1, min(3, windowCap))
-            )
-            .font(.callout)
+            EnsembleBudgetRow(title: "Concurrent child runs") {
+                Text("\(model.maxConcurrent)")
+                    .font(.callout)
+                    .monospacedDigit()
+                    .foregroundStyle(theme.palette.textSecondary)
+                Stepper(
+                    "Max concurrent child runs",
+                    value: $model.maxConcurrent,
+                    in: 1...max(1, min(3, windowCap))
+                )
+                .labelsHidden()
+            }
             Text("Capped at \(windowCap) per window.")
                 .font(.caption)
-                .foregroundStyle(theme.palette.textMuted)
-            Stepper(
-                "Max total child runs: \(model.maxTotal)",
-                value: $model.maxTotal,
-                in: 1...50
-            )
-            .font(.callout)
-            Picker("Deadline", selection: $model.deadlineChoice) {
-                ForEach(EnsembleGrantDeadline.allCases) { choice in
-                    Text(choice.title).tag(choice)
-                }
+                .foregroundStyle(theme.palette.textSecondary)
+            EnsembleBudgetRow(title: "Total child runs") {
+                Text("\(model.maxTotal)")
+                    .font(.callout)
+                    .monospacedDigit()
+                    .foregroundStyle(theme.palette.textSecondary)
+                Stepper(
+                    "Max total child runs",
+                    value: $model.maxTotal,
+                    in: 1...50
+                )
+                .labelsHidden()
             }
-            .font(.callout)
+            EnsembleBudgetRow(title: "Deadline") {
+                Picker("Deadline", selection: $model.deadlineChoice) {
+                    ForEach(EnsembleGrantDeadline.allCases) { choice in
+                        Text(choice.title).tag(choice)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
             Text(
                 "The coordinator can start at most this many child runs and reach only the CLIs you allow."
             )
             .font(.caption)
-            .foregroundStyle(theme.palette.textMuted)
+            .foregroundStyle(theme.palette.textSecondary)
             .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -817,26 +827,18 @@ struct EnsembleStartCanvas: View {
             } else {
                 EnsembleCLISelectionList(options: model.cliOptions) { option in
                     let isAllowed = model.isAllowed(option.id)
-                    let resolution = model.modelResolution(for: option.id)
                     EnsembleCLISelectionRow(
                         option: option,
                         selection: .allowed(isSelected: isAllowed),
                         unavailableReason: model.disableReason(option.id),
                         activate: { toggleAllowed(option) }
                     ) {
-                        if isAllowed {
-                            EnsembleModelField(
-                                label: "\(option.displayName) allowed model",
-                                available: model.availableModels(for: option.id),
-                                resolution: resolution,
-                                value: allowedModelBinding(option.id)
-                            )
-                        } else {
-                            Text(resolution.detailedLabel)
-                                .font(.caption)
-                                .foregroundStyle(theme.palette.textMuted)
-                                .accessibilityLabel("Resolved model: \(resolution.detailedLabel)")
-                        }
+                        EnsembleModelField(
+                            label: "\(option.displayName) allowed model",
+                            available: model.availableModels(for: option.id),
+                            resolution: model.modelResolution(for: option.id),
+                            value: allowedModelBinding(option.id)
+                        )
                     }
                 }
                 .accessibilityElement(children: .contain)
@@ -850,7 +852,7 @@ struct EnsembleStartCanvas: View {
                     "Each allowed CLI runs the model chosen here unless a role names its own. For CLIs that can list their own models, use Settings → Agents → Refresh models to show the full catalog here too."
                 )
                 .font(.caption)
-                .foregroundStyle(theme.palette.textMuted)
+                .foregroundStyle(theme.palette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -1099,20 +1101,36 @@ struct EnsembleStartCanvas: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                Form {
-                    Picker("Workflow file", selection: selectedWorkflowBinding) {
-                        ForEach(workflowLaunchModel.workflows) { workflow in
-                            Text("\(workflow.displayName) — \(workflow.scope.displayName)")
-                                .tag(Optional(workflow.id))
+                VStack(alignment: .leading, spacing: RafuMetrics.space3) {
+                    ConductorFormCard {
+                        ConductorFormRow("Workflow file") {
+                            Picker("Workflow file", selection: selectedWorkflowBinding) {
+                                ForEach(workflowLaunchModel.workflows) { workflow in
+                                    Text("\(workflow.displayName) — \(workflow.scope.displayName)")
+                                        .tag(Optional(workflow.id))
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        ConductorFormRow("Task prompt", alignment: .top) {
+                            ConductorPromptEditor(
+                                label: "Task prompt",
+                                placeholder: "Describe what this run should do…",
+                                text: $expertTaskPrompt,
+                                isFocused: $isExpertPromptFocused)
+                        }
+                        ConductorFormRow("Base reference") {
+                            ConductorBaseReferenceField(
+                                reference: $expertBaseReference,
+                                branchNames: session.gitBranchSnapshot?.localBranches.map(\.name)
+                                    ?? [])
                         }
                     }
-                    TextField("Task prompt", text: $expertTaskPrompt, axis: .vertical)
-                        .lineLimit(3...6)
-                    TextField("Base reference", text: $expertBaseReference)
-                        .help("Branch, tag, or commit. Defaults to the current HEAD.")
                     if let workflow = workflowLaunchModel.selectedWorkflow, !workflow.issues.isEmpty
                     {
-                        Section("Fix Before Running") {
+                        ConductorFormCard(title: "Fix Before Running") {
                             ForEach(workflow.issues) { issue in
                                 Label(
                                     issue.line.map { "Line \($0): \(issue.message)" }
@@ -1121,12 +1139,12 @@ struct EnsembleStartCanvas: View {
                                 )
                                 .font(.caption)
                                 .foregroundStyle(theme.palette.error)
+                                .fixedSize(horizontal: false, vertical: true)
                             }
                         }
                     }
                 }
-                .formStyle(.grouped)
-                .frame(maxWidth: 720)
+                .frame(maxWidth: 720, alignment: .topLeading)
             }
             if !session.canStartConductorWorkflowRun {
                 Label(capReasonText, systemImage: "exclamationmark.triangle")
@@ -1216,7 +1234,7 @@ struct EnsembleStartCanvas: View {
     }
 }
 
-/// A titled block in the guided door's left rail: glyph + title + hairline,
+/// A titled block in the guided door's left rail: glyph + title-case title,
 /// then a leading-aligned content stack. Keeps the rail's three sections
 /// reading as one rhythm without a `Form`, whose grouped style forces the
 /// inset-list look this layout deliberately drops.
@@ -1230,12 +1248,39 @@ private struct EnsembleControlSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: RafuMetrics.space2) {
             Label(title, systemImage: systemImage)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(theme.palette.textSecondary)
-                .textCase(.uppercase)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(theme.palette.textPrimary)
+                .accessibilityAddTraits(.isHeader)
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// One Budget row: the label on the left, the value and its control (a
+/// stepper or a popup) right-aligned.
+private struct EnsembleBudgetRow<Controls: View>: View {
+    let title: String
+    let controls: Controls
+
+    @Environment(\.rafuTheme) private var theme
+
+    init(title: String, @ViewBuilder controls: () -> Controls) {
+        self.title = title
+        self.controls = controls()
+    }
+
+    var body: some View {
+        HStack(spacing: RafuMetrics.space2) {
+            Text(title)
+                .font(.callout)
+                .foregroundStyle(theme.palette.textPrimary)
+                .lineLimit(1)
+            Spacer(minLength: RafuMetrics.space2)
+            controls
+        }
+        .frame(minHeight: 28)
+        .accessibilityElement(children: .contain)
     }
 }
 

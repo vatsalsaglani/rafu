@@ -8,11 +8,10 @@ struct RafuAppCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .appSettings) {
+            // Settings is the standard Settings scene window, never an editor
+            // tab: one window serves every workspace window.
             Button("Settings…") {
-                SettingsCommandRouter.open(
-                    workspaceSession: workspaceSession,
-                    openFallback: openSettings.callAsFunction
-                )
+                openSettings()
             }
             .keyboardShortcut(",", modifiers: .command)
         }

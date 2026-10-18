@@ -8,18 +8,18 @@ struct CanvasPresentations: ViewModifier {
                 CanvasDialogView(dialog: dialog, session: session)
             }
             .confirmationDialog(
-                "Remove selected cards?",
+                "Remove from Canvas?",
                 isPresented: Binding(
                     get: { session.pendingCanvasRemoval != nil },
                     set: { if !$0 { session.pendingCanvasRemoval = nil } }),
                 titleVisibility: .visible
             ) {
                 if let id = session.pendingCanvasRemoval, let board = session.canvas.boards[id] {
-                    Button(hasTerminal(board) ? "Remove Cards and Park Groups" : "Remove Cards") {
+                    Button("Remove from Canvas") {
                         session.removeCanvasCards(id)
                     }
                     if board.selection.count == 1, hasTerminal(board) {
-                        Button("Close Terminal Group and Remove Card…", role: .destructive) {
+                        Button("Close Terminal and Remove Card", role: .destructive) {
                             session.closeCanvasTerminalCard(id)
                         }
                     }
@@ -27,7 +27,7 @@ struct CanvasPresentations: ViewModifier {
                 Button("Cancel", role: .cancel) { session.pendingCanvasRemoval = nil }
             } message: {
                 Text(
-                    "Source files and external apps stay open. Parked terminal processes continue in the Terminal manager. Close a terminal group separately to stop it."
+                    "Source files and external apps stay open. Hidden terminals keep running in the Terminals panel. Close a terminal separately to stop it."
                 )
             }
             .confirmationDialog(

@@ -647,6 +647,7 @@ struct CanvasLiveBridgeTests {
         fixture.bridge.enable(fixture.edge, in: fixture.board)
         let initial = await fixture.bridge.handle(fixture.request(0, "list"))
         #expect(initial.peers.first?.connected == false)
+        #expect(initial.peers.first?.linkState == "disconnected")
         #expect(initial.peers.first?.provider == nil)
 
         var registration = fixture.request(1, "register", provider: "codex")
@@ -659,6 +660,7 @@ struct CanvasLiveBridgeTests {
         #expect(claudePeers.peers.first?.title == fixture.cards[1].title)
         #expect(claudePeers.peers.first?.kind == "Terminal")
         #expect(claudePeers.peers.first?.connected == true)
+        #expect(claudePeers.peers.first?.linkState == "live")
         let codexPeers = await fixture.bridge.handle(fixture.request(1, "list", provider: "codex"))
         #expect(codexPeers.peers.first?.provider == "claude")
         let encoded = String(decoding: try JSONEncoder().encode(claudePeers), as: UTF8.self)
@@ -667,8 +669,13 @@ struct CanvasLiveBridgeTests {
         #expect(!encoded.contains("rafu-cdx-"))
 
         fixture.bridge.disable(fixture.edge, in: fixture.board)
-        #expect(
-            await fixture.bridge.handle(fixture.request(0, "list")).peers.first?.provider == nil)
+        let paused = await fixture.bridge.handle(fixture.request(0, "list"))
+        #expect(paused.peers.first?.provider == nil)
+        #expect(paused.peers.first?.connected == false)
+        #expect(paused.peers.first?.linkState == "paused")
+        let denied = await fixture.bridge.handle(
+            fixture.request(0, "send", destination: 1, text: "blocked"))
+        #expect(denied.error?.contains("Resume it in Rafu Canvas") == true)
         fixture.bridge.enable(fixture.edge, in: fixture.board)
         fixture.controllers[1].restart()
         let stopped = await fixture.bridge.handle(fixture.request(0, "list"))
@@ -823,5 +830,147 @@ struct CanvasLiveBridgeTests {
                 == "Session changed. Restart this terminal to reconnect.")
         #expect(
             fixture.bridge.notice == "Codex changed sessions. Restart its terminal to reconnect.")
+    }
+
+    // MARK: Per-link state (redesign W6b)
+
+    @Test("A new message link is Paused until the user resumes it, and pause is per link")
+    func perLinkPauseAndResume() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        let edge = try #require(fixture.board.connections.first)
+        #expect(fixture.bridge.linkState(of: edge, in: fixture.board) == .paused)
+        #expect(await fixture.bridge.handle(fixture.request(0, "register")).error == nil)
+        #expect(await fixture.bridge.handle(fixture.request(1, "register")).error == nil)
+        #expect(fixture.bridge.linkState(of: edge, in: fixture.board) == .paused)
+        fixture.bridge.resume(fixture.edge, in: fixture.board)
+        #expect(fixture.bridge.linkState(of: edge, in: fixture.board) == .live)
+        fixture.bridge.pause(fixture.edge, in: fixture.board)
+        #expect(fixture.bridge.linkState(of: edge, in: fixture.board) == .paused)
+        #expect(
+            await fixture.bridge.handle(fixture.request(0, "send", destination: 1, text: "held"))
+                .error != nil)
+
+        try fixture.board.addConnection(
+            from: fixture.cards[0].id, to: fixture.cards[2].id, behavior: .session)
+        let second = try #require(fixture.board.connections.last)
+        fixture.bridge.resumeAll(in: fixture.board)
+        let states = fixture.bridge.linkStates(in: fixture.board)
+        #expect(states[fixture.edge] == .live)
+        // The third terminal has a capability but no connected agent.
+        #expect(states[second.id] == .disconnected(.agentNotRunning))
+        fixture.bridge.pauseAll(in: fixture.board)
+        #expect(
+            fixture.bridge.linkStates(in: fixture.board).values.allSatisfy { $0 == .paused })
+    }
+
+    @Test("A stopped terminal makes the link Disconnected, not Failed")
+    func stoppedTerminalDisconnects() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        await fixture.registerPair()
+        let edge = try #require(fixture.board.connections.first)
+        #expect(fixture.bridge.linkState(of: edge, in: fixture.board) == .live)
+        fixture.bridge.remove(fixture.controllers[1])
+        #expect(
+            fixture.bridge.linkState(of: edge, in: fixture.board)
+                == .disconnected(.sessionEnded))
+    }
+
+    @Test("A quit agent leaves the terminal running but the link Disconnected")
+    func quitAgentDisconnects() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        await fixture.registerPair()
+        let edge = try #require(fixture.board.connections.first)
+        #expect(await fixture.bridge.handle(fixture.request(0, "unregister")).error == nil)
+        #expect(
+            fixture.bridge.linkState(of: edge, in: fixture.board)
+                == .disconnected(.agentNotRunning))
+        #expect(await fixture.bridge.handle(fixture.request(0, "register")).error == nil)
+        #expect(fixture.bridge.linkState(of: edge, in: fixture.board) == .live)
+    }
+
+    @Test("A changed Codex conversation and a lost transport map to their own reasons")
+    func suspensionMapsToDisconnected() async throws {
+        for (reason, expected) in [
+            ("sessionChanged", CanvasLinkDisconnectReason.conversationChanged),
+            ("transportLost", CanvasLinkDisconnectReason.connectionLost),
+        ] {
+            let fixture = try CanvasLiveBridgeFixture()
+            #expect(await fixture.bridge.handle(fixture.request(0, "register")).error == nil)
+            var registration = fixture.request(1, "register", provider: "codex")
+            registration.threadID = UUID().uuidString
+            registration.endpoint = "unix:///tmp/rafu-cdx-\(UUID().uuidString)/socket"
+            registration.executable = "/local/bin/codex"
+            #expect(await fixture.bridge.handle(registration).error == nil)
+            fixture.bridge.resume(fixture.edge, in: fixture.board)
+            let edge = try #require(fixture.board.connections.first)
+            #expect(fixture.bridge.linkState(of: edge, in: fixture.board) == .live)
+            var suspend = registration
+            suspend.operation = "suspend"
+            suspend.clientID = UUID().uuidString
+            suspend.reason = reason
+            #expect(await fixture.bridge.handle(suspend).error == nil)
+            #expect(
+                fixture.bridge.linkState(of: edge, in: fixture.board) == .disconnected(expected))
+        }
+    }
+
+    @Test("A refused send marks the link Failed until the next accepted message or user action")
+    func refusedSendFails() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        await fixture.registerPair()
+        let edge = try #require(fixture.board.connections.first)
+        for index in 0..<16 {
+            #expect(
+                await fixture.bridge.handle(
+                    fixture.request(0, "send", destination: 1, text: "m\(index)")
+                ).error == nil)
+        }
+        #expect(fixture.bridge.linkState(of: edge, in: fixture.board) == .live)
+        let refused = await fixture.bridge.handle(
+            fixture.request(0, "send", destination: 1, text: "overflow"))
+        #expect(refused.error == "The destination inbox is full.")
+        #expect(
+            fixture.bridge.linkState(of: edge, in: fixture.board)
+                == .failed("The destination inbox is full."))
+        // Draining makes room, and the next accepted message clears the failure.
+        #expect(await fixture.bridge.handle(fixture.request(1, "receive")).messages.count == 1)
+        #expect(
+            await fixture.bridge.handle(fixture.request(0, "send", destination: 1, text: "ok"))
+                .error == nil)
+        #expect(fixture.bridge.linkState(of: edge, in: fixture.board) == .live)
+        // Pausing and resuming also clear a recorded refusal.
+        _ = await fixture.bridge.handle(fixture.request(0, "send", destination: 1, text: "full"))
+        #expect(fixture.bridge.linkState(of: edge, in: fixture.board).kind == .failed)
+        fixture.bridge.pause(fixture.edge, in: fixture.board)
+        fixture.bridge.resume(fixture.edge, in: fixture.board)
+        #expect(fixture.bridge.linkState(of: edge, in: fixture.board) == .live)
+    }
+
+    @Test("An accepted message publishes its connection and direction, never its body")
+    func acceptedMessageEvent() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        await fixture.registerPair()
+        #expect(fixture.bridge.lastMessageEvent == nil)
+        #expect(
+            fixture.bridge.activity(of: fixture.edge, in: fixture.board).count == 0)
+        #expect(
+            await fixture.bridge.handle(
+                fixture.request(0, "send", destination: 1, text: "forward")
+            ).error == nil)
+        var event = try #require(fixture.bridge.lastMessageEvent)
+        #expect(event.connectionID == fixture.edge)
+        #expect(event.direction == .forward)
+        #expect(
+            await fixture.bridge.handle(fixture.request(1, "send", destination: 0, text: "back"))
+                .error == nil)
+        event = try #require(fixture.bridge.lastMessageEvent)
+        #expect(event.direction == .reverse)
+        let activity = fixture.bridge.activity(of: fixture.edge, in: fixture.board)
+        #expect(activity.count == 2)
+        #expect(activity.serial == 2)
+        // A refused send is not an event.
+        fixture.bridge.pause(fixture.edge, in: fixture.board)
+        _ = await fixture.bridge.handle(fixture.request(0, "send", destination: 1, text: "held"))
+        #expect(fixture.bridge.activity(of: fixture.edge, in: fixture.board).count == 2)
     }
 }

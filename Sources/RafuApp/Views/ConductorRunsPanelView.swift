@@ -16,6 +16,89 @@ private enum ConductorRunsPanelSection: String, CaseIterable, Identifiable {
         case .activity: "Activity"
         }
     }
+
+    /// Shown instead of the title when the panel is too narrow for three
+    /// one-line labels.
+    var symbolName: String {
+        switch self {
+        case .runs: "play.square"
+        case .workflows: "list.bullet.rectangle"
+        case .activity: "waveform.path.ecg"
+        }
+    }
+}
+
+/// Runs | Workflows | Activity. Labels never wrap: each is one fixed-size line,
+/// and when three labels do not fit the panel width (large text, or a panel
+/// narrower than its 300 pt minimum) the picker falls back to icons, each with
+/// a tooltip and accessibility label.
+private struct ConductorSectionPicker: View {
+    let items: [ConductorRunsPanelSection]
+    @Binding var selection: ConductorRunsPanelSection
+
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            segments(showsTitles: true)
+            segments(showsTitles: false)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func segments(showsTitles: Bool) -> some View {
+        HStack(spacing: 2) {
+            ForEach(items) { item in
+                segment(for: item, showsTitle: showsTitles)
+            }
+        }
+        .padding(2)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(theme.palette.appBackground.opacity(0.6))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .strokeBorder(theme.palette.borderSubtle)
+        )
+    }
+
+    private func segment(for item: ConductorRunsPanelSection, showsTitle: Bool) -> some View {
+        let isSelected = item == selection
+        return Button {
+            withAnimation(RafuMotion.selection) { selection = item }
+        } label: {
+            Group {
+                if showsTitle {
+                    Text(item.title)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                } else {
+                    Image(systemName: item.symbolName)
+                }
+            }
+            .font(.system(size: 11.5, weight: isSelected ? .semibold : .regular))
+            .foregroundStyle(isSelected ? theme.palette.textPrimary : theme.palette.textSecondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3.5)
+            .frame(maxWidth: .infinity)
+            .background {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+                        .fill(theme.palette.elevatedBackground)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+                                .strokeBorder(theme.palette.borderStrong.opacity(0.6))
+                        )
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 5.5, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help(item.title)
+        .accessibilityLabel(item.title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
 }
 
 /// Content-free Activity-row presentation. Keep the run identifier and every
@@ -93,11 +176,10 @@ struct ConductorRunsPanelView: View {
 
         VStack(spacing: 0) {
             header
-            RafuSegmentedPicker(
+            ConductorSectionPicker(
                 items: ConductorRunsPanelSection.allCases,
-                selection: $section,
-                fillsWidth: true
-            ) { $0.title }
+                selection: $section
+            )
             .accessibilityLabel("Ensemble Section")
             .padding(.horizontal, RafuMetrics.space3)
             .padding(.vertical, RafuMetrics.space2)
@@ -117,6 +199,13 @@ struct ConductorRunsPanelView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // A full-tab Ensemble form or the graph already says what it has to
+        // say. Show Runs (with its "New Run…" action) beside it instead of a
+        // second empty state from Activity or Workflows. The user can still
+        // switch sections afterwards.
+        .onChange(of: showsFullTabEnsembleSurface, initial: true) { _, isOpen in
+            if isOpen { section = .runs }
+        }
         .task(id: session.rootURL?.standardizedFileURL) {
             await controller.attachAndReload(workspaceRoot: session.rootURL)
             await libraryModel.load(workspaceRoot: session.rootURL)
@@ -153,6 +242,13 @@ struct ConductorRunsPanelView: View {
         session.canStartConductorWorkflowRun
     }
 
+    /// True while an Ensemble creation form or the graph occupies the editor.
+    private var showsFullTabEnsembleSurface: Bool {
+        session.ensembleStartCanvasVisible
+            || session.ensembleNewRunCanvasVisible
+            || session.conductorGraphVisible
+    }
+
     private var header: some View {
         RafuUtilityPanelHeader(
             icon: WorkspaceNavigatorMode.runs.symbolName,
@@ -160,49 +256,60 @@ struct ConductorRunsPanelView: View {
             closeAccessibilityLabel: "Close Ensemble",
             onClose: { session.navigatorMode = .files },
             actions: {
-                HStack(spacing: 6) {
-                    Button("Graph", systemImage: "point.3.connected.trianglepath.dotted") {
+                HStack(spacing: RafuMetrics.space1) {
+                    Button(
+                        "Show Ensemble Graph", systemImage: "point.3.connected.trianglepath.dotted"
+                    ) {
                         session.showConductorGraph()
                     }
                     .buttonStyle(RafuIconButtonStyle(size: 24))
                     .help("Show Ensemble Graph")
                     .accessibilityLabel("Show Ensemble Graph")
                     .disabled(session.rootURL == nil)
-                    if section == .workflows {
-                        Menu("New from Template", systemImage: "doc.badge.plus") {
-                            ForEach(ConductorBundledTemplateCatalog.templates) { template in
-                                Menu(template.displayName) {
-                                    Button("Repository") {
-                                        instantiate(template: template, scope: .repository)
-                                    }
-                                    Button("User") {
-                                        instantiate(template: template, scope: .userGlobal)
-                                    }
-                                }
-                            }
-                        }
-                        .menuStyle(.borderlessButton)
-                        .fixedSize()
-                        .help("New from Template")
-                        .disabled(libraryModel.isMutating || session.rootURL == nil)
-                    }
-                    Button("New Ensemble…", systemImage: "circle.hexagongrid") {
-                        session.showEnsembleStart()
-                    }
-                    .buttonStyle(RafuIconButtonStyle(size: 24))
-                    .help("New Ensemble…")
-                    .accessibilityLabel("New Ensemble")
-                    .disabled(session.rootURL == nil)
-                    Button("New Run…", systemImage: "plus") {
-                        session.showEnsembleNewRun()
-                    }
-                    .buttonStyle(RafuIconButtonStyle(size: 24))
-                    .help("New Run…")
-                    .accessibilityLabel("New Ensemble Run")
-                    .disabled(!canStartNewRun)
+                    newMenu
                 }
             }
         )
+    }
+
+    /// The one creation entry point: a "+" pull-down. Neutral, because the
+    /// panel's primary action is the empty state's "New Run…" button.
+    private var newMenu: some View {
+        Menu {
+            Button("New Run…", systemImage: "plus") {
+                session.showEnsembleNewRun()
+            }
+            .disabled(!canStartNewRun)
+            Button("New Ensemble…", systemImage: "circle.hexagongrid") {
+                session.showEnsembleStart()
+            }
+            .disabled(session.rootURL == nil)
+            Divider()
+            Menu("New Workflow from Template…", systemImage: "doc.badge.plus") {
+                ForEach(ConductorBundledTemplateCatalog.templates) { template in
+                    Menu(template.displayName) {
+                        Button("Repository") {
+                            instantiate(template: template, scope: .repository)
+                        }
+                        Button("User") {
+                            instantiate(template: template, scope: .userGlobal)
+                        }
+                    }
+                }
+            }
+            .disabled(libraryModel.isMutating || session.rootURL == nil)
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(theme.palette.textSecondary)
+                .frame(width: 24, height: 24)
+                .contentShape(.rect)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("New Run, Ensemble, or Workflow")
+        .accessibilityLabel("New")
     }
 
     @ViewBuilder
@@ -277,8 +384,7 @@ struct ConductorRunsPanelView: View {
             RafuPanelEmptyState(
                 icon: "waveform.path.ecg",
                 title: "No Run Activity",
-                message:
-                    "Bounded Ensemble lifecycle events appear here while this workspace is open."
+                message: "Run events appear here while this workspace is open."
             )
         } else {
             List(activityEvents, id: \.cursor) { event in
@@ -334,6 +440,10 @@ struct ConductorRunsPanelView: View {
                                 ForEach(scoped) { workflow in
                                     ConductorWorkflowLibraryRow(
                                         workflow: workflow,
+                                        displayPath: ConductorWorkflowPathPresentation.displayPath(
+                                            for: workflow.fileURL,
+                                            workspaceRoot: session.rootURL,
+                                            homeDirectory: NSHomeDirectory()),
                                         isMutating: libraryModel.isMutating,
                                         open: { openDefinition(workflow) },
                                         duplicate: {
@@ -360,6 +470,7 @@ struct ConductorRunsPanelView: View {
         Label(message, systemImage: systemImage)
             .font(.caption)
             .foregroundStyle(isError ? theme.palette.error : theme.palette.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, RafuMetrics.space3)
             .padding(.vertical, RafuMetrics.space2)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -528,7 +639,7 @@ private struct ConductorRunRowView: View {
             Image(systemName: row.statusSymbol)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(
-                    row.needsAttention ? theme.palette.accent : theme.palette.textSecondary
+                    row.needsAttention ? theme.palette.warning : theme.palette.textSecondary
                 )
                 .frame(width: 22, height: 22)
             VStack(alignment: .leading, spacing: 2) {
@@ -538,7 +649,7 @@ private struct ConductorRunRowView: View {
                         .foregroundStyle(theme.palette.textPrimary)
                         .lineLimit(1)
                     if let gateBadge = row.gateBadge {
-                        RafuChip(text: gateBadge, foreground: theme.palette.accent)
+                        RafuChip(text: gateBadge, foreground: theme.palette.warning)
                     }
                     if let attribution {
                         RafuChip(text: "via \(attribution)")
@@ -561,7 +672,8 @@ private struct ConductorRunRowView: View {
             Spacer(minLength: 4)
             if let reveal {
                 Button("Reveal Terminal", action: reveal)
-                    .buttonStyle(RafuSecondaryButtonStyle())
+                    .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+                    .lineLimit(1)
             }
         }
         .padding(.vertical, 2)
@@ -654,8 +766,33 @@ extension String {
     }
 }
 
+/// Content-free path text for a Workflows row. Repository files read relative
+/// to the workspace (`.rafu/workflows/review.md`), files under the home folder
+/// read with `~`, and anything else keeps its full path.
+nonisolated enum ConductorWorkflowPathPresentation {
+    static func displayPath(
+        for fileURL: URL,
+        workspaceRoot: URL?,
+        homeDirectory: String
+    ) -> String {
+        let path = fileURL.standardizedFileURL.path
+        if let root = workspaceRoot?.standardizedFileURL.path,
+            path.hasPrefix(root + "/")
+        {
+            return String(path.dropFirst(root.count + 1))
+        }
+        if !homeDirectory.isEmpty, homeDirectory != "/", path.hasPrefix(homeDirectory + "/") {
+            return "~" + String(path.dropFirst(homeDirectory.count))
+        }
+        return path
+    }
+}
+
+/// Name and path, one "···" menu, double-click to open. Every line truncates,
+/// so the row never forces the panel wider than its minimum width.
 private struct ConductorWorkflowLibraryRow: View {
     let workflow: ConductorLibraryWorkflow
+    let displayPath: String
     let isMutating: Bool
     let open: () -> Void
     let duplicate: () -> Void
@@ -664,35 +801,37 @@ private struct ConductorWorkflowLibraryRow: View {
     @Environment(\.rafuTheme) private var theme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: RafuMetrics.space2) {
                 Image(
                     systemName: workflow.isLaunchable
                         ? "point.3.connected.trianglepath.dotted" : "exclamationmark.triangle"
                 )
                 .foregroundStyle(
-                    workflow.isLaunchable ? theme.palette.textSecondary : theme.palette.error)
-                Text(workflow.displayName)
-                    .font(.body.weight(.medium))
-                    .lineLimit(1)
-                if workflow.resolution == .overriddenByRepository {
-                    RafuChip(text: workflow.resolution.label)
+                    workflow.isLaunchable ? theme.palette.textSecondary : theme.palette.error
+                )
+                .frame(width: 18)
+                .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 6) {
+                        Text(workflow.displayName)
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(theme.palette.textPrimary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        if workflow.resolution == .overriddenByRepository {
+                            RafuChip(text: workflow.resolution.label)
+                        }
+                    }
+                    Text(displayPath)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(theme.palette.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
-                Spacer(minLength: 4)
-                Button("Open", action: open)
-                    .buttonStyle(RafuSecondaryButtonStyle())
-                Menu("Workflow Actions", systemImage: "ellipsis") {
-                    Button("Duplicate", systemImage: "plus.square.on.square", action: duplicate)
-                        .disabled(isMutating)
-                    Button("Reveal in Finder", systemImage: "folder", action: reveal)
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
+                Spacer(minLength: 0)
+                actionsMenu
             }
-            Text(workflow.fileURL.lastPathComponent)
-                .font(.caption)
-                .foregroundStyle(theme.palette.textMuted)
-                .lineLimit(1)
             ForEach(workflow.issues) { issue in
                 Label(
                     issue.line.map { "Line \($0): \(issue.message)" } ?? issue.message,
@@ -704,6 +843,8 @@ private struct ConductorWorkflowLibraryRow: View {
             }
         }
         .padding(.vertical, 3)
+        .contentShape(.rect)
+        .onTapGesture(count: 2, perform: open)
         .contextMenu {
             Button("Open", action: open)
             Button("Duplicate", action: duplicate)
@@ -712,7 +853,29 @@ private struct ConductorWorkflowLibraryRow: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
-            "\(workflow.displayName), \(workflow.scope.displayName), \(workflow.resolution.label)")
+            "\(workflow.displayName), \(workflow.scope.displayName), \(workflow.resolution.label)"
+        )
+        .accessibilityAction(named: "Open", open)
+    }
+
+    private var actionsMenu: some View {
+        Menu {
+            Button("Open", systemImage: "doc.text", action: open)
+            Button("Duplicate", systemImage: "plus.square.on.square", action: duplicate)
+                .disabled(isMutating)
+            Button("Reveal in Finder", systemImage: "folder", action: reveal)
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(theme.palette.textSecondary)
+                .frame(width: 22, height: 22)
+                .contentShape(.rect)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Actions for \(workflow.displayName)")
+        .accessibilityLabel("Actions for \(workflow.displayName)")
     }
 }
 
@@ -731,68 +894,50 @@ struct ConductorNewRunCanvas: View {
     var body: some View {
         VStack(spacing: 0) {
             if showsTabStrip { tabStrip }
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("New Ensemble Run")
-                        .font(.title2.weight(.semibold))
-                    Text("Choose a role or workflow. Rafu starts nothing until you select Run.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-
-                RafuSegmentedPicker(
-                    items: ConductorNewRunMode.allCases,
-                    selection: $model.mode,
-                    fillsWidth: true
-                ) { $0.title }
-                .accessibilityLabel("Mode")
-
-                if model.isLoading || (model.mode == .workflow && workflowModel.isLoading) {
-                    ProgressView("Reading .rafu files…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    switch model.mode {
-                    case .singleRole:
-                        singleRoleForm
-                    case .workflow:
-                        workflowForm
+            ScrollView {
+                VStack(alignment: .leading, spacing: RafuMetrics.space4) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("New Ensemble Run")
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(theme.palette.textPrimary)
+                        Text("Choose a role or workflow. Rafu starts nothing until you select Run.")
+                            .font(.callout)
+                            .foregroundStyle(theme.palette.textSecondary)
                     }
-                }
 
-                if let error = visibleError {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .font(.callout)
-                        .foregroundStyle(.red)
-                        .accessibilityLabel("Run error: \(error)")
-                }
+                    RafuSegmentedPicker(
+                        items: ConductorNewRunMode.allCases,
+                        selection: $model.mode,
+                        fillsWidth: true
+                    ) { $0.title }
+                    .accessibilityLabel("Mode")
 
-                HStack {
-                    Spacer()
-                    Button("Close", action: session.closeEnsembleNewRun)
-                    Button {
-                        Task {
-                            let started =
-                                switch model.mode {
-                                case .singleRole: await startSingleRole()
-                                case .workflow: await startWorkflow()
-                                }
-                            if started { session.closeEnsembleNewRun() }
-                        }
-                    } label: {
-                        if model.isStarting || isStartingWorkflow {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Text("Run")
+                    if model.isLoading || (model.mode == .workflow && workflowModel.isLoading) {
+                        ProgressView("Reading .rafu files…")
+                            .frame(maxWidth: .infinity, minHeight: 120)
+                    } else {
+                        switch model.mode {
+                        case .singleRole:
+                            singleRoleForm
+                        case .workflow:
+                            workflowForm
                         }
                     }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!canStart)
+
+                    if let error = visibleError {
+                        Label(error, systemImage: "exclamationmark.triangle")
+                            .font(.callout)
+                            .foregroundStyle(theme.palette.error)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityLabel("Run error: \(error)")
+                    }
                 }
+                .padding(20)
+                .frame(maxWidth: 600, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .top)
             }
-            .padding(20)
-            .frame(maxWidth: 600, maxHeight: .infinity, alignment: .topLeading)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            Divider().overlay(theme.palette.borderSubtle)
+            footer
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(theme.palette.editorBackground)
@@ -806,6 +951,43 @@ struct ConductorNewRunCanvas: View {
                 promptFocused = true
             }
         }
+    }
+
+    /// Sticky footer: Close, and Run as the one primary action.
+    private var footer: some View {
+        HStack(spacing: RafuMetrics.space3) {
+            Spacer(minLength: RafuMetrics.space3)
+            Button("Close", action: session.closeEnsembleNewRun)
+                .buttonStyle(RafuSecondaryButtonStyle())
+            Button {
+                Task {
+                    let started =
+                        switch model.mode {
+                        case .singleRole: await startSingleRole()
+                        case .workflow: await startWorkflow()
+                        }
+                    if started { session.closeEnsembleNewRun() }
+                }
+            } label: {
+                if model.isStarting || isStartingWorkflow {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Text("Run")
+                }
+            }
+            .buttonStyle(RafuProminentButtonStyle())
+            .keyboardShortcut(.defaultAction)
+            .disabled(!canStart)
+        }
+        .padding(.horizontal, RafuMetrics.sheetPadding)
+        .padding(.vertical, RafuMetrics.space2)
+        .frame(minHeight: 52)
+        .background(theme.palette.tabBarBackground)
+    }
+
+    private var baseReferenceBranchNames: [String] {
+        session.gitBranchSnapshot?.localBranches.map(\.name) ?? []
     }
 
     private var tabStrip: some View {
@@ -848,26 +1030,33 @@ struct ConductorNewRunCanvas: View {
                 message: "Add a Markdown role under .rafu/agents/ to start a run."
             )
         } else {
-            Form {
-                Picker("Agent file", selection: $model.selectedAgentID) {
-                    ForEach(model.agents) { agent in
-                        Text("\(agent.definition.name) — \(agent.relativePath)")
-                            .tag(Optional(agent.id))
+            ConductorFormCard {
+                ConductorFormRow("Agent file") {
+                    Picker("Agent file", selection: $model.selectedAgentID) {
+                        ForEach(model.agents) { agent in
+                            Text("\(agent.definition.name) — \(agent.relativePath)")
+                                .tag(Optional(agent.id))
+                        }
                     }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Picker("Provider override", selection: singleRoleProviderBinding) {
-                    ForEach(model.singleRoleProviderOptions) { option in
-                        singleRoleProviderLabel(option)
-                            .tag(Optional(option.id))
-                            .disabled(!option.isReady)
+                ConductorFormRow("Provider override") {
+                    Picker("Provider override", selection: singleRoleProviderBinding) {
+                        ForEach(model.singleRoleProviderOptions) { option in
+                            singleRoleProviderLabel(option)
+                                .tag(Optional(option.id))
+                                .disabled(!option.isReady)
+                        }
                     }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityLabel("Provider override for this run")
                 }
-                .accessibilityLabel("Provider override for this run")
                 if let provider = model.singleRoleProvider {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Model override")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    ConductorFormRow("Model override", alignment: .top) {
                         EnsembleModelField(
                             label: "Role model override",
                             available: model.modelChoices(for: provider),
@@ -881,14 +1070,12 @@ struct ConductorNewRunCanvas: View {
                     "Provider and model defaults come from the selected agent file. Changes apply only to this run."
                 )
                 .font(.caption)
-                .foregroundStyle(.secondary)
-                TextField("Task prompt", text: $taskPrompt, axis: .vertical)
-                    .lineLimit(4...8)
-                    .focused($promptFocused)
-                TextField("Base reference", text: $baseReference)
-                    .help("Branch, tag, or commit. Defaults to the current HEAD.")
+                .foregroundStyle(theme.palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, ConductorFormMetrics.labelWidth + RafuMetrics.space3)
+                taskPromptRow
+                baseReferenceRow
             }
-            .formStyle(.grouped)
         }
     }
 
@@ -902,23 +1089,27 @@ struct ConductorNewRunCanvas: View {
                     "Add a repository or user Ensemble workflow, or create one from the Workflows library."
             )
         } else {
-            Form {
-                Picker("Workflow file", selection: selectedWorkflowBinding) {
-                    ForEach(workflowModel.workflows) { workflow in
-                        Text(
-                            "\(workflow.displayName) — \(workflow.scope.displayName) — \(workflow.fileURL.lastPathComponent)"
-                        )
-                        .tag(Optional(workflow.id))
+            VStack(alignment: .leading, spacing: RafuMetrics.space3) {
+                ConductorFormCard {
+                    ConductorFormRow("Workflow file") {
+                        Picker("Workflow file", selection: selectedWorkflowBinding) {
+                            ForEach(workflowModel.workflows) { workflow in
+                                Text(
+                                    "\(workflow.displayName) — \(workflow.scope.displayName) — \(workflow.fileURL.lastPathComponent)"
+                                )
+                                .tag(Optional(workflow.id))
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    taskPromptRow
+                    baseReferenceRow
                 }
-                TextField("Task prompt", text: $taskPrompt, axis: .vertical)
-                    .lineLimit(4...8)
-                    .focused($promptFocused)
-                TextField("Base reference", text: $baseReference)
-                    .help("Branch, tag, or commit. Defaults to the current HEAD.")
                 if let workflow = workflowModel.selectedWorkflow {
                     if !workflow.issues.isEmpty {
-                        Section("Fix Before Running") {
+                        ConductorFormCard(title: "Fix Before Running") {
                             ForEach(workflow.issues) { issue in
                                 Label(
                                     issue.line.map { "Line \($0): \(issue.message)" }
@@ -926,12 +1117,13 @@ struct ConductorNewRunCanvas: View {
                                     systemImage: "exclamationmark.triangle"
                                 )
                                 .font(.caption)
-                                .foregroundStyle(.red)
+                                .foregroundStyle(theme.palette.error)
+                                .fixedSize(horizontal: false, vertical: true)
                             }
                         }
                     }
                     if !workflowModel.resolvedRoles.isEmpty {
-                        Section("Steps and Model Overrides") {
+                        ConductorFormCard(title: "Steps and Model Overrides") {
                             ForEach(workflowModel.resolvedRoles) { role in
                                 workflowStepRow(role)
                             }
@@ -939,7 +1131,24 @@ struct ConductorNewRunCanvas: View {
                     }
                 }
             }
-            .formStyle(.grouped)
+        }
+    }
+
+    private var taskPromptRow: some View {
+        ConductorFormRow("Task prompt", alignment: .top) {
+            ConductorPromptEditor(
+                label: "Task prompt",
+                placeholder: "Describe what this run should do…",
+                text: $taskPrompt,
+                isFocused: $promptFocused)
+        }
+    }
+
+    private var baseReferenceRow: some View {
+        ConductorFormRow("Base reference") {
+            ConductorBaseReferenceField(
+                reference: $baseReference,
+                branchNames: baseReferenceBranchNames)
         }
     }
 
@@ -948,6 +1157,8 @@ struct ConductorNewRunCanvas: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Text("\(role.stepIndex + 1). \(role.step.agentName)")
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(theme.palette.textPrimary)
                     .lineLimit(1)
                 RafuChip(text: role.definition.provider.displayName)
                 if role.step.gateAfter {
@@ -955,16 +1166,15 @@ struct ConductorNewRunCanvas: View {
                 }
                 Spacer()
             }
-            Text("Model override")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            EnsembleModelField(
-                label: "\(role.step.agentName) model override",
-                available: role.modelChoices,
-                resolution: workflowModelResolution(for: role),
-                value: Binding(
-                    get: { workflowModel.modelValue(for: role.stepIndex) },
-                    set: { workflowModel.setModelValue($0, for: role.stepIndex) }))
+            ConductorFormRow("Model override", alignment: .top) {
+                EnsembleModelField(
+                    label: "\(role.step.agentName) model override",
+                    available: role.modelChoices,
+                    resolution: workflowModelResolution(for: role),
+                    value: Binding(
+                        get: { workflowModel.modelValue(for: role.stepIndex) },
+                        set: { workflowModel.setModelValue($0, for: role.stepIndex) }))
+            }
         }
     }
 

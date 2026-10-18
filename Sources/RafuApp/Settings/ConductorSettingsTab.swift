@@ -1,41 +1,77 @@
+import AppKit
 import SwiftUI
 
 /// Settings > Agents (conductor/C0-shim.md, "Settings surface"):
-/// registry-driven rows, one per `ConductorAdapterRegistry` adapter — install
-/// status, version, delegated auth hint, enable toggle, and a default-model
-/// picker with free-text override.
+/// registry-driven rows, one per `ConductorAdapterRegistry` adapter, in one
+/// table — enable switch, icon, name, version, sign-in state (glyph + word),
+/// and a default-model popup in a single aligned column. Selecting a row
+/// shows its details below: abbreviated location with Show in Finder, and
+/// one combo field for a custom model ID.
 ///
 /// No credentials are collected anywhere. Rafu never stores, reads, copies,
-/// or proxies a provider credential for inference (ADR 0018); every row says
+/// or proxies a provider credential for inference (ADR 0018); the footer says
 /// so, and signing in happens in the vendor's own CLI.
 struct ConductorSettingsSection: View {
     @State private var model = ConductorSettingsModel()
+    @State private var selection: ConductorCLIID?
 
     var body: some View {
-        RafuSettingsSection {
-            Text("Agent CLIs")
-        } content: {
-            if model.rows.isEmpty {
-                RafuSettingsRow {
+        Group {
+            Section {
+                if model.rows.isEmpty {
                     Text("No agent CLIs are available yet.")
                         .foregroundStyle(.secondary)
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(model.rows.enumerated()), id: \.element.id) { index, row in
-                        if index > 0 {
-                            Divider()
+                } else {
+                    Table(model.rows, selection: $selection) {
+                        TableColumn("Enabled") { row in
+                            Toggle(isOn: model.binding(for: row.id)) {
+                                Text("Enable \(row.displayName)")
+                            }
+                            .labelsHidden()
                         }
-                        RafuSettingsRow {
-                            ConductorAdapterRow(row: row, model: model)
+                        .width(52)
+                        TableColumn("Agent") { row in
+                            Label(row.displayName, systemImage: conductorAgentSymbol(row.id))
+                                .lineLimit(1)
                         }
+                        .width(min: 90, ideal: 110, max: 120)
+                        TableColumn("Version") { row in
+                            Text(ConductorAgentDisplay.versionText(model.probe(for: row.id)))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        .width(min: 48, ideal: 60, max: 70)
+                        TableColumn("Sign-in") { row in
+                            let state = model.signInPresentation(for: row.id)
+                            Label(state.word, systemImage: state.systemImage)
+                                .lineLimit(1)
+                        }
+                        .width(min: 90, ideal: 104, max: 110)
+                        TableColumn("Default model") { row in
+                            ConductorDefaultModelCell(row: row, model: model)
+                        }
+                        .width(min: 140, ideal: 170)
                     }
+                    .frame(height: 30 + 28 * CGFloat(model.rows.count))
+                }
+            } header: {
+                Text("Agent CLIs")
+            } footer: {
+                Text(
+                    "Rafu runs the agent CLIs you already have installed, under your own subscriptions. It never stores, reads, or forwards a sign-in token — log in inside each CLI. Nothing runs until you start a run. Unknown sign-in does not block runs."
+                )
+            }
+
+            if let selected = model.rows.first(where: { $0.id == selection }) {
+                Section(selected.displayName) {
+                    ConductorAgentDetail(row: selected, model: model)
+                }
+            } else if !model.rows.isEmpty {
+                Section {
+                    Text("Select an agent to see its location and set a custom model.")
+                        .foregroundStyle(.secondary)
                 }
             }
-        } footer: {
-            Text(
-                "Rafu runs the agent CLIs you already have installed, under your own subscriptions. It never stores, reads, or forwards a sign-in token — log in inside each CLI. Nothing runs until you start a run."
-            )
         }
         .task {
             await model.refreshStatuses()
@@ -161,6 +197,22 @@ final class ConductorSettingsModel {
         didRefreshStatuses = true
     }
 
+    /// The last probe result, or `nil` before the explicit refresh finished.
+    func probe(for id: ConductorCLIID) -> AdapterProbe? {
+        probeByID[id]
+    }
+
+    /// Glyph plus word for the Sign-in column.
+    func signInPresentation(for id: ConductorCLIID) -> ConductorSignInPresentation {
+        ConductorSignInPresentation.make(probe: probeByID[id], auth: authByID[id])
+    }
+
+    /// Absolute path of the installed CLI, when the probe found one.
+    func executablePath(for id: ConductorCLIID) -> String? {
+        guard let probe = probeByID[id], probe.installed else { return nil }
+        return probe.executableURL?.path
+    }
+
     func installStatusText(for id: ConductorCLIID) -> String {
         guard let probe = probeByID[id] else { return "Checking for the CLI…" }
         guard probe.installed else {
@@ -253,28 +305,75 @@ final class ConductorSettingsModel {
     }
 }
 
-private struct ConductorAdapterRow: View {
+/// Pure presentation rules for the Agents pane: the sign-in glyph and word,
+/// the version cell, and the abbreviated executable path.
+nonisolated struct ConductorSignInPresentation: Equatable, Sendable {
+    let systemImage: String
+    let word: String
+
+    /// Glyph plus word, never colour alone. "Unknown" never blocks a run:
+    /// the CLI itself is the authority at launch (ADR 0018 delegated auth).
+    static func make(probe: AdapterProbe?, auth: AdapterAuthStatus?) -> Self {
+        guard let probe else { return Self(systemImage: "ellipsis.circle", word: "Checking…") }
+        guard probe.installed else {
+            return Self(systemImage: "minus.circle", word: "Not installed")
+        }
+        switch auth ?? .unknown() {
+        case .authenticated:
+            return Self(systemImage: "checkmark.circle", word: "Signed in")
+        case .notAuthenticated:
+            return Self(systemImage: "exclamationmark.triangle", word: "Sign-in needed")
+        case .unknown:
+            return Self(systemImage: "questionmark.circle", word: "Unknown")
+        }
+    }
+}
+
+nonisolated enum ConductorAgentDisplay {
+    /// "/Users/me/.local/bin/claude" becomes "~/.local/bin/claude". Only a
+    /// whole leading home-directory component is abbreviated, so
+    /// "/Users/mentor/x" is not shortened for home "/Users/me".
+    static func abbreviated(_ path: String, home: String = NSHomeDirectory()) -> String {
+        let trimmedHome = home.hasSuffix("/") ? String(home.dropLast()) : home
+        guard !trimmedHome.isEmpty, trimmedHome != "/" else { return path }
+        if path == trimmedHome { return "~" }
+        if path.hasPrefix(trimmedHome + "/") {
+            return "~" + String(path.dropFirst(trimmedHome.count))
+        }
+        return path
+    }
+
+    static func versionText(_ probe: AdapterProbe?) -> String {
+        guard let probe, probe.installed else { return "—" }
+        return probe.version ?? "Unknown"
+    }
+}
+
+/// The glyph beside an agent's name. Neutral SF Symbols; no vendor artwork.
+private func conductorAgentSymbol(_ id: ConductorCLIID) -> String {
+    switch id {
+    case .claudeCode: "asterisk"
+    case .codex: "scope"
+    case .openCode: "square"
+    case .cline: "diamond"
+    case .kimi: "k.square"
+    case .geminiCLI: "sparkles"
+    case .cursor: "cursorarrow"
+    }
+}
+
+/// The default-model popup for one agent, plus a refresh icon where the CLI
+/// can list models. The icon slot is reserved on every row so the popups line
+/// up in one column.
+private struct ConductorDefaultModelCell: View {
     let row: ConductorSettingsModel.Row
     let model: ConductorSettingsModel
 
-    @State private var customModel = ""
     @State private var refreshTask: Task<Void, Never>?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Toggle(isOn: model.binding(for: row.id)) {
-                Text(row.displayName).font(.body.weight(.medium))
-            }
-            Text(model.installStatusText(for: row.id))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Install status: \(model.installStatusText(for: row.id))")
-            Text(model.authStatusText(for: row.id))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Sign-in status: \(model.authStatusText(for: row.id))")
-
-            HStack(spacing: 8) {
+        HStack(spacing: 4) {
+            Menu {
                 Picker("Default model", selection: model.defaultModelBinding(for: row.id)) {
                     Text(ConductorModelResolution.unsetLabel).tag("")
                     ForEach(model.availableModels(for: row.id)) { choice in
@@ -286,42 +385,132 @@ private struct ConductorAdapterRow: View {
                         Text("\(resolved.displayName) (custom)").tag(resolved.id)
                     }
                 }
-                .accessibilityLabel("\(row.displayName) default model")
-                if row.supportsModelDiscovery {
-                    Button("Refresh models") {
-                        refreshTask?.cancel()
-                        refreshTask = Task { await model.refreshModels(for: row.id) }
-                    }
-                    .disabled(model.modelRefreshState(for: row.id) == .refreshing)
-                    .accessibilityLabel("Refresh \(row.displayName) models")
-                }
+                .pickerStyle(.inline)
+            } label: {
+                Text(
+                    model.resolvedModelChoice(for: row.id)?.displayName
+                        ?? ConductorModelResolution.unsetLabel
+                )
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(minWidth: 0, maxWidth: .infinity)
+            .accessibilityLabel("\(row.displayName) default model")
 
-            HStack(spacing: 8) {
-                TextField("Custom model identifier", text: $customModel)
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityLabel("\(row.displayName) custom model identifier")
-                    .onSubmit { applyCustomModel() }
-                Button("Use") { applyCustomModel() }
-                    .disabled(
-                        customModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    )
-                    .accessibilityLabel("Use custom model for \(row.displayName)")
-            }
-            if model.modelRefreshState(for: row.id) == .unsupported {
-                Text("This CLI has no model-listing command; enter one by hand instead.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if row.supportsModelDiscovery {
+                Button {
+                    refreshTask?.cancel()
+                    refreshTask = Task { await model.refreshModels(for: row.id) }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .disabled(model.modelRefreshState(for: row.id) == .refreshing)
+                .help("Refresh models")
+                .accessibilityLabel("Refresh \(row.displayName) models")
+                .frame(width: 18)
+                .fixedSize()
+            } else {
+                Color.clear.frame(width: 18, height: 1).accessibilityHidden(true)
             }
         }
-        .padding(.vertical, 3)
         .onDisappear { refreshTask?.cancel() }
     }
+}
 
-    private func applyCustomModel() {
-        let trimmed = customModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+/// Details for the selected agent: where the CLI lives, its sign-in note, and
+/// one editable combo field for a model ID the list does not offer.
+private struct ConductorAgentDetail: View {
+    let row: ConductorSettingsModel.Row
+    let model: ConductorSettingsModel
+
+    var body: some View {
+        if let path = model.executablePath(for: row.id) {
+            LabeledContent("Location") {
+                HStack(spacing: 8) {
+                    Text(ConductorAgentDisplay.abbreviated(path))
+                        .font(.body.monospaced())
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                        .help(path)
+                    Button("Show in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([
+                            URL(fileURLWithPath: path)
+                        ])
+                    }
+                    .buttonStyle(.link)
+                }
+            }
+        } else {
+            LabeledContent("Location") {
+                Text(model.installStatusText(for: row.id))
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Install status: \(model.installStatusText(for: row.id))")
+            }
+        }
+
+        LabeledContent("Sign-in") {
+            Text(model.authStatusText(for: row.id))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.trailing)
+                .accessibilityLabel("Sign-in status: \(model.authStatusText(for: row.id))")
+        }
+
+        LabeledContent("Custom model") {
+            ConductorModelComboField(row: row, model: model)
+        }
+
+        if model.modelRefreshState(for: row.id) == .unsupported {
+            Text("This CLI has no model-listing command; enter one by hand instead.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// One field that is both a list and free text: type any model ID, or open
+/// the menu to pick a listed one. Typing commits on Return or when the field
+/// loses focus, so there is no separate "Use" button.
+private struct ConductorModelComboField: View {
+    let row: ConductorSettingsModel.Row
+    let model: ConductorSettingsModel
+
+    @State private var draft = ""
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            TextField("Type a model ID", text: $draft)
+                .textFieldStyle(.roundedBorder)
+                .focused($isFocused)
+                .accessibilityLabel("\(row.displayName) custom model identifier")
+                .onSubmit { commit(draft) }
+            Menu {
+                Button(ConductorModelResolution.unsetLabel) { commit("") }
+                ForEach(model.availableModels(for: row.id)) { choice in
+                    Button(choice.displayName) { commit(choice.id) }
+                }
+            } label: {
+                Image(systemName: "chevron.up.chevron.down")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Choose a listed model")
+            .accessibilityLabel("Choose \(row.displayName) model from the list")
+        }
+        .onAppear { draft = model.defaultModel(for: row.id) }
+        .onChange(of: row.id) { _, _ in draft = model.defaultModel(for: row.id) }
+        .onChange(of: isFocused) { _, focused in
+            if !focused { commit(draft) }
+        }
+    }
+
+    private func commit(_ value: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         model.setDefaultModel(trimmed, for: row.id)
-        customModel = ""
+        draft = trimmed
     }
 }

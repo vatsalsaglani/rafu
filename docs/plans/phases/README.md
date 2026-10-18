@@ -5,6 +5,8 @@ The active gate before the repository's first commit and initial push is
 the narrower vertical-slice brief after hands-on review expanded the acceptance
 contract to a polished workbench.
 
+The macOS redesign ("One Gold Thread") is tracked in [`macos-redesign.md`](macos-redesign.md); it is implemented on its integration branch and awaits a macOS build and test pass.
+
 This directory turns the canonical [Rafu v0.4 product and architecture plan](../rafu_product_architecture_plan.md) into worktree-ready Goal mode briefs. The canonical plan owns product intent and locked decisions; these files own execution order, path boundaries, verification, and handoff.
 
 ## Bootstrap checkpoint and active gate

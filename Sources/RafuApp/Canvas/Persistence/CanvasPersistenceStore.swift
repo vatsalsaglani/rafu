@@ -27,8 +27,12 @@ actor CanvasPersistenceStore {
             for url in try boardURLs(in: folder) {
                 do {
                     let document = try read(url)
+                    let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+                        .contentModificationDate
                     result.boards.append(
-                        .init(id: document.id, title: document.title, revision: document.revision))
+                        .init(
+                            id: document.id, title: document.title, revision: document.revision,
+                            cardCount: document.cards.count, modified: modified))
                 } catch { result.unavailableCount += 1 }
             }
             result.boards.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }

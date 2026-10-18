@@ -1,15 +1,15 @@
 import Foundation
 
-enum GitInspectorSection: String, CaseIterable, Sendable {
+nonisolated enum GitInspectorSection: String, CaseIterable, Sendable {
     case changes
-    case worktrees
     case history
+    case worktrees
 
     var title: String { rawValue.capitalized }
 }
 
 /// Persisted (`@AppStorage`) Source Control Changes presentation.
-enum GitChangesViewMode: String, CaseIterable, Sendable {
+nonisolated enum GitChangesViewMode: String, CaseIterable, Sendable {
     case flat
     case tree
 }

@@ -267,7 +267,8 @@ group records retain the existing process/restoration boundary; Canvas adds no
 new runtime owner. Group splits are disabled from Canvas. Four terminal surface
 leases and two loaded web views remain the per-window limits.
 
-Focus changes and Leave Content now release keyboard focus without unloading
+Focus changes and Return to Board (formerly "Leave Content", ⌃⇥ since the
+macOS redesign) now release keyboard focus without unloading
 other visible cards. Hiding/closing the Canvas still stops web/capture resources
 and parks terminals. A native web mount uses a window-scoped mouse-down observer
 to update card focus while leaving the event intact for WebKit. Its observer is

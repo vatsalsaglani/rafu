@@ -7,6 +7,18 @@
 - **Last verified:** Swift 6.2 language mode (Swift 6.3.3, Xcode 26.6),
   macOS 26.5.2, on 2026-07-26 (UX-01 + UX-02).
 
+## macOS redesign update: Settings is no longer a canvas route (macOS build verification pending)
+
+Settings now opens only as the standard SwiftUI `Settings` scene (`TabView`
+panes, 680 pt) through `openSettings`, and `SettingsCommandRouter` was deleted.
+Every statement below about the Settings tab, the `.settings` route (resolver
+rule 9), the `showSettings` activator, or `SettingsCommandRouter` describes code
+that is now unreachable. It stays until cleanup after the first green Mac build:
+`WorkspaceSession.showSettings/closeSettings/settingsVisible`,
+`WorkspaceAuxiliaryTab.settings`, `EditorCanvasRoute.settings`, the `.settings`
+cases, and the `SettingsCanvas` stub. When removing the route, also drop the
+Settings clears from the other activators in the exclusivity table.
+
 ## 2026-10-17 repair: auxiliary tabs share the file shelf
 
 The user requested that Settings and Ensemble keep open file tabs accessible.
@@ -123,7 +135,7 @@ Two subtleties worth keeping in mind before "simplifying" anything here:
   a `WorkspaceSession`, so its status-bar Settings button and focused-window
   ⌘, command can set `settingsVisible` and resolve `.settings`. With every
   window closed there is no session or resolver; `SettingsCommandRouter`
-  invokes the registered native Settings scene instead.
+  (since deleted) invoked the registered native Settings scene instead.
 
 ## How to add a canvas mode
 

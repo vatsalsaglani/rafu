@@ -1,5 +1,39 @@
 import SwiftUI
 
+/// Pure "does the form differ from what is saved" rule behind the Save
+/// button's default state. Text is compared trimmed, the way `validated()`
+/// normalizes it, so stray whitespace alone does not count as a change.
+nonisolated enum AIProviderDraftChange {
+    static func hasChanges(
+        saved: AIProviderConfiguration,
+        name: String,
+        kind: AIProviderKind,
+        baseURL: String,
+        model: String,
+        modelAlias: String,
+        transport: OpenAICompatibleTransport,
+        maxOutputTokens: Int,
+        enteredAPIKey: String
+    ) -> Bool {
+        func trimmed(_ value: String) -> String {
+            value.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if !trimmed(enteredAPIKey).isEmpty { return true }
+        // Sequential checks keep the type checker fast (one long `||` chain
+        // of mixed comparisons risks "expression too complex").
+        if trimmed(name) != trimmed(saved.name) { return true }
+        if kind != saved.kind { return true }
+        if trimmed(baseURL) != saved.baseURL.absoluteString { return true }
+        if trimmed(model) != trimmed(saved.model) { return true }
+        let savedAlias: String = saved.modelAlias ?? ""
+        if trimmed(modelAlias) != trimmed(savedAlias) { return true }
+        if transport != saved.openAITransport { return true }
+        return maxOutputTokens != saved.maxOutputTokens
+    }
+}
+
+/// Settings > AI: a provider list with "+" and "−" beneath it (the macOS
+/// list-edit convention) beside a detail form with right-aligned labels.
 struct AIProviderSettingsSection: View {
     @State private var model: AIProviderSettingsModel
 
@@ -10,16 +44,19 @@ struct AIProviderSettingsSection: View {
     var body: some View {
         @Bindable var model = model
 
-        RafuSettingsSection {
-            Text("Commit Message Providers")
-        } content: {
-            VStack(alignment: .leading, spacing: 14) {
-                providerToolbar(model: model)
-                Divider()
-                providerFields(model: model)
-                actionRow(model: model)
+        Section {
+            HStack(alignment: .top, spacing: 16) {
+                providerList(model: model)
+                    .frame(width: 180)
+                VStack(alignment: .leading, spacing: 14) {
+                    providerFields(model: model)
+                    actionRow(model: model)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.vertical, 4)
+        } header: {
+            Text("Commit Message Providers")
         } footer: {
             Text(
                 "Keys stay in this Mac’s Keychain. Only explicitly selected diffs are sent when "
@@ -29,39 +66,65 @@ struct AIProviderSettingsSection: View {
         .task { await model.load() }
     }
 
-    private func providerToolbar(model: AIProviderSettingsModel) -> some View {
-        HStack {
-            Picker(
-                "Provider",
-                selection: Binding(
+    // MARK: Provider list
+
+    private func providerList(model: AIProviderSettingsModel) -> some View {
+        VStack(spacing: 0) {
+            List(
+                model.configurations,
+                selection: Binding<UUID?>(
                     get: { model.selectedID },
                     set: { id in
-                        guard let id else { return }
+                        guard let id, id != model.selectedID else { return }
                         model.beginSelect(id)
                     }
                 )
-            ) {
-                ForEach(model.configurations) { configuration in
-                    Text("\(configuration.name) · \(configuration.displayModelName)")
-                        .tag(Optional(configuration.id))
+            ) { configuration in
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(configuration.name).lineLimit(1)
+                    Text(configuration.displayModelName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
+            .listStyle(.bordered)
+            .frame(height: 190)
+            .accessibilityLabel("Providers")
 
-            Menu("Add Provider", systemImage: "plus") {
-                ForEach(AIProviderKind.allCases) { kind in
-                    Button(kind.title) { model.add(kind) }
+            HStack(spacing: 0) {
+                Menu {
+                    ForEach(AIProviderKind.allCases) { kind in
+                        Button(kind.title) { model.add(kind) }
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                        .frame(width: 24, height: 20)
                 }
-            }
-            .labelStyle(.iconOnly)
-            .help("Add provider")
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Add Provider")
+                .accessibilityLabel("Add Provider")
 
-            Button("Delete Provider", systemImage: "trash", role: .destructive) {
-                model.beginDelete()
+                Button {
+                    model.beginDelete()
+                } label: {
+                    Image(systemName: "minus")
+                        .frame(width: 24, height: 20)
+                }
+                .buttonStyle(.borderless)
+                .disabled(model.selectedID == nil)
+                .help("Remove Selected Provider")
+                .accessibilityLabel("Remove Selected Provider")
+
+                Spacer(minLength: 0)
             }
-            .labelStyle(.iconOnly)
-            .help("Delete selected provider")
+            .padding(.top, 4)
         }
     }
+
+    // MARK: Detail form
 
     private func providerFields(model: AIProviderSettingsModel) -> some View {
         @Bindable var model = model
@@ -75,6 +138,7 @@ struct AIProviderSettingsSection: View {
                     }
                 }
                 .labelsHidden()
+                .fixedSize()
                 .onChange(of: model.draftKind) { oldValue, newValue in
                     if oldValue != newValue { model.applyKindDefaults(newValue) }
                 }
@@ -104,6 +168,7 @@ struct AIProviderSettingsSection: View {
                         }
                     }
                     .labelsHidden()
+                    .fixedSize()
                 }
             }
             fieldRow("API Key") {
@@ -121,14 +186,40 @@ struct AIProviderSettingsSection: View {
         }
     }
 
+    // MARK: Actions
+
     private func actionRow(model: AIProviderSettingsModel) -> some View {
         HStack {
             statusView(model.status)
             Spacer()
             Button("Test Connection") { model.beginTest() }
-            Button("Save") { model.beginSave() }
-                .buttonStyle(RafuProminentButtonStyle())
+            if hasChanges(model: model) {
+                Button("Save") { model.beginSave() }
+                    .buttonStyle(RafuProminentButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+            } else {
+                Button("Save") { model.beginSave() }
+            }
         }
+    }
+
+    /// A provider that was added but never saved also counts as changed, so
+    /// Save is the default action until it has been written once.
+    private func hasChanges(model: AIProviderSettingsModel) -> Bool {
+        guard let id = model.selectedID else { return false }
+        guard model.persistedIDs.contains(id),
+            let saved = model.configurations.first(where: { $0.id == id })
+        else { return true }
+        return AIProviderDraftChange.hasChanges(
+            saved: saved,
+            name: model.draftName,
+            kind: model.draftKind,
+            baseURL: model.draftBaseURL,
+            model: model.draftModel,
+            modelAlias: model.draftModelAlias,
+            transport: model.draftTransport,
+            maxOutputTokens: model.draftMaxOutputTokens,
+            enteredAPIKey: model.apiKey)
     }
 
     @ViewBuilder
@@ -148,12 +239,15 @@ struct AIProviderSettingsSection: View {
         }
     }
 
+    /// Right-aligned label column, left-aligned controls.
     private func fieldRow<Content: View>(
         _ title: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        GridRow {
-            Text(title).foregroundStyle(.secondary)
+        GridRow(alignment: .firstTextBaseline) {
+            Text(title)
+                .foregroundStyle(.secondary)
+                .gridColumnAlignment(.trailing)
             content().frame(maxWidth: .infinity, alignment: .leading)
         }
     }

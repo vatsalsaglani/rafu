@@ -174,7 +174,9 @@ private struct EditorGroupView: View {
             isFocused: session.isFocusedGroup(group.id),
             terminalIdentityColor: selectedTerminalIdentity?.color,
             identityMatchesEditorBackground:
-                selectedTerminalIdentity?.matchesEditorBackground == true
+                selectedTerminalIdentity?.matchesEditorBackground == true,
+            hostsTerminal: selectedTerminalController != nil || selectedTerminalGroupID != nil,
+            hasSiblings: session.editorLayout.groupIDs.count > 1
         ) {
             VStack(spacing: 0) {
                 // The tab strip owns its own drop target
@@ -957,10 +959,8 @@ private struct WorkspaceWelcomeView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(theme.palette.textMuted)
-                .textCase(.uppercase)
-                .kerning(0.6)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(theme.palette.textSecondary)
             content()
         }
         .padding(14)
@@ -996,7 +996,7 @@ private struct WorkspaceWelcomeView: View {
             HStack(spacing: 8) {
                 Image(systemName: "folder")
                     .font(.system(size: 11))
-                    .foregroundStyle(theme.palette.accent)
+                    .foregroundStyle(theme.palette.textSecondary)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(entry.displayName)
                         .font(.system(size: 12, weight: .medium))
@@ -1175,14 +1175,32 @@ private struct EditorGroupTabBar: View {
                     )
                 }
                 .scrollIndicators(.hidden)
+                // Tabs scroll under a trailing fade, so the fixed controls
+                // below never overlap (or clip) a tab or its close button.
+                .overlay(alignment: .trailing) {
+                    LinearGradient(
+                        colors: [
+                            theme.palette.tabBarBackground.opacity(0),
+                            theme.palette.tabBarBackground,
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: 16)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                }
+                .layoutPriority(0)
                 Button {
                     session.editorLayout.focus(group.id)
                     session.requestNewCanvas()
                 } label: {
                     Image(systemName: "plus.rectangle.on.rectangle")
+                        .foregroundStyle(theme.palette.textSecondary)
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
+                .fixedSize()
                 .help("New Canvas")
                 .accessibilityLabel("New Canvas")
                 .disabled(session.rootURL == nil)
@@ -1199,6 +1217,7 @@ private struct EditorGroupTabBar: View {
                         )
                     )
                     .padding(.horizontal, 6)
+                    .fixedSize()
                 }
                 if group.tabs.count > 1 {
                     overflowTabMenu
@@ -1328,35 +1347,50 @@ private struct EditorGroupTabBar: View {
         switch tab.resource {
         case .file:
             if let document = session.document(for: tab) {
-                overflowTabMenuButton(title: document.displayName, tab: tab)
+                overflowTabMenuButton(
+                    title: document.displayName,
+                    glyph: FileIconProvider.fileIcon(named: document.displayName).symbol,
+                    isDirty: document.isDirty,
+                    tab: tab
+                )
             }
         case .terminal(let sessionID):
             if let controller = session.terminal.sessions.first(where: { $0.id == sessionID }) {
                 overflowTabMenuButton(
-                    title: TerminalSessionPresentation.tabLabel(controller.displayName), tab: tab)
+                    title: TerminalSessionPresentation.tabLabel(controller.displayName),
+                    glyph: "terminal", isDirty: false, tab: tab)
             }
         case .terminalGroup(let terminalGroupID):
             if let snapshot = session.terminal.terminalGroup(terminalGroupID) {
-                overflowTabMenuButton(title: snapshot.name.rawValue, tab: tab)
+                overflowTabMenuButton(
+                    title: snapshot.name.rawValue, glyph: "rectangle.3.group", isDirty: false,
+                    tab: tab)
             }
         case .canvas(let id):
-            overflowTabMenuButton(title: session.canvas.boards[id]?.title ?? "Canvas", tab: tab)
+            overflowTabMenuButton(
+                title: session.canvas.boards[id]?.title ?? "Canvas", glyph: "rectangle.3.group",
+                isDirty: false, tab: tab)
         case .restorable:
             EmptyView()
         }
     }
 
+    /// One row of the tab list: the tab's glyph, its name, and a trailing dot
+    /// when the document has unsaved changes. The selected tab keeps the check
+    /// mark in place of its glyph (a menu row carries one image).
     @ViewBuilder
-    private func overflowTabMenuButton(title: String, tab: EditorTabState) -> some View {
+    private func overflowTabMenuButton(
+        title: String, glyph: String, isDirty: Bool, tab: EditorTabState
+    ) -> some View {
+        let isSelected = tab.id == group.selectedTabID
         Button {
             session.selectEditorTab(tab.id, in: group.id)
         } label: {
-            if tab.id == group.selectedTabID {
-                Label(title, systemImage: "checkmark")
-            } else {
-                Text(title)
-            }
+            Label(isDirty ? "\(title) •" : title, systemImage: isSelected ? "checkmark" : glyph)
         }
+        .accessibilityValue(
+            [isSelected ? "Selected" : nil, isDirty ? "Unsaved changes" : nil]
+                .compactMap(\.self).joined(separator: ", "))
     }
 }
 
@@ -1628,9 +1662,13 @@ private struct GitDiffTabItem: View {
                 AttachedWorkbenchTabCloseButton(
                     accessibilityLabel: "Close \(openDiff.title)",
                     help: "Close \(openDiff.title)",
+                    presentation: EditorTabAccessory.resolve(
+                        isSelected: isSelected,
+                        isHovering: isHovering,
+                        isDirty: false
+                    ),
                     action: close
                 )
-                .opacity(isHovering || isSelected ? 1 : 0)
             }
         }
         .background {
@@ -1737,36 +1775,60 @@ private struct GitSideBySideDiffView: View {
         )
     }
 
+    /// One header (G8): path breadcrumb, the real comparison, and "+n −n".
+    /// The tab already carries the file title, so it is not repeated here.
     private var diffHeader: some View {
-        RafuCardHeaderRow {
-            HStack(spacing: 8) {
-                Image(systemName: "arrow.left.arrow.right")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(theme.palette.info)
-                RafuChip(text: openDiff.title, foreground: theme.palette.textPrimary)
-                Text(openDiff.subtitle)
-                    .font(.caption)
+        let components = GitDiffHeaderPresentation.breadcrumb(for: openDiff.diff.path)
+        let fileName = (openDiff.diff.path as NSString).lastPathComponent
+        return RafuCardHeaderRow {
+            HStack(spacing: 6) {
+                FileIconView(icon: FileIconProvider.fileIcon(named: fileName), size: 12)
+                    .accessibilityHidden(true)
+                ForEach(Array(components.enumerated()), id: \.offset) { item in
+                    if item.offset > 0 {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(theme.palette.textMuted)
+                            .accessibilityHidden(true)
+                    }
+                    let isLast = item.offset == components.count - 1
+                    Text(item.element)
+                        .font(.system(size: 12, weight: isLast ? .semibold : .regular))
+                        .foregroundStyle(
+                            isLast ? theme.palette.textPrimary : theme.palette.textSecondary
+                        )
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Text("·")
+                    .foregroundStyle(theme.palette.textMuted)
+                    .accessibilityHidden(true)
+                Text(GitDiffHeaderPresentation.comparisonLabel(for: openDiff.scope))
+                    .font(.system(size: 12))
                     .foregroundStyle(theme.palette.textSecondary)
                     .lineLimit(1)
+                    .fixedSize()
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                "\(openDiff.diff.path), \(GitDiffHeaderPresentation.comparisonLabel(for: openDiff.scope))"
+            )
         } trailing: {
             diffStats
         }
     }
 
     private var diffStats: some View {
-        let additions = openDiff.diff.hunks
-            .flatMap(\.rows)
-            .count { $0.newLine != nil && ($0.kind == .addition || $0.kind == .modification) }
-        let deletions = openDiff.diff.hunks
-            .flatMap(\.rows)
-            .count { $0.oldLine != nil && ($0.kind == .deletion || $0.kind == .modification) }
+        let counts = GitDiffHeaderPresentation.lineCounts(for: openDiff.diff)
         return HStack(spacing: 6) {
             RafuChip(
-                text: "+\(additions)", foreground: theme.palette.gitAdded, monospacedDigit: true)
+                text: "+\(counts.added)", foreground: theme.palette.gitAdded, monospacedDigit: true)
             RafuChip(
-                text: "−\(deletions)", foreground: theme.palette.gitDeleted, monospacedDigit: true)
+                text: "−\(counts.deleted)", foreground: theme.palette.gitDeleted,
+                monospacedDigit: true)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(counts.added) lines added, \(counts.deleted) lines removed")
     }
 
     private var diffTable: some View {
@@ -1804,19 +1866,17 @@ private struct GitSideBySideDiffView: View {
 
     private func hunkHeader(_ hunk: GitDiffHunk) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: "ellipsis")
-                .font(.caption2)
-                .foregroundStyle(theme.palette.textMuted)
+            // G8: no decorative "···" — the diff model has a fixed context
+            // size, so there is no real "Show More Context" action to offer.
             Text(hunk.header)
                 .font(.caption.monospaced())
-                .foregroundStyle(theme.palette.accent)
+                .foregroundStyle(theme.palette.textSecondary)
             Spacer(minLength: 12)
             if let action = hunkAction {
-                Button(action.title, systemImage: action.systemImage) {
+                Button(action.title) {
                     perform(action, on: hunk)
                 }
-                .buttonStyle(.borderless)
-                .controlSize(.small)
+                .buttonStyle(RafuSecondaryButtonStyle(compact: true))
                 .disabled(session.isGitBusy || session.isGitHunkActionBusy)
                 .help(action.help)
             }
@@ -2142,13 +2202,6 @@ private struct EditorTabItem: View {
                             )
                             .layoutPriority(1)
                             .help(document.displayName)
-                        if document.isDirty {
-                            Circle()
-                                .fill(theme.palette.accent)
-                                .frame(width: 6, height: 6)
-                                .fixedSize()
-                                .accessibilityHidden(true)
-                        }
                     }
                     .contentShape(.rect)
                 }
@@ -2163,12 +2216,16 @@ private struct EditorTabItem: View {
 
                 AttachedWorkbenchTabCloseButton(
                     accessibilityLabel: "Close \(document.displayName)",
-                    help: "Close \(document.displayName)"
+                    help: "Close \(document.displayName)",
+                    presentation: EditorTabAccessory.resolve(
+                        isSelected: isSelected,
+                        isHovering: isHovering,
+                        isDirty: document.isDirty
+                    )
                 ) {
                     session.requestClose(document)
                 }
                 .fixedSize()
-                .opacity(isHovering || isSelected ? 1 : 0)
             }
         }
         .fixedSize(horizontal: true, vertical: false)
@@ -2263,7 +2320,7 @@ private struct EditorTerminalTabItem: View {
                         } else {
                             Image(systemName: "terminal")
                                 .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(theme.palette.accent)
+                                .foregroundStyle(theme.palette.textSecondary)
                                 .fixedSize()
                                 .accessibilityHidden(true)
                         }
@@ -2299,12 +2356,16 @@ private struct EditorTerminalTabItem: View {
 
                 AttachedWorkbenchTabCloseButton(
                     accessibilityLabel: "Close \(title)",
-                    help: "Close \(title)"
+                    help: "Close \(title)",
+                    presentation: EditorTabAccessory.resolve(
+                        isSelected: isSelected,
+                        isHovering: isHovering,
+                        isDirty: false
+                    )
                 ) {
                     session.closeTerminalTab(tabID)
                 }
                 .fixedSize()
-                .opacity(isHovering || isSelected ? 1 : 0)
             }
         }
         .fixedSize(horizontal: true, vertical: false)
@@ -2404,7 +2465,7 @@ private struct EditorTerminalGroupTabItem: View {
         AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true) {
             HStack(spacing: 6) {
                 Image(systemName: "rectangle.3.group")
-                    .foregroundStyle(theme.palette.accent)
+                    .foregroundStyle(theme.palette.textSecondary)
                     .accessibilityHidden(true)
                 if isRenaming {
                     TextField("Terminal Group name", text: $renameText)
@@ -2428,7 +2489,9 @@ private struct EditorTerminalGroupTabItem: View {
                         [
                             isSelected ? "Selected" : nil,
                             snapshot.panes.count > 1 ? "\(snapshot.panes.count) panes" : nil,
-                            attentionCount > 0 ? "\(attentionCount) panes need attention" : nil,
+                            attentionCount > 0
+                                ? "\(attentionCount) \(attentionCount == 1 ? "pane needs" : "panes need") attention"
+                                : nil,
                         ]
                         .compactMap(\.self).joined(separator: ", "))
                 }
@@ -2441,16 +2504,22 @@ private struct EditorTerminalGroupTabItem: View {
                     if attentionCount > 0 {
                         Image(systemName: "bell.fill")
                             .font(.caption2)
-                            .accessibilityLabel("\(attentionCount) panes need attention")
+                            .accessibilityLabel(
+                                "\(attentionCount) \(attentionCount == 1 ? "pane needs" : "panes need") attention"
+                            )
                     }
                 }
                 AttachedWorkbenchTabCloseButton(
                     accessibilityLabel: "Close Terminal Group \(title)",
-                    help: "Close \(title)"
+                    help: "Close \(title)",
+                    presentation: EditorTabAccessory.resolve(
+                        isSelected: isSelected,
+                        isHovering: isHovering,
+                        isDirty: false
+                    )
                 ) {
                     session.requestTerminalGroupClose(snapshot.id)
                 }
-                .opacity(isHovering || isSelected ? 1 : 0)
             }
         }
         .fixedSize(horizontal: true, vertical: false)
@@ -2702,6 +2771,11 @@ private struct MarkdownEditorPresentation: View {
     }
 }
 
+/// Find / replace bar. Layout (Xcode and Safari order): the field first, then
+/// the result count, previous/next, the option toggles, and a trailing Done.
+/// The replace row reuses the same leading column and field width so the two
+/// fields align. Option toggles are neutral 24 x 22 icons; the field draws the
+/// theme focus ring (never system blue).
 private struct DocumentFindBar: View {
     @Environment(\.rafuTheme) private var theme
     @Bindable var state: DocumentFindState
@@ -2715,11 +2789,24 @@ private struct DocumentFindBar: View {
         case replacement
     }
 
+    /// Shared by both rows so the find and replace fields align.
+    private static let disclosureColumnWidth: CGFloat = 22
+    private static let fieldMinWidth: CGFloat = 260
+    private static let fieldMaxWidth: CGFloat = 420
+
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
+                Button(
+                    showsReplace ? "Hide Replace" : "Show Replace",
+                    systemImage: showsReplace ? "chevron.down" : "chevron.right"
+                ) { showsReplace.toggle() }
+                .buttonStyle(RafuIconButtonStyle(size: Self.disclosureColumnWidth, iconSize: 10))
+                .help(showsReplace ? "Hide Replace" : "Show Replace")
                 TextField("Find", text: $state.query)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
+                    .rafuField(isFocused: focusedField == .query)
+                    .frame(minWidth: Self.fieldMinWidth, maxWidth: Self.fieldMaxWidth)
                     .focused($focusedField, equals: .query)
                     .onSubmit { state.findNext() }
                     .onChange(of: state.queryFocusRequest, initial: true) { _, request in
@@ -2728,37 +2815,52 @@ private struct DocumentFindBar: View {
                     }
                 Text(matchSummary).font(.caption.monospacedDigit())
                     .foregroundStyle(theme.palette.textSecondary)
-                    .frame(minWidth: 48)
-                Button("Previous Match", systemImage: "chevron.up") { state.findPrevious() }
+                    .lineLimit(1)
+                    .frame(minWidth: 52, alignment: .leading)
+                Button("Previous Match", systemImage: "chevron.left") { state.findPrevious() }
                     .buttonStyle(RafuIconButtonStyle(size: 22))
                     .help("Previous Match")
-                Button("Next Match", systemImage: "chevron.down") { state.findNext() }
+                Button("Next Match", systemImage: "chevron.right") { state.findNext() }
                     .buttonStyle(RafuIconButtonStyle(size: 22))
                     .help("Next Match")
-                findOptionButton("Case Sensitive", symbol: "textformat", option: .caseSensitive)
-                findOptionButton("Whole Word", symbol: "character.cursor.ibeam", option: .wholeWord)
-                findOptionButton(
-                    "Regular Expression", symbol: "asterisk", option: .regularExpression)
-                Button(
-                    showsReplace ? "Hide Replace" : "Show Replace",
-                    systemImage: showsReplace ? "chevron.down" : "chevron.right"
-                ) { showsReplace.toggle() }
-                .buttonStyle(RafuIconButtonStyle(isActive: showsReplace, size: 22))
-                .help(showsReplace ? "Hide Replace" : "Show Replace")
-                Button("Close Find", systemImage: "xmark", action: close)
-                    .buttonStyle(RafuIconButtonStyle(size: 22))
+                // A `ViewBuilder` block holds at most ten children, so the
+                // option toggles are grouped. `Group` adds no layout of its own.
+                Group {
+                    RafuOptionToggle(
+                        glyph: .text("Aa"), label: "Match Case",
+                        isOn: optionBinding(.caseSensitive))
+                    RafuOptionToggle(
+                        glyph: .text("ab", underlined: true), label: "Whole Word",
+                        isOn: optionBinding(.wholeWord))
+                    RafuOptionToggle(
+                        glyph: .text(".*", monospaced: true), label: "Regular Expression",
+                        isOn: optionBinding(.regularExpression))
+                    RafuOptionToggle(
+                        glyph: .symbol("selection.pin.in.out"), label: "Find in Selection",
+                        isOn: Binding(
+                            get: { state.isLimitedToSelection },
+                            set: { state.setLimitedToSelection($0) }
+                        ))
+                }
+                Spacer(minLength: 0)
+                Button("Done", action: close)
+                    .buttonStyle(RafuSecondaryButtonStyle(compact: true))
                     .help("Close Find")
             }
             if showsReplace {
                 HStack(spacing: 6) {
+                    Color.clear.frame(width: Self.disclosureColumnWidth, height: 1)
                     TextField("Replace", text: $state.replacement)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(.plain)
+                        .rafuField(isFocused: focusedField == .replacement)
+                        .frame(minWidth: Self.fieldMinWidth, maxWidth: Self.fieldMaxWidth)
                         .focused($focusedField, equals: .replacement)
                         .onSubmit { state.replaceCurrent() }
                     Button("Replace") { state.replaceCurrent() }
                         .buttonStyle(RafuSecondaryButtonStyle(compact: true))
                     Button("Replace All") { state.replaceAll() }
                         .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+                    Spacer(minLength: 0)
                 }
             }
             if let errorMessage = state.errorMessage {
@@ -2777,26 +2879,50 @@ private struct DocumentFindBar: View {
     }
 
     private var matchSummary: String {
-        guard state.matchCount > 0 else { return "No results" }
-        return "\((state.currentMatchIndex ?? 0) + 1) of \(state.matchCount)"
+        FindBarPresentation.matchSummary(
+            matchCount: state.matchCount, currentIndex: state.currentMatchIndex)
     }
 
-    private func findOptionButton(
-        _ title: String,
-        symbol: String,
-        option: TextSearchOptions
-    ) -> some View {
-        let selected = state.options.contains(option)
-        return Button(title, systemImage: symbol) {
-            if selected {
-                state.options.remove(option)
-            } else {
-                state.options.insert(option)
+    private func optionBinding(_ option: TextSearchOptions) -> Binding<Bool> {
+        Binding(
+            get: { state.options.contains(option) },
+            set: { isOn in
+                if isOn {
+                    state.options.insert(option)
+                } else {
+                    state.options.remove(option)
+                }
             }
+        )
+    }
+}
+
+/// Pure wording for the find bar, kept apart from the view for tests.
+nonisolated enum FindBarPresentation {
+    static func matchSummary(matchCount: Int, currentIndex: Int?) -> String {
+        guard matchCount > 0 else { return "No results" }
+        return "\((currentIndex ?? 0) + 1) of \(matchCount)"
+    }
+}
+
+/// User-facing words for the Markdown mode control: one three-segment choice,
+/// "Source | Preview | Split". The model case stays `.edit`; only the word
+/// shown to the user is "Source".
+nonisolated enum MarkdownModePresentation {
+    static func title(for mode: MarkdownPresentationMode) -> String {
+        switch mode {
+        case .edit: "Source"
+        case .preview: "Preview"
+        case .split: "Split"
         }
-        .buttonStyle(RafuIconButtonStyle(isActive: selected, size: 22))
-        .help(title)
-        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    static func tooltip(for mode: MarkdownPresentationMode) -> String {
+        switch mode {
+        case .edit: "Show Markdown source"
+        case .preview: "Show rendered preview"
+        case .split: "Show source and preview side by side"
+        }
     }
 }
 
@@ -2807,7 +2933,7 @@ private struct MarkdownModeControl: View {
     var body: some View {
         HStack(spacing: 2) {
             ForEach(MarkdownPresentationMode.allCases, id: \.rawValue) { item in
-                modeButton(item)
+                segment(item)
             }
         }
         .padding(2)
@@ -2820,15 +2946,31 @@ private struct MarkdownModeControl: View {
         .accessibilityLabel("Markdown presentation")
     }
 
-    private func modeButton(_ item: MarkdownPresentationMode) -> some View {
-        Button(item.title, systemImage: item.symbolName) {
-            withAnimation(.spring(duration: 0.22)) { mode = item }
+    private func segment(_ item: MarkdownPresentationMode) -> some View {
+        let isSelected = item == mode
+        return Button {
+            mode = item
+        } label: {
+            Text(MarkdownModePresentation.title(for: item))
+                .rafuNoWrapSegmentLabel()
+                .font(.system(size: 11.5, weight: isSelected ? .semibold : .regular))
+                .foregroundStyle(
+                    isSelected ? theme.palette.textPrimary : theme.palette.textSecondary
+                )
+                .padding(.horizontal, 8)
+                .frame(height: 22)
+                .background {
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(theme.palette.selection)
+                    }
+                }
+                .contentShape(Rectangle())
         }
-        .buttonStyle(
-            RafuIconButtonStyle(isActive: item == mode, size: 24, iconSize: 11)
-        )
-        .help(item.title)
-        .accessibilityAddTraits(item == mode ? .isSelected : [])
+        .buttonStyle(.plain)
+        .help(MarkdownModePresentation.tooltip(for: item))
+        .accessibilityLabel(MarkdownModePresentation.title(for: item))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 

@@ -6,6 +6,10 @@ import SwiftUI
 /// through the configured AI provider and import the validated result.
 struct AIThemeGeneratorSection: View {
     @AppStorage("themeChoice") private var themeChoice = RafuThemeChoice.system.rawValue
+    @AppStorage(ThemeAppearancePreference.lightChoiceKey) private var lightChoice =
+        ThemeAppearancePreference.defaultLightIdentifier
+    @AppStorage(ThemeAppearancePreference.darkChoiceKey) private var darkChoice =
+        ThemeAppearancePreference.defaultDarkIdentifier
     @AppStorage("themeRevision") private var themeRevision = 0
     @State private var descriptionText = ""
     @State private var isGenerating = false
@@ -19,59 +23,50 @@ struct AIThemeGeneratorSection: View {
     private let client = AIProviderClient()
 
     var body: some View {
-        RafuSettingsSection {
-            Text("Design a Theme with AI")
-        } content: {
-            VStack(alignment: .leading, spacing: RafuMetrics.space2) {
-                RafuSettingsRow {
-                    TextField(
-                        "Describe the look you want",
-                        text: $descriptionText,
-                        prompt: Text(
-                            "e.g. Warm paper tones with forest-green accents, easy on the eyes"),
-                        axis: .vertical
-                    )
-                    .lineLimit(2...4)
+        Section {
+            TextField(
+                "Describe the look you want",
+                text: $descriptionText,
+                prompt: Text(
+                    "e.g. Warm paper tones with forest-green accents, easy on the eyes"),
+                axis: .vertical
+            )
+            .lineLimit(2...4)
+
+            HStack(spacing: 10) {
+                Button(
+                    didCopy ? "Copied" : "Copy Prompt",
+                    systemImage: didCopy ? "checkmark" : "doc.on.doc"
+                ) {
+                    copyPrompt()
                 }
-                Divider()
+                .help(
+                    "Copies a complete prompt for ChatGPT, Claude, or any assistant. Import the JSON it returns."
+                )
 
-                RafuSettingsRow {
-                    HStack(spacing: 10) {
-                        Button(
-                            didCopy ? "Copied" : "Copy Prompt",
-                            systemImage: didCopy ? "checkmark" : "doc.on.doc"
-                        ) {
-                            copyPrompt()
-                        }
-                        .help(
-                            "Copies a complete prompt for ChatGPT, Claude, or any assistant. Import the JSON it returns."
-                        )
-
-                        Button("Generate with AI", systemImage: "sparkles") {
-                            generate()
-                        }
-                        .disabled(isGenerating)
-                        .help(
-                            "Uses your configured commit-message provider to design and install the theme."
-                        )
-
-                        if isGenerating {
-                            ProgressView().controlSize(.small)
-                            Button("Cancel") { generationTask?.cancel() }
-                        }
-                        Spacer()
-                    }
+                Button("Generate with AI", systemImage: "sparkles") {
+                    generate()
                 }
+                .disabled(isGenerating)
+                .help(
+                    "Uses your configured commit-message provider to design and install the theme."
+                )
 
-                if let statusMessage {
-                    Divider()
-                    RafuSettingsRow {
-                        Label(statusMessage, systemImage: "info.circle")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                if isGenerating {
+                    ProgressView().controlSize(.small)
+                    Button("Cancel") { generationTask?.cancel() }
                 }
+                Spacer(minLength: 0)
             }
+
+            if let statusMessage {
+                Label(statusMessage, systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } header: {
+            Text("Design a Theme with AI")
         } footer: {
             Text(
                 "Generate uses the provider configured under Settings → AI and sends only your "
@@ -138,7 +133,15 @@ struct AIThemeGeneratorSection: View {
                     return
                 }
                 let descriptor = try await themeService.importThemeData(data)
-                themeChoice = descriptor.id
+                // With Follow System on, the new theme fills the light or dark
+                // slot that matches its appearance instead of pinning it.
+                let updated = ThemeAppearancePreference.Selection(
+                    themeChoice: themeChoice, lightIdentifier: lightChoice,
+                    darkIdentifier: darkChoice
+                ).selecting(descriptor.id, isDark: descriptor.appearance == "dark")
+                themeChoice = updated.themeChoice
+                lightChoice = updated.lightIdentifier
+                darkChoice = updated.darkIdentifier
                 themeRevision &+= 1
                 statusMessage = "Installed and applied “\(descriptor.name)”."
             } catch is CancellationError {

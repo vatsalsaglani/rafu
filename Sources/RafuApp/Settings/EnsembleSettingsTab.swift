@@ -8,82 +8,83 @@ struct EnsembleSettingsSection: View {
     @State private var installTask: Task<Void, Never>?
 
     var body: some View {
-        RafuSettingsSection {
-            Text("Ensemble Skill")
-        } content: {
-            VStack(alignment: .leading, spacing: 10) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(model.metadata?.name ?? "ensemble-with-rafu")
-                        .font(.body.weight(.medium))
-                    Text(
-                        model.metadata?.description
-                            ?? "Loading the bundled coordinator skill…"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
+        Section {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(model.metadata?.name ?? "ensemble-with-rafu")
+                    .font(.body.weight(.medium))
+                Text(
+                    model.metadata?.description
+                        ?? "Loading the bundled coordinator skill…"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
 
-                if let metadata = model.metadata {
-                    LabeledContent("Verb version") {
+            if let metadata = model.metadata {
+                LabeledContent("Version") {
+                    Text(
+                        EnsembleSkillVersionCopy.summary(
+                            skillTargets: metadata.targetsVerbVersion)
+                    )
+                }
+                if !model.verbVersionsMatch {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .accessibilityHidden(true)
                         Text(
-                            "Skill \(metadata.targetsVerbVersion) • Rafu \(model.launcherVerbVersion)"
+                            EnsembleSkillVersionCopy.mismatch(
+                                skillTargets: metadata.targetsVerbVersion,
+                                rafuSupports: model.launcherVerbVersion)
                         )
                     }
-                    if !model.verbVersionsMatch {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .accessibilityHidden(true)
-                            Text(
-                                "Version mismatch: the skill targets \(metadata.targetsVerbVersion), but Rafu supports \(model.launcherVerbVersion)."
-                            )
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityElement(children: .combine)
-                    }
-                } else if model.loadState == .loading {
-                    ProgressView("Reading bundled skill…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityElement(children: .combine)
+                }
+            } else if model.loadState == .loading {
+                ProgressView("Reading bundled skill…")
+                    .controlSize(.small)
+            }
+
+            HStack(spacing: 8) {
+                Button("Install for Claude Code") {
+                    startInstall(at: .claudeCode)
+                }
+                .disabled(model.loadState != .ready || model.isInstalling)
+                Button("Install to Folder…") {
+                    isFolderImporterPresented = true
+                }
+                .disabled(model.loadState != .ready || model.isInstalling)
+                if model.isInstalling {
+                    ProgressView()
                         .controlSize(.small)
-                }
-
-                HStack(spacing: 8) {
-                    Button("Install for Claude Code") {
-                        startInstall(at: .claudeCode)
-                    }
-                    .disabled(model.loadState != .ready || model.isInstalling)
-                    Button("Install to Folder…") {
-                        isFolderImporterPresented = true
-                    }
-                    .disabled(model.loadState != .ready || model.isInstalling)
-                    if model.isInstalling {
-                        ProgressView()
-                            .controlSize(.small)
-                            .accessibilityLabel("Installing coordinator skill")
-                    }
-                }
-
-                if let message = model.operationMessage {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Image(systemName: "checkmark.circle")
-                            .accessibilityHidden(true)
-                        Text(message)
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityElement(children: .combine)
-                }
-
-                if let message = model.errorMessage {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .accessibilityHidden(true)
-                        Text(message)
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Installing coordinator skill")
                 }
             }
+
+            if let message = model.operationMessage {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "checkmark.circle")
+                        .accessibilityHidden(true)
+                    Text(message)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityElement(children: .combine)
+            }
+
+            if let message = model.errorMessage {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .accessibilityHidden(true)
+                    Text(message)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityElement(children: .combine)
+            }
+        } header: {
+            Text("Ensemble Skill")
         } footer: {
             Text(
                 "Claude Code installs to ~/.claude/skills/ensemble-with-rafu. For Codex or another coordinator, choose its verified skills folder; Rafu does not guess vendor directories."
@@ -160,6 +161,24 @@ struct EnsembleSettingsSection: View {
                 replaceConfirmed: replaceConfirmed,
                 requiresSecurityScope: requiresSecurityScope)
         }
+    }
+}
+
+/// Plain-words copy for the skill's protocol version. The internal term
+/// ("verb version") never reaches the user; the numbers are the real ones.
+nonisolated enum EnsembleSkillVersionCopy {
+    /// "Skill version 2 · needs Rafu 2 or later"
+    static func summary(skillTargets: Int) -> String {
+        "Skill version \(skillTargets) · needs Rafu \(skillTargets) or later"
+    }
+
+    static func mismatch(skillTargets: Int, rafuSupports: Int) -> String {
+        if rafuSupports < skillTargets {
+            return
+                "This skill needs Rafu \(skillTargets) or later, but this Rafu supports version \(rafuSupports). Update Rafu to use it."
+        }
+        return
+            "This skill is version \(skillTargets), but this Rafu supports version \(rafuSupports). Install the skill again to update it."
     }
 }
 

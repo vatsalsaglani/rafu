@@ -11,9 +11,7 @@ struct UsageSettingsSection: View {
         Group {
             UsageStripOrderSection(model: model)
 
-            RafuSettingsSection {
-                Text("Usage")
-            } content: {
+            Section {
                 if model.visibleRows.isEmpty {
                     Text("No usage providers are available yet.")
                         .foregroundStyle(.secondary)
@@ -22,6 +20,8 @@ struct UsageSettingsSection: View {
                         UsageProviderRow(row: row, model: model)
                     }
                 }
+            } header: {
+                Text("Providers")
             } footer: {
                 Text(
                     "Rafu reads only metric fields — percent used, token totals, reset times — never message or prompt content. API keys and imported cookie headers are stored only in Rafu's Keychain. Provider tests and browser imports run only when you explicitly request them."
@@ -34,35 +34,113 @@ struct UsageSettingsSection: View {
     }
 }
 
+/// Pure rules for the Usage pane: strip reordering, the status capsule, and
+/// when a provider's privacy explanation stays on screen.
+nonisolated enum UsageSettingsPresentation {
+    /// Moves `displayed` (a subsequence of `full`) the way `List.onMove`
+    /// asks, then puts the result back into the slots `displayed` occupied.
+    /// Entries of `full` that are not displayed (disabled providers) keep
+    /// their exact positions, so they resume their place when re-enabled.
+    static func reordered<ID: Hashable>(
+        full: [ID], displayed: [ID], fromOffsets source: IndexSet, toOffset destination: Int
+    ) -> [ID] {
+        var moved = displayed
+        moved.move(fromOffsets: source, toOffset: destination)
+        let shown = Set(displayed)
+        var iterator = moved.makeIterator()
+        return full.map { id in
+            shown.contains(id) ? (iterator.next() ?? id) : id
+        }
+    }
+
+    /// Whether a provider's explanation of what Rafu reads is shown in full.
+    /// It stays visible until the user has taken the step that lets Rafu read
+    /// that provider (Connect, store a key, import a session, or — for
+    /// providers with nothing to connect — turn it on), so consent is
+    /// informed. Afterwards it moves behind a "What Rafu reads" disclosure.
+    static func showsDisclosureInline(
+        authPattern: UsageAuthPattern,
+        isEnabled: Bool,
+        isConnected: Bool,
+        hasStoredKey: Bool,
+        hasImportedSession: Bool
+    ) -> Bool {
+        switch authPattern {
+        case .piggybackNetwork, .localSessionPiggyback: !isConnected
+        case .apiKey: !hasStoredKey
+        case .cookieImport: !hasImportedSession
+        case .localZeroConfig: !isEnabled
+        case .unavailable: true
+        }
+    }
+
+    /// The one-word state shown in the row's capsule. Words, never colour.
+    @MainActor
+    static func statusLabel(
+        authPattern: UsageAuthPattern,
+        isEnabled: Bool,
+        connection: UsageSettingsModel.ConnectionState,
+        hasStoredKey: Bool,
+        hasImportedSession: Bool
+    ) -> String {
+        switch authPattern {
+        case .unavailable:
+            return "Unavailable"
+        case .localZeroConfig:
+            return isEnabled ? "Local" : "Off"
+        case .piggybackNetwork, .localSessionPiggyback:
+            switch connection {
+            case .connected: return "Connected"
+            case .connecting: return "Connecting…"
+            case .failed: return "Connection failed"
+            case .disconnected: return isEnabled ? "Not connected" : "Off"
+            }
+        case .apiKey:
+            return hasStoredKey ? "Key stored" : "No key"
+        case .cookieImport:
+            return hasImportedSession ? "Session imported" : "No session"
+        }
+    }
+}
+
 /// Lets the user arrange which enabled providers lead the notch front line.
 /// The first `stripFrontLineCap` entries with data render on the strip; the
-/// rest fall into the expandable overflow grid.
+/// rest fall into the expandable overflow grid. Drag a row to reorder it;
+/// the context menu and VoiceOver actions offer Move Up and Move Down.
 private struct UsageStripOrderSection: View {
     let model: UsageSettingsModel
 
     var body: some View {
         let rows = model.stripOrderedEnabledRows()
-        RafuSettingsSection {
-            Text("Notch Strip Order")
-        } content: {
+        Section {
             if rows.isEmpty {
                 Text("Enable a provider below to arrange the notch strip.")
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                    UsageStripOrderRow(
-                        position: index + 1,
-                        onStrip: index < model.stripFrontLineCap,
-                        displayName: row.displayName,
-                        canMoveUp: index > 0,
-                        canMoveDown: index < rows.count - 1,
-                        moveUp: { model.moveStripProvider(row.id, up: true) },
-                        moveDown: { model.moveStripProvider(row.id, up: false) })
+                List {
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                        UsageStripOrderRow(
+                            position: index + 1,
+                            onStrip: index < model.stripFrontLineCap,
+                            displayName: row.displayName,
+                            canMoveUp: index > 0,
+                            canMoveDown: index < rows.count - 1,
+                            moveUp: { model.moveStripProvider(row.id, up: true) },
+                            moveDown: { model.moveStripProvider(row.id, up: false) })
+                    }
+                    .onMove { source, destination in
+                        model.moveStripProviders(fromOffsets: source, toOffset: destination)
+                    }
                 }
+                .listStyle(.bordered)
+                .frame(height: CGFloat(rows.count) * 28 + 8)
+                .accessibilityLabel("Notch strip order")
             }
+        } header: {
+            Text("Notch Strip Order")
         } footer: {
             Text(
-                "The first \(model.stripFrontLineCap) enabled providers with data appear on the notch front line, in this order. The rest stay under “more providers.”"
+                "Drag to reorder. The first \(model.stripFrontLineCap) enabled providers with data appear on the notch front line, in this order. The rest stay under “more providers.”"
             )
         }
     }
@@ -79,6 +157,9 @@ private struct UsageStripOrderRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            Image(systemName: "line.3.horizontal")
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
             Text(onStrip ? "\(position)" : "—")
                 .font(.body.monospacedDigit())
                 .foregroundStyle(onStrip ? .primary : .secondary)
@@ -91,22 +172,18 @@ private struct UsageStripOrderRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button(action: moveUp) {
-                Image(systemName: "chevron.up")
-            }
-            .buttonStyle(.borderless)
-            .disabled(!canMoveUp)
-            .accessibilityLabel("Move \(displayName) earlier in the strip")
-            Button(action: moveDown) {
-                Image(systemName: "chevron.down")
-            }
-            .buttonStyle(.borderless)
-            .disabled(!canMoveDown)
-            .accessibilityLabel("Move \(displayName) later in the strip")
+        }
+        .contentShape(.rect)
+        .contextMenu {
+            Button("Move Up", action: moveUp).disabled(!canMoveUp)
+            Button("Move Down", action: moveDown).disabled(!canMoveDown)
         }
         .accessibilityElement(children: .combine)
         .accessibilityValue(
-            onStrip ? "On strip, position \(position)" : "In overflow")
+            onStrip ? "On strip, position \(position)" : "In overflow"
+        )
+        .accessibilityAction(named: "Move Up") { if canMoveUp { moveUp() } }
+        .accessibilityAction(named: "Move Down") { if canMoveDown { moveDown() } }
     }
 }
 
@@ -274,6 +351,18 @@ final class UsageSettingsModel {
         enabled.swapAt(index, target)
         let disabled = stripOrderIDs.filter { !isEnabled($0) }
         stripOrderIDs = enabled + disabled
+        stripOrderStore.setOrder(stripOrderIDs)
+    }
+
+    /// Applies a drag from `List.onMove`. `source` and `destination` index
+    /// `stripOrderedEnabledRows()`; disabled providers keep their positions.
+    func moveStripProviders(fromOffsets source: IndexSet, toOffset destination: Int) {
+        let displayed = stripOrderedEnabledRows().map(\.id)
+        let reordered = UsageSettingsPresentation.reordered(
+            full: stripOrderIDs, displayed: displayed,
+            fromOffsets: source, toOffset: destination)
+        guard reordered != stripOrderIDs else { return }
+        stripOrderIDs = reordered
         stripOrderStore.setOrder(stripOrderIDs)
     }
 
@@ -540,25 +629,46 @@ private struct UsageProviderRow: View {
     let model: UsageSettingsModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Toggle(isOn: model.binding(for: row.id)) {
-                Text(row.displayName).font(.body.weight(.medium))
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Toggle(isOn: model.binding(for: row.id)) {
+                    Text(row.displayName).font(.body.weight(.medium))
+                }
+                .disabled(row.authPattern == .unavailable)
+                Spacer(minLength: 8)
+                UsageStatusCapsule(text: statusLabel)
+                if isOAuthPattern {
+                    UsageOAuthConnectButton(
+                        providerName: row.displayName,
+                        state: model.connectionState(for: row.id),
+                        connect: { await model.connect(row.id) },
+                        disconnect: { await model.disconnect(row.id) })
+                }
             }
-            .disabled(row.authPattern == .unavailable)
-            Text(row.disclosure)
+
+            if showsDisclosureInline {
+                Text(row.disclosure)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                DisclosureGroup("What Rafu reads") {
+                    Text(row.disclosure)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+            }
 
             switch row.authPattern {
             case .localZeroConfig:
                 EmptyView()
             case .piggybackNetwork, .localSessionPiggyback:
-                UsageOAuthConnectionControls(
+                UsageOAuthConnectionStatus(
                     providerName: row.displayName,
                     affordance: row.authPattern.connectAffordance,
-                    state: model.connectionState(for: row.id),
-                    connect: { await model.connect(row.id) },
-                    disconnect: { await model.disconnect(row.id) })
+                    state: model.connectionState(for: row.id))
             case .apiKey:
                 UsageAPIKeyControls(row: row, model: model)
             case .cookieImport:
@@ -568,6 +678,47 @@ private struct UsageProviderRow: View {
             }
         }
         .padding(.vertical, 3)
+    }
+
+    private var isOAuthPattern: Bool {
+        switch row.authPattern {
+        case .piggybackNetwork, .localSessionPiggyback: true
+        case .localZeroConfig, .apiKey, .cookieImport, .unavailable: false
+        }
+    }
+
+    private var statusLabel: String {
+        UsageSettingsPresentation.statusLabel(
+            authPattern: row.authPattern,
+            isEnabled: model.isEnabled(row.id),
+            connection: model.connectionState(for: row.id),
+            hasStoredKey: model.hasStoredAPIKey(for: row.id),
+            hasImportedSession: model.hasImportedCookie(for: row.id))
+    }
+
+    private var showsDisclosureInline: Bool {
+        UsageSettingsPresentation.showsDisclosureInline(
+            authPattern: row.authPattern,
+            isEnabled: model.isEnabled(row.id),
+            isConnected: model.connectionState(for: row.id) == .connected,
+            hasStoredKey: model.hasStoredAPIKey(for: row.id),
+            hasImportedSession: model.hasImportedCookie(for: row.id))
+    }
+}
+
+/// A one-word state in a capsule. The word carries the meaning; the capsule
+/// is only a quiet container.
+private struct UsageStatusCapsule: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .background(.quaternary, in: .capsule)
+            .accessibilityLabel("Status: \(text)")
     }
 }
 
@@ -804,12 +955,37 @@ private struct UsageCookieImportControls: View {
     }
 }
 
-private struct UsageOAuthConnectionControls: View {
+/// Connect or Disconnect, in the provider row's header.
+private struct UsageOAuthConnectButton: View {
     let providerName: String
-    let affordance: UsageConnectAffordance
     let state: UsageSettingsModel.ConnectionState
     let connect: @MainActor () async -> Void
     let disconnect: @MainActor () async -> Void
+
+    var body: some View {
+        Button(actionTitle) {
+            Task {
+                if state == .connected {
+                    await disconnect()
+                } else {
+                    await connect()
+                }
+            }
+        }
+        .disabled(state == .connecting)
+        .accessibilityLabel("\(actionTitle) \(providerName) usage")
+    }
+
+    private var actionTitle: String {
+        state == .connected ? "Disconnect" : "Connect"
+    }
+}
+
+/// The explanatory line under a Connect-style provider row.
+private struct UsageOAuthConnectionStatus: View {
+    let providerName: String
+    let affordance: UsageConnectAffordance
+    let state: UsageSettingsModel.ConnectionState
 
     var body: some View {
         HStack(spacing: 8) {
@@ -821,24 +997,9 @@ private struct UsageOAuthConnectionControls: View {
             Text(statusText)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
                 .accessibilityLabel("Connection status: \(statusText)")
-            Spacer()
-            Button(actionTitle) {
-                Task {
-                    if state == .connected {
-                        await disconnect()
-                    } else {
-                        await connect()
-                    }
-                }
-            }
-            .disabled(state == .connecting)
-            .accessibilityLabel("\(actionTitle) \(providerName) usage")
         }
-    }
-
-    private var actionTitle: String {
-        state == .connected ? "Disconnect" : "Connect"
     }
 
     private var statusText: String {

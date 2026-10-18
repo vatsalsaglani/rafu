@@ -5,9 +5,9 @@ import SwiftUI
 /// replacing the plain row rendering `GitInspectorView.historyView` used
 /// before. Owns its own `List(selection:)` bound to the SAME
 /// `session.gitSelectedHistoryCommitID` binding the prior row list used, so
-/// selection semantics and the `GitHistoryDetail` panel above it are
-/// unchanged — only the row content and the header (search/branch/fetch/load
-/// more) are new.
+/// selection semantics are unchanged. G11: the selected commit's details
+/// expand as their own non-selectable row directly under it, instead of a
+/// block at the bottom of the panel.
 struct GitCommitGraphView: View {
     @Environment(\.rafuTheme) private var theme
 
@@ -18,7 +18,10 @@ struct GitCommitGraphView: View {
     let hasMore: Bool
     let isBusy: Bool
     @Binding var selection: String?
+    let detailChanges: [GitCommitFileChange]
+    let isDetailLoading: Bool
     let onSelect: (GitCommitSummary) -> Void
+    let onOpenDiff: (GitCommitFileChange) -> Void
     let onFetch: () -> Void
     let onLoadMore: () -> Void
 
@@ -74,11 +77,21 @@ struct GitCommitGraphView: View {
                             .tag(commit.id)
                             .contentShape(.rect)
                             .onTapGesture { onSelect(commit) }
+                            if selection == commit.id {
+                                GitCommitInlineDetail(
+                                    commit: commit,
+                                    changes: detailChanges,
+                                    isLoading: isDetailLoading,
+                                    openDiff: onOpenDiff
+                                )
+                                .selectionDisabled()
+                                .listRowSeparator(.hidden)
+                            }
                         }
                         if hasMore {
                             Button("Load More", systemImage: "ellipsis.circle") { onLoadMore() }
                                 .buttonStyle(.plain)
-                                .foregroundStyle(theme.palette.accent)
+                                .foregroundStyle(theme.palette.textSecondary)
                                 .disabled(isBusy)
                                 .padding(.vertical, 4)
                         }
@@ -92,10 +105,11 @@ struct GitCommitGraphView: View {
 
     /// Lane colors derived from theme Git tokens (GD3, ADR 0013) — never a
     /// fixed rainbow palette — so the graph inherits every theme's palette.
+    /// Gold stays out of the lanes: it is reserved for focus and selection.
     private var colorPalette: [Color] {
         [
             theme.palette.gitAdded, theme.palette.gitModified, theme.palette.gitDeleted,
-            theme.palette.info, theme.palette.accent, theme.palette.warning,
+            theme.palette.info, theme.palette.textSecondary, theme.palette.warning,
         ]
     }
 
@@ -112,7 +126,7 @@ struct GitCommitGraphView: View {
             .rafuField()
             HStack(spacing: RafuMetrics.space2) {
                 if let currentBranch {
-                    RafuChip(text: currentBranch, foreground: theme.palette.accent)
+                    RafuChip(text: currentBranch, foreground: theme.palette.textPrimary)
                 }
                 if let upstream {
                     RafuChip(text: upstream)
@@ -131,11 +145,12 @@ struct GitCommitGraphView: View {
         guard let lastFetchedAt else {
             return "Fetch from the remote — Rafu never fetches automatically"
         }
-        let formatter = RelativeDateTimeFormatter()
-        return "Last fetched \(formatter.localizedString(for: lastFetchedAt, relativeTo: Date()))"
+        return "Last fetched \(GitRelativeTime.label(for: lastFetchedAt))"
     }
 }
 
+/// Two-line history row (G10): the title on line 1 at full width, with the
+/// refs as neutral capsules after it; "short hash · author · time" on line 2.
 private struct GitCommitGraphRow: View {
     @Environment(\.rafuTheme) private var theme
     let commit: GitCommitSummary
@@ -148,43 +163,58 @@ private struct GitCommitGraphRow: View {
     /// rows misalign.
     let laneCanvasWidth: CGFloat
 
+    private static let rowHeight: CGFloat = 40
+    private static let visibleRefs = 3
+
     var body: some View {
-        HStack(alignment: .top, spacing: RafuMetrics.space2) {
+        let refs = GitRefLabels.chips(from: commit.decorations)
+        HStack(alignment: .center, spacing: RafuMetrics.space2) {
             laneCanvas
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
-                    ForEach(decorationChips, id: \.self) { decoration in
+                    Text(commit.subject)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(theme.palette.textPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    ForEach(refs.prefix(Self.visibleRefs), id: \.self) { ref in
                         RafuChip(
-                            text: decoration,
-                            foreground: decoration == currentBranch
-                                ? theme.palette.accent : theme.palette.info
+                            text: ref,
+                            foreground: ref == currentBranch || ref == "HEAD"
+                                ? theme.palette.textPrimary : theme.palette.textSecondary
                         )
+                        .fixedSize()
                     }
-                    Text(commit.subject).font(.callout.weight(.medium)).lineLimit(2)
+                    if refs.count > Self.visibleRefs {
+                        RafuChip(text: "+\(refs.count - Self.visibleRefs)").fixedSize()
+                    }
                 }
-                HStack(spacing: 6) {
-                    Text(commit.shortID).font(.caption2.monospaced())
-                    Text(commit.authorName).lineLimit(1)
-                    Spacer()
-                    Text(commit.authoredAt, style: .relative)
+                HStack(spacing: 4) {
+                    Text(commit.shortID)
+                        .font(.system(size: 11.5, design: .monospaced))
+                    Text("·")
+                    Text(commit.authorName)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text("·")
+                    Text(GitRelativeTime.label(for: commit.authoredAt))
+                        .lineLimit(1)
+                        .fixedSize()
                 }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 11.5))
+                .foregroundStyle(theme.palette.textSecondary)
             }
         }
-        .padding(.vertical, 3)
+        .frame(height: Self.rowHeight)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
     }
 
-    private var decorationChips: [String] {
-        Array(commit.decorations.prefix(3))
-    }
-
     private var accessibilityLabel: String {
-        let decorationText =
-            commit.decorations.isEmpty ? "" : ", \(commit.decorations.joined(separator: ", "))"
-        return "\(commit.subject), \(commit.shortID), \(commit.authorName)\(decorationText)"
+        let refs = GitRefLabels.chips(from: commit.decorations)
+        let decorationText = refs.isEmpty ? "" : ", \(refs.joined(separator: ", "))"
+        return
+            "\(commit.subject), \(commit.shortID), \(commit.authorName), \(GitRelativeTime.label(for: commit.authoredAt))\(decorationText)"
     }
 
     fileprivate static let laneWidth: CGFloat = 14
@@ -215,7 +245,7 @@ private struct GitCommitGraphRow: View {
                 )
             }
         }
-        .frame(width: laneCanvasWidth, height: 30)
+        .frame(width: laneCanvasWidth, height: Self.rowHeight)
         .accessibilityHidden(true)
     }
 
@@ -225,5 +255,149 @@ private struct GitCommitGraphRow: View {
 
     private func color(for lane: Int) -> Color {
         palette[lane % palette.count]
+    }
+}
+
+/// Commit details shown directly under the selected history row (G11):
+/// subject, author, date, the full hash in SF Mono with a Copy button, and the
+/// changed files. The hash is split into fixed-width lines by character count,
+/// so it never breaks at a hyphen and a copy always yields the exact hash.
+private struct GitCommitInlineDetail: View {
+    @Environment(\.rafuTheme) private var theme
+    let commit: GitCommitSummary
+    let changes: [GitCommitFileChange]
+    let isLoading: Bool
+    let openDiff: (GitCommitFileChange) -> Void
+
+    @State private var didCopy = false
+
+    /// Bounds the non-lazy file list for very large commits.
+    private static let maximumFileRows = 200
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(commit.subject)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(theme.palette.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(commit.authorName) <\(commit.authorEmail)>")
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(commit.authoredAt.formatted(date: .abbreviated, time: .shortened))
+            }
+            .font(.system(size: 11.5))
+            .foregroundStyle(theme.palette.textSecondary)
+            .textSelection(.enabled)
+            hashRow
+            Divider().overlay(theme.palette.borderSubtle)
+            files
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.palette.cardBackground)
+        .clipShape(
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusDenseCard, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusDenseCard, style: .continuous)
+                .strokeBorder(theme.palette.borderSubtle, lineWidth: RafuMetrics.hairline)
+        )
+        .padding(.vertical, 2)
+    }
+
+    private var hashRow: some View {
+        HStack(alignment: .top, spacing: 6) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(GitHashDisplay.lines(for: commit.id).enumerated()), id: \.offset) {
+                    item in
+                    Text(item.element)
+                        .font(.system(size: 11.5, design: .monospaced))
+                        .foregroundStyle(theme.palette.textPrimary)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+            }
+            .textSelection(.enabled)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Commit hash")
+            .accessibilityValue(commit.id)
+            Spacer(minLength: 4)
+            Button(
+                didCopy ? "Copied" : "Copy Hash",
+                systemImage: didCopy ? "checkmark" : "doc.on.doc"
+            ) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(commit.id, forType: .string)
+                didCopy = true
+                Task {
+                    try? await Task.sleep(for: .seconds(RafuMotion.successHold))
+                    didCopy = false
+                }
+            }
+            .buttonStyle(RafuIconButtonStyle(size: 22, iconSize: 11))
+            .help("Copy Full Hash")
+        }
+    }
+
+    @ViewBuilder
+    private var files: some View {
+        if isLoading {
+            ProgressView().controlSize(.small).frame(maxWidth: .infinity)
+        } else if changes.isEmpty {
+            Text("This commit has no file changes.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(theme.palette.textSecondary)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Files (\(changes.count))")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .padding(.bottom, 2)
+                ForEach(changes.prefix(Self.maximumFileRows)) { change in
+                    fileRow(change)
+                }
+                if changes.count > Self.maximumFileRows {
+                    Text("\(changes.count - Self.maximumFileRows) more files not shown")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(theme.palette.textSecondary)
+                        .padding(.top, 4)
+                }
+            }
+        }
+    }
+
+    private func fileRow(_ change: GitCommitFileChange) -> some View {
+        let parts = GitChangePathParts(path: change.path)
+        return Button {
+            openDiff(change)
+        } label: {
+            HStack(spacing: 6) {
+                GitStatusLetterBadge(kind: change.kind)
+                FileIconView(icon: FileIconProvider.fileIcon(named: parts.name), size: 12)
+                    .frame(width: 14)
+                    .accessibilityHidden(true)
+                Text(parts.name)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .layoutPriority(1)
+                if let folder = parts.folder {
+                    Text(folder)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(theme.palette.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(theme.palette.textMuted)
+            }
+            .frame(height: 24)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help("Open diff for \(change.path)")
     }
 }

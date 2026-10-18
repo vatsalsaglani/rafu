@@ -32,7 +32,7 @@ struct EditorTabSwitcherOverlay: View {
             HStack(spacing: RafuMetrics.space2) {
                 Image(systemName: "rectangle.3.group")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(theme.palette.accent)
+                    .foregroundStyle(theme.palette.textSecondary)
                 Text("Open Tabs & Terminals")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(theme.palette.textPrimary)
@@ -125,7 +125,7 @@ struct EditorTabSwitcherOverlay: View {
                     Spacer(minLength: 0)
                     if item.isDirty {
                         Circle()
-                            .fill(theme.palette.accent)
+                            .fill(theme.palette.textSecondary)
                             .frame(width: 7, height: 7)
                             .accessibilityLabel("Unsaved changes")
                     }
@@ -168,7 +168,7 @@ struct EditorTabSwitcherOverlay: View {
         } else {
             Image(systemName: item.symbolName)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(theme.palette.accent)
+                .foregroundStyle(theme.palette.textSecondary)
         }
     }
 

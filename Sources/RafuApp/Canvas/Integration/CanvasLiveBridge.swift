@@ -68,7 +68,20 @@ final class CanvasLiveBridge {
     }
     @ObservationIgnored private var deliveries: [UUID: Delivery] = [:]
     @ObservationIgnored private var sentAt: [Date] = []
+    /// Per-link runtime state for the redesigned edges. Like the permission set
+    /// it is window scoped and never saved; it holds counts and a refusal
+    /// reason, never message bodies.
+    private struct LinkRuntime {
+        weak var board: CanvasBoardState?
+        var activity = CanvasLinkActivity()
+        var failure: String?
+    }
+    @ObservationIgnored private var linkRuntime: [SessionLinkPermission: LinkRuntime] = [:]
     private(set) var revision = 0
+    /// Changes when a message is accepted on any link (badge count, dot).
+    private(set) var activityRevision = 0
+    /// The latest accepted message: connection and direction only, no body.
+    private(set) var lastMessageEvent: CanvasLinkMessageEvent?
     private(set) var notice: String?
 
     func prepare(
@@ -131,19 +144,133 @@ final class CanvasLiveBridge {
     func enable(_ edge: UUID, in board: CanvasBoardState) {
         // Weak identity prevents a later board from inheriting a recycled object address.
         enabledEdges = enabledEdges.filter { $0.value.board != nil }
-        enabledEdges[SessionLinkPermission(board: ObjectIdentifier(board), edge: edge)] =
-            PermissionBoard(board)
+        linkRuntime = linkRuntime.filter { $0.value.board != nil }
+        let key = SessionLinkPermission(board: ObjectIdentifier(board), edge: edge)
+        enabledEdges[key] = PermissionBoard(board)
+        linkRuntime[key]?.failure = nil
         revision &+= 1
     }
     func disable(_ edge: UUID, in board: CanvasBoardState) {
-        enabledEdges.removeValue(
-            forKey: SessionLinkPermission(board: ObjectIdentifier(board), edge: edge))
+        let key = SessionLinkPermission(board: ObjectIdentifier(board), edge: edge)
+        enabledEdges.removeValue(forKey: key)
+        linkRuntime[key]?.failure = nil
         revision &+= 1
     }
     func isEnabled(_ edge: UUID, in board: CanvasBoardState) -> Bool {
         _ = revision
         return enabledEdges[SessionLinkPermission(board: ObjectIdentifier(board), edge: edge)]?
             .board === board
+    }
+
+    // MARK: Per-link state, pause and resume (review 7.6)
+
+    /// A new message link starts Paused: nothing calls `resume` for it until the
+    /// user chooses to. `pause` and `resume` are the per-link forms of
+    /// `disable` and `enable`.
+    func pause(_ edge: UUID, in board: CanvasBoardState) { disable(edge, in: board) }
+    func resume(_ edge: UUID, in board: CanvasBoardState) { enable(edge, in: board) }
+
+    func pauseAll(in board: CanvasBoardState) {
+        for edge in board.connections where edge.behavior == .session {
+            disable(edge.id, in: board)
+        }
+    }
+
+    func resumeAll(in board: CanvasBoardState) {
+        for edge in board.connections where edge.behavior == .session {
+            enable(edge.id, in: board)
+        }
+    }
+
+    /// States of every message link on `board`, computed in one pass over the
+    /// terminal capabilities. It only reads; it never changes observed state.
+    func linkStates(in board: CanvasBoardState) -> [UUID: CanvasLinkState] {
+        _ = revision
+        let messageLinks = board.connections.filter { $0.behavior == .session }
+        guard !messageLinks.isEmpty else { return [:] }
+        let statuses = endpointStatuses(in: board)
+        var result: [UUID: CanvasLinkState] = [:]
+        for edge in messageLinks {
+            let key = SessionLinkPermission(board: ObjectIdentifier(board), edge: edge.id)
+            result[edge.id] = CanvasLinkStateMapper.resolve(
+                isEnabled: isEnabled(edge.id, in: board),
+                from: statuses[edge.from] ?? .missing, to: statuses[edge.to] ?? .missing,
+                failure: linkRuntime[key]?.failure)
+        }
+        return result
+    }
+
+    func linkState(of edge: CanvasConnection, in board: CanvasBoardState) -> CanvasLinkState {
+        linkStates(in: board)[edge.id] ?? .paused
+    }
+
+    func activity(of edge: UUID, in board: CanvasBoardState) -> CanvasLinkActivity {
+        _ = activityRevision
+        let key = SessionLinkPermission(board: ObjectIdentifier(board), edge: edge)
+        guard let runtime = linkRuntime[key], runtime.board === board else {
+            return CanvasLinkActivity()
+        }
+        return runtime.activity
+    }
+
+    static var burstPolicy: CanvasBurstPolicy {
+        CanvasBurstPolicy(
+            limit: RafuMotion.messageBurstLimit, window: RafuMotion.messageBurstWindow,
+            travel: RafuMotion.messageTravel)
+    }
+
+    private func endpointStatuses(in board: CanvasBoardState) -> [CanvasCardID:
+        CanvasLinkEndpointStatus]
+    {
+        var result: [CanvasCardID: CanvasLinkEndpointStatus] = [:]
+        let current = now()
+        for endpoint in endpoints.values {
+            guard let controller = endpoint.controller,
+                controller.generation == endpoint.generation,
+                let place = location(of: controller.id), place.board === board
+            else { continue }
+            result[place.card.id] = Self.status(of: endpoint, at: current)
+        }
+        return result
+    }
+
+    private static func status(of endpoint: Endpoint, at date: Date) -> CanvasLinkEndpointStatus {
+        if endpoint.suspended {
+            return .suspended(
+                endpoint.suspensionReason == .transportLost
+                    ? .connectionLost : .conversationChanged)
+        }
+        guard endpoint.clientID != nil, date.timeIntervalSince(endpoint.lastSeen) < 15 else {
+            return .notConnected
+        }
+        return .connected
+    }
+
+    private func recordFailure(_ route: LiveRoute?, _ reason: String) {
+        guard let route else { return }
+        let key = SessionLinkPermission(board: ObjectIdentifier(route.board), edge: route.edge.id)
+        var runtime = linkRuntime[key] ?? LinkRuntime(board: route.board)
+        runtime.board = route.board
+        runtime.failure = reason
+        linkRuntime[key] = runtime
+        revision &+= 1
+    }
+
+    private func recordAccepted(_ route: LiveRoute?) {
+        guard let route else { return }
+        let key = SessionLinkPermission(board: ObjectIdentifier(route.board), edge: route.edge.id)
+        var runtime = linkRuntime[key] ?? LinkRuntime(board: route.board)
+        runtime.board = route.board
+        runtime.failure = nil
+        let direction: CanvasLinkDirection =
+            route.sourceCard == route.edge.from ? .forward : .reverse
+        let date = now()
+        runtime.activity.record(direction: direction, at: date, policy: Self.burstPolicy)
+        linkRuntime[key] = runtime
+        lastMessageEvent = CanvasLinkMessageEvent(
+            connectionID: route.edge.id, direction: direction, date: date)
+        activityRevision &+= 1
+        revision &+= 1
     }
 
     func status(for controllerID: UUID) -> String {
@@ -315,6 +442,14 @@ final class CanvasLiveBridge {
             } else {
                 destinationID = destination
             }
+            if peers(for: controller.id).contains(where: {
+                $0.id == destinationID && $0.linkState == "paused"
+            }) {
+                return .init(
+                    error:
+                        "This link is paused. Resume it in Rafu Canvas. Do not restart the terminals."
+                )
+            }
             guard let targetID = liveTarget(from: controller.id, cardID: destinationID),
                 let targetToken = endpoints.first(where: { $0.value.controller?.id == targetID })?
                     .key,
@@ -323,8 +458,10 @@ final class CanvasLiveBridge {
             else {
                 return .init(error: "Connect two live terminal nodes before sending a message.")
             }
+            let route = liveRoute(from: controller.id, cardID: destinationID)
             sentAt.removeAll { now().timeIntervalSince($0) > 60 }
             guard sentAt.count < 20 else {
+                recordFailure(route, "Message limit reached. Wait one minute.")
                 return .init(error: "Message limit reached. Wait one minute.")
             }
             let message = CanvasBridgeMessage(
@@ -335,6 +472,7 @@ final class CanvasLiveBridge {
             }
             if target.provider == "claude" {
                 guard target.inbox.count < 16 else {
+                    recordFailure(route, "The destination inbox is full.")
                     return .init(error: "The destination inbox is full.")
                 }
                 target.inbox.append(message)
@@ -345,10 +483,10 @@ final class CanvasLiveBridge {
                     let executable = target.executable, endpoint.hasPrefix("unix:///"),
                     executable.hasPrefix("/")
                 else {
-                    return .init(
-                        error:
-                            "Codex is waiting for its first Canvas tool call. Ask it to list Canvas connections."
-                    )
+                    let reason =
+                        "Codex is waiting for its first Canvas tool call. Ask it to list Canvas connections."
+                    recordFailure(route, reason)
+                    return .init(error: reason)
                 }
                 let reservation = now()
                 sentAt.append(reservation)
@@ -372,10 +510,12 @@ final class CanvasLiveBridge {
                         )
                     }
                     notice = "Codex could not accept the message. Check its terminal."
+                    recordFailure(route, "Codex could not accept the message. Check its terminal.")
                     return .init(error: notice)
                 }
             }
             notice = "Message queued. The receiving agent has not acknowledged it."
+            recordAccepted(route)
             revision &+= 1
             return .init()
         default: return .init(error: "Unsupported bridge request.")
@@ -401,6 +541,7 @@ final class CanvasLiveBridge {
 
     private func peers(for controllerID: UUID) -> [CanvasBridgePeer] {
         guard let source = location(of: controllerID) else { return [] }
+        let states = linkStates(in: source.board)
         var seen = Set<CanvasCardID>()
         var peers: [CanvasBridgePeer] = source.board.connections.compactMap { edge in
             let other =
@@ -421,7 +562,8 @@ final class CanvasLiveBridge {
                 kind: card.content.kindName,
                 connected: connected, provider: provider,
                 mention: connected && provider != nil
-                    ? CanvasBridgePeer.mention(for: card.title) : nil)
+                    ? CanvasBridgePeer.mention(for: card.title) : nil,
+                linkState: states[edge.id]?.word.lowercased() ?? "related")
         }
         // Bound both the launcher response and the MCP result's second JSON encoding.
         if let encoded = try? JSONEncoder().encode(CanvasBridgeResponse(peers: peers)),
@@ -466,7 +608,14 @@ final class CanvasLiveBridge {
         return UUID(uuidString: String(suffix)) != nil
     }
 
-    private func liveTarget(from controllerID: UUID, cardID: String) -> UUID? {
+    private struct LiveRoute {
+        let edge: CanvasConnection
+        let board: CanvasBoardState
+        let sourceCard: CanvasCardID
+        let target: UUID
+    }
+
+    private func liveRoute(from controllerID: UUID, cardID: String) -> LiveRoute? {
         guard let source = location(of: controllerID), let uuid = UUID(uuidString: cardID),
             let edge = source.board.connections.first(where: {
                 $0.behavior == .session && isEnabled($0.id, in: source.board)
@@ -475,8 +624,14 @@ final class CanvasLiveBridge {
             }),
             let card = source.board.cards.first(where: {
                 $0.id == (edge.from == source.card.id ? edge.to : edge.from)
-            }), case .terminal(let groupID) = card.content
+            }), case .terminal(let groupID) = card.content,
+            let target = source.session.terminal.terminalGroup(groupID)?.panes.first?.sessionID
         else { return nil }
-        return source.session.terminal.terminalGroup(groupID)?.panes.first?.sessionID
+        return LiveRoute(
+            edge: edge, board: source.board, sourceCard: source.card.id, target: target)
+    }
+
+    private func liveTarget(from controllerID: UUID, cardID: String) -> UUID? {
+        liveRoute(from: controllerID, cardID: cardID)?.target
     }
 }
