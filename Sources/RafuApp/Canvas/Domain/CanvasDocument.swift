@@ -49,8 +49,15 @@ nonisolated struct CanvasRect: Codable, Equatable, Sendable {
     var isValid: Bool {
         [x, y, width, height].allSatisfy(\.isFinite)
             && abs(x) <= 50_000 && abs(y) <= 50_000
-            && (240...2_000).contains(width) && (160...2_000).contains(height)
+            && (Self.absoluteMinimumWidth...2_000).contains(width)
+            && (Self.absoluteMinimumHeight...2_000).contains(height)
     }
+
+    /// The smallest stored size. Each card type enforces its own larger
+    /// minimum in the interface (`CanvasCardContent.minimumSize`); the stored
+    /// bound only has to admit the brief resistance past that minimum.
+    static let absoluteMinimumWidth = 96.0
+    static let absoluteMinimumHeight = 64.0
 }
 
 nonisolated struct CanvasViewport: Codable, Equatable, Sendable {
@@ -59,7 +66,8 @@ nonisolated struct CanvasViewport: Codable, Equatable, Sendable {
     var y: Double = 0
 
     var isValid: Bool {
-        [scale, x, y].allSatisfy(\.isFinite) && (0.25...2).contains(scale)
+        [scale, x, y].allSatisfy(\.isFinite)
+            && (CanvasZoomMetrics.minimumScale...CanvasZoomMetrics.maximumScale).contains(scale)
             && abs(x) <= 100_000 && abs(y) <= 100_000
     }
 }
@@ -280,4 +288,6 @@ nonisolated struct CanvasSummary: Identifiable, Equatable, Sendable {
     let id: CanvasID
     let title: String
     let revision: UInt64
+    var cardCount = 0
+    var modified: Date?
 }
