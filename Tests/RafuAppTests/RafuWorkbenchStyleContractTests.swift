@@ -138,6 +138,8 @@ struct RafuWorkbenchStyleContractTests {
         let contexts: [TerminalSurfaceBorderStyle.Context] = [
             .editorGroup(isFocused: false),
             .editorGroup(isFocused: true),
+            .editorGroup(isFocused: true, hostsTerminal: true),
+            .editorGroup(isFocused: true, hasSiblings: true),
             .managerRow(isCurrent: false, needsAttention: false),
             .managerRow(isCurrent: true, needsAttention: false),
             .managerRow(isCurrent: false, needsAttention: true),
@@ -169,8 +171,9 @@ struct RafuWorkbenchStyleContractTests {
 
                     let expectsStrongNeutral: Bool =
                         switch context {
-                        case .editorGroup(let isFocused):
-                            isFocused || contrast == .increased
+                        case .editorGroup(let isFocused, let hostsTerminal, _):
+                            (isFocused && (hostsTerminal || hasIdentity))
+                                || contrast == .increased
                         case .managerRow(let isCurrent, let needsAttention):
                             isCurrent || needsAttention || contrast == .increased
                         }
@@ -180,13 +183,19 @@ struct RafuWorkbenchStyleContractTests {
                     )
 
                     switch context {
-                    case .editorGroup(let isFocused):
+                    case .editorGroup(let isFocused, let hostsTerminal, let hasSiblings):
+                        let terminalFocus = isFocused && (hostsTerminal || hasIdentity)
+                        let siblingFocus = isFocused && hasSiblings && !terminalFocus
                         #expect(resolution.rowFill == .none)
-                        #expect(resolution.emphasis == (isFocused ? .editorFocus : .none))
+                        #expect(
+                            resolution.emphasis
+                                == (terminalFocus || siblingFocus ? .editorFocus : .none))
                         #expect(
                             resolution.emphasisWidth
-                                == (isFocused ? (hasIdentity ? 1 : 2) : 0)
+                                == (terminalFocus ? (hasIdentity ? 1 : 2) : (siblingFocus ? 1 : 0))
                         )
+                        // Gold only ever marks a focused terminal.
+                        #expect((resolution.emphasisRole == .focusRing) == terminalFocus)
                     case .managerRow(let isCurrent, let needsAttention):
                         let expectedEmphasis: TerminalSurfaceBorderResolution.Emphasis =
                             needsAttention
