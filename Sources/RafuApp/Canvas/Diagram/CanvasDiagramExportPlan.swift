@@ -59,14 +59,14 @@ nonisolated enum CanvasDiagramExportPlan {
     }
 
     /// The pixel scale for `bounds`: the requested scale, reduced so neither
-    /// side exceeds the cap. Never below 0.1.
+    /// side exceeds the cap, including very large boards.
     static func pixelScale(
         for bounds: CGRect, requested: Double, maximumWidth: Double, maximumHeight: Double
     ) -> Double {
         let width = max(1, Double(bounds.width))
         let height = max(1, Double(bounds.height))
         let wanted = min(3, max(0.25, requested.isFinite ? requested : 1))
-        return max(0.1, min(wanted, maximumWidth / width, maximumHeight / height))
+        return min(wanted, maximumWidth / width, maximumHeight / height)
     }
 
     static func pngScale(for bounds: CGRect, requested: Double) -> Double {
@@ -102,10 +102,28 @@ nonisolated enum CanvasDiagramExportPlan {
 
     /// True when `candidate` (after resolving symlinks) is `root` or inside it.
     static func isInside(_ candidate: URL, root: URL) -> Bool {
-        let rootPath = root.resolvingSymlinksInPath().standardizedFileURL.path
-        let path = candidate.resolvingSymlinksInPath().standardizedFileURL.path
+        guard root.isFileURL, candidate.isFileURL else { return false }
+        let rootPath = resolvedForCreation(root).path
+        let path = resolvedForCreation(candidate).path
         let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
         return path == rootPath || path.hasPrefix(prefix)
+    }
+
+    /// Foundation can preserve /private for a missing leaf but remove it for
+    /// an existing parent. Resolve the existing ancestor first, then append
+    /// missing components so both paths use the same macOS spelling.
+    private static func resolvedForCreation(_ url: URL) -> URL {
+        var ancestor = url.standardizedFileURL
+        var missing: [String] = []
+        while ancestor.path != "/",
+            (try? FileManager.default.attributesOfItem(atPath: ancestor.path)) == nil
+        {
+            missing.append(ancestor.lastPathComponent)
+            ancestor.deleteLastPathComponent()
+        }
+        var resolved = ancestor.resolvingSymlinksInPath().standardizedFileURL
+        for component in missing.reversed() { resolved.appendPathComponent(component) }
+        return resolved
     }
 }
 

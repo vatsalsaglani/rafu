@@ -413,6 +413,9 @@ struct CanvasDiagramExportPlanTests {
         #expect(CanvasDiagramExportPlan.gifScale(for: wide) == 0.4)
         #expect(CanvasDiagramExportPlan.pngScale(for: wide, requested: 3) == 1.024)
         #expect(CanvasDiagramExportPlan.pngScale(for: bounds, requested: .nan) == 1)
+        let huge = CGRect(x: 0, y: 0, width: 200_000, height: 180_000)
+        #expect(huge.width * CanvasDiagramExportPlan.pngScale(for: huge, requested: 3) <= 4_096)
+        #expect(huge.width * CanvasDiagramExportPlan.gifScale(for: huge) <= 1_600)
     }
 
     @Test("Export file names are safe and stay inside the workspace")
@@ -481,5 +484,51 @@ struct CanvasDiagramExportPlanTests {
         #expect(curved.point(atFraction: 0) == .zero)
         #expect(curved.point(atFraction: 1) == CGPoint(x: 100, y: 100))
         #expect(CanvasGIFFlow.dots(for: [], progress: 0.3).isEmpty)
+    }
+}
+
+@Suite("Mermaid export preparation")
+@MainActor
+struct CanvasMermaidExportTests {
+    @Test("Exports prepare bounded diagram pixels before taking a static snapshot")
+    func preparesImages() async throws {
+        let valid = CanvasCard(title: "Flow", content: .mermaid(source: "flowchart LR\n A --> B"))
+        let invalid = CanvasCard(title: "Invalid", content: .mermaid(source: "not a diagram"))
+        let snapshots = try await CanvasMermaidExportSnapshot.prepare(
+            cards: [valid, invalid], theme: MermaidThemeSpec(theme: RafuThemeCatalog.indigo))
+        let image = try #require(snapshots[valid.id]?.image)
+        #expect(image.width > 0 && image.height > 0)
+        #expect(image.width <= 1_024 && image.height <= 1_024)
+        #expect(snapshots[valid.id]?.failure == nil)
+        #expect(snapshots[invalid.id]?.image == nil)
+        #expect(snapshots[invalid.id]?.failure != nil)
+    }
+}
+
+@Suite("Canvas export file writes")
+struct CanvasExportWriterTests {
+    @Test("New exports work through a workspace symlink; escaping export folders are refused")
+    func workspaceAliases() async throws {
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory.appending(path: UUID().uuidString)
+        try fm.createDirectory(at: base, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: base) }
+        let root = base.appending(path: "workspace")
+        let alias = base.appending(path: "alias")
+        let outside = base.appending(path: "outside")
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        try fm.createDirectory(at: outside, withIntermediateDirectories: true)
+        try fm.createSymbolicLink(at: alias, withDestinationURL: root)
+        let bytes = Data("test export".utf8)
+        let result = try await CanvasDiagramExportWriter.write(
+            bytes, fileName: "test.png", root: alias)
+        #expect(try Data(contentsOf: result) == bytes)
+        #expect(CanvasDiagramExportPlan.isInside(result, root: root))
+        try fm.removeItem(at: root.appending(path: "exports"))
+        try fm.createSymbolicLink(at: root.appending(path: "exports"), withDestinationURL: outside)
+        await #expect(throws: CanvasDiagramError.self) {
+            try await CanvasDiagramExportWriter.write(bytes, fileName: "escape.png", root: alias)
+        }
+        #expect(!fm.fileExists(atPath: outside.appending(path: "escape.png").path))
     }
 }

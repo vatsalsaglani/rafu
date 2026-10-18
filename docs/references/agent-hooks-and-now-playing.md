@@ -6,11 +6,15 @@
   `Sources/RafuApp/AgentTracking/**` (`AgentActivityStore`, Settings ▸ Agents
   ▸ Activity tracking, notch "Other agents"), `Sources/RafuApp/Notch/NotchNowPlaying*.swift`,
   `Vendor/MediaRemoteAdapter/**`, `script/build_media_helper.sh`, and the
-  `Contents/Helpers` staging in `script/build_and_run.sh`.
-- Last verified: Swift 6.2 Linux toolchain (swift.org ubuntu24.04), Ubuntu
+  `Contents/Helpers` and `Contents/Resources` staging in `script/build_and_run.sh`.
+- Initial verification: Swift 6.2 Linux toolchain (swift.org ubuntu24.04), Ubuntu
   24.04, 2026-10-18. Pure logic only (scratch SwiftPM package, 57 Swift
-  Testing tests). Not yet built, launched, or run against a real Claude Code
-  or Codex session on macOS. The first Mac build must confirm it.
+  Testing tests).
+- Mac verification: Apple Swift 6.4, macOS 27.0.1 (26A434), arm64,
+  2026-10-18. Canonical Lightning build and launch, strict bundle signature
+  check, full package tests, and Agents/Ensemble Settings inspection. Live
+  hook installation and real-provider events remain manual checks; this pass
+  did not change the user's provider configuration.
 
 ## Rule or observed behavior
 
@@ -115,9 +119,14 @@
     `xcrun clang` and ad-hoc signs it. When `xcrun clang` is missing or the
     compile fails it prints one line and exits 1; `build_and_run.sh` then
     skips staging and the app build continues. Staged files:
-    `Contents/Helpers/MediaRemoteAdapter.framework`, `mediaremote-adapter.pl`,
-    `MediaRemoteAdapter-LICENSE`, plus `rafu-agent-events`. Nested code is
-    signed before the bundle.
+    framework and `rafu-agent-events` in `Contents/Helpers`;
+    `mediaremote-adapter.pl` and `MediaRemoteAdapter-LICENSE` in
+    `Contents/Resources`. Nested code is signed before the bundle.
+    `Helpers` is a nested-code location: placing the plain licence there
+    caused `codesign --deep` to reject the app with “code object is not signed
+    at all.” The canonical launcher now fails on that error for structured
+    SwiftPM resource bundles and checks the completed signature. The existing
+    flat SwiftPM bundle compatibility exception remains explicit.
 18. `NotchSystemMediaBridge`: generation token per stream (output and exits
     of a stopped stream are inert), bounded line buffer (256 KiB per line; a
     longer line is dropped and the buffer resynchronises at the next

@@ -105,3 +105,15 @@ swift test --filter "CanvasWhiteboardTests|CanvasEnsembleFileTests|CanvasEnsembl
 [`canvas-interaction.md`](canvas-interaction.md),
 [`mermaid-native-preview.md`](mermaid-native-preview.md),
 [`drag-and-drop-custom-uttype.md`](drag-and-drop-custom-uttype.md).
+
+
+## Narrow split review (2026-10-18)
+
+Applies to `CanvasToolPalette` on Apple Swift 6.4 / macOS 27.0.1, arm64.
+The full palette exceeds a roughly 400-point editor split and clipped its last
+controls. `ViewThatFits` now uses a compact Select / Hand / Drawing Tools / Style
+palette when needed. The native Drawing Tools menu includes all drawing tools,
+Icon Library, and Convert Selection to Frame. A live Lightning check split a
+Markdown tab beside the board and opened the compact menu to verify those items.
+Use `./script/build_and_run.sh --verify`, then split an editor tab to the right
+of an Ensemble, to repeat the check. Related phase: `ensemble-canvas.md`, X5/X9.

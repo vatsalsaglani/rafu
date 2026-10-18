@@ -58,7 +58,7 @@ struct ConductorSettingsSection: View {
                 Text("Agent CLIs")
             } footer: {
                 Text(
-                    "Rafu runs the agent CLIs you already have installed, under your own subscriptions. It never stores, reads, or forwards a sign-in token — log in inside each CLI. Nothing runs until you start a run. Unknown sign-in does not block runs."
+                    "Rafu runs the agent CLIs you already have installed, under your own subscriptions. It never stores, reads, or forwards a sign-in token — log in inside each CLI. Start an agent in a terminal when you need it. You can start it even if Rafu cannot detect its sign-in state."
                 )
             }
 

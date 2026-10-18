@@ -186,4 +186,23 @@ exit 0 always, bounded input, private spool directory 0700, files 0600).
 
 - Merged into the integration branch: workstreams X1, X3 to X12, and the R pass.
 - Verification: Linux parse + swift-format lint + scratch-package tests; macOS CI (Swift 6.3, macos-26) run via workflow_dispatch — see the PR for the latest result.
-- Not yet done: GUI launch pass on a Mac (second window, keyboard, VoiceOver), live test of hooks with real Claude Code / Codex sessions.
+- Mac review (2026-10-18): Apple Swift 6.4 / macOS 27.0.1, arm64. Lightning
+  built and launched through the canonical script. A separate fixture workspace
+  covered Markdown source/preview, board shape creation, Command-Return Mermaid
+  editing, PNG export (pixels inspected), editor split menus, narrow-board tools,
+  General/Agents/Ensemble Settings, a second folder, and saved-workspace reopen.
+- Review fixes: prepare Mermaid pixels before static export; enforce image caps
+  even for very large boards; resolve existing ancestors for new export paths;
+  place helper scripts/licences in Resources and enforce structured-bundle
+  signing; remove an implicit capture warning; expose drawing tools in a compact
+  menu when a split cannot fit the full palette; update stale run-based Settings
+  copy. See `canvas-diagrams.md`, `agent-hooks-and-now-playing.md`, and
+  `build-and-run.md` in `docs/references/`.
+- First full Mac test pass: 185 core tests and 2,399 app tests. The export writer
+  alias/escape regression was added afterward; repeat format, build, parallel,
+  and serial gates before merging. Test logs and final results belong to PR #3.
+- Remaining manual coverage: VoiceOver speech, live hook installation/provider
+  events, real AX window docking, and vendor pack downloads. UI automation did
+  not start native sidebar/tab drag sessions (no source callback was observed);
+  do not claim the file-drop or tab-drag path was verified by that pass. Board
+  drawing gestures and editor splits through the menu did work.

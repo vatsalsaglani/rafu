@@ -98,7 +98,8 @@ protocol NotchSystemMediaStreaming: AnyObject {
 }
 
 /// Runs the BSD-3 `mediaremote-adapter` (vendored in
-/// `Vendor/MediaRemoteAdapter`, staged in `Contents/Helpers`) through
+/// `Vendor/MediaRemoteAdapter`, with code in `Contents/Helpers` and the
+/// script in `Contents/Resources`) through
 /// `/usr/bin/perl`, the way Cider does. Every process gets an argument
 /// array, never a shell string. A generation token makes output and exits
 /// from a stopped stream inert. stderr is discarded and nothing is logged.
@@ -108,6 +109,7 @@ final class NotchSystemMediaBridge: NotchSystemMediaStreaming {
     static let commandTimeout: Duration = .seconds(5)
 
     private let helpers: URL
+    private let resources: URL
     private var process: Process?
     private var generation = 0
     private var onLine: ((Data) -> Void)?
@@ -116,8 +118,12 @@ final class NotchSystemMediaBridge: NotchSystemMediaStreaming {
     private var commandCounter = 0
     private var availability: Bool?
 
-    init(helpers: URL = Bundle.main.bundleURL.appending(path: "Contents/Helpers")) {
+    init(
+        helpers: URL = Bundle.main.bundleURL.appending(path: "Contents/Helpers"),
+        resources: URL = Bundle.main.bundleURL.appending(path: "Contents/Resources")
+    ) {
         self.helpers = helpers
+        self.resources = resources
     }
 
     /// Three `stat` calls, made once per bridge.
@@ -133,7 +139,7 @@ final class NotchSystemMediaBridge: NotchSystemMediaStreaming {
         return found
     }
 
-    private var script: URL { helpers.appending(path: "mediaremote-adapter.pl") }
+    private var script: URL { resources.appending(path: "mediaremote-adapter.pl") }
     private var framework: URL { helpers.appending(path: "MediaRemoteAdapter.framework") }
 
     func start(onLine: @escaping (Data) -> Void, onFailure: @escaping () -> Void) {

@@ -245,3 +245,22 @@ Lightning state.
   any tests. See
   [`test-source-policy-and-bookmark-isolation.md`](test-source-policy-and-bookmark-isolation.md)
   for test isolation, source-check limits, and the separate fixture warning.
+
+
+## Helper resources and signing (2026-10-18)
+
+Applies to Lightning's canonical launcher on Apple Swift 6.4, macOS 27.0.1
+(26A434), arm64. Keep executable helpers and frameworks in `Contents/Helpers`;
+keep interpreted scripts and licences in `Contents/Resources`. The MediaRemote
+licence in `Helpers` made `codesign --deep` treat plain text as nested code and
+reject the app. The launcher had ignored that error and still reported success.
+Nested helper signing errors now fail the launch script. With structured SwiftPM
+resource bundles, outer signing and `codesign --verify --deep --strict` must also
+pass. The older flat SwiftPM bundle-at-app-root compatibility case remains an
+explicit exception; it is not a distribution signing path.
+
+Verify with `./script/build_and_run.sh --verify` and
+`codesign --verify --deep --strict 'dist/Rafu Lightning.app'`.
+`NotchSystemMediaTests.systemMediaBundleLayout` checks the runtime resource paths.
+See [agent hooks and Now Playing](agent-hooks-and-now-playing.md) and
+[the Ensemble phase](../plans/phases/ensemble-canvas.md).

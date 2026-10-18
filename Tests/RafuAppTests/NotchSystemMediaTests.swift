@@ -172,3 +172,19 @@ struct NotchSystemMediaParsingTests {
         #expect(NotchSystemMediaBridge.code(.previous) == 5)
     }
 }
+
+@MainActor
+@Test("Media bridge reads scripts from Resources and code from Helpers")
+func systemMediaBundleLayout() throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let helpers = root.appending(path: "Helpers")
+    let resources = root.appending(path: "Resources")
+    let framework = helpers.appending(path: "MediaRemoteAdapter.framework")
+    try FileManager.default.createDirectory(at: framework, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+    try Data().write(to: framework.appending(path: "MediaRemoteAdapter"))
+    try Data().write(to: resources.appending(path: "mediaremote-adapter.pl"))
+    #expect(NotchSystemMediaBridge(helpers: helpers, resources: resources).isAvailable)
+    #expect(!NotchSystemMediaBridge(helpers: helpers, resources: helpers).isAvailable)
+}

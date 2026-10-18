@@ -102,7 +102,11 @@ enum CanvasDiagramRenderer {
         scene: CanvasDiagramExportScene, board: CanvasBoardState, theme: RafuTheme,
         format: CanvasDiagramExportFormat
     ) async throws -> Data {
-        let view = CanvasDiagramExportView(scene: scene, board: board).rafuTheme(theme)
+        let snapshots = try await CanvasMermaidExportSnapshot.prepare(
+            cards: scene.items.map(\.card), theme: MermaidThemeSpec(theme: theme))
+        let view = CanvasDiagramExportView(
+            scene: scene, board: board, mermaidSnapshots: snapshots
+        ).rafuTheme(theme)
         let renderer = ImageRenderer(content: view)
         renderer.proposedSize = ProposedViewSize(scene.bounds.size)
         switch format {

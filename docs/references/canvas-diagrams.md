@@ -9,9 +9,12 @@ animated GIF export.
 
 ## Last verified
 
-- Swift 6.2 Linux toolchain (swift.org, ubuntu24.04), 2026-10-18. **macOS build
-  pending.** Nothing here ran on macOS; AppKit, ImageIO, `ImageRenderer`,
-  `/usr/bin/ditto`, `/usr/bin/zipinfo` and `URLSession` paths are code-read only.
+- Mac review: Apple Swift 6.4, macOS 27.0.1 (26A434), arm64, 2026-10-18.
+  Canonical Lightning build/launch and full package tests. Live Mermaid
+  editing exposed the export path issue described below; the fixed PNG export
+  was opened and its flowchart pixels inspected. Vendor downloads
+  and imports were not repeated during this Mac pass.
+- Initial Linux verification: Swift 6.2 (swift.org, ubuntu24.04), 2026-10-18.
 - Pure logic (search, vendor layout detection, archive and SVG checks, frame
   math, GIF planning, export bounds) passed 26 Swift Testing tests in a scratch
   package, including runs over the real file listings of the three official
@@ -115,6 +118,23 @@ animated GIF export.
   a background-coloured ring.
 - Native-view cards (terminal, web, docked app) export a summary face; notes
   export their current text excerpt.
+- `ImageRenderer` does not mount a view's `.task`. Mermaid cards must prepare
+  their raster images before the static export view is constructed; reusing
+  the live card otherwise exports its loading state. Preparation parses and
+  renders off the main actor, checks cancellation between diagrams, and limits
+  all retained thumbnails together to four million pixels. Malformed diagrams
+  export an explicit error face.
+- Pixel scale must have no fixed minimum: two nodes 200,000 points apart need
+  a scale below 0.1 to stay within the PNG/GIF caps. The regression checks both
+  caps at that distance.
+- macOS Foundation can return different `/private` spellings for an existing
+  folder and a missing child. Resolve the nearest existing ancestor, then
+  append missing path components before the containment comparison. A live
+  export from `/tmp/rafu-pr3-ui-review` previously failed with “Exports must
+  stay inside the workspace folder.” The writer regression covers a workspace
+  symlink, a new export leaf, and refusal of an exports symlink outside the
+  workspace. This path check is not a filesystem sandbox against concurrent
+  replacement of directories by another local process.
 
 ## Why it matters
 

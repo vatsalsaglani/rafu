@@ -100,8 +100,8 @@ chmod +x "$APP_BINARY" "$CLI_BINARY" "$HOOK_HELPER_BINARY"
 # Playing falls back to Music and Spotify. Never fails the app build.
 if "$ROOT_DIR/script/build_media_helper.sh" "$MEDIA_FRAMEWORK_CACHE"; then
   cp -R "$MEDIA_FRAMEWORK_CACHE/MediaRemoteAdapter.framework" "$APP_HELPERS/"
-  cp "$ROOT_DIR/Vendor/MediaRemoteAdapter/bin/mediaremote-adapter.pl" "$APP_HELPERS/"
-  cp "$ROOT_DIR/Vendor/MediaRemoteAdapter/LICENSE" "$APP_HELPERS/MediaRemoteAdapter-LICENSE"
+  cp "$ROOT_DIR/Vendor/MediaRemoteAdapter/bin/mediaremote-adapter.pl" "$APP_RESOURCES/"
+  cp "$ROOT_DIR/Vendor/MediaRemoteAdapter/LICENSE" "$APP_RESOURCES/MediaRemoteAdapter-LICENSE"
 else
   echo "Now Playing will use the Music and Spotify fallback in this build." >&2
 fi
@@ -262,11 +262,16 @@ PLIST
 # below (build, resources, launch) must still pass regardless of whether
 # this signing step fully seals the resource bundle.
 # Nested code is signed first so the bundle signature can seal it.
-codesign --force --sign - --timestamp=none "$HOOK_HELPER_BINARY" || true
+codesign --force --sign - --timestamp=none "$HOOK_HELPER_BINARY"
 if [[ -d "$APP_HELPERS/MediaRemoteAdapter.framework" ]]; then
-  codesign --force --sign - --timestamp=none "$APP_HELPERS/MediaRemoteAdapter.framework" || true
+  codesign --force --sign - --timestamp=none "$APP_HELPERS/MediaRemoteAdapter.framework"
 fi
-codesign --force --sign - --timestamp=none "$APP_BUNDLE" || true
+if [[ -d "$APP_BUNDLE/$RESOURCE_BUNDLE_NAME" || -d "$APP_BUNDLE/SwiftTerm_SwiftTerm.bundle" ]]; then
+  codesign --force --sign - --timestamp=none "$APP_BUNDLE" || true
+else
+  codesign --force --sign - --timestamp=none "$APP_BUNDLE"
+  codesign --verify --deep --strict "$APP_BUNDLE"
+fi
 
 plutil -lint "$INFO_PLIST" >/dev/null
 test -x "$APP_BINARY"

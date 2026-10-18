@@ -61,7 +61,7 @@ final class AgentActivityStore {
         guard !connectedProviders.isEmpty, watcher == nil, !isOpeningWatcher else { return }
         isOpeningWatcher = true
         let spool = paths.spool
-        Task {
+        Task { [self] in
             defer { isOpeningWatcher = false }
             guard let descriptor = await AgentActivityIO.openSpool(spool) else { return }
             guard isStarted, !connectedProviders.isEmpty, watcher == nil else {

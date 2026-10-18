@@ -52,19 +52,10 @@ struct CanvasToolPalette: View {
     }
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(CanvasWhiteboardToolKind.allCases) { kind in
-                toolButton(kind)
-                if kind == .hand || kind == .pen || kind == .mermaid {
-                    separator
-                }
-            }
-            separator
-            CanvasWhiteboardStyleMenu(board: board, tool: tool)
-            if !Self.extraItems.isEmpty {
-                separator
-                ForEach(Self.extraItems) { item in extraButton(item) }
-            }
+        ViewThatFits(in: .horizontal) {
+            expandedTools
+                .fixedSize(horizontal: true, vertical: false)
+            compactTools
         }
         .padding(4)
         .background(theme.palette.elevatedBackground, in: .rect(cornerRadius: 10))
@@ -79,6 +70,56 @@ struct CanvasToolPalette: View {
         .accessibilityLabel("Whiteboard tools")
         .padding(.top, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var expandedTools: some View {
+        HStack(spacing: 2) {
+            ForEach(CanvasWhiteboardToolKind.allCases) { kind in
+                toolButton(kind)
+                if kind == .hand || kind == .pen || kind == .mermaid {
+                    separator
+                }
+            }
+            separator
+            CanvasWhiteboardStyleMenu(board: board, tool: tool)
+            if !Self.extraItems.isEmpty {
+                separator
+                ForEach(Self.extraItems) { item in extraButton(item) }
+            }
+        }
+    }
+
+    /// Split groups can be narrower than the full palette. Keep selection and
+    /// panning visible and expose every remaining tool in a native menu.
+    private var compactTools: some View {
+        HStack(spacing: 2) {
+            toolButton(.select)
+            toolButton(.hand)
+            Menu {
+                ForEach(CanvasWhiteboardToolKind.allCases.filter { $0 != .select && $0 != .hand }) {
+                    kind in
+                    Button(kind.title, systemImage: kind.symbol) { choose(kind) }
+                }
+                if !Self.extraItems.isEmpty {
+                    Divider()
+                    ForEach(Self.extraItems) { item in
+                        Button(item.title, systemImage: item.symbol) {
+                            item.perform(board, session)
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "pencil.and.outline")
+                    .frame(width: 28, height: 26)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Drawing Tools")
+            .accessibilityLabel("Drawing Tools")
+            separator
+            CanvasWhiteboardStyleMenu(board: board, tool: tool)
+        }
     }
 
     private var keysActive: Bool {

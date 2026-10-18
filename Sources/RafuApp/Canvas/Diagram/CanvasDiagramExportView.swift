@@ -70,6 +70,7 @@ struct CanvasDiagramExportView: View {
     @Environment(\.rafuTheme) private var theme
     let scene: CanvasDiagramExportScene
     let board: CanvasBoardState
+    var mermaidSnapshots: [CanvasCardID: CanvasMermaidExportSnapshot] = [:]
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -79,9 +80,12 @@ struct CanvasDiagramExportView: View {
                     .stroke(edgeColor(edge), style: edgeStroke(edge))
             }
             ForEach(scene.items) { item in
-                CanvasDiagramStaticCard(card: item.card, board: board, rootURL: scene.rootURL)
-                    .frame(width: item.rect.width, height: item.rect.height)
-                    .offset(x: item.rect.minX, y: item.rect.minY)
+                CanvasDiagramStaticCard(
+                    card: item.card, board: board, rootURL: scene.rootURL,
+                    mermaidSnapshot: mermaidSnapshots[item.id]
+                )
+                .frame(width: item.rect.width, height: item.rect.height)
+                .offset(x: item.rect.minX, y: item.rect.minY)
             }
             ForEach(scene.edges) { edge in
                 CanvasDiagramArrowhead(curve: edge.curve)
@@ -151,6 +155,7 @@ struct CanvasDiagramStaticCard: View {
     let card: CanvasCard
     let board: CanvasBoardState
     let rootURL: URL
+    var mermaidSnapshot: CanvasMermaidExportSnapshot?
 
     var body: some View {
         switch card.content {
@@ -184,7 +189,15 @@ struct CanvasDiagramStaticCard: View {
             }
         case .mermaid:
             CanvasDiagramStaticChrome(card: card) {
-                CanvasWhiteboardCardFace(card: card, board: board)
+                if let image = mermaidSnapshot?.image {
+                    Image(decorative: image, scale: 1)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .padding(12)
+                } else {
+                    CanvasDiagramSummaryText(
+                        text: mermaidSnapshot?.failure ?? "Diagram not rendered", lines: 4)
+                }
             }
         default:
             CanvasWhiteboardCardFace(card: card, board: board)
