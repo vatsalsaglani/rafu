@@ -36,16 +36,16 @@ nonisolated enum CanvasError: Error, LocalizedError, Equatable, Sendable {
 
     var errorDescription: String? {
         switch self {
-        case .invalidDocument: "This Canvas contains invalid or excessive data."
-        case .unsupportedVersion: "This Canvas needs a newer version of Rafu."
-        case .capacity: "The Canvas resource limit has been reached."
-        case .conflict: "This Canvas changed in another window. Reload it or save a copy."
-        case .busy: "The Canvas store is busy. Try saving again."
-        case .unavailable: "The saved Canvas is unavailable."
+        case .invalidDocument: "This Ensemble contains invalid or excessive data."
+        case .unsupportedVersion: "This Ensemble needs a newer version of Rafu."
+        case .capacity: "The Ensemble resource limit has been reached."
+        case .conflict: "This Ensemble changed in another window. Reload it or save a copy."
+        case .busy: "The Ensemble store is busy. Try saving again."
+        case .unavailable: "The saved Ensemble is unavailable."
         case .invalidURL:
             "Use an http or https URL on localhost, 127.0.0.1, or [::1], without credentials."
         case .invalidPath: "Choose a file inside this workspace."
-        case .noteTooLarge: "A Canvas note can contain at most 64 KiB of UTF-8 text."
+        case .noteTooLarge: "An Ensemble note can contain at most 64 KiB of UTF-8 text."
         }
     }
 }

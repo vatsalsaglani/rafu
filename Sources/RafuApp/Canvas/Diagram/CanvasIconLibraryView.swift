@@ -82,7 +82,7 @@ struct CanvasIconLibraryView: View {
 
     private var footerText: String {
         if let notice = library.notice { return notice }
-        guard let board = target.board else { return "Open a Canvas to add icons." }
+        guard let board = target.board else { return "Open an Ensemble to add icons." }
         return "Click an icon to add it to “\(board.title)”."
     }
 

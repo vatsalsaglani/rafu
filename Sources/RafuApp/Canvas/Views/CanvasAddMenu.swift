@@ -97,8 +97,8 @@ struct CanvasAddCardMenu: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .disabled(board.cards.count >= CanvasLimits.cards)
-        .help("Add to Canvas")
-        .accessibilityLabel("Add to Canvas")
+        .help("Add to Ensemble")
+        .accessibilityLabel("Add to Ensemble")
     }
 }
 

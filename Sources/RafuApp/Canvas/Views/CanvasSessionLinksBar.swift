@@ -65,7 +65,7 @@ private struct CanvasLinkStatusPopover: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Message links").font(.headline)
             if links.isEmpty {
-                Text("No message links on this Canvas.").foregroundStyle(.secondary)
+                Text("No message links on this Ensemble.").foregroundStyle(.secondary)
             }
             ForEach(links) { link in
                 row(link, state: states[link.id] ?? .paused)

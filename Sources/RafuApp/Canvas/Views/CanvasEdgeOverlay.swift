@@ -537,7 +537,7 @@ private struct CanvasEdgeLabelEditor: View {
                 }
                 Text(
                     connection.behavior == .session
-                        ? "Starts Paused. Resume it from the link menu or the Canvas bar."
+                        ? "Starts Paused. Resume it from the link menu or the Ensemble bar."
                         : "A visual relationship. No messages pass."
                 )
                 .font(.caption).foregroundStyle(.secondary)

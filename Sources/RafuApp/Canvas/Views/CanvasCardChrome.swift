@@ -238,7 +238,7 @@ struct CanvasCardMenuContent: View {
             }
         }
         Divider()
-        Button("Remove from Canvas…", systemImage: "minus.circle", role: .destructive) {
+        Button("Remove from Ensemble…", systemImage: "minus.circle", role: .destructive) {
             commands.requestRemoval()
         }
     }

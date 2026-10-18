@@ -283,7 +283,7 @@ struct CanvasLiveBridgeTests {
         // This check validates route shape only. Delivery validates filesystem ownership off-main.
         #expect(
             fixture.bridge.status(for: fixture.controllers[0].id).contains(
-                "list Canvas connections"))
+                "list Ensemble connections"))
     }
 
     @Test("A full inbox drains in bounded frames without losing large messages")
@@ -452,7 +452,7 @@ struct CanvasLiveBridgeTests {
         #expect(await fixture.bridge.handle(registration).error == nil)
         #expect(
             fixture.bridge.status(for: fixture.controllers[0].id).contains(
-                "list Canvas connections"))
+                "list Ensemble connections"))
 
         let supervisorClient = UUID().uuidString
         var bind = fixture.request(0, "bind", client: supervisorClient, provider: "codex")
@@ -675,7 +675,7 @@ struct CanvasLiveBridgeTests {
         #expect(paused.peers.first?.linkState == "paused")
         let denied = await fixture.bridge.handle(
             fixture.request(0, "send", destination: 1, text: "blocked"))
-        #expect(denied.error?.contains("Resume it in Rafu Canvas") == true)
+        #expect(denied.error?.contains("Resume it in Rafu Ensemble") == true)
         fixture.bridge.enable(fixture.edge, in: fixture.board)
         fixture.controllers[1].restart()
         let stopped = await fixture.bridge.handle(fixture.request(0, "list"))

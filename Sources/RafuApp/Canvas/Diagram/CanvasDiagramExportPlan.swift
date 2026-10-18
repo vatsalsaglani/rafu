@@ -96,7 +96,7 @@ nonisolated enum CanvasDiagramExportPlan {
             )
         )
         .trimmingCharacters(in: CharacterSet(charactersIn: " .-"))
-        let base = cleaned.isEmpty ? "Canvas" : String(cleaned.prefix(80))
+        let base = cleaned.isEmpty ? "Ensemble" : String(cleaned.prefix(80))
         return "\(base) \(formatter.string(from: date)).\(format.fileExtension)"
     }
 

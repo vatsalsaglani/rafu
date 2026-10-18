@@ -683,6 +683,6 @@ private struct CanvasCardAccessibility: ViewModifier {
             .accessibilityAction(named: "Move Down") { commands.move(dx: 0, dy: 8) }
             .accessibilityAction(named: "Make Larger") { commands.resize(dw: 8, dh: 8) }
             .accessibilityAction(named: "Make Smaller") { commands.resize(dw: -8, dh: -8) }
-            .accessibilityAction(named: "Remove from Canvas") { commands.requestRemoval() }
+            .accessibilityAction(named: "Remove from Ensemble") { commands.requestRemoval() }
     }
 }
