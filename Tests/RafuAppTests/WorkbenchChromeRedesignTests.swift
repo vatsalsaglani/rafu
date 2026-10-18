@@ -8,6 +8,14 @@ import Testing
 /// no view is instantiated.
 @Suite("Workbench chrome redesign")
 struct WorkbenchChromeRedesignTests {
+    @Test("Status bar has an accessible session-only initializer")
+    @MainActor
+    func statusBarInitializerPreservesSession() {
+        let session = WorkspaceSession()
+        let view = WorkspaceStatusBar(session: session)
+        #expect(view.session === session)
+    }
+
     // MARK: - E1: editor group border
 
     @Test("A document group has a neutral frame and no gold, focused or not")

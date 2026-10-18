@@ -9,6 +9,10 @@ struct WorkspaceStatusBar: View {
     /// Shared with the Resources popover so both always show the same reading.
     private var memory = ResidentMemoryMonitor.shared
 
+    init(session: WorkspaceSession) {
+        self.session = session
+    }
+
     private var descriptor: WorkspaceDescriptor? { session.descriptor }
 
     var body: some View {

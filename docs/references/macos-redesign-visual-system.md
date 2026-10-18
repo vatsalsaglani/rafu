@@ -162,3 +162,17 @@ Touch trackpad.
   JSON key `fonts.markdownPreview.prose` (Indigo and Khadi set `"New York"`,
   fallback Georgia). Canvas notes in Read mode use the same family through
   `RafuNoteMarkdownStyling.swift`; Edit mode uses SF Pro.
+
+## Status bar initializer compatibility
+
+Verified 2026-10-18: CI Apple Swift 6.3.3 reported a private synthesized
+`WorkspaceStatusBar.init(session:memory:)` at the call in `WorkspaceWindowView`.
+The private stored `memory` property participates in that initializer. Declare
+an explicit internal `init(session:)` and retain the private shared monitor.
+This keeps construction independent of synthesized memberwise access rules.
+
+Evidence: [CI job 117644791643](https://github.com/vatsalsaglani/rafu/actions/runs/39117028617/job/117644791643).
+The local Mac has only Apple Swift 6.4 on macOS 27.0.1; Swift 6.3.3 verification
+requires CI. Regression: `WorkbenchChromeRedesignTests.statusBarInitializerPreservesSession`.
+Verify with `./script/build.sh` and `./script/test.sh`. This change has no UI or
+session lifecycle effect and does not require restarting live terminals.
