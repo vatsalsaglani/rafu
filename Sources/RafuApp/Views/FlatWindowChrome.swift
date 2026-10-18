@@ -63,8 +63,10 @@ struct FlatWindowChrome: NSViewRepresentable {
     /// Changes only when bounded workbench topology/canvas identity changes.
     var topologyToken: TopologyToken = .empty
 
-    /// Hides the traffic lights while the pointer is away from the top-left
-    /// hover cluster. Ignored in full screen, where the system manages them.
+    /// Hides the standard close / minimise / zoom buttons. The workspace
+    /// window keeps them visible (`false`, macOS redesign E2); the option
+    /// remains for tests and any chrome that wants them hidden. Ignored in
+    /// full screen, where the system manages them.
     var hidesTrafficLights: Bool = false
 
     /// Reports full-screen transitions so SwiftUI can drop the traffic-light

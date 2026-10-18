@@ -88,7 +88,7 @@ struct WorkbenchDeckPresentationTests {
         #expect(windowContent.contains(".frame(minWidth: 480, minHeight: 220)"))
         #expect(
             windowContent.contains(
-                ".frame(minWidth: 250, idealWidth: 310, maxWidth: 460)"
+                ".frame(minWidth: 300, idealWidth: 340, maxWidth: 520)"
             )
         )
         #expect(Self.occurrences(of: ".layoutPriority(1)", in: windowContent) >= 4)
@@ -105,7 +105,7 @@ struct WorkbenchDeckPresentationTests {
 
         #expect(source.contains(".background(theme.palette.sidebarBackground)"))
         #expect(source.contains(".listStyle(.plain)"))
-        #expect(source.contains(".environment(\\.defaultMinListRowHeight, 22)"))
+        #expect(source.contains(".environment(\\.defaultMinListRowHeight, 24)"))
         #expect(source.contains("ForEach(session.loadedChildren[\"\"] ?? [], id: \\.id)"))
         #expect(source.contains(".dropDestination(for: URL.self)"))
         #expect(source.contains(".onCopyCommand"))

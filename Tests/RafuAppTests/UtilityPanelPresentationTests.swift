@@ -67,8 +67,14 @@ struct UtilityPanelPresentationTests {
 
         #expect(navigator.contains("title: \"Search\""))
         #expect(navigator.contains("DisclosureGroup(\"File filters\""))
-        #expect(navigator.contains("\"Case\", accessibilityLabel: \"Case Sensitive\""))
-        #expect(navigator.contains("\"Regex\", accessibilityLabel: \"Regular Expression\""))
+        // Option toggles are 24 x 22 icon toggles with tooltip + accessibility
+        // labels; no wrapped words such as "Ca se" or "Reg ex".
+        #expect(navigator.contains("glyph: .text(\"Aa\"), label: \"Match Case\""))
+        #expect(navigator.contains("label: \"Whole Word\""))
+        #expect(navigator.contains("label: \"Regular Expression\""))
+        #expect(!navigator.contains("\"Case\", accessibilityLabel"))
+        #expect(RafuOptionToggle.width == 24)
+        #expect(RafuOptionToggle.height == 22)
         #expect(navigator.contains("RafuPanelEmptyState("))
         #expect(navigator.contains("title: \"Search Workspace\""))
     }
