@@ -1,5 +1,8 @@
 import Foundation
 
+// The Rafu Ensemble agent skill installer. The historical `Conductor*` names
+// stay (ADR 0018 naming split); every user-visible string says "Agent skill".
+
 nonisolated struct ConductorBundledSkillFile: Equatable, Sendable {
     let pathComponents: [String]
 
@@ -11,7 +14,6 @@ nonisolated struct ConductorBundledSkillFile: Equatable, Sendable {
 nonisolated struct ConductorBundledSkillMetadata: Equatable, Sendable {
     let name: String
     let description: String
-    let targetsVerbVersion: Int
 }
 
 nonisolated enum ConductorBundledSkillError: Error, Equatable, LocalizedError, Sendable {
@@ -24,7 +26,7 @@ nonisolated enum ConductorBundledSkillError: Error, Equatable, LocalizedError, S
     var errorDescription: String? {
         switch self {
         case .resourcesUnavailable:
-            "The bundled Ensemble coordinator skill is unavailable."
+            "The bundled Rafu agent skill is unavailable."
         case .unsafeResourcePath(let path):
             "Skill resource \"\(path)\" has an unsafe path."
         case .missingResource(let path):
@@ -32,22 +34,22 @@ nonisolated enum ConductorBundledSkillError: Error, Equatable, LocalizedError, S
         case .resourceTooLarge(let path):
             "Skill resource \"\(path)\" exceeds Rafu's 1 MiB skill-file limit."
         case .invalidMetadata(let detail):
-            "The bundled Ensemble coordinator skill has invalid metadata: \(detail)"
+            "The bundled Rafu agent skill has invalid metadata: \(detail)"
         }
     }
 }
 
-/// Code-declared manifest for the read-only coordinator skill. Rafu never
-/// trusts a resource-directory listing when deciding what to install.
+/// Code-declared manifest for the agent skill. Rafu never trusts a
+/// resource-directory listing when deciding what to install.
 nonisolated struct ConductorBundledSkillCatalog: Sendable {
-    static let skillIdentifier = "ensemble-with-rafu"
+    static let skillIdentifier = "rafu-ensemble"
+    static let resourceDirectory = "AgentSkills"
     static let maximumSkillFileBytes = 1_048_576
     static let files: [ConductorBundledSkillFile] = [
         .init(pathComponents: ["SKILL.md"]),
-        .init(pathComponents: ["references", "verbs.md"]),
-        .init(pathComponents: ["references", "file-formats.md"]),
-        .init(pathComponents: ["references", "patterns.md"]),
-        .init(pathComponents: ["references", "troubleshooting.md"]),
+        .init(pathComponents: ["references", "tools.md"]),
+        .init(pathComponents: ["references", "recipes.md"]),
+        .init(pathComponents: ["references", "codex-agents-snippet.md"]),
     ]
 
     let resourceRootURL: URL
@@ -68,7 +70,7 @@ nonisolated struct ConductorBundledSkillCatalog: Sendable {
     static func bundled() throws -> ConductorBundledSkillCatalog {
         guard
             let root = Bundle.module.url(
-                forResource: "EnsembleSkills",
+                forResource: resourceDirectory,
                 withExtension: nil)
         else {
             throw ConductorBundledSkillError.resourcesUnavailable
@@ -112,34 +114,37 @@ nonisolated struct ConductorBundledSkillCatalog: Sendable {
         guard let skillFile = manifest.first(where: { $0.relativePath == "SKILL.md" }) else {
             throw ConductorBundledSkillError.invalidMetadata("SKILL.md is not in the manifest.")
         }
-        let data = try data(for: skillFile)
-        guard let text = String(data: data, encoding: .utf8) else {
+        guard let text = String(data: try data(for: skillFile), encoding: .utf8) else {
             throw ConductorBundledSkillError.invalidMetadata("SKILL.md is not UTF-8.")
         }
-        let lines = ConductorFrontmatter.lines(of: text)
-        let block = try ConductorFrontmatter.block(in: lines)
-        var values: [String: String] = [:]
-        for line in block.lines {
-            guard let scalar = try ConductorFrontmatter.scalar(line) else { continue }
-            values[scalar.key] = scalar.value
-        }
+        let values = try Self.frontmatter(text)
         guard let name = values["name"], !name.isEmpty else {
             throw ConductorBundledSkillError.invalidMetadata("name is missing.")
         }
         guard let description = values["description"], !description.isEmpty else {
             throw ConductorBundledSkillError.invalidMetadata("description is missing.")
         }
-        guard
-            let rawVersion = values["targetsverbversion"],
-            let targetsVerbVersion = Int(rawVersion)
-        else {
-            throw ConductorBundledSkillError.invalidMetadata(
-                "targetsVerbVersion is missing or invalid.")
+        return ConductorBundledSkillMetadata(name: name, description: description)
+    }
+
+    /// The `key: value` lines between the leading `---` fences. Keys are
+    /// lowercased; values are trimmed. Nested YAML is not supported.
+    static func frontmatter(_ text: String) throws -> [String: String] {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map {
+            $0.hasSuffix("\r") ? String($0.dropLast()) : String($0)
         }
-        return ConductorBundledSkillMetadata(
-            name: name,
-            description: description,
-            targetsVerbVersion: targetsVerbVersion)
+        guard lines.first == "---", let end = lines.dropFirst().firstIndex(of: "---") else {
+            throw ConductorBundledSkillError.invalidMetadata("frontmatter is missing.")
+        }
+        var values: [String: String] = [:]
+        for line in lines[1..<end] {
+            guard let colon = line.firstIndex(of: ":"), !line.hasPrefix(" ") else { continue }
+            let key = line[..<colon].trimmingCharacters(in: .whitespaces).lowercased()
+            let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            guard !key.isEmpty else { continue }
+            values[key] = value
+        }
+        return values
     }
 
     static func isSafePathComponent(_ value: String) -> Bool {
@@ -149,9 +154,12 @@ nonisolated struct ConductorBundledSkillCatalog: Sendable {
 }
 
 nonisolated enum ConductorSkillDestination: Equatable, Sendable {
+    /// `~/.claude/skills/rafu-ensemble`, Claude Code's user skills folder.
     case claudeCode
-    /// A user-selected skills directory. Rafu creates
-    /// `ensemble-with-rafu/` inside it.
+    /// `~/.codex/skills/rafu-ensemble`, Codex's user skills folder
+    /// (verified in this repository's planning notes, 2026-10-17).
+    case codex
+    /// A user-selected skills directory. Rafu creates `rafu-ensemble/` inside it.
     case custom(URL)
 }
 
@@ -191,10 +199,9 @@ nonisolated enum ConductorSkillInstallationError: Error, Equatable, LocalizedErr
     }
 }
 
-/// Explicit, bounded coordinator-skill installation. All five destinations
-/// are classified before any directory or file is created. Existing content
-/// is never replaced until the caller repeats the action with confirmed
-/// replacement policy.
+/// Explicit, bounded skill installation. All destinations are classified
+/// before any directory or file is created. Existing content is never
+/// replaced until the caller repeats the action with confirmed replacement.
 nonisolated struct ConductorSkillInstaller: Sendable {
     private let catalog: ConductorBundledSkillCatalog
     private let homeDirectory: URL
@@ -211,6 +218,13 @@ nonisolated struct ConductorSkillInstaller: Sendable {
     func metadata() async throws -> ConductorBundledSkillMetadata {
         try Task.checkCancellation()
         return try catalog.metadata()
+    }
+
+    /// The skill folder a destination resolves to.
+    func destinationRootURL(for destination: ConductorSkillDestination) -> URL {
+        skillsDirectory(for: destination).appending(
+            path: ConductorBundledSkillCatalog.skillIdentifier,
+            directoryHint: .isDirectory)
     }
 
     @concurrent
@@ -304,19 +318,20 @@ nonisolated struct ConductorSkillInstaller: Sendable {
         case different
     }
 
-    private func destinationRootURL(for destination: ConductorSkillDestination) -> URL {
-        let skillsDirectory =
-            switch destination {
-            case .claudeCode:
-                homeDirectory
-                    .appending(path: ".claude", directoryHint: .isDirectory)
-                    .appending(path: "skills", directoryHint: .isDirectory)
-            case .custom(let url):
-                url
-            }
-        return skillsDirectory.appending(
-            path: ConductorBundledSkillCatalog.skillIdentifier,
-            directoryHint: .isDirectory)
+    private func vendorDirectory(for destination: ConductorSkillDestination) -> URL? {
+        switch destination {
+        case .claudeCode: homeDirectory.appending(path: ".claude", directoryHint: .isDirectory)
+        case .codex: homeDirectory.appending(path: ".codex", directoryHint: .isDirectory)
+        case .custom: nil
+        }
+    }
+
+    private func skillsDirectory(for destination: ConductorSkillDestination) -> URL {
+        guard let vendor = vendorDirectory(for: destination) else {
+            if case .custom(let url) = destination { return url }
+            return homeDirectory
+        }
+        return vendor.appending(path: "skills", directoryHint: .isDirectory)
     }
 
     private func destinationDirectories(
@@ -324,17 +339,10 @@ nonisolated struct ConductorSkillInstaller: Sendable {
         root: URL
     ) -> [URL] {
         let ancestors: [URL] =
-            switch destination {
-            case .claudeCode:
-                [
-                    homeDirectory,
-                    homeDirectory.appending(path: ".claude", directoryHint: .isDirectory),
-                    homeDirectory
-                        .appending(path: ".claude", directoryHint: .isDirectory)
-                        .appending(path: "skills", directoryHint: .isDirectory),
-                ]
-            case .custom(let url):
-                [url]
+            if let vendor = vendorDirectory(for: destination) {
+                [homeDirectory, vendor, skillsDirectory(for: destination)]
+            } else {
+                [skillsDirectory(for: destination)]
             }
         return ancestors + [
             root,

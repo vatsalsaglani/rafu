@@ -125,7 +125,8 @@ let package = Package(
                 // `swift run`, and the staged `.app`. See
                 // `Sources/RafuApp/Resources/Grammars/README.md`.
                 .copy("Resources/Grammars"),
-                .copy("Resources/EnsembleSkills"),
+                // The Rafu Ensemble agent skill (X4), installed from Settings.
+                .copy("Resources/AgentSkills"),
             ],
             swiftSettings: [
                 .defaultIsolation(MainActor.self)

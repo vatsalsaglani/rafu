@@ -299,8 +299,9 @@ final class CanvasLiveBridge {
             source.generation == controller.generation, location(of: controller.id) != nil
         else { return .init(error: "This terminal session is no longer available.") }
         guard
-            ["bind", "suspend", "register", "list", "send", "receive", "unregister"].contains(
-                request.operation)
+            ["bind", "suspend", "register", "list", "send", "receive", "unregister", "tool"]
+                .contains(
+                    request.operation)
         else {
             return .init(error: "Unsupported bridge request.")
         }
@@ -405,6 +406,23 @@ final class CanvasLiveBridge {
             revision &+= 1
             return .init()
         case "list": return .init(peers: peers(for: controller.id))
+        case "tool":
+            guard let call = request.agentCall, let provider = source.provider,
+                let place = location(of: controller.id)
+            else { return .init(error: "Invalid Ensemble tool request.") }
+            let token = request.token
+            let clientID = request.clientID
+            let caller = CanvasAgentCaller(
+                session: place.session, board: place.board, card: place.card,
+                controllerID: controller.id, provider: provider
+            ) { [weak self] destination, text in
+                guard let self else { return .init(error: "Ensemble connection unavailable.") }
+                return await self.handle(
+                    CanvasBridgeRequest(
+                        token: token, operation: "send", clientID: clientID,
+                        provider: provider, destination: destination, text: text))
+            }
+            return await CanvasAgentActions.handle(call, caller: caller)
         case "receive":
             guard source.provider == "claude" else { return .init() }
             source.inbox = source.inbox.filter { message in
@@ -520,6 +538,24 @@ final class CanvasLiveBridge {
             return .init()
         default: return .init(error: "Unsupported bridge request.")
         }
+    }
+
+    // MARK: Agent tools (X4)
+
+    /// True when a Live message link connects the caller's node to `cardID`.
+    func hasLiveRoute(from controllerID: UUID, to cardID: String) -> Bool {
+        guard let target = liveTarget(from: controllerID, cardID: cardID) else { return false }
+        return hasLiveEndpoint(target)
+    }
+
+    /// True after the terminal's private bridge shell was prepared; the shell
+    /// process starts in the same main-actor turn.
+    func hasBootstrap(controllerID: UUID) -> Bool { directories[controllerID] != nil }
+
+    /// The agent CLI connected in a terminal, if any.
+    func connectedProvider(controllerID: UUID) -> String? {
+        guard hasLiveEndpoint(controllerID) else { return nil }
+        return endpoints.values.first { $0.controller?.id == controllerID }?.provider
     }
 
     private func location(of controllerID: UUID) -> Location? {

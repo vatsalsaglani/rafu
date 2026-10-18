@@ -3,7 +3,8 @@ import SwiftUI
 /// The compact link status in the Canvas bar (review 7.6, Global control):
 /// "⇄ 1 live · 0 paused". It opens a popover with one row per message link and
 /// a Pause or Resume toggle for each, plus Pause All Links and Resume All.
-/// It draws nothing when the board has no message links.
+/// The link part draws nothing when the board has no message links; the
+/// Agent control chip beside it is always shown.
 struct CanvasLinkStatusItem: View {
     @Environment(\.rafuTheme) private var theme
     let board: CanvasBoardState
@@ -11,6 +12,14 @@ struct CanvasLinkStatusItem: View {
     private let bridge = CanvasLiveBridge.shared
 
     var body: some View {
+        HStack(spacing: 8) {
+            // X4: the Agent control chip and approval panel sit beside the link status.
+            CanvasAgentControlItem(board: board)
+            linkStatus
+        }
+    }
+
+    @ViewBuilder private var linkStatus: some View {
         let links = board.connections.filter { $0.isMessageLink }
         if !links.isEmpty {
             let states = bridge.linkStates(in: board)
