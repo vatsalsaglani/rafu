@@ -388,6 +388,25 @@ nonisolated enum CanvasEdgeGeometry {
         return t0 <= t1
     }
 
+    /// The curve of a connection preview. It leaves `startSide` perpendicular
+    /// to the card; it enters a snapped port perpendicular too, and otherwise
+    /// approaches the pointer from the start's direction.
+    static func previewCurve(
+        from start: CGPoint, startSide: CanvasPortSide, to end: CGPoint, endSide: CanvasPortSide?
+    ) -> CanvasEdgeCurve {
+        let reach = controlDistance(forLength: hypot(end.x - start.x, end.y - start.y))
+        let out = startSide.normal
+        let control1 = CGPoint(x: start.x + out.x * reach, y: start.y + out.y * reach)
+        var control2 = end
+        if let endSide {
+            let inward = endSide.normal
+            control2 = CGPoint(x: end.x + inward.x * reach, y: end.y + inward.y * reach)
+        } else if let back = normalized(CGPoint(x: control1.x - end.x, y: control1.y - end.y)) {
+            control2 = CGPoint(x: end.x + back.x * reach, y: end.y + back.y * reach)
+        }
+        return CanvasEdgeCurve(start: start, control1: control1, control2: control2, end: end)
+    }
+
     // MARK: Hit testing
 
     /// The topmost route within `tolerance` of `point` (nearest wins).

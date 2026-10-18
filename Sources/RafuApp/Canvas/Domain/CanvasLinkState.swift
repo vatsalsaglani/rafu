@@ -29,7 +29,7 @@ nonisolated enum CanvasLinkState: Equatable, Sendable {
     case disconnected(CanvasLinkDisconnectReason)
     case failed(String)
 
-    enum Kind: Equatable, Sendable { case live, paused, disconnected, failed }
+    enum Kind: Hashable, Sendable { case live, paused, disconnected, failed }
 
     var kind: Kind {
         switch self {
@@ -121,13 +121,19 @@ nonisolated struct CanvasLinkSummary: Equatable, Sendable {
 
     var total: Int { live + paused + disconnected + failed }
 
-    /// "⇄ 1 live · 0 paused"; disconnected and failed counts appear only when present.
-    var text: String {
-        var parts = ["⇄ \(live) live", "\(paused) paused"]
+    /// "⇄ 1 live".
+    var liveText: String { "⇄ \(live) live" }
+
+    /// "0 paused"; disconnected and failed counts appear only when present.
+    var restText: String {
+        var parts = ["\(paused) paused"]
         if disconnected > 0 { parts.append("\(disconnected) disconnected") }
         if failed > 0 { parts.append("\(failed) failed") }
         return parts.joined(separator: " · ")
     }
+
+    /// "⇄ 1 live · 0 paused".
+    var text: String { liveText + " · " + restText }
 }
 
 nonisolated enum CanvasLinkDirection: Equatable, Sendable {

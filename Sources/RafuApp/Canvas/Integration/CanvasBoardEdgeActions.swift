@@ -178,7 +178,7 @@ extension CanvasBoardState {
     }
 }
 
-enum CanvasNewCardKind: Equatable {
+nonisolated enum CanvasNewCardKind: Equatable, Sendable {
     case note
     case terminal
 }

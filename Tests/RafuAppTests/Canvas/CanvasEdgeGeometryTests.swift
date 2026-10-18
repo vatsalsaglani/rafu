@@ -258,6 +258,25 @@ struct CanvasEdgeGeometryTests {
         #expect(CanvasEdgeGeometry.snappedPort(on: rect, to: CGPoint(x: 100, y: -25)) == nil)
     }
 
+    @Test("The preview curve leaves the source port and enters a snapped port perpendicular")
+    func previewCurve() {
+        let free = CanvasEdgeGeometry.previewCurve(
+            from: CGPoint(x: 100, y: 50), startSide: .right, to: CGPoint(x: 300, y: 50),
+            endSide: nil)
+        #expect(free.start == CGPoint(x: 100, y: 50))
+        #expect(free.end == CGPoint(x: 300, y: 50))
+        #expect(nearPoint(free.control1, CGPoint(x: 180, y: 50)))
+        #expect(nearPoint(free.control2, CGPoint(x: 220, y: 50)))
+        let snapped = CanvasEdgeGeometry.previewCurve(
+            from: CGPoint(x: 100, y: 50), startSide: .right, to: CGPoint(x: 300, y: 50),
+            endSide: .left)
+        #expect(nearPoint(snapped.control2, CGPoint(x: 220, y: 50)))
+        let below = CanvasEdgeGeometry.previewCurve(
+            from: CGPoint(x: 100, y: 50), startSide: .right, to: CGPoint(x: 100, y: 50),
+            endSide: nil)
+        #expect(below.end == below.start)
+    }
+
     @Test("The dot eases in and out and reverses for the other direction")
     func dotTravel() {
         #expect(near(CanvasEdgeGeometry.easeInOut(0), 0))
