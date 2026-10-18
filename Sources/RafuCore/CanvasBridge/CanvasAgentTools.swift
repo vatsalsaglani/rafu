@@ -115,6 +115,10 @@ public nonisolated enum CanvasAgentTool: String, CaseIterable, Codable, Sendable
     case appInspect = "app_inspect"
     case mermaidSet = "mermaid_set"
     case actionStatus = "action_status"
+    case iconSearch = "icon_search"
+    case frameCreate = "frame_create"
+    case export = "export"
+    case diagramBuild = "diagram_build"
 
     /// The words shown in the approval and the activity log.
     public var actionTitle: String {
@@ -136,6 +140,10 @@ public nonisolated enum CanvasAgentTool: String, CaseIterable, Codable, Sendable
         case .appInspect: "Inspect an app"
         case .mermaidSet: "Change a diagram"
         case .actionStatus: "Read an action status"
+        case .iconSearch: "Search icons"
+        case .frameCreate: "Add a frame"
+        case .export: "Export to a file"
+        case .diagramBuild: "Build a diagram"
         }
     }
 }
@@ -174,12 +182,30 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
     public var requestID: String?
     public var offset: Int?
     public var length: Int?
+    public var packID: String?
+    public var iconID: String?
+    public var query: String?
+    public var limit: Int?
+    public var memberIDs: [String]?
+    /// Export target: board, selection or frame (with `frameID`).
+    public var target: String?
+    public var frameID: String?
+    /// Export format: png, pdf or gif.
+    public var format: String?
+    public var scale: Double?
+    public var seconds: Double?
+    public var fps: Int?
+    public var diagram: CanvasAgentDiagramSpec?
 
     public init(tool: CanvasAgentTool) { self.tool = tool }
 
     public static let nodeKinds = [
         "note", "terminal", "file", "image", "web", "app", "mermaid", "shape", "text",
+        "service_icon", "frame",
     ]
+    public static let exportTargets = ["board", "selection", "frame"]
+    public static let exportFormats = ["png", "pdf", "gif"]
+    public static let maximumFrameMembers = 100
     public static let edgeKinds = ["relationship", "message"]
     public static let linkStates = ["live", "paused"]
     public static let shapes = ["rectangle", "ellipse", "diamond"]
@@ -193,8 +219,9 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
     /// downgraded by the app, which knows the link state.
     public var risk: CanvasAgentRisk {
         switch tool {
-        case .ensembleDescribe, .noteRead, .appInspect, .actionStatus: .read
-        case .nodeRemove, .edgeRemove, .terminalStart, .terminalSend, .appOpen: .sensitive
+        case .ensembleDescribe, .noteRead, .appInspect, .actionStatus, .iconSearch: .read
+        case .nodeRemove, .edgeRemove, .terminalStart, .terminalSend, .appOpen, .export:
+            .sensitive
         case .terminalCreate: startsProcess ? .sensitive : .edit
         default: .edit
         }
@@ -233,6 +260,14 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         add("App", bundleID ?? appName)
         add("Path", path)
         add("URL", url)
+        if let packID, let iconID { add("Icon", "\(packID)/\(iconID)") }
+        if let memberIDs { lines.append("Members: \(memberIDs.count) nodes") }
+        add("Target", target.map { $0 == "frame" ? "frame \(frameID ?? "")" : $0 })
+        add("Format", format)
+        if let diagram {
+            lines.append("Diagram: \(diagram.nodes.count) nodes, \(diagram.edges.count) links")
+            add("Frame", diagram.frame)
+        }
         if let prompt { lines.append("Task: \(CanvasAgentText.singleLine(prompt, limit: 240))") }
         if let text {
             if tool == .terminalSend {
@@ -256,7 +291,7 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         case .nodeCreate:
             return placement.union([
                 "kind", "title", "text", "path", "url", "bundle_id", "app_name", "shape",
-                "width", "height",
+                "width", "height", "pack_id", "icon_id", "label", "member_ids",
             ])
         case .nodeUpdate: return ["node_id", "title", "x", "y", "width", "height"]
         case .nodeRemove, .terminalStart, .appInspect: return ["node_id"]
@@ -269,6 +304,10 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         case .appOpen: return placement.union(["bundle_id", "app_name"])
         case .mermaidSet: return ["node_id", "source"]
         case .actionStatus: return ["request_id"]
+        case .iconSearch: return ["query", "limit"]
+        case .frameCreate: return ["title", "member_ids"]
+        case .export: return ["target", "frame_id", "format", "scale", "seconds", "fps"]
+        case .diagramBuild: return placement.union(["spec"])
         }
     }
 
@@ -336,6 +375,31 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         call.requestID = try string("request_id")
         call.offset = try integer("offset")
         call.length = try integer("length")
+        call.packID = try string("pack_id")
+        call.iconID = try string("icon_id")
+        call.query = try string("query")
+        call.limit = try integer("limit")
+        if let value = arguments["member_ids"] {
+            guard let list = value as? [Any], let strings = list as? [String] else {
+                throw .invalidArgument("member_ids")
+            }
+            call.memberIDs = strings
+        }
+        call.target = try string("target")?.lowercased()
+        call.frameID = try string("frame_id")
+        call.format = try string("format")?.lowercased()
+        call.scale = try number("scale")
+        call.seconds = try number("seconds")
+        call.fps = try integer("fps")
+        if let value = arguments["spec"] {
+            guard let object = value as? [String: Any] else { throw .invalidArgument("spec") }
+            call.diagram = try CanvasAgentDiagramSpec.parse(object)
+        }
+        if call.label == nil, call.tool == .nodeCreate, let text = call.title,
+            call.kind == "service_icon"
+        {
+            call.label = text
+        }
         call.kind = call.kind?.lowercased()
         call.mode = call.mode?.lowercased()
         try call.validate()
@@ -410,6 +474,36 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         }
         if let state, !Self.linkStates.contains(state) { throw .invalidArgument("state") }
         if let mode, CanvasAgentNoteMode(rawValue: mode) == nil { throw .invalidArgument("mode") }
+        try validateDiagramFieldBounds()
+    }
+
+    private func validateDiagramFieldBounds() throws(CanvasAgentToolError) {
+        if let frameID, UUID(uuidString: frameID) == nil { throw .invalidArgument("frame_id") }
+        if let memberIDs {
+            guard memberIDs.count <= Self.maximumFrameMembers,
+                memberIDs.allSatisfy({ UUID(uuidString: $0) != nil })
+            else { throw .invalidArgument("member_ids") }
+        }
+        if let packID, !CanvasAgentText.validIdentifier(packID) {
+            throw .invalidArgument("pack_id")
+        }
+        if let iconID, !CanvasAgentText.validIdentifier(iconID) {
+            throw .invalidArgument("icon_id")
+        }
+        if let query, query.isEmpty || query.utf8.count > 200 || CanvasAgentText.hasControl(query) {
+            throw .invalidArgument("query")
+        }
+        if let limit, !(1...50).contains(limit) { throw .invalidArgument("limit") }
+        if let target, !Self.exportTargets.contains(target) { throw .invalidArgument("target") }
+        if let format, !Self.exportFormats.contains(format) { throw .invalidArgument("format") }
+        if let scale, !scale.isFinite || !(0.5...4).contains(scale) {
+            throw .invalidArgument("scale")
+        }
+        if let seconds, !seconds.isFinite || !(1...10).contains(seconds) {
+            throw .invalidArgument("seconds")
+        }
+        if let fps, !(1...30).contains(fps) { throw .invalidArgument("fps") }
+        if let diagram { try diagram.validate() }
     }
 
     private func validateRequirements() throws(CanvasAgentToolError) {
@@ -462,6 +556,19 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
             try require(nodeID, "node_id")
             try require(text, "source")
         case .actionStatus: try require(requestID, "request_id")
+        case .iconSearch: try require(query, "query")
+        case .frameCreate:
+            try require(title, "title")
+            guard let memberIDs, !memberIDs.isEmpty else { throw .missingArgument("member_ids") }
+        case .export:
+            try require(format, "format")
+            if target == "frame" { try require(frameID, "frame_id") }
+            if frameID != nil, target != nil, target != "frame" {
+                throw .invalidArgument("frame_id")
+            }
+            if scale != nil, format != "png" { throw .invalidArgument("scale") }
+            if seconds != nil || fps != nil, format != "gif" { throw .invalidArgument("seconds") }
+        case .diagramBuild: try require(diagram, "spec")
         }
     }
 
@@ -473,6 +580,11 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         case "web": if url == nil { throw .missingArgument("url") }
         case "app":
             guard bundleID != nil || appName != nil else { throw .missingArgument("bundle_id") }
+        case "service_icon":
+            if packID == nil { throw .missingArgument("pack_id") }
+            if iconID == nil { throw .missingArgument("icon_id") }
+        case "frame":
+            if title == nil { throw .missingArgument("title") }
         default: break
         }
     }
@@ -589,6 +701,14 @@ public nonisolated enum CanvasAgentText {
     public static func validTitle(_ value: String) -> Bool {
         !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && value.unicodeScalars.count <= 120 && !hasControl(value)
+    }
+
+    /// An icon-pack or icon identifier: letters, digits, `.`, `-`, `_`, `/`.
+    public static func validIdentifier(_ value: String) -> Bool {
+        let allowed = CharacterSet(
+            charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_/")
+        return !value.isEmpty && value.utf8.count <= 200 && !value.hasPrefix("/")
+            && !value.contains("..") && value.unicodeScalars.allSatisfy { allowed.contains($0) }
     }
 
     public static func validBundleID(_ value: String) -> Bool {
@@ -830,6 +950,11 @@ public nonisolated enum CanvasAgentToolCatalog {
     private static var y: [String: Any] {
         property("number", "Optional board y of the new node's centre.")
     }
+    private static var memberIDs: [String: Any] {
+        property(
+            "array", "Node IDs inside the frame.",
+            ["items": ["type": "string"], "maxItems": CanvasAgentToolCall.maximumFrameMembers])
+    }
     private static var title: [String: Any] {
         property("string", "Title, at most 120 characters.")
     }
@@ -898,7 +1023,7 @@ public nonisolated enum CanvasAgentToolCatalog {
             )
         case .nodeCreate:
             return (
-                "Add a node. kind note/mermaid/text use text; file/image use a workspace-relative path; web uses a localhost URL; app uses bundle_id or app_name (the app is not launched; use app_open); shape uses shape. A terminal node is created stopped.",
+                "Add a node. kind note/mermaid/text use text; file/image use a workspace-relative path; web uses a localhost URL; app uses bundle_id or app_name (the app is not launched; use app_open); shape uses shape; service_icon uses pack_id and icon_id from icon_search plus label; frame uses title and member_ids. A terminal node is created stopped.",
                 schema(
                     [
                         "kind": property(
@@ -915,6 +1040,10 @@ public nonisolated enum CanvasAgentToolCatalog {
                             "string", "Shape kind.", ["enum": CanvasAgentToolCall.shapes]),
                         "width": property("number", "Optional width (96–2000)."),
                         "height": property("number", "Optional height (64–2000)."),
+                        "pack_id": property("string", "Icon pack ID from icon_search."),
+                        "icon_id": property("string", "Icon ID from icon_search."),
+                        "label": property("string", "Label under a service icon."),
+                        "member_ids": memberIDs,
                         "near": near, "x": x, "y": y,
                     ], required: ["kind"])
             )
@@ -1033,6 +1162,319 @@ public nonisolated enum CanvasAgentToolCatalog {
                     ["request_id": property("string", "The request_id you received.")],
                     required: ["request_id"])
             )
+        default: return diagramDefinition(for: tool)
         }
+    }
+
+    private static func diagramDefinition(for tool: CanvasAgentTool) -> (String, [String: Any]) {
+        switch tool {
+        case .iconSearch:
+            return (
+                "Search the icon packs (Common, and AWS, Azure or Google Cloud packs the user imported) by name. Returns pack_id, icon_id and label for node_create kind service_icon or diagram_build. Read-only.",
+                schema(
+                    [
+                        "query": property(
+                            "string", "Words to search, for example queue or lambda."),
+                        "limit": property(
+                            "integer", "Matches to return (1–50).", ["minimum": 1, "maximum": 50]),
+                    ], required: ["query"])
+            )
+        case .frameCreate:
+            return (
+                "Put nodes in a titled frame. Moving the frame moves its members. Undoable.",
+                schema(
+                    ["title": title, "member_ids": memberIDs], required: ["title", "member_ids"])
+            )
+        case .export:
+            return (
+                "Export the board, the selection or one frame to a file in the workspace exports folder. png takes scale, gif takes seconds and fps and shows dots moving along links. Returns the workspace-relative path. Asks the user unless Agent control is Allow.",
+                schema(
+                    [
+                        "target": property(
+                            "string", "What to export (default board).",
+                            ["enum": CanvasAgentToolCall.exportTargets]),
+                        "frame_id": property("string", "Frame node ID when target is frame."),
+                        "format": property(
+                            "string", "File format.", ["enum": CanvasAgentToolCall.exportFormats]),
+                        "scale": property("number", "PNG scale (0.5–4, default 2)."),
+                        "seconds": property("number", "GIF length (1–10, default 3)."),
+                        "fps": property("integer", "GIF frames per second (1–30, default 12)."),
+                    ], required: ["format"])
+            )
+        default:
+            return (
+                "Build a whole diagram in one undoable step. spec.nodes: [{id, kind (service_icon, note, text or shape), label, pack_id, icon_id, shape}]; spec.edges: [{from, to, label}] using the local ids; spec.frame: optional frame title; spec.direction: right (default) or down. Rafu lays nodes out in layers and returns the created node IDs keyed by local id.",
+                schema(
+                    [
+                        "spec": property(
+                            "object", "Diagram spec.",
+                            [
+                                "properties": [
+                                    "nodes": [
+                                        "type": "array",
+                                        "maxItems": CanvasAgentDiagramSpec.maximumNodes,
+                                    ],
+                                    "edges": [
+                                        "type": "array",
+                                        "maxItems": CanvasAgentDiagramSpec.maximumEdges,
+                                    ],
+                                    "frame": ["type": "string"],
+                                    "direction": ["type": "string", "enum": ["right", "down"]],
+                                ],
+                                "required": ["nodes"],
+                            ]),
+                        "near": near, "x": x, "y": y,
+                    ], required: ["spec"])
+            )
+        }
+    }
+}
+
+// MARK: Diagrams
+
+/// A small diagram description that `diagram_build` lays out in one step.
+public nonisolated struct CanvasAgentDiagramSpec: Codable, Hashable, Sendable {
+    public struct Node: Codable, Hashable, Sendable {
+        public var id: String
+        public var kind: String
+        public var label: String
+        public var packID: String?
+        public var iconID: String?
+        public var shape: String?
+
+        public init(
+            id: String, kind: String = "service_icon", label: String, packID: String? = nil,
+            iconID: String? = nil, shape: String? = nil
+        ) {
+            self.id = id
+            self.kind = kind
+            self.label = label
+            self.packID = packID
+            self.iconID = iconID
+            self.shape = shape
+        }
+    }
+
+    public struct Edge: Codable, Hashable, Sendable {
+        public var from: String
+        public var to: String
+        public var label: String?
+
+        public init(from: String, to: String, label: String? = nil) {
+            self.from = from
+            self.to = to
+            self.label = label
+        }
+    }
+
+    public var nodes: [Node]
+    public var edges: [Edge]
+    public var frame: String?
+    public var direction: String?
+
+    public static let maximumNodes = 40
+    public static let maximumEdges = 80
+    public static let nodeKinds = ["service_icon", "note", "text", "shape"]
+
+    public init(nodes: [Node], edges: [Edge] = [], frame: String? = nil, direction: String? = nil) {
+        self.nodes = nodes
+        self.edges = edges
+        self.frame = frame
+        self.direction = direction
+    }
+
+    private static func text(_ item: [String: Any], _ key: String) throws(CanvasAgentToolError)
+        -> String?
+    {
+        guard let value = item[key] else { return nil }
+        guard let string = value as? String else { throw .invalidArgument("spec") }
+        return string
+    }
+
+    static func parse(_ object: [String: Any]) throws(CanvasAgentToolError)
+        -> CanvasAgentDiagramSpec
+    {
+        let keys: Set<String> = ["nodes", "edges", "frame", "direction"]
+        guard Set(object.keys).isSubset(of: keys),
+            let rawNodes = object["nodes"] as? [Any], rawNodes.count <= maximumNodes
+        else { throw .invalidArgument("spec") }
+        var rawEdges: [Any] = []
+        if let value = object["edges"] {
+            guard let list = value as? [Any], list.count <= maximumEdges else {
+                throw .invalidArgument("spec")
+            }
+            rawEdges = list
+        }
+        let nodeKeys: Set<String> = ["id", "kind", "label", "pack_id", "icon_id", "shape"]
+        var nodes: [Node] = []
+        for raw in rawNodes {
+            guard let item = raw as? [String: Any], Set(item.keys).isSubset(of: nodeKeys) else {
+                throw .invalidArgument("spec")
+            }
+            guard let id = try text(item, "id"), let label = try text(item, "label") else {
+                throw .invalidArgument("spec")
+            }
+            let kind = try text(item, "kind")?.lowercased() ?? "service_icon"
+            let packID = try text(item, "pack_id")
+            let iconID = try text(item, "icon_id")
+            let shape = try text(item, "shape")?.lowercased()
+            nodes.append(
+                Node(
+                    id: id, kind: kind, label: label, packID: packID, iconID: iconID, shape: shape)
+            )
+        }
+        var edges: [Edge] = []
+        for raw in rawEdges {
+            guard let item = raw as? [String: Any],
+                Set(item.keys).isSubset(of: ["from", "to", "label"])
+            else { throw .invalidArgument("spec") }
+            guard let from = try text(item, "from"), let to = try text(item, "to") else {
+                throw .invalidArgument("spec")
+            }
+            let label = try text(item, "label")
+            edges.append(Edge(from: from, to: to, label: label))
+        }
+        let frame = try text(object, "frame")
+        let direction = try text(object, "direction")?.lowercased()
+        return CanvasAgentDiagramSpec(
+            nodes: nodes, edges: edges, frame: frame, direction: direction)
+    }
+
+    public func validate() throws(CanvasAgentToolError) {
+        guard !nodes.isEmpty, nodes.count <= Self.maximumNodes, edges.count <= Self.maximumEdges
+        else { throw .invalidArgument("spec") }
+        var ids = Set<String>()
+        for node in nodes {
+            guard !node.id.isEmpty, node.id.utf8.count <= 64,
+                !CanvasAgentText.hasControl(node.id), ids.insert(node.id).inserted,
+                Self.nodeKinds.contains(node.kind), CanvasAgentText.validTitle(node.label)
+            else { throw .invalidArgument("spec.nodes") }
+            if node.kind == "service_icon" {
+                guard let pack = node.packID, let icon = node.iconID,
+                    CanvasAgentText.validIdentifier(pack), CanvasAgentText.validIdentifier(icon)
+                else { throw .invalidArgument("spec.nodes") }
+            } else if node.packID != nil || node.iconID != nil {
+                throw .invalidArgument("spec.nodes")
+            }
+            if let shape = node.shape, !CanvasAgentToolCall.shapes.contains(shape) {
+                throw .invalidArgument("spec.nodes")
+            }
+        }
+        for edge in edges {
+            guard ids.contains(edge.from), ids.contains(edge.to), edge.from != edge.to else {
+                throw .invalidArgument("spec.edges")
+            }
+            if let label = edge.label, !CanvasAgentText.validTitle(label) {
+                throw .invalidArgument("spec.edges")
+            }
+        }
+        if let frame, !CanvasAgentText.validTitle(frame) { throw .invalidArgument("spec.frame") }
+        if let direction, direction != "right", direction != "down" {
+            throw .invalidArgument("spec.direction")
+        }
+    }
+}
+
+public nonisolated struct CanvasAgentRect: Codable, Hashable, Sendable {
+    public var x: Double
+    public var y: Double
+    public var width: Double
+    public var height: Double
+
+    public init(x: Double, y: Double, width: Double, height: Double) {
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+    }
+}
+
+/// A layered layout: each node goes one layer after its furthest
+/// predecessor. Cycles are broken in node order. Pure and deterministic.
+public nonisolated enum CanvasAgentDiagramLayout {
+    public static let gap = 80.0
+    public static let rowGap = 48.0
+
+    public static func size(of node: CanvasAgentDiagramSpec.Node) -> (width: Double, height: Double)
+    {
+        switch node.kind {
+        case "service_icon": (160, 128)
+        case "note": (260, 180)
+        default: (200, 120)
+        }
+    }
+
+    /// Layer index per node id. Ready nodes are placed in rounds; when a
+    /// cycle leaves no ready node, the earliest remaining node is placed.
+    public static func layers(_ spec: CanvasAgentDiagramSpec) -> [String: Int] {
+        var incoming: [String: Set<String>] = [:]
+        for edge in spec.edges where edge.from != edge.to {
+            incoming[edge.to, default: []].insert(edge.from)
+        }
+        var remaining = spec.nodes.map(\.id)
+        var layer: [String: Int] = [:]
+        while !remaining.isEmpty {
+            let open = Set(remaining)
+            var ready = remaining.filter { (incoming[$0] ?? []).isDisjoint(with: open) }
+            if ready.isEmpty { ready = [remaining[0]] }
+            for id in ready {
+                layer[id] = (incoming[id] ?? []).compactMap { layer[$0] }.map { $0 + 1 }.max() ?? 0
+            }
+            let placed = Set(ready)
+            remaining.removeAll { placed.contains($0) }
+        }
+        return layer
+    }
+
+    /// Top-left rects relative to the origin, keyed by local node id.
+    public static func rects(
+        for spec: CanvasAgentDiagramSpec, originX: Double = 0, originY: Double = 0
+    ) -> [String: CanvasAgentRect] {
+        let layer = layers(spec)
+        let down = spec.direction == "down"
+        var columns: [Int: [CanvasAgentDiagramSpec.Node]] = [:]
+        for node in spec.nodes { columns[layer[node.id] ?? 0, default: []].append(node) }
+        var result: [String: CanvasAgentRect] = [:]
+        var along = 0.0
+        for index in columns.keys.sorted() {
+            var across = 0.0
+            var thickness = 0.0
+            for node in columns[index] ?? [] {
+                let size = size(of: node)
+                result[node.id] =
+                    down
+                    ? CanvasAgentRect(
+                        x: originX + across, y: originY + along, width: size.width,
+                        height: size.height)
+                    : CanvasAgentRect(
+                        x: originX + along, y: originY + across, width: size.width,
+                        height: size.height)
+                across += (down ? size.width : size.height) + rowGap
+                thickness = max(thickness, down ? size.height : size.width)
+            }
+            along += thickness + gap
+        }
+        return result
+    }
+
+    /// The bounding rect of `rects` grown by `padding` (more at the top for a
+    /// frame title).
+    public static func bounds(_ rects: [CanvasAgentRect], padding: Double = 40)
+        -> CanvasAgentRect?
+    {
+        guard let first = rects.first else { return nil }
+        var minX = first.x
+        var minY = first.y
+        var maxX = first.x + first.width
+        var maxY = first.y + first.height
+        for rect in rects.dropFirst() {
+            minX = min(minX, rect.x)
+            minY = min(minY, rect.y)
+            maxX = max(maxX, rect.x + rect.width)
+            maxY = max(maxY, rect.y + rect.height)
+        }
+        return CanvasAgentRect(
+            x: minX - padding, y: minY - padding * 1.5, width: maxX - minX + padding * 2,
+            height: maxY - minY + padding * 2.5)
     }
 }
