@@ -3,18 +3,22 @@ import Foundation
 /// Window-only tabs. They never enter the restorable file/terminal layout.
 nonisolated enum WorkspaceAuxiliaryTab: Hashable, Identifiable {
     case settings
+    /// A read-only Agent History transcript (X12).
+    case agentSession(AgentSessionTabReference)
 
     var id: Self { self }
 
     var title: String {
         switch self {
         case .settings: "Settings"
+        case .agentSession(let reference): reference.title
         }
     }
 
     var symbol: String {
         switch self {
         case .settings: "gearshape"
+        case .agentSession: "bubble.left.and.text.bubble.right"
         }
     }
 }
@@ -23,6 +27,11 @@ extension WorkspaceSession {
     var selectedAuxiliaryTab: WorkspaceAuxiliaryTab? {
         guard selectedDocumentID == nil else { return nil }
         if settingsVisible { return .settings }
+        if let reference = agentHistory.visibleSession,
+            auxiliaryTabs.contains(.agentSession(reference))
+        {
+            return .agentSession(reference)
+        }
         return nil
     }
 
@@ -60,6 +69,7 @@ extension WorkspaceSession {
         suspendAuxiliarySelection()
         switch tab {
         case .settings: settingsVisible = true
+        case .agentSession(let reference): agentHistory.visibleSession = reference
         }
         selectedDocumentID = nil
         selectedTreePath = nil
@@ -73,6 +83,7 @@ extension WorkspaceSession {
 
     func suspendAuxiliarySelection() {
         settingsVisible = false
+        agentHistory.visibleSession = nil
     }
 
     func closeAuxiliaryTab(_ tab: WorkspaceAuxiliaryTab) {

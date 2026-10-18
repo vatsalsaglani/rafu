@@ -665,6 +665,21 @@ struct CommandPaletteView: View {
                 session.navigatorMode = .sourceControl
             },
             .init(
+                title: "Show Agent History", symbolName: "clock.arrow.circlepath",
+                keywords: ["claude", "codex", "chat", "sessions", "transcripts"],
+                shortcut: "⌘⇧H"
+            ) {
+                dismiss()
+                session.showAgentHistory()
+            },
+            .init(
+                title: "Search Agent History…", symbolName: "clock.arrow.circlepath",
+                keywords: ["claude", "codex", "chat", "find", "transcripts"]
+            ) {
+                dismiss()
+                session.showAgentHistory(focusSearch: true)
+            },
+            .init(
                 title: "Hide Utility Panel", symbolName: "sidebar.right",
                 keywords: ["close", "panel"]
             ) {

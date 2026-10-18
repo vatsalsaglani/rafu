@@ -95,6 +95,7 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`workspace-navigation-and-restoration-scheduling.md`](workspace-navigation-and-restoration-scheduling.md) | Async goto, stale-result checks, bookmark caching, combined metadata saves, and quit completion |
 | [`window-chrome-attachment-repair.md`](window-chrome-attachment-repair.md) | Synchronous window attachment, independent window state, and bounded chrome repair |
 | [`test-source-policy-and-bookmark-isolation.md`](test-source-policy-and-bookmark-isolation.md) | Source-policy test limits, real bookmark assertions, and isolated preferences |
+| [`agent-history.md`](agent-history.md) | Changing Agent History: Claude Code and Codex transcript locations and line formats, title and injected-context rules, read bounds, the summary cache, the resume command quoting, or Open Project Folder's new-window request |
 
 ## Reference-note template
 

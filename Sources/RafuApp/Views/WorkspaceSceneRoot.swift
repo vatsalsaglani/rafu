@@ -49,7 +49,9 @@ struct WorkspaceSceneRoot: View {
             // first-launch design's simplest, most consistent behavior, the
             // intro still offers itself underneath — it does not special-
             // case an external open.
-            if let url = ExternalOpenRequests.shared.take() {
+            if let url = ExternalOpenRequests.shared.takeForNewWindow()
+                ?? ExternalOpenRequests.shared.take()
+            {
                 WorkspaceRestorationGate.hasRestored = true
                 session.openLocalWorkspace(at: url)
                 FirstLaunchExperienceModel.shared.offerOnFirstLaunch(hostedBy: session)

@@ -15,6 +15,7 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
     case search
     case sourceControl
     case terminals
+    case history
 
     var title: String {
         switch self {
@@ -22,6 +23,7 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
         case .search: "Search"
         case .sourceControl: "Source Control"
         case .terminals: "Terminals"
+        case .history: "History"
         }
     }
 
@@ -31,6 +33,7 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
         case .search: "magnifyingglass"
         case .sourceControl: "arrow.triangle.branch"
         case .terminals: "terminal"
+        case .history: "clock.arrow.circlepath"
         }
     }
 
@@ -390,7 +393,13 @@ final class WorkspaceSession {
     /// The native Settings scene remains the no-window fallback for ⌘,;
     /// focused workspace windows route here instead.
     var settingsVisible = false
-    var auxiliaryTabs: [WorkspaceAuxiliaryTab] = []
+    var auxiliaryTabs: [WorkspaceAuxiliaryTab] = [] {
+        // Agent History (X12): a transcript lives only while its tab is open.
+        didSet { agentHistory.retainTranscripts(for: auxiliaryTabs) }
+    }
+    /// Agent History (X12): this window's History navigator filter and the
+    /// transcripts of its open Agent Session tabs.
+    @ObservationIgnored let agentHistory = AgentHistoryWindowState()
     var auxiliaryTabGroups: [WorkspaceAuxiliaryTab: EditorGroupID] = [:]
 
     func showSettings() {
@@ -1131,6 +1140,33 @@ final class WorkspaceSession {
         newTerminalGroup(shell: shell)
     }
 
+    /// Agent History (X12): a one-pane ordinary-shell Terminal Group that
+    /// starts in `directory`, which must be inside this workspace. Returns
+    /// `nil` (and starts nothing) for any other folder.
+    @discardableResult
+    func newTerminalGroup(startingIn directory: URL) -> TerminalGroupID? {
+        guard !isTerminalGroupModalInputBlocked, let rootURL,
+            let folder = terminalFolder(for: directory.path)
+        else { return nil }
+        installTerminalHandlersIfNeeded()
+        let shell = preferredTerminalShell()
+        let profile = TerminalPaneLaunchProfile(
+            shell: TerminalPaneShellChoice(approvedShellPath: shell.path) ?? .preferredShell,
+            startingFolder: folder)
+        do {
+            let group = try terminal.createLiveGroup(
+                instantiation: .ordinaryShell(
+                    startingDirectory: resolvedTerminalDirectory(folder, rootURL: rootURL),
+                    shell: shell,
+                    profile: profile))
+            revealTerminalGroup(group.id)
+            return group.id
+        } catch {
+            presentTerminalGroupError(error.localizedDescription)
+            return nil
+        }
+    }
+
     func splitFocusedTerminalPane(_ placement: TerminalGroupSplitPlacement) {
         guard !isTerminalGroupModalInputBlocked, selectedCanvasID == nil else { return }
         guard let groupID = selectedTerminalGroupID,
@@ -1478,8 +1514,9 @@ final class WorkspaceSession {
             presentTerminalGroupError(error.localizedDescription)
             return
         }
-        // Terminal Groups occupy the same editor canvas slot as Settings.
-        settingsVisible = false
+        // Terminal Groups occupy the same editor canvas slot as Settings
+        // and Agent Session tabs.
+        suspendAuxiliarySelection()
         if let tab = editorLayout.tab(matching: .terminalGroup(groupID: groupID)),
             let editorGroupID = editorLayout.group(containing: tab.id)?.id
         {
