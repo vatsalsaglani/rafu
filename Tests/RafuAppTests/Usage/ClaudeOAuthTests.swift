@@ -284,18 +284,21 @@ func claudeDisconnectPreservesEnablement() async {
     #expect(enable.isEnabled(.claude, default: true))
 }
 
-@Test("Claude OAuth accepts inactive-shaped limits and keeps one unique model-scoped window")
+@Test("Claude OAuth accepts inactive-shaped limits and keeps one window per scoped model")
 func claudeOAuthMapsUsageFixture() throws {
     let snapshot = try ClaudeOAuthStrategy.parseUsage(Data(claudeUsageFixture.utf8))
 
     #expect(snapshot.providerID == .claude)
-    #expect(snapshot.windows.count == 3)
-    #expect(snapshot.windows.map(\.label) == ["5h", "7d", "Fable 7d"])
-    #expect(snapshot.windows.map(\.percent) == [12.5, 30, 5])
+    #expect(snapshot.source == .providerAPI)
+    #expect(snapshot.windows.count == 4)
+    #expect(snapshot.windows.map(\.label) == ["5h", "7d", "Fable 7d", "Other 7d"])
+    #expect(snapshot.windows.map(\.percent) == [12.5, 30, 5, 7])
+    #expect(snapshot.windows.map(\.windowMinutes) == [300, 10_080, 10_080, 10_080])
     #expect(snapshot.windows.allSatisfy { $0.tokens == nil })
     #expect(snapshot.windows[0].resetsAt == Date(timeIntervalSince1970: 1_784_808_000))
     #expect(snapshot.windows[1].resetsAt == Date(timeIntervalSince1970: 1_785_283_200))
     #expect(snapshot.windows[2].resetsAt == Date(timeIntervalSince1970: 1_785_283_200))
+    #expect(snapshot.windows[3].resetsAt == Date(timeIntervalSince1970: 1_785_283_200))
 }
 
 @Test("Claude descriptor strategy order and count are context-independent")

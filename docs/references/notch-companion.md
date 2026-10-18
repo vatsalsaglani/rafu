@@ -64,7 +64,11 @@ other tools' internals, not a contract Rafu controls):**
   per line with `"timestamp"` (ISO 8601, fractional seconds, `Z`-suffixed)
   and `"message": { "usage": { "input_tokens": ..., "cache_creation_input_tokens": ..., "cache_read_input_tokens": ..., "output_tokens": ... } }`. Claude exposes no rate-limit percentage anywhere in this
   shape, which is why the Claude usage tile shows token totals for 5h/7d
-  windows and never fabricates a percentage.
+  windows and never fabricates a percentage. Exact percentage rings need
+  Connect; the card now says "Estimated from local transcripts" and offers
+  "Connect for exact usage…". See
+  [`usage-rings-and-pace.md`](usage-rings-and-pace.md) for the rings, pace,
+  and the reasons Claude showed no ring.
 - Both parsers treat every field as optional/version-tolerant; a missing
   or malformed file hides that tile rather than crashing or guessing.
   Reads are bounded (newest Codex rollout only, tail-read capped 256KB;

@@ -6,9 +6,14 @@ import SwiftUI
 /// periodic notch refreshes consume only previously stored inputs.
 struct UsageSettingsSection: View {
     @State private var model = UsageSettingsModel()
+    /// The one usage refresh path: Settings shows the same snapshots as the
+    /// notch and never starts a second reader.
+    private let companion = NotchCompanionModel.shared
 
     var body: some View {
         Group {
+            UsageDisplayModeSection(companion: companion)
+
             UsageStripOrderSection(model: model)
 
             Section {
@@ -17,7 +22,7 @@ struct UsageSettingsSection: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(model.visibleRows) { row in
-                        UsageProviderRow(row: row, model: model)
+                        UsageProviderRow(row: row, model: model, companion: companion)
                     }
                 }
             } header: {
@@ -29,7 +34,34 @@ struct UsageSettingsSection: View {
             }
         }
         .task {
+            companion.refreshUsage()
             await model.loadInputStatuses()
+        }
+    }
+}
+
+/// Used or Remaining for every usage ring, in Settings and in the notch.
+private struct UsageDisplayModeSection: View {
+    let companion: NotchCompanionModel
+
+    var body: some View {
+        Section {
+            LabeledContent("Rings show") {
+                RafuSegmentedPicker(
+                    items: UsageDisplayMode.allCases,
+                    selection: Binding(
+                        get: { companion.usageDisplayMode },
+                        set: { companion.setUsageDisplayMode($0) }),
+                    title: { $0.title }
+                )
+                .accessibilityLabel("Rings show used or remaining usage")
+            }
+        } header: {
+            Text("Display")
+        } footer: {
+            Text(
+                "Rings show the share of each limit that is used or still remaining. Warnings follow the used share in both modes."
+            )
         }
     }
 }
@@ -627,6 +659,8 @@ final class UsageSettingsModel {
 private struct UsageProviderRow: View {
     let row: UsageSettingsModel.Row
     let model: UsageSettingsModel
+    let companion: NotchCompanionModel
+    @Environment(\.rafuTheme) private var theme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -641,9 +675,23 @@ private struct UsageProviderRow: View {
                     UsageOAuthConnectButton(
                         providerName: row.displayName,
                         state: model.connectionState(for: row.id),
-                        connect: { await model.connect(row.id) },
-                        disconnect: { await model.disconnect(row.id) })
+                        connect: {
+                            await model.connect(row.id)
+                            companion.refreshUsage(force: true)
+                        },
+                        disconnect: {
+                            await model.disconnect(row.id)
+                            companion.refreshUsage(force: true)
+                        })
                 }
+            }
+
+            if model.isEnabled(row.id), let card = companion.usageCard(for: row.id) {
+                UsageProviderCardView(
+                    card: card, providerID: row.id, displayName: row.displayName,
+                    authPattern: row.authPattern, mode: companion.usageDisplayMode,
+                    isRefreshing: companion.isUsageRefreshing, compact: false,
+                    ink: .settings(theme: theme), connect: cardConnectAction)
             }
 
             if showsDisclosureInline {
@@ -678,6 +726,21 @@ private struct UsageProviderRow: View {
             }
         }
         .padding(.vertical, 3)
+    }
+
+    /// The card's "Connect for exact usage…" runs the same Connect flow as
+    /// the row's Connect button. `nil` while a Connect is already running.
+    private var cardConnectAction: (@MainActor () -> Void)? {
+        guard model.connectionState(for: row.id) != .connecting else { return nil }
+        let model = model
+        let companion = companion
+        let id = row.id
+        return {
+            Task {
+                await model.connect(id)
+                companion.refreshUsage(force: true)
+            }
+        }
     }
 
     private var isOAuthPattern: Bool {

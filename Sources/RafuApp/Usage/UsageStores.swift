@@ -97,6 +97,31 @@ nonisolated struct UsageStripOrderStore: Sendable {
     }
 }
 
+/// Whether usage rings show the used or the remaining share. Same suite-name
+/// idiom as `UsageStripOrderStore`; an unset or unknown value is `.used`.
+nonisolated struct UsageDisplayModeStore: Sendable {
+    static let defaultsKey = "usageDisplayMode"
+
+    private let suiteName: String?
+
+    init(suiteName: String? = nil) {
+        self.suiteName = suiteName
+    }
+
+    private var defaults: UserDefaults {
+        suiteName.flatMap(UserDefaults.init(suiteName:)) ?? .standard
+    }
+
+    func mode() -> UsageDisplayMode {
+        defaults.string(forKey: Self.defaultsKey).flatMap(UsageDisplayMode.init(rawValue:))
+            ?? .used
+    }
+
+    func setMode(_ mode: UsageDisplayMode) {
+        defaults.set(mode.rawValue, forKey: Self.defaultsKey)
+    }
+}
+
 /// Failure modes for `UsageCredentialStore`, deliberately as bare as
 /// `AIProviderError.keychainFailure`'s shape but scoped to this store (the
 /// AI domain's error type is not reused here — usage credentials are a
@@ -402,6 +427,69 @@ actor UsageCredentialStore {
 
     func removeTransientExternalCredential(for id: UsageProviderID) {
         transientExternalCredentials[id] = nil
+        keychainRefreshAttempts[id] = nil
+        keychainRefreshDenied.remove(id)
+    }
+
+    // MARK: Claude Code Keychain re-read after Connect
+
+    /// The shortest interval between two refresh-time reads of Claude
+    /// Code's Keychain item. Bounds how often macOS can show its Keychain
+    /// prompt when the person chose "Allow" rather than "Always Allow".
+    static let keychainRefreshInterval: TimeInterval = 15 * 60
+
+    private var keychainRefreshAttempts: [UsageProviderID: Date] = [:]
+    private var keychainRefreshDenied: Set<UsageProviderID> = []
+
+    /// `true` when a refresh may read Claude Code's Keychain item now, and
+    /// records the attempt. Only Claude qualifies. A denial stops every
+    /// later attempt until the next Connect or Disconnect
+    /// (`removeTransientExternalCredential(for:)` clears it). The caller
+    /// must also hold network consent: this gate does not check it.
+    func claimKeychainRefresh(for id: UsageProviderID, now: Date) -> Bool {
+        guard id == .claude, !keychainRefreshDenied.contains(id) else { return false }
+        if let last = keychainRefreshAttempts[id],
+            now.timeIntervalSince(last) < Self.keychainRefreshInterval,
+            now >= last
+        {
+            return false
+        }
+        keychainRefreshAttempts[id] = now
+        return true
+    }
+
+    func recordKeychainRefreshDenied(for id: UsageProviderID) {
+        keychainRefreshDenied.insert(id)
+    }
+
+    /// After Connect, Claude Code keeps its OAuth token in its own Keychain
+    /// item and replaces it when the token expires; Rafu's copy lives only
+    /// in process memory. Without a re-read, every relaunch and every token
+    /// expiry silently returned the Claude card to the local estimate while
+    /// Settings still said "Connected". This re-reads the item ONLY when the
+    /// person already connected (the caller checks consent), no usable file
+    /// or memory credential exists, and the gate above allows it. A usable
+    /// credential is cached in memory exactly like the Connect path; nothing
+    /// is logged and nothing is written to Rafu's Keychain.
+    func refreshClaudeKeychainCredential(
+        now: Date,
+        keychainReader: @Sendable () -> UsageClaudeKeychainReadResult
+    ) -> String? {
+        guard claimKeychainRefresh(for: .claude, now: now) else { return nil }
+        switch keychainReader() {
+        case .credential(let contents):
+            guard let envelope = UsageExternalCredentialParser.claude(contents: contents),
+                envelope.isUsable(for: .claude, at: now),
+                let encoded = envelope.encoded(),
+                setTransientExternalCredential(encoded, for: .claude)
+            else { return nil }
+            return encoded
+        case .accessDenied:
+            recordKeychainRefreshDenied(for: .claude)
+            return nil
+        case .unavailable:
+            return nil
+        }
     }
 
     private func service(for id: UsageProviderID) -> String {
