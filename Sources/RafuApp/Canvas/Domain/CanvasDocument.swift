@@ -247,6 +247,8 @@ nonisolated struct CanvasDocument: Codable, Equatable, Identifiable, Sendable {
     var connections: [CanvasConnection] = []
     var viewport = CanvasViewport()
     var terminalGroups: TerminalGroupWorkspaceRestoration?
+    /// X4: per-Ensemble Agent control. Absent means the default, Ask.
+    var agentControl: CanvasAgentControl?
 
     init(title: String, id: CanvasID = CanvasID()) {
         self.title = title
@@ -255,6 +257,7 @@ nonisolated struct CanvasDocument: Codable, Equatable, Identifiable, Sendable {
 
     private enum CodingKeys: CodingKey {
         case version, id, revision, title, cards, connections, viewport, terminalGroups
+        case agentControl
     }
 
     init(from decoder: any Decoder) throws {
@@ -274,6 +277,8 @@ nonisolated struct CanvasDocument: Codable, Equatable, Identifiable, Sendable {
         viewport = try container.decode(CanvasViewport.self, forKey: .viewport)
         terminalGroups = try container.decodeIfPresent(
             TerminalGroupWorkspaceRestoration.self, forKey: .terminalGroups)
+        agentControl = try container.decodeIfPresent(
+            CanvasAgentControl.self, forKey: .agentControl)
         try validate()
     }
 

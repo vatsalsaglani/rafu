@@ -1,7 +1,8 @@
-import RafuCore
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Settings > Ensemble: installs the Rafu agent skill that teaches Claude Code
+/// and Codex to use the Ensemble tools.
 struct EnsembleSettingsSection: View {
     @State private var model = EnsembleSettingsModel()
     @State private var isFolderImporterPresented = false
@@ -10,38 +11,18 @@ struct EnsembleSettingsSection: View {
     var body: some View {
         Section {
             VStack(alignment: .leading, spacing: 3) {
-                Text(model.metadata?.name ?? "ensemble-with-rafu")
+                Text(model.metadata?.name ?? ConductorBundledSkillCatalog.skillIdentifier)
                     .font(.body.weight(.medium))
                 Text(
-                    model.metadata?.description
-                        ?? "Loading the bundled coordinator skill…"
+                    model.loadState == .ready
+                        ? EnsembleSkillCopy.summary
+                        : "Loading the bundled agent skill…"
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
 
-            if let metadata = model.metadata {
-                LabeledContent("Version") {
-                    Text(
-                        EnsembleSkillVersionCopy.summary(
-                            skillTargets: metadata.targetsVerbVersion)
-                    )
-                }
-                if !model.verbVersionsMatch {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .accessibilityHidden(true)
-                        Text(
-                            EnsembleSkillVersionCopy.mismatch(
-                                skillTargets: metadata.targetsVerbVersion,
-                                rafuSupports: model.launcherVerbVersion)
-                        )
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityElement(children: .combine)
-                }
-            } else if model.loadState == .loading {
+            if model.loadState == .loading {
                 ProgressView("Reading bundled skill…")
                     .controlSize(.small)
             }
@@ -50,45 +31,34 @@ struct EnsembleSettingsSection: View {
                 Button("Install for Claude Code") {
                     startInstall(at: .claudeCode)
                 }
-                .disabled(model.loadState != .ready || model.isInstalling)
+                .help("Writes ~/.claude/skills/rafu-ensemble")
+                Button("Install for Codex") {
+                    startInstall(at: .codex)
+                }
+                .help("Writes ~/.codex/skills/rafu-ensemble")
                 Button("Install to Folder…") {
                     isFolderImporterPresented = true
                 }
-                .disabled(model.loadState != .ready || model.isInstalling)
+                .help("Choose another skills folder. Rafu creates rafu-ensemble inside it.")
                 if model.isInstalling {
                     ProgressView()
                         .controlSize(.small)
-                        .accessibilityLabel("Installing coordinator skill")
+                        .accessibilityLabel("Installing agent skill")
                 }
             }
+            .disabled(model.loadState != .ready || model.isInstalling)
 
             if let message = model.operationMessage {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Image(systemName: "checkmark.circle")
-                        .accessibilityHidden(true)
-                    Text(message)
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .accessibilityElement(children: .combine)
+                EnsembleSettingsNotice(symbol: "checkmark.circle", message: message)
             }
 
             if let message = model.errorMessage {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .accessibilityHidden(true)
-                    Text(message)
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .accessibilityElement(children: .combine)
+                EnsembleSettingsNotice(symbol: "exclamationmark.triangle", message: message)
             }
         } header: {
-            Text("Ensemble Skill")
+            Text("Agent Skill")
         } footer: {
-            Text(
-                "Claude Code installs to ~/.claude/skills/ensemble-with-rafu. For Codex or another coordinator, choose its verified skills folder; Rafu does not guess vendor directories."
-            )
+            Text(EnsembleSkillCopy.footer)
         }
         .task {
             await model.load()
@@ -109,9 +79,7 @@ struct EnsembleSettingsSection: View {
                 model.reportFileImporterError(error)
             }
         }
-        .fileDialogMessage(
-            "Choose a skills directory. Rafu creates ensemble-with-rafu inside it."
-        )
+        .fileDialogMessage("Choose a skills folder. Rafu creates rafu-ensemble inside it.")
         .fileDialogConfirmationLabel("Install Here")
         .confirmationDialog(
             "Replace existing skill files?",
@@ -133,9 +101,7 @@ struct EnsembleSettingsSection: View {
                 model.clearPendingReplacement()
             }
         } message: {
-            Text(
-                "Rafu will replace only coordinator-skill destinations after this confirmation."
-            )
+            Text("Rafu replaces only the rafu-ensemble skill files after this confirmation.")
         }
     }
 
@@ -164,22 +130,29 @@ struct EnsembleSettingsSection: View {
     }
 }
 
-/// Plain-words copy for the skill's protocol version. The internal term
-/// ("verb version") never reaches the user; the numbers are the real ones.
-nonisolated enum EnsembleSkillVersionCopy {
-    /// "Skill version 2 · needs Rafu 2 or later"
-    static func summary(skillTargets: Int) -> String {
-        "Skill version \(skillTargets) · needs Rafu \(skillTargets) or later"
-    }
+private struct EnsembleSettingsNotice: View {
+    let symbol: String
+    let message: String
 
-    static func mismatch(skillTargets: Int, rafuSupports: Int) -> String {
-        if rafuSupports < skillTargets {
-            return
-                "This skill needs Rafu \(skillTargets) or later, but this Rafu supports version \(rafuSupports). Update Rafu to use it."
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: symbol)
+                .accessibilityHidden(true)
+            Text(message)
         }
-        return
-            "This skill is version \(skillTargets), but this Rafu supports version \(rafuSupports). Install the skill again to update it."
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .combine)
     }
+}
+
+/// Plain-words copy for the agent skill section.
+nonisolated enum EnsembleSkillCopy {
+    static let summary =
+        "Teaches Claude Code and Codex to use an Ensemble: read the board, start a peer agent, link it, delegate work, share notes, draw and export diagrams, and open and check apps."
+
+    static let footer =
+        "Claude Code reads ~/.claude/skills/rafu-ensemble and Codex reads ~/.codex/skills/rafu-ensemble. For another agent, choose its skills folder; Rafu does not guess other vendor folders. Install again after a Rafu update to refresh the skill."
 }
 
 @MainActor
@@ -207,26 +180,20 @@ final class EnsembleSettingsModel {
     private(set) var errorMessage: String?
     private(set) var pendingReplacement: PendingReplacement?
 
-    let launcherVerbVersion: Int
-
     @ObservationIgnored private let catalogProvider: CatalogProvider
+    @ObservationIgnored private let homeDirectory: URL
     @ObservationIgnored private var installer: ConductorSkillInstaller?
 
     /// Construction is presentation-state only. `catalogProvider` is not
     /// called until the Settings section's `.task` invokes `load()`.
     init(
-        launcherVerbVersion: Int = LauncherIPCProtocol.ensembleVerbVersion,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
         catalogProvider: @escaping CatalogProvider = {
             try ConductorBundledSkillCatalog.bundled()
         }
     ) {
-        self.launcherVerbVersion = launcherVerbVersion
+        self.homeDirectory = homeDirectory
         self.catalogProvider = catalogProvider
-    }
-
-    var verbVersionsMatch: Bool {
-        guard let metadata else { return false }
-        return metadata.targetsVerbVersion == launcherVerbVersion
     }
 
     func load() async {
@@ -234,7 +201,8 @@ final class EnsembleSettingsModel {
         loadState = .loading
         errorMessage = nil
         do {
-            let installer = ConductorSkillInstaller(catalog: try catalogProvider())
+            let installer = ConductorSkillInstaller(
+                catalog: try catalogProvider(), homeDirectory: homeDirectory)
             let metadata = try await installer.metadata()
             try Task.checkCancellation()
             self.installer = installer
@@ -246,7 +214,7 @@ final class EnsembleSettingsModel {
             loadState = .failed
             errorMessage =
                 (error as? LocalizedError)?.errorDescription
-                ?? "Rafu could not read the bundled coordinator skill."
+                ?? "Rafu could not read the bundled agent skill."
         }
     }
 
@@ -299,7 +267,7 @@ final class EnsembleSettingsModel {
         } catch {
             errorMessage =
                 (error as? LocalizedError)?.errorDescription
-                ?? "Rafu could not install the coordinator skill."
+                ?? "Rafu could not install the agent skill."
         }
     }
 

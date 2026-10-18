@@ -854,6 +854,18 @@ public nonisolated struct CanvasAgentEdgeSummary: Codable, Hashable, Sendable {
     }
 }
 
+public nonisolated struct CanvasAgentIconSummary: Codable, Hashable, Sendable {
+    public var packID: String
+    public var iconID: String
+    public var label: String
+
+    public init(packID: String, iconID: String, label: String) {
+        self.packID = packID
+        self.iconID = iconID
+        self.label = label
+    }
+}
+
 public nonisolated struct CanvasAgentToolResult: Codable, Hashable, Sendable {
     public enum Status: String, Codable, Sendable {
         case ok
@@ -874,6 +886,12 @@ public nonisolated struct CanvasAgentToolResult: Codable, Hashable, Sendable {
     public var offset: Int?
     public var totalLength: Int?
     public var truncated: Bool?
+    /// Icon matches from `icon_search`.
+    public var icons: [CanvasAgentIconSummary]?
+    /// `diagram_build`: created node ID per local spec id.
+    public var createdNodes: [String: String]?
+    /// A workspace-relative file path, for example an export.
+    public var path: String?
 
     public init(status: Status = .ok, message: String? = nil) {
         self.status = status
@@ -912,6 +930,8 @@ public nonisolated struct CanvasAgentToolResult: Codable, Hashable, Sendable {
         while size(value) > maximumBytes {
             if let edges = value.edges, !edges.isEmpty {
                 value.edges = Array(edges.dropLast(max(1, edges.count / 4)))
+            } else if let icons = value.icons, !icons.isEmpty {
+                value.icons = Array(icons.dropLast(max(1, icons.count / 4)))
             } else if let nodes = value.nodes, !nodes.isEmpty {
                 value.nodes = Array(nodes.dropLast(max(1, nodes.count / 4)))
             } else if let text = value.text, !text.isEmpty {
@@ -1203,7 +1223,7 @@ public nonisolated enum CanvasAgentToolCatalog {
             )
         default:
             return (
-                "Build a whole diagram in one undoable step. spec.nodes: [{id, kind (service_icon, note, text or shape), label, pack_id, icon_id, shape}]; spec.edges: [{from, to, label}] using the local ids; spec.frame: optional frame title; spec.direction: right (default) or down. Rafu lays nodes out in layers and returns the created node IDs keyed by local id.",
+                "Build a whole diagram in one undoable step (a frame adds a second step). spec.nodes: [{id, kind (service_icon, note, text or shape), label, pack_id, icon_id, shape}]; spec.edges: [{from, to, label}] using the local ids; spec.frame: optional frame title; spec.direction: right (default) or down. Rafu lays nodes out in layers and returns the created node IDs keyed by local id.",
                 schema(
                     [
                         "spec": property(
