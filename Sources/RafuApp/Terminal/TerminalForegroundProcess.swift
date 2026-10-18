@@ -1,5 +1,5 @@
-import Foundation
 import Darwin
+import Foundation
 
 // Which program runs in the foreground of a terminal? This answers "is an
 // agent CLI running here?" for a shell where the person typed `claude` or
@@ -199,7 +199,9 @@ nonisolated struct DarwinTerminalProcessInspector: TerminalProcessInspecting {
         var nameBuffer = [CChar](repeating: 0, count: 256)
         let nameLength = proc_name(processID, &nameBuffer, UInt32(nameBuffer.count))
         guard nameLength > 0 else { return nil }
-        let name = String(decoding: nameBuffer.prefix(Int(nameLength)).map(UInt8.init(bitPattern:)), as: UTF8.self)
+        let name = String(
+            decoding: nameBuffer.prefix(Int(nameLength)).map(UInt8.init(bitPattern:)), as: UTF8.self
+        )
 
         // PROC_PIDPATHINFO_MAXSIZE is 4 * MAXPATHLEN.
         var pathBuffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))

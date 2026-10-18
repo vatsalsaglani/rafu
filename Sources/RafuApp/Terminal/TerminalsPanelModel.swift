@@ -556,13 +556,20 @@ nonisolated enum TerminalsPanelModel {
         switch pane.runtimeKind {
         // A shell that runs an agent CLI names the agent ("Claude Code —
         // rafu"); it reverts to the shell when the agent exits.
-        case .ordinaryShell:
-            controller.flatMap { $0.hasLiveProcess ? $0.resolvedAgentProvider?.displayName : nil }
-                ?? controller?.shellDisplayName ?? "Shell"
+        case .ordinaryShell: shellOrAgentName(controller)
         case .directAgentTerminal(let provider): provider.displayName
         case .unavailableAgentTerminal: "Agent Terminal"
         case .unavailableEnsemble: "Ensemble"
         }
+    }
+
+    @MainActor
+    private static func shellOrAgentName(_ controller: WorkspaceTerminalController?) -> String {
+        guard let controller else { return "Shell" }
+        if controller.hasLiveProcess, let provider = controller.resolvedAgentProvider {
+            return provider.displayName
+        }
+        return controller.shellDisplayName
     }
 
     /// One row per session, in creation order — reads `WorkspaceTerminalController`

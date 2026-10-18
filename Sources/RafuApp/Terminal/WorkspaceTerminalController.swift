@@ -979,7 +979,8 @@ final class WorkspaceTerminalController: Identifiable {
     @ObservationIgnored private var foregroundSampleDeadline: ContinuousClock.Instant?
     /// The last classified foreground group, so one program is described
     /// once, not on every tick.
-    @ObservationIgnored private var foregroundCache: (processID: Int32, state: TerminalForegroundState)?
+    @ObservationIgnored private var foregroundCache:
+        (processID: Int32, state: TerminalForegroundState)?
     @ObservationIgnored private var lastOutputDate: Date?
 
     /// `userName`, then the shell's own OSC 0/2 title report, then a
@@ -1465,10 +1466,11 @@ final class WorkspaceTerminalController: Identifiable {
 
     /// Asks for one foreground sample no later than `delay` from now. A
     /// sample already due sooner absorbs the request; a later one moves up.
-    /// Does nothing for a terminal Rafu launched as an agent (its identity
-    /// is known) or one without a live process.
+    /// Only an ordinary login shell samples: a spec-backed process is its
+    /// own group leader, so "leader == shell" would wrongly read as a shell
+    /// prompt. Does nothing without a live process.
     private func scheduleForegroundSample(after delay: Duration) {
-        guard hasLiveProcess, agentProvider == nil, terminalView != nil else { return }
+        guard hasLiveProcess, isOrdinaryShellTerminal, terminalView != nil else { return }
         let deadline = ContinuousClock.now.advanced(by: delay)
         if foregroundSampleTask != nil, let pending = foregroundSampleDeadline,
             pending <= deadline
