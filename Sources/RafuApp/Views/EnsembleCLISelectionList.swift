@@ -2,15 +2,15 @@ import SwiftUI
 
 /// A compact, source-ordered provider list for the New Ensemble canvas.
 ///
-/// A provider is represented once. Its readiness and selection control share
-/// the first logical line; its resolved model or model picker stays directly
-/// below rather than being repeated in a detached stack later in the form.
+/// A provider is represented once, on a ~32 pt line that holds its selection
+/// control, name, and readiness. Its model picker appears directly below the
+/// row only while that row is chosen, so an unchosen CLI costs one line.
 struct EnsembleCLISelectionList<Row: View>: View {
     let options: [AgentTerminalOption]
     @ViewBuilder let row: (AgentTerminalOption) -> Row
 
     var body: some View {
-        VStack(alignment: .leading, spacing: RafuMetrics.space1) {
+        VStack(alignment: .leading, spacing: 2) {
             ForEach(options) { option in
                 row(option)
             }
@@ -80,38 +80,45 @@ struct EnsembleCLISelectionRow<ModelContent: View>: View {
         self.modelContent = modelContent
     }
 
+    /// Height of the one-line row; the model picker is extra, below it.
+    static var rowHeight: CGFloat { 32 }
+    /// The model line aligns under the name: control column + icon column.
+    private static var modelLeadingInset: CGFloat { 15 + 20 + 2 * RafuMetrics.space2 }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: RafuMetrics.space1) {
+        VStack(alignment: .leading, spacing: 0) {
             Button(action: activate) {
                 HStack(spacing: RafuMetrics.space2) {
-                    FileIconView(icon: ConductorCLIIcons.icon(for: option.id), size: 18)
-                        .frame(width: 22, height: 22)
-                        .accessibilityHidden(true)
-
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(option.displayName)
-                            .font(.callout.weight(selection.isSelected ? .semibold : .regular))
-                            .foregroundStyle(
-                                option.isReady ? theme.palette.textPrimary : theme.palette.textMuted
-                            )
-                            .lineLimit(1)
-                        Text(option.isReady ? "Ready" : "Unavailable")
-                            .font(.caption)
-                            .foregroundStyle(
-                                option.isReady ? theme.palette.textSecondary : theme.palette.warning
-                            )
-                    }
-
-                    Spacer(minLength: RafuMetrics.space2)
-
                     Image(systemName: selection.symbolName)
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(
                             selection.isSelected
                                 ? theme.palette.accent : theme.palette.textSecondary
                         )
+                        .frame(width: 15)
                         .accessibilityHidden(true)
+
+                    FileIconView(icon: ConductorCLIIcons.icon(for: option.id), size: 16)
+                        .frame(width: 20, height: 20)
+                        .accessibilityHidden(true)
+
+                    Text(option.displayName)
+                        .font(.callout.weight(selection.isSelected ? .semibold : .regular))
+                        .foregroundStyle(
+                            option.isReady ? theme.palette.textPrimary : theme.palette.textMuted
+                        )
+                        .lineLimit(1)
+
+                    Spacer(minLength: RafuMetrics.space2)
+
+                    Text(option.isReady ? "Ready" : "Unavailable")
+                        .font(.caption)
+                        .foregroundStyle(
+                            option.isReady ? theme.palette.textSecondary : theme.palette.warning
+                        )
+                        .lineLimit(1)
                 }
+                .frame(minHeight: Self.rowHeight)
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
@@ -126,8 +133,10 @@ struct EnsembleCLISelectionRow<ModelContent: View>: View {
                     .font(.caption)
                     .foregroundStyle(theme.palette.warning)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, Self.modelLeadingInset)
+                    .padding(.bottom, RafuMetrics.space2)
                     .accessibilityLabel("Unavailable: \(unavailableReason)")
-            } else {
+            } else if selection.isSelected {
                 HStack(alignment: .top, spacing: RafuMetrics.space2) {
                     Text("Model")
                         .font(.caption)
@@ -135,20 +144,15 @@ struct EnsembleCLISelectionRow<ModelContent: View>: View {
                         .frame(width: 42, alignment: .leading)
                     modelContent()
                 }
+                .padding(.leading, Self.modelLeadingInset)
+                .padding(.bottom, RafuMetrics.space2)
             }
         }
-        .padding(RafuMetrics.space2)
+        .padding(.horizontal, RafuMetrics.space2)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: RafuMetrics.radiusDenseSelection, style: .continuous)
                 .fill(rowFill)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: RafuMetrics.radiusDenseSelection, style: .continuous)
-                .strokeBorder(
-                    selection.isSelected ? theme.palette.accent : theme.palette.borderSubtle,
-                    lineWidth: selection.isSelected ? 2 : RafuMetrics.hairline
-                )
         )
         .contentShape(.rect)
         .onHover { isHovering = $0 }
@@ -157,9 +161,11 @@ struct EnsembleCLISelectionRow<ModelContent: View>: View {
     }
 
     private var rowFill: Color {
-        if selection.isSelected { return theme.palette.accentSoft }
+        // One chosen coordinator reads as selection; a checklist of allowed
+        // CLIs stays calm and only the glyph carries the accent.
+        if case .lead(let isSelected) = selection, isSelected { return theme.palette.accentSoft }
         if isHovering && option.isReady { return theme.palette.hover }
-        return theme.palette.cardBackground
+        return .clear
     }
 
     private var accessibilityLabel: String {

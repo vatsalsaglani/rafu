@@ -66,9 +66,8 @@ struct EnsembleGoalPane: View {
         RafuCardHeaderRow {
             HStack(spacing: RafuMetrics.space2) {
                 Label("Goal", systemImage: "text.alignleft")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(theme.palette.textSecondary)
-                    .textCase(.uppercase)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(theme.palette.textPrimary)
                 RafuChip(text: showsEditor ? "Editing Markdown" : "Rendered")
             }
         } trailing: {

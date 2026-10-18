@@ -85,16 +85,19 @@ struct ConductorRunsPanelPresentationTests {
         let commands = try source("Sources/RafuApp/App/RafuAppCommands.swift", root: root)
         let palette = try source("Sources/RafuApp/Views/CommandPaletteView.swift", root: root)
 
+        // Graph and "+" in the panel header; Close comes from the shared header.
         #expect(
             runsPanel.components(separatedBy: ".buttonStyle(RafuIconButtonStyle(size: 24))")
-                .count - 1 >= 3
+                .count - 1 >= 1
         )
         #expect(runsPanel.contains(".help(\"Show Ensemble Graph\")"))
         #expect(runsPanel.contains(".accessibilityLabel(\"Show Ensemble Graph\")"))
-        #expect(runsPanel.contains(".help(\"New Ensemble…\")"))
-        #expect(runsPanel.contains(".accessibilityLabel(\"New Ensemble\")"))
-        #expect(runsPanel.contains(".help(\"New Run…\")"))
-        #expect(runsPanel.contains(".accessibilityLabel(\"New Ensemble Run\")"))
+        #expect(runsPanel.contains(".help(\"New Run, Ensemble, or Workflow\")"))
+        #expect(runsPanel.contains(".accessibilityLabel(\"New\")"))
+        // The three creation verbs live in the one "+" pull-down.
+        #expect(runsPanel.contains("Button(\"New Run…\""))
+        #expect(runsPanel.contains("Button(\"New Ensemble…\""))
+        #expect(runsPanel.contains("Menu(\"New Workflow from Template…\""))
 
         #expect(commands.contains("workspaceSession?.showConductorGraph()"))
         #expect(palette.contains("session.showConductorGraph()"))
@@ -102,6 +105,92 @@ struct ConductorRunsPanelPresentationTests {
         #expect(palette.contains("session.showEnsembleStart()"))
         #expect(commands.contains("workspaceSession?.showEnsembleNewRun()"))
         #expect(palette.contains("session.showEnsembleNewRun()"))
+    }
+
+    @Test("The header has no flower glyph button and no wide text menu that clips the panel")
+    func headerStaysNarrow() throws {
+        let root = try repositoryRoot()
+        let runsPanel = try source(
+            "Sources/RafuApp/Views/ConductorRunsPanelView.swift", root: root
+        )
+
+        #expect(!runsPanel.contains("Menu(\"New from Template\""))
+        #expect(!runsPanel.contains("Menu(\"Workflow Actions\""))
+        // "Open" appears twice only: the "···" menu item and its context-menu twin.
+        #expect(runsPanel.components(separatedBy: "Button(\"Open\"").count - 1 == 2)
+        // The graph and "+" are the only header-specific icon buttons.
+        #expect(runsPanel.components(separatedBy: "circle.hexagongrid").count - 1 == 1)
+    }
+
+    @Test("The section picker never wraps and falls back to icons with tooltips")
+    func sectionPickerNeverWraps() throws {
+        let root = try repositoryRoot()
+        let runsPanel = try source(
+            "Sources/RafuApp/Views/ConductorRunsPanelView.swift", root: root
+        )
+
+        #expect(runsPanel.contains("ViewThatFits(in: .horizontal)"))
+        #expect(runsPanel.contains(".lineLimit(1)"))
+        #expect(runsPanel.contains(".fixedSize(horizontal: true, vertical: false)"))
+        #expect(runsPanel.contains(".help(item.title)"))
+        #expect(runsPanel.contains(".accessibilityLabel(item.title)"))
+        #expect(runsPanel.contains("withAnimation(RafuMotion.selection)"))
+    }
+
+    @Test("Workflow rows show name and path, open on double click, and keep one Open")
+    func workflowRowContract() throws {
+        let root = try repositoryRoot()
+        let runsPanel = try source(
+            "Sources/RafuApp/Views/ConductorRunsPanelView.swift", root: root
+        )
+
+        #expect(runsPanel.contains(".onTapGesture(count: 2, perform: open)"))
+        #expect(runsPanel.contains("Button(\"Reveal in Finder\""))
+        #expect(runsPanel.contains("Button(\"Duplicate\""))
+        #expect(runsPanel.contains(".truncationMode(.middle)"))
+        // The only "Open" verb is in the menu (and its context-menu twin).
+        #expect(runsPanel.contains("Button(\"Open\", systemImage: \"doc.text\", action: open)"))
+    }
+
+    @Test("Activity copy is plain, and a full-tab Ensemble surface switches the panel to Runs")
+    func activityCopyAndDuplicateEmptyState() throws {
+        let root = try repositoryRoot()
+        let runsPanel = try source(
+            "Sources/RafuApp/Views/ConductorRunsPanelView.swift", root: root
+        )
+
+        #expect(
+            runsPanel.contains("Run events appear here while this workspace is open."))
+        #expect(!runsPanel.contains("Bounded Ensemble lifecycle events"))
+        #expect(runsPanel.contains("showsFullTabEnsembleSurface"))
+        #expect(runsPanel.contains("session.conductorGraphVisible"))
+        #expect(runsPanel.contains("if isOpen { section = .runs }"))
+    }
+
+    @Test("New Run uses theme surfaces, one label column, and a footer")
+    func newRunFormUsesThemeSurfaces() throws {
+        let root = try repositoryRoot()
+        let runsPanel = try source(
+            "Sources/RafuApp/Views/ConductorRunsPanelView.swift", root: root
+        )
+        let controls = try source(
+            "Sources/RafuApp/Views/ConductorFormControls.swift", root: root
+        )
+
+        #expect(!runsPanel.contains(".formStyle(.grouped)"))
+        #expect(runsPanel.contains("ConductorFormRow(\"Agent file\")"))
+        #expect(runsPanel.contains("ConductorFormRow(\"Provider override\")"))
+        #expect(runsPanel.contains("ConductorFormRow(\"Model override\""))
+        #expect(runsPanel.contains("ConductorFormRow(\"Task prompt\""))
+        #expect(runsPanel.contains("ConductorFormRow(\"Base reference\")"))
+        #expect(runsPanel.contains("ConductorPromptEditor("))
+        #expect(runsPanel.contains("ConductorBaseReferenceField("))
+        #expect(runsPanel.contains("private var footer"))
+        #expect(controls.contains("theme.palette.cardBackground"))
+        #expect(controls.contains("theme.palette.fieldBackground"))
+        #expect(controls.contains("theme.palette.borderSubtle"))
+        #expect(!controls.contains("Color(nsColor"))
+        #expect(!controls.contains("Color.gray"))
     }
 
     private func repositoryRoot(file: StaticString = #filePath) throws -> URL {
