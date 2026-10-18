@@ -271,7 +271,7 @@ struct CanvasCardShell: View {
                 }
             }
             if isDirtyFile { CanvasHeaderBadge(text: "Modified") }
-            if showsPreviewBadge { CanvasHeaderBadge(text: "Preview", symbol: "eye") }
+            if showsDockedBadge { CanvasHeaderBadge(text: "Docked", symbol: "pin.fill") }
             if let model = commands.noteModel, model.isEditing {
                 CanvasNoteFormatBar(
                     model: model, availableWidth: CGFloat(card.rect.width), showsEditingLabel: false
@@ -440,9 +440,9 @@ struct CanvasCardShell: View {
         }
     }
 
-    private var showsPreviewBadge: Bool {
+    private var showsDockedBadge: Bool {
         guard case .nativeApp = card.content else { return false }
-        return session.canvasResources[board.id]?.nativeApp(for: card)?.frame != nil
+        return CanvasAppDocking.shared.state(for: card.id).isDocked
     }
 
     // MARK: Hover

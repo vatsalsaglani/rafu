@@ -9,23 +9,6 @@ import WebKit
 @Suite("Canvas editor and native ownership")
 @MainActor
 struct CanvasIntegrationTests {
-    @Test("Picker tickets stay occupied until the SDK replies and reject stale handoffs")
-    func pickerRequestTickets() throws {
-        let gate = CanvasCaptureRequestGate()
-        let first = try #require(gate.begin())
-        #expect(gate.snapshot() == first)
-        // Owner cancellation does not release the request. A later callback
-        // must not be attributed to a new card.
-        #expect(gate.begin() == nil)
-        #expect(!gate.finish(UUID()))
-        #expect(gate.finish(first))
-        let second = try #require(gate.begin())
-        #expect(!gate.finish(first))
-        #expect(gate.snapshot() == second)
-        #expect(gate.finish(second))
-        #expect(gate.snapshot() == nil)
-    }
-
     @Test("Canvas fills an empty editor group and follows its size")
     func canvasFillsEmptyEditor() async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -46,7 +29,7 @@ struct CanvasIntegrationTests {
         #expect(board.visibleSize.width > 1100)
         #expect(board.visibleSize.height > 650)
         let app = try #require(session.canvasResources[board.id]?.apps[cardID])
-        #expect(!app.isCapturing)
+        #expect(!app.isDocked)
         host.frame.size = CGSize(width: 900, height: 600)
         host.layoutSubtreeIfNeeded()
         #expect(board.visibleSize.width > 800 && board.visibleSize.width < 950)
@@ -312,7 +295,7 @@ struct CanvasIntegrationTests {
         #expect(decoded.editorLayout == nil && decoded.canvasIDs.isEmpty)
     }
 
-    @Test("Making a window available permits an explicit preview request without resuming capture")
+    @Test("Window availability never docks, launches, or moves a native app by itself")
     func visibilityIsInert() async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -324,12 +307,14 @@ struct CanvasIntegrationTests {
         let resources = try #require(session.canvasResources[board.id])
         resources.present(owner: UUID())
         let app = try #require(resources.nativeApp(for: board.cards[0]))
-        #expect(app.canStart?() == true)
+        #expect(resources.permitsLiveContent)
         resources.pause()
-        #expect(app.canStart?() == false)
+        #expect(!resources.permitsLiveContent)
         resources.windowBecameAvailable()
-        #expect(app.canStart?() == true)
-        #expect(!app.isCapturing && app.frame == nil)
+        #expect(resources.permitsLiveContent)
+        #expect(!app.isDocked)
+        #expect(CanvasAppDocking.shared.state(for: board.cards[0].id) == .notDocked)
+        #expect(await CanvasAppDocking.shared.inspect(cardID: board.cards[0].id) == nil)
         #expect(await session.canvas.flushAll())
     }
 

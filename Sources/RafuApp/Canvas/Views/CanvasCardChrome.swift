@@ -93,17 +93,18 @@ struct CanvasCardCommands {
             return items
         case .nativeApp:
             guard let app = resources?.nativeApp(for: card) else { return [] }
-            if app.isCapturing {
+            if app.isDocked {
                 return [
                     Action(
-                        id: "stop-preview", title: "Stop Window Preview", symbol: "eye.slash"
-                    ) { app.stop() }
+                        id: "undock", title: "Undock \(card.title)",
+                        symbol: "rectangle.portrait.and.arrow.right"
+                    ) { app.undock() }
                 ]
             }
             return [
                 Action(
-                    id: "preview", title: "Show Window Preview…", symbol: "eye"
-                ) { app.chooseWindow() }
+                    id: "dock", title: "Dock \(card.title)", symbol: "rectangle.inset.filled"
+                ) { app.dock(appName: card.title, session: session) }
             ]
         default:
             return []
