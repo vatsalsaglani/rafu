@@ -16,6 +16,8 @@ struct CanvasCommands: Commands {
         CommandMenu("Canvas") {
             if let board, let session {
                 Menu("Add to Canvas") { CanvasAddMenuItems(board: board, session: session) }
+                // X9 diagrams
+                CanvasDiagramMenuItems(board: board, session: session, showsShortcut: true)
             }
             Divider()
             Button("Board") {

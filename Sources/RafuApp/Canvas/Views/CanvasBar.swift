@@ -133,6 +133,7 @@ struct CanvasBar: View {
                 CanvasLiveBridge.shared.resumeAll(in: board)
             }
             .disabled(!board.connections.contains { $0.behavior == .session })
+            CanvasDiagramMenuItems(board: board, session: session)  // X9 diagrams
             Divider()
             Button("Close Canvas", systemImage: "xmark") { session.closeCanvas(board.id) }
         } label: {

@@ -67,6 +67,7 @@ struct CanvasAddMenuItems: View {
         Divider()
         item(.webApp)
         item(.macApp)
+        CanvasDiagramAddMenuItem(board: board, session: session)  // X9 diagrams
     }
 
     private func item(_ kind: CanvasAddKind) -> some View {
