@@ -131,12 +131,16 @@ public nonisolated enum CanvasAgentDiagramLayout {
 
     /// The longest path through the forward edges, as a set of node ids.
     static func mainChain(_ graph: Graph) -> Set<String> {
-        let sorted = graph.ids.sorted { (graph.level($0), graph.rank($0)) < (graph.level($1), graph.rank($1)) }
+        let sorted = graph.ids.sorted {
+            (graph.level($0), graph.rank($0)) < (graph.level($1), graph.rank($1))
+        }
         var length: [String: Int] = [:]
         var previous: [String: String] = [:]
         for id in sorted {
             var best = 0
-            let candidates = (graph.predecessors[id] ?? []).sorted { graph.rank($0) < graph.rank($1) }
+            let candidates = (graph.predecessors[id] ?? []).sorted {
+                graph.rank($0) < graph.rank($1)
+            }
             for candidate in candidates {
                 let value = length[candidate] ?? 0
                 if value > best {
@@ -229,18 +233,22 @@ public nonisolated enum CanvasAgentDiagramLayout {
         // Forward sweep: barycentre of predecessors.
         for ids in graph.layerLists {
             let current = slot
-            placeLayer(ids, chain: chain, graph: graph, key: { id in
-                mean((graph.predecessors[id] ?? []).compactMap { current[$0] })
-                    ?? Double(current[id] ?? 0)
-            }, into: &slot)
+            placeLayer(
+                ids, chain: chain, graph: graph,
+                key: { id in
+                    mean((graph.predecessors[id] ?? []).compactMap { current[$0] })
+                        ?? Double(current[id] ?? 0)
+                }, into: &slot)
         }
         // Backward sweep: barycentre of successors.
         for ids in graph.layerLists.reversed() {
             let current = slot
-            placeLayer(ids, chain: chain, graph: graph, key: { id in
-                mean((graph.successors[id] ?? []).compactMap { current[$0] })
-                    ?? Double(current[id] ?? 0)
-            }, into: &slot)
+            placeLayer(
+                ids, chain: chain, graph: graph,
+                key: { id in
+                    mean((graph.successors[id] ?? []).compactMap { current[$0] })
+                        ?? Double(current[id] ?? 0)
+                }, into: &slot)
         }
         // Skip edges: move an outermost node outward when its line is blocked.
         var members: [Int: [String]] = [:]
@@ -306,7 +314,9 @@ public nonisolated enum CanvasAgentDiagramLayout {
             let row = rowLabel > 0 ? max(rowGap, gapWidth(forLabelWidth: rowLabel)) : rowGap
             return (layerGaps, row)
         }
-        return (layerLabel.map { gapWidth(forLabelWidth: $0) }, rowLabel > 0 ? labelledRowGap : rowGap)
+        return (
+            layerLabel.map { gapWidth(forLabelWidth: $0) }, rowLabel > 0 ? labelledRowGap : rowGap
+        )
     }
 
     /// `gaps` shrunk proportionally (to `compressedGap` at the least) so

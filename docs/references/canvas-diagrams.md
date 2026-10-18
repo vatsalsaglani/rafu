@@ -16,6 +16,14 @@ animated GIF export.
   downloaded the pinned Google Cloud pack through the Lightning UI and
   imported 19 icons. AWS and Azure runtime downloads were not repeated.
 - Initial Linux verification: Swift 6.2 (swift.org, ubuntu24.04), 2026-10-18.
+- Derived frame bounds, the `diagram_build` layout and edge label placement:
+  Swift 6.2 Linux toolchain, 2026-10-18. The pure parts
+  (`CanvasFrameLayout`, `CanvasEdgeGeometry`, `CanvasAgentDiagramLayout`, and
+  the real `CanvasAgentTools.swift` parser) passed Swift Testing tests in two
+  scratch packages (34 tests with `defaultIsolation(MainActor)` for the app
+  parts, and 13 tests for RafuCore; the 7 layout tests ran in both). The board
+  tests (`Canvas frame bounds on a board`) and the views were not run: they
+  need the macOS SDK.
 - Pure logic (search, vendor layout detection, archive and SVG checks, frame
   math, GIF planning, export bounds) passed 26 Swift Testing tests in a scratch
   package, including runs over the real file listings of the three official
@@ -41,18 +49,88 @@ animated GIF export.
 
 ### Frames
 
-- A frame is a card stored **before** its earliest member in `board.cards`
-  (array order is z-order), so it draws behind them.
-- The card drag (`CanvasCardShell.startMove`) and click-raise move the set
-  `cardIDsMovingTogether(with:)`, so members move and rise with their frame.
-- A safety net in the frame face covers every other path (keyboard move, Align,
-  agent edits, Bring to Front): members whose rects did not change in the same
-  step follow a frame that moved without resizing, and a raised frame is put
-  back behind its members. These follow-ups use `setRect` / `refreshResources`
-  and add no undo step of their own; the triggering edit's undo restores both.
-  The safety net only runs while the frame face is mounted.
+- **A frame's rect is derived from its members.** The stored rect (saved
+  format unchanged) is recomputed at one choke point,
+  `CanvasBoardState.normalizeFrames(_:previous:)`, which runs inside `edit`,
+  `setRect` / `setRects` (every gesture step) and `raiseDuringGesture`, so the
+  refit is part of the same undo step. Undo and redo restore whole documents
+  and do not normalize. `init(document:)` normalizes without marking the board
+  dirty, so a board saved before this rule fits on open and is saved fitted
+  with the next edit.
+- The pure rule is `CanvasFrameLayout.normalized(_:previous:)`, in order:
+  1. Follow: a frame whose origin changed carries each member (transitively)
+     whose rect did not change in the same edit, by the same offset. The size
+     of the new frame rect does not matter, so an agent `node_update` with x,
+     y, width and height still moves the members.
+  2. Fit: each frame with at least one member on the board gets
+     `enclosingRect` of its members (32 pt padding, 36 pt title band); inner
+     frames fit first; a membership cycle uses the stored rect of the frame
+     that closes it. A frame whose members are all gone keeps its rect.
+  3. Stack: each frame goes just behind its earliest member (array order is
+     z-order), so Bring to Front on a frame, or Send to Back on a member, is
+     corrected in the same step.
+- A group drag must call `setRects` once per step with every moved card.
+  Calling `setRect` card by card would let the follow step see the frame
+  moved while its members had not, and move them a second time.
+- Frames have no resize handles, no Make Larger/Smaller accessibility
+  actions and no resize menu items (`CanvasCardContent.hasDerivedSize`);
+  `resizeSelection` ignores a frame. The title stays editable. Frame edges are
+  not snap targets, because they follow the card being dragged.
+- Members are never removed from `memberIDs` by a move: dragging a member out
+  grows the frame. Members that are not on the board are ignored.
+- The frame face has no follow or restack logic of its own any more (the
+  earlier view-level safety net ran only while the face was mounted and could
+  fight the board rule).
 - A frame is at most 2,000 pt per side (the stored `CanvasRect` bound), so a
-  frame around a very wide selection does not fully enclose it.
+  frame around a very wide selection does not fully enclose it. The
+  `diagram_build` layout shrinks its gaps to stay inside that bound.
+
+### Diagram layout (`diagram_build`)
+
+`CanvasAgentDiagramLayout` (RafuCore, pure and deterministic) places the
+nodes; the app then adds the cards and links in one edit and the frame in a
+second edit.
+
+- Layers: one layer after the furthest predecessor; cycles break in node order.
+- Main chain: the longest forward path is on one axis (slot 0). Ties prefer an
+  end that no skip edge reaches, then spec order.
+- Other nodes take integer slots beside the axis (below/above for `right`,
+  right/left for `down`), ordered by the barycentre of their predecessors
+  (forward sweep), then of their successors (backward sweep). Ties with the
+  axis alternate below and above.
+- A node reached by a skip edge (two or more layers) moves outward, up to three
+  slots, when it is the outermost node of its layer and the straight line from
+  the source would pass within half a node of a node in between.
+- Gaps for `right`: after each layer, `max(96, w + 56)` capped at 320, where
+  `w = 7.2 × characters + 16` for the longest label on an edge that crosses
+  that gap. Rows: 64 pt, or 96 pt when a labelled edge runs between rows (same
+  layer, or two or more rows apart in adjacent layers). For `down` the roles
+  swap: layer gaps are 64 / 96 pt and the row gap uses the width rule.
+- If the layout would exceed one frame (2,000 pt per side less padding and
+  title band), gaps shrink proportionally down to 48 pt.
+- `bounds(_:)` uses the app's frame padding and title band, so it equals
+  `CanvasFrameLayout.enclosingRect` (a RafuApp test checks both).
+
+### Edge routing and labels
+
+- `CanvasEdgeGeometry.routes(for:rects:background:)`: frames are passed as
+  `background`, so they can be edge ends but never obstacles. Before, every
+  edge inside a frame "crossed" the frame and got a 24 pt bend.
+- When the straight segment crosses a card, the bend (perpendicular, away from
+  the nearest crossed card) grows through 24, 60, 108, 156 and 216 pt until the
+  sampled curve crosses no card; otherwise the fewest crossings win. A long
+  skip edge therefore arcs over the row of cards it skips.
+- `labelPlacement(for:avoiding:limit:)` puts the pill at the arc-length middle
+  of the curve. The curve runs border to border, so this is the middle of the
+  visible part of the edge. The pill width is limited so that it keeps 6 pt
+  from every non-frame card beside its row, at least 28 pt (an ellipsis) and at
+  most 160 pt (480 pt while hovered). The full label stays in `.help` and the
+  accessibility label.
+- `CanvasEdgeLabelWidthLayout` sizes the text to `min(ideal, maximum)` so it
+  truncates with an ellipsis and a short label keeps a tight pill. Do not use
+  `.frame(maxWidth:)` plus `.fixedSize()` for this: whether a flexible frame
+  passes a smaller width to the text under a nil proposal is not something the
+  code should depend on. The PNG / PDF / GIF export uses the same placement.
 
 ### Icon packs
 
@@ -147,28 +225,39 @@ animated GIF export.
 
 Archive import and network download are the risky parts: they take untrusted
 bytes into Application Support. Frames depend on array-order z-order and on a
-drag path owned by another workstream, so the follow and restack rules must stay
-consistent with `CanvasCardShell`.
+drag path owned by another workstream. Before frame bounds were derived, a
+frame kept the rect from its creation: after an agent moved or resized members
+(or the frame), the frame no longer covered them, and its title drew under a
+member. One rule at the board choke point replaces the creation-time rect and
+the view-level follow, so no two mechanisms move the same cards.
 
 ## Verification
 
 On a Mac:
 
 ```bash
-./script/test.sh --filter "Canvas diagram|Canvas icon|Canvas frames"
+./script/test.sh --filter "Canvas diagram|Canvas icon|Canvas frame|Canvas edge geometry|diagram|layout"
 ./script/build_and_run.sh --verify
 ```
 
 Manual checks: import each vendor ZIP and a folder; one-click download with
 Cancel and with networking off (expect the failure message); a zip with a `..`
 entry is refused; Convert to Frame (⌃⌘G) then drag, arrow-key move, Bring to
-Front and undo; export PNG 1×/2×/3×, PDF and GIF, and open the GIF in Preview;
+Front and undo; drag a member out of a frame (the frame grows live) and undo
+once; ask an agent for the serverless image diagram (`diagram_build` with a
+frame) and check that the frame covers every node and that no label pill
+covers a node; export PNG 1×/2×/3×, PDF and GIF, and open the GIF in Preview;
 SVG vendor icons render in the library and on cards (`NSImage(contentsOf:)`).
 
 ## Related
 
 - Code: `Sources/RafuApp/Canvas/Diagram/`, `CanvasCardViews.swift`
-  (`startMove`, `raiseIfNeeded`), `CanvasToolPalette.register`.
+  (`startMove`, `updateMove`, `raiseIfNeeded`), `CanvasToolPalette.register`,
+  `CanvasBoardState.normalizeFrames`, `CanvasEdgeGeometry.labelPlacement`,
+  `Sources/RafuCore/CanvasBridge/CanvasAgentDiagramLayout.swift`.
+- Tests: `Tests/RafuAppTests/Canvas/CanvasDiagramTests.swift` (`Canvas frames`,
+  `Canvas frame bounds on a board`), `CanvasEdgeGeometryTests.swift`,
+  `Tests/RafuCoreTests/CanvasAgentDiagramLayoutTests.swift`.
 - Phase: [`../plans/phases/ensemble-canvas.md`](../plans/phases/ensemble-canvas.md)
   (Addendum X9). Reference: [`canvas-interaction.md`](canvas-interaction.md),
   [`canvas-whiteboard-and-ensemble-file.md`](canvas-whiteboard-and-ensemble-file.md).

@@ -398,13 +398,13 @@ private struct CanvasEdgeView: View {
                     .padding(.horizontal, 8)
                     .frame(height: 20)
             }
-                .background(theme.palette.elevatedBackground, in: Capsule())
-                .overlay(Capsule().strokeBorder(pillBorder, lineWidth: 1))
-                .overlay(
-                    Capsule().strokeBorder(theme.palette.textPrimary.opacity(pulse), lineWidth: 1.5)
-                )
-                .modifier(interaction(tooltip: tooltip, exposesToAccessibility: false))
-                .position(display.label.center)
+            .background(theme.palette.elevatedBackground, in: Capsule())
+            .overlay(Capsule().strokeBorder(pillBorder, lineWidth: 1))
+            .overlay(
+                Capsule().strokeBorder(theme.palette.textPrimary.opacity(pulse), lineWidth: 1.5)
+            )
+            .modifier(interaction(tooltip: tooltip, exposesToAccessibility: false))
+            .position(display.label.center)
         case .glyph(let glyph):
             Text(glyph)
                 .font(.system(size: 10, weight: .semibold))

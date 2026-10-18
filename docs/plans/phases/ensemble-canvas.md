@@ -119,7 +119,9 @@ Contracts (exact names):
 - **Card kinds (X5 adds the cases):** `.frame(CanvasFrame)` and
   `.serviceIcon(CanvasServiceIcon)` in `CanvasCardContent`, rendered through
   `CanvasDiagramCardFace(card:board:)` (X9 provides). Frames draw behind their
-  members; moving a frame moves its members.
+  members; moving a frame moves its members. A frame's rect is derived: after
+  every board edit it fits its members (see
+  [`canvas-diagrams.md`](../../references/canvas-diagrams.md#frames)).
 - **Packs:** built-in **Common** pack drawn with SF Symbols (user, browser,
   mobile, API, server, function, container, database, cache, queue, stream,
   storage, CDN, DNS, load balancer, gateway, auth, monitoring, …). Vendor packs

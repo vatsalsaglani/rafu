@@ -161,8 +161,8 @@ struct CanvasDiagramEdgeLabel: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
         }
-            .background(Capsule().fill(theme.palette.elevatedBackground))
-            .overlay(Capsule().strokeBorder(theme.palette.borderSubtle))
+        .background(Capsule().fill(theme.palette.elevatedBackground))
+        .overlay(Capsule().strokeBorder(theme.palette.borderSubtle))
     }
 }
 

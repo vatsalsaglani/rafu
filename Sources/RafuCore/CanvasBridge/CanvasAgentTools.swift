@@ -1072,7 +1072,7 @@ public nonisolated enum CanvasAgentToolCatalog {
             )
         case .nodeUpdate:
             return (
-                "Rename, move or resize a node. x and y are the top-left corner in board units.",
+                "Rename, move or resize a node. x and y are the top-left corner in board units. A frame fits its members by itself: moving a frame moves its members, and its width and height are ignored. To change a frame's size, move its members.",
                 schema(
                     [
                         "node_id": nodeID, "title": title,
@@ -1204,7 +1204,7 @@ public nonisolated enum CanvasAgentToolCatalog {
             )
         case .frameCreate:
             return (
-                "Put nodes in a titled frame. Moving the frame moves its members. Undoable.",
+                "Put nodes in a titled frame. The frame always fits its members: it grows, shrinks and moves when they do, and moving the frame moves its members. Undoable.",
                 schema(
                     ["title": title, "member_ids": memberIDs], required: ["title", "member_ids"])
             )
@@ -1226,7 +1226,7 @@ public nonisolated enum CanvasAgentToolCatalog {
             )
         default:
             return (
-                "Build a whole diagram in one undoable step (a frame adds a second step). spec.nodes: [{id, kind (service_icon, note, text or shape), label, pack_id, icon_id, shape}]; spec.edges: [{from, to, label}] using the local ids; spec.frame: optional frame title; spec.direction: right (default) or down. Rafu lays nodes out in layers and returns the created node IDs keyed by local id.",
+                "Build a whole diagram in one undoable step (a frame adds a second step). spec.nodes: [{id, kind (service_icon, note, text or shape), label, pack_id, icon_id, shape}]; spec.edges: [{from, to, label}] using the local ids; spec.frame: optional frame title; spec.direction: right (default) or down. Rafu lays nodes out in layers: the longest chain on one line, branches beside it, and gaps wide enough for the edge labels. Keep labels short (a few words). Returns the created node IDs keyed by local id.",
                 schema(
                     [
                         "spec": property(

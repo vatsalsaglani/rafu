@@ -608,13 +608,15 @@ struct CanvasFrameBoardTests {
         CanvasRect(x: x, y: y, width: 160, height: 128)
     }
 
-    private func makeBoard() throws -> (CanvasBoardState, CanvasCardID, CanvasCardID, CanvasCardID) {
+    private func makeBoard() throws -> (CanvasBoardState, CanvasCardID, CanvasCardID, CanvasCardID)
+    {
         var document = CanvasDocument(title: "Diagram")
         let a = CanvasCard(title: "A", rect: rect(0, 0), content: .text(CanvasText(text: "A")))
         let b = CanvasCard(title: "B", rect: rect(400, 0), content: .text(CanvasText(text: "B")))
         document.cards = [a, b]
         let board = CanvasBoardState(document: document)
-        let frame = try #require(try board.createFrame(title: "Group", memberIDs: [a.id, b.id]))
+        let created = try board.createFrame(title: "Group", memberIDs: [a.id, b.id])
+        let frame = try #require(created)
         return (board, frame, a.id, b.id)
     }
 
@@ -672,7 +674,8 @@ struct CanvasFrameBoardTests {
     @Test("Nested frames fit inner first, and an outer move carries everything")
     func nested() throws {
         let (board, inner, a, b) = try makeBoard()
-        let outer = try #require(try board.createFrame(title: "Outer", memberIDs: [inner]))
+        let created = try board.createFrame(title: "Outer", memberIDs: [inner])
+        let outer = try #require(created)
         #expect(frameRect(board, outer) == fit(board, [inner]))
         #expect(board.cards.map(\.id).prefix(2) == [outer, inner])
         board.select([a])
