@@ -18,6 +18,7 @@ struct RafuApplication: App {
         .windowStyle(.hiddenTitleBar)
         .commands {
             RafuAppCommands()
+            CanvasNoteCommands()
         }
 
         Settings {
