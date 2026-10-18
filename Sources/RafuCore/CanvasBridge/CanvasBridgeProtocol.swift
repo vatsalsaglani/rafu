@@ -12,12 +12,15 @@ public nonisolated struct CanvasBridgeRequest: Codable, Hashable, Sendable {
     public var destination: String?
     public var text: String?
     public var reason: String?
+    /// Present only for `operation == "tool"`. Older peers ignore it.
+    public var agentCall: CanvasAgentToolCall?
 
     public init(
         token: String, operation: String, clientID: String = UUID().uuidString,
         provider: String? = nil,
         threadID: String? = nil, endpoint: String? = nil, executable: String? = nil,
-        destination: String? = nil, text: String? = nil, reason: String? = nil
+        destination: String? = nil, text: String? = nil, reason: String? = nil,
+        agentCall: CanvasAgentToolCall? = nil
     ) {
         self.token = token
         self.clientID = clientID
@@ -29,6 +32,7 @@ public nonisolated struct CanvasBridgeRequest: Codable, Hashable, Sendable {
         self.destination = destination
         self.text = text
         self.reason = reason
+        self.agentCall = agentCall
     }
 }
 
@@ -36,14 +40,17 @@ public nonisolated struct CanvasBridgeResponse: Codable, Hashable, Sendable {
     public var error: String?
     public var peers: [CanvasBridgePeer]
     public var messages: [CanvasBridgeMessage]
+    /// The result of an orchestration tool call. Optional for older peers.
+    public var toolResult: CanvasAgentToolResult?
 
     public init(
         error: String? = nil, peers: [CanvasBridgePeer] = [],
-        messages: [CanvasBridgeMessage] = []
+        messages: [CanvasBridgeMessage] = [], toolResult: CanvasAgentToolResult? = nil
     ) {
         self.error = error
         self.peers = peers
         self.messages = messages
+        self.toolResult = toolResult
     }
 }
 

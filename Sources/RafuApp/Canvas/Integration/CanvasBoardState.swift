@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import RafuCore
 import SwiftUI
 
 /// Which links the board draws. W6b's edge layer reads `linkVisibility`.
@@ -326,6 +327,7 @@ final class CanvasBoardState: Identifiable {
         leaveContent()
         remember(document, in: &redo)
         previous.revision = document.revision
+        previous.agentControl = document.agentControl
         revokeChangedLinks(replacing: previous)
         document = previous
         selection.formIntersection(Set(document.cards.map(\.id)))
@@ -339,6 +341,7 @@ final class CanvasBoardState: Identifiable {
         leaveContent()
         remember(document, in: &undo)
         next.revision = document.revision
+        next.agentControl = document.agentControl
         revokeChangedLinks(replacing: next)
         document = next
         selection.formIntersection(Set(document.cards.map(\.id)))
@@ -355,6 +358,22 @@ final class CanvasBoardState: Identifiable {
             })
         }.map(\.id)
         if !revoked.isEmpty { revokeSessionLinks?(revoked) }
+    }
+
+    // MARK: Agent control (X4)
+
+    /// The saved per-Ensemble Agent control. Undo and redo never change it.
+    var agentControlMode: CanvasAgentControlMode {
+        _ = changeStamp
+        return document.agentControl?.mode ?? .ask
+    }
+
+    /// A setting change, not an edit: it is saved but is not an undo step.
+    func setAgentControlMode(_ mode: CanvasAgentControlMode) {
+        guard mode != agentControlMode else { return }
+        document.agentControl = CanvasAgentControl(mode: mode)
+        markDirty()
+        requestSave?()
     }
 
     private func markDirty() {

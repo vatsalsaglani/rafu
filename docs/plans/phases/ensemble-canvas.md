@@ -139,3 +139,45 @@ Contracts (exact names):
   (`CGImageDestination`, `UTType.gif`) with frames where a dot travels each edge
   in its direction. Native-view nodes (terminal, web, docked app) render their
   summary face, not live content.
+
+## Addendum 2 (2026-10-18): Now Playing, workspaces, agent hooks, chat history — X10–X12
+
+User direction:
+1. Now Playing may use the private MediaRemote framework the way Cider does
+   (the BSD-3 `mediaremote-adapter`, run through `/usr/bin/perl`). The public
+   path stays as the fallback.
+2. Vendor icon packs (AWS, Azure, Google Cloud) get a one-click download (X9).
+3. A workspace can hold more than one folder; workspaces can be saved; a view
+   lists saved workspaces.
+4. Agent hooks, like Cider, track agent activity.
+5. Show Claude Code and Codex chat history in Rafu, grouped by project.
+
+| ID | Model | Workstream | Owns |
+|---|---|---|---|
+| X10 | Opus | Multi-folder and saved workspaces | `Sources/RafuCore/Workspace*` (descriptor, roots), `Sources/RafuApp/Workspace/**`, recents/saved stores, Files tree root handling in `Views/WorkspaceSidebarView.swift` (roots only), new `Views/Workspaces*.swift` (saved workspaces view), the `WindowTitlebarRow` workspace menu, `File` menu commands for Add Folder / Save Workspace, the `.rafuworkspace` UTType |
+| X11 | Opus | Agent hooks, activity tracking, Now Playing via MediaRemote | new `Sources/RafuAgentEventHelper/**` (helper executable), new `Sources/RafuApp/AgentTracking/**`, `Notch/NowPlaying*`, `Vendor/MediaRemoteAdapter/**`, hook install UI in the Agents settings pane, `script/build_and_run.sh` + packaging helper staging |
+| X12 | Opus | Agent chat history | new `Sources/RafuCore/AgentHistory/**` (read-only parsers), new `Sources/RafuApp/AgentHistory/**` (history tab and navigator entry), one navigator mode case, palette commands |
+
+Contracts:
+- **Workspace roots (X10):** `WorkspaceSession.roots: [WorkspaceRoot]`
+  (ordered, first is primary); `rootURL` stays and means the primary root, so
+  existing callers keep working. Saved workspace file: `.rafuworkspace`
+  (UTType `dev.rafu.workspace`, versioned JSON, folder bookmarks + display
+  name + window layout reference). Git/search work per root.
+- **Agent events (X11):** `AgentActivityStore` (`@MainActor @Observable`,
+  one per app) exposes `sessions: [TrackedAgentSession]` keyed by provider and
+  session id, with state `working | waitingForPermission | needsInput |
+  finished | ended`, `cwd`, last tool, and time. It matches a session to a
+  Rafu terminal by cwd + process tree when possible. Notch, titlebar activity
+  and Ensemble terminal nodes read it; they keep their output-based fallback.
+- **Agent history (X12):** read-only. Claude Code: `~/.claude/projects/*/*.jsonl`.
+  Codex: `~/.codex/sessions/**/rollout-*.jsonl` (+ `session_index`). Parsed off
+  the main actor, lazily, bounded per file; grouped by project path; "Resume"
+  opens a terminal running `claude --resume <id>` / `codex resume <id>` in that
+  folder only after the user clicks it. Nothing leaves the Mac; nothing is logged.
+
+Security rules for X11: hook installation is an explicit user action with a
+review of the exact file and entries; it merges into the provider's config
+without removing other hooks, keeps a backup, is reversible, and never runs at
+launch. The helper must never block or change the agent's decision (1 s alarm,
+exit 0 always, bounded input, private spool directory 0700, files 0600).

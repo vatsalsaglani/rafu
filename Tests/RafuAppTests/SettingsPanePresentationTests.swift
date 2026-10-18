@@ -216,17 +216,9 @@ struct SettingsPanePresentationTests {
 
     // MARK: S8 Ensemble
 
-    @Test("Skill version copy uses plain words and the real numbers")
-    func ensembleVersionCopy() {
-        #expect(
-            EnsembleSkillVersionCopy.summary(skillTargets: 2)
-                == "Skill version 2 · needs Rafu 2 or later")
-        #expect(!EnsembleSkillVersionCopy.summary(skillTargets: 2).contains("Verb"))
-        let older = EnsembleSkillVersionCopy.mismatch(skillTargets: 3, rafuSupports: 2)
-        #expect(older.contains("needs Rafu 3 or later"))
-        #expect(older.contains("supports version 2"))
-        let newer = EnsembleSkillVersionCopy.mismatch(skillTargets: 2, rafuSupports: 3)
-        #expect(newer.contains("Install the skill again"))
-        #expect(!older.contains("mismatch"))
+    @Test("Agent skill copy uses plain words")
+    func ensembleSkillCopy() {
+        #expect(EnsembleSkillCopy.summary.contains("Claude Code and Codex"))
+        #expect(!EnsembleSkillCopy.footer.contains("Verb"))
     }
 }

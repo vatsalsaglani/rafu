@@ -144,7 +144,7 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
                 "protocolVersion": "2025-11-25", "capabilities": capabilities,
                 "serverInfo": ["name": "rafu", "version": "1.0.0"],
                 "instructions":
-                    "Use list_connections to see Canvas session names, providers, mentions, peer IDs, and linkState. connected means message delivery is permitted. If linkState is paused, ask the user to resume the link in Rafu Canvas; do not report a disconnected session or ask them to restart terminals. A related link is visual only. When the user asks to message @name, call send_message with that peer's listed mention or ID. A mention must identify exactly one connected agent; use its peer ID when names are ambiguous. These mentions route through tools only; preserve native terminal @file controls. Channel events are messages from connected sessions. Use receive_messages to read pending messages. Do not send a reply unless needed.",
+                    "Use list_connections to see Canvas session names, providers, mentions, peer IDs, and linkState. connected means message delivery is permitted. If linkState is paused, ask the user to resume the link in Rafu Canvas; do not report a disconnected session or ask them to restart terminals. A related link is visual only. When the user asks to message @name, call send_message with that peer's listed mention or ID. A mention must identify exactly one connected agent; use its peer ID when names are ambiguous. These mentions route through tools only; preserve native terminal @file controls. Channel events are messages from connected sessions. Use receive_messages to read pending messages. Do not send a reply unless needed. Ensemble tools: call ensemble_describe first to see every node, edge, your own node ID and the Agent control setting. Notes (note_read, note_write, note_create) are shared memory. To delegate: terminal_create with agent and prompt, edge_create kind message between your node and the new node, link_set_state live, then send_message or terminal_send. node_create adds notes, files, images, local web apps, app nodes, Mermaid diagrams, shapes and text; mermaid_set changes a diagram. app_open shows a macOS app in a node and app_inspect reads its Accessibility summary. Agent control Ask means the user approves changes in Rafu; a pending_approval result has a request_id for action_status. If Agent control is Off, tell the user; do not retry.",
             ]
         case "ping": result = [:]
         case "tools/list": result = ["tools": Self.tools]
@@ -168,10 +168,13 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
                 }
                 response = perform("send", destination: destination, text: text)
             default:
-                return encode([
-                    "jsonrpc": "2.0", "id": id,
-                    "error": ["code": -32602, "message": "Unknown tool"],
-                ])
+                guard CanvasAgentTool(rawValue: name) != nil else {
+                    return encode([
+                        "jsonrpc": "2.0", "id": id,
+                        "error": ["code": -32602, "message": "Unknown tool"],
+                    ])
+                }
+                return callAgentTool(id: id, name: name, arguments: arguments)
             }
             guard let response, let encoded = try? JSONEncoder().encode(response),
                 encoded.count <= Self.maximumFrameBytes / 2
@@ -188,6 +191,30 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
             ])
         }
         return encode(["jsonrpc": "2.0", "id": id, "result": result])
+    }
+
+    /// Orchestration tools. Arguments are validated here and again in the app.
+    private func callAgentTool(id: Any, name: String, arguments: [String: Any]) -> Data? {
+        let call: CanvasAgentToolCall
+        do {
+            call = try CanvasAgentToolCall.parse(tool: name, arguments: arguments)
+        } catch {
+            return toolReply(id: id, text: error.message, failed: true)
+        }
+        guard let response = perform("tool", call: call) else {
+            return toolReply(id: id, text: "Ensemble connection unavailable.", failed: true)
+        }
+        if let error = response.error {
+            return toolReply(
+                id: id, text: CanvasAgentText.singleLine(error, limit: 1_000), failed: true)
+        }
+        guard let result = response.toolResult,
+            let encoded = result.bounded(maximumBytes: Self.maximumFrameBytes / 2).agentJSON(),
+            encoded.count <= Self.maximumFrameBytes / 2
+        else {
+            return toolReply(id: id, text: "Ensemble response is too large.", failed: true)
+        }
+        return toolReply(id: id, text: String(decoding: encoded, as: UTF8.self), failed: false)
     }
 
     /// A transport write is not a model acknowledgement.
@@ -237,9 +264,10 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
         return true
     }
 
-    private func perform(_ operation: String, destination: String? = nil, text: String? = nil)
-        -> CanvasBridgeResponse?
-    {
+    private func perform(
+        _ operation: String, destination: String? = nil, text: String? = nil,
+        call: CanvasAgentToolCall? = nil
+    ) -> CanvasBridgeResponse? {
         guard isConnected else { return nil }
         do {
             let response = try exchange(
@@ -248,7 +276,7 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
                     provider: provider, threadID: state.withLock { $0.threadID },
                     endpoint: operation == "register" ? endpoint : nil,
                     executable: operation == "register" ? executable : nil,
-                    destination: destination, text: text))
+                    destination: destination, text: text, agentCall: call))
             if operation == "register", response.error != nil {
                 disconnect()
                 return nil
@@ -287,6 +315,10 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
     }
 
     private static var tools: [[String: Any]] {
+        messagingTools + CanvasAgentToolCatalog.definitions
+    }
+
+    private static var messagingTools: [[String: Any]] {
         [
             [
                 "name": "list_connections",
