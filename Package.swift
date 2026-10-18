@@ -11,6 +11,8 @@ let package = Package(
         .library(name: "RafuCore", targets: ["RafuCore"]),
         .executable(name: "RafuApp", targets: ["RafuApp"]),
         .executable(name: "rafu", targets: ["RafuCLI"]),
+        // The agent hook helper (X11), staged into Contents/Helpers.
+        .executable(name: "rafu-agent-events", targets: ["RafuAgentEventHelper"]),
     ],
     dependencies: [
         .package(
@@ -134,6 +136,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "RafuCLI",
+            dependencies: ["RafuCore"]
+        ),
+        .executableTarget(
+            name: "RafuAgentEventHelper",
             dependencies: ["RafuCore"]
         ),
         .testTarget(

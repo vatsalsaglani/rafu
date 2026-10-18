@@ -6,6 +6,7 @@ APP_NAME="${RAFU_APP_NAME:-Rafu Lightning}"
 APP_EXECUTABLE="${APP_NAME// /}"
 GUI_PRODUCT="RafuApp"
 CLI_PRODUCT="rafu"
+HOOK_HELPER_PRODUCT="rafu-agent-events"
 MIN_SYSTEM_VERSION="15.0"
 # Overridable so the release workflow can stamp the branch-derived version
 # into the bundle without editing this script.
@@ -61,8 +62,11 @@ APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_SHARED_BIN="$APP_CONTENTS/SharedSupport/bin"
+APP_HELPERS="$APP_CONTENTS/Helpers"
 APP_BINARY="$APP_MACOS/$APP_EXECUTABLE"
 CLI_BINARY="$APP_SHARED_BIN/$CLI_PRODUCT"
+HOOK_HELPER_BINARY="$APP_HELPERS/$HOOK_HELPER_PRODUCT"
+MEDIA_FRAMEWORK_CACHE="$ROOT_DIR/.build/rafu-media"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 APP_ICON_NAME="Rafu.icns"
 APP_ICON="$APP_RESOURCES/$APP_ICON_NAME"
@@ -74,17 +78,33 @@ fi
 
 swift build --product "$GUI_PRODUCT"
 swift build --product "$CLI_PRODUCT"
+swift build --product "$HOOK_HELPER_PRODUCT"
 
 BUILD_BIN_DIR="$(swift build --show-bin-path)"
 BUILD_APP_BINARY="$BUILD_BIN_DIR/$GUI_PRODUCT"
 BUILD_CLI_BINARY="$BUILD_BIN_DIR/$CLI_PRODUCT"
+BUILD_HOOK_HELPER_BINARY="$BUILD_BIN_DIR/$HOOK_HELPER_PRODUCT"
 
 rm -rf "$APP_BUNDLE"
-mkdir -p "$APP_MACOS" "$APP_RESOURCES" "$APP_SHARED_BIN"
+mkdir -p "$APP_MACOS" "$APP_RESOURCES" "$APP_SHARED_BIN" "$APP_HELPERS"
 
 cp "$BUILD_APP_BINARY" "$APP_BINARY"
 cp "$BUILD_CLI_BINARY" "$CLI_BINARY"
-chmod +x "$APP_BINARY" "$CLI_BINARY"
+# Agent hook helper (X11). Settings > Agents copies it to Application Support
+# on Connect; hooks never run it from inside the bundle.
+cp "$BUILD_HOOK_HELPER_BINARY" "$HOOK_HELPER_BINARY"
+chmod +x "$APP_BINARY" "$CLI_BINARY" "$HOOK_HELPER_BINARY"
+
+# System Now Playing (X11): the BSD-3 MediaRemote adapter, run by
+# /usr/bin/perl. Optional: without xcrun clang the build skips it and Now
+# Playing falls back to Music and Spotify. Never fails the app build.
+if "$ROOT_DIR/script/build_media_helper.sh" "$MEDIA_FRAMEWORK_CACHE"; then
+  cp -R "$MEDIA_FRAMEWORK_CACHE/MediaRemoteAdapter.framework" "$APP_HELPERS/"
+  cp "$ROOT_DIR/Vendor/MediaRemoteAdapter/bin/mediaremote-adapter.pl" "$APP_HELPERS/"
+  cp "$ROOT_DIR/Vendor/MediaRemoteAdapter/LICENSE" "$APP_HELPERS/MediaRemoteAdapter-LICENSE"
+else
+  echo "Now Playing will use the Music and Spotify fallback in this build." >&2
+fi
 
 if [[ -d "$ROOT_DIR/Resources" ]]; then
   cp -R "$ROOT_DIR/Resources/." "$APP_RESOURCES/"
@@ -212,11 +232,17 @@ PLIST
 # accepted limitation, not a build failure — every other verification step
 # below (build, resources, launch) must still pass regardless of whether
 # this signing step fully seals the resource bundle.
+# Nested code is signed first so the bundle signature can seal it.
+codesign --force --sign - --timestamp=none "$HOOK_HELPER_BINARY" || true
+if [[ -d "$APP_HELPERS/MediaRemoteAdapter.framework" ]]; then
+  codesign --force --sign - --timestamp=none "$APP_HELPERS/MediaRemoteAdapter.framework" || true
+fi
 codesign --force --sign - --timestamp=none "$APP_BUNDLE" || true
 
 plutil -lint "$INFO_PLIST" >/dev/null
 test -x "$APP_BINARY"
 test -x "$CLI_BINARY"
+test -x "$HOOK_HELPER_BINARY"
 test -s "$APP_ICON"
 test "$(plutil -extract CFBundleIconFile raw "$INFO_PLIST")" = "$APP_ICON_NAME"
 # Keep the Info.plist-declared drag UTI identifier in lockstep with

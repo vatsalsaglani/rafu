@@ -123,6 +123,11 @@ struct CanvasCardCommands {
             guard let pane = session.terminal.terminalGroup(groupID)?.panes.first else {
                 return "Unavailable"
             }
+            if let word = AgentActivityStore.shared.stateWord(
+                for: session.terminal.terminalController(for: pane.id))
+            {
+                return word
+            }
             var code: Int32?
             if case .exited(let reported)? = session.terminal.terminalController(for: pane.id)?
                 .status

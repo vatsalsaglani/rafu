@@ -55,6 +55,9 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
         // once at launch (idempotent; a no-op on a non-notch/disabled
         // machine, terminal-notch-hud.md NC-B).
         NotchCompanionModel.shared.activateIfEnabled()
+        // Watches the agent hook spool only if the person connected a
+        // provider in Settings ▸ Agents. Never installs or changes hooks.
+        AgentActivityStore.shared.start()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

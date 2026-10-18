@@ -241,3 +241,6 @@ rg -n "NotchScreenSelection|currentMetrics" Sources/RafuApp/Terminal
   (v1 attention HUD stack this builds on)
 - [`nonisolated-extension-isolation-trap.md`](nonisolated-extension-isolation-trap.md)
   (the general Swift-concurrency gotcha found while building NC-A)
+- [`agent-hooks-and-now-playing.md`](agent-hooks-and-now-playing.md) (X11:
+  hook-based agent phases in the notch, "Other agents", and the system Now
+  Playing source with its Music/Spotify fallback)

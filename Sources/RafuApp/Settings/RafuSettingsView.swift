@@ -67,6 +67,7 @@ struct RafuSettingsView: View {
                 UsageSettingsSection()
             case .agents:
                 ConductorSettingsSection()
+                AgentTrackingSettingsSection()
             case .ensemble:
                 EnsembleSettingsSection()
             }
