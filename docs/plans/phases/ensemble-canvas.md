@@ -1,6 +1,6 @@
 # Ensemble canvas (round 2)
 
-- Status: Active implementation (user direction, 2026-10-18). Base: `main` at `5e01dca`.
+- Status: Implemented; awaiting macOS verification (user direction, 2026-10-18). Base: `main` at `5e01dca`.
 - Integration branch: `claude/rafu-macos-redesign-nqcu7h` (restarted from `main`).
 - Earlier spec still applies for visual rules: `macos-redesign.md`,
   `docs/references/macos-redesign-visual-system.md`, `canvas-interaction.md`.
@@ -181,3 +181,9 @@ review of the exact file and entries; it merges into the provider's config
 without removing other hooks, keeps a backup, is reversible, and never runs at
 launch. The helper must never block or change the agent's decision (1 s alarm,
 exit 0 always, bounded input, private spool directory 0700, files 0600).
+
+## Status (2026-10-18)
+
+- Merged into the integration branch: workstreams X1, X3 to X12, and the R pass.
+- Verification: Linux parse + swift-format lint + scratch-package tests; macOS CI (Swift 6.3, macos-26) run via workflow_dispatch — see the PR for the latest result.
+- Not yet done: GUI launch pass on a Mac (second window, keyboard, VoiceOver), live test of hooks with real Claude Code / Codex sessions.
