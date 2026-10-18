@@ -948,21 +948,21 @@ private struct WorkspaceWelcomeView: View {
                 .buttonStyle(RafuProminentButtonStyle())
                 .controlSize(.large)
             HStack(alignment: .top, spacing: 16) {
-                if !recents.isEmpty {
-                    welcomeCard(title: "Recent Workspaces") { recentList }
+                // Saved workspaces and recent folders: the same list as the
+                // Workspaces window (⇧⌘1), opening in this window.
+                welcomeCard(title: "Workspaces", width: 380) {
+                    WorkspacesListView(model: .shared, session: session, placement: .welcome)
+                        .frame(height: 230)
                 }
                 welcomeCard(title: "Shortcuts") { WelcomeShortcutHints() }
             }
         }
         .padding(40)
-        .task { recents = recentsStore.load() }
     }
-
-    @State private var recents: [RecentWorkspaceEntry] = []
-    private let recentsStore = RecentWorkspacesStore()
 
     private func welcomeCard<Content: View>(
         title: String,
+        width: CGFloat = 260,
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -972,7 +972,7 @@ private struct WorkspaceWelcomeView: View {
             content()
         }
         .padding(14)
-        .frame(width: 260, alignment: .leading)
+        .frame(width: width, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
                 .fill(theme.palette.cardBackground)
@@ -981,76 +981,6 @@ private struct WorkspaceWelcomeView: View {
             RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
                 .strokeBorder(theme.palette.borderSubtle)
         )
-    }
-
-    private var recentList: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(recents.prefix(4)) { entry in
-                recentRow(entry)
-            }
-        }
-    }
-
-    private func recentRow(_ entry: RecentWorkspaceEntry) -> some View {
-        Button {
-            do {
-                let url = try recentsStore.resolve(entry)
-                session.openLocalWorkspace(at: url)
-            } catch {
-                recentsStore.remove(rootPath: entry.rootPath)
-                recents = recentsStore.load()
-            }
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "folder")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.palette.textSecondary)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(entry.displayName)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(theme.palette.textPrimary)
-                    RafuChip(
-                        text: (entry.rootPath as NSString).abbreviatingWithTildeInPath,
-                        foreground: theme.palette.textMuted
-                    )
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(
-                RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous))
-        }
-        .buttonStyle(WelcomeRecentButtonStyle())
-    }
-}
-
-private struct WelcomeRecentButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        StyleBody(configuration: configuration)
-    }
-
-    private struct StyleBody: View {
-        let configuration: Configuration
-        @Environment(\.rafuTheme) private var theme
-        @State private var isHovering = false
-
-        var body: some View {
-            configuration.label
-                .background(
-                    RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
-                        .fill(
-                            configuration.isPressed
-                                ? theme.palette.selection
-                                : isHovering ? theme.palette.hover : .clear
-                        )
-                )
-                .onHover { isHovering = $0 }
-                .animation(.easeOut(duration: 0.12), value: isHovering)
-        }
     }
 }
 
@@ -1063,6 +993,7 @@ private struct WelcomeShortcutHints: View {
             hint("Command Palette", keys: "⌘⇧P")
             hint("Search Workspace", keys: "⌘⇧F")
             hint("Source Control", keys: "⌘⇧G")
+            hint("All Workspaces", keys: "⌘⇧1")
         }
     }
 

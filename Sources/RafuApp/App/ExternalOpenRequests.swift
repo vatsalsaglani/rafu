@@ -12,6 +12,10 @@ final class ExternalOpenRequests {
     static let shared = ExternalOpenRequests()
 
     private(set) var pending: [URL] = []
+    /// `.rafuworkspace` files waiting for a fresh window
+    /// (`WorkspaceFileOpenRouter`). Only a window that has no workspace
+    /// takes one, so an open workspace is never replaced.
+    private(set) var pendingWorkspaceFiles: [URL] = []
 
     func enqueue(_ urls: [URL]) {
         let folders = urls.filter { url in
@@ -30,7 +34,19 @@ final class ExternalOpenRequests {
         return pending.removeFirst()
     }
 
-    var hasPending: Bool { !pending.isEmpty }
+    func enqueueWorkspaceFiles(_ urls: [URL]) {
+        let files = urls.filter(WorkspaceSession.isWorkspaceFile)
+        guard !files.isEmpty else { return }
+        pendingWorkspaceFiles.append(
+            contentsOf: files.prefix(8 - min(8, pendingWorkspaceFiles.count)))
+    }
+
+    func takeWorkspaceFile() -> URL? {
+        guard !pendingWorkspaceFiles.isEmpty else { return nil }
+        return pendingWorkspaceFiles.removeFirst()
+    }
+
+    var hasPending: Bool { !pending.isEmpty || !pendingWorkspaceFiles.isEmpty }
 }
 
 /// Receives `application(_:open:)` for folders passed by `open -a` (the CLI
@@ -78,8 +94,13 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        // `.rafuensemble` files open as board tabs (X5); folders as before.
-        ExternalOpenRequests.shared.enqueue(CanvasEnsembleOpenRouter.shared.route(urls))
+        // `.rafuensemble` files open as board tabs (X5); `.rafuworkspace`
+        // files open as saved workspaces (X10); folders as before.
+        let others = CanvasEnsembleOpenRouter.shared.route(urls)
+        for url in others where WorkspaceSession.isWorkspaceFile(url) {
+            WorkspaceFileOpenRouter.open(url)
+        }
+        ExternalOpenRequests.shared.enqueue(others.filter { !WorkspaceSession.isWorkspaceFile($0) })
         NSApp.activate(ignoringOtherApps: true)
     }
 }

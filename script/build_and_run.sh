@@ -161,6 +161,18 @@ cat >"$INFO_PLIST" <<PLIST
         <string>dev.rafu.ensemble</string>
       </array>
     </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Rafu Workspace</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>LSHandlerRank</key>
+      <string>Owner</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>dev.rafu.workspace</string>
+      </array>
+    </dict>
   </array>
   <key>UTExportedTypeDeclarations</key>
   <array>
@@ -188,6 +200,23 @@ cat >"$INFO_PLIST" <<PLIST
         <key>public.filename-extension</key>
         <array>
           <string>rafuensemble</string>
+        </array>
+      </dict>
+    </dict>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>dev.rafu.workspace</string>
+      <key>UTTypeDescription</key>
+      <string>Rafu Workspace</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.json</string>
+      </array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array>
+          <string>rafuworkspace</string>
         </array>
       </dict>
     </dict>
@@ -227,6 +256,9 @@ test "$(plutil -extract UTExportedTypeDeclarations.0.UTTypeIdentifier raw "$INFO
 # Keep the Ensemble file type in lockstep with `UTType.rafuEnsemble` and
 # `CanvasEnsembleFile.typeIdentifier` (CanvasEnsembleFileActions.swift).
 test "$(plutil -extract UTExportedTypeDeclarations.1.UTTypeIdentifier raw "$INFO_PLIST")" = "dev.rafu.ensemble"
+# Keep the saved-workspace file type in lockstep with `UTType.rafuWorkspace`
+# and `RafuWorkspaceFile.typeIdentifier` (WorkspaceFileActions.swift).
+test "$(plutil -extract UTExportedTypeDeclarations.2.UTTypeIdentifier raw "$INFO_PLIST")" = "dev.rafu.workspace"
 test -f "$APP_RESOURCES/Themes/indigo.json"
 test -f "$APP_RESOURCES/Themes/khadi.json"
 test -f "$APP_RESOURCES/Themes/dracula.json"

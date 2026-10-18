@@ -49,6 +49,12 @@ struct WorkspaceSceneRoot: View {
             // first-launch design's simplest, most consistent behavior, the
             // intro still offers itself underneath — it does not special-
             // case an external open.
+            if let file = ExternalOpenRequests.shared.takeWorkspaceFile() {
+                WorkspaceRestorationGate.hasRestored = true
+                session.openWorkspaceFile(at: file)
+                FirstLaunchExperienceModel.shared.offerOnFirstLaunch(hostedBy: session)
+                return
+            }
             if let url = ExternalOpenRequests.shared.take() {
                 WorkspaceRestorationGate.hasRestored = true
                 session.openLocalWorkspace(at: url)
@@ -64,6 +70,12 @@ struct WorkspaceSceneRoot: View {
         .onChange(of: ExternalOpenRequests.shared.hasPending) { _, hasPending in
             // While running, the key window consumes CLI/Finder opens.
             guard hasPending, controlActiveState == .key else { return }
+            // A saved workspace only fills an empty window.
+            if session.descriptor == nil, let file = ExternalOpenRequests.shared.takeWorkspaceFile()
+            {
+                session.openWorkspaceFile(at: file)
+                return
+            }
             if let url = ExternalOpenRequests.shared.take() {
                 session.openLocalWorkspace(at: url)
             }
