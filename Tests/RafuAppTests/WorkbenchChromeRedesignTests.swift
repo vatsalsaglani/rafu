@@ -215,6 +215,7 @@ struct WorkbenchChromeRedesignTests {
     // MARK: - E8 / E9
 
     @Test("Markdown mode control reads Source | Preview | Split")
+    @MainActor
     func markdownModeWords() {
         #expect(
             MarkdownPresentationMode.allCases.map(MarkdownModePresentation.title(for:))
