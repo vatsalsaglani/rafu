@@ -212,7 +212,8 @@ nonisolated enum CanvasCardContent: Codable, Equatable, Sendable {
         case .stroke(let stroke): try stroke.validate()
         case .text(let text): try text.validate()
         // X9 owns the frame and icon value types and their bounds.
-        case .frame, .serviceIcon: break
+        case .frame(let frame): try frame.validate()
+        case .serviceIcon(let icon): try icon.validate()
         }
     }
 

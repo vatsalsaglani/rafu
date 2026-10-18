@@ -102,6 +102,21 @@ enum CanvasDiagramPanels {
     private static var libraryPanel: NSPanel?
     private static let libraryTarget = CanvasIconLibraryTarget()
 
+    /// Adds "Icons…" and "Convert to Frame" to the whiteboard tool palette.
+    /// Called once at launch.
+    static func registerPaletteItems() {
+        CanvasToolPalette.register(
+            CanvasToolPaletteItem(
+                id: "x9.icons", title: "Icon Library…", symbol: "square.grid.3x3"
+            ) { board, session in showLibrary(board: board, session: session) })
+        CanvasToolPalette.register(
+            CanvasToolPaletteItem(
+                id: "x9.frame", title: "Convert Selection to Frame", symbol: "rectangle.dashed"
+            ) { board, session in
+                session.performCanvasEdit(board) { try board.convertSelectionToFrame() }
+            })
+    }
+
     static func showLibrary(board: CanvasBoardState, session: WorkspaceSession) {
         libraryTarget.board = board
         libraryTarget.session = session
