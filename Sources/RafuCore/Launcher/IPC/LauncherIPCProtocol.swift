@@ -17,12 +17,6 @@ public enum LauncherIPCProtocol {
     /// fields do not require a bump (forward-compatible decoding).
     public static let protocolVersion = 1
 
-    /// Version of the agent-skill verb surface that the bundled Rafu skill
-    /// targets. The `rafu ensemble` verbs themselves were removed; the
-    /// constant stays only so the skill installer's compatibility check keeps
-    /// compiling until the skill is rebuilt around the Ensemble MCP tools.
-    public static let ensembleVerbVersion = 2
-
     /// Upper bound on one framed JSON body, enforced by both the encoder and
     /// the incremental decoder (landed in I1). Paths, line/column, and
     /// activation metadata only — this socket never carries document text

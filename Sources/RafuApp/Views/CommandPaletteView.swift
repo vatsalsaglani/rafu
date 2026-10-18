@@ -593,28 +593,28 @@ struct CommandPaletteView: View {
     private func makeCommands() -> [PaletteCommand] {
         var commands: [PaletteCommand] = [
             .init(
-                title: "New Canvas…", symbolName: "rectangle.3.group",
+                title: "New Ensemble…", symbolName: "rectangle.3.group",
                 keywords: ["board", "spatial"]
             ) {
                 dismiss()
                 session.requestNewCanvas()
             },
             .init(
-                title: "Open Canvas…", symbolName: "rectangle.3.group",
+                title: "Open Ensemble…", symbolName: "rectangle.3.group",
                 keywords: ["board", "saved"]
             ) {
                 dismiss()
                 session.requestCanvasLibrary()
             },
             .init(
-                title: "Canvas: Zoom to Fit", symbolName: "arrow.up.left.and.arrow.down.right",
+                title: "Ensemble: Zoom to Fit", symbolName: "arrow.up.left.and.arrow.down.right",
                 keywords: ["board", "zoom"]
             ) {
                 dismiss()
                 session.selectedCanvas?.fitAll()
             },
             .init(
-                title: "Canvas: Tidy Up", symbolName: "square.grid.2x2",
+                title: "Ensemble: Tidy Up", symbolName: "square.grid.2x2",
                 keywords: ["board", "layout"]
             ) {
                 dismiss()
@@ -623,7 +623,7 @@ struct CommandPaletteView: View {
                 }
             },
             .init(
-                title: "Canvas: Return to Board", symbolName: "arrow.uturn.backward",
+                title: "Ensemble: Return to Board", symbolName: "arrow.uturn.backward",
                 keywords: ["focus", "board"]
             ) {
                 dismiss()
@@ -1127,56 +1127,58 @@ struct CommandPaletteView: View {
         }
         if let board = session.selectedCanvas {
             commands.append(contentsOf: [
-                .init(title: "Canvas: Add File…", symbolName: "doc.badge.plus", keywords: ["card"])
-                {
+                .init(
+                    title: "Ensemble: Add File…", symbolName: "doc.badge.plus", keywords: ["card"]
+                ) {
                     dismiss()
                     session.chooseCanvasFile(board.id, imageOnly: false)
                 },
-                .init(title: "Canvas: Add Image…", symbolName: "photo", keywords: ["card"]) {
+                .init(title: "Ensemble: Add Image…", symbolName: "photo", keywords: ["card"]) {
                     dismiss()
                     session.chooseCanvasFile(board.id, imageOnly: true)
                 },
-                .init(title: "Canvas: Add Note", symbolName: "note.text", keywords: ["card"]) {
+                .init(title: "Ensemble: Add Note", symbolName: "note.text", keywords: ["card"]) {
                     dismiss()
                     session.addCanvasNote(board.id)
                 },
                 .init(
-                    title: "Canvas: Add Terminal", symbolName: "terminal",
+                    title: "Ensemble: Add Terminal", symbolName: "terminal",
                     keywords: ["card"]
                 ) {
                     dismiss()
                     session.addCanvasStoppedTerminal(board.id)
                 },
-                .init(title: "Canvas: Add Web App…", symbolName: "globe", keywords: ["card"]) {
+                .init(title: "Ensemble: Add Web App…", symbolName: "globe", keywords: ["card"]) {
                     dismiss()
                     session.canvasDialog = .web(board.id)
                 },
                 .init(
-                    title: "Canvas: Add Mac App…", symbolName: "macwindow",
+                    title: "Ensemble: Add Mac App…", symbolName: "macwindow",
                     keywords: ["card"]
                 ) {
                     dismiss()
                     session.chooseCanvasApplication(board.id)
                 },
-                .init(title: "Canvas: Actual Size", symbolName: "1.square", keywords: ["zoom"]) {
+                .init(title: "Ensemble: Actual Size", symbolName: "1.square", keywords: ["zoom"]) {
                     dismiss()
                     board.zoom(1 / board.viewport.scale)
                 },
                 .init(
-                    title: "Canvas: Zoom In", symbolName: "plus.magnifyingglass", keywords: ["zoom"]
+                    title: "Ensemble: Zoom In", symbolName: "plus.magnifyingglass",
+                    keywords: ["zoom"]
                 ) {
                     dismiss()
                     board.zoom(1.2)
                 },
                 .init(
-                    title: "Canvas: Zoom Out", symbolName: "minus.magnifyingglass",
+                    title: "Ensemble: Zoom Out", symbolName: "minus.magnifyingglass",
                     keywords: ["zoom"]
                 ) {
                     dismiss()
                     board.zoom(1 / 1.2)
                 },
                 .init(
-                    title: "Canvas: Show List", symbolName: "list.bullet",
+                    title: "Ensemble: Show List", symbolName: "list.bullet",
                     keywords: ["cards", "connections"]
                 ) {
                     dismiss()
@@ -1184,7 +1186,7 @@ struct CommandPaletteView: View {
                     board.showsList = true
                 },
                 .init(
-                    title: "Canvas: Connect Selected Cards…",
+                    title: "Ensemble: Connect Selected Cards…",
                     symbolName: "point.3.connected.trianglepath.dotted", keywords: ["relationship"]
                 ) {
                     dismiss()

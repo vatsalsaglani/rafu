@@ -67,6 +67,7 @@ struct CanvasAddMenuItems: View {
         Divider()
         item(.webApp)
         item(.macApp)
+        CanvasDiagramAddMenuItem(board: board, session: session)  // X9 diagrams
     }
 
     private func item(_ kind: CanvasAddKind) -> some View {
@@ -96,8 +97,8 @@ struct CanvasAddCardMenu: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .disabled(board.cards.count >= CanvasLimits.cards)
-        .help("Add to Canvas")
-        .accessibilityLabel("Add to Canvas")
+        .help("Add to Ensemble")
+        .accessibilityLabel("Add to Ensemble")
     }
 }
 

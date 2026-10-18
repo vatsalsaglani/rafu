@@ -389,7 +389,7 @@ struct RafuAppCommands: Commands {
     }
 
     private var contextualSaveTitle: String {
-        if workspaceSession?.selectedCanvasID != nil { return "Save Canvas" }
+        if workspaceSession?.selectedCanvasID != nil { return "Save Ensemble" }
         return workspaceSession?.selectedTerminalGroupID == nil ? "Save" : "Save Terminal Group"
     }
 

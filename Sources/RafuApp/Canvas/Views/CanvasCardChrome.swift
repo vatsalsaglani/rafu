@@ -216,6 +216,7 @@ struct CanvasCardMenuContent: View {
                     CanvasBridgePeer.mention(for: card.title), forType: .string)
             }
         }
+        CanvasDiagramCardMenuItems(card: card, board: board, session: session)  // X9 diagrams
         Divider()
         Button("Rename…", systemImage: "pencil") { board.renamingCardID = card.id }
         Button("Duplicate", systemImage: "plus.square.on.square") {
@@ -242,7 +243,7 @@ struct CanvasCardMenuContent: View {
             }
         }
         Divider()
-        Button("Remove from Canvas…", systemImage: "minus.circle", role: .destructive) {
+        Button("Remove from Ensemble…", systemImage: "minus.circle", role: .destructive) {
             commands.requestRemoval()
         }
     }

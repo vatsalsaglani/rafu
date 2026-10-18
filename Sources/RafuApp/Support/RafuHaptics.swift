@@ -7,7 +7,7 @@ import AppKit
 /// never call this for incoming messages, link state changes or results.
 /// Every call site must also show visual feedback (a guide, a port, a stop).
 enum RafuHaptics {
-    /// Settings ▸ General ▸ "Haptic feedback on the Canvas". Default: on.
+    /// Settings ▸ General ▸ "Haptic feedback on the Ensemble". Default: on.
     static let canvasHapticsDefaultsKey = "canvasHapticsEnabled"
     static let minimumInterval: Duration = .milliseconds(100)
 

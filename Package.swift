@@ -127,6 +127,9 @@ let package = Package(
                 // `swift run`, and the staged `.app`. See
                 // `Sources/RafuApp/Resources/Grammars/README.md`.
                 .copy("Resources/Grammars"),
+                // Built-in Common diagram icon pack manifest (SF Symbols only;
+                // vendor packs are imported by the user, never bundled).
+                .copy("Resources/DiagramPacks"),
                 // The Rafu Ensemble agent skill (X4), installed from Settings.
                 .copy("Resources/AgentSkills"),
             ],

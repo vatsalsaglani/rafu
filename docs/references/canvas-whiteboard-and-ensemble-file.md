@@ -64,9 +64,9 @@ key-sorted so it diffs well.
 - A per-workspace index (`ensemble-files.index`, 32 entries) in the App Support
   Canvas folder maps board IDs to file paths, so a restored tab reopens its
   file through `open(_:)`.
-- "Save Canvas As…" writes a new file inside the workspace with a new board ID
+- "Save Ensemble As…" writes a new file inside the workspace with a new board ID
   and opens it as its own tab; the original board is unchanged (same model as
-  "Save Copy"). "Export Canvas…" writes anywhere, embeds small PNG/JPEG/GIF
+  "Save Copy"). "Export Ensemble…" writes anywhere, embeds small PNG/JPEG/GIF
   images, and opens nothing. Opening a file whose embedded images are missing
   asks before writing them; existing files are never replaced.
 - Finder opens: a file inside an open workspace opens there; otherwise its

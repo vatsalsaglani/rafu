@@ -49,11 +49,11 @@ struct SettingsPresentationTests {
     }
 
     @MainActor
-    @Test("General offers the Canvas haptics toggle bound to the shared defaults key")
+    @Test("General offers the Ensemble haptics toggle bound to the shared defaults key")
     func canvasHapticsToggle() throws {
         let source = try Self.source("Sources/RafuApp/Settings/RafuSettingsView.swift")
         #expect(source.contains("@AppStorage(RafuHaptics.canvasHapticsDefaultsKey)"))
-        #expect(source.contains("Toggle(\"Haptic feedback on the Canvas\""))
+        #expect(source.contains("Toggle(\"Haptic feedback on the Ensemble\""))
         #expect(source.contains("Plays only on Force Touch trackpads."))
         #expect(RafuHaptics.canvasHapticsDefaultsKey == "canvasHapticsEnabled")
     }

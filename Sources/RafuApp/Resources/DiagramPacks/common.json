@@ -1,0 +1,676 @@
+{
+  "version": 1,
+  "id": "common",
+  "name": "Common",
+  "vendor": "common",
+  "entries": [
+    {
+      "id": "user",
+      "name": "User",
+      "category": "People",
+      "symbol": "person.fill",
+      "keywords": [
+        "person",
+        "customer",
+        "client",
+        "actor",
+        "human"
+      ]
+    },
+    {
+      "id": "users",
+      "name": "Users",
+      "category": "People",
+      "symbol": "person.3.fill",
+      "keywords": [
+        "team",
+        "group",
+        "people",
+        "customers"
+      ]
+    },
+    {
+      "id": "admin",
+      "name": "Administrator",
+      "category": "People",
+      "symbol": "person.badge.key.fill",
+      "keywords": [
+        "admin",
+        "operator",
+        "staff"
+      ]
+    },
+    {
+      "id": "browser",
+      "name": "Browser",
+      "category": "Clients",
+      "symbol": "globe",
+      "keywords": [
+        "web",
+        "client",
+        "frontend",
+        "spa"
+      ]
+    },
+    {
+      "id": "mobile-app",
+      "name": "Mobile App",
+      "category": "Clients",
+      "symbol": "iphone",
+      "keywords": [
+        "ios",
+        "android",
+        "phone",
+        "client"
+      ]
+    },
+    {
+      "id": "desktop-app",
+      "name": "Desktop App",
+      "category": "Clients",
+      "symbol": "desktopcomputer",
+      "keywords": [
+        "mac",
+        "windows",
+        "client",
+        "native"
+      ]
+    },
+    {
+      "id": "laptop",
+      "name": "Laptop",
+      "category": "Clients",
+      "symbol": "laptopcomputer",
+      "keywords": [
+        "developer",
+        "workstation"
+      ]
+    },
+    {
+      "id": "iot-device",
+      "name": "IoT Device",
+      "category": "Clients",
+      "symbol": "antenna.radiowaves.left.and.right",
+      "keywords": [
+        "sensor",
+        "edge",
+        "device"
+      ]
+    },
+    {
+      "id": "internet",
+      "name": "Internet",
+      "category": "Networking",
+      "symbol": "globe.americas.fill",
+      "keywords": [
+        "public",
+        "web",
+        "www"
+      ]
+    },
+    {
+      "id": "api",
+      "name": "API",
+      "category": "Compute",
+      "symbol": "curlybraces",
+      "keywords": [
+        "rest",
+        "http",
+        "endpoint",
+        "service",
+        "backend"
+      ]
+    },
+    {
+      "id": "graphql",
+      "name": "GraphQL API",
+      "category": "Compute",
+      "symbol": "point.3.connected.trianglepath.dotted",
+      "keywords": [
+        "graph",
+        "query",
+        "api"
+      ]
+    },
+    {
+      "id": "server",
+      "name": "Server",
+      "category": "Compute",
+      "symbol": "server.rack",
+      "keywords": [
+        "host",
+        "machine",
+        "backend",
+        "instance"
+      ]
+    },
+    {
+      "id": "virtual-machine",
+      "name": "Virtual Machine",
+      "category": "Compute",
+      "symbol": "cpu",
+      "keywords": [
+        "vm",
+        "instance",
+        "ec2",
+        "compute"
+      ]
+    },
+    {
+      "id": "function",
+      "name": "Function",
+      "category": "Compute",
+      "symbol": "function",
+      "keywords": [
+        "serverless",
+        "lambda",
+        "faas",
+        "cloud",
+        "function"
+      ]
+    },
+    {
+      "id": "container",
+      "name": "Container",
+      "category": "Compute",
+      "symbol": "shippingbox.fill",
+      "keywords": [
+        "docker",
+        "image",
+        "pod"
+      ]
+    },
+    {
+      "id": "kubernetes",
+      "name": "Kubernetes Cluster",
+      "category": "Compute",
+      "symbol": "circle.hexagongrid.fill",
+      "keywords": [
+        "k8s",
+        "cluster",
+        "orchestration"
+      ]
+    },
+    {
+      "id": "microservice",
+      "name": "Microservice",
+      "category": "Compute",
+      "symbol": "cube.fill",
+      "keywords": [
+        "service",
+        "module"
+      ]
+    },
+    {
+      "id": "worker",
+      "name": "Worker",
+      "category": "Compute",
+      "symbol": "gearshape.2.fill",
+      "keywords": [
+        "background",
+        "job",
+        "consumer"
+      ]
+    },
+    {
+      "id": "scheduler",
+      "name": "Scheduler",
+      "category": "Compute",
+      "symbol": "clock.fill",
+      "keywords": [
+        "cron",
+        "timer",
+        "job"
+      ]
+    },
+    {
+      "id": "database",
+      "name": "Database",
+      "category": "Data",
+      "symbol": "cylinder.split.1x2.fill",
+      "keywords": [
+        "sql",
+        "postgres",
+        "mysql",
+        "rds",
+        "db",
+        "relational"
+      ]
+    },
+    {
+      "id": "nosql-database",
+      "name": "NoSQL Database",
+      "category": "Data",
+      "symbol": "tablecells.fill",
+      "keywords": [
+        "document",
+        "dynamodb",
+        "mongodb",
+        "key",
+        "value"
+      ]
+    },
+    {
+      "id": "cache",
+      "name": "Cache",
+      "category": "Data",
+      "symbol": "bolt.fill",
+      "keywords": [
+        "redis",
+        "memcached",
+        "in-memory"
+      ]
+    },
+    {
+      "id": "data-warehouse",
+      "name": "Data Warehouse",
+      "category": "Data",
+      "symbol": "square.stack.3d.up.fill",
+      "keywords": [
+        "analytics",
+        "bigquery",
+        "redshift",
+        "snowflake"
+      ]
+    },
+    {
+      "id": "search",
+      "name": "Search Engine",
+      "category": "Data",
+      "symbol": "magnifyingglass",
+      "keywords": [
+        "elasticsearch",
+        "opensearch",
+        "index"
+      ]
+    },
+    {
+      "id": "etl",
+      "name": "ETL Pipeline",
+      "category": "Data",
+      "symbol": "arrow.triangle.merge",
+      "keywords": [
+        "transform",
+        "extract",
+        "load",
+        "batch"
+      ]
+    },
+    {
+      "id": "analytics",
+      "name": "Analytics",
+      "category": "Data",
+      "symbol": "chart.bar.fill",
+      "keywords": [
+        "bi",
+        "reporting",
+        "dashboard"
+      ]
+    },
+    {
+      "id": "queue",
+      "name": "Queue",
+      "category": "Integration",
+      "symbol": "tray.full.fill",
+      "keywords": [
+        "sqs",
+        "rabbitmq",
+        "message",
+        "broker"
+      ]
+    },
+    {
+      "id": "stream",
+      "name": "Event Stream",
+      "category": "Integration",
+      "symbol": "water.waves",
+      "keywords": [
+        "kafka",
+        "kinesis",
+        "pubsub",
+        "events",
+        "streaming"
+      ]
+    },
+    {
+      "id": "topic",
+      "name": "Pub/Sub Topic",
+      "category": "Integration",
+      "symbol": "megaphone.fill",
+      "keywords": [
+        "sns",
+        "pubsub",
+        "broadcast",
+        "fanout"
+      ]
+    },
+    {
+      "id": "webhook",
+      "name": "Webhook",
+      "category": "Integration",
+      "symbol": "link",
+      "keywords": [
+        "callback",
+        "http"
+      ]
+    },
+    {
+      "id": "workflow",
+      "name": "Workflow",
+      "category": "Integration",
+      "symbol": "flowchart.fill",
+      "keywords": [
+        "step",
+        "functions",
+        "orchestration",
+        "state",
+        "machine"
+      ]
+    },
+    {
+      "id": "email",
+      "name": "Email",
+      "category": "Integration",
+      "symbol": "envelope.fill",
+      "keywords": [
+        "smtp",
+        "mail",
+        "ses"
+      ]
+    },
+    {
+      "id": "notification",
+      "name": "Push Notification",
+      "category": "Integration",
+      "symbol": "app.badge.fill",
+      "keywords": [
+        "push",
+        "alert",
+        "apns",
+        "fcm"
+      ]
+    },
+    {
+      "id": "realtime",
+      "name": "Realtime Connection",
+      "category": "Integration",
+      "symbol": "dot.radiowaves.left.and.right",
+      "keywords": [
+        "websocket",
+        "socket",
+        "live"
+      ]
+    },
+    {
+      "id": "object-storage",
+      "name": "Object Storage",
+      "category": "Storage",
+      "symbol": "archivebox.fill",
+      "keywords": [
+        "s3",
+        "bucket",
+        "blob",
+        "gcs"
+      ]
+    },
+    {
+      "id": "file-storage",
+      "name": "File Storage",
+      "category": "Storage",
+      "symbol": "folder.fill",
+      "keywords": [
+        "nfs",
+        "efs",
+        "share"
+      ]
+    },
+    {
+      "id": "block-storage",
+      "name": "Block Storage",
+      "category": "Storage",
+      "symbol": "externaldrive.fill",
+      "keywords": [
+        "disk",
+        "volume",
+        "ebs"
+      ]
+    },
+    {
+      "id": "cdn",
+      "name": "CDN",
+      "category": "Networking",
+      "symbol": "network",
+      "keywords": [
+        "cloudfront",
+        "edge",
+        "cache",
+        "content",
+        "delivery"
+      ]
+    },
+    {
+      "id": "dns",
+      "name": "DNS",
+      "category": "Networking",
+      "symbol": "signpost.right.fill",
+      "keywords": [
+        "route53",
+        "domain",
+        "name"
+      ]
+    },
+    {
+      "id": "load-balancer",
+      "name": "Load Balancer",
+      "category": "Networking",
+      "symbol": "arrow.triangle.branch",
+      "keywords": [
+        "lb",
+        "alb",
+        "nlb",
+        "elb",
+        "balancer"
+      ]
+    },
+    {
+      "id": "api-gateway",
+      "name": "API Gateway",
+      "category": "Networking",
+      "symbol": "arrow.left.arrow.right.circle.fill",
+      "keywords": [
+        "gateway",
+        "proxy",
+        "ingress"
+      ]
+    },
+    {
+      "id": "vpn",
+      "name": "VPN",
+      "category": "Networking",
+      "symbol": "lock.shield.fill",
+      "keywords": [
+        "tunnel",
+        "private",
+        "network"
+      ]
+    },
+    {
+      "id": "firewall",
+      "name": "Firewall",
+      "category": "Security",
+      "symbol": "shield.lefthalf.filled",
+      "keywords": [
+        "waf",
+        "security",
+        "group",
+        "network",
+        "policy"
+      ]
+    },
+    {
+      "id": "auth",
+      "name": "Authentication",
+      "category": "Security",
+      "symbol": "person.badge.key.fill",
+      "keywords": [
+        "identity",
+        "login",
+        "oauth",
+        "sso",
+        "iam",
+        "cognito"
+      ]
+    },
+    {
+      "id": "secrets",
+      "name": "Secrets Manager",
+      "category": "Security",
+      "symbol": "key.fill",
+      "keywords": [
+        "vault",
+        "keys",
+        "credentials",
+        "kms"
+      ]
+    },
+    {
+      "id": "monitoring",
+      "name": "Monitoring",
+      "category": "Operations",
+      "symbol": "chart.xyaxis.line",
+      "keywords": [
+        "metrics",
+        "observability",
+        "cloudwatch",
+        "grafana"
+      ]
+    },
+    {
+      "id": "logging",
+      "name": "Logging",
+      "category": "Operations",
+      "symbol": "list.bullet.rectangle.fill",
+      "keywords": [
+        "logs",
+        "audit",
+        "trail"
+      ]
+    },
+    {
+      "id": "alerting",
+      "name": "Alerting",
+      "category": "Operations",
+      "symbol": "bell.fill",
+      "keywords": [
+        "alarm",
+        "pager",
+        "oncall"
+      ]
+    },
+    {
+      "id": "ci-cd",
+      "name": "CI/CD Pipeline",
+      "category": "Operations",
+      "symbol": "arrow.triangle.2.circlepath",
+      "keywords": [
+        "build",
+        "deploy",
+        "pipeline",
+        "actions"
+      ]
+    },
+    {
+      "id": "repository",
+      "name": "Code Repository",
+      "category": "Operations",
+      "symbol": "chevron.left.forwardslash.chevron.right",
+      "keywords": [
+        "git",
+        "github",
+        "source"
+      ]
+    },
+    {
+      "id": "config",
+      "name": "Configuration",
+      "category": "Operations",
+      "symbol": "gearshape.fill",
+      "keywords": [
+        "settings",
+        "parameters",
+        "feature",
+        "flags"
+      ]
+    },
+    {
+      "id": "ml-model",
+      "name": "ML Model",
+      "category": "AI",
+      "symbol": "brain",
+      "keywords": [
+        "machine",
+        "learning",
+        "inference",
+        "model"
+      ]
+    },
+    {
+      "id": "llm",
+      "name": "LLM",
+      "category": "AI",
+      "symbol": "sparkles",
+      "keywords": [
+        "ai",
+        "large",
+        "language",
+        "model",
+        "agent",
+        "gpt",
+        "claude"
+      ]
+    },
+    {
+      "id": "payment",
+      "name": "Payments",
+      "category": "Third Party",
+      "symbol": "creditcard.fill",
+      "keywords": [
+        "stripe",
+        "billing",
+        "checkout"
+      ]
+    },
+    {
+      "id": "saas",
+      "name": "Third-Party Service",
+      "category": "Third Party",
+      "symbol": "cloud.fill",
+      "keywords": [
+        "external",
+        "saas",
+        "vendor"
+      ]
+    },
+    {
+      "id": "document",
+      "name": "Document",
+      "category": "General",
+      "symbol": "doc.fill",
+      "keywords": [
+        "file",
+        "report"
+      ]
+    },
+    {
+      "id": "media",
+      "name": "Media",
+      "category": "General",
+      "symbol": "play.rectangle.fill",
+      "keywords": [
+        "video",
+        "streaming",
+        "audio"
+      ]
+    }
+  ]
+}

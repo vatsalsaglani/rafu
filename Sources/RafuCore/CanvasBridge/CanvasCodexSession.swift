@@ -517,7 +517,7 @@ public nonisolated enum CanvasCodexSession {
             case .socket: "Codex did not open its private socket."
             case .control: "Codex did not complete the control connection."
             case .thread: "Codex did not prepare the terminal session."
-            case .binding: "Canvas could not bind the Codex session."
+            case .binding: "Ensemble could not bind the Codex session."
             case .proxy: "The Codex terminal transport could not start."
             case .terminal: "The Codex terminal interface could not start."
             }
