@@ -4,8 +4,10 @@ import SwiftUI
 struct WorkspaceStatusBar: View {
     @AppStorage("showsProcessMemory") private var showsProcessMemory = false
     @Environment(\.rafuTheme) private var theme
-    @State private var memorySample: ProcessMemorySample?
+    @Environment(\.openSettings) private var openSettings
     @Bindable var session: WorkspaceSession
+    /// Shared with the Resources popover so both always show the same reading.
+    private var memory = ResidentMemoryMonitor.shared
 
     private var descriptor: WorkspaceDescriptor? { session.descriptor }
 
@@ -27,8 +29,8 @@ struct WorkspaceStatusBar: View {
 
             GitHubAccountStatusView(session: session)
 
-            if showsProcessMemory, let memorySample {
-                Label(memorySample.formatted, systemImage: "memorychip")
+            if showsProcessMemory, let sample = memory.sample {
+                Label(ResourceMemoryFormat.label(sample.residentBytes), systemImage: "memorychip")
                     .foregroundStyle(theme.palette.textMuted)
                     .help("Rafu process resident memory. This is shared by all windows.")
             }
@@ -46,11 +48,23 @@ struct WorkspaceStatusBar: View {
                 ResourcesView(coordinator: session.languageIntelligence, session: session)
             }
 
-            Text(descriptor == nil ? "Ready" : "Local editor")
+            if let servers = StatusBarLanguageServerFormatter.present(
+                phases: session.languageIntelligence.servers.statuses.values.map(\.phase))
+            {
+                Button {
+                    session.isResourcesPresented = true
+                } label: {
+                    Label(servers.label, systemImage: servers.symbol)
+                        .lineLimit(1)
+                }
+                .buttonStyle(.plain)
                 .foregroundStyle(theme.palette.textMuted)
+                .help(servers.help)
+                .accessibilityLabel(servers.help)
+            }
 
             Button {
-                session.showSettings()
+                openSettings()
             } label: {
                 Image(systemName: "gearshape")
             }
@@ -66,13 +80,9 @@ struct WorkspaceStatusBar: View {
         .background(theme.palette.statusBarBackground)
         .overlay(alignment: .top) { Divider().overlay(theme.palette.borderSubtle) }
         .task(id: showsProcessMemory) {
-            guard showsProcessMemory else {
-                memorySample = nil
-                return
-            }
-            let sampler = ProcessMemorySampler()
+            guard showsProcessMemory else { return }
             while !Task.isCancelled {
-                memorySample = sampler.sample()
+                memory.refresh()
                 do {
                     try await Task.sleep(for: .seconds(5))
                 } catch {
@@ -154,6 +164,45 @@ struct WorkspaceStatusBar: View {
             presentation.isDetached
                 ? "Detached HEAD, switch branches"
                 : "Current branch \(presentation.label), switch branches")
+    }
+}
+
+/// Pure formatting for the status bar's language-server item. It reports a
+/// count and the worst state, with a shape-distinct symbol as well as words.
+/// No servers running means no item at all.
+nonisolated enum StatusBarLanguageServerFormatter {
+    struct Presentation: Equatable {
+        let label: String
+        let symbol: String
+        let help: String
+    }
+
+    static func present(phases: [LanguageServerStatus.Phase]) -> Presentation? {
+        guard !phases.isEmpty else { return nil }
+        let stopped = phases.filter { $0 == .dead || $0 == .ceilingKilled }.count
+        let starting = phases.filter {
+            $0 == .starting || $0 == .warmingUp || $0 == .backingOff
+        }.count
+        let noun = phases.count == 1 ? "language server" : "language servers"
+        if stopped > 0 {
+            return Presentation(
+                label: "\(stopped) stopped",
+                symbol: "exclamationmark.triangle",
+                help: "\(stopped) of \(phases.count) \(noun) stopped. Open Resources to restart."
+            )
+        }
+        if starting > 0 {
+            return Presentation(
+                label: "\(starting) starting",
+                symbol: "hourglass",
+                help: "\(starting) of \(phases.count) \(noun) starting"
+            )
+        }
+        return Presentation(
+            label: "\(phases.count) \(noun)",
+            symbol: "cpu",
+            help: "\(phases.count) \(noun) running. Open Resources for details."
+        )
     }
 }
 

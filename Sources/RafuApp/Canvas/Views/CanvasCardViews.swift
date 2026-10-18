@@ -95,12 +95,13 @@ struct CanvasCardShell: View {
                 CanvasWebCard(card: card, board: board, session: session)
             } else if case .file(let path) = card.content, board.focusedCardID == card.id {
                 CanvasFilePreview(path: path, session: session)
-            } else if case .note = card.content, board.focusedCardID == card.id {
-                CanvasNoteEditor(
+            } else if case .note = card.content {
+                CanvasNoteCard(
                     card: card, board: board, session: session,
                     presentationID: presentationID,
                     isCurrentPresentation: session.canvasResources[board.id]?.canPresent(
-                        owner: presentationID) == true)
+                        owner: presentationID) == true,
+                    scale: board.viewport.scale)
             } else if case .image(let path) = card.content {
                 Button(action: activateCard) {
                     CanvasImageContent(path: path, session: session).padding(12)

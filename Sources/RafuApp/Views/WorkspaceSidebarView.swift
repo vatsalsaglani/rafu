@@ -38,7 +38,7 @@ struct WorkspaceSidebarView: View {
                 }
             }
             .listStyle(.plain)
-            .environment(\.defaultMinListRowHeight, 22)
+            .environment(\.defaultMinListRowHeight, 24)
             .scrollContentBackground(.hidden)
             // Finder (or cross-workspace) drops on the tree background land in
             // the workspace root; folder rows below claim their own drops.
@@ -75,17 +75,25 @@ struct WorkspaceSidebarView: View {
         }
     }
 
-    /// Just the action strip — no workspace name. The folder name already
-    /// lives in the window title (and truncated badly in a narrow sidebar),
-    /// so the header stays a quiet right-aligned row of icon actions.
+    /// Workspace name at the leading end (13 pt semibold, truncating) so
+    /// several windows are told apart at a glance; the icon actions sit at the
+    /// trailing end. "Filter Files" is the file-name filter (the Go to File
+    /// palette); workspace-wide text search belongs to the right rail alone.
     private var sidebarHeader: some View {
         HStack(spacing: 4) {
+            Text(workspaceTitle)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(theme.palette.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help(workspaceTitle)
+                .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 8)
-            Button("Search Workspace", systemImage: "magnifyingglass") {
-                session.navigatorMode = .search
+            Button("Filter Files", systemImage: "line.3.horizontal.decrease") {
+                session.showCommandPalette(seed: "")
             }
             .buttonStyle(RafuIconButtonStyle(size: 24))
-            .help("Search Workspace")
+            .help("Filter Files (⌘P)")
             Button("New File", systemImage: "doc.badge.plus") {
                 session.requestFileCreation(isDirectory: false)
             }
@@ -98,15 +106,17 @@ struct WorkspaceSidebarView: View {
             .help("New Folder")
         }
         .padding(.horizontal, 10)
-        // Top-heavy on purpose: centers the 24 pt icons on the same
-        // baseline as the top-left sidebar toggle (center ≈ 24 pt from the
-        // window top now that the header sits in the titlebar zone).
-        .padding(.top, 12)
-        .padding(.bottom, 7)
+        // The header sits directly below the titlebar row.
+        .padding(.top, 6)
+        .padding(.bottom, 6)
         // The header's empty leading run doubles as a window-move surface
         // (`isMovable` is off; see WindowDragHandle). The icon buttons above
         // still win hit-testing.
         .background(WindowDragHandle())
+    }
+
+    private var workspaceTitle: String {
+        session.descriptor?.displayName ?? "Files"
     }
 
     private var renameBinding: Binding<Bool> {

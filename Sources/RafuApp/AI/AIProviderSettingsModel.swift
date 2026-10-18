@@ -22,6 +22,10 @@ final class AIProviderSettingsModel {
     var draftMaxOutputTokens = 256
     var apiKey = ""
     private(set) var hasStoredAPIKey = false
+    /// Ids of providers the store has written. A provider added with the "+"
+    /// button is in `configurations` but not here until the first Save, so the
+    /// view can tell "unchanged" from "never saved".
+    private(set) var persistedIDs: Set<UUID> = []
     private(set) var status = Status.idle
 
     @ObservationIgnored private let configurationStore: any AIProviderConfigurationStoring
@@ -53,6 +57,7 @@ final class AIProviderSettingsModel {
             configurations =
                 stored.isEmpty
                 ? [AIProviderConfiguration.defaultConfiguration(for: .openAI)] : stored
+            persistedIDs = Set(stored.map(\.id))
             let preferredID = await configurationStore.selectedConfigurationID()
             let resolvedID =
                 preferredID.flatMap { preferredID in
@@ -146,6 +151,7 @@ final class AIProviderSettingsModel {
             hasStoredAPIKey = true
         }
         try await configurationStore.save(configurations)
+        persistedIDs = Set(configurations.map(\.id))
         await configurationStore.setSelectedConfigurationID(configuration.id)
         status = .success("Provider saved.")
     }
@@ -167,6 +173,7 @@ final class AIProviderSettingsModel {
         configurations.removeAll { $0.id == selectedID }
         try await secretStore.removeSecret(for: selectedID)
         try await configurationStore.save(configurations)
+        persistedIDs = Set(configurations.map(\.id))
         if let next = configurations.first {
             await select(next.id)
         } else {

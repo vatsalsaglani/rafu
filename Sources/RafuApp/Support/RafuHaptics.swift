@@ -26,6 +26,7 @@ enum RafuHaptics {
             return
         }
         lastPerformed[channel] = now
-        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .drawCompleted)
+        NSHapticFeedbackManager.defaultPerformer.perform(
+            .alignment, performanceTime: .drawCompleted)
     }
 }

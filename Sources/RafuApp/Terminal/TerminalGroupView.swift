@@ -20,6 +20,22 @@ nonisolated enum TerminalPanePresentation {
             ?? "Terminal Pane"
     }
 
+    /// The name shown in the pane header: the user's name, then a title the
+    /// shell reported (unless it is only a path), then an automatic
+    /// "command — folder" name from the working directory.
+    static func displayName(for pane: TerminalPaneSnapshot, workingDirectory: String?) -> String {
+        if let explicit = pane.explicitUserName?.rawValue { return explicit }
+        if let title = pane.reportedTitle?.rawValue,
+            !WorkspaceTerminalController.isPathLikeTitle(title)
+        {
+            return title
+        }
+        let folder = TerminalNaming.folderName(
+            path: workingDirectory ?? folderLabel(for: pane), workspaceRoot: nil)
+        return TerminalNaming.automaticName(
+            command: providerIdentity(for: pane.runtimeKind), folder: folder)
+    }
+
     static func providerIdentity(for kind: TerminalPaneRuntimeKind) -> String {
         switch kind {
         case .ordinaryShell: "Shell"
@@ -179,7 +195,7 @@ private struct TerminalGroupPaneView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
-            "\(TerminalPanePresentation.name(for: pane)), \(statusLabel), \(folderAccessibilityLabel)"
+            "\(displayName), \(statusLabel), \(folderAccessibilityLabel)"
         )
         .accessibilityValue(isFocused ? "Focused pane" : "Pane")
     }
@@ -207,7 +223,7 @@ private struct TerminalGroupPaneView: View {
             }
             .buttonStyle(.plain)
             .help("Rename terminal pane")
-            .accessibilityLabel("Rename \(TerminalPanePresentation.name(for: pane))")
+            .accessibilityLabel("Rename \(displayName)")
             if pane.status == .exited, pane.runtimeKind == .ordinaryShell {
                 Button {
                     action(.restart(pane.id))
@@ -217,7 +233,7 @@ private struct TerminalGroupPaneView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Restart terminal pane")
-                .accessibilityLabel("Restart \(TerminalPanePresentation.name(for: pane))")
+                .accessibilityLabel("Restart \(displayName)")
             }
             if pane.status == .stopped, pane.startAvailability == .available {
                 Button {
@@ -228,7 +244,7 @@ private struct TerminalGroupPaneView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Start terminal pane")
-                .accessibilityLabel("Start \(TerminalPanePresentation.name(for: pane))")
+                .accessibilityLabel("Start \(displayName)")
             }
             Button {
                 action(.close(pane.id))
@@ -238,7 +254,7 @@ private struct TerminalGroupPaneView: View {
             }
             .buttonStyle(.plain)
             .help("Close terminal pane")
-            .accessibilityLabel("Close \(TerminalPanePresentation.name(for: pane))")
+            .accessibilityLabel("Close \(displayName)")
         }
         .padding(.horizontal, 8)
         .frame(minHeight: 28)
@@ -265,12 +281,18 @@ private struct TerminalGroupPaneView: View {
                 .onAppear { nameFieldFocused = true }
                 .accessibilityLabel("Terminal pane name")
         } else {
-            Text(TerminalPanePresentation.name(for: pane))
+            Text(displayName)
                 .font(.callout.weight(.medium))
                 .lineLimit(1)
                 .help(metadataHelp)
                 .accessibilityAddTraits(.isHeader)
         }
+    }
+
+    private var displayName: String {
+        TerminalPanePresentation.displayName(
+            for: pane,
+            workingDirectory: controller?.currentDirectoryPath ?? controller?.startingDirectory)
     }
 
     private var paneTint: Color {
@@ -332,11 +354,20 @@ private struct TerminalGroupPaneView: View {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if pane.status == .stopped {
-            ContentUnavailableView(
-                "Terminal Pane Stopped",
-                systemImage: "stop.circle",
-                description: Text("Start this pane when you are ready.")
-            )
+            ContentUnavailableView {
+                Label("Terminal Pane Stopped", systemImage: "stop.circle")
+            } description: {
+                Text("Start this pane when you are ready.")
+            } actions: {
+                if pane.startAvailability == .available {
+                    Button("Start Shell") {
+                        action(.start(pane.id))
+                    }
+                    .buttonStyle(RafuProminentButtonStyle())
+                    .help("Start terminal pane")
+                    .accessibilityLabel("Start \(displayName)")
+                }
+            }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ContentUnavailableView(

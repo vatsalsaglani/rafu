@@ -1,6 +1,22 @@
 import AppKit
 import SwiftUI
 
+/// Content-free presentation helpers for the front-matter card, kept outside
+/// the view so the wording is directly testable.
+nonisolated enum MarkdownFrontmatterPresentation {
+    /// The header count, in normal case. It counts the rows the card shows
+    /// (`fields`), never the keys lifted into the title or description, so
+    /// the number always matches what the reader can see. `nil` for zero rows:
+    /// "0 fields" next to an empty ledger says nothing.
+    static func countLabel(rowCount: Int) -> String? {
+        switch rowCount {
+        case ..<1: nil
+        case 1: "1 field"
+        default: "\(rowCount) fields"
+        }
+    }
+}
+
 struct MarkdownFrontmatterCard: View {
     let result: MarkdownFrontmatterParseResult
 
@@ -54,10 +70,13 @@ struct MarkdownFrontmatterCard: View {
                         .tracking(-0.19)
                         .foregroundStyle(theme.palette.textPrimary)
                 }
-                Text("\(metadata.fieldCount) FIELDS")
-                    .font(.system(size: 10, weight: .semibold))
-                    .tracking(1.2)
-                    .foregroundStyle(theme.palette.textMuted)
+                if let count = MarkdownFrontmatterPresentation.countLabel(
+                    rowCount: metadata.fields.count)
+                {
+                    Text(count)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(theme.palette.textSecondary)
+                }
             }
 
             Spacer(minLength: RafuMetrics.space2)

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Right-hand utility panel hosting Search and Source Control.
@@ -30,14 +31,53 @@ struct WorkspaceUtilityPanelView: View {
     }
 }
 
+/// The window's titlebar row: the standard close / minimise / zoom buttons
+/// (always visible outside full screen, drawn by AppKit in the reserved
+/// leading space) followed by the one sidebar toggle as a plain toolbar icon.
+/// The rest of the row is a window-move surface. In full screen the system
+/// owns the (auto-hidden) buttons, so no space is reserved.
+struct WindowTitlebarRow: View {
+    @Bindable var session: WorkspaceSession
+    let isFullScreen: Bool
+
+    @Environment(\.rafuTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Height of the standard titlebar, so the system buttons and the toggle
+    /// share one centre line.
+    nonisolated static let height: CGFloat = 28
+    /// Width of the zone the system window buttons occupy (x ≈ 12…70).
+    nonisolated static let trafficLightSpan: CGFloat = 76
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Color.clear
+                .frame(width: isFullScreen ? 8 : Self.trafficLightSpan, height: Self.height)
+            Button("Toggle Sidebar", systemImage: "sidebar.left") {
+                if let animation = RafuMotion.resolve(
+                    RafuMotion.panelToggle, reduceMotion: reduceMotion)
+                {
+                    withAnimation(animation) { session.toggleSidebar() }
+                } else {
+                    session.toggleSidebar()
+                }
+            }
+            .buttonStyle(RafuIconButtonStyle(size: 24, iconSize: 13))
+            .help(session.isSidebarCollapsed ? "Show Sidebar (⌘B)" : "Hide Sidebar (⌘B)")
+            .accessibilityLabel("Toggle Sidebar")
+            .accessibilityValue(session.isSidebarCollapsed ? "Hidden" : "Shown")
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: Self.height)
+        .background(WindowDragHandle())
+        .background(theme.palette.sidebarBackground)
+    }
+}
+
 /// Slim column pinned to the window's LEFT edge, mirroring
-/// `WorkspaceUtilityRail` on the right. The app's ONE sidebar toggle
-/// (ADR 0002) visually sits at the top of this rail, but the button itself
-/// lives in `WindowTopLeftControlCluster`, overlaid by
-/// `WorkspaceWindowView`: the window content extends into the titlebar zone
-/// (`.ignoresSafeArea(.top)` + `FlatWindowChrome`), and the toggle must
-/// slide right of the traffic lights when they reveal — a 40 pt column
-/// cannot host that travel.
+/// `WorkspaceUtilityRail` on the right. It is a window-move surface; the
+/// sidebar toggle lives in `WindowTitlebarRow` above it.
 struct WorkspaceSidebarRail: View {
     @Environment(\.rafuTheme) private var theme
 
@@ -46,75 +86,6 @@ struct WorkspaceSidebarRail: View {
             .frame(width: 40)
             .frame(maxHeight: .infinity)
             .background(theme.palette.sidebarBackground)
-    }
-}
-
-/// The window's top-left control cluster, overlaid in the titlebar zone.
-/// Holds the sidebar toggle and, in front of it, the space the traffic
-/// lights occupy when revealed. Outside full screen the lights stay hidden
-/// (`FlatWindowChrome.hidesTrafficLights`) until the pointer enters this
-/// cluster; the toggle then slides right to clear them (the cmux-style
-/// hover-reveal validated in the TitleBarProto spike).
-struct WindowTopLeftControlCluster: View {
-    @Bindable var session: WorkspaceSession
-    /// The traffic lights currently occupy top-left window space.
-    let lightsVisible: Bool
-    /// Hover tracking is meaningless in full screen, where the system owns
-    /// the (auto-hidden) lights.
-    let hoverTrackingEnabled: Bool
-    let onHoverChange: (Bool) -> Void
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    /// Width of the zone the system traffic lights occupy (x ≈ 12…70).
-    private static let trafficLightSpan: CGFloat = 76
-    /// Matches the tab-strip / sidebar-header top row.
-    private static let rowHeight: CGFloat = 36
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Color.clear
-                .frame(width: lightsVisible ? Self.trafficLightSpan : 0, height: Self.rowHeight)
-            Button("Toggle Sidebar", systemImage: "sidebar.left") {
-                if reduceMotion {
-                    session.toggleSidebar()
-                } else {
-                    withAnimation(.spring(duration: 0.25)) {
-                        session.toggleSidebar()
-                    }
-                }
-            }
-            .buttonStyle(
-                RafuRailButtonStyle(
-                    isSelected: !session.isSidebarCollapsed,
-                    deckFacingEdge: .trailing,
-                    tooltip: session.isSidebarCollapsed
-                        ? "Show Sidebar (⌘B)" : "Hide Sidebar (⌘B)"
-                )
-            )
-            .accessibilityLabel("Toggle Sidebar")
-            .accessibilityValue(session.isSidebarCollapsed ? "Hidden" : "Shown")
-            .padding(.leading, lightsVisible ? 0 : 5)
-        }
-        // Breathing room below the window's top edge; also drops the toggle
-        // onto the traffic lights' own baseline when they reveal.
-        .padding(.top, 6)
-        .frame(height: Self.rowHeight + 6, alignment: .top)
-        // The cluster is exactly as wide as its content: rail-width while
-        // the lights are hidden, lights + toggle while revealed. Keeping the
-        // collapsed zone narrow matters — a wider invisible zone would eat
-        // clicks meant for the sidebar header's leading edge.
-        .contentShape(Rectangle())
-        .onHover { inside in
-            guard hoverTrackingEnabled else { return }
-            if reduceMotion {
-                onHoverChange(inside)
-            } else {
-                withAnimation(.easeOut(duration: 0.18)) {
-                    onHoverChange(inside)
-                }
-            }
-        }
     }
 }
 
@@ -131,9 +102,8 @@ struct WorkspaceUtilityRail: View {
             railButton(.runs)
             Spacer()
         }
-        // Centers the first 30 pt button on the sidebar toggle's baseline
-        // (center ≈ 24 pt) now that the rail reaches the window's top edge.
-        .padding(.top, 9)
+        // The rail starts below the titlebar row (`WindowTitlebarRow`).
+        .padding(.top, 8)
         .frame(width: 40)
         .frame(maxHeight: .infinity)
         .fixedSize(horizontal: true, vertical: false)
@@ -289,16 +259,16 @@ private struct WorkspaceSearchContent: View {
             }
             .font(.caption)
             .foregroundStyle(theme.palette.textSecondary)
-            HStack(spacing: 6) {
-                searchOptionButton(
-                    "Case", accessibilityLabel: "Case Sensitive",
-                    symbol: "textformat", option: .caseSensitive)
-                searchOptionButton(
-                    "Whole Word", accessibilityLabel: "Whole Word",
-                    symbol: "character.cursor.ibeam", option: .wholeWord)
-                searchOptionButton(
-                    "Regex", accessibilityLabel: "Regular Expression",
-                    symbol: "asterisk", option: .regularExpression)
+            HStack(spacing: 4) {
+                RafuOptionToggle(
+                    glyph: .text("Aa"), label: "Match Case",
+                    isOn: optionBinding(.caseSensitive))
+                RafuOptionToggle(
+                    glyph: .text("ab", underlined: true), label: "Whole Word",
+                    isOn: optionBinding(.wholeWord))
+                RafuOptionToggle(
+                    glyph: .text(".*", monospaced: true), label: "Regular Expression",
+                    isOn: optionBinding(.regularExpression))
                 Spacer()
                 if search.isSearching { ProgressView().controlSize(.small) }
                 if let result = search.result {
@@ -335,7 +305,7 @@ private struct WorkspaceSearchContent: View {
         if let preview = search.replacementPreview {
             List {
                 ForEach(preview.files) { file in
-                    Section(file.relativePath) {
+                    Section {
                         ForEach(file.edits) { edit in
                             Button {
                                 session.openSearchLocation(fileURL: file.fileURL, range: edit.range)
@@ -356,6 +326,10 @@ private struct WorkspaceSearchContent: View {
                             }
                             .buttonStyle(.plain)
                         }
+                    } header: {
+                        fileHeader(
+                            relativePath: file.relativePath, count: file.edits.count,
+                            noun: "replacements")
                     }
                 }
             }
@@ -364,24 +338,32 @@ private struct WorkspaceSearchContent: View {
         } else if let result = search.result, !result.groups.isEmpty {
             List {
                 ForEach(result.groups) { group in
-                    Section(group.relativePath) {
+                    Section {
                         ForEach(group.matches) { match in
                             Button {
                                 session.openSearchMatch(group, match: match)
                             } label: {
                                 HStack(alignment: .firstTextBaseline, spacing: 7) {
-                                    Text("\(match.line):\(match.column)")
+                                    Text("\(match.line)")
                                         .font(.caption2.monospacedDigit())
                                         .foregroundStyle(theme.palette.textMuted)
-                                        .frame(width: 44, alignment: .trailing)
-                                    Text(match.preview).font(.caption.monospaced())
-                                        .foregroundStyle(theme.palette.textPrimary)
-                                        .lineLimit(2)
+                                        .frame(width: 32, alignment: .trailing)
+                                    Text(snippetText(for: match))
+                                        .font(.caption.monospaced())
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             .buttonStyle(.plain)
+                            .help("Line \(match.line), column \(match.column)")
+                            .accessibilityLabel(
+                                "Line \(match.line), column \(match.column): \(match.preview)")
                         }
+                    } header: {
+                        fileHeader(
+                            relativePath: group.relativePath, count: group.matches.count,
+                            noun: "matches")
                     }
                 }
             }
@@ -439,44 +421,136 @@ private struct WorkspaceSearchContent: View {
         search.previewReplacements(in: rootURL)
     }
 
-    private func searchOptionButton(
-        _ title: String,
-        accessibilityLabel: String,
-        symbol: String,
-        option: TextSearchOptions
-    ) -> some View {
-        let selected = search.options.contains(option)
-        return Button(title, systemImage: symbol) {
-            if selected {
-                search.options.remove(option)
-            } else {
-                search.options.insert(option)
+    private func optionBinding(_ option: TextSearchOptions) -> Binding<Bool> {
+        Binding(
+            get: { search.options.contains(option) },
+            set: { isOn in
+                if isOn {
+                    search.options.insert(option)
+                } else {
+                    search.options.remove(option)
+                }
             }
-        }
-        .font(.caption)
-        .foregroundStyle(selected ? theme.palette.textPrimary : theme.palette.textSecondary)
-        .padding(.horizontal, 6)
-        .frame(minHeight: 24)
-        .background(
-            selected ? theme.palette.selection : Color.clear,
-            in: RoundedRectangle(
-                cornerRadius: RafuMetrics.radiusDenseSelection,
-                style: .continuous
-            )
         )
-        .overlay {
-            RoundedRectangle(
-                cornerRadius: RafuMetrics.radiusDenseSelection,
-                style: .continuous
-            )
-            .strokeBorder(
-                selected ? theme.palette.borderStrong : theme.palette.borderSubtle,
-                lineWidth: RafuMetrics.hairline
-            )
+    }
+
+    /// One result line: the match in the find-match colour, bold, with a little
+    /// context on each side. The line is cut around the match, not at the start.
+    private func snippetText(for match: WorkspaceSearchMatch) -> AttributedString {
+        let snippet = SearchResultSnippet.make(
+            preview: match.preview, column: match.column, matchLength: match.range.length)
+        var before = AttributedString(snippet.prefix)
+        before.foregroundColor = theme.palette.textSecondary
+        var hit = AttributedString(snippet.match)
+        hit.font = .caption.monospaced().bold()
+        hit.foregroundColor = theme.palette.textPrimary
+        hit.backgroundColor = Color(nsColor: theme.editorFindMatchBackgroundColor)
+        var after = AttributedString(snippet.suffix)
+        after.foregroundColor = theme.palette.textSecondary
+        return before + hit + after
+    }
+
+    /// File header: icon, name, folder (secondary) and a match-count capsule.
+    private func fileHeader(relativePath: String, count: Int, noun: String) -> some View {
+        let parts = SearchResultPathParts.split(relativePath)
+        let icon = FileIconProvider.fileIcon(named: parts.name)
+        return HStack(spacing: 6) {
+            FileIconView(icon: icon, size: 12)
+                .accessibilityHidden(true)
+            Text(parts.name)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(theme.palette.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .layoutPriority(1)
+            if !parts.folder.isEmpty {
+                Text(parts.folder)
+                    .font(.caption)
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
+            Spacer(minLength: 4)
+            RafuChip(text: "\(count)", monospacedDigit: true)
         }
-        .buttonStyle(.plain)
-        .help(accessibilityLabel)
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        .textCase(nil)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(relativePath), \(count) \(noun)")
+    }
+}
+
+/// Splits a workspace-relative path into the file name and its folder, for
+/// the search result file header (name first, folder in secondary text).
+nonisolated enum SearchResultPathParts {
+    static func split(_ relativePath: String) -> (name: String, folder: String) {
+        guard let slash = relativePath.lastIndex(of: "/") else { return (relativePath, "") }
+        let name = String(relativePath[relativePath.index(after: slash)...])
+        let folder = String(relativePath[..<slash])
+        return (name.isEmpty ? relativePath : name, folder)
+    }
+}
+
+/// A one-line search result cut around its match: a little leading context,
+/// the match itself, and trailing context. Offsets are UTF-16 (`NSString`),
+/// matching `WorkspaceSearchMatch.column` and `range`.
+nonisolated struct SearchResultSnippet: Equatable, Sendable {
+    let prefix: String
+    let match: String
+    let suffix: String
+
+    static func make(
+        preview: String,
+        column: Int,
+        matchLength: Int,
+        contextBefore: Int = 24,
+        maximumMatch: Int = 48,
+        contextAfter: Int = 72
+    ) -> SearchResultSnippet {
+        let line = preview as NSString
+        let length = line.length
+        // Skip the indentation: a result starts at the first visible character.
+        var firstVisible = 0
+        while firstVisible < length, isWhitespace(line.character(at: firstVisible)) {
+            firstVisible += 1
+        }
+        let matchStart = min(max(column - 1, 0), length)
+        guard matchStart < length else {
+            // The match lies beyond the clipped preview; show the line start.
+            let text = line.substring(from: min(firstVisible, length))
+            return SearchResultSnippet(prefix: text, match: "", suffix: "")
+        }
+        let lowerBound = min(firstVisible, matchStart)
+        var begin = max(lowerBound, matchStart - contextBefore)
+        if begin > lowerBound, begin < length {
+            begin = line.rangeOfComposedCharacterSequence(at: begin).location
+        }
+        var matchEnd = min(matchStart + max(matchLength, 0), length)
+        var matchWasCut = false
+        if matchEnd - matchStart > maximumMatch {
+            matchEnd = matchStart + maximumMatch
+            matchWasCut = true
+        }
+        if matchEnd < length {
+            matchEnd = NSMaxRange(line.rangeOfComposedCharacterSequence(at: max(matchEnd - 1, 0)))
+        }
+        var suffixEnd = min(matchEnd + contextAfter, length)
+        if suffixEnd < length {
+            suffixEnd = NSMaxRange(
+                line.rangeOfComposedCharacterSequence(at: max(suffixEnd - 1, 0)))
+        }
+        let leading = begin > lowerBound ? "…" : ""
+        let trailing = (suffixEnd < length || matchWasCut) ? "…" : ""
+        return SearchResultSnippet(
+            prefix: leading
+                + line.substring(with: NSRange(location: begin, length: matchStart - begin)),
+            match: line.substring(
+                with: NSRange(location: matchStart, length: matchEnd - matchStart)),
+            suffix: line.substring(with: NSRange(location: matchEnd, length: suffixEnd - matchEnd))
+                + trailing
+        )
+    }
+
+    private static func isWhitespace(_ unit: unichar) -> Bool {
+        unit == 0x20 || unit == 0x09
     }
 }

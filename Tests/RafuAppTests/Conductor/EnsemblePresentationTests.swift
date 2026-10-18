@@ -68,6 +68,41 @@ struct EnsemblePresentationTests {
         }
     }
 
+    @Test("Form headers are title case and the Budget is rows with right-aligned controls")
+    func headersAreTitleCaseAndBudgetIsRows() throws {
+        let startCanvas = try source("Sources/RafuApp/Views/EnsembleStartCanvas.swift")
+        let list = try source("Sources/RafuApp/Views/EnsembleCLISelectionList.swift")
+        let goalPane = try source("Sources/RafuApp/Views/EnsembleGoalPane.swift")
+
+        #expect(startCanvas.contains("title: \"Lead Coordinator\""))
+        #expect(startCanvas.contains("title: \"Budget\""))
+        #expect(startCanvas.contains("title: \"Allowed CLIs\""))
+        #expect(!startCanvas.contains("Budget grant"))
+        #expect(!startCanvas.contains("title: \"Lead coordinator\""))
+        for file in [startCanvas, list, goalPane] {
+            #expect(!file.contains(".textCase(.uppercase)"))
+        }
+        #expect(startCanvas.contains("EnsembleBudgetRow(title: \"Concurrent child runs\")"))
+        #expect(startCanvas.contains("EnsembleBudgetRow(title: \"Total child runs\")"))
+        #expect(startCanvas.contains("EnsembleBudgetRow(title: \"Deadline\")"))
+        #expect(startCanvas.contains(".labelsHidden()"))
+        #expect(startCanvas.contains("Button(primaryTitle)"))
+        #expect(startCanvas.contains("Button(\"Close\", action: session.closeEnsembleStart)"))
+    }
+
+    @Test("Selection rows are one 32 pt line and show the model only on the chosen row")
+    func selectionRowsAreCompact() throws {
+        let list = try source("Sources/RafuApp/Views/EnsembleCLISelectionList.swift")
+
+        #expect(list.contains("static var rowHeight: CGFloat { 32 }"))
+        #expect(list.contains(".frame(minHeight: Self.rowHeight)"))
+        #expect(list.contains("} else if selection.isSelected {"))
+        // The radio or checkbox glyph leads the line.
+        let glyph = try #require(list.range(of: "Image(systemName: selection.symbolName)"))
+        let name = try #require(list.range(of: "Text(option.displayName)"))
+        #expect(glyph.lowerBound < name.lowerBound)
+    }
+
     private func source(_ path: String, file: StaticString = #filePath) throws -> String {
         var directory = URL(fileURLWithPath: "\(file)").deletingLastPathComponent()
         while directory.path != "/" {

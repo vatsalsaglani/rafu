@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Settings > Language Servers: the curated catalog, batching packs, and a
-/// user's own custom entries. Thin — every list/action lives in
+/// Settings > Language Servers: the curated catalog as one table (Server,
+/// Languages, Status, Size, Action), the batching packs, a user's own custom
+/// entries, and workspace trust. Thin — every list/action lives in
 /// `LanguageServersCatalogModel`; this view only lays the rows out and
 /// wires their button actions to `beginX()` model calls.
 struct LanguageServersSettingsSection: View {
@@ -12,22 +13,20 @@ struct LanguageServersSettingsSection: View {
         @Bindable var model = model
 
         Group {
-            RafuSettingsSection {
+            Section {
+                LanguageServerTable(rows: model.rows, model: model, showsRemove: false)
+            } header: {
                 HStack {
                     Text("Curated Servers")
                     Spacer()
-                    Button("Refresh") { model.beginRefresh() }
-                        .buttonStyle(.link)
-                }
-            } content: {
-                ForEach(model.rows) { row in
-                    LanguageServerCatalogRow(
-                        row: row,
-                        onInstall: { model.beginInstall(id: row.id) },
-                        onUpdate: { model.beginUpdate(id: row.id) },
-                        onUninstall: { model.beginUninstall(id: row.id) },
-                        onCancel: { model.cancelInstall(id: row.id) }
-                    )
+                    Button {
+                        model.beginRefresh()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Refresh")
+                    .accessibilityLabel("Refresh")
                 }
             } footer: {
                 Text(
@@ -36,39 +35,24 @@ struct LanguageServersSettingsSection: View {
                 )
             }
 
-            RafuSettingsSection {
-                Text("Packs")
-            } content: {
-                DisclosureGroup("Packs") {
-                    ForEach(model.packs) { pack in
-                        LanguageServerPackRow(
-                            pack: pack,
-                            onInstall: { model.beginInstallPack(id: pack.id) },
-                            onCancel: { model.cancelInstall(id: pack.id) }
-                        )
-                    }
+            Section("Packs") {
+                ForEach(model.packs) { pack in
+                    LanguageServerPackRow(
+                        pack: pack,
+                        onInstall: { model.beginInstallPack(id: pack.id) },
+                        onCancel: { model.cancelInstall(id: pack.id) }
+                    )
                 }
             }
 
-            RafuSettingsSection {
-                Text("Custom Servers")
-            } content: {
-                ForEach(model.userRows) { row in
-                    LanguageServerCatalogRow(
-                        row: row,
-                        onInstall: { model.beginInstall(id: row.id) },
-                        onUpdate: { model.beginUpdate(id: row.id) },
-                        onUninstall: { model.beginUninstall(id: row.id) },
-                        onCancel: { model.cancelInstall(id: row.id) },
-                        onRemove: { model.beginRemoveUserEntry(id: row.id) }
-                    )
+            Section("Custom Servers") {
+                if !model.userRows.isEmpty {
+                    LanguageServerTable(rows: model.userRows, model: model, showsRemove: true)
                 }
                 Button("Add Custom Server…") { model.isPresentingEntryForm = true }
             }
 
-            RafuSettingsSection {
-                Text("Workspace Trust")
-            } content: {
+            Section {
                 if trustModel.rows.isEmpty {
                     Text("No workspaces have approved a language server yet.")
                         .foregroundStyle(.secondary)
@@ -77,6 +61,8 @@ struct LanguageServersSettingsSection: View {
                         WorkspaceTrustApprovalRow(row: row, onRevoke: { trustModel.revoke(row) })
                     }
                 }
+            } header: {
+                Text("Workspace Trust")
             } footer: {
                 Text(
                     "Revoking takes effect the next time the workspace is reopened; a server "
@@ -128,6 +114,113 @@ struct LanguageServersSettingsSection: View {
             Text(model.presentedError ?? "")
         }
         .task { await model.load() }
+    }
+}
+
+/// Pure text and sizing rules for the server table, kept apart from the views
+/// so a test can pin them.
+nonisolated enum LanguageServerTablePresentation {
+    static let rowHeight: CGFloat = 28
+    static let headerHeight: CGFloat = 30
+    static let maximumHeight: CGFloat = 360
+
+    /// Tall enough for every row without an inner scroll bar, up to a cap.
+    static func tableHeight(rowCount: Int) -> CGFloat {
+        min(maximumHeight, headerHeight + rowHeight * CGFloat(max(rowCount, 1)))
+    }
+
+    static func statusText(_ state: LanguageServersCatalogModel.InstallState) -> String {
+        switch state {
+        case .notInstalled: "Not installed"
+        case .installed(let version): "Installed · \(version)"
+        case .availableViaToolchain: "Available via toolchain"
+        case .unavailableToolchain: "Toolchain not found"
+        case .prerequisiteMissing: "Prerequisite missing"
+        }
+    }
+
+    static func sizeText(_ source: ServerSource?) -> String {
+        guard let source else { return "—" }
+        guard let bytes = source.estimatedBytes else { return "Unknown" }
+        return Int64(bytes).formatted(.byteCount(style: .file))
+    }
+}
+
+/// One table of servers: Server, Languages, Status, Size, Action.
+private struct LanguageServerTable: View {
+    let rows: [LanguageServersCatalogModel.CatalogRowState]
+    let model: LanguageServersCatalogModel
+    let showsRemove: Bool
+
+    var body: some View {
+        Table(rows) {
+            TableColumn("Server") { row in
+                Text(row.descriptor.displayName)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+            }
+            .width(min: 90, ideal: 120)
+            TableColumn("Languages") { row in
+                Text(row.descriptor.languageIDs.joined(separator: ", "))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .help(row.descriptor.languageIDs.joined(separator: ", "))
+            }
+            .width(min: 80, ideal: 130)
+            TableColumn("Status") { row in
+                Text(LanguageServerTablePresentation.statusText(row.installState))
+                    .lineLimit(1)
+            }
+            .width(min: 80, ideal: 110)
+            TableColumn("Size") { row in
+                Text(LanguageServerTablePresentation.sizeText(row.descriptor.source))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .width(min: 56, ideal: 66, max: 90)
+            TableColumn("Action") { row in
+                LanguageServerActions(row: row, model: model, showsRemove: showsRemove)
+            }
+            .width(min: 120, ideal: 150)
+        }
+        .frame(height: LanguageServerTablePresentation.tableHeight(rowCount: rows.count))
+    }
+}
+
+/// The action cluster for one server row, chosen by install state.
+private struct LanguageServerActions: View {
+    let row: LanguageServersCatalogModel.CatalogRowState
+    let model: LanguageServersCatalogModel
+    let showsRemove: Bool
+
+    var body: some View {
+        if row.progressActive {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Button("Cancel", role: .cancel) { model.cancelInstall(id: row.id) }
+            }
+        } else {
+            HStack(spacing: 8) {
+                switch row.installState {
+                case .notInstalled:
+                    Button("Install…") { model.beginInstall(id: row.id) }
+                case .installed:
+                    Button("Update") { model.beginUpdate(id: row.id) }
+                    Button("Uninstall", role: .destructive) { model.beginUninstall(id: row.id) }
+                case .availableViaToolchain:
+                    Text("Available").foregroundStyle(.secondary)
+                case .unavailableToolchain, .prerequisiteMissing:
+                    Text("Not Available").foregroundStyle(.secondary)
+                }
+                if showsRemove {
+                    Button("Remove", role: .destructive) {
+                        model.beginRemoveUserEntry(id: row.id)
+                    }
+                }
+            }
+            .buttonStyle(.borderless)
+        }
     }
 }
 

@@ -2352,6 +2352,56 @@ final class WorkspaceSession {
         }
     }
 
+    /// Renames one saved layout in the library. Only the name changes: the
+    /// layout tree and pane profiles are copied unchanged. A name conflict or
+    /// invalid name is reported in the Terminal Group alert.
+    func renameSavedTerminalGroup(_ savedLayoutID: SavedTerminalGroupID, to rawName: String) {
+        guard let rootURL, terminalGroupMutationTask == nil,
+            let record = savedTerminalGroups.first(where: { $0.id == savedLayoutID })
+        else { return }
+        guard let name = TerminalGroupName(rawName) else {
+            presentTerminalGroupError("Enter a valid Terminal Group name.")
+            return
+        }
+        guard name != record.name else { return }
+        let request: TerminalGroupSavedLayoutSaveRequest
+        do {
+            let renamed = try SavedTerminalGroupRecord(
+                id: record.id, name: name, root: record.root,
+                focusedPaneID: record.focusedPaneID, panes: record.panes)
+            request = try TerminalGroupSavedLayoutSaveRequest(
+                workspaceKey: TerminalGroupWorkspaceKey(standardizedRoot: rootURL),
+                operation: .save(existingID: record.id), group: renamed)
+        } catch {
+            presentTerminalGroupError(error.localizedDescription)
+            return
+        }
+        let key = request.workspaceKey
+        let generation = terminalGroupWorkspaceGeneration
+        terminalGroupMutationEpoch &+= 1
+        let epoch = terminalGroupMutationEpoch
+        terminalGroupMutationTask = Task { [weak self] in
+            do {
+                guard let self else { return }
+                let store = await self.resolvedTerminalGroupSavedLayoutStore()
+                _ = try await store.saveSavedLayout(request)
+                guard !Task.isCancelled,
+                    self.terminalGroupWorkspaceGeneration == generation,
+                    self.terminalGroupMutationEpoch == epoch
+                else { return }
+                self.terminalGroupMutationTask = nil
+                self.loadTerminalGroupLibrary(key: key, generation: generation)
+            } catch {
+                guard let self, !Task.isCancelled,
+                    self.terminalGroupWorkspaceGeneration == generation,
+                    self.terminalGroupMutationEpoch == epoch
+                else { return }
+                self.terminalGroupMutationTask = nil
+                self.presentTerminalGroupError(error.localizedDescription)
+            }
+        }
+    }
+
     /// Save uses the open instance only as a snapshot source. It never
     /// replaces its live pane tree with data read from the named library.
     func requestTerminalGroupSave(_ groupID: TerminalGroupID) {

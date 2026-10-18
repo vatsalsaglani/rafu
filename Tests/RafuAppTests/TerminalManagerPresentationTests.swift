@@ -164,21 +164,23 @@ func managerPresentationInputsStaySeparate() {
 
 @Suite("Terminal manager source contract")
 struct TerminalManagerSourceContractTests {
-    @Test("The panel uses one shared header, adaptive named launch cells, and 48 point rows")
+    @Test("The panel uses one shared header, one Start Agent pull-down, and 48 point rows")
     func compactTerminalManagerGeometry() throws {
         let panel = try Self.source("Sources/RafuApp/Views/WorkspaceTerminalsPanelView.swift")
 
         #expect(panel.contains("RafuUtilityPanelHeader("))
         #expect(panel.contains(#"title: "Terminals""#))
-        #expect(panel.contains("GridItem(.adaptive(minimum: 86, maximum: 160), spacing: 6"))
+        #expect(panel.contains("AgentStartMenuView("))
+        #expect(panel.contains(#"Text("Start Agent")"#))
+        #expect(panel.contains("AgentLauncherModel.checkingLine(agentCount: rows.count)"))
+        #expect(!panel.contains("LazyVGrid"))
         #expect(panel.contains("Text(row.displayName)"))
-        #expect(panel.contains("base: 34"))
         #expect(panel.contains("LazyVStack(spacing: 6)"))
         #expect(panel.contains("base: 48"))
         #expect(panel.contains("RafuPanelEmptyState("))
     }
 
-    @Test("The header keeps one direct default action and adds a two-shell picker affordance")
+    @Test("The header is one split pull-down: plus starts a shell, the arrow lists shells")
     func headerUsesSplitTerminalAction() throws {
         let panel = try Self.source("Sources/RafuApp/Views/WorkspaceTerminalsPanelView.swift")
         let header = try Self.section(
@@ -187,13 +189,15 @@ struct TerminalManagerSourceContractTests {
             in: panel
         )
 
-        #expect(header.components(separatedBy: "session.newTerminalTab()").count - 1 == 1)
-        #expect(header.contains("if session.availableTerminalShells.count >= 2"))
-        #expect(header.contains(#"Label("Choose Terminal Shell", systemImage: "chevron.down")"#))
-        #expect(header.contains("TerminalShellPickerView("))
+        // Exactly one default-shell start and one explicit-shell start.
+        #expect(header.components(separatedBy: "session.newTerminalTab()").count - 1 == 2)
         #expect(header.contains("session.newTerminalTab(shell: shell)"))
-        #expect(header.contains("isShellPickerPresented = false"))
-        #expect(!header.contains("Menu(\"New Terminal With Shell\")"))
+        #expect(header.contains("if shells.count >= 2"))
+        #expect(header.contains("primaryAction:"))
+        #expect(header.contains("TerminalNaming.shellMenuTitle(for: shell, among: shells)"))
+        #expect(header.contains(#"Label("New Terminal", systemImage: "plus")"#))
+        #expect(!header.contains("chevron.down"))
+        #expect(!header.contains("TerminalShellPickerView("))
     }
 
     @Test("Launcher help and accessibility carry provider readiness and unavailable reasons")
@@ -201,6 +205,7 @@ struct TerminalManagerSourceContractTests {
         let panel = try Self.source("Sources/RafuApp/Views/WorkspaceTerminalsPanelView.swift")
 
         #expect(panel.contains(".help(row.tooltip)"))
+        #expect(panel.contains("Text(row.stateLabel)"))
         #expect(panel.contains(".accessibilityLabel(row.accessibilityLabel)"))
         #expect(panel.contains(#"Image(systemName: "checkmark")"#))
         #expect(panel.contains(#"Image(systemName: "exclamationmark.triangle")"#))
@@ -216,6 +221,7 @@ struct TerminalManagerSourceContractTests {
         #expect(panel.contains(".menuIndicator(.hidden)"))
         #expect(panel.contains(".fixedSize()"))
         #expect(panel.contains(#"Image(systemName: "ellipsis")"#))
+        #expect(panel.contains(#".help("Actions for \(row.displayName)")"#))
         #expect(panel.contains(#".help("Actions for \(row.name)")"#))
         #expect(panel.contains(#".accessibilityLabel("Actions for \(row.name)")"#))
         #expect(panel.contains("renamingPaneID == pane.id"))
@@ -223,6 +229,36 @@ struct TerminalManagerSourceContractTests {
         #expect(panel.contains("session.renameTerminalPane(paneID, to: paneRenameText)"))
         #expect(panel.contains("session.setTerminalPaneColor(pane.id, color)"))
         #expect(panel.contains("TerminalPaneThemeColor.presets"))
+    }
+
+    @Test("Group and pane menus use the redesign wording and never say Parked")
+    func menuWordingFollowsGlossary() throws {
+        let panel = try Self.source("Sources/RafuApp/Views/WorkspaceTerminalsPanelView.swift")
+
+        #expect(panel.contains(#"Button("Rename…", action: beginRename)"#))
+        #expect(panel.contains(#"Button("Save Layout…", action: saveLayout)"#))
+        #expect(panel.contains(#"Button("Start All Panes", action: startAll)"#))
+        #expect(panel.contains("exited shells"))
+        #expect(panel.contains(#"Button("Close Group", role: .destructive, action: close)"#))
+        #expect(!panel.contains("Start All Restartable Panes"))
+        #expect(!panel.contains(#""Parked""#))
+        #expect(!panel.contains("panes · "))
+        #expect(panel.contains("symbolRenderingMode(.palette)"))
+        #expect(panel.contains("TerminalColorDot("))
+    }
+
+    @Test("Saved groups open on double-click and keep Delete in a confirmed menu")
+    func savedLayoutRowsUseMenuAndDoubleClick() throws {
+        let saved = try Self.source("Sources/RafuApp/Views/TerminalGroupSavedLayoutsSection.swift")
+
+        #expect(saved.contains(".onTapGesture(count: 2)"))
+        #expect(saved.contains(#"Button("Open", action: open)"#))
+        #expect(saved.contains(#"Button("Rename…", action: beginRename)"#))
+        #expect(saved.contains(#"Button("Delete…", role: .destructive, action: requestDelete)"#))
+        #expect(saved.contains(".confirmationDialog("))
+        #expect(!saved.contains(#"Button("Open") {"#))
+        #expect(!saved.contains(".buttonStyle(.borderless)"))
+        #expect(saved.contains("session.renameSavedTerminalGroup(id, to: renameText)"))
     }
 
     @Test("Current derives from focus, not selectedID, and drives the shared manager-row resolver")
