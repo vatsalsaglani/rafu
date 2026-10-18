@@ -9,6 +9,12 @@ struct AuxiliaryEditorTabContent: View {
             switch tab {
             case .settings:
                 SettingsCanvas(session: session, showsTabStrip: false)
+            case .agentSession(let reference):
+                AgentSessionTabView(
+                    reference: reference,
+                    model: session.agentHistory.transcripts[reference.key],
+                    session: session,
+                    isActive: session.selectedAuxiliaryTab == tab)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

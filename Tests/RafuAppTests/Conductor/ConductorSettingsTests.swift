@@ -350,7 +350,7 @@ func settingsRowCarriesNoCredential() {
 func retiredRunsNavigatorModeFallsBackToFiles() throws {
     let data = Data("\"runs\"".utf8)
     #expect(try JSONDecoder().decode(WorkspaceNavigatorMode.self, from: data) == .files)
-    #expect(WorkspaceNavigatorMode.allCases.count == 4)
+    #expect(WorkspaceNavigatorMode.allCases.count == 5)
 }
 
 @Test("An unknown navigator mode still falls back to .files")

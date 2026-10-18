@@ -47,6 +47,27 @@ final class ExternalOpenRequests {
     }
 
     var hasPending: Bool { !pending.isEmpty || !pendingWorkspaceFiles.isEmpty }
+
+    /// Folders that must open in a NEW window (Agent History's "Open Project
+    /// Folder"). Kept apart from `pending` because the key window consumes
+    /// `pending` itself, which would replace the workspace the user is in.
+    /// Only a fresh scene's startup takes these.
+    @ObservationIgnored private var pendingForNewWindow: [URL] = []
+
+    func enqueueForNewWindow(_ url: URL) {
+        pendingForNewWindow.append(url)
+    }
+
+    func cancelNewWindowRequest(_ url: URL) {
+        if let index = pendingForNewWindow.lastIndex(of: url) {
+            pendingForNewWindow.remove(at: index)
+        }
+    }
+
+    func takeForNewWindow() -> URL? {
+        guard !pendingForNewWindow.isEmpty else { return nil }
+        return pendingForNewWindow.removeFirst()
+    }
 }
 
 /// Receives `application(_:open:)` for folders passed by `open -a` (the CLI

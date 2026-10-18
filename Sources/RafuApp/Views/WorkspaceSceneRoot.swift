@@ -55,7 +55,9 @@ struct WorkspaceSceneRoot: View {
                 FirstLaunchExperienceModel.shared.offerOnFirstLaunch(hostedBy: session)
                 return
             }
-            if let url = ExternalOpenRequests.shared.take() {
+            if let url = ExternalOpenRequests.shared.takeForNewWindow()
+                ?? ExternalOpenRequests.shared.take()
+            {
                 WorkspaceRestorationGate.hasRestored = true
                 session.openLocalWorkspace(at: url)
                 FirstLaunchExperienceModel.shared.offerOnFirstLaunch(hostedBy: session)

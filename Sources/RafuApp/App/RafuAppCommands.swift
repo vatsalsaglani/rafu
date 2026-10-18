@@ -149,6 +149,13 @@ struct RafuAppCommands: Commands {
             }
             .keyboardShortcut("g", modifiers: [.command, .shift])
 
+            // Agent History (X12): ⌘⇧H, next to ⌘⇧F Search and ⌘⇧G Source Control.
+            Button("Show Agent History") {
+                workspaceSession?.toggleUtilityPane(.history)
+            }
+            .keyboardShortcut("h", modifiers: [.command, .shift])
+            .disabled(workspaceSession?.rootURL == nil)
+
             Divider()
 
             Button("Stage Hunk") {
