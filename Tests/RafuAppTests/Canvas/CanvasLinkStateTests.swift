@@ -164,7 +164,8 @@ struct CanvasLinkStateTests {
         #expect(
             CanvasLinkText.tooltip(
                 from: "claude — api", to: "codex — tests", isMessageLink: true, state: .live,
-                count: 3, label: nil) == "claude — api ⇄ codex — tests · Live · 3 messages in 10 min")
+                count: 3, label: nil)
+                == "claude — api ⇄ codex — tests · Live · 3 messages in 10 min")
         #expect(
             CanvasLinkText.tooltip(
                 from: "A", to: "B", isMessageLink: true, state: .live, count: 1, label: nil)

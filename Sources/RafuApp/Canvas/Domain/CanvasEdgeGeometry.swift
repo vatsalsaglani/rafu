@@ -76,7 +76,8 @@ nonisolated struct CanvasEdgeCurve: Equatable, Sendable {
         for index in 1..<points.count {
             best = min(
                 best,
-                CanvasEdgeGeometry.distance(from: target, toSegment: points[index - 1], points[index]))
+                CanvasEdgeGeometry.distance(
+                    from: target, toSegment: points[index - 1], points[index]))
         }
         return best
     }
@@ -293,8 +294,10 @@ nonisolated enum CanvasEdgeGeometry {
         for (key, group) in uses {
             guard let rect = rects[key.card] else { continue }
             let ordered = group.sorted { lhs, rhs in
-                let l = key.side.isHorizontal ? (lhs.other.y, lhs.other.x) : (lhs.other.x, lhs.other.y)
-                let r = key.side.isHorizontal ? (rhs.other.y, rhs.other.x) : (rhs.other.x, rhs.other.y)
+                let l =
+                    key.side.isHorizontal ? (lhs.other.y, lhs.other.x) : (lhs.other.x, lhs.other.y)
+                let r =
+                    key.side.isHorizontal ? (rhs.other.y, rhs.other.x) : (rhs.other.x, rhs.other.y)
                 if l.0 != r.0 { return l.0 < r.0 }
                 if l.1 != r.1 { return l.1 < r.1 }
                 if lhs.tie != rhs.tie { return lhs.tie < rhs.tie }

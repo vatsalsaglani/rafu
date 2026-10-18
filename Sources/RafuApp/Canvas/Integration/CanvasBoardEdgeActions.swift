@@ -76,7 +76,8 @@ extension CanvasBoardState {
     func setConnectionLabel(_ id: UUID, to text: String) {
         guard let edge = connection(id) else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let label = trimmed.isEmpty ? CanvasConnection.placeholderLabel(for: edge.behavior) : trimmed
+        let label =
+            trimmed.isEmpty ? CanvasConnection.placeholderLabel(for: edge.behavior) : trimmed
         guard CanvasDocument.validTitle(label) else {
             errorMessage = "A label needs 1 to 120 characters and no control characters."
             return
