@@ -132,6 +132,21 @@ final class NotchCompanionModel: NSObject {
     /// synchronously, so panel presentation never blocks on file I/O (or,
     /// once network strategies land, a network round-trip).
     private(set) var usageSnapshots: [UsageSnapshot] = []
+    /// When each snapshot in `usageSnapshots` was read. A stale (retained)
+    /// snapshot keeps its original time. See `UsageSnapshotRetention`.
+    private(set) var usageObservedAt: [UsageProviderID: Date] = [:]
+    /// Providers whose last refresh failed and that show their last
+    /// successful snapshot instead.
+    private(set) var usageStaleProviderIDs: Set<UsageProviderID> = []
+    /// Providers with network consent at the last refresh — decides whether
+    /// a local-only card offers "Connect" or "Reconnect".
+    private(set) var usageNetworkConsentIDs: Set<UsageProviderID> = []
+    /// `true` while a refresh runs; cards show a spinner.
+    private(set) var isUsageRefreshing = false
+    /// Used/Remaining for every usage ring (Settings ▸ Usage).
+    private(set) var usageDisplayMode: UsageDisplayMode = UsageDisplayModeStore().mode()
+    @ObservationIgnored
+    var usageDisplayModeStore = UsageDisplayModeStore()
     /// The user's front-line ordering (agent-usage-providers.md: "up to 4
     /// tiles the user picks and orders in Settings"). Not a test seam —
     /// every headless test either asserts `usageSnapshots` directly or
@@ -348,8 +363,8 @@ final class NotchCompanionModel: NSObject {
 
     /// The recognised agent CLI behind a terminal (`resolvedAgentProvider`,
     /// `Support/AgentIdentity.swift`): the process spec's provider when Rafu
-    /// launched it, else whatever its terminal title says. `nil` for an
-    /// ordinary shell.
+    /// launched it, else the hook session, the foreground process, or the
+    /// sticky title match. `nil` for an ordinary shell.
     static func agentIdentity(of controller: WorkspaceTerminalController) -> ConductorCLIID? {
         controller.resolvedAgentProvider
     }
@@ -360,7 +375,7 @@ final class NotchCompanionModel: NSObject {
     ) -> NotchTerminalInput {
         NotchTerminalInput(
             id: controller.id,
-            title: controller.displayName,
+            title: controller.presentedTitle,
             cli: agentIdentity(of: controller),
             status: controller.status,
             isProducingOutput: controller.isProducingOutput,
@@ -817,16 +832,58 @@ final class NotchCompanionModel: NSObject {
         }
         lastUsageRefreshDate = now
         usageRefreshTask?.cancel()
+        isUsageRefreshing = true
         let reader = usageReader
         let task = Task { [weak self] in
-            let snapshots = await Task.detached(priority: .utility) {
-                await reader.snapshots(now: now)
+            let result = await Task.detached(priority: .utility) {
+                let snapshots = await reader.snapshots(now: now)
+                let ids = reader.descriptors.map(\.id)
+                let consent = Set(
+                    reader.descriptors.filter { $0.authPattern.connectAffordance != .none }
+                        .map(\.id).filter(reader.hasNetworkConsent))
+                let enabled = Set(ids.filter(reader.isEnabled))
+                return (snapshots, consent, enabled, ids)
             }.value
-            guard !Task.isCancelled else { return }
-            self?.usageSnapshots = snapshots
+            guard !Task.isCancelled, let self else { return }
+            self.applyUsageRefresh(
+                fresh: result.0, now: now, networkConsent: result.1, enabled: result.2,
+                registryOrder: result.3)
         }
         usageRefreshTask = task
         return task
+    }
+
+    private func applyUsageRefresh(
+        fresh: [UsageSnapshot], now: Date, networkConsent: Set<UsageProviderID>,
+        enabled: Set<UsageProviderID>, registryOrder: [UsageProviderID]
+    ) {
+        let merged = UsageSnapshotRetention.merge(
+            previous: usageSnapshots, previousObservedAt: usageObservedAt, fresh: fresh,
+            now: now, enabled: enabled, networkConsent: networkConsent,
+            registryOrder: registryOrder)
+        usageSnapshots = merged.snapshots
+        usageObservedAt = merged.observedAt
+        usageStaleProviderIDs = merged.staleProviderIDs
+        usageNetworkConsentIDs = networkConsent
+        isUsageRefreshing = false
+    }
+
+    func setUsageDisplayMode(_ mode: UsageDisplayMode) {
+        guard mode != usageDisplayMode else { return }
+        usageDisplayMode = mode
+        usageDisplayModeStore.setMode(mode)
+    }
+
+    /// Everything one provider card needs, derived from the last refresh.
+    /// `nil` when the provider has no snapshot.
+    func usageCard(for id: UsageProviderID) -> UsageProviderCardModel? {
+        guard let snapshot = usageSnapshots.first(where: { $0.providerID == id }) else {
+            return nil
+        }
+        return UsageProviderCardModel(
+            snapshot: snapshot, observedAt: usageObservedAt[id],
+            isStale: usageStaleProviderIDs.contains(id),
+            hasNetworkConsent: usageNetworkConsentIDs.contains(id))
     }
 
     private func startUsageTimerIfNeeded() {
@@ -848,6 +905,7 @@ final class NotchCompanionModel: NSObject {
         cancelTimers()
         stopUsageTimer()
         usageRefreshTask?.cancel()
+        isUsageRefreshing = false
         clearKeyEngagement()
         searchQuery = ""
         if let panel {

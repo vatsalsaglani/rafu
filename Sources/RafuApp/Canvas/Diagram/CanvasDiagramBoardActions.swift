@@ -11,6 +11,7 @@ extension CanvasBoardState {
     }
 
     /// Moves a frame and its members by (dx, dy) board points as one undo step.
+    /// The frame's size is derived (`normalizeFrames`), so only moves exist.
     func moveFrame(_ id: CanvasCardID, by delta: CGSize) throws {
         let moves = CanvasFrameLayout.frameMove(
             id, dx: Double(delta.width), dy: Double(delta.height),
@@ -116,28 +117,5 @@ extension CanvasBoardState {
         let x = (Double(visibleSize.width) / 2 - viewport.x) / viewport.scale
         let y = (Double(visibleSize.height) / 2 - viewport.y) / viewport.scale
         return CGPoint(x: x, y: y)
-    }
-
-    // MARK: Follow and stacking (no undo step of their own)
-
-    /// Moves members that did not move with their frame. The surrounding
-    /// gesture or edit owns the undo step.
-    func applyFrameFollow(_ moves: [CanvasCardID: CanvasRect]) {
-        guard !moves.isEmpty else { return }
-        for (id, rect) in moves { setRect(rect, for: id) }
-        requestSave?()
-    }
-
-    /// Puts every frame back behind its members when an edit raised it.
-    func restackFramesIfNeeded() {
-        let nodes = CanvasFrameLayout.nodes(cards)
-        let stacked = CanvasFrameLayout.stackedFramesBehindMembers(nodes)
-        guard stacked.map(\.id) != nodes.map(\.id) else { return }
-        let order = Dictionary(
-            uniqueKeysWithValues: stacked.enumerated().map { ($1.id, $0) })
-        refreshResources { document in
-            document.cards.sort { (order[$0.id] ?? 0) < (order[$1.id] ?? 0) }
-        }
-        requestSave?()
     }
 }

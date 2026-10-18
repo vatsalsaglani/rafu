@@ -853,7 +853,7 @@ private struct TerminalSessionRowView: View {
                         if let color = row.sessionColor {
                             TerminalColorDot(color: theme.palette.color(for: color))
                         }
-                        Text(row.displayName)
+                        Text(row.presentedTitle)
                             .fontWeight(isCurrent ? .semibold : .medium)
                             .lineLimit(1)
                             .truncationMode(.middle)
@@ -1060,9 +1060,9 @@ private struct TerminalSessionRowView: View {
     }
 
     private var accessibilityLabel: String {
-        var parts = [row.displayName]
+        var parts = [row.presentedTitle]
         if let provider = row.resolvedAgentProvider,
-            provider.displayName != row.displayName
+            provider.displayName != row.presentedTitle
         {
             parts.append(provider.displayName)
         }

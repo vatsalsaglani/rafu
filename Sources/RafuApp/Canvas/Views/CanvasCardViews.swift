@@ -127,12 +127,16 @@ struct CanvasCardShell: View {
         }
     }
 
+    /// No zones on a frame: its size is derived from its members.
+    @ViewBuilder
     private func resizeZones(scale: Double, selected: Bool) -> some View {
-        CanvasResizeZones(
-            size: CGSize(width: card.rect.width, height: card.rect.height),
-            scale: scale, showsHandles: selected,
-            changed: { edges, value in resizeChanged(edges, value) },
-            ended: { resizeEnded() })
+        if !card.content.hasDerivedSize {
+            CanvasResizeZones(
+                size: CGSize(width: card.rect.width, height: card.rect.height),
+                scale: scale, showsHandles: selected,
+                changed: { edges, value in resizeChanged(edges, value) },
+                ended: { resizeEnded() })
+        }
     }
 
     /// Ports appear only while the pointer is over the card (and stay while a
@@ -399,8 +403,20 @@ struct CanvasCardShell: View {
 
     // MARK: Header state
 
+    /// The card title. A terminal node that still has its automatic title
+    /// ("Terminal") and runs an agent shows the agent's task title, or its
+    /// name ("Claude Code"), beside the agent's mark. A renamed node keeps
+    /// its name.
     private var displayTitle: String {
-        CanvasCardPresentation.displayTitle(title: card.title, content: card.content)
+        if TerminalNaming.isAutomaticGroupName(card.title), let cli = agentCLI {
+            let controller = terminalPane.flatMap {
+                session.terminal.terminalController(for: $0.id)
+            }
+            return TerminalSessionPresentation.agentTitle(
+                reportedTitle: controller?.reportedTitle ?? terminalReportedTitle, provider: cli,
+                shellName: controller?.shellDisplayName)
+        }
+        return CanvasCardPresentation.displayTitle(title: card.title, content: card.content)
     }
 
     private var accessibilityTitle: String {
@@ -568,7 +584,10 @@ struct CanvasCardShell: View {
         let frames = moveOrigins.values.map(\.cgRect)
         if let first = frames.first, !NSEvent.modifierFlags.contains(.command) {
             let union = frames.dropFirst().reduce(first) { $0.union($1) }
-            let others = board.cards.filter { !ids.contains($0.id) }.map(\.rect.cgRect)
+            // Frame edges follow their members, so they are no snap targets.
+            let others = board.cards.filter {
+                !ids.contains($0.id) && !$0.content.hasDerivedSize
+            }.map(\.rect.cgRect)
             let snap = CanvasSnapper.snap(
                 moving: union.offsetBy(dx: CGFloat(dx), dy: CGFloat(dy)), others: others,
                 scale: scale)
@@ -582,22 +601,27 @@ struct CanvasCardShell: View {
             snappedY = false
             interaction.show(guides: [])
         }
+        // One batch, so the frame refit sees the whole group moved at once.
+        var rects: [CanvasCardID: CanvasRect] = [:]
         for (id, origin) in moveOrigins {
             var rect = origin
             rect.x = min(50_000, max(-50_000, origin.x + dx))
             rect.y = min(50_000, max(-50_000, origin.y + dy))
-            board.setRect(rect, for: id)
+            rects[id] = rect
         }
+        board.setRects(rects)
     }
 
     private func finishMove() {
         // Off a guide the card lands on the 8 pt grid; on a guide it stays exact.
-        for id in moveOrigins.keys {
-            guard var rect = board.cards.first(where: { $0.id == id })?.rect else { continue }
+        var rects: [CanvasCardID: CanvasRect] = [:]
+        for card in board.cards where moveOrigins[card.id] != nil {
+            var rect = card.rect
             if !snappedX { rect.x = (rect.x / 8).rounded() * 8 }
             if !snappedY { rect.y = (rect.y / 8).rounded() * 8 }
-            board.setRect(rect, for: id)
+            rects[card.id] = rect
         }
+        board.setRects(rects)
         board.endGesture()
         interaction.clearGuides(fade: true)
         CanvasMotion.animate(RafuMotion.setDown) { isLifted = false }
@@ -681,8 +705,13 @@ private struct CanvasCardAccessibility: ViewModifier {
             .accessibilityAction(named: "Move Right") { commands.move(dx: 8, dy: 0) }
             .accessibilityAction(named: "Move Up") { commands.move(dx: 0, dy: -8) }
             .accessibilityAction(named: "Move Down") { commands.move(dx: 0, dy: 8) }
-            .accessibilityAction(named: "Make Larger") { commands.resize(dw: 8, dh: 8) }
-            .accessibilityAction(named: "Make Smaller") { commands.resize(dw: -8, dh: -8) }
+            .accessibilityActions {
+                // A frame fits its members; it has no size of its own.
+                if !card.content.hasDerivedSize {
+                    Button("Make Larger") { commands.resize(dw: 8, dh: 8) }
+                    Button("Make Smaller") { commands.resize(dw: -8, dh: -8) }
+                }
+            }
             .accessibilityAction(named: "Remove from Ensemble") { commands.requestRemoval() }
     }
 }

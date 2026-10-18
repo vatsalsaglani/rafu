@@ -89,11 +89,16 @@ types only into terminals **you** created: text into an agent terminal, or a
      ```
 
      The result maps each local `id` to the created node ID
-     (`created_nodes`).
+     (`created_nodes`). The longest chain of edges goes on one line and
+     branches go beside it. Gaps grow with the edge labels, so keep labels
+     short (a few words); a label that does not fit between two nodes is
+     shortened with "…" on the board.
 - Single nodes: `node_create` kinds `service_icon` (`pack_id`, `icon_id`,
   `label`), `shape` (`shape`: rectangle, ellipse, diamond), `text`, `note`.
 - Frames group nodes: `frame_create {"title": "Backend", "member_ids": [...]}`.
-  Moving a frame moves its members.
+  A frame always fits its members: it grows, shrinks and moves with them.
+  Moving a frame moves its members. Do not set a frame's `width` or
+  `height`; Rafu ignores them. To change a frame, move its members.
 - Links between diagram nodes: `edge_create` with `kind` `relationship` and a
   `label`.
 - Export: `export {"format": "png", "scale": 2}`, `{"format": "pdf"}`, or

@@ -19,6 +19,7 @@ struct RafuSettingsView: View {
     /// eagerly would perform each pane's task-driven load when Settings first
     /// opens, and rebuilding on revisit would repeat it.
     @State private var visitedPanes: Set<SettingsPane> = [.general]
+    private let paneRouter = SettingsPaneRouter.shared
 
     var body: some View {
         TabView(selection: $pane) {
@@ -39,6 +40,14 @@ struct RafuSettingsView: View {
         .rafuTheme(activeTheme)
         .preferredColorScheme(preferredColorScheme)
         .onChange(of: pane) { _, newPane in visitedPanes.insert(newPane) }
+        .onAppear { showRequestedPane() }
+        .onChange(of: paneRouter.requestedPane) { showRequestedPane() }
+    }
+
+    private func showRequestedPane() {
+        guard let requested = paneRouter.takeRequest() else { return }
+        visitedPanes.insert(requested)
+        pane = requested
     }
 
     @ViewBuilder

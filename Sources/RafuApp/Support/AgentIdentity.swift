@@ -83,6 +83,100 @@ nonisolated enum AgentIdentityMatcher {
         return words[normalizedWord(String(first))]
     }
 
+    /// `true` when `text` is nothing but a name of `cli` ("claude",
+    /// "claude code", "codex-cli"). Case and leading glyphs are ignored.
+    static func isBareName(_ text: String, of cli: ConductorCLIID) -> Bool {
+        let lowered = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = String(lowered.drop(while: { !$0.isLetter && !$0.isNumber }))
+        guard !trimmed.isEmpty else { return false }
+        if trimmed == cli.displayName.lowercased() { return true }
+        if phrases.contains(where: { $0.prefix == trimmed && $0.cli == cli }) { return true }
+        guard !trimmed.contains(where: \.isWhitespace) else { return false }
+        return words[normalizedWord(trimmed)] == cli
+    }
+
+    /// Interpreters and launchers that run an agent CLI as a script
+    /// (`node …/@openai/codex/bin/codex.js`, `bun x claude`, a `bash`
+    /// wrapper). For these, the first operand names the agent.
+    private static let interpreters: Set<String> = [
+        "node", "nodejs", "bun", "deno", "tsx", "python", "python3", "ruby", "env",
+        "sh", "bash", "zsh", "dash",
+    ]
+
+    /// Script extensions removed before the stem is matched (`codex.js`).
+    private static let scriptExtensions: Set<String> = [
+        "js", "mjs", "cjs", "ts", "mts", "py", "sh",
+    ]
+
+    /// A foreground process (name, executable path, leading argv) to its
+    /// CLI. Checks, in order: the process name, the executable's file name,
+    /// `argv[0]`, then, for an interpreter, its first operand: the script's
+    /// stem, the package directory after `node_modules`, or a hyphenated
+    /// product directory (`claude-code`, `gemini-cli`) anywhere in the path.
+    static func match(
+        processName: String, executablePath: String?, arguments: [String]
+    ) -> ConductorCLIID? {
+        let executableName = executablePath.map(lastPathComponent)
+        let argumentZero = arguments.first.map(lastPathComponent)
+        for candidate in [processName, executableName, argumentZero].compactMap(\.self) {
+            if let found = words[normalizedProcessWord(candidate)] { return found }
+        }
+        let launcherNames = [processName, executableName, argumentZero].compactMap(\.self)
+            .map(normalizedProcessWord)
+        guard launcherNames.contains(where: interpreters.contains),
+            let operand = firstOperand(in: arguments)
+        else { return nil }
+        return match(scriptOperand: operand)
+    }
+
+    /// The first argv entry after `argv[0]` that is not a flag. `bash -c
+    /// "claude --resume"` gives `claude --resume`; `node --no-warnings
+    /// cli.js` gives `cli.js`; `env FOO=1 claude` gives `claude`. `nil`
+    /// when there is none.
+    static func firstOperand(in arguments: [String]) -> String? {
+        arguments.dropFirst().first {
+            !$0.isEmpty && !$0.hasPrefix("-") && !isEnvironmentAssignment(Substring($0))
+        }
+    }
+
+    /// Lowercased, quotes and a leading login dash removed (`-zsh` is `zsh`).
+    static func normalizedProcessWord(_ raw: String) -> String {
+        normalizedWord(raw)
+    }
+
+    private static func match(scriptOperand operand: String) -> ConductorCLIID? {
+        // A command string (`bash -c "claude --resume"`).
+        if operand.contains(where: \.isWhitespace) {
+            return match(command: operand)
+        }
+        let components = operand.split(separator: "/").map { String($0).lowercased() }
+        guard let file = components.last else { return nil }
+        if let found = words[normalizedWord(stem(of: file))] { return found }
+        // `…/node_modules/@anthropic-ai/claude-code/cli.js`: the package.
+        if let modules = components.lastIndex(of: "node_modules") {
+            for component in components[(modules + 1)...] where !component.hasPrefix("@") {
+                if let found = words[component] { return found }
+                break
+            }
+        }
+        // `~/.local/share/cursor-agent/versions/x/index.js`: a hyphenated
+        // product name is specific enough to match anywhere in the path.
+        for component in components.dropLast() where component.contains("-") {
+            if let found = words[component] { return found }
+        }
+        return nil
+    }
+
+    private static func stem(of file: String) -> String {
+        guard let dot = file.lastIndex(of: "."), dot != file.startIndex else { return file }
+        let suffix = file[file.index(after: dot)...]
+        return scriptExtensions.contains(String(suffix)) ? String(file[..<dot]) : file
+    }
+
+    private static func lastPathComponent(_ path: String) -> String {
+        path.split(separator: "/").last.map(String.init) ?? path
+    }
+
     private static func isEnvironmentAssignment(_ token: Substring) -> Bool {
         guard let equals = token.firstIndex(of: "="), equals != token.startIndex else {
             return false
@@ -115,16 +209,54 @@ nonisolated enum AgentIdentityMatcher {
 /// Surfaces that list terminals ask these properties, not `agentProvider`
 /// alone: `agentProvider` is set only for a terminal Rafu launched as an
 /// agent. A user who types `claude` in a login shell is just as much an
-/// agent session, and its terminal title ("✳ claude") says so.
+/// agent session.
+///
+/// Resolution order (`TerminalAgentResolution`): the Rafu-launched provider,
+/// then a live hook session matched to this terminal, then the foreground
+/// process, then the sticky title match, then the current title. The
+/// identity stays while the agent runs, even after it replaces its title,
+/// and clears when the shell is in front again or the process exits.
 extension WorkspaceTerminalController {
     var resolvedAgentProvider: ConductorCLIID? {
-        agentProvider ?? ConductorCLIID.detect(command: nil, title: displayName)
+        TerminalAgentResolution.resolve(
+            launched: agentProvider, hook: hookAgentProvider, observed: agentIdentity,
+            currentTitle: identityTitle)
+    }
+
+    /// The identity without the hook signal. Hook matching itself uses this
+    /// (`AgentActivityStore.candidate`), so the two never recurse.
+    var observedAgentProvider: ConductorCLIID? {
+        TerminalAgentResolution.resolve(
+            launched: agentProvider, hook: nil, observed: agentIdentity,
+            currentTitle: identityTitle)
+    }
+
+    /// The title fallback, only while the process has not exited: an exited
+    /// shell whose last title still says "claude" runs no agent.
+    private var identityTitle: String? {
+        TerminalSessionPresentation.isExited(status) ? nil : displayName
+    }
+
+    /// The provider of a live hook session whose PID chain (or folder) puts
+    /// it in this terminal; `nil` without hooks.
+    private var hookAgentProvider: ConductorCLIID? {
+        guard hasLiveProcess else { return nil }
+        return AgentActivityStore.shared.trackedSession(for: self)?.provider.cli
+    }
+
+    /// The name every surface shows for this terminal: the agent's own name
+    /// ("Claude Code") while the title is generic, otherwise the title.
+    var presentedTitle: String {
+        TerminalSessionPresentation.title(
+            displayName: displayName, hasUserName: userName != nil,
+            provider: resolvedAgentProvider, shellName: shellDisplayName)
     }
 }
 
 extension AgentActivitySummary {
     /// Counts the agent sessions among `sessions`: a terminal Rafu launched
-    /// as an agent, or one whose title names an agent CLI, with a live process.
+    /// as an agent, or one that runs an agent CLI (`resolvedAgentProvider`),
+    /// with a live process.
     /// Attention prefers hook state (`AgentActivityStore`: approval or an
     /// answer pending) and keeps the terminal's own bell as the fallback.
     init(sessions: [WorkspaceTerminalController], tracking: AgentActivityStore = .shared) {
@@ -140,8 +272,20 @@ extension AgentActivitySummary {
 }
 
 extension TerminalSessionRow {
+    /// A row built from a controller carries the controller's full
+    /// resolution (`detectedAgentProvider`). A row built by hand falls back
+    /// to its title.
     nonisolated var resolvedAgentProvider: ConductorCLIID? {
-        agentProvider ?? ConductorCLIID.detect(command: nil, title: displayName)
+        if let agentProvider { return agentProvider }
+        if isAgentIdentityResolved { return detectedAgentProvider }
+        return ConductorCLIID.detect(command: nil, title: displayName)
+    }
+
+    /// The agent-aware name (`TerminalSessionPresentation.title`).
+    nonisolated var presentedTitle: String {
+        TerminalSessionPresentation.title(
+            displayName: displayName, hasUserName: hasUserName,
+            provider: resolvedAgentProvider, shellName: shellName)
     }
 }
 

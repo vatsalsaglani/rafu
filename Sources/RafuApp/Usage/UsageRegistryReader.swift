@@ -127,7 +127,10 @@ nonisolated struct UsageRegistryReader: Sendable {
     /// Auth-file and Keychain reads are pre-resolved off the caller's actor,
     /// then captured as immutable strings by the synchronous context closure.
     /// External OAuth credentials require separate network consent and never
-    /// use Rafu's persistent Keychain namespace.
+    /// use Rafu's persistent Keychain namespace. Order for Claude and Codex:
+    /// the CLI's credential file, then the in-memory copy from Connect, then
+    /// (Claude only, consent required, rate-limited) a fresh read of Claude
+    /// Code's Keychain item.
     @concurrent
     static func productionCredentials(
         _ ids: [UsageProviderID], now: Date
@@ -164,6 +167,21 @@ nonisolated struct UsageRegistryReader: Sendable {
                     envelope.isUsable(for: id, at: now)
                 {
                     credentials[id] = transient
+                    continue
+                }
+
+                // Consent exists but no usable credential is left (Rafu
+                // relaunched, or the token expired). See
+                // `UsageCredentialStore.refreshClaudeKeychainCredential`.
+                if id == .claude,
+                    let refreshed = await UsageCredentialStore.shared
+                        .refreshClaudeKeychainCredential(
+                            now: now,
+                            keychainReader: {
+                                UsageOAuthConnector.productionClaudeKeychainCredential()
+                            })
+                {
+                    credentials[id] = refreshed
                 }
             default:
                 if let credential = try? await UsageCredentialStore.shared.credential(for: id) {

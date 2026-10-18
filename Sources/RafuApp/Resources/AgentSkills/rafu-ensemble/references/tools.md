@@ -51,3 +51,6 @@ Off blocks edit and sensitive tools.
 Without `x`/`y`, a new node appears to the right of `near` (or of your own
 node) and steps down past other nodes. With `x`/`y`, that point is the new
 node's centre. `node_update` takes the top-left corner.
+
+A frame fits its members by itself. `node_update` on a frame moves the frame
+and its members; its `width` and `height` are ignored.

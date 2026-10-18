@@ -70,19 +70,86 @@ nonisolated struct ClaudeOAuthStrategy: UsageFetchStrategy {
         }
 
         var windows: [UsageWindow] = []
-        if let window = Self.mapWindow(response.fiveHour, label: "5h") {
+        if let window = Self.mapWindow(
+            response.fiveHour, label: "5h", windowMinutes: Self.sessionWindowMinutes)
+        {
             windows.append(window)
         }
-        if let window = Self.mapWindow(response.sevenDay, label: "7d") {
+        if let window = Self.mapWindow(
+            response.sevenDay, label: "7d", windowMinutes: Self.weeklyWindowMinutes)
+        {
             windows.append(window)
         }
-        if let window = Self.firstScopedWeeklyWindow(response.limits) {
-            windows.append(window)
-        }
+        windows.append(
+            contentsOf: Self.modelScopedWeeklyWindows(
+                response, cap: Self.maximumWindows - windows.count))
         guard !windows.isEmpty else { throw ClaudeOAuthStrategyError.invalidResponse }
 
         return UsageSnapshot(
-            providerID: .claude, windows: windows, costLine: nil, identity: nil)
+            providerID: .claude, windows: windows, costLine: nil, identity: nil,
+            source: .providerAPI)
+    }
+
+    /// Claude's session limit is a rolling 5-hour window and every weekly
+    /// limit is 7 days. The endpoint reports only `resets_at`, so the
+    /// lengths come from Claude's documented limits; `UsagePace` needs them
+    /// to find where each window started.
+    static let sessionWindowMinutes = 5 * 60
+    static let weeklyWindowMinutes = 7 * 24 * 60
+    /// Bounds the snapshot: the two account-wide lanes plus up to four
+    /// model-scoped weekly lanes. The notch shows the first three; Settings
+    /// shows all of them.
+    static let maximumWindows = 6
+
+    /// Every model-scoped weekly lane, in a stable order: the dedicated
+    /// top-level keys first (`seven_day_opus`, `seven_day_sonnet`), then
+    /// each `limits` entry of kind `weekly_scoped`. A model appears at most
+    /// once (the first valid entry wins), and "all models" is never a
+    /// model lane because `seven_day` already is that lane.
+    private static func modelScopedWeeklyWindows(_ response: Response, cap: Int) -> [UsageWindow] {
+        guard cap > 0 else { return [] }
+        var seenModels: Set<String> = []
+        var windows: [UsageWindow] = []
+
+        func append(model: String, identity: String?, percent: Double?, resetsAt: String?) {
+            guard windows.count < cap, let percent = validPercent(percent),
+                let modelName = nonEmpty(model)
+            else { return }
+            let normalizedIdentity = normalizedModelIdentity(nonEmpty(identity) ?? modelName)
+            let normalizedName = normalizedModelIdentity(modelName)
+            guard normalizedIdentity != "all models", normalizedIdentity != "all-models",
+                !seenModels.contains(normalizedIdentity), !seenModels.contains(normalizedName)
+            else { return }
+            seenModels.insert(normalizedIdentity)
+            seenModels.insert(normalizedName)
+            windows.append(
+                UsageWindow(
+                    label: "\(modelName) 7d", percent: percent, tokens: nil,
+                    resetsAt: resetsAt.flatMap(UsageDateParsing.parseISO8601Fractional),
+                    windowMinutes: weeklyWindowMinutes))
+        }
+
+        for (model, window) in [
+            ("Opus", response.sevenDayOpus), ("Sonnet", response.sevenDaySonnet),
+        ] {
+            guard let window else { continue }
+            append(
+                model: model, identity: nil, percent: window.utilization,
+                resetsAt: window.resetsAt)
+        }
+        for limit in response.limits ?? [] {
+            guard limit.kind == "weekly_scoped", limit.group == "weekly",
+                let modelName = limit.scope?.model?.displayName
+            else { continue }
+            append(
+                model: modelName, identity: limit.scope?.model?.id,
+                percent: limit.percent ?? limit.utilization, resetsAt: limit.resetsAt)
+        }
+        return windows
+    }
+
+    private static func normalizedModelIdentity(_ value: String) -> String {
+        value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
     }
 
     private static func credential(
@@ -95,42 +162,30 @@ nonisolated struct ClaudeOAuthStrategy: UsageFetchStrategy {
         return envelope
     }
 
-    private static func mapWindow(_ source: Response.Window?, label: String) -> UsageWindow? {
+    private static func mapWindow(
+        _ source: Response.Window?, label: String, windowMinutes: Int
+    ) -> UsageWindow? {
         guard let source, let percent = validPercent(source.utilization) else { return nil }
         return UsageWindow(
             label: label, percent: percent, tokens: nil,
-            resetsAt: source.resetsAt.flatMap(UsageDateParsing.parseISO8601Fractional))
+            resetsAt: source.resetsAt.flatMap(UsageDateParsing.parseISO8601Fractional),
+            windowMinutes: windowMinutes)
     }
 
-    /// The shared snapshot surface intentionally carries at most three
-    /// windows. Preserve the two account-wide lanes and then add the first
-    /// valid model-scoped weekly lane, de-duplicated by model identity.
-    private static func firstScopedWeeklyWindow(_ limits: [Response.Limit]?) -> UsageWindow? {
-        guard let limits else { return nil }
-        var seenModels: Set<String> = []
-        for limit in limits {
-            guard limit.kind == "weekly_scoped", limit.group == "weekly",
-                let percent = validPercent(limit.percent),
-                let modelName = nonEmpty(limit.scope?.model?.displayName)
-            else { continue }
+    /// The largest over-limit value still treated as "at the limit". The
+    /// endpoint can report a little over 100 once a window is exhausted.
+    static let maximumReportedPercent: Double = 1_000
 
-            let identity = nonEmpty(limit.scope?.model?.id) ?? modelName
-            let normalizedIdentity = identity.folding(
-                options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-            guard normalizedIdentity != "all models", normalizedIdentity != "all-models",
-                seenModels.insert(normalizedIdentity).inserted
-            else { continue }
-
-            return UsageWindow(
-                label: "\(modelName) 7d", percent: percent, tokens: nil,
-                resetsAt: limit.resetsAt.flatMap(UsageDateParsing.parseISO8601Fractional))
+    /// `utilization` is a percentage on a 0–100 scale. A value from 0 to 1
+    /// is a small percentage (0.5 means 0.5 %), never a fraction to
+    /// multiply by 100: a fraction guess would show 1 % as 100 %. A value
+    /// over 100 (an exhausted window) clamps to 100 instead of dropping the
+    /// window. A negative, non-finite, or absurd value drops the window.
+    static func validPercent(_ value: Double?) -> Double? {
+        guard let value, value.isFinite, (0...maximumReportedPercent).contains(value) else {
+            return nil
         }
-        return nil
-    }
-
-    private static func validPercent(_ value: Double?) -> Double? {
-        guard let value, value.isFinite, (0...100).contains(value) else { return nil }
-        return value
+        return min(value, 100)
     }
 
     private static func nonEmpty(_ value: String?) -> String? {
@@ -141,12 +196,29 @@ nonisolated struct ClaudeOAuthStrategy: UsageFetchStrategy {
     private struct Response: Decodable {
         let fiveHour: Window?
         let sevenDay: Window?
+        let sevenDayOpus: Window?
+        let sevenDaySonnet: Window?
         let limits: [Limit]?
 
         enum CodingKeys: String, CodingKey {
             case fiveHour = "five_hour"
             case sevenDay = "seven_day"
+            case sevenDayOpus = "seven_day_opus"
+            case sevenDaySonnet = "seven_day_sonnet"
             case limits
+        }
+
+        /// The two account-wide lanes and `limits` decode strictly, as
+        /// before: a malformed value there hides the tile. The model lanes
+        /// decode leniently, so an odd value in an optional lane cannot
+        /// hide the session and weekly rings.
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            fiveHour = try container.decodeIfPresent(Window.self, forKey: .fiveHour)
+            sevenDay = try container.decodeIfPresent(Window.self, forKey: .sevenDay)
+            sevenDayOpus = try? container.decodeIfPresent(Window.self, forKey: .sevenDayOpus)
+            sevenDaySonnet = try? container.decodeIfPresent(Window.self, forKey: .sevenDaySonnet)
+            limits = try container.decodeIfPresent([Limit].self, forKey: .limits)
         }
 
         struct Window: Decodable {
@@ -163,11 +235,12 @@ nonisolated struct ClaudeOAuthStrategy: UsageFetchStrategy {
             let kind: String?
             let group: String?
             let percent: Double?
+            let utilization: Double?
             let resetsAt: String?
             let scope: Scope?
 
             enum CodingKeys: String, CodingKey {
-                case kind, group, percent, scope
+                case kind, group, percent, utilization, scope
                 case resetsAt = "resets_at"
             }
         }
@@ -296,7 +369,7 @@ nonisolated struct ClaudeLocalTranscriptStrategy: UsageFetchStrategy {
                 UsageWindow(label: "5h", percent: nil, tokens: fiveHourTokens, resetsAt: nil),
                 UsageWindow(label: "7d", percent: nil, tokens: sevenDayTokens, resetsAt: nil),
             ],
-            costLine: nil, identity: nil
+            costLine: nil, identity: nil, source: .localEstimate
         )
     }
 }
@@ -310,7 +383,7 @@ nonisolated enum ClaudeProvider {
         displayName: "Claude",
         authPattern: .piggybackNetwork,
         disclosure:
-            "Reads recent Claude Code transcripts locally for an estimate. Connect authorizes Rafu to read Claude Code credentials and make read-only exact usage requests only to api.anthropic.com; disconnect keeps local estimates enabled.",
+            "Reads recent Claude Code transcripts locally for an estimate. Connect authorizes Rafu to read Claude Code credentials (again while connected, when the saved token expires) and make read-only exact usage requests only to api.anthropic.com; disconnect keeps local estimates enabled.",
         defaultEnabled: true,
         makeStrategies: { _ in [ClaudeOAuthStrategy(), ClaudeLocalTranscriptStrategy()] }
     )

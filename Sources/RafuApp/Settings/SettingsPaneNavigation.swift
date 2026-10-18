@@ -54,3 +54,25 @@ nonisolated enum SettingsPresentationLayout {
     /// Popup buttons size to their content but never narrower than this.
     static let minimumPopupWidth: CGFloat = 140
 }
+
+/// A one-shot request to show a Settings pane, for entry points outside the
+/// Settings window (for example, the notch's "Connect for exact usage…").
+/// The caller sets the request and then opens Settings; `RafuSettingsView`
+/// takes the request when it appears or when the request changes.
+@MainActor
+@Observable
+final class SettingsPaneRouter {
+    static let shared = SettingsPaneRouter()
+
+    private(set) var requestedPane: SettingsPane?
+
+    func request(_ pane: SettingsPane) {
+        requestedPane = pane
+    }
+
+    /// Returns and clears the pending request.
+    func takeRequest() -> SettingsPane? {
+        defer { requestedPane = nil }
+        return requestedPane
+    }
+}

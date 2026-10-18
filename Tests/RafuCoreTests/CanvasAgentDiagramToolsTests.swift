@@ -111,6 +111,9 @@ private func spec(_ edges: [[String: Any]], direction: String? = nil) -> [String
         #expect(rect.x + rect.width <= bounds.x + bounds.width)
         #expect(rect.y + rect.height <= bounds.y + bounds.height)
     }
+    // The layout starts at the origin.
+    #expect(all.map(\.x).min() == 100)
+    #expect(all.map(\.y).min() == 50)
 }
 
 @Test func diagramLayoutFlowsDownWhenAsked() throws {

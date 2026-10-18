@@ -1072,7 +1072,7 @@ public nonisolated enum CanvasAgentToolCatalog {
             )
         case .nodeUpdate:
             return (
-                "Rename, move or resize a node. x and y are the top-left corner in board units.",
+                "Rename, move or resize a node. x and y are the top-left corner in board units. A frame fits its members by itself: moving a frame moves its members, and its width and height are ignored. To change a frame's size, move its members.",
                 schema(
                     [
                         "node_id": nodeID, "title": title,
@@ -1204,7 +1204,7 @@ public nonisolated enum CanvasAgentToolCatalog {
             )
         case .frameCreate:
             return (
-                "Put nodes in a titled frame. Moving the frame moves its members. Undoable.",
+                "Put nodes in a titled frame. The frame always fits its members: it grows, shrinks and moves when they do, and moving the frame moves its members. Undoable.",
                 schema(
                     ["title": title, "member_ids": memberIDs], required: ["title", "member_ids"])
             )
@@ -1226,7 +1226,7 @@ public nonisolated enum CanvasAgentToolCatalog {
             )
         default:
             return (
-                "Build a whole diagram in one undoable step (a frame adds a second step). spec.nodes: [{id, kind (service_icon, note, text or shape), label, pack_id, icon_id, shape}]; spec.edges: [{from, to, label}] using the local ids; spec.frame: optional frame title; spec.direction: right (default) or down. Rafu lays nodes out in layers and returns the created node IDs keyed by local id.",
+                "Build a whole diagram in one undoable step (a frame adds a second step). spec.nodes: [{id, kind (service_icon, note, text or shape), label, pack_id, icon_id, shape}]; spec.edges: [{from, to, label}] using the local ids; spec.frame: optional frame title; spec.direction: right (default) or down. Rafu lays nodes out in layers: the longest chain on one line, branches beside it, and gaps wide enough for the edge labels. Keep labels short (a few words). Returns the created node IDs keyed by local id.",
                 schema(
                     [
                         "spec": property(
@@ -1409,95 +1409,5 @@ public nonisolated struct CanvasAgentRect: Codable, Hashable, Sendable {
         self.y = y
         self.width = width
         self.height = height
-    }
-}
-
-/// A layered layout: each node goes one layer after its furthest
-/// predecessor. Cycles are broken in node order. Pure and deterministic.
-public nonisolated enum CanvasAgentDiagramLayout {
-    public static let gap = 80.0
-    public static let rowGap = 48.0
-
-    public static func size(of node: CanvasAgentDiagramSpec.Node) -> (width: Double, height: Double)
-    {
-        switch node.kind {
-        case "service_icon": (160, 128)
-        case "note": (260, 180)
-        default: (200, 120)
-        }
-    }
-
-    /// Layer index per node id. Ready nodes are placed in rounds; when a
-    /// cycle leaves no ready node, the earliest remaining node is placed.
-    public static func layers(_ spec: CanvasAgentDiagramSpec) -> [String: Int] {
-        var incoming: [String: Set<String>] = [:]
-        for edge in spec.edges where edge.from != edge.to {
-            incoming[edge.to, default: []].insert(edge.from)
-        }
-        var remaining = spec.nodes.map(\.id)
-        var layer: [String: Int] = [:]
-        while !remaining.isEmpty {
-            let open = Set(remaining)
-            var ready = remaining.filter { (incoming[$0] ?? []).isDisjoint(with: open) }
-            if ready.isEmpty { ready = [remaining[0]] }
-            for id in ready {
-                layer[id] = (incoming[id] ?? []).compactMap { layer[$0] }.map { $0 + 1 }.max() ?? 0
-            }
-            let placed = Set(ready)
-            remaining.removeAll { placed.contains($0) }
-        }
-        return layer
-    }
-
-    /// Top-left rects relative to the origin, keyed by local node id.
-    public static func rects(
-        for spec: CanvasAgentDiagramSpec, originX: Double = 0, originY: Double = 0
-    ) -> [String: CanvasAgentRect] {
-        let layer = layers(spec)
-        let down = spec.direction == "down"
-        var columns: [Int: [CanvasAgentDiagramSpec.Node]] = [:]
-        for node in spec.nodes { columns[layer[node.id] ?? 0, default: []].append(node) }
-        var result: [String: CanvasAgentRect] = [:]
-        var along = 0.0
-        for index in columns.keys.sorted() {
-            var across = 0.0
-            var thickness = 0.0
-            for node in columns[index] ?? [] {
-                let size = size(of: node)
-                result[node.id] =
-                    down
-                    ? CanvasAgentRect(
-                        x: originX + across, y: originY + along, width: size.width,
-                        height: size.height)
-                    : CanvasAgentRect(
-                        x: originX + along, y: originY + across, width: size.width,
-                        height: size.height)
-                across += (down ? size.width : size.height) + rowGap
-                thickness = max(thickness, down ? size.height : size.width)
-            }
-            along += thickness + gap
-        }
-        return result
-    }
-
-    /// The bounding rect of `rects` grown by `padding` (more at the top for a
-    /// frame title).
-    public static func bounds(_ rects: [CanvasAgentRect], padding: Double = 40)
-        -> CanvasAgentRect?
-    {
-        guard let first = rects.first else { return nil }
-        var minX = first.x
-        var minY = first.y
-        var maxX = first.x + first.width
-        var maxY = first.y + first.height
-        for rect in rects.dropFirst() {
-            minX = min(minX, rect.x)
-            minY = min(minY, rect.y)
-            maxX = max(maxX, rect.x + rect.width)
-            maxY = max(maxY, rect.y + rect.height)
-        }
-        return CanvasAgentRect(
-            x: minX - padding, y: minY - padding * 1.5, width: maxX - minX + padding * 2,
-            height: maxY - minY + padding * 2.5)
     }
 }

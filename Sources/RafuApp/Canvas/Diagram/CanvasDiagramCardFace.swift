@@ -3,8 +3,8 @@ import SwiftUI
 
 /// The face of a `.frame` or `.serviceIcon` card. The card shell owns the
 /// move gesture, selection ring, resize and ports; this view only draws.
-/// A frame face also keeps its members following it and keeps itself behind
-/// them in the stack.
+/// Frame bounds, member follow and stacking are board rules
+/// (`CanvasBoardState.normalizeFrames`), not view behaviour.
 struct CanvasDiagramCardFace: View {
     let card: CanvasCard
     let board: CanvasBoardState
@@ -12,29 +12,9 @@ struct CanvasDiagramCardFace: View {
     var body: some View {
         if let frame = card.content.diagramFrame {
             CanvasFrameFaceView(title: card.title, style: frame.style)
-                .modifier(CanvasFrameFollower(frameID: card.id, board: board))
         } else if let icon = card.content.diagramServiceIcon {
             CanvasServiceIconFaceView(icon: icon, title: card.title)
         }
-    }
-}
-
-/// Members follow a frame that moved on its own (keyboard move, Align, an
-/// agent edit), and a frame that an edit raised goes back behind its members.
-private struct CanvasFrameFollower: ViewModifier {
-    let frameID: CanvasCardID
-    let board: CanvasBoardState
-
-    func body(content: Content) -> some View {
-        let nodes = CanvasFrameLayout.nodes(board.cards)
-        let state = CanvasFrameLayout.followState(frameID: frameID, in: nodes)
-        content
-            .onChange(of: state) { old, new in
-                guard let old, let new else { return }
-                board.applyFrameFollow(CanvasFrameLayout.followMoves(from: old, to: new))
-            }
-            .onChange(of: nodes.map(\.id)) { _, _ in board.restackFramesIfNeeded() }
-            .onAppear { board.restackFramesIfNeeded() }
     }
 }
 

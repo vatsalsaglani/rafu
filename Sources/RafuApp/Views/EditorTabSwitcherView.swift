@@ -240,7 +240,7 @@ struct EditorTabSwitcherOverlay: View {
             }
             let isPresented = presentedTerminalIDs.contains(sessionID)
             return Presentation(
-                title: controller.displayName,
+                title: controller.presentedTitle,
                 detail: terminalDetail(controller.status, isPresented: isPresented),
                 fileIcon: EditorTabSwitcherAgentIdentity.icon(
                     for: controller.resolvedAgentProvider),

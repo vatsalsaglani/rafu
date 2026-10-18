@@ -397,11 +397,16 @@ struct CompanionNowPlayingSectionView: View {
 
 // MARK: - Usage
 
-/// The existing usage stores, shown as compact meters (Cider's Usage tab).
-/// Read-only and refreshed on a TTL; the model owns the reads.
+/// Cider's Usage tab: one compact card per provider — brand icon, name,
+/// "Just updated" or a spinner, up to three rings with reset countdowns, and
+/// one pace line. Token-only providers keep a compact text line. Read-only
+/// and refreshed on a TTL; the model owns the reads. "Connect for exact
+/// usage…" opens Settings ▸ Usage, where the Connect flow and its
+/// explanation live.
 struct CompanionUsageSectionView: View {
     let model: NotchCompanionModel
     @Environment(\.rafuTheme) private var theme
+    @Environment(\.openSettings) private var openSettings
 
     private var ink: NotchInk { NotchInk(theme: theme) }
 
@@ -423,6 +428,7 @@ struct CompanionUsageSectionView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .disabled(model.isUsageRefreshing)
                 .help("Refresh usage")
                 .accessibilityLabel("Refresh usage")
             }
@@ -438,93 +444,54 @@ struct CompanionUsageSectionView: View {
                 ScrollView(.vertical) {
                     VStack(spacing: RafuMetrics.space2) {
                         ForEach(snapshots, id: \.providerID) { snapshot in
-                            CompanionUsageCardView(snapshot: snapshot)
+                            CompanionUsageCardView(
+                                model: model, providerID: snapshot.providerID,
+                                openUsageSettings: { openUsageSettings() })
                         }
                     }
                     .padding(.horizontal, RafuMetrics.space3)
                     .padding(.bottom, RafuMetrics.space3)
+                    .frame(maxWidth: .infinity, alignment: .top)
                 }
                 .scrollIndicators(.automatic)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear { model.refreshUsage() }
+    }
+
+    /// The notch panel never takes the app's activation, so activate first;
+    /// then open Settings on the Usage pane.
+    private func openUsageSettings() {
+        SettingsPaneRouter.shared.request(.usage)
+        NSApp.activate()
+        openSettings()
     }
 }
 
-/// One provider: its name, then one meter per window (or its cost line).
+/// One provider in the notch: the compact `UsageProviderCardView`.
 struct CompanionUsageCardView: View {
-    let snapshot: UsageSnapshot
+    let model: NotchCompanionModel
+    let providerID: UsageProviderID
+    let openUsageSettings: @MainActor () -> Void
     @Environment(\.rafuTheme) private var theme
 
+    init(
+        model: NotchCompanionModel, providerID: UsageProviderID,
+        openUsageSettings: @escaping @MainActor () -> Void
+    ) {
+        self.model = model
+        self.providerID = providerID
+        self.openUsageSettings = openUsageSettings
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(displayName)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(theme.palette.textPrimary)
-            ForEach(Array(snapshot.windows.enumerated()), id: \.offset) { _, window in
-                windowRow(window)
-            }
-            if let costLine = snapshot.costLine {
-                Text(costLine)
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(theme.palette.textSecondary)
-            }
-        }
-        .padding(RafuMetrics.space2 + 2)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
-                .fill(theme.palette.cardBackground)
-        )
-        .accessibilityElement(children: .contain)
-    }
-
-    private var displayName: String {
-        UsageProviderRegistry.descriptor(for: snapshot.providerID)?.displayName
-            ?? snapshot.providerID.rawValue
-    }
-
-    private func windowRow(_ window: UsageWindow) -> some View {
-        let level = NotchUsageMeter.level(percent: window.percent)
-        return HStack(spacing: RafuMetrics.space2) {
-            Text(window.label)
-                .font(.system(size: 10.5, design: .monospaced))
-                .foregroundStyle(theme.palette.textMuted)
-                .frame(width: 64, alignment: .leading)
-                .lineLimit(1)
-            if let fraction = NotchUsageMeter.fraction(percent: window.percent) {
-                ProgressView(value: fraction)
-                    .progressViewStyle(.linear)
-                    .tint(tint(for: level))
-                    .labelsHidden()
-                    .accessibilityHidden(true)
-            } else {
-                Spacer(minLength: 0)
-            }
-            if let value = NotchUsageMeter.valueText(for: window) {
-                Text(value)
-                    .font(
-                        .system(
-                            size: 10.5, weight: level == .normal ? .regular : .semibold,
-                            design: .monospaced)
-                    )
-                    .foregroundStyle(
-                        level == .normal ? theme.palette.textSecondary : theme.palette.textPrimary
-                    )
-                    .frame(minWidth: 44, alignment: .trailing)
-            }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(
-            "\(displayName) \(window.label)"
-                + (NotchUsageMeter.valueText(for: window).map { ", " + $0 } ?? ""))
-    }
-
-    private func tint(for level: NotchUsageMeter.Level) -> Color {
-        switch level {
-        case .normal: theme.palette.textSecondary
-        case .high: theme.palette.warning
-        case .critical: theme.palette.error
-        }
+        let descriptor = UsageProviderRegistry.descriptor(for: providerID)
+        UsageProviderCardView(
+            card: model.usageCard(for: providerID), providerID: providerID,
+            displayName: descriptor?.displayName ?? providerID.rawValue,
+            authPattern: descriptor?.authPattern ?? .unavailable,
+            mode: model.usageDisplayMode, isRefreshing: model.isUsageRefreshing,
+            compact: true, ink: .notch(theme: theme), connect: openUsageSettings)
     }
 }

@@ -377,6 +377,7 @@ struct RafuSegmentedPicker<Item: Hashable>: View {
                 .contentShape(RoundedRectangle(cornerRadius: 5.5, style: .continuous))
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
