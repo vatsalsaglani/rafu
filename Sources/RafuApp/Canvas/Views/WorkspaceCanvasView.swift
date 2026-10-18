@@ -432,6 +432,12 @@ struct WorkspaceCanvasView: View {
         if zoomingIfNeeded, !CanvasZoomFace(scale: board.viewport.scale).showsLiveContent {
             board.zoomToCard(id)
         }
+        if case .note = card.content,
+            let model = CanvasCardCommands(card: card, board: board, session: session).noteModel
+        {
+            // Return on a selected note starts editing (Zoom to Card first below 50%).
+            if model.beginEditing() { return }
+        }
         if case .terminal = card.content,
             let primary = CanvasCardCommands(card: card, board: board, session: session).primary,
             primary.id == "start" || primary.id == "restart"

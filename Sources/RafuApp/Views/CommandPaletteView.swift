@@ -134,7 +134,7 @@ struct CommandPaletteView: View {
             HStack(spacing: 8) {
                 Image(systemName: headerSymbolName(for: parsed.mode))
                     .frame(width: 18)
-                    .foregroundStyle(theme.palette.accent)
+                    .foregroundStyle(theme.palette.textSecondary)
                 TextField(
                     "Go to file… > commands, @ file symbols, # workspace symbols, : go to line",
                     text: $query
@@ -278,7 +278,10 @@ struct CommandPaletteView: View {
                     }
                 }
                 Spacer()
-                if let detail = row.detail, isShortcutHint(detail) {
+                if let shortcut = row.shortcut {
+                    RafuChip(text: shortcut)
+                        .accessibilityLabel("Shortcut \(shortcut)")
+                } else if let detail = row.detail, isShortcutHint(detail) {
                     RafuChip(text: detail)
                 }
                 if isSelected {
@@ -302,10 +305,11 @@ struct CommandPaletteView: View {
     }
 
     private var paletteFooterHints: some View {
-        HStack(spacing: 14) {
-            footerHint(symbol: "arrow.up.arrow.down", label: "Navigate")
-            footerHint(symbol: "return", label: "Open")
-            footerHint(symbol: "escape", label: "Close")
+        HStack(spacing: 0) {
+            Text(PaletteFooterHints.text)
+                .font(.system(size: 11))
+                .foregroundStyle(theme.palette.textSecondary)
+                .lineLimit(1)
             Spacer()
         }
         .padding(.horizontal, 16)
@@ -315,17 +319,9 @@ struct CommandPaletteView: View {
         .accessibilityHidden(true)
     }
 
-    private func footerHint(symbol: String, label: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: symbol).font(.system(size: 9))
-            Text(label).font(.system(size: 10))
-        }
-        .foregroundStyle(theme.palette.textMuted)
-    }
-
     private func iconColor(for row: PaletteRow, isSelected: Bool) -> Color {
         if let tint = row.iconTint { return theme.palette.color(for: tint) }
-        return isSelected ? theme.palette.accent : theme.palette.textSecondary
+        return isSelected ? theme.palette.textPrimary : theme.palette.textSecondary
     }
 
     /// The rows for the query as it stands RIGHT NOW.
@@ -378,7 +374,7 @@ struct CommandPaletteView: View {
             PaletteRow(
                 id: "goto:\(line)",
                 symbolName: "arrow.turn.down.right",
-                iconTint: .accent,
+                iconTint: nil,
                 title: "Go to Line \(line)",
                 detail: document.displayName
             ) {
@@ -458,7 +454,7 @@ struct CommandPaletteView: View {
             PaletteRow(
                 id: "wsymbol:\(match.relativePath):\(match.range.location):\(match.name)",
                 symbolName: Self.symbolIcon(for: match.kind),
-                iconTint: .accent,
+                iconTint: nil,
                 title: match.name,
                 detail: "\(match.relativePath) · \(match.kind)"
             ) {
@@ -513,6 +509,7 @@ struct CommandPaletteView: View {
                 iconTint: nil,
                 title: command.title,
                 detail: command.detail,
+                shortcut: command.shortcut,
                 isEnabled: command.isEnabled,
                 action: command.action
             )
@@ -532,7 +529,7 @@ struct CommandPaletteView: View {
             return PaletteRow(
                 id: "symbol:\(symbol.range.location):\(symbol.name)",
                 symbolName: symbol.kind.symbolName,
-                iconTint: .accent,
+                iconTint: nil,
                 title: symbol.name,
                 detail: symbol.detail
             ) {
@@ -628,34 +625,37 @@ struct CommandPaletteView: View {
                 dismiss()
                 session.selectedCanvas?.leaveContent()
             },
-            .init(title: "Open Folder…", symbolName: "folder.badge.plus", keywords: ["workspace"]) {
+            .init(
+                title: "Open Folder…", symbolName: "folder.badge.plus", keywords: ["workspace"],
+                shortcut: "⌘O"
+            ) {
                 dismiss()
                 session.requestOpenFolder()
             },
             .init(
                 title: "New Workspace Window", symbolName: "macwindow.badge.plus",
-                keywords: ["window"]
+                keywords: ["window"], shortcut: "⌘⇧N"
             ) {
                 dismiss()
                 openWindow(id: "workspace")
             },
             .init(
                 title: "Search Workspace", symbolName: "magnifyingglass",
-                keywords: ["find", "replace"]
+                keywords: ["find", "replace"], shortcut: "⌘⇧F"
             ) {
                 dismiss()
                 session.navigatorMode = .search
             },
             .init(
                 title: "Find in File", symbolName: "doc.text.magnifyingglass",
-                keywords: ["find", "replace"]
+                keywords: ["find", "replace"], shortcut: "⌘F"
             ) {
                 dismiss()
                 session.showDocumentFind()
             },
             .init(
                 title: "Show Source Control", symbolName: "arrow.triangle.branch",
-                keywords: ["git", "changes"]
+                keywords: ["git", "changes"], shortcut: "⌘⇧G"
             ) {
                 dismiss()
                 session.navigatorMode = .sourceControl
@@ -866,7 +866,7 @@ struct CommandPaletteView: View {
                 session.startTerminalPane(paneID)
             },
             .init(
-                id: "terminal-group.start-all", title: "Start All Restartable Panes",
+                id: "terminal-group.start-all", title: "Start All Panes",
                 detail: availability(.startAll).reason,
                 symbolName: "play.circle", keywords: ["terminal", "pane", "start", "all"],
                 isEnabled: availability(.startAll).isEnabled
@@ -914,7 +914,8 @@ struct CommandPaletteView: View {
                     id: "conductor.new-ensemble",
                     title: "New Ensemble…",
                     symbolName: "circle.hexagongrid",
-                    keywords: ["ensemble", "coordinator", "goal", "new"]
+                    keywords: ["ensemble", "coordinator", "goal", "new"],
+                    shortcut: "⌘⇧E"
                 ) {
                     dismiss()
                     session.showEnsembleStart()
@@ -953,7 +954,8 @@ struct CommandPaletteView: View {
                     id: "terminal.new-agent",
                     title: "New Agent Terminal…",
                     symbolName: "terminal.badge",
-                    keywords: ["agent", "terminal", "claude", "codex"]
+                    keywords: ["agent", "terminal", "claude", "codex"],
+                    shortcut: "⌘⇧A"
                 ) {
                     dismiss()
                     session.presentAgentTerminalSheet()
@@ -1315,6 +1317,9 @@ private struct PaletteRow: Identifiable {
     var fileIcon: FileIconProvider.Icon? = nil
     let title: String
     let detail: String?
+    /// Keyboard shortcut glyphs shown right-aligned on the row, when the
+    /// command has one (for example "⌘⇧F").
+    var shortcut: String? = nil
     var isEnabled = true
     let action: @MainActor () -> Void
 }
@@ -1329,10 +1334,17 @@ private struct PaletteCommand {
     var detail: String?
     let symbolName: String
     var keywords: [String]
+    var shortcut: String? = nil
     var isEnabled = true
     let action: @MainActor () -> Void
 
     var searchText: String { ([title, detail ?? ""] + keywords).joined(separator: " ") }
+}
+
+/// The palette's footer legend: arrow keys, Return and Escape as the keys the
+/// user presses, not as pictograms.
+nonisolated enum PaletteFooterHints {
+    static let text = "↑↓ Navigate · ↩ Open · esc Close"
 }
 
 /// Splits a palette query into its mode prefix and search term: plain text

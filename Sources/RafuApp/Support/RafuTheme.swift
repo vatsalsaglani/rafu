@@ -307,7 +307,7 @@ enum RafuThemeCatalog {
 
     static func resolved(choice: RafuThemeChoice, systemScheme: ColorScheme) -> RafuTheme {
         switch choice {
-        case .system: systemScheme == .dark ? indigo : khadi
+        case .system: systemPairTheme(systemScheme: systemScheme)
         case .indigo: indigo
         case .khadi: khadi
         case .dracula: dracula

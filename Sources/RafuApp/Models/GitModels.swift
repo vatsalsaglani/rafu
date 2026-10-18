@@ -51,18 +51,8 @@ nonisolated struct GitChange: Identifiable, Hashable, Sendable {
 
     var isConflicted: Bool { kind == .conflicted }
 
-    var statusLabel: String {
-        switch kind {
-        case .added, .untracked: "Added"
-        case .copied: "Copied"
-        case .conflicted: "Conflict"
-        case .deleted: "Deleted"
-        case .modified: "Modified"
-        case .renamed: "Renamed"
-        case .typeChanged: "Type Changed"
-        case .unknown: "Changed"
-        }
-    }
+    /// Same wording as the Files sidebar badge tooltip (G3).
+    var statusLabel: String { GitStatusPresentation.title(for: kind) }
 
     private static func isUnchanged(_ status: Character) -> Bool {
         status == "." || status == " "

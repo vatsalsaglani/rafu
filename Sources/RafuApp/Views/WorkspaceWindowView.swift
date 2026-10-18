@@ -6,22 +6,13 @@ struct WorkspaceWindowView: View {
     @Bindable var session: WorkspaceSession
     @Environment(\.rafuTheme) private var theme
 
-    /// Outside full screen the traffic lights stay hidden until the pointer
-    /// enters the top-left cluster (see `WindowTopLeftControlCluster`).
-    @State private var trafficLightsRevealed = false
+    /// The standard close / minimise / zoom buttons are always visible
+    /// outside full screen; `WindowTitlebarRow` reserves their space.
     @State private var isWindowFullScreen = false
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             windowContent
-            if !showsWelcome {
-                WindowTopLeftControlCluster(
-                    session: session,
-                    lightsVisible: trafficLightsRevealed && !isWindowFullScreen,
-                    hoverTrackingEnabled: !isWindowFullScreen,
-                    onHoverChange: { trafficLightsRevealed = $0 }
-                )
-            }
             if session.editorTabSwitcherState != nil {
                 EditorTabSwitcherOverlay(session: session)
                     .zIndex(10)
@@ -40,12 +31,9 @@ struct WorkspaceWindowView: View {
                     showsWelcome ? theme.palette.editorBackground : theme.palette.sidebarBackground
                 ),
                 topologyToken: windowChromeTopologyToken,
-                hidesTrafficLights: !trafficLightsRevealed && !isWindowFullScreen,
+                hidesTrafficLights: false,
                 onFullScreenChange: { isFullScreen in
                     isWindowFullScreen = isFullScreen
-                    if isFullScreen {
-                        trafficLightsRevealed = false
-                    }
                 }
             )
         )
@@ -99,11 +87,7 @@ struct WorkspaceWindowView: View {
     private var welcomeWindowHeader: some View {
         HStack(spacing: 0) {
             WindowDragHandle()
-                .frame(width: 76)
-                .onHover { inside in
-                    guard !isWindowFullScreen else { return }
-                    trafficLightsRevealed = inside
-                }
+                .frame(width: WindowTitlebarRow.trafficLightSpan)
             WindowDragHandle()
         }
         .frame(height: 42)
@@ -111,12 +95,8 @@ struct WorkspaceWindowView: View {
 
     private var workbenchContent: some View {
         VStack(spacing: 0) {
-            if !isWindowFullScreen {
-                WindowDragHandle()
-                    .frame(height: 14)
-                    .frame(maxWidth: .infinity)
-                    .background(theme.palette.sidebarBackground)
-            }
+            // Standard window buttons plus the one sidebar toggle.
+            WindowTitlebarRow(session: session, isFullScreen: isWindowFullScreen)
             // Issue: flat sidebar. `NavigationSplitView` on macOS 26 floats
             // the sidebar as an inset, rounded Liquid Glass card whenever the
             // window is key — visible elevation, shadow, and margins that
@@ -126,9 +106,7 @@ struct WorkspaceWindowView: View {
             // both drive `session.isSidebarCollapsed`.
             HStack(spacing: 0) {
                 // Mirrors `WorkspaceUtilityRail` on the right edge. The
-                // sidebar toggle that visually tops this rail is the
-                // `WindowTopLeftControlCluster` overlay in `body`, so it can
-                // slide clear of the traffic lights when they reveal.
+                // sidebar toggle lives in `WindowTitlebarRow` above.
                 WorkspaceSidebarRail()
                 Divider().overlay(theme.palette.borderSubtle)
                 HSplitView {
@@ -152,7 +130,7 @@ struct WorkspaceWindowView: View {
                                     .layoutPriority(1)
                                 if session.descriptor != nil, session.navigatorMode != .files {
                                     WorkspaceUtilityPanelView(session: session)
-                                        .frame(minWidth: 250, idealWidth: 310, maxWidth: 460)
+                                        .frame(minWidth: 300, idealWidth: 340, maxWidth: 520)
                                         .frame(maxHeight: .infinity)
                                 }
                             }

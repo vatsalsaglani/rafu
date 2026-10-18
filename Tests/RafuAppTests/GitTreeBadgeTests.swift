@@ -100,6 +100,34 @@ struct GitTreeBadgeTests {
         #expect(badges["tooling/build.sh"] == nil)
     }
 
+    @Test("The Source Control panel and the Files badge share one status vocabulary (G3)")
+    func panelAndSidebarShareLetters() {
+        let kinds: [GitChangeKind] = [
+            .added, .copied, .conflicted, .deleted, .modified, .renamed, .typeChanged,
+            .untracked, .unknown,
+        ]
+        for kind in kinds {
+            let badge = GitTreeBadge(kind: kind, isDirectory: false)
+            #expect(badge.shortCode == GitStatusPresentation.letter(for: kind))
+        }
+        // An untracked file is "U" in both places; a staged new file is "A".
+        let untracked = change("new.txt", index: "?", worktree: "?")
+        let staged = change("added.txt", index: "A", worktree: ".")
+        #expect(GitStatusPresentation.letter(for: untracked.kind) == "U")
+        #expect(GitStatusPresentation.letter(for: staged.kind) == "A")
+        #expect(untracked.statusLabel == "Untracked")
+        #expect(staged.statusLabel == "Added")
+    }
+
+    @Test("Status tooltips use the documented state names")
+    func statusTitles() {
+        #expect(GitStatusPresentation.title(for: .added) == "Added")
+        #expect(GitStatusPresentation.title(for: .modified) == "Modified")
+        #expect(GitStatusPresentation.title(for: .deleted) == "Deleted")
+        #expect(GitStatusPresentation.title(for: .untracked) == "Untracked")
+        #expect(GitStatusPresentation.title(for: .renamed) == "Renamed")
+    }
+
     @Test("No repository or no changes yields no badges")
     func emptyWhenNothingChanged() {
         let root = URL(filePath: "/repo")

@@ -18,12 +18,23 @@ struct CanvasCardCommands {
 
     private var resources: CanvasBoardResources? { session.canvasResources[board.id] }
 
+    /// The small observable model of a note card; nil for every other type.
+    var noteModel: CanvasNoteModel? {
+        guard case .note = card.content else { return nil }
+        return session.canvasNoteModel(boardID: board.id, card: card)
+    }
+
     /// The thing the card does: Edit Note, Open in Editor, Start Shell, Load, Open App.
     var primary: Action? {
         switch card.content {
         case .note:
+            if noteModel?.isEditing == true {
+                return Action(id: "edit", title: "Done Editing", symbol: "checkmark") {
+                    noteModel?.endEditing()
+                }
+            }
             return Action(id: "edit", title: "Edit Note", symbol: "pencil") {
-                board.focus(card.id)
+                if noteModel?.beginEditing() != true { board.focus(card.id) }
             }
         case .file(let path), .image(let path):
             return Action(
@@ -114,6 +125,9 @@ struct CanvasCardCommands {
             guard let web = resources?.web(for: card) else { return nil }
             return web.webView == nil ? "Not loaded" : web.status
         case .note(let text):
+            if let model = noteModel {
+                return model.isEditing ? "Editing" : model.progressText
+            }
             return CanvasCardSummaryText.taskCount(in: String(text.prefix(8_192)))
         default:
             return nil

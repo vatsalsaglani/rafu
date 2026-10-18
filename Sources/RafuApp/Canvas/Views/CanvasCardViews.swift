@@ -139,8 +139,10 @@ struct CanvasCardShell: View {
                         .font(.system(size: detailSize, weight: .medium))
                         .foregroundStyle(theme.palette.textSecondary).lineLimit(1)
                 }
-                let line = CanvasCardPresentation.summaryLine(
-                    for: card.content, terminalTitle: terminalReportedTitle)
+                let line =
+                    commands.noteModel?.excerpt
+                    ?? CanvasCardPresentation.summaryLine(
+                        for: card.content, terminalTitle: terminalReportedTitle)
                 if !line.isEmpty {
                     Text(line)
                         .font(.system(size: detailSize))
@@ -181,15 +183,25 @@ struct CanvasCardShell: View {
                     }
             }
             if let state = headerState {
-                Text(state)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(theme.palette.textSecondary)
-                    .lineLimit(1)
-                    .monospacedDigit()
+                if case .note = card.content, state != "Editing" {
+                    CanvasHeaderBadge(text: state)
+                } else {
+                    Text(state)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(theme.palette.textSecondary)
+                        .lineLimit(1)
+                        .monospacedDigit()
+                }
             }
             if isDirtyFile { CanvasHeaderBadge(text: "Modified") }
             if showsPreviewBadge { CanvasHeaderBadge(text: "Preview", symbol: "eye") }
-            Spacer(minLength: 4)
+            if let model = commands.noteModel, model.isEditing {
+                CanvasNoteFormatBar(
+                    model: model, availableWidth: CGFloat(card.rect.width), showsEditingLabel: false
+                )
+            } else {
+                Spacer(minLength: 4)
+            }
             if contentFocused {
                 CanvasReturnToBoardButton { returnToBoard() }
             }
@@ -285,12 +297,13 @@ struct CanvasCardShell: View {
         } else if case .file(let path) = card.content {
             CanvasFileExcerptCard(
                 card: card, path: path, board: board, session: session, activate: activateCard)
-        } else if case .note = card.content, board.focusedCardID == card.id {
-            CanvasNoteEditor(
+        } else if case .note = card.content {
+            CanvasNoteCard(
                 card: card, board: board, session: session,
                 presentationID: presentationID,
                 isCurrentPresentation: session.canvasResources[board.id]?.canPresent(
-                    owner: presentationID) == true)
+                    owner: presentationID) == true,
+                scale: board.viewport.scale, showsInlineChrome: false)
         } else if case .image(let path) = card.content {
             Button(action: activateCard) {
                 CanvasImageContent(path: path, session: session, pixels: 256).padding(12)

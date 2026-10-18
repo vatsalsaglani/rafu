@@ -1,50 +1,30 @@
 import SwiftUI
 
-/// Window-scoped editor host for the existing seven-pane Settings content.
-/// The content itself remains reusable by the native Settings scene when no
-/// workspace window exists.
+/// Settings no longer lives in an editor tab: ⌘, and every "Settings…" entry
+/// point open the standard Settings window. This view remains only because
+/// the editor-canvas routes (`EditorCanvasRoute.settings`,
+/// `WorkspaceAuxiliaryTab.settings`) still name it; nothing in the UI or the
+/// commands can reach them any more. If one is ever reached anyway, it opens
+/// the Settings window and closes its own tab instead of hosting a second copy.
 struct SettingsCanvas: View {
-    @Environment(\.rafuTheme) private var theme
+    @Environment(\.openSettings) private var openSettings
     @Bindable var session: WorkspaceSession
     var showsTabStrip = true
 
     var body: some View {
-        VStack(spacing: 0) {
-            if showsTabStrip {
-                tabStrip
-                Divider().overlay(theme.palette.borderSubtle)
-            }
-            RafuSettingsView()
+        VStack(spacing: 12) {
+            Image(systemName: "gearshape")
+                .font(.system(size: 28))
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text("Settings opens in its own window.")
+                .foregroundStyle(.secondary)
+            Button("Open Settings") { openSettings() }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(theme.palette.editorBackground)
-    }
-
-    private var tabStrip: some View {
-        HStack(spacing: 0) {
-            AttachedWorkbenchTab(isSelected: true) {
-                HStack(spacing: RafuMetrics.space2) {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 11))
-                        .foregroundStyle(theme.palette.info)
-                        .accessibilityHidden(true)
-                    Text("Settings")
-                        .lineLimit(1)
-                    AttachedWorkbenchTabCloseButton(
-                        accessibilityLabel: "Close Settings",
-                        help: "Close Settings",
-                        action: session.closeSettings
-                    )
-                    .accessibilityHint("Closes the Settings canvas")
-                }
-            }
-            .font(.callout)
-            .overlay(alignment: .trailing) {
-                Divider().frame(height: 18).overlay(theme.palette.borderSubtle)
-            }
-            Spacer()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task {
+            openSettings()
+            session.closeSettings()
         }
-        .frame(minHeight: RafuMetrics.tabBarHeight)
-        .background(theme.palette.tabBarBackground)
     }
 }

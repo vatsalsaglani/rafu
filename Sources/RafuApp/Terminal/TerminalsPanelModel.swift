@@ -138,9 +138,23 @@ nonisolated struct AgentLauncherRow: Identifiable, Equatable, Sendable {
     /// AT-01's verified-argv caveat (only Kimi carries one today). Shown as
     /// text on a ready row rather than suppressed.
     let verificationNote: String?
+    /// `true` when the CLI is absent, as opposed to installed but signed
+    /// out. Both are `.unavailable`; this picks the short state word.
+    var isNotInstalled: Bool = false
 
     var isLaunchable: Bool {
         state == .ready
+    }
+
+    /// The short state word shown beside the name in the Start Agent menu.
+    /// The longer reason stays in `statusText`, `tooltip`, and
+    /// `accessibilityLabel`.
+    var stateLabel: String {
+        switch state {
+        case .probing: "Checking…"
+        case .ready: "Ready"
+        case .unavailable: isNotInstalled ? "Not installed" : "Not signed in"
+        }
     }
 
     /// The row's single secondary line. A ready row prefers its verification
@@ -221,7 +235,8 @@ nonisolated enum AgentLauncherModel {
                 state: option.isReady
                     ? .ready
                     : .unavailable(option.availability.reason ?? "Unavailable."),
-                verificationNote: option.launchVerificationNote)
+                verificationNote: option.launchVerificationNote,
+                isNotInstalled: option.availability == .notInstalled)
         }
     }
 
@@ -229,10 +244,10 @@ nonisolated enum AgentLauncherModel {
         rows.count { $0.isLaunchable }
     }
 
-    /// Section header text. The count appears only once the probe resolved;
-    /// claiming "0 ready" mid-probe would be the same lie as an empty list.
-    static func headerTitle(rows: [AgentLauncherRow], isProbing: Bool) -> String {
-        isProbing ? "Agents (checking…)" : "Agents (\(readyCount(rows)) of \(rows.count) ready)"
+    /// The one line shown while detection runs. No ready count appears until
+    /// the probe resolved; claiming "0 ready" mid-probe would be a lie.
+    static func checkingLine(agentCount: Int) -> String {
+        agentCount == 1 ? "Checking 1 agent…" : "Checking \(agentCount) agents…"
     }
 
     /// The launch gate. Returns the option to launch, or `nil` when the row is
@@ -288,6 +303,24 @@ nonisolated enum TerminalsPanelModel {
         let isCurrent: Bool
         let isSaved: Bool
         let hasRestartablePane: Bool
+        /// Automatic name ("zsh — api") for a group the user never named.
+        /// `nil` when the stored `name` is user-chosen.
+        var automaticName: String? = nil
+        /// Colour tag of the focused pane, shown as a 6 pt dot.
+        var sessionColor: TerminalSessionColor? = nil
+
+        /// What the panel shows. `name` stays the stored value.
+        var displayName: String { automaticName ?? name }
+
+        var summary: String {
+            TerminalNaming.groupSummary(
+                paneCount: paneCount, livePaneCount: livePaneCount,
+                attentionCount: attentionCount)
+        }
+
+        var stateLabel: String {
+            TerminalNaming.groupStateLabel(livePaneCount: livePaneCount)
+        }
     }
 
     nonisolated struct TerminalPaneRow: Identifiable, Equatable, Sendable {
@@ -306,6 +339,11 @@ nonisolated enum TerminalsPanelModel {
         let providerOrShell: String
         let canStart: Bool
         let canRestart: Bool
+
+        /// "Shell · Stopped", with no empty or "." parts.
+        var subtitle: String {
+            TerminalNaming.subtitle([providerOrShell, detail, folder])
+        }
 
         var unavailableMessage: String? {
             guard isUnavailable else { return nil }
@@ -330,11 +368,13 @@ nonisolated enum TerminalsPanelModel {
         let groupedRows = groups.flatMap { group in
             let panes = group.panes.map { pane in
                 let controller = pane.sessionID.flatMap { controllerByID[$0] }
+                let providerOrShell = paneProviderOrShell(pane, controller: controller)
                 return TerminalPaneRow(
                     id: pane.id,
                     groupID: group.id,
-                    name: pane.explicitUserName?.rawValue ?? pane.reportedTitle?.rawValue
-                        ?? controller?.displayName ?? "Terminal Pane",
+                    name: paneDisplayName(
+                        pane, controller: controller, providerOrShell: providerOrShell,
+                        workspaceRoot: workspaceRoot),
                     detail: paneDetail(pane, controller: controller),
                     status: pane.status,
                     hasAttention: controller.map {
@@ -346,7 +386,7 @@ nonisolated enum TerminalsPanelModel {
                     sessionColor: controller?.sessionColor,
                     folder: pane.launchProfile?.startingFolder.rawValue
                         ?? controller?.currentDirectoryPath ?? "No saved folder",
-                    providerOrShell: paneProviderOrShell(pane, controller: controller),
+                    providerOrShell: providerOrShell,
                     canStart: pane.status == .stopped
                         && pane.runtimeKind == .ordinaryShell
                         && pane.startAvailability == .available
@@ -356,9 +396,25 @@ nonisolated enum TerminalsPanelModel {
                         && pane.startAvailability == .available
                         && pane.launchProfile != nil)
             }
+            let focusedIndex = group.panes.firstIndex { $0.id == group.focusedPaneID } ?? 0
+            let storedName = group.name.rawValue
+            var automaticName: String?
+            if TerminalNaming.isAutomaticGroupName(storedName),
+                group.panes.indices.contains(focusedIndex)
+            {
+                let focused = group.panes[focusedIndex]
+                let controller = focused.sessionID.flatMap { controllerByID[$0] }
+                automaticName = TerminalNaming.automaticName(
+                    command: paneProviderOrShell(focused, controller: controller),
+                    folder: paneFolderName(
+                        focused, controller: controller, workspaceRoot: workspaceRoot))
+            }
+            let groupColor =
+                panes.first { $0.isFocused && $0.sessionColor != nil }?.sessionColor
+                ?? panes.compactMap(\.sessionColor).first
             let groupRow = TerminalGroupRow(
                 id: group.id,
-                name: group.name.rawValue,
+                name: storedName,
                 paneCount: panes.count,
                 livePaneCount: group.panes.count { $0.status == .live },
                 attentionCount: panes.count { $0.hasAttention },
@@ -370,7 +426,9 @@ nonisolated enum TerminalsPanelModel {
                         && $0.status == .stopped
                         && $0.startAvailability == .available
                         && $0.launchProfile != nil
-                })
+                },
+                automaticName: automaticName,
+                sessionColor: groupColor)
             return [.group(groupRow)] + panes.map(HierarchyRow.pane)
         }
         let legacyRows = rows(
@@ -380,6 +438,38 @@ nonisolated enum TerminalsPanelModel {
             HierarchyRow.legacy(row, isCurrent: currentLegacySessionID == row.id)
         }
         return groupedRows + legacyRows
+    }
+
+    /// A pane's user name wins, then a shell-reported title (unless it is only
+    /// a path), then an automatic "command — folder" name.
+    @MainActor
+    private static func paneDisplayName(
+        _ pane: TerminalPaneSnapshot,
+        controller: WorkspaceTerminalController?,
+        providerOrShell: String,
+        workspaceRoot: String?
+    ) -> String {
+        if let explicit = pane.explicitUserName?.rawValue { return explicit }
+        if let title = pane.reportedTitle?.rawValue,
+            !WorkspaceTerminalController.isPathLikeTitle(title)
+        {
+            return title
+        }
+        return TerminalNaming.automaticName(
+            command: providerOrShell,
+            folder: paneFolderName(pane, controller: controller, workspaceRoot: workspaceRoot))
+    }
+
+    @MainActor
+    private static func paneFolderName(
+        _ pane: TerminalPaneSnapshot,
+        controller: WorkspaceTerminalController?,
+        workspaceRoot: String?
+    ) -> String? {
+        let path =
+            controller?.currentDirectoryPath ?? controller?.startingDirectory
+            ?? pane.launchProfile?.startingFolder.rawValue
+        return TerminalNaming.folderName(path: path, workspaceRoot: workspaceRoot)
     }
 
     @MainActor

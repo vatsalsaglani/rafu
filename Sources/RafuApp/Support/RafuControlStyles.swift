@@ -24,7 +24,10 @@ extension View {
 }
 
 /// Icon button used across chrome (sidebar headers, panels, tab bars).
-/// Quiet at rest, visible wash on hover, accent when active.
+/// Quiet at rest, visible wash on hover. An active (toggled) icon button is
+/// neutral: a `selection` fill with a `textPrimary` glyph. Gold is reserved
+/// for keyboard focus, the current selection ring, and the primary action
+/// ("One Gold Thread"), so a toggle is never gold.
 struct RafuIconButtonStyle: ButtonStyle {
     var isActive: Bool = false
     var size: CGFloat = 26
@@ -46,6 +49,7 @@ struct RafuIconButtonStyle: ButtonStyle {
         let iconSize: CGFloat
         @Environment(\.rafuTheme) private var theme
         @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.isFocused) private var isFocused
         @State private var isHovering = false
 
         var body: some View {
@@ -61,30 +65,26 @@ struct RafuIconButtonStyle: ButtonStyle {
                 .overlay(
                     RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
                         .strokeBorder(
-                            theme.palette.accent.opacity(isActive ? 0.5 : 0),
-                            lineWidth: RafuMetrics.hairline
+                            isFocused ? theme.palette.focusRing : Color.clear,
+                            lineWidth: 1.5
                         )
                 )
                 .contentShape(
                     RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
                 )
                 .onHover { isHovering = $0 }
-                .animation(.easeOut(duration: 0.12), value: isHovering)
-                .animation(.easeOut(duration: 0.12), value: isActive)
+                .animation(isHovering ? RafuMotion.hoverIn : RafuMotion.hoverOut, value: isHovering)
                 .opacity(isEnabled ? 1 : 0.35)
         }
 
         private var foreground: Color {
-            if isActive { return theme.palette.accent }
-            if isHovering { return theme.palette.textPrimary }
+            if isActive || isHovering { return theme.palette.textPrimary }
             return theme.palette.textSecondary
         }
 
         private var background: Color {
-            // Selected nav items read as a scarce accent wash + hairline
-            // outline (references); pressed and hover stay neutral washes.
-            if isActive { return theme.palette.accentSoft }
             if configuration.isPressed { return theme.palette.selection }
+            if isActive { return theme.palette.selection }
             if isHovering { return theme.palette.hover }
             return .clear
         }
@@ -240,7 +240,7 @@ struct RafuProminentButtonStyle: ButtonStyle {
                         .fill(fill)
                 )
                 .onHover { isHovering = $0 }
-                .animation(.easeOut(duration: 0.12), value: isHovering)
+                .animation(isHovering ? RafuMotion.hoverIn : RafuMotion.hoverOut, value: isHovering)
                 .opacity(isEnabled ? 1 : 0.4)
         }
 
@@ -265,6 +265,7 @@ struct RafuSecondaryButtonStyle: ButtonStyle {
         let compact: Bool
         @Environment(\.rafuTheme) private var theme
         @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.isFocused) private var isFocused
         @State private var isHovering = false
 
         var body: some View {
@@ -280,13 +281,16 @@ struct RafuSecondaryButtonStyle: ButtonStyle {
                 .overlay(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .strokeBorder(
-                            isHovering
-                                ? theme.palette.borderStrong
-                                : theme.palette.borderSubtle
+                            isFocused
+                                ? theme.palette.focusRing
+                                : (isHovering
+                                    ? theme.palette.borderStrong
+                                    : theme.palette.borderSubtle),
+                            lineWidth: isFocused ? 1.5 : 1
                         )
                 )
                 .onHover { isHovering = $0 }
-                .animation(.easeOut(duration: 0.12), value: isHovering)
+                .animation(isHovering ? RafuMotion.hoverIn : RafuMotion.hoverOut, value: isHovering)
                 .opacity(isEnabled ? 1 : 0.4)
         }
 
@@ -348,9 +352,10 @@ struct RafuSegmentedPicker<Item: Hashable>: View {
     private func segment(for item: Item) -> some View {
         let isSelected = item == selection
         return Button {
-            withAnimation(.spring(duration: 0.25)) { selection = item }
+            withAnimation(RafuMotion.selection) { selection = item }
         } label: {
             Text(title(item))
+                .rafuNoWrapSegmentLabel()
                 .font(.system(size: 11.5, weight: isSelected ? .semibold : .regular))
                 .foregroundStyle(
                     isSelected ? theme.palette.textPrimary : theme.palette.textSecondary
@@ -372,6 +377,121 @@ struct RafuSegmentedPicker<Item: Hashable>: View {
                 .contentShape(RoundedRectangle(cornerRadius: 5.5, style: .continuous))
         }
         .buttonStyle(.plain)
+    }
+}
+
+extension View {
+    /// Keeps a segment label on one line at its natural width. A segmented
+    /// control that wraps ("Worktree / s") is a defect; a control that does
+    /// not fit should switch to icons or scroll, never break a word. Use it
+    /// on the `Text` inside any custom segment or pull-down label.
+    func rafuNoWrapSegmentLabel() -> some View {
+        lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+/// What an icon toggle draws. Text glyphs ("Aa", "ab", ".*") keep their
+/// familiar editor meaning and are drawn as text, not as SF Symbols.
+enum RafuOptionToggleGlyph: Equatable {
+    case text(String, monospaced: Bool = false, underlined: Bool = false)
+    case symbol(String)
+}
+
+/// 24 x 22 neutral icon toggle for search options (Match Case, Whole Word,
+/// Regular Expression, In Selection). On = `selection` fill with a
+/// `textPrimary` glyph; off = `textSecondary`. The theme focus ring shows only
+/// for real keyboard focus. Always pass a `label`: it becomes the tooltip and
+/// the accessibility label, and the on/off state is exposed as a trait.
+struct RafuOptionToggle: View {
+    let glyph: RafuOptionToggleGlyph
+    let label: String
+    @Binding var isOn: Bool
+
+    nonisolated static let width: CGFloat = 24
+    nonisolated static let height: CGFloat = 22
+
+    var body: some View {
+        Button {
+            isOn.toggle()
+        } label: {
+            // The face is a separate view so `\.isFocused` is read INSIDE the
+            // button's focus scope; read outside it, it would never be true.
+            Face(glyph: glyph, isOn: isOn)
+        }
+        .buttonStyle(.plain)
+        .help(label)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
+    }
+
+    private struct Face: View {
+        let glyph: RafuOptionToggleGlyph
+        let isOn: Bool
+
+        @Environment(\.rafuTheme) private var theme
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.isFocused) private var isFocused
+        @State private var isHovering = false
+
+        var body: some View {
+            glyphView
+                .frame(width: RafuOptionToggle.width, height: RafuOptionToggle.height)
+                .background(
+                    RoundedRectangle(
+                        cornerRadius: RafuMetrics.radiusDenseSelection, style: .continuous
+                    )
+                    .fill(fill)
+                )
+                .overlay(
+                    RoundedRectangle(
+                        cornerRadius: RafuMetrics.radiusDenseSelection, style: .continuous
+                    )
+                    .strokeBorder(
+                        isFocused
+                            ? theme.palette.focusRing
+                            : (isOn ? theme.palette.borderStrong : Color.clear),
+                        lineWidth: isFocused ? 1.5 : RafuMetrics.hairline
+                    )
+                )
+                .contentShape(Rectangle())
+                .onHover { isHovering = $0 }
+                .animation(
+                    isHovering ? RafuMotion.hoverIn : RafuMotion.hoverOut, value: isHovering
+                )
+                .opacity(isEnabled ? 1 : 0.35)
+        }
+
+        @ViewBuilder
+        private var glyphView: some View {
+            switch glyph {
+            case .text(let text, let monospaced, let underlined):
+                Text(text)
+                    .font(
+                        .system(
+                            size: 11.5, weight: .semibold,
+                            design: monospaced ? .monospaced : .default)
+                    )
+                    .underline(underlined)
+                    .foregroundStyle(foreground)
+                    .lineLimit(1)
+                    .fixedSize()
+            case .symbol(let name):
+                Image(systemName: name)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(foreground)
+            }
+        }
+
+        private var foreground: Color {
+            isOn || isHovering ? theme.palette.textPrimary : theme.palette.textSecondary
+        }
+
+        private var fill: Color {
+            if isOn { return theme.palette.selection }
+            if isHovering { return theme.palette.hover }
+            return .clear
+        }
     }
 }
 
@@ -515,7 +635,7 @@ struct RafuSheetHeader: View {
         HStack(alignment: .top, spacing: RafuMetrics.space2) {
             Image(systemName: icon)
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(theme.palette.accent)
+                .foregroundStyle(theme.palette.textSecondary)
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
@@ -546,7 +666,7 @@ struct RafuHoverRow<Content: View>: View {
                     .fill(background)
             )
             .onHover { isHovering = $0 }
-            .animation(.easeOut(duration: 0.1), value: isHovering)
+            .animation(isHovering ? RafuMotion.hoverIn : RafuMotion.hoverOut, value: isHovering)
     }
 
     private var background: Color {
