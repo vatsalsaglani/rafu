@@ -43,9 +43,17 @@ nonisolated struct CanvasEdgeCurve: Equatable, Sendable {
         let b = 3 * u * u * t
         let c = 3 * u * t * t
         let d = t * t * t
-        return CGPoint(
-            x: a * start.x + b * control1.x + c * control2.x + d * end.x,
-            y: a * start.y + b * control1.y + c * control2.y + d * end.y)
+        let x0 = Double(start.x)
+        let x1 = Double(control1.x)
+        let x2 = Double(control2.x)
+        let x3 = Double(end.x)
+        let y0 = Double(start.y)
+        let y1 = Double(control1.y)
+        let y2 = Double(control2.y)
+        let y3 = Double(end.y)
+        let x: Double = a * x0 + b * x1 + c * x2 + d * x3
+        let y: Double = a * y0 + b * y1 + c * y2 + d * y3
+        return CGPoint(x: x, y: y)
     }
 
     /// The derivative at `t`. It is not normalized and can be zero for a degenerate curve.
@@ -54,11 +62,17 @@ nonisolated struct CanvasEdgeCurve: Equatable, Sendable {
         let a = 3 * u * u
         let b = 6 * u * t
         let c = 3 * t * t
-        return CGPoint(
-            x: a * (control1.x - start.x) + b * (control2.x - control1.x)
-                + c * (end.x - control2.x),
-            y: a * (control1.y - start.y) + b * (control2.y - control1.y)
-                + c * (end.y - control2.y))
+        let x0 = Double(start.x)
+        let x1 = Double(control1.x)
+        let x2 = Double(control2.x)
+        let x3 = Double(end.x)
+        let y0 = Double(start.y)
+        let y1 = Double(control1.y)
+        let y2 = Double(control2.y)
+        let y3 = Double(end.y)
+        let x: Double = a * (x1 - x0) + b * (x2 - x1) + c * (x3 - x2)
+        let y: Double = a * (y1 - y0) + b * (y2 - y1) + c * (y3 - y2)
+        return CGPoint(x: x, y: y)
     }
 
     /// Label placement point (t = 0.5).

@@ -100,95 +100,111 @@ struct WorkspaceCanvasView: View {
 
     private var boardSurface: some View {
         GeometryReader { geometry in
-            // Only a valid target gets the shell's outline; invalid ones are dimmed
-            // by the edge overlay.
-            let connectionTarget = connectionDrag.source.flatMap { source in
-                connectionDrag.target(in: board.cards, viewport: board.viewport).flatMap {
-                    board.canConnect(from: source, to: $0) ? $0 : nil
+            boardKeys(boardChrome(boardLayers(geometry), geometry: geometry))
+        }
+    }
+
+    /// The only card a connection drag may drop on, or nil.
+    private var validConnectionTarget: CanvasCardID? {
+        guard let source = connectionDrag.source,
+            let target = connectionDrag.target(in: board.cards, viewport: board.viewport),
+            board.canConnect(from: source, to: target)
+        else { return nil }
+        return target
+    }
+
+    /// Stage 1: the grid, edges, cards, overlays and the board coordinate space.
+    private func boardLayers(_ geometry: GeometryProxy) -> some View {
+        // Only a valid target gets the shell's outline; invalid ones are dimmed
+        // by the edge overlay.
+        let connectionTarget = validConnectionTarget
+        return ZStack(alignment: .topLeading) {
+            grid
+                .contentShape(.rect)
+                .gesture(backgroundDrag)
+                .onTapGesture {
+                    board.backToBoard()
+                    boardHasKeyboardFocus = true
+                    board.selection = []
+                    board.clearConnectionSelection()
                 }
-            }
-            ZStack(alignment: .topLeading) {
-                grid
-                    .contentShape(.rect)
-                    .gesture(backgroundDrag)
-                    .onTapGesture {
-                        board.backToBoard()
-                        boardHasKeyboardFocus = true
-                        board.selection = []
-                        board.clearConnectionSelection()
+                .simultaneousGesture(
+                    SpatialTapGesture(count: 2).onEnded { value in
+                        interaction.addPopoverBoardPoint = unproject(value.location)
+                        interaction.addPopoverAnchor = value.location
                     }
-                    .simultaneousGesture(
-                        SpatialTapGesture(count: 2).onEnded { value in
-                            interaction.addPopoverBoardPoint = unproject(value.location)
-                            interaction.addPopoverAnchor = value.location
+                )
+                .pointerStyle(isPanning ? .grabActive : .grabIdle)
+            CanvasEdgeLayer(
+                board: board, session: session, focusBoard: { boardHasKeyboardFocus = true })
+            ForEach(visibleCards(in: geometry.size)) { card in
+                CanvasCardShell(
+                    card: card, board: board, session: session,
+                    focusBoard: { boardHasKeyboardFocus = true },
+                    isConnectionTarget: connectionTarget == card.id,
+                    updateConnectionDrag: { source, point in
+                        if connectionDrag.source == nil {
+                            board.backToBoard()
+                            boardHasKeyboardFocus = true
                         }
-                    )
-                    .pointerStyle(isPanning ? .grabActive : .grabIdle)
-                CanvasEdgeLayer(
-                    board: board, session: session, focusBoard: { boardHasKeyboardFocus = true })
-                ForEach(visibleCards(in: geometry.size)) { card in
-                    CanvasCardShell(
-                        card: card, board: board, session: session,
-                        focusBoard: { boardHasKeyboardFocus = true },
-                        isConnectionTarget: connectionTarget == card.id,
-                        updateConnectionDrag: { source, point in
-                            if connectionDrag.source == nil {
-                                board.backToBoard()
-                                boardHasKeyboardFocus = true
-                            }
-                            connectionDrag.update(from: source, at: point)
-                        },
-                        finishConnectionDrag: { source, point in
-                            if let drop = connectionDrag.finish(
-                                from: source, at: point, cards: board.cards,
-                                viewport: board.viewport)
-                            {
-                                session.connectCanvasCards(
-                                    boardID: board.id, from: drop.from, to: drop.to)
-                            }
-                        },
-                        cancelConnectionDrag: { source in
-                            if connectionDrag.source == source { connectionDrag.reset() }
+                        connectionDrag.update(from: source, at: point)
+                    },
+                    finishConnectionDrag: { source, point in
+                        if let drop = connectionDrag.finish(
+                            from: source, at: point, cards: board.cards,
+                            viewport: board.viewport)
+                        {
+                            session.connectCanvasCards(
+                                boardID: board.id, from: drop.from, to: drop.to)
                         }
-                    )
-                    .frame(width: card.rect.width, height: card.rect.height)
-                    .scaleEffect(board.viewport.scale, anchor: .topLeading)
-                    .offset(
-                        x: card.rect.x * board.viewport.scale + board.viewport.x,
-                        y: card.rect.y * board.viewport.scale + board.viewport.y
-                    )
-                    .transition(cardTransition)
-                }
-                CanvasEdgeOverlay(board: board, session: session, drag: connectionDrag)
-                ForEach(interaction.guides, id: \.key) { guide in
-                    guideLine(guide)
-                }
-                if let marquee = interaction.marquee {
-                    Rectangle().stroke(theme.palette.accent, lineWidth: 1)
-                        .background(theme.palette.accent.opacity(0.08))
-                        .frame(width: marquee.width, height: marquee.height)
-                        .offset(x: marquee.minX, y: marquee.minY)
-                        .allowsHitTesting(false).accessibilityHidden(true)
-                }
-                if isDropTargeted {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(
-                            theme.palette.accent, style: StrokeStyle(lineWidth: 2, dash: [8, 5])
-                        )
-                        .padding(6)
-                        .allowsHitTesting(false).accessibilityHidden(true)
-                }
-                if board.cards.isEmpty, !tipDismissed {
-                    emptyBoardTip
-                }
+                    },
+                    cancelConnectionDrag: { source in
+                        if connectionDrag.source == source { connectionDrag.reset() }
+                    }
+                )
+                .frame(width: card.rect.width, height: card.rect.height)
+                .scaleEffect(board.viewport.scale, anchor: .topLeading)
+                .offset(
+                    x: card.rect.x * board.viewport.scale + board.viewport.x,
+                    y: card.rect.y * board.viewport.scale + board.viewport.y
+                )
+                .transition(cardTransition)
             }
-            .coordinateSpace(name: CanvasConnectionCoordinateSpace.board)
-            .onGeometryChange(for: CGSize.self) {
-                $0.size
-            } action: {
-                board.visibleSize = $0
+            CanvasEdgeOverlay(board: board, session: session, drag: connectionDrag)
+            ForEach(interaction.guides, id: \.key) { guide in
+                guideLine(guide)
             }
-            .clipped()
+            if let marquee = interaction.marquee {
+                Rectangle().stroke(theme.palette.accent, lineWidth: 1)
+                    .background(theme.palette.accent.opacity(0.08))
+                    .frame(width: marquee.width, height: marquee.height)
+                    .offset(x: marquee.minX, y: marquee.minY)
+                    .allowsHitTesting(false).accessibilityHidden(true)
+            }
+            if isDropTargeted {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(
+                        theme.palette.accent, style: StrokeStyle(lineWidth: 2, dash: [8, 5])
+                    )
+                    .padding(6)
+                    .allowsHitTesting(false).accessibilityHidden(true)
+            }
+            if board.cards.isEmpty, !tipDismissed {
+                emptyBoardTip
+            }
+        }
+        .coordinateSpace(name: CanvasConnectionCoordinateSpace.board)
+        .onGeometryChange(for: CGSize.self) {
+            $0.size
+        } action: {
+            board.visibleSize = $0
+        }
+        .clipped()
+    }
+
+    /// Stage 2: popover, drop, scroll and magnify bridges, zoom capsule, focus.
+    private func boardChrome(_ content: some View, geometry: GeometryProxy) -> some View {
+        content
             .popover(
                 isPresented: Binding(
                     get: { interaction.addPopoverAnchor != nil },
@@ -265,6 +281,11 @@ struct WorkspaceCanvasView: View {
             .focused($boardHasKeyboardFocus)
             .onChange(of: boardHasKeyboardFocus) { _, focused in if !focused { spaceIsDown = false }
             }
+    }
+
+    /// Stage 3: keyboard handling for the board.
+    private func boardKeys(_ content: some View) -> some View {
+        content
             .onKeyPress(.space, phases: [.down, .repeat, .up]) { event in
                 guard !board.contentIsActive else { return .ignored }
                 spaceIsDown = event.phase != .up
@@ -343,7 +364,6 @@ struct WorkspaceCanvasView: View {
                 board.connectingFrom = nil
                 return .handled
             }
-        }
     }
 
     private var pausedLinksNotice: some View {
