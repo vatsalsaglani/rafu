@@ -51,14 +51,8 @@ final class CanvasBoardResources {
     func nativeApp(for card: CanvasCard) -> CanvasNativeAppController? {
         if let value = apps[card.id] { return value }
         guard case .nativeApp(let bundleID) = card.content else { return nil }
-        let value = CanvasNativeAppController(bundleID: bundleID)
-        value.canStart = { [weak self] in
-            guard let self, permitsLiveContent, let session else { return false }
-            return session.canvasResources.values.reduce(0) {
-                $0 + $1.apps.values.filter(\.isCapturing).count
-            }
-                < CanvasLimits.captureStreams
-        }
+        // Docking has its own limit and checks `permitsLiveContent` itself.
+        let value = CanvasNativeAppController(bundleID: bundleID, cardID: card.id)
         apps[card.id] = value
         return value
     }

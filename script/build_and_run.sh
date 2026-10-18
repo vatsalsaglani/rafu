@@ -131,6 +131,8 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$VERSION</string>
   <key>CFBundleVersion</key>
   <string>1</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Rafu asks Music and Spotify what is playing, and sends them play, pause, next, and previous, only when you use Now Playing in the notch.</string>
   <key>LSMinimumSystemVersion</key>
   <string>$MIN_SYSTEM_VERSION</string>
   <key>NSPrincipalClass</key>
