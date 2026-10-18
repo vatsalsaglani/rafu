@@ -62,7 +62,7 @@ final class CanvasBoardState: Identifiable {
         var value = document
         // A board saved before frame bounds were derived may hold a frame
         // that no longer fits. This is not an edit: the next save keeps it.
-        Self.normalizeFrames(&value, previous: nil)
+        CanvasBoardState.normalizeFrames(&value, previous: nil)
         self.document = value
     }
 
