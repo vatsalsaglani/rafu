@@ -366,6 +366,9 @@ struct AgentHistorySessionMenuItems: View {
         Button("Resume in Terminal", systemImage: "terminal") {
             session.resumeAgentSession(summary)
         }
+        Button("Resume in Ensemble", systemImage: "rectangle.3.group") {
+            session.resumeAgentSessionInEnsemble(summary)
+        }
         Divider()
         Button("Reveal Transcript in Finder", systemImage: "folder") {
             session.revealAgentTranscript(summary)

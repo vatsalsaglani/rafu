@@ -252,7 +252,27 @@ struct CanvasCardMenuContent: View {
     }
 }
 
-/// Inline title editing (double-click the title). Return saves, Esc cancels.
+/// The rules of the inline title field, kept apart from the view.
+nonisolated enum CanvasInlineRename {
+    /// The title to save for `draft`, or `nil` when nothing changes: the
+    /// trimmed draft equals the current title, or it is not a valid title.
+    static func committedTitle(draft: String, current: String) -> String? {
+        let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard name != current, CanvasDocument.validTitle(name) else { return nil }
+        return name
+    }
+
+    /// Board shortcuts (Return, Space, Delete, arrows, Tab, N, T, ⌘A, ⌘Z)
+    /// apply only when no card content is active and no title field is open.
+    static func boardTakesKeys(contentIsActive: Bool, renamingCardID: CanvasCardID?) -> Bool {
+        !contentIsActive && renamingCardID == nil
+    }
+}
+
+/// Inline title editing (double-click the title, or Rename…). Return and
+/// clicking away save; Esc cancels. The save is one undoable board edit, the
+/// same as the Rename Card dialog, and the stored title wins over automatic
+/// terminal titles (`CanvasCardShell.displayTitle`).
 struct CanvasCardRenameField: View {
     @Environment(\.rafuTheme) private var theme
     let card: CanvasCard
@@ -287,15 +307,17 @@ struct CanvasCardRenameField: View {
                 focused = true
             }
             .onChange(of: focused) { _, isFocused in
-                if !isFocused, board.renamingCardID == card.id { board.renamingCardID = nil }
+                // Focus moved away (a click elsewhere): save, as Return does.
+                // Esc closes the field first, so it never saves.
+                if !isFocused, board.renamingCardID == card.id { commit() }
             }
             .accessibilityLabel("Card name")
     }
 
     private func commit() {
-        let name = text.trimmingCharacters(in: .whitespacesAndNewlines)
         board.renamingCardID = nil
-        guard name != card.title, CanvasDocument.validTitle(name) else { return }
+        guard let name = CanvasInlineRename.committedTitle(draft: text, current: card.title)
+        else { return }
         session.performCanvasEdit(board) {
             try board.edit { value in
                 if let index = value.cards.firstIndex(where: { $0.id == card.id }) {

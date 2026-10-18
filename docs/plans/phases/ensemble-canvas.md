@@ -176,7 +176,9 @@ Contracts:
   Codex: `~/.codex/sessions/**/rollout-*.jsonl` (+ `session_index`). Parsed off
   the main actor, lazily, bounded per file; grouped by project path; "Resume"
   opens a terminal running `claude --resume <id>` / `codex resume <id>` in that
-  folder only after the user clicks it. Nothing leaves the Mac; nothing is logged.
+  folder only after the user clicks it (round 4: the CLI is the terminal's own
+  process, not a typed line). "Resume in Ensemble" adds a terminal node that
+  runs it on the window's Ensemble. Nothing leaves the Mac; nothing is logged.
 
 Security rules for X11: hook installation is an explicit user action with a
 review of the exact file and entries; it merges into the provider's config

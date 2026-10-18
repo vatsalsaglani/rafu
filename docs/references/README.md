@@ -96,7 +96,7 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`workspace-navigation-and-restoration-scheduling.md`](workspace-navigation-and-restoration-scheduling.md) | Async goto, stale-result checks, bookmark caching, combined metadata saves, and quit completion |
 | [`window-chrome-attachment-repair.md`](window-chrome-attachment-repair.md) | Synchronous window attachment, independent window state, and bounded chrome repair |
 | [`test-source-policy-and-bookmark-isolation.md`](test-source-policy-and-bookmark-isolation.md) | Source-policy test limits, real bookmark assertions, and isolated preferences |
-| [`agent-history.md`](agent-history.md) | Changing Agent History: Claude Code and Codex transcript locations and line formats, title and injected-context rules, read bounds, the summary cache, the resume command quoting, or Open Project Folder's new-window request |
+| [`agent-history.md`](agent-history.md) | Changing Agent History: Claude Code and Codex transcript locations and line formats, title and injected-context rules, read bounds, the summary cache, the resume command quoting, Resume in Terminal (direct Agent Terminal launch) and Resume in Ensemble, or Open Project Folder's new-window request |
 
 ## Reference-note template
 
@@ -130,7 +130,7 @@ Keep one focused subject per note. Add it to this index. Use an ADR instead when
 
 - [macOS redesign visual system](macos-redesign-visual-system.md): the "One Gold Thread" rules: gold budget, neutral structure, focus language, Canvas-only shadows, typography roles, `RafuMotion` values, and `RafuHaptics` rules.
 - [Linux Swift verification](linux-swift-verification.md): checking Swift changes in a Linux container without the macOS SDK (`swiftc -parse -swift-version 6`, `swift-format lint`, scratch SwiftPM packages) and why a Mac build stays mandatory.
-- [Canvas interaction](canvas-interaction.md): Canvas input map, Return to Board, z-order, snapping and zoom faces, edge layering and link states, note Read/Edit modes.
+- [Canvas interaction](canvas-interaction.md): Canvas input map, Return to Board, z-order, snapping and zoom faces, edge layering and link states, note Read/Edit modes, inline card rename and board-key gating, the paused-links notice below the tool palette.
 - [Canvas whiteboard and Ensemble file](canvas-whiteboard-and-ensemble-file.md): whiteboard and Mermaid card kinds, saved-format compatibility, bounds, the `.rafuensemble` format, file-bound boards and their expected-version check, palette keys.
 - [Canvas diagrams](canvas-diagrams.md): icon packs (Common, vendor import and pinned one-click download), frames with bounds derived from their members, the `diagram_build` layered layout, edge label placement, PNG/PDF/GIF export.
 - [Agent hooks and Now Playing](agent-hooks-and-now-playing.md): the `rafu-agent-events` hook helper (1 s alarm, silent exit 0, bounded stdin, private spool), event folding and terminal matching by PID chain, reviewed hook merge/unmerge with backups for Claude Code, Codex, and Cursor, and the MediaRemote adapter for system Now Playing with its Music/Spotify fallback.

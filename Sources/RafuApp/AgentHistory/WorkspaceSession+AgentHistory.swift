@@ -73,24 +73,23 @@ extension WorkspaceSession {
         }
     }
 
-    /// Opens a terminal in the session's folder and types the resume command
-    /// (`claude --resume <id>` / `codex resume <id>`). The folder must be
-    /// open in a Rafu window: this one, or another one, which then comes to
-    /// the front.
+    /// Opens an Agent Terminal in the session's folder that runs the resume
+    /// command (`claude --resume <id>` / `codex resume <id>`) as its own
+    /// process (`launchAgentResumeTerminal`). The folder must be open in a
+    /// Rafu window: this one, or another one, which then comes to the front.
     func resumeAgentSession(_ session: AgentHistorySessionSummary) {
-        guard let arguments = AgentHistoryResumeCommand.arguments(for: session.key) else {
+        guard AgentHistoryResumeCommand.arguments(for: session.key) != nil else {
             presentAgentHistoryMessage("This session id cannot be resumed safely.")
             return
         }
         guard let folder = existingAgentProjectFolder(session) else { return }
-        let line = AgentHistoryResumeCommand.shellLine(arguments)
         if containsAgentFolder(folder) {
-            startAgentResumeTerminal(in: folder, line: line)
+            launchAgentResumeTerminal(session.key, in: folder)
             return
         }
         for snapshot in WorkspaceWindowRegistry.shared.sessionSnapshots()
         where snapshot.session !== self && snapshot.session.containsAgentFolder(folder) {
-            snapshot.session.startAgentResumeTerminal(in: folder, line: line)
+            snapshot.session.launchAgentResumeTerminal(session.key, in: folder)
             WorkspaceWindowRegistry.shared.focus(session: snapshot.session)
             return
         }
@@ -114,36 +113,8 @@ extension WorkspaceSession {
         return primary.contains { AgentHistoryPath.isPath(candidate, inside: $0) }
     }
 
-    private func startAgentResumeTerminal(in folder: URL, line: String) {
-        guard let groupID = newTerminalGroup(startingIn: folder) else { return }
-        Task(name: "Type the agent resume command") { [weak self] in
-            guard let self else { return }
-            let typed = await self.typeAgentResumeLine(line, into: groupID)
-            if !typed {
-                self.presentAgentHistoryMessage(
-                    "The terminal did not start in time. Type the command yourself: \(line)")
-            }
-        }
-    }
-
-    /// Waits (at most ten seconds) for the new pane's shell, then types one
-    /// line. The pty buffers the line until the shell reads it.
-    private func typeAgentResumeLine(_ line: String, into groupID: TerminalGroupID) async -> Bool {
-        for attempt in 0..<100 {
-            if let pane = terminal.terminalGroup(groupID)?.panes.first,
-                let controller = terminal.terminalController(for: pane.id),
-                pane.status == .live
-            {
-                if attempt > 0 { try? await Task.sleep(for: .milliseconds(300)) }
-                if controller.sendReply(line) { return true }
-            }
-            do { try await Task.sleep(for: .milliseconds(100)) } catch { return false }
-        }
-        return false
-    }
-
     /// The session's folder when it still exists; otherwise says so.
-    private func existingAgentProjectFolder(_ session: AgentHistorySessionSummary) -> URL? {
+    func existingAgentProjectFolder(_ session: AgentHistorySessionSummary) -> URL? {
         guard let path = session.projectPath, path.hasPrefix("/") else {
             presentAgentHistoryMessage("This session did not record its folder.")
             return nil
@@ -159,7 +130,7 @@ extension WorkspaceSession {
         return URL(fileURLWithPath: path, isDirectory: true)
     }
 
-    private func presentAgentHistoryMessage(_ message: String) {
+    func presentAgentHistoryMessage(_ message: String) {
         openFolderErrorTitle = "Agent History"
         openFolderErrorMessage = message
         isOpenFolderErrorPresented = true

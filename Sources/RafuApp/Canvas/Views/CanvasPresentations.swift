@@ -8,6 +8,23 @@ struct CanvasPresentations: ViewModifier {
                 CanvasDialogView(dialog: dialog, session: session)
             }
             .confirmationDialog(
+                "No Ensemble is open",
+                isPresented: Binding(
+                    get: { session.agentEnsembleResumeAwaitingConfirmation != nil },
+                    set: { if !$0 { session.agentEnsembleResumeAwaitingConfirmation = nil } }),
+                titleVisibility: .visible,
+                presenting: session.agentEnsembleResumeAwaitingConfirmation
+            ) { plan in
+                Button("New Ensemble") { session.createEnsembleForAgentResume(plan) }
+                Button("Cancel", role: .cancel) {
+                    session.agentEnsembleResumeAwaitingConfirmation = nil
+                }
+            } message: { plan in
+                Text(
+                    "Rafu creates a new Ensemble named “\(plan.title)” and resumes the session in a terminal node."
+                )
+            }
+            .confirmationDialog(
                 "Remove from Ensemble?",
                 isPresented: Binding(
                     get: { session.pendingCanvasRemoval != nil },
