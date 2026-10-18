@@ -130,6 +130,12 @@ therefore no directory to resolve relative images against.
 
 ### Both CLI pickers are icon grids
 
+> **macOS redesign update (macOS build verification pending):** the New Ensemble
+> screen now shows title-case section headers, 32 pt CLI rows and budget rows.
+> The icon-grid anatomy below (and the "icon grid" wording in the layout and
+> `allowedProviders` tables) describes the earlier layout. The handoff did not
+> state which rules in this section still hold.
+
 `EnsembleCLIIconGrid` + `EnsembleCLIIconCard` replace the old row list and the
 old column of toggles. Same component, two modes: `.selected` (coordinator,
 single-select) and `.allowed` (grant, multi-select). Icons come from

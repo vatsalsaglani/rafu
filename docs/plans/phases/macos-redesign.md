@@ -1,6 +1,7 @@
 # macOS redesign: "One Gold Thread"
 
-- Status: Active implementation (user direction, 2026-10-18).
+- Status: Implemented on the integration branch; macOS build and test pending.
+  Started on user direction, 2026-10-18. See "Status and results" at the end.
 - Source specification: [`macos-redesign/review.html`](macos-redesign/review.html)
   (open it in a browser, or grep it). Finding IDs (C1–C19, E1–E12, G1–G16,
   T1–T8, N1–N6, S1–S8) and section numbers (06 specs, 07 Canvas, 08 motion)
@@ -108,3 +109,250 @@ These names must match exactly, because no workstream can compile the others.
    Do not delete `.build` (it does not exist here).
 9. Handoff: branch, commit SHAs, findings done, findings skipped (and why),
    edits outside owned paths, tests added/changed, compile risks you see.
+
+## Status and results
+
+Branch `claude/rafu-macos-redesign-nqcu7h` (new branch of `main`, base
+`dcf2d68`). All workstreams below are merged on it. The user's direction was to
+implement every suggestion and new capability and to ignore ADR constraints; no
+ADR was edited.
+
+### Verification actually done
+
+- No macOS SDK was available. A Swift 6.2 Linux toolchain (swift.org,
+  ubuntu24.04) was installed at `/opt/swift`. See
+  [`../../references/linux-swift-verification.md`](../../references/linux-swift-verification.md).
+- `swiftc -parse -swift-version 6` over all `Sources/` and `Tests/`: 0 errors
+  after every merge.
+- `swift-format lint --strict --recursive Sources Tests` with the repo
+  `.swift-format`: clean.
+- **No app build and no repo test run happened.** `RafuCore` imports `Darwin`
+  and `RafuApp` needs SwiftUI/AppKit, so neither builds on Linux.
+- Pure logic was compiled and tested in scratch SwiftPM packages outside the
+  repo (file copies, `import CoreGraphics`/`SwiftUI` swapped to `Foundation`,
+  `@testable import` renamed, `defaultIsolation(MainActor)` to mirror the GUI
+  target). Roughly 250 Swift Testing tests passed across the workstreams and
+  the Canvas audit (the Canvas audit alone ran about 107 or more tests in 8 or
+  more suites). These are scratch runs, not the repo test suite, and they are
+  not evidence for parallel or `--no-parallel` repo runs.
+- `-warn-long-expression-type-checking` measured slow mixed `Double` x
+  `CGFloat` Bezier math (2.8 s and 5.5 s). It was rewritten with `Double`
+  locals.
+- Three compile audits (A1 Canvas; A2 panels and settings; A3 chrome
+  and editor) read every changed symbol against its definition and checked
+  risky SwiftUI/AppKit APIs against Apple documentation JSON. Fixed by the
+  audits: a `_ = x` statement inside a ViewBuilder body (must be `let _ = x`);
+  two stale source-scan test literals; very long modifier chains split
+  (`WorkspaceCanvasView.boardSurface`, `CanvasCardShell.body`); an 11-child
+  `HStack` grouped; a nonisolated enum for cross-module test use; an explicit
+  `Font.` on an `AttributedString` attribute; a long `||` chain split.
+
+### W1 Workbench chrome, editor, search, palette, status bar
+
+Landed:
+
+- Editor-group border is neutral (`borderSubtle`). With more than one group,
+  the focused group gets a `borderStrong` hairline. Gold stays only on a focused
+  terminal (`TerminalSurfaceBorderStyle.Context.editorGroup(isFocused:hostsTerminal:hasSiblings:)`).
+- Gold budget applied in shared styles; focus rings use `\.isFocused` with the
+  `focusRing` token (see the visual-system reference).
+- Window buttons are always visible again (they were hidden until hover). New
+  28 pt `WindowTitlebarRow` with a plain sidebar toggle.
+- Right panel minimum, ideal, maximum width 300, 340, 520 pt.
+  `rafuNoWrapSegmentLabel()` helper.
+- Files header: workspace name, Filter Files (opens the Go to File palette),
+  New File and New Folder. Rows are at least 24 pt.
+- Tabs: close control on selected or hovered tab; dirty dot becomes x on hover
+  (`EditorTabAccessory`); tab strip scrolls under a 16 pt fade.
+- Find bar compact; new Find in Selection scope (`FindSelectionScope`, protocol
+  `findScopeSelection()` with a default implementation).
+- Search toggles Aa, ab, .* (`RafuOptionToggle`); one-line results with the
+  match highlighted.
+- Markdown Source | Preview | Split control. Palette shortcut chips and footer
+  "Navigate / Open / Close".
+- Resources popover is summary-first; status bar and popover share
+  `ResidentMemoryMonitor` and `ResourceMemoryFormat`. "Local editor" removed
+  from the status bar; language-server item added.
+- Wording: "Parked" became "Not running"; "1 pane"/"N panes"; "Start All Panes".
+
+Skipped:
+
+- File-tree indent not changed (system `DisclosureGroup`).
+- No preview-tab concept exists, so none was added. The dashed line is the
+  `StitchedAccentEdge` selection motif and was kept.
+
+### W2 Source Control
+
+Landed:
+
+- `GitStatusPresentation` is the single source of status letters (U untracked,
+  A added) for the panel and the Files sidebar.
+- One-line rows with a status-letter badge; `GitSectionPicker` (icons below
+  320 pt); branch pull-down (Switch To, Create Branch..., Merge into Current);
+  neutral sync capsule ("up n, down n" / "No upstream" / "No remote"); Fetch,
+  Pull, Push disabled without a remote; "Publish to GitHub..." when available.
+- Commit composer: generate button in the field (Option-Command-G), "Commits N
+  files", Command-Return commits.
+- Diff header names the real comparison. Working tree: "Working Tree <-> Index"
+  (git diff compares to the index). Staged: "Index <-> HEAD". Commit:
+  "<hash> <-> Parent".
+- History: two-line rows, `GitRelativeTime`, ref capsules; commit details
+  expand under the row; hash split by characters without a hyphen
+  (`GitHashDisplay`).
+
+Skipped (no `GitService` primitive): branch rename and delete, Add Remote,
+Discard Hunk, Open in Terminal for worktrees, more diff context (diff stays at
+`--unified=3`).
+
+### W3 Terminals
+
+Landed:
+
+- "Start Agent" uses a popover, not `Menu`, because vendor SVG icons render at
+  1 x 1 pt inside `NSMenu` (they appear as dots). Rows use `FileIconView` at
+  16 pt. `agent-terminals.md` still describes the icon grid and needs updating.
+- `TerminalNaming`: automatic names ("zsh - fixtures"), plurals, states,
+  subtitle cleanup. Split "+" uses `Menu(primaryAction:)`. Stopped pane shows
+  "Start Shell".
+- Saved groups: double-click opens; "..." menu; new rename
+  (`WorkspaceSession.renameSavedTerminalGroup`); new delete confirmation. Group
+  menu reordered: "Save Layout..." always opens the naming sheet; "Update Saved
+  Layout" for saved groups.
+
+Note: `TerminalShellPickerView` is now unused. It is kept because tests pin it.
+
+### W4 Ensemble
+
+Landed:
+
+- "+" menu (New Run..., New Ensemble..., New Workflow from Template...), graph
+  button, `ConductorSectionPicker` (`ViewThatFits` with an icons fallback). The
+  panel switches to Runs while a full-tab Ensemble surface is open.
+- New Ensemble: title-case headers, 32 pt CLI rows, budget rows. New Run form
+  in `ConductorFormControls.swift` (theme card, one 128 pt label column,
+  bordered prompt editor, base reference field filled from already-loaded
+  branches, so no Git process starts).
+- Header clipping: the likely cause is `.fixedSize()` text menus in the header
+  and rows. They were changed, but the fix is not verified at runtime.
+- Activity copy plain. Frontmatter count "N fields" equals the shown rows.
+  Attention states use `warning`, not accent.
+
+### W5 Settings
+
+Landed:
+
+- Command-comma and the status-bar gear open the standard `Settings` scene
+  (`TabView` panes, 680 pt). `SettingsCommandRouter` was deleted.
+  `editor-canvas-routing.md` and `settings-surface.md` are stale.
+- General: Canvas haptics toggle. Appearance: new Follow System with a
+  light/dark theme pair (`ThemeAppearancePreference`, keys `themeLightChoice`
+  and `themeDarkChoice`; the old "system" value still works), radio cards,
+  labelled buttons. AI: provider list with + and -, "Save default" only when
+  changed (`AIProviderDraftChange`, `persistedIDs`). Language Servers and Agents
+  tables; agent custom-model combo field; sign-in state shows "Sign-in needed"
+  (not "Update needed", because no version data exists). Usage: drag reorder;
+  privacy text visible until first connect. Ensemble skill copy.
+
+Left in place on purpose (unreachable now): `WorkspaceSession.showSettings`,
+`closeSettings`, `settingsVisible`; `WorkspaceAuxiliaryTab.settings`;
+`EditorCanvasRoute.settings`; the `.settings` cases; the `SettingsCanvas` stub
+(opens the window and closes the tab). Also unused: `RafuSettingsSection`,
+`RafuSettingsRow`, `LanguageServerCatalogRow`.
+
+### W6a Canvas board
+
+Landed:
+
+- One 36 pt bar with a zoom capsule (Command-9 fit, Option-Command-9 selection,
+  Command-0 actual size); viewport scale 10% to 400%; Command-scroll zooms
+  about the pointer.
+- 32 pt header move handle; no footer; resize zones with `pointerStyle`;
+  per-type minimum sizes with resistance and spring; the PTY resizes once on
+  mouse-up; two-layer shadows; bring-to-front by `board.cards` array order
+  (last on top), skipped for clicks inside native terminal and web bodies to
+  keep first responder.
+- Snapping (`CanvasSnapper`), guides, haptics; marquee; Align, Distribute, Tidy
+  (`CanvasLayoutMath`); full key map including Control-Tab "Return to Board"
+  through a local key monitor; Tab and Shift-Tab reading order; N and T on board
+  focus.
+- Card types: terminal Start Shell block, file excerpt (40 lines, 8 KiB),
+  Mac-app Preview badge and popover, web Load. Zoom faces (`CanvasZoomFace`);
+  terminals and web unmount below 50% zoom.
+- List tables, Open Canvas sheet (`CanvasSummary.cardCount/modified`), Connect
+  form, unified card menu, Add menu, Help > Canvas Shortcuts, one-time empty
+  board tip (`canvasEmptyBoardTipDismissed`).
+- Control-Tab is also Next Tab in the app commands. The key monitor wins only
+  while card content is active.
+
+Skipped: Stop for a running terminal (no safe API), image pixel size, file
+excerpt selection, "last command" summary, board-focus VoiceOver hint, real
+arrow-key menu shortcuts (item titles show hints instead).
+
+### W6b Canvas edges and live links
+
+Landed:
+
+- Pure types: `CanvasEdgeGeometry`, `CanvasLinkState` (Live, Paused,
+  Disconnected(reason), Failed(reason), burst policy), `CanvasConnectionRules`.
+- Bridge: per-link pause and resume; state mapping (restore paused; stop
+  becomes disconnected; conversation changed; transport lost; a refused send is
+  failed until the next accepted message or a pause/resume). Accepted-message
+  events carry no body.
+- Behaviour change: new terminal-to-terminal links start Paused.
+- `CanvasEdgeLayer` (below cards), `CanvasEdgeOverlay` (above cards),
+  `CanvasConnectionPorts`, `CanvasLinkStatusItem` (replaces
+  `CanvasSessionLinksBar`; "Enable Links" and "Pause Links" are gone, so
+  `canvas-live-sessions.md` is stale). The message dot shows only while a
+  message is active (`TimelineView`); Reduce Motion uses a badge pulse. Default
+  labels "Related to" and "Session link" count as unlabelled.
+
+Skipped: "Show Message Log..." (there is no log).
+
+### W6c Notes
+
+Landed:
+
+- Read mode renders MarkdownUI per top-level block
+  (`RafuNoteMarkdownStyling.swift`); task toggles go through the TextKit buffer
+  so undo stays intact. Edit mode uses SF Pro with incremental syntax styling
+  (`CanvasNoteSyntax`), formatting commands (`CanvasNoteFormatCommand`) and a
+  Format menu. A key monitor resolves the Command-B and Shift-Command-L
+  conflict while editing. Zoom faces. Links: workspace files open in Rafu;
+  http, https and mailto open in the system handler; other schemes are ignored.
+  Images load only from workspace files.
+
+Known gaps (MarkdownUI limits): Command-C copies rendered text (a "Copy Note as
+Markdown" context item exists); no link hover underline; no inline-code radius.
+
+### Audits A1 to A3
+
+A1 (Canvas), A2 (panels and settings) and A3 (chrome and editor) were
+read-only compile audits; their fixes are listed under "Verification actually
+done". They do not replace a compiler run.
+
+### Required macOS verification (not done)
+
+Run on a Mac, in the order from `AGENTS.md`: `swift-format format --fix`, then
+`--lint`, `swift build`, `./script/test.sh` (parallel), `./script/test.sh
+--no-parallel` (CI gate), then `./script/build_and_run.sh --verify`. Expect
+some compile fixes. Then check by hand:
+
+- Visual pass with the right panel at 300 pt and at 520 pt.
+- Split "+" menu look; swatch tint inside `NSMenu`.
+- Titlebar row layout (`WindowTitlebarRow`) and traffic-light visibility.
+- Settings tables inside the grouped `Form`.
+- Terminal first-click focus after bring-to-front; the Tab key reaching the
+  board; Control-Tab versus Next Tab.
+- Ensemble header clipping (W4) at narrow panel widths.
+- Second window, keyboard reachability, and VoiceOver/Reduce Motion behaviour
+  of the new Canvas controls.
+
+### Follow-ups
+
+- After the build is green, remove the unreachable Settings-tab code and the
+  unused views listed under W5 and W3.
+- Update stale references: `flat-window-chrome-titlebar-merge.md`,
+  `editor-canvas-routing.md`, `settings-surface.md`, `canvas-live-sessions.md`,
+  `agent-terminals.md`.
+- Features marked "Skipped" under W2 and W6a need a `GitService` primitive or a
+  safe API first.

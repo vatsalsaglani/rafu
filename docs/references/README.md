@@ -21,7 +21,7 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`cli-app-ipc.md`](cli-app-ipc.md) | Changing the CLI ↔ app Unix-domain socket protocol: framing/codec, same-user listener, request routing/window focus, goto selection, or the CLI connect/fallback flow |
 | [`cli-app-location.md`](cli-app-location.md) | How `rafu <path>` finds Rafu.app: real executable path via `_NSGetExecutablePath` (not argv[0]), symlink-based install, dangling-link handling, and the argv[0]/PATH gotcha |
 | [`ui-design-language.md`](ui-design-language.md) | Implementing or auditing UI surfaces, color/spacing/radius tokens, form fields, card anatomy, button styles, or titled sheets |
-| [`flat-window-chrome-titlebar-merge.md`](flat-window-chrome-titlebar-merge.md) | Changing window chrome, the titlebar-zone content merge, the `_NSTitlebarDecorationView` inactive-band scrub, traffic-light hover-reveal, or full-screen chrome re-apply |
+| [`flat-window-chrome-titlebar-merge.md`](flat-window-chrome-titlebar-merge.md) | Changing window chrome, the titlebar-zone content merge, the `_NSTitlebarDecorationView` inactive-band scrub, the always-visible traffic lights and `WindowTitlebarRow` (hover-reveal superseded by the macOS redesign), or full-screen chrome re-apply |
 | [`local-editor-vertical-slice.md`](local-editor-vertical-slice.md) | Changing local file trees, open buffers, Markdown/Mermaid preview, JSON themes, or Git capture |
 | [`mermaid-native-preview.md`](mermaid-native-preview.md) | Changing Mermaid rendering via `beautiful-mermaid-swift` (ADR 0020): classifier and normaliser rules (the bare-header and YAML-frontmatter regressions Rafu compensates for), the macOS flip bug and its CTM fix, why `PreparedDiagram` is never cached and `NSGraphicsContext.current` must never be live during render, the source-keyed theme-independent layout cache, raster caps, and the honest unsupported/malformed fallback |
 | [`memory-and-file-indexing.md`](memory-and-file-indexing.md) | Changing the lazy sidebar tree, the background ⌘P file-name index, `WorkspaceChangeSet` directory tracking, or file-ranking behavior |
@@ -125,3 +125,7 @@ Keep one focused subject per note. Add it to this index. Use an ADR instead when
 - [Canvas native boundaries and initial evidence](canvas-native-boundaries.md) — C0 probes, Swift picker value semantics, and bounded persistence.
 
 - [Canvas live sessions](canvas-live-sessions.md): provider interfaces, shell startup, and live connection checks.
+
+- [macOS redesign visual system](macos-redesign-visual-system.md): the "One Gold Thread" rules: gold budget, neutral structure, focus language, Canvas-only shadows, typography roles, `RafuMotion` values, and `RafuHaptics` rules.
+- [Linux Swift verification](linux-swift-verification.md): checking Swift changes in a Linux container without the macOS SDK (`swiftc -parse -swift-version 6`, `swift-format lint`, scratch SwiftPM packages) and why a Mac build stays mandatory.
+- [Canvas interaction](canvas-interaction.md): Canvas input map, Return to Board, z-order, snapping and zoom faces, edge layering and link states, note Read/Edit modes.

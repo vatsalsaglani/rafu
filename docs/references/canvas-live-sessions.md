@@ -49,8 +49,33 @@ output and receive arguments directly, with no shell interpolation.
 
 The broker stores only live capability state. Every send checks the terminal
 lifetime and current edge. Messages are bounded, not logged, and not saved with
-boards. Disconnected nodes cannot receive new messages. Restored edges require
-Enable Links. Generic app/file links grant no capture or filesystem capability.
+boards. Disconnected nodes cannot receive new messages. Restored edges start Paused
+and resume per link (see "Per-link states"). Generic app/file links grant no capture or filesystem capability.
+
+## Per-link states (macOS redesign; macOS build verification pending)
+
+The session-wide "Enable Links" / "Pause Links" bar (`CanvasSessionLinksBar`) is
+gone. `CanvasLinkStatusItem` replaced it, and state is now per link:
+
+- States (`CanvasLinkState`): **Live**, **Paused**, **Disconnected(reason)**,
+  **Failed(reason)**.
+- A new terminal-to-terminal link starts **Paused**. This is a behaviour change:
+  creating a link no longer makes it live. A restored link also starts Paused.
+- Mapping implemented in `CanvasLiveBridge`: stopping a terminal gives
+  Disconnected; a changed conversation gives Disconnected; a lost transport
+  gives Disconnected; a refused send gives Failed until the next accepted
+  message or a pause/resume.
+- `CanvasLiveBridge` per-link API: `pause`, `resume`, `pauseAll(in:)`,
+  `resumeAll(in:)`, `linkStates(in:)`, `linkState(of:in:)`, `activity(of:in:)`.
+- Accepted-message events carry the connection, direction and date only. They
+  carry no message body, so activity indicators cannot leak content. "Show
+  Message Log…" was omitted because no log exists.
+- Haptics: none for incoming agent messages (see
+  [`canvas-interaction.md`](canvas-interaction.md)).
+
+Evidence: pure logic only, compiled and tested outside the repo on a Linux
+toolchain. The bridge was not run against Claude or Codex after this change, so
+the live-exchange checks below must be repeated on a Mac.
 
 ## Reproduction and verification
 
@@ -65,7 +90,7 @@ Create two Canvas terminals. Run `claude` and `codex`. Accept only the provider'
 visible channel/MCP consent. Connect the two nodes, then ask each CLI to list
 Canvas connections. Ask Claude to send a short message to Codex and have Codex
 reply through send_message. Check the same terminal conversations. Repeat while
-busy, after Pause Links, after node removal, after /new, and in a second window.
+busy, after pausing the link, after node removal, after /new, and in a second window.
 Provider-backed model delivery must be recorded separately from fake transport
 tests; source inspection alone does not prove a live exchange.
 
@@ -260,7 +285,8 @@ and Claude Code 2.1.302. A plain `codex` command in a Canvas terminal opened the
 interactive prompt and retained the `Codex connected` state through startup.
 A plain `claude` command in the other terminal retained `Claude connected` after
 the user-approved local channel consent. Both terminals remained interactive.
-The restored edge began paused and became active only through Enable Links.
+The restored edge began paused and became active only through the then-current
+Enable Links control (since replaced by per-link resume; see "Per-link states").
 
 A separate shell check clicked each terminal body, pasted a distinct `printf`
 command, and pressed Return. Each terminal displayed only its own marker. The

@@ -65,7 +65,11 @@ throwaway TitleBarProto spike and the shipped implementation.
    The delayed passes are the part that actually fixes it; do not remove
    them as "redundant".
 
-5. **Traffic lights hover-reveal.** Outside full screen the lights stay
+5. **Traffic lights hover-reveal (SUPERSEDED by the macOS redesign; macOS
+   build verification pending).** The traffic lights are now always visible. A
+   new 28 pt `WindowTitlebarRow` with a plain sidebar toggle replaced the hover
+   cluster, so rules 5 and 6 and the "Known limitation" below describe the
+   removed behaviour and are kept as history. Original text: Outside full screen the lights stay
    hidden (`standardWindowButton(_:).isHidden` — hidden, never removed, so
    close/zoom and their accessibility actions keep working) until the
    pointer enters `WindowTopLeftControlCluster`, which then widens by the
@@ -90,14 +94,15 @@ AppKit escape hatch — no toolbar, no custom window subclass.
 - `swift test` — `FlatWindowChromeTests` covers the chrome invariants,
   separator removal, traffic-light hiding, initial full-screen reporting,
   and the backdrop class matcher.
-- `./script/build_and_run.sh --verify`, then by hand: hover top-left
-  (lights fade in, toggle slides right), full-screen round trip, unfocus
+- `./script/build_and_run.sh --verify`, then by hand: check the lights are
+  always visible and the `WindowTitlebarRow` toggle works (the old hover
+  check is obsolete; not yet run on macOS), full-screen round trip, unfocus
   the window (no band), second window, ⌘B both from menu and toggle.
 - The decoration-view hierarchy can be inspected by dumping
   `window.contentView?.superview` subviews whose class name contains
   `Titlebar` (see the TitleBarProto spike technique).
 
-## Known limitation
+## Known limitation (obsolete: describes the removed hover cluster)
 
 With the sidebar collapsed, a revealed cluster transiently overlays the
 leading ~106 pt of the editor tab strip while the pointer is in the
