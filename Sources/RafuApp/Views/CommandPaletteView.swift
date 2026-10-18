@@ -1,4 +1,5 @@
 import Foundation
+import RafuCore
 import SwiftUI
 
 struct CommandPaletteView: View {
@@ -9,7 +10,7 @@ struct CommandPaletteView: View {
     @Bindable var session: WorkspaceSession
     @State private var query = ""
     @State private var selectedIndex = 0
-    @State private var fileMatches: [String] = []
+    @State private var fileMatches: [WorkspaceFileMatch] = []
     @State private var symbolScan = SymbolScanState.idle
     @State private var workspaceSymbolMatches: [WorkspaceSymbolMatch] = []
     @State private var agentTerminalOptions: [AgentTerminalOption] = []
@@ -388,22 +389,22 @@ struct CommandPaletteView: View {
     }
 
     /// `fileMatches` is already ranked and top-N limited by the background
-    /// index query (`runFileQuery`); this only turns the relative paths it
-    /// found into rows.
+    /// index query (`runFileQuery`); this only turns the paths it found into
+    /// rows. In a multi-folder workspace the detail names the folder.
     private func fileRows(matching term: String) -> [PaletteRow] {
-        fileMatches.map { relativePath in
-            let name = (relativePath as NSString).lastPathComponent
+        fileMatches.map { match in
+            let name = (match.relativePath as NSString).lastPathComponent
             let icon = FileIconProvider.fileIcon(named: name)
             return PaletteRow(
-                id: "file:\(relativePath)",
+                id: "file:\(match.id)",
                 symbolName: icon.symbol,
                 iconTint: icon.tint,
                 fileIcon: icon,
                 title: name,
-                detail: relativePath == name ? nil : relativePath
+                detail: match.displayPath == name ? nil : match.displayPath
             ) {
                 dismiss()
-                session.openFile(atRelativePath: relativePath)
+                session.openFile(match)
             }
         }
     }
@@ -423,7 +424,8 @@ struct CommandPaletteView: View {
             if Task.isCancelled { return }
         }
         do {
-            let results = try await session.queryFileIndex(term: term, limit: Self.maximumFileRows)
+            let results = try await session.queryWorkspaceFiles(
+                term: term, limit: Self.maximumFileRows)
             fileMatches = results
         } catch is CancellationError {
         } catch {

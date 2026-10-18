@@ -104,6 +104,23 @@ final class WorkspaceSession {
     var descriptor: WorkspaceDescriptor? {
         didSet { cancelLocationNavigation() }
     }
+    /// Folders after the primary root, in workspace order (multi-folder
+    /// workspaces). Empty for a one-folder workspace. `rootURL` always means
+    /// the primary root. See `WorkspaceSession+Roots.swift`.
+    var additionalRootTrees: [WorkspaceRootTree] = []
+    /// The root Source Control works on; `nil` means the primary root.
+    var sourceControlRootID: UUID? {
+        didSet {
+            guard oldValue != sourceControlRootID else { return }
+            resetGitWorkbenchState()
+            Task { await refreshGit() }
+        }
+    }
+    /// IDs of roots that are inside a Git work tree, checked off the main
+    /// actor whenever the root list changes.
+    var gitRepositoryRootIDs: Set<UUID> = []
+    /// The `.rafuworkspace` file this window was opened from or saved to.
+    var workspaceFileURL: URL?
     var navigatorMode: WorkspaceNavigatorMode = .files {
         didSet { persistWorkspaceState() }
     }
@@ -2340,6 +2357,7 @@ final class WorkspaceSession {
         indexRebuildQueued = false
         fileIndexState = .idle
         Task { await fileIndex.shed() }
+        for tree in additionalRootTrees { tree.invalidateFileIndex() }
         // Bumped even though the shed above is a fire-and-forget actor call:
         // it always wins the race against a later `requestFileIndexRebuild`
         // enqueued from `ensureFileIndexReady`, because actor calls on
@@ -2414,11 +2432,18 @@ final class WorkspaceSession {
     }
 
     func openLocalWorkspace(at url: URL) {
+        openLocalWorkspace(at: url, plan: nil)
+    }
+
+    /// Opens `url` as the primary root. `plan` (a saved `.rafuworkspace`)
+    /// adds the other folders, the display name, and the file binding after
+    /// the primary root is open.
+    func openLocalWorkspace(at url: URL, plan: WorkspaceOpenPlan?) {
         canvas.refreshResourceSnapshots()
         if canvas.hasPendingWrites {
             Task { [weak self] in
                 guard let self, await canvas.flushAll() else { return }
-                openLocalWorkspace(at: url)
+                openLocalWorkspace(at: url, plan: plan)
             }
             return
         }
@@ -2443,6 +2468,7 @@ final class WorkspaceSession {
         // Old terminal/run callbacks still belong to the old descriptor and
         // security scope. Drain them before replacing any workspace state.
         teardownTerminalGroups()
+        tearDownAdditionalRoots()
         canvas.clearAfterWorkspaceFlush()
         canvasResources = [:]
         canvasTerminalOwners = [:]
@@ -2459,9 +2485,10 @@ final class WorkspaceSession {
         // A fresh authorization must not reuse an older bookmark for this path.
         restorationAuthorizationID = UUID()
         descriptor = WorkspaceDescriptor(
-            displayName: name,
+            displayName: plan?.displayName ?? name,
             location: .local(LocalWorkspaceReference(path: url.path))
         )
+        workspaceFileURL = plan?.fileURL
         navigationLadder = makeNavigationLadder(rootURL: url)
         openDocuments = []
         suspendAuxiliarySelection()
@@ -2481,6 +2508,8 @@ final class WorkspaceSession {
         startFileWatcher()
         languageIntelligence.workspaceDidOpen(root: url)
         beginTerminalGroupLibrary(for: url)
+        if let plan { applyAdditionalRoots(plan.additionalRoots) }
+        refreshGitRepositoryRoots()
         persistWorkspaceState()
 
         previousSecurityScopedURL?.stopAccessingSecurityScopedResource()
@@ -2553,11 +2582,15 @@ final class WorkspaceSession {
         // the sidebar shows "Loading files…" forever after a superseded
         // refresh (e.g. rapid branch switches).
         defer { isLoadingTree = false }
+        let gitRoot = gitRootURL ?? rootURL
         do {
             async let tree: Void = reloadMaterializedDirectories(rootURL: rootURL)
-            async let git = gitService.snapshot(at: rootURL)
+            async let git = gitService.snapshot(at: gitRoot)
             try await tree
-            gitSnapshot = try await git
+            for rootTree in additionalRootTrees { await rootTree.reloadMaterializedDirectories() }
+            let snapshot = try await git
+            guard gitRootURL == gitRoot else { return }
+            gitSnapshot = snapshot
             if gitSnapshot == nil { resetGitWorkbenchState() }
             reconcileGitSelection()
             requestFileIndexRebuild()
@@ -2951,6 +2984,7 @@ final class WorkspaceSession {
     /// `fileIndexState` to `.building` synchronously, before this returns, so
     /// the palette's idle-state message never flashes "Open a folder" first.
     func ensureFileIndexReady() {
+        ensureAdditionalFileIndexesReady()
         guard rootURL != nil, fileIndexState == .idle, indexRebuildTask == nil else { return }
         requestFileIndexRebuild()
     }
@@ -3066,10 +3100,12 @@ final class WorkspaceSession {
         }
     }
 
-    private func refreshGitSnapshotOnly() async {
-        guard let rootURL else { return }
+    func refreshGitSnapshotOnly() async {
+        guard let rootURL = gitRootURL else { return }
         do {
-            gitSnapshot = try await gitService.snapshot(at: rootURL)
+            let snapshot = try await gitService.snapshot(at: rootURL)
+            guard self.gitRootURL == rootURL else { return }
+            gitSnapshot = snapshot
             if gitSnapshot == nil { resetGitWorkbenchState() }
             reconcileGitSelection()
         } catch is CancellationError {
@@ -3183,7 +3219,7 @@ final class WorkspaceSession {
     }
 
     func refreshGit() async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         // The working-tree peek diff is cached by (path, revision), which does
         // not change when the index changes (stage/unstage/commit here, in the
         // Source Control panel, or in a terminal). refreshGit runs after every
@@ -3191,7 +3227,10 @@ final class WorkspaceSession {
         // peek coherent with the actual index.
         workingTreeDiffCache = nil
         do {
-            guard let snapshot = try await gitService.snapshot(at: rootURL) else {
+            let refreshed = try await gitService.snapshot(at: rootURL)
+            // The Source Control root can change while Git runs.
+            guard self.gitRootURL == rootURL else { return }
+            guard let snapshot = refreshed else {
                 resetGitWorkbenchState()
                 return
             }
@@ -3229,7 +3268,9 @@ final class WorkspaceSession {
     /// unchanged; this is the explicit "Load More" continuation only —
     /// never automatic, never a background poll (GX3, ADR 0013).
     func loadMoreHistory() async {
-        guard let rootURL, let currentPage = gitHistoryPage, currentPage.hasMore, !isGitBusy else {
+        guard let rootURL = gitRootURL, let currentPage = gitHistoryPage, currentPage.hasMore,
+            !isGitBusy
+        else {
             return
         }
         isGitBusy = true
@@ -3237,7 +3278,7 @@ final class WorkspaceSession {
         do {
             let nextPage = try await gitService.history(
                 at: rootURL, limit: 100, offset: currentPage.commits.count)
-            guard self.rootURL == rootURL,
+            guard self.gitRootURL == rootURL,
                 let existing = gitHistoryPage,
                 existing.commits.count == currentPage.commits.count,
                 existing.offset == currentPage.offset
@@ -3250,7 +3291,7 @@ final class WorkspaceSession {
         } catch is CancellationError {
             return
         } catch {
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             reportGitError(error)
         }
     }
@@ -3939,7 +3980,7 @@ final class WorkspaceSession {
                 document.revision += 1
             }
             await refreshWorkspace()
-            if let rootURL { workspaceSearch.search(in: rootURL) }
+            if rootURL != nil { workspaceSearch.search(in: workspaceSearchRoots) }
         } catch {
             return
         }
@@ -3987,9 +4028,9 @@ final class WorkspaceSession {
     var selectedFolderURL: URL? {
         guard let rootURL else { return nil }
         guard let selectedTreePath else { return rootURL }
-        let rootPath = rootURL.standardizedFileURL.path
         let selected = URL(filePath: selectedTreePath).standardizedFileURL
-        guard selected.path == rootPath || selected.path.hasPrefix(rootPath + "/") else {
+        // Any root of a multi-folder workspace can hold the selection.
+        guard WorkspaceRootList.locate(absolutePath: selected.path, in: roots) != nil else {
             return rootURL
         }
         var isDirectory: ObjCBool = false
@@ -4009,14 +4050,17 @@ final class WorkspaceSession {
     /// Tree drop handler shared by the root list and per-folder rows: items
     /// already inside the workspace MOVE; items from outside (Finder) COPY in.
     func handleTreeDrop(_ urls: [URL], into directory: URL) async {
-        guard let rootURL else { return }
-        let rootPath = rootURL.standardizedFileURL.path
+        guard rootURL != nil else { return }
+        // Every folder of a multi-folder workspace counts as "inside": its
+        // items move; items from outside are copied in. A root never moves.
+        let roots = roots
         var changed = false
         for url in urls {
             let sourcePath = url.standardizedFileURL.path
+            let found = WorkspaceRootList.locate(absolutePath: sourcePath, in: roots)
             do {
-                if sourcePath == rootPath { continue }
-                if sourcePath.hasPrefix(rootPath + "/") {
+                if found?.relativePath.isEmpty == true { continue }
+                if found != nil {
                     let destination = try await fileService.move(url, into: directory)
                     rebindOpenDocuments(from: url, to: destination)
                 } else {
@@ -4123,7 +4167,7 @@ final class WorkspaceSession {
     }
 
     func setStaged(_ staged: Bool, change: GitChange) async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4135,7 +4179,7 @@ final class WorkspaceSession {
     /// Batch stage/unstage in one Git process, used by the Source Control
     /// tree view's folder tri-state checkbox.
     func setStaged(_ staged: Bool, paths: [String]) async {
-        guard let rootURL, !paths.isEmpty else { return }
+        guard let rootURL = gitRootURL, !paths.isEmpty else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4145,7 +4189,7 @@ final class WorkspaceSession {
     }
 
     func stageAll() async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4155,7 +4199,7 @@ final class WorkspaceSession {
     }
 
     func commit() async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4166,7 +4210,7 @@ final class WorkspaceSession {
     }
 
     func gitOpenChangeDiff(_ change: GitChange, scope: GitDiffScope) async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4195,7 +4239,7 @@ final class WorkspaceSession {
     }
 
     func gitSelectHistoryCommit(_ commit: GitCommitSummary) async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         gitSelectedHistoryCommitID = commit.id
         gitHistoryCommitChanges = []
         isGitHistoryDetailLoading = true
@@ -4216,7 +4260,7 @@ final class WorkspaceSession {
     }
 
     func gitOpenHistoryDiff(_ change: GitCommitFileChange) async {
-        guard let rootURL, let revision = gitSelectedHistoryCommitID else { return }
+        guard let rootURL = gitRootURL, let revision = gitSelectedHistoryCommitID else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4264,7 +4308,7 @@ final class WorkspaceSession {
     /// Stages one hunk of the currently open working-tree diff via
     /// `git apply --cached`, using `GitHunkPatchBuilder` to build the patch.
     func stageHunk(_ hunk: GitDiffHunk) async {
-        guard let rootURL,
+        guard let rootURL = gitRootURL,
             let openDiff = gitOpenDiff,
             openDiff.scope == .workingTree,
             gitSnapshot?.changes.first(where: { $0.path == openDiff.diff.path })?.kind == .modified,
@@ -4305,7 +4349,7 @@ final class WorkspaceSession {
     /// `git apply --cached --reverse`, using `GitHunkPatchBuilder` to build
     /// the reverse patch.
     func unstageHunk(_ hunk: GitDiffHunk) async {
-        guard let rootURL,
+        guard let rootURL = gitRootURL,
             let openDiff = gitOpenDiff,
             openDiff.scope == .staged,
             gitSnapshot?.changes.first(where: { $0.path == openDiff.diff.path })?.kind == .modified,
@@ -4348,24 +4392,24 @@ final class WorkspaceSession {
     /// used to mark the "current" row. Prefers the git repository root (the
     /// worktree's own top), falling back to the opened folder.
     var currentWorktreePath: String? {
-        (gitSnapshot?.repositoryRoot ?? rootURL)?.standardizedFileURL.path
+        (gitSnapshot?.repositoryRoot ?? gitRootURL)?.standardizedFileURL.path
     }
 
     /// Loads `git worktree list` for the Source Control worktrees section.
     /// Called on explicit section expand and after worktree mutations — never
     /// polled, and never watches sibling worktrees.
     func loadWorktrees() async {
-        guard let rootURL, !isGitWorktreesLoading else { return }
+        guard let rootURL = gitRootURL, !isGitWorktreesLoading else { return }
         isGitWorktreesLoading = true
         defer { isGitWorktreesLoading = false }
         do {
             let worktrees = try await gitService.worktrees(at: rootURL)
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             gitWorktrees = worktrees
         } catch is CancellationError {
             return
         } catch {
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             reportGitError(error)
         }
     }
@@ -4390,18 +4434,18 @@ final class WorkspaceSession {
     /// `git worktree add -b <branch> <path>` vs checking out an existing
     /// branch at `<path>`.
     func addWorktree(at path: URL, branch: String?, createBranch: Bool) async {
-        guard let rootURL, !isGitBusy else { return }
+        guard let rootURL = gitRootURL, !isGitBusy else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
             try await gitService.addWorktree(
                 path: path, branch: branch, createBranch: createBranch, at: rootURL)
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             await loadWorktrees()
         } catch is CancellationError {
             return
         } catch {
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             reportGitError(error)
         }
     }
@@ -4409,17 +4453,17 @@ final class WorkspaceSession {
     /// Removes a worktree (never `--force`; git refuses dirty/locked and the
     /// real error surfaces), then refreshes the list.
     func removeWorktree(_ worktree: GitWorktree) async {
-        guard let rootURL, !isGitBusy, !worktree.isMain else { return }
+        guard let rootURL = gitRootURL, !isGitBusy, !worktree.isMain else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
             try await gitService.removeWorktree(path: worktree.path, at: rootURL)
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             await loadWorktrees()
         } catch is CancellationError {
             return
         } catch {
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             reportGitError(error)
         }
     }
@@ -4428,7 +4472,7 @@ final class WorkspaceSession {
 
     /// Pushes a new stash entry via `git stash push`.
     func stashChanges(message: String, includeUntracked: Bool) async {
-        guard let rootURL, !isGitBusy, !isGitHunkActionBusy else { return }
+        guard let rootURL = gitRootURL, !isGitBusy, !isGitHunkActionBusy else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4437,22 +4481,22 @@ final class WorkspaceSession {
                 includeUntracked: includeUntracked,
                 at: rootURL
             )
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             await refreshGit()
             let stashes = try await gitService.stashList(at: rootURL)
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             gitStashes = stashes
         } catch is CancellationError {
             return
         } catch {
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             reportGitError(error)
         }
     }
 
     /// Applies a stash entry without removing it.
     func applyStash(_ entry: GitStashEntry) async {
-        guard let rootURL, !isGitBusy, !isGitHunkActionBusy else { return }
+        guard let rootURL = gitRootURL, !isGitBusy, !isGitHunkActionBusy else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4460,31 +4504,31 @@ final class WorkspaceSession {
             guard current.first(where: { $0.index == entry.index }) == entry else {
                 throw GitServiceError.stashChanged
             }
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             try await gitService.stashApply(index: entry.index, at: rootURL)
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             await refreshGit()
             let stashes = try await gitService.stashList(at: rootURL)
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             gitStashes = stashes
         } catch is CancellationError {
             return
         } catch {
-            if self.rootURL == rootURL {
+            if self.gitRootURL == rootURL {
                 await refreshGit()
                 if let stashes = try? await gitService.stashList(at: rootURL) {
-                    guard self.rootURL == rootURL else { return }
+                    guard self.gitRootURL == rootURL else { return }
                     gitStashes = stashes
                 }
             }
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             reportGitError(error)
         }
     }
 
     /// Applies a stash entry and removes it.
     func popStash(_ entry: GitStashEntry) async {
-        guard let rootURL, !isGitBusy, !isGitHunkActionBusy else { return }
+        guard let rootURL = gitRootURL, !isGitBusy, !isGitHunkActionBusy else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4492,31 +4536,31 @@ final class WorkspaceSession {
             guard current.first(where: { $0.index == entry.index }) == entry else {
                 throw GitServiceError.stashChanged
             }
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             try await gitService.stashPop(index: entry.index, at: rootURL)
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             await refreshGit()
             let stashes = try await gitService.stashList(at: rootURL)
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             gitStashes = stashes
         } catch is CancellationError {
             return
         } catch {
-            if self.rootURL == rootURL {
+            if self.gitRootURL == rootURL {
                 await refreshGit()
                 if let stashes = try? await gitService.stashList(at: rootURL) {
-                    guard self.rootURL == rootURL else { return }
+                    guard self.gitRootURL == rootURL else { return }
                     gitStashes = stashes
                 }
             }
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             reportGitError(error)
         }
     }
 
     /// Discards a stash entry.
     func dropStash(_ entry: GitStashEntry) async {
-        guard let rootURL, !isGitBusy, !isGitHunkActionBusy else { return }
+        guard let rootURL = gitRootURL, !isGitBusy, !isGitHunkActionBusy else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4524,17 +4568,17 @@ final class WorkspaceSession {
             guard current.first(where: { $0.index == entry.index }) == entry else {
                 throw GitServiceError.stashChanged
             }
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             try await gitService.stashDrop(index: entry.index, at: rootURL)
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             await refreshGit()
             let stashes = try await gitService.stashList(at: rootURL)
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             gitStashes = stashes
         } catch is CancellationError {
             return
         } catch {
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             reportGitError(error)
         }
     }
@@ -4544,10 +4588,10 @@ final class WorkspaceSession {
     /// Opens a read-only blame canvas for the selected file, parsing
     /// `git blame` porcelain output via `GitBlameParser`.
     func openBlameForSelectedFile() async {
-        guard let rootURL,
+        guard let rootURL = gitRootURL,
             let document = selectedDocument,
             let gitSnapshot,
-            let rawRepositoryRoot = gitSnapshot.repositoryRoot ?? self.rootURL,
+            let rawRepositoryRoot = gitSnapshot.repositoryRoot ?? self.gitRootURL,
             !isGitBusy
         else { return }
         guard !document.isDirty else {
@@ -4572,13 +4616,13 @@ final class WorkspaceSession {
                 forRelativePath: relativePath,
                 at: repositoryRoot
             )
-            guard self.rootURL == rootURL, selectedDocumentID == document.id else { return }
+            guard self.gitRootURL == rootURL, selectedDocumentID == document.id else { return }
             gitOpenDiff = nil
             gitOpenBlame = blame
         } catch is CancellationError {
             return
         } catch {
-            guard self.rootURL == rootURL else { return }
+            guard self.gitRootURL == rootURL else { return }
             reportGitError(error)
         }
     }
@@ -4596,7 +4640,7 @@ final class WorkspaceSession {
     /// hunk-peek/blame-hover lookups so both stay consistent with the
     /// existing gutter/blame resolution.
     private func gitRepositoryRelativePath(for document: EditorDocument) -> String? {
-        guard let gitSnapshot, let repositoryRoot = gitSnapshot.repositoryRoot ?? rootURL else {
+        guard let gitSnapshot, let repositoryRoot = gitSnapshot.repositoryRoot ?? gitRootURL else {
             return nil
         }
         let rootPath = repositoryRoot.standardizedFileURL.path
@@ -4662,7 +4706,7 @@ final class WorkspaceSession {
     /// HEAD OID, buffer revision) so both callers reuse one fetch.
     private func blame(for document: EditorDocument) async -> GitBlame? {
         guard !document.isDirty, !document.suppressesSyntax,
-            let gitSnapshot, let repositoryRoot = gitSnapshot.repositoryRoot ?? rootURL,
+            let gitSnapshot, let repositoryRoot = gitSnapshot.repositoryRoot ?? gitRootURL,
             let relativePath = gitRepositoryRelativePath(for: document)
         else { return nil }
 
@@ -4737,7 +4781,8 @@ final class WorkspaceSession {
     /// so opening the peek repeatedly at the same buffer state never
     /// re-diffs.
     func workingTreeDiff(for document: EditorDocument) async -> GitFileDiff? {
-        guard let rootURL, let relativePath = gitRepositoryRelativePath(for: document) else {
+        guard let rootURL = gitRootURL, let relativePath = gitRepositoryRelativePath(for: document)
+        else {
             return nil
         }
         let key = WorkingTreeDiffCacheKey(path: relativePath, revision: document.revision)
@@ -4761,7 +4806,7 @@ final class WorkspaceSession {
     /// through the normal Git error alert rather than silently retrying
     /// against a stale hunk.
     func stagePeekHunk(_ hunk: GitDiffHunk, in diff: GitFileDiff) async {
-        guard let rootURL, !isGitBusy, !isGitHunkActionBusy else { return }
+        guard let rootURL = gitRootURL, !isGitBusy, !isGitHunkActionBusy else { return }
         isGitHunkActionBusy = true
         defer { isGitHunkActionBusy = false }
         do {
@@ -4794,7 +4839,7 @@ final class WorkspaceSession {
     }
 
     func gitCreateBranch(named name: String) async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4808,7 +4853,7 @@ final class WorkspaceSession {
     /// stays explicit). On success the refreshed snapshot flips the panel
     /// from the empty state to the full inspector.
     func gitInitializeRepository() async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4819,7 +4864,7 @@ final class WorkspaceSession {
     }
 
     func gitCheckoutBranch(named name: String) async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4830,7 +4875,7 @@ final class WorkspaceSession {
     }
 
     func gitMergeBranch(named name: String) async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4844,7 +4889,7 @@ final class WorkspaceSession {
     }
 
     func gitFetch(remote: String? = nil) async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4855,7 +4900,7 @@ final class WorkspaceSession {
     }
 
     func gitPull(strategy: GitPullStrategy = .merge) async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4866,7 +4911,7 @@ final class WorkspaceSession {
     }
 
     func gitPush(remote: String? = nil) async {
-        guard let rootURL else { return }
+        guard let rootURL = gitRootURL else { return }
         isGitBusy = true
         defer { isGitBusy = false }
         do {
@@ -4908,7 +4953,7 @@ final class WorkspaceSession {
     /// `GitHubPublishSheet`'s explicit "Create & Push" confirmation. A no-op
     /// unless `canPublishToGitHub` holds and no publish is already running.
     func publishToGitHub(name: String, visibility: GitHubRepositoryVisibility) async {
-        guard let rootURL, canPublishToGitHub, !isPublishingToGitHub else { return }
+        guard let rootURL = gitRootURL, canPublishToGitHub, !isPublishingToGitHub else { return }
         isPublishingToGitHub = true
         defer { isPublishingToGitHub = false }
         do {
@@ -5038,7 +5083,7 @@ final class WorkspaceSession {
     /// files are synthesized as all-added locally, also without a process.
     func gutterLineChanges(for document: EditorDocument) async -> GitGutterLineChanges? {
         guard let gitSnapshot,
-            let repositoryRoot = gitSnapshot.repositoryRoot ?? rootURL
+            let repositoryRoot = gitSnapshot.repositoryRoot ?? gitRootURL
         else { return nil }
         let rootPath = repositoryRoot.standardizedFileURL.path
         let filePath = document.url.standardizedFileURL.path
@@ -5107,7 +5152,7 @@ final class WorkspaceSession {
 
         do {
             try Task.checkCancellation()
-            guard let rootURL, let gitSnapshot else {
+            guard let rootURL = gitRootURL, let gitSnapshot else {
                 throw AIProviderError.selectedDiffsRequired
             }
 
@@ -5285,6 +5330,7 @@ final class WorkspaceSession {
 
     isolated deinit {
         liveness.stop()
+        for tree in additionalRootTrees { tree.stop() }
         navigationTask?.cancel()
         locationNavigationTask?.cancel()
         indexRebuildTask?.cancel()
@@ -5341,6 +5387,9 @@ final class WorkspaceSession {
             resetFileTreeState()
             startFileWatcher()
             await refreshWorkspace()
+            guard self.rootURL == resolved.url else { return }
+            await restoreAdditionalRoots(
+                restored.additionalRoots, workspaceFilePath: restored.workspaceFilePath)
             guard self.rootURL == resolved.url else { return }
 
             languageIntelligence.workspaceDidOpen(root: resolved.url)
@@ -5485,8 +5534,15 @@ final class WorkspaceSession {
 
     private func makeWorkspaceStateSaveTask() -> Task<Void, Never>? {
         guard let rootURL else { return nil }
-        let openPaths = openDocuments.map { relativePath(for: $0.url) }
-        let selectedPath = selectedDocument.map { relativePath(for: $0.url) }
+        // Files from the other folders of a multi-folder workspace are not
+        // relative to the primary root, so they are not restored as tabs.
+        let primaryDocuments = openDocuments.filter { !isInAdditionalRoot($0.url) }
+        let openPaths = primaryDocuments.map { relativePath(for: $0.url) }
+        let selectedPath = selectedDocument.flatMap {
+            isInAdditionalRoot($0.url) ? nil : relativePath(for: $0.url)
+        }
+        let additionalRootURLs = additionalRootTrees.map(\.url)
+        let workspaceFilePath = workspaceFileURL?.path
         let navigatorMode = navigatorMode
         let canvasIDs = canvas.savedIDs
         let terminalGroupRestoration = terminalGroupWorkspaceRestoration()
@@ -5502,6 +5558,8 @@ final class WorkspaceSession {
             do {
                 let bookmark = try await restorationStore.makeBookmark(
                     for: bookmarkURL, authorizationID: authorizationID)
+                let additionalRoots = await WorkspaceRootBookmarks.restorableRoots(
+                    for: additionalRootURLs)
                 try Task.checkCancellation()
                 try await restorationStore.save(
                     RestorableWorkspace(
@@ -5511,7 +5569,8 @@ final class WorkspaceSession {
                         selectedRelativePath: selectedPath,
                         navigatorMode: navigatorMode,
                         editorLayout: EditorLayoutRestoration(layout: restorableEditorLayout),
-                        terminalGroupRestoration: terminalGroupRestoration, canvasIDs: canvasIDs
+                        terminalGroupRestoration: terminalGroupRestoration, canvasIDs: canvasIDs,
+                        additionalRoots: additionalRoots, workspaceFilePath: workspaceFilePath
                     )
                 )
             } catch {
@@ -5608,7 +5667,7 @@ final class WorkspaceSession {
     /// `gitSnapshot.didSet`, so every snapshot refresh (and clear) keeps the
     /// file-tree decorations in sync without any per-row work.
     private func rebuildGitTreeBadges() {
-        guard let snapshot = gitSnapshot, let rootURL else {
+        guard let snapshot = gitSnapshot, let rootURL = gitRootURL else {
             if !gitTreeBadges.isEmpty { gitTreeBadges = [:] }
             return
         }

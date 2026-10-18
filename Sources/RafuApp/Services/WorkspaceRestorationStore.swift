@@ -1,5 +1,11 @@
 import Foundation
 
+/// One extra folder of a multi-folder workspace, for relaunch restoration.
+nonisolated struct RestorableWorkspaceRoot: Codable, Equatable, Sendable {
+    let bookmark: Data?
+    let path: String
+}
+
 nonisolated struct RestorableWorkspace: Codable, Sendable {
     let bookmark: Data
     let rootPath: String
@@ -15,6 +21,12 @@ nonisolated struct RestorableWorkspace: Codable, Sendable {
     /// Decode-only, bounded diagnostics. They are deliberately not persisted
     /// again and contain no workspace path, terminal output, or process data.
     let terminalGroupRestorationDiagnostics: [TerminalGroupRestorationDiagnostic]
+    /// Folders after the primary root (multi-folder workspaces), in order.
+    /// Optional on decode: older payloads have none, and a damaged list is
+    /// dropped without losing the rest of the workspace.
+    let additionalRoots: [RestorableWorkspaceRoot]
+    /// The `.rafuworkspace` file the window was bound to, if any.
+    let workspaceFilePath: String?
 
     init(
         bookmark: Data,
@@ -24,8 +36,12 @@ nonisolated struct RestorableWorkspace: Codable, Sendable {
         navigatorMode: WorkspaceNavigatorMode,
         editorLayout: EditorLayoutRestoration?,
         terminalGroupRestoration: TerminalGroupWorkspaceRestoration? = nil,
-        canvasIDs: [CanvasID] = []
+        canvasIDs: [CanvasID] = [],
+        additionalRoots: [RestorableWorkspaceRoot] = [],
+        workspaceFilePath: String? = nil
     ) {
+        self.additionalRoots = Array(additionalRoots.prefix(16))
+        self.workspaceFilePath = workspaceFilePath
         self.canvasIDs = Array(canvasIDs.prefix(CanvasLimits.boards))
         self.bookmark = bookmark
         self.rootPath = rootPath
@@ -46,6 +62,8 @@ nonisolated struct RestorableWorkspace: Codable, Sendable {
         case editorLayout
         case terminalGroupRestoration
         case canvasIDs
+        case additionalRoots
+        case workspaceFilePath
     }
 
     init(from decoder: any Decoder) throws {
@@ -58,6 +76,11 @@ nonisolated struct RestorableWorkspace: Codable, Sendable {
         navigatorMode = try container.decode(WorkspaceNavigatorMode.self, forKey: .navigatorMode)
         editorLayout = try? container.decodeIfPresent(
             EditorLayoutRestoration.self, forKey: .editorLayout)
+        let roots = try? container.decodeIfPresent(
+            [RestorableWorkspaceRoot].self, forKey: .additionalRoots)
+        additionalRoots = Array((roots ?? []).prefix(16))
+        workspaceFilePath = try? container.decodeIfPresent(
+            String.self, forKey: .workspaceFilePath)
 
         if let list = try? container.nestedUnkeyedContainer(forKey: .canvasIDs),
             (list.count ?? Int.max) <= CanvasLimits.boards
@@ -98,6 +121,10 @@ nonisolated struct RestorableWorkspace: Codable, Sendable {
         try container.encode(navigatorMode, forKey: .navigatorMode)
         try container.encodeIfPresent(editorLayout, forKey: .editorLayout)
         try container.encodeIfPresent(terminalGroupRestoration, forKey: .terminalGroupRestoration)
+        if !additionalRoots.isEmpty {
+            try container.encode(additionalRoots, forKey: .additionalRoots)
+        }
+        try container.encodeIfPresent(workspaceFilePath, forKey: .workspaceFilePath)
     }
 }
 

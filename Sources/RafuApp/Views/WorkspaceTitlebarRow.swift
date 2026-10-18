@@ -6,9 +6,10 @@ import SwiftUI
 ///
 /// - Leading: room for the standard close / minimise / zoom buttons (drawn by
 ///   AppKit; no space is reserved in full screen) and the one sidebar toggle.
-/// - Centre: the workspace name as a menu (recent workspaces, Open Folder,
-///   Reveal in Finder), the current branch, and, only while agents run, an
-///   activity capsule that opens the Terminals panel.
+/// - Centre: the workspace name as a menu (saved workspaces, recent folders,
+///   Open Folder, Open Workspace, Add Folder to Workspace, Save Workspace As,
+///   Show All Workspaces, Reveal in Finder), the current branch, and, only
+///   while agents run, an activity capsule that opens the Terminals panel.
 /// - Trailing: a "Search" button that opens the palette in file mode.
 /// - Everything else is a window-move surface. A double-click there performs
 ///   the action chosen in System Settings (zoom, minimise, or nothing).
@@ -18,7 +19,7 @@ struct WindowTitlebarRow: View {
 
     @Environment(\.rafuTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var recents: [RecentWorkspaceEntry] = []
+    @Environment(\.openWindow) private var openWindow
 
     /// Explicit init: private stored properties would otherwise make the
     /// synthesized memberwise init private (Swift 6.3).
@@ -37,7 +38,7 @@ struct WindowTitlebarRow: View {
     nonisolated static let sideReserve: CGFloat = 200
     nonisolated static let searchButtonWidth: CGFloat = 176
 
-    private static let recentsStore = RecentWorkspacesStore()
+    private var workspaces: SavedWorkspacesModel { .shared }
 
     var body: some View {
         ZStack {
@@ -54,7 +55,7 @@ struct WindowTitlebarRow: View {
         .frame(maxWidth: .infinity)
         .frame(height: Self.height)
         .background(theme.palette.sidebarBackground)
-        .task(id: session.rootURL) { recents = Self.recentsStore.load() }
+        .task(id: session.rootURL) { workspaces.reload() }
     }
 
     // MARK: - Leading
@@ -98,12 +99,40 @@ struct WindowTitlebarRow: View {
 
     private var workspaceMenu: some View {
         Menu {
-            ForEach(otherRecents) { entry in
-                Button(entry.displayName, systemImage: "folder") { open(entry) }
+            if !otherSavedWorkspaces.isEmpty {
+                Section("Saved Workspaces") {
+                    ForEach(otherSavedWorkspaces) { entry in
+                        Button(entry.displayName, systemImage: "square.stack.3d.up") {
+                            open(entry)
+                        }
+                    }
+                }
             }
-            if !otherRecents.isEmpty { Divider() }
+            if !otherRecents.isEmpty {
+                Section("Recent Folders") {
+                    ForEach(otherRecents) { entry in
+                        Button(entry.displayName, systemImage: "folder") { open(entry) }
+                    }
+                }
+            }
+            if !otherSavedWorkspaces.isEmpty || !otherRecents.isEmpty { Divider() }
             Button("Open Folder…", systemImage: "folder.badge.plus") {
                 session.requestOpenFolder()
+            }
+            Button("Open Workspace…", systemImage: "square.stack.3d.up") {
+                session.requestOpenWorkspaceFile()
+            }
+            Button("Add Folder to Workspace…", systemImage: "plus.rectangle.on.folder") {
+                session.requestAddFolder()
+            }
+            .disabled(session.rootURL == nil)
+            Button("Save Workspace As…", systemImage: "square.and.arrow.down") {
+                session.requestSaveWorkspaceAs()
+            }
+            .disabled(session.rootURL == nil)
+            Divider()
+            Button("Show All Workspaces", systemImage: "rectangle.stack") {
+                openWindow(id: WorkspacesWindow.id)
             }
             Button("Reveal in Finder", systemImage: "magnifyingglass") {
                 if let url = session.rootURL {
@@ -129,21 +158,33 @@ struct WindowTitlebarRow: View {
         .menuIndicator(.hidden)
         .tint(theme.palette.textSecondary)
         .fixedSize()
-        .help("Workspace: recent workspaces, Open Folder, Reveal in Finder")
+        .help("Workspace: saved workspaces, recent folders, Add Folder, Save Workspace As")
         .accessibilityLabel("Workspace \(workspaceName)")
     }
 
     private var otherRecents: [RecentWorkspaceEntry] {
-        Array(recents.filter { $0.rootPath != session.rootURL?.path }.prefix(5))
+        Array(workspaces.recentFolders.filter { $0.rootPath != session.rootURL?.path }.prefix(5))
+    }
+
+    private var otherSavedWorkspaces: [SavedWorkspaceEntry] {
+        let current = session.workspaceFileURL?.standardizedFileURL.path
+        return Array(workspaces.savedWorkspaces.filter { $0.filePath != current }.prefix(5))
     }
 
     private func open(_ entry: RecentWorkspaceEntry) {
-        do {
-            let url = try Self.recentsStore.resolve(entry)
-            session.openLocalWorkspace(at: url)
-        } catch {
-            Self.recentsStore.remove(rootPath: entry.rootPath)
-            recents = Self.recentsStore.load()
+        guard let url = workspaces.resolve(entry) else {
+            workspaces.remove(entry)
+            return
+        }
+        session.openLocalWorkspace(at: url)
+    }
+
+    private func open(_ entry: SavedWorkspaceEntry) {
+        Task {
+            guard let url = await workspaces.resolve(entry) else {
+                return workspaces.presentMissing(entry.displayName)
+            }
+            session.openWorkspaceFile(at: url)
         }
     }
 

@@ -131,3 +131,4 @@ Keep one focused subject per note. Add it to this index. Use an ADR instead when
 - [Canvas interaction](canvas-interaction.md): Canvas input map, Return to Board, z-order, snapping and zoom faces, edge layering and link states, note Read/Edit modes.
 - [Canvas whiteboard and Ensemble file](canvas-whiteboard-and-ensemble-file.md): whiteboard and Mermaid card kinds, saved-format compatibility, bounds, the `.rafuensemble` format, file-bound boards and their expected-version check, palette keys.
 - [Canvas diagrams](canvas-diagrams.md): icon packs (Common, vendor import and pinned one-click download), frames, PNG/PDF/GIF export.
+- [Multi-folder and saved workspaces](multi-folder-workspaces.md): primary `rootURL` contract, per-root trees and watchers, Git root rebinding and badge gating, multi-root search and quick open, the `.rafuworkspace` format and bounds, and the Application Support saved list.
