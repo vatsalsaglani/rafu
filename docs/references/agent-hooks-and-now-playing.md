@@ -12,9 +12,56 @@
   Testing tests).
 - Mac verification: Apple Swift 6.4, macOS 27.0.1 (26A434), arm64,
   2026-10-18. Canonical Lightning build and launch, strict bundle signature
-  check, full package tests, and Agents/Ensemble Settings inspection. Live
-  hook installation and real-provider events remain manual checks; this pass
-  did not change the user's provider configuration.
+  check, full package tests, and Agents/Ensemble Settings inspection.
+  Follow-up runtime checks used the bundled helper with Claude Code 2.1.302
+  and Codex 0.163.0. Both emitted SessionStart, UserPromptSubmit, Stop, and
+  SessionEnd. Claude used a live reply and temporary `--settings`; Codex used
+  a temporary `CODEX_HOME` and a loopback Responses API fixture, with no
+  credentials. The user's provider configuration was not changed. Cursor
+  2026.07.23-e383d2b returned `Authentication required` before starting its
+  temporary-workspace hook test, although `cursor-agent status` reported a
+  login. Cursor runtime events and persistent installation into personal
+  settings remain unverified.
+
+## Mac runtime verification (2026-10-18)
+
+- The actual bundled helper returned exit 0 with no output for malformed,
+  oversized, and unknown events. Valid events retained process ancestry and
+  used mode 0600. A sentinel in prompt, tool input, and transcript path did
+  not appear in the event file. Keeping stdin open triggered the one-second
+  alarm and still returned exit 0.
+- `AgentActivityStoreTests.watchSpool` uses a real macOS directory watcher,
+  an atomic spool write, and an async notification. It verifies that the
+  event reaches the store and the consumed file is removed. Its five-second
+  deadline fails the test; it is not a synchronization delay.
+- Codex hook definitions require trust. For the isolated loopback check only,
+  the invocation used `--dangerously-bypass-hook-trust` with a fresh home
+  containing only the reviewed Rafu helper commands. Do not add that flag to
+  normal terminal launches. In normal use, open `/hooks` and review the Rafu
+  entries; installing the JSON file alone does not grant trust. See the
+  [official hook trust contract](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks).
+- The staged MediaRemote adapter started through `/usr/bin/perl` and returned
+  a valid `data` envelope with `--no-diff --debounce=150 --no-artwork`. This
+  verifies loading and stream output; it does not verify playback controls.
+- Full serial verification passed 185 core and 2,402 app tests. Two full
+  parallel runs hit `CanvasBridgeIPCTests.typedBridgeRoundTrip` with socket
+  read error 35 under suite load. The same test passed alone (0.008 s) and
+  in the serial suite. Per the repository's isolation rule, this is recorded
+  as scheduler starvation; the unrelated IPC test and its timeout were not
+  changed. Hook watcher and redirect tests passed in both modes.
+
+Repeat the automated boundaries with:
+
+```sh
+./script/test.sh --filter 'AgentHook|AgentActivity|AgentSession|AgentTerminalMatcher|NotchSystemMedia'
+./script/build_and_run.sh --verify
+```
+
+For a real Claude event check, write the reviewed hook JSON to a temporary
+file, point its commands at the bundled helper and a temporary
+`AgentTracking/spool`, then run `claude -p --settings <file> --setting-sources ''
+--tools '' --no-session-persistence 'Reply with RAFU_HOOK_CHECK_OK'` from that
+temporary folder. Inspect only normalized events, not provider transcripts.
 
 ## Rule or observed behavior
 

@@ -1,4 +1,5 @@
 import Foundation
+import RafuCore
 
 // Pure value logic for native app docking. Nothing here touches AppKit or the
 // Accessibility API, so every rule can be tested without a window or a
@@ -73,6 +74,12 @@ nonisolated enum CanvasDockGeometry {
             && abs(Double(current.width) - Double(expected.width)) <= sizeTolerance
             && abs(Double(current.height) - Double(expected.height)) <= sizeTolerance
     }
+
+    /// An app can refuse a requested size or position. Never leave its real
+    /// window outside the visible card body, apart from pixel rounding.
+    static func fits(_ frame: CGRect, inside body: CGRect) -> Bool {
+        body.insetBy(dx: -positionTolerance, dy: -positionTolerance).contains(frame)
+    }
 }
 
 /// Why a docked window is out of the way for now. It returns by itself when
@@ -84,6 +91,8 @@ nonisolated enum CanvasDockPauseReason: Equatable, Sendable {
     case zoomedOut
     /// Too little of the card body is inside the visible board.
     case offBoard
+    /// The app's minimum size or placement rules prevent it fitting the body.
+    case windowDoesNotFit
     /// Another card lies over this card's body.
     case covered
     /// The Rafu window is minimised, hidden, or fully covered.
@@ -214,7 +223,7 @@ nonisolated enum CanvasDockState: Equatable, Sendable {
     }
 
     /// One plain sentence for the card body, or nil.
-    func detail(appName: String) -> String? {
+    func detail(appName: String, identity: RafuAppIdentity = .current) -> String? {
         switch self {
         case .notDocked, .docked: nil
         case .docking: "Opening \(appName) and finding its window…"
@@ -226,12 +235,14 @@ nonisolated enum CanvasDockState: Equatable, Sendable {
                 "Another card covers this one. Move it to show \(appName)."
             case .offBoard:
                 "Scroll this card into view to show \(appName)."
+            case .windowDoesNotFit:
+                "\(appName) cannot fit in this card. Make the card larger and keep it fully in view."
             case .otherAppActive, .windowHidden, .notMounted, .ensembleHidden:
                 "\(appName) is put away until this card is visible."
             }
         case .undocked(let reason), .failed(let reason): reason
         case .needsPermission:
-            "Allow Rafu in System Settings ▸ Privacy & Security ▸ Accessibility."
+            "Allow app control for \(identity.displayName) in System Settings ▸ Privacy & Security."
         }
     }
 }

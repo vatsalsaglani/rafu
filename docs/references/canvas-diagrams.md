@@ -12,8 +12,9 @@ animated GIF export.
 - Mac review: Apple Swift 6.4, macOS 27.0.1 (26A434), arm64, 2026-10-18.
   Canonical Lightning build/launch and full package tests. Live Mermaid
   editing exposed the export path issue described below; the fixed PNG export
-  was opened and its flowchart pixels inspected. Vendor downloads
-  and imports were not repeated during this Mac pass.
+  was opened and its flowchart pixels inspected. The follow-up Mac pass
+  downloaded the pinned Google Cloud pack through the Lightning UI and
+  imported 19 icons. AWS and Azure runtime downloads were not repeated.
 - Initial Linux verification: Swift 6.2 (swift.org, ubuntu24.04), 2026-10-18.
 - Pure logic (search, vendor layout detection, archive and SVG checks, frame
   math, GIF planning, export bounds) passed 26 Swift Testing tests in a scratch
@@ -89,10 +90,16 @@ animated GIF export.
   - Google Cloud `services.google.com/fh/files/misc/core-products-icons.zip`,
     318,678 bytes, `6531a10f…ce`.
 - The fetch happens only after a click and a confirmation alert that shows the
-  vendor, the source URL, the size and the vendor's terms page. The request URL
-  and the final URL after redirects must be HTTPS on the vendor allowlist; the
+  vendor, the source URL, the size and the vendor's terms page. The request URL,
+  every redirect hop, and the final URL must be HTTPS on the vendor allowlist; the
   body is capped at 200 MiB and must match the pinned hash; the file is then
   imported through the same importer as a user-chosen ZIP.
+- `CanvasIconPackRedirectPolicy` checks each redirect before URLSession sends
+  it. A final-URL check alone is too late: an intermediate redirect can already
+  contact an unapproved host. Downloads use a private ephemeral session and
+  do not send cookies. The redirect regression test covers an unrelated host,
+  another vendor, HTTP, credentials, a non-default port, and loopback.
+  Verify with `./script/test.sh --filter CanvasIconPackDownloadTests`.
 - When a vendor moves or replaces its file, the hash or URL fails and the UI
   says "Download failed — use Import Icon Pack… with the file from <page>".
   Update the pins by re-reading each vendor page.

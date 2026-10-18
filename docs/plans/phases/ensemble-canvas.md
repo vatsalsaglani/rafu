@@ -201,8 +201,13 @@ exit 0 always, bounded input, private spool directory 0700, files 0600).
 - First full Mac test pass: 185 core tests and 2,399 app tests. The export writer
   alias/escape regression was added afterward; repeat format, build, parallel,
   and serial gates before merging. Test logs and final results belong to PR #3.
-- Remaining manual coverage: VoiceOver speech, live hook installation/provider
-  events, real AX window docking, and vendor pack downloads. UI automation did
+- Follow-up Mac evidence: live Claude and Codex hook events, Google Cloud icon
+  pack download/import, and Calculator docking were checked. Docking fixes
+  cover minimum window sizes and permission guidance for the actual app variant.
+  See `agent-hooks-and-now-playing.md`, `canvas-diagrams.md`, and
+  `canvas-native-boundaries.md` in `docs/references/` for evidence and limits.
+- Remaining manual coverage: VoiceOver speech, Cursor hook events (authentication
+  blocked the isolated test), and exact multi-display docking placement. UI automation did
   not start native sidebar/tab drag sessions (no source callback was observed);
   do not claim the file-drop or tab-drag path was verified by that pass. Board
   drawing gestures and editor splits through the menu did work.

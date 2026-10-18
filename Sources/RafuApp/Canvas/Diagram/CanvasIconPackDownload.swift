@@ -98,7 +98,11 @@ nonisolated enum CanvasIconPackDownloads {
         var request = URLRequest(url: source.url)
         request.timeoutInterval = 60
         request.httpShouldHandleCookies = false
-        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        let session = URLSession(
+            configuration: .ephemeral,
+            delegate: CanvasIconPackRedirectPolicy(vendor: source.vendor), delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
+        let (bytes, response) = try await session.bytes(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200,
             let final = http.url, isAllowed(final, vendor: source.vendor)
         else { throw CanvasDiagramError.unsupportedSource }
@@ -140,5 +144,27 @@ nonisolated enum CanvasIconPackDownloads {
 
     static func hex(_ digest: SHA256.Digest) -> String {
         digest.map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+/// Validate each hop before URLSession sends it. Checking only the response
+/// URL is too late: a redirect can already have contacted another host.
+nonisolated final class CanvasIconPackRedirectPolicy: NSObject, URLSessionTaskDelegate {
+    let vendor: CanvasIconPackVendor
+
+    init(vendor: CanvasIconPackVendor) {
+        self.vendor = vendor
+    }
+
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest
+    ) async -> URLRequest? {
+        guard let url = request.url, CanvasIconPackDownloads.isAllowed(url, vendor: vendor)
+        else { return nil }
+        var redirected = request
+        redirected.httpShouldHandleCookies = false
+        return redirected
     }
 }

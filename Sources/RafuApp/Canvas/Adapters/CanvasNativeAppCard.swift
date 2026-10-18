@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import RafuCore
 import SwiftUI
 
 /// Per-card metadata owner. Docking state lives in `CanvasAppDocking`; this
@@ -176,13 +177,13 @@ struct CanvasNativeAppCard: View {
                 .foregroundStyle(theme.palette.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            Button("Open Accessibility Settings") { docking.openAccessibilitySettings() }
+            Button("Open Privacy Settings") { docking.openAccessibilitySettings() }
                 .buttonStyle(RafuProminentButtonStyle(compact: true))
             Button("Dock \(card.title)") {
                 controller.dock(appName: card.title, session: session)
             }
             .buttonStyle(RafuSecondaryButtonStyle(compact: true))
-            .help("Try again after allowing Rafu")
+            .help("Try again after allowing \(RafuAppIdentity.current.displayName)")
         }
         .padding(12)
     }

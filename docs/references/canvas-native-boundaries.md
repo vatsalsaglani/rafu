@@ -6,8 +6,8 @@
 
 ## Native app node: docking replaces capture (2026-10-18, supersedes capture text below)
 
-Applies to the native app card. Last verified: Swift 6.2 Linux parse +
-read-through, 2026-10-18; not yet run on macOS.
+Applies to the native app card. Mac follow-up: 2026-10-18, macOS 27.0.1,
+Apple Swift 6.4 in Swift 6.2 mode, Rafu Lightning with Calculator.
 
 Rule: the native app node no longer captures a window. ScreenCaptureKit, the
 single-window picker, capture streams, `CanvasLimits.captureStreams`, and
@@ -31,6 +31,10 @@ Constraints stated in the header comment of `CanvasAppDocking.swift`:
 - Window text cannot scale, so docking needs 75% board zoom. Below that, and
   whenever the card is not visible, the app is hidden and returns when the card
   is visible again.
+- An app can refuse a requested size. Calculator keeps its minimum height.
+  Read back the real frame after placement. If it exceeds the visible card
+  body by more than the 4-point placement tolerance, pause docking and ask the
+  user to enlarge the card. Do not leave a real window over nearby nodes.
 - Accessibility calls are synchronous IPC to the other app. They run on the main
   actor with a 0.25 s messaging timeout; an app that does not answer is undocked,
   not retried every frame.
@@ -40,12 +44,44 @@ privacy claims (no recording, no transmission) are replaced by the docking
 claims above: this feature moves another app's window, so its permission and
 no-synthetic-input rules are the boundary to review.
 
-Evidence: read-through of the code named below only. No macOS build, test, or
-launch was run for docking. Verify with:
+Permission evidence: a prior Lightning entry was enabled in System Settings,
+but the running local build still returned false from `AXIsProcessTrusted()`.
+Switching the entry off and on did not resolve it. After building and launching
+the current bundle, removing that entry and adding the exact
+`dist/Rafu Lightning.app` bundle enabled docking. `codesign -d -r-` reports a
+cdhash-only designated requirement for the ad-hoc build. A rebuilt binary has
+a different hash; do not treat the visible settings switch as proof of access
+for the current process. Do not edit TCC databases or change release Rafu's
+entry. The user must approve the OS permission and complete any authentication.
+
+On this OS, the permission pane is named **Device Control and Data Access**.
+The existing `Privacy_Accessibility` settings URL still opens it. User guidance
+now names the actual app variant and the stable Privacy & Security parent pane.
+
+Initial live evidence: explicit Dock opened Calculator; typing `2 + 3` and
+Return showed `5`. Move Left and Make Larger kept the dock registered. At 50%
+zoom the card showed the 75% requirement; Actual Size restored the docked face.
+Calculator's 408-point minimum window height exposed the overflow fixed above.
+The fixed build showed the size message in the small card. Dragging its lower
+resize handle down resumed docking; `7 × 6` and Return showed `42`. Header drag
+and background pan kept the dock registered. Minimizing Calculator changed the
+card to Undocked; explicit Dock reconnected it. Command-Shift-N opened a separate
+empty workspace, and closing that window returned to the original board with
+its selected app card still docked. The accessible Undock action returned the
+card to Not docked. Restart restored the card without starting a dock.
+
+Limits of this pass: Calculator is a fixed-width app. This proves its minimum
+size handling and live input, not that every app accepts arbitrary resize
+requests. Native-window title dragging did not produce a verified move in the
+UI tool. Exact multi-display placement and VoiceOver speech still need manual
+checks; per-window screenshots do not prove cross-window stacking alignment.
+Verify with:
 
 ```sh
 rg -n "ScreenCaptureKit|captureStreams|previewCaption" Sources/RafuApp   # expect none
 rg -n "AXIsProcessTrusted|AXRaise" Sources/RafuApp/Canvas/Integration/CanvasAppDocking.swift
+./script/test.sh --filter CanvasAppDockingTests
+./script/build_and_run.sh --verify
 ```
 
 Related code: `Sources/RafuApp/Canvas/Integration/CanvasAppDocking.swift`,

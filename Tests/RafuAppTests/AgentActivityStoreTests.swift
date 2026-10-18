@@ -77,6 +77,49 @@ struct AgentActivityStoreTests {
         #expect(try FileManager.default.contentsOfDirectory(atPath: store.paths.spool.path).isEmpty)
         store.stop()
     }
+
+    @Test("A native directory notification drains an atomically written hook event")
+    func watchSpool() async throws {
+        let (store, suite) = makeStore()
+        defer {
+            store.stop()
+            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: store.paths.root.deletingLastPathComponent())
+        }
+        let descriptor = try #require(await AgentActivityIO.openSpool(store.paths.spool))
+        let (events, continuation) = AsyncStream<Void>.makeStream(
+            bufferingPolicy: .bufferingNewest(1))
+        let watcher = AgentActivityIO.makeWatcher(descriptor: descriptor) {
+            await store.drain()
+            if store.sessions.first?.state == .needsInput { continuation.yield(()) }
+        }
+        watcher.resume()
+        defer {
+            watcher.cancel()
+            continuation.finish()
+        }
+        try AgentHookSpool.write(
+            AgentHookEvent(
+                provider: .claude, sessionID: "native-watch", hookEventName: "PreToolUse",
+                toolName: "AskUserQuestion"), to: store.paths.spool)
+        let received = await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                for await _ in events { return true }
+                return false
+            }
+            group.addTask {
+                // A failure deadline, not a delay used to synchronize the watcher.
+                try? await Task.sleep(for: .seconds(5))
+                return false
+            }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+        #expect(received)
+        #expect(store.sessions.first?.state == .needsInput)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: store.paths.spool.path).isEmpty)
+    }
 }
 
 @Suite("Agent tracked phase")

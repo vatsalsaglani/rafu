@@ -640,11 +640,15 @@ final class CanvasAppDocking {
                     restoreFrame: false)
                 return
             default:
-                // An app may refuse a size. Keep the window where it landed.
+                // An app may refuse a size. Check its actual bounds below.
                 break
             }
         }
         dock.expectedFrame = CanvasAX.frame(dock.window) ?? target
+        if let frame = dock.expectedFrame, !CanvasDockGeometry.fits(frame, inside: target) {
+            pause(dock, .windowDoesNotFit)
+            return
+        }
         setState(.docked, for: dock.cardID)
     }
 

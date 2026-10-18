@@ -85,6 +85,25 @@ struct CanvasAppDockingTests {
 
     // MARK: Visibility and zoom
 
+    @Test("An app's fixed or minimum window size must stay inside the visible card")
+    func minimumWindowSize() {
+        let body = CGRect(x: 200, y: 100, width: 400, height: 240)
+        // Calculator can accept the position but keep a taller minimum size.
+        #expect(
+            !CanvasDockGeometry.fits(
+                CGRect(x: 200, y: 100, width: 230, height: 408), inside: body))
+        #expect(
+            CanvasDockGeometry.fits(
+                CGRect(x: 200, y: 100, width: 230, height: 408),
+                inside: CGRect(x: 200, y: 100, width: 400, height: 440)))
+        // Smaller fixed-size windows and pixel rounding are allowed.
+        #expect(
+            CanvasDockGeometry.fits(
+                CGRect(x: 202, y: 98, width: 230, height: 240), inside: body))
+        // A placement refused by the app must not cover a neighbouring node.
+        #expect(!CanvasDockGeometry.fits(body.offsetBy(dx: 20, dy: 0), inside: body))
+    }
+
     private func conditions(
         scale: Double = 1, body: CGRect = CGRect(x: 100, y: 100, width: 400, height: 300)
     ) -> CanvasDockConditions {
@@ -168,8 +187,11 @@ struct CanvasAppDockingTests {
         #expect(CanvasDockState.paused(.zoomedOut).isDocked)
         #expect(!CanvasDockState.undocked("moved").isDocked)
         #expect(
-            CanvasDockState.needsPermission.detail(appName: "Notes")
-                == "Allow Rafu in System Settings ▸ Privacy & Security ▸ Accessibility.")
+            CanvasDockState.needsPermission.detail(appName: "Notes", identity: .release)
+                == "Allow app control for Rafu in System Settings ▸ Privacy & Security.")
+        #expect(
+            CanvasDockState.needsPermission.detail(appName: "Notes", identity: .lightning)
+                == "Allow app control for Rafu Lightning in System Settings ▸ Privacy & Security.")
         #expect(
             CanvasDockState.paused(.zoomedOut).detail(appName: "Notes")
                 == "Zoom to 75% or more to use Notes here.")

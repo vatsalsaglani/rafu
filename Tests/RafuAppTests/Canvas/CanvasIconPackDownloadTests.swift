@@ -39,6 +39,32 @@ struct CanvasIconPackDownloadTests {
         #expect(message.contains("learn.microsoft.com"))
     }
 
+    @Test("Redirects are refused before contacting an unapproved destination")
+    func redirectPolicy() async throws {
+        let policy = CanvasIconPackRedirectPolicy(vendor: .aws)
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let source = try #require(URL(string: "https://d1.awsstatic.com/icons.zip"))
+        let task = session.dataTask(with: source)
+        let response = try #require(
+            HTTPURLResponse(url: source, statusCode: 302, httpVersion: nil, headerFields: nil))
+        for destination in [
+            "https://unapproved.example/icons.zip", "http://d1.awsstatic.com/icons.zip",
+            "https://services.google.com/icons.zip", "https://user:secret@aws.amazon.com/icons.zip",
+            "http://127.0.0.1/private", "https://aws.amazon.com:8443/icons.zip",
+        ] {
+            let request = URLRequest(url: try #require(URL(string: destination)))
+            let redirect = await policy.urlSession(
+                session, task: task, willPerformHTTPRedirection: response, newRequest: request)
+            #expect(redirect == nil)
+        }
+        let allowed = URLRequest(url: try #require(URL(string: "https://aws.amazon.com/icons.zip")))
+        let redirect = await policy.urlSession(
+            session, task: task, willPerformHTTPRedirection: response, newRequest: allowed)
+        #expect(redirect?.url == allowed.url)
+        #expect(redirect?.httpShouldHandleCookies == false)
+    }
+
     @Test("Hashes print as lowercase hex")
     func hex() {
         let digest = SHA256.hash(data: Data("abc".utf8))
