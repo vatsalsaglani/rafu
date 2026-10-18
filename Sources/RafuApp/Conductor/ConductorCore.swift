@@ -87,239 +87,6 @@ nonisolated struct ConductorModelChoice: Codable, Equatable, Hashable, Identifia
 
 }
 
-// MARK: - Repository-file definitions
-
-/// A role, parsed from `.rafu/agents/<name>.md` (ADR 0018: files are the
-/// source of truth — committable, diffable, shareable, usable without Rafu).
-///
-/// Deliberately NOT `Codable`: this type is only ever produced by
-/// `ConductorAgentFileParser` from Markdown the user owns. Rafu never
-/// serializes it back, so there is no second, drifting representation of a
-/// role.
-nonisolated struct ConductorAgentDefinition: Equatable, Sendable {
-    let name: String
-    let provider: ConductorCLIID
-    /// Empty means "let the adapter's default model decide".
-    let model: String
-    let autonomy: ConductorAutonomy
-    /// Relative filename this role must write into the run's handoff
-    /// directory, e.g. `brief.md`. Step completion = artifact present +
-    /// clean process exit.
-    let handoffArtifact: String
-    /// Everything after the closing frontmatter fence — the role's prompt.
-    let promptBody: String
-}
-
-/// An ordered role pipeline, parsed from `.rafu/workflows/<name>.md`.
-/// Not `Codable` for the same reason as `ConductorAgentDefinition`; a run
-/// snapshots what it needs into `ConductorRunManifest` instead.
-nonisolated struct ConductorWorkflowDefinition: Equatable, Sendable {
-    let name: String
-    let steps: [Step]
-
-    /// One pipeline step. `gateAfter` is the user gate the workflow file
-    /// spells `[gate]` — see `ConductorWorkflowFileParser` for the grammar.
-    nonisolated struct Step: Equatable, Sendable {
-        let agentName: String
-        /// Artifacts produced by earlier steps that this step receives.
-        let inputArtifacts: [String]
-        /// Pause for explicit user review after this step completes.
-        let gateAfter: Bool
-        /// Whether this gate may be approved straight from a notification,
-        /// without opening the artifact first (`[gate:remote]`). Defaults to
-        /// `false`: remote approval is always opt-in, per workflow, by the
-        /// person who wrote the file (C7).
-        var safeToApproveRemotely: Bool = false
-    }
-}
-
-// MARK: - Run manifest
-
-/// Where one run step stands.
-///
-/// The `Codable` conformance is hand-written so the on-disk envelope is
-/// stable and self-describing — `{"state":"failed","message":"…"}` rather
-/// than Swift's synthesized associated-value nesting, which would rename
-/// itself the moment a case gained a payload.
-///
-/// Decoding an UNRECOGNIZED state deliberately THROWS. This is the exact
-/// opposite of `WorkspaceNavigatorMode`'s tolerant decode, and the
-/// difference is intentional: a navigator mode is a UI preference worth
-/// salvaging, while a run manifest is EVIDENCE. Silently downgrading an
-/// unknown state to `.pending` would fabricate a claim about what an agent
-/// did; an honest "this run is unreadable by this build" error is strictly
-/// better.
-nonisolated enum RunStepStatus: Codable, Equatable, Sendable {
-    case pending
-    case running
-    case awaitingGate
-    case completed
-    case failed(String)
-    case aborted
-    /// The app relaunched while this step was `.running`: its child process
-    /// was NOT resurrected (ADR 0004/0014). Distinct from `.failed` because
-    /// nothing went wrong with the work — the process simply outlived nothing.
-    case interrupted
-
-    private nonisolated enum CodingKeys: String, CodingKey {
-        case state
-        case message
-    }
-
-    private nonisolated enum State: String {
-        case pending
-        case running
-        case awaitingGate
-        case completed
-        case failed
-        case aborted
-        case interrupted
-    }
-
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        let raw = try container.decode(String.self, forKey: .state)
-        guard let state = State(rawValue: raw) else {
-            throw DecodingError.dataCorruptedError(
-                forKey: .state, in: container,
-                debugDescription: "Unrecognized run step state \"\(raw)\".")
-        }
-        switch state {
-        case .pending: self = .pending
-        case .running: self = .running
-        case .awaitingGate: self = .awaitingGate
-        case .completed: self = .completed
-        case .failed: self = .failed(try container.decode(String.self, forKey: .message))
-        case .aborted: self = .aborted
-        case .interrupted: self = .interrupted
-        }
-    }
-
-    func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        switch self {
-        case .pending: try container.encode(State.pending.rawValue, forKey: .state)
-        case .running: try container.encode(State.running.rawValue, forKey: .state)
-        case .awaitingGate: try container.encode(State.awaitingGate.rawValue, forKey: .state)
-        case .completed: try container.encode(State.completed.rawValue, forKey: .state)
-        case .failed(let message):
-            try container.encode(State.failed.rawValue, forKey: .state)
-            try container.encode(message, forKey: .message)
-        case .aborted: try container.encode(State.aborted.rawValue, forKey: .state)
-        case .interrupted: try container.encode(State.interrupted.rawValue, forKey: .state)
-        }
-    }
-}
-
-/// A run's persisted record under `.rafu/runs/<id>/manifest.json` (ADR 0018:
-/// "runs are repo data, not app state"). It snapshots the workflow and the
-/// resolved provider/model/adapter bindings so a run stays readable after the
-/// `.rafu/` files that produced it change.
-nonisolated struct ConductorRunManifest: Codable, Equatable, Sendable {
-    /// Also the `.rafu/runs/<id>/` directory name — see
-    /// `ConductorRunStore.isValidRunID(_:)` for the accepted shape.
-    let id: String
-    let workflowName: String
-    /// Commit the run's worktree branched from.
-    let baseCommit: String
-    /// The Rafu-created worktree branch, conventionally `rafu/run-<id>`.
-    let worktreeBranch: String
-    let createdAt: Date
-    var updatedAt: Date
-    var steps: [Step]
-    /// Coordinator run that started this run. Additive and optional so
-    /// manifests written before the Ensemble CLI decode unchanged.
-    var startedBy: String? = nil
-    /// Human-readable graph label supplied by a future mutating verb.
-    var label: String? = nil
-    /// Set only after a later human-approved merge completes.
-    var mergedAt: Date? = nil
-    /// The gate currently parking this run, `nil` when none is open (C5:
-    /// `ConductorWorkflowController` sets this alongside the parked step's
-    /// `.awaitingGate` status; C1 single-role runs never set it — their
-    /// merge gate is expressed purely through `ConductorRunState`). `var`
-    /// with a default keeps this additive: the synthesized memberwise init
-    /// still accepts every existing call site unchanged (a `let` with a
-    /// default value is EXCLUDED from Swift's synthesized memberwise init —
-    /// see `TerminalProcessSpec`'s note above — but a `var` with a default is
-    /// not), and `JSONEncoder`'s default `encodeIfPresent` behavior for
-    /// `Optional` properties omits a `nil` key entirely, so a C1-era
-    /// manifest's on-disk shape is unaffected.
-    var gate: Gate? = nil
-    /// Why this run looks the way it does after an app relaunch or an external
-    /// change — e.g. "the app closed while this step was running". Additive and
-    /// optional so pre-C7 manifests decode unchanged; `nil` means nothing
-    /// unusual happened (C7 recovery).
-    var recoveryNote: String? = nil
-
-    /// One open gate: which kind, and which step it follows (or precedes,
-    /// for the terminal `.merge` gate).
-    nonisolated struct Gate: Codable, Equatable, Sendable {
-        nonisolated enum Kind: String, Codable, Sendable {
-            case step
-            case merge
-            /// Parks a fully-validated run before anything spawns (C8-04:
-            /// `run --plan-gate`) — files as tabs, a parsed-step preview,
-            /// Approve/Request Changes. Never remotely approvable, exactly
-            /// like `.merge` (`ConductorGateReadyEvent.Kind.plan` mirrors this
-            /// same rule at the notification layer).
-            case plan
-        }
-        let kind: Kind
-        let stepIndex: Int
-    }
-
-    /// What a role resolved to at the moment the run started. Stored per
-    /// step so re-reading an old manifest never depends on today's
-    /// `.rafu/agents/*.md` or today's adapter build.
-    nonisolated struct AgentBinding: Codable, Equatable, Sendable {
-        let provider: ConductorCLIID
-        let model: String
-        let autonomy: ConductorAutonomy
-        /// Version string the adapter probe reported, `nil` when the probe
-        /// could not determine one.
-        let adapterVersion: String?
-    }
-
-    nonisolated struct Step: Codable, Equatable, Sendable {
-        let agentName: String
-        let binding: AgentBinding
-        let inputArtifacts: [String]
-        let handoffArtifact: String
-        let gateAfter: Bool
-        var status: RunStepStatus
-        var startedAt: Date?
-        var finishedAt: Date?
-        /// 1-based attempt number; `nil` means attempt 1 (a C1-era manifest,
-        /// or a C5 step that has not yet been retried). The manifest records
-        /// only the CURRENT attempt — prior attempts' evidence persists on
-        /// disk under their own `-a<N>` directory, untouched.
-        var attempt: Int? = nil
-        /// Run-relative path to this step's evidence directory, e.g.
-        /// `"steps/01-advisor-a1"`. `nil` for C1's flat single-role layout.
-        var evidencePath: String? = nil
-        /// Snapshotted from the workflow file's `[gate:remote]` marker so a
-        /// later edit to that file cannot retroactively make an already-open
-        /// gate remotely approvable. `nil` in pre-C7 manifests ⇒ not safe.
-        var safeToApproveRemotely: Bool? = nil
-        /// What this step's attempt cost, when metering could resolve an
-        /// honest delta (ADR 0017 providers are best-effort). `nil` means "no
-        /// data", never zero — a provider without metering, a step too fast to
-        /// resolve, or an ambiguous reading all record nothing rather than a
-        /// fabricated number (C7).
-        var usage: ConductorRunUsageRecord? = nil
-        /// Trimmed, non-empty entries parsed from this step's completed
-        /// artifact's `proposes:` frontmatter list (C8-04), capped at 16
-        /// (the 16th becoming "… (truncated)" when the artifact declared
-        /// more) and each bounded to 200 characters. `nil` when the artifact
-        /// declared no `proposes:` list, a scalar one, or could not be read —
-        /// parsing this is advisory and NEVER fails an otherwise-completed
-        /// step. `var` with a default keeps this additive for the same
-        /// reason documented on `gate` above.
-        var proposals: [String]? = nil
-    }
-}
-
 // MARK: - Adapter contract
 
 /// What a binary-discovery probe found. `installed == false` is an honest,
@@ -666,36 +433,19 @@ nonisolated struct TerminalProcessSpec: Equatable, Sendable {
     /// name in the terminal tab and panel row.
     let roleBadge: String
     /// The vendor identity for a tokenless interactive Agent Terminal.
-    /// `nil` preserves both ordinary login shells and Ensemble run terminals.
+    /// `nil` preserves ordinary login shells.
     var agentProvider: ConductorCLIID? = nil
     /// How this child appears in the Resources surface — e.g.
     /// "implementor • Codex". `nil` for a plain login shell, which keeps its
     /// existing "Terminal N" naming (C7 accounting).
     let resourceAttribution: String?
-    /// Where `WorkspaceTerminalController` tees this run's raw PTY output
-    /// for evidence (`.rafu/runs/<id>/logs/output.log`), `nil` for a plain
-    /// login shell. Deliberately UNUSED by `resolvedLaunch()` below — this
-    /// stays a pure SwiftTerm launch mapping; only the terminal controller
-    /// (never a shell env var or argv) consumes this URL, so it can never
-    /// reach the child process or a log line.
-    let outputLogURL: URL?
 
-    /// Explicit, not synthesized: a `let` property with a default-value
-    /// initializer is excluded from Swift's synthesized memberwise
-    /// initializer entirely (verified against the Swift 6.2 toolchain — it
-    /// is not merely optional-with-a-default, it is unreachable through any
-    /// initializer), so `outputLogURL` needs this one explicit initializer
-    /// to stay both immutable and settable by `ConductorRunController`.
-    /// Every existing call site keeps compiling unchanged because
-    /// `outputLogURL` defaults to `nil` here exactly as it would have from a
-    /// synthesized init.
     init(
         executableURL: URL,
         arguments: [String],
         currentDirectoryPath: String,
         environment: [String: String],
         roleBadge: String,
-        outputLogURL: URL? = nil,
         resourceAttribution: String? = nil,
         agentProvider: ConductorCLIID? = nil
     ) {
@@ -704,7 +454,6 @@ nonisolated struct TerminalProcessSpec: Equatable, Sendable {
         self.currentDirectoryPath = currentDirectoryPath
         self.environment = environment
         self.roleBadge = roleBadge
-        self.outputLogURL = outputLogURL
         self.resourceAttribution = resourceAttribution
         self.agentProvider = agentProvider
     }

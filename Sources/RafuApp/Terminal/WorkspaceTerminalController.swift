@@ -718,10 +718,6 @@ final class WorkspaceTerminalManager {
         let runtimeKind: TerminalPaneRuntimeKind
         if let provider = controller.agentProvider {
             runtimeKind = .directAgentTerminal(provider: provider)
-        } else if controller.isEnsembleRunTerminal {
-            runtimeKind = .ensembleRole
-        } else if controller.isEnsembleCoordinatorTerminal {
-            runtimeKind = .ensembleCoordinator
         } else if controller.isOrdinaryShellTerminal {
             runtimeKind = .ordinaryShell
         } else {
@@ -834,7 +830,7 @@ final class WorkspaceTerminalManager {
                 throw TerminalGroupValidationError.unsupportedPaneStart
             }
             switch kind {
-            case .directAgentTerminal, .ensembleRole, .ensembleCoordinator:
+            case .directAgentTerminal:
                 break
             case .ordinaryShell, .unavailableAgentTerminal, .unavailableEnsemble:
                 throw TerminalGroupValidationError.unsupportedPaneStart
@@ -1008,10 +1004,9 @@ final class WorkspaceTerminalController: Identifiable {
         userName = spec.roleBadge
     }
 
-    /// Non-`nil` only for a spec-backed process (an Ensemble run or an Agent
-    /// Terminal). `nil` keeps the login-shell path exactly as it was; a
-    /// stored property with a `nil` default lets the original initializer
-    /// above stay untouched.
+    /// Non-`nil` only for a spec-backed process (an Agent Terminal). `nil`
+    /// keeps the login-shell path exactly as it was; a stored property with a
+    /// `nil` default lets the original initializer above stay untouched.
     @ObservationIgnored
     private(set) var processSpec: TerminalProcessSpec?
 
@@ -1026,14 +1021,6 @@ final class WorkspaceTerminalController: Identifiable {
     private var delegateProxy: DelegateProxy?
     @ObservationIgnored
     private var appliedStyleSignature = ""
-    /// Non-`nil` only for an Ensemble run session whose spec names an
-    /// `outputLogURL` — the login-shell and Agent Terminal paths never
-    /// construct one.
-    /// Retained so its consumer `Task` (and the `FileHandle` it owns) stay
-    /// alive for the session's lifetime; released once `finish()` has been
-    /// called from both process-exit paths below.
-    @ObservationIgnored
-    private var outputCapture: ConductorRunOutputCapture?
     /// Invoked once, on natural process exit, forwarded up to
     /// `WorkspaceTerminalManager.sessionDidExit`. Wired by the manager in
     /// `newSession`; `nil` otherwise.
@@ -1064,29 +1051,13 @@ final class WorkspaceTerminalController: Identifiable {
 
     var shellDisplayName: String { shell.basename }
 
-    /// Non-`nil` only for a tokenless interactive Agent Terminal. Ensemble
-    /// run terminals and ordinary login shells intentionally return `nil`.
+    /// Non-`nil` only for a tokenless interactive Agent Terminal. Ordinary
+    /// login shells intentionally return `nil`.
     var agentProvider: ConductorCLIID? { processSpec?.agentProvider }
 
-    /// The existing run-terminal seam: only an Ensemble step names an
-    /// evidence `outputLogURL`. The terminal canvas uses this to omit the
-    /// ordinary shell restart overlay after a completed step; plain shells
-    /// and tokenless Agent Terminals remain restartable.
-    var isEnsembleRunTerminal: Bool { processSpec?.outputLogURL != nil }
-
-    /// Internal classification only. It does not expose process input to the
-    /// workspace layer; the manager uses it when it adopts a legacy session.
-    var isEnsembleCoordinatorTerminal: Bool {
-        guard let processSpec, processSpec.outputLogURL == nil,
-            processSpec.agentProvider == nil
-        else { return false }
-        return processSpec.roleBadge == "Coordinator"
-            && processSpec.environment["RAFU_ENSEMBLE_TOKEN"] != nil
-    }
-
     /// A nil process specification is the existing login-shell path. A spec
-    /// with neither Agent nor Ensemble metadata is not adopted as a group,
-    /// because its classification would not be truthful.
+    /// without Agent metadata is not adopted as a group, because its
+    /// classification would not be truthful.
     var isOrdinaryShellTerminal: Bool { processSpec == nil }
 
     var terminalPaneStatus: TerminalPaneStatus {
@@ -1109,11 +1080,9 @@ final class WorkspaceTerminalController: Identifiable {
     }
 
     /// The terminal canvas asks this one presentation seam whether its
-    /// ordinary exited-shell overlay applies. A completed Ensemble step is
-    /// evidence, not a reusable shell, so it deliberately has no restart
-    /// control; all other exited terminal sessions keep one.
+    /// ordinary exited-shell overlay applies.
     var showsShellExitedOverlay: Bool {
-        TerminalSessionPresentation.isExited(status) && !isEnsembleRunTerminal
+        TerminalSessionPresentation.isExited(status)
     }
 
     /// Whether this session's live view currently sits in the KEY window —
@@ -1234,27 +1203,11 @@ final class WorkspaceTerminalController: Identifiable {
         terminalView = view
         status = .running
 
-        // A Conductor session spawns its spec; everything else spawns the
+        // An Agent Terminal spawns its spec; everything else spawns the
         // login shell exactly as before. Only this call differs — status,
         // view retention, and `ProcessResourceRegistry` registration below
         // are shared by both paths.
         if let processSpec {
-            // Run-evidence capture (`conductor/C1-single-role-runs.md`):
-            // only a Conductor spec that names an `outputLogURL` gets one —
-            // the login-shell branch below never constructs a capture.
-            if let outputLogURL = processSpec.outputLogURL {
-                let capture = ConductorRunOutputCapture(outputLogURL: outputLogURL)
-                outputCapture = capture
-                view.onOutputRender = { [weak capture] slice in
-                    capture?.render(slice) ?? Data(slice)
-                }
-                view.onOutputRenderFinish = { [weak capture] in
-                    capture?.finishRendering() ?? Data()
-                }
-                view.onOutputCapture = { [weak capture] slice in
-                    capture?.record(slice)
-                }
-            }
             let launch = processSpec.resolvedLaunch()
             view.startProcess(
                 executable: launch.executable,
@@ -1297,7 +1250,7 @@ final class WorkspaceTerminalController: Identifiable {
         let shellPid = view.process.shellPid
         if shellPid != 0 {
             let controllerID = id
-            // An Ensemble child is attributed by role and vendor; an Agent
+            // An attributed child is named by role and vendor; an Agent
             // Terminal carries its own distinct kind; a login shell keeps its
             // existing "Terminal N" naming. Registration stays PID-gated in
             // every case, so an idle Rafu registers nothing (C7 accounting).
@@ -1377,13 +1330,10 @@ final class WorkspaceTerminalController: Identifiable {
         pendingShellStartup = nil
         CanvasLiveBridge.shared.remove(self)
         stopQuiescenceTracking()
-        terminalView?.flushRenderedOutput()
         terminalView?.terminate()
         terminalView = nil
         delegateProxy = nil
         appliedStyleSignature = ""
-        outputCapture?.finish()
-        outputCapture = nil
         status = .exited(code: nil)
 
         let controllerID = id
@@ -1443,12 +1393,9 @@ final class WorkspaceTerminalController: Identifiable {
         CanvasLiveBridge.shared.remove(self)
         stopQuiescenceTracking()
         status = .exited(code: exitCode)
-        terminalView?.flushRenderedOutput()
         terminalView = nil
         delegateProxy = nil
         appliedStyleSignature = ""
-        outputCapture?.finish()
-        outputCapture = nil
 
         let controllerID = id
         Task {

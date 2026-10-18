@@ -23,7 +23,9 @@ struct CanvasFileDropDelegate: DropDelegate {
             board.cards.count < CanvasLimits.cards
         else { return false }
         if !info.itemProviders(for: [.rafuEditorDrag]).isEmpty {
-            return true
+            // A dragged editor TAB belongs to the editor group's edge-split
+            // target, not to the board (`EditorDropRouting`).
+            return EditorDropRouting.canvasAccepts(session.activeEditorDrag)
         }
         let count = info.itemProviders(for: [.fileURL]).count
         return count > 0 && count <= CanvasLimits.cards - board.cards.count

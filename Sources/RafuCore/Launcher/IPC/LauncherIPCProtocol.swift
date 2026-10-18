@@ -17,13 +17,10 @@ public enum LauncherIPCProtocol {
     /// fields do not require a bump (forward-compatible decoding).
     public static let protocolVersion = 1
 
-    /// Version of the read-only `rafu ensemble` verb surface. This advances
-    /// independently of the transport schema so coordinators can detect verb
-    /// additions without treating them as a framing incompatibility.
-    /// 2 since the mutating verbs (`run`, `abort`, `note`, `grant`) landed.
-    /// A coordinator skill built against the mutating surface compares its
-    /// `targetsVerbVersion` with this to detect an app that predates it,
-    /// rather than discovering the gap as an unexplained exit 64.
+    /// Version of the agent-skill verb surface that the bundled Rafu skill
+    /// targets. The `rafu ensemble` verbs themselves were removed; the
+    /// constant stays only so the skill installer's compatibility check keeps
+    /// compiling until the skill is rebuilt around the Ensemble MCP tools.
     public static let ensembleVerbVersion = 2
 
     /// Upper bound on one framed JSON body, enforced by both the encoder and
@@ -47,33 +44,7 @@ public enum LauncherIPCRequestKind: Hashable, Sendable {
     case canvasBridge
     case openFolder
     case goto
-    case ensembleStatus
-    case ensembleArtifact
-    case ensembleSubscribe
-    case ensembleRun
-    case ensembleAbort
-    case ensembleNote
-    case ensembleGrant
-    /// Token-scoped: re-raises the human merge gate for one or more runs
-    /// this coordinator started. Never applies, commits, or merges anything
-    /// (C8-04).
-    case ensembleProposeMerge
     case unknown(String)
-
-    public var isEnsemble: Bool {
-        switch self {
-        case .ensembleStatus, .ensembleArtifact, .ensembleSubscribe,
-            .ensembleRun, .ensembleAbort, .ensembleNote, .ensembleGrant,
-            .ensembleProposeMerge:
-            true
-        case .handshake, .openFolder, .goto, .canvasBridge, .unknown:
-            false
-        }
-    }
-
-    public var isStreaming: Bool {
-        self == .ensembleSubscribe
-    }
 }
 
 extension LauncherIPCRequestKind: Codable {
@@ -84,14 +55,6 @@ extension LauncherIPCRequestKind: Codable {
         case "canvasBridge": self = .canvasBridge
         case "openFolder": self = .openFolder
         case "goto": self = .goto
-        case "ensembleStatus": self = .ensembleStatus
-        case "ensembleArtifact": self = .ensembleArtifact
-        case "ensembleSubscribe": self = .ensembleSubscribe
-        case "ensembleRun": self = .ensembleRun
-        case "ensembleAbort": self = .ensembleAbort
-        case "ensembleNote": self = .ensembleNote
-        case "ensembleGrant": self = .ensembleGrant
-        case "ensembleProposeMerge": self = .ensembleProposeMerge
         default: self = .unknown(raw)
         }
     }
@@ -103,14 +66,6 @@ extension LauncherIPCRequestKind: Codable {
         case .canvasBridge: try container.encode("canvasBridge")
         case .openFolder: try container.encode("openFolder")
         case .goto: try container.encode("goto")
-        case .ensembleStatus: try container.encode("ensembleStatus")
-        case .ensembleArtifact: try container.encode("ensembleArtifact")
-        case .ensembleSubscribe: try container.encode("ensembleSubscribe")
-        case .ensembleRun: try container.encode("ensembleRun")
-        case .ensembleAbort: try container.encode("ensembleAbort")
-        case .ensembleNote: try container.encode("ensembleNote")
-        case .ensembleGrant: try container.encode("ensembleGrant")
-        case .ensembleProposeMerge: try container.encode("ensembleProposeMerge")
         case .unknown(let raw): try container.encode(raw)
         }
     }
@@ -130,15 +85,11 @@ public struct LauncherIPCEnvelope: Codable, Hashable, Sendable {
     public let kind: LauncherIPCRequestKind
     /// `nil` for `handshake`; present for `openFolder`/`goto`.
     public let payload: LauncherOpenRequest?
-    /// Present only for an Ensemble request kind. Optional so older peers
-    /// continue decoding the v1 launcher envelope unchanged.
-    public let ensemble: EnsembleRequestPayload?
     public let canvasBridge: CanvasBridgeRequest?
 
     public init(
         kind: LauncherIPCRequestKind,
         payload: LauncherOpenRequest? = nil,
-        ensemble: EnsembleRequestPayload? = nil,
         canvasBridge: CanvasBridgeRequest? = nil,
         requestID: String = UUID().uuidString,
         wireVersion: Int = LauncherIPCProtocol.wireVersion,
@@ -149,7 +100,6 @@ public struct LauncherIPCEnvelope: Codable, Hashable, Sendable {
         self.requestID = requestID
         self.kind = kind
         self.payload = payload
-        self.ensemble = ensemble
         self.canvasBridge = canvasBridge
     }
 }
@@ -161,7 +111,6 @@ public struct LauncherIPCEnvelope: Codable, Hashable, Sendable {
 public enum LauncherIPCResponse: Codable, Hashable, Sendable {
     case accepted(workspaceMatched: Bool, windowFocused: Bool, waitSupported: Bool)
     case rejected(reason: String)
-    case ensemble(EnsembleResponsePayload)
     case canvasBridge(CanvasBridgeResponse)
 }
 

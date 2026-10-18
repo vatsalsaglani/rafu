@@ -346,13 +346,12 @@ final class NotchCompanionModel: NSObject {
 
     // MARK: - Agents (collapsed status, mascot, Ensembles, Up next)
 
-    /// The recognised agent CLI behind a terminal: the process spec's provider
-    /// when Rafu launched it, else whatever its terminal title or name says
-    /// (agent CLIs set titles like "✳ claude"). `nil` for an ordinary shell.
+    /// The recognised agent CLI behind a terminal (`resolvedAgentProvider`,
+    /// `Support/AgentIdentity.swift`): the process spec's provider when Rafu
+    /// launched it, else whatever its terminal title says. `nil` for an
+    /// ordinary shell.
     static func agentIdentity(of controller: WorkspaceTerminalController) -> ConductorCLIID? {
-        controller.agentProvider
-            ?? ConductorCLIID.detect(command: nil, title: controller.reportedTitle)
-            ?? ConductorCLIID.detect(command: nil, title: controller.userName)
+        controller.resolvedAgentProvider
     }
 
     static func terminalInput(
@@ -872,8 +871,7 @@ final class NotchCompanionModel: NSObject {
     /// any view's `body`).
     private func reposition(animated: Bool = false) {
         guard let panel, let metrics = NotchScreenAdapter.companionMetrics() else { return }
-        if let resting = NotchCompanionGeometry.restingFrame(for: metrics, allowsPill: allowsPill)
-        {
+        if let resting = NotchCompanionGeometry.restingFrame(for: metrics, allowsPill: allowsPill) {
             updateStripMetrics(metrics, restingFrame: resting)
         }
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion

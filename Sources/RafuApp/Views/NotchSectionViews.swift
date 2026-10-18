@@ -176,7 +176,8 @@ struct CompanionAgentRowView: View {
                     .font(.system(size: 10))
                     .accessibilityHidden(true)
                 Text(row.phase.label)
-                    .font(.system(size: 10, weight: row.phase.needsAttention ? .semibold : .regular))
+                    .font(
+                        .system(size: 10, weight: row.phase.needsAttention ? .semibold : .regular))
             }
             .foregroundStyle(row.phase.needsAttention ? ink.accent : ink.secondary)
             .padding(.horizontal, RafuMetrics.space2)
@@ -351,14 +352,16 @@ struct CompanionNowPlayingSectionView: View {
             context in
             Canvas { drawing, size in
                 let time =
-                    player.playing && !reduceMotion ? context.date.timeIntervalSinceReferenceDate : 0
+                    player.playing && !reduceMotion
+                    ? context.date.timeIntervalSinceReferenceDate : 0
                 for layer in 0..<3 {
                     var path = Path()
                     for x in stride(from: 0.0, through: size.width, by: 2) {
                         let envelope = sin(x / size.width * .pi)
                         let swing = player.playing ? 9.0 : 2.0
                         let y =
-                            size.height / 2 + sin(x / 18 + time * 3 + Double(layer)) * envelope * swing
+                            size.height / 2 + sin(x / 18 + time * 3 + Double(layer)) * envelope
+                            * swing
                         if x == 0 {
                             path.move(to: CGPoint(x: x, y: y))
                         } else {
@@ -378,7 +381,8 @@ struct CompanionNowPlayingSectionView: View {
     private static func openAutomationSettings() {
         guard
             let url = URL(
-                string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")
+                string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
+            )
         else { return }
         NSWorkspace.shared.open(url)
     }

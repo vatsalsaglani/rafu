@@ -97,7 +97,8 @@ nonisolated enum NotchCompanionGeometry {
         let height = max(pillMinimumHeight, menuBarHeight)
         let width = min(expanded ? pillExpandedWidth : pillWidth, metrics.frame.width)
         let topY = metrics.visibleFrame.maxY
-        let x = min(max(metrics.frame.midX - width / 2, metrics.frame.minX), metrics.frame.maxX - width)
+        let x = min(
+            max(metrics.frame.midX - width / 2, metrics.frame.minX), metrics.frame.maxX - width)
         let y = min(max(topY - height, metrics.frame.minY), metrics.frame.maxY - height)
         return CGRect(x: x, y: y, width: width, height: height)
     }

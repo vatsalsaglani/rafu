@@ -309,7 +309,8 @@ struct CompanionTabBar: View {
         switch section {
         case .ensembles:
             let live = model.agentSummary.live
-            return live > 0 ? Badge(text: "\(live)", spoken: "\(live) running", isAttention: false) : nil
+            return live > 0
+                ? Badge(text: "\(live)", spoken: "\(live) running", isAttention: false) : nil
         case .upNext:
             let waiting = model.upNextRows.count
             return waiting > 0

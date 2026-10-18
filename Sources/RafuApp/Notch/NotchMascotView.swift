@@ -305,7 +305,8 @@ struct NotchPlaybackIndicator: View {
                     let phase = Double(bar) * 1.7
                     let height = 3.0 + (sin(time * 7 + phase) + 1) * 3.5
                     let rect = CGRect(
-                        x: Double(bar) * 3.5, y: (size.height - height) / 2, width: 2, height: height)
+                        x: Double(bar) * 3.5, y: (size.height - height) / 2, width: 2,
+                        height: height)
                     drawing.fill(
                         Path(roundedRect: rect, cornerRadius: 1), with: .color(theme.palette.accent)
                     )

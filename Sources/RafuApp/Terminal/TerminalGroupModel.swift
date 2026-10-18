@@ -268,8 +268,6 @@ nonisolated indirect enum TerminalGroupNode: Codable, Equatable, Sendable {
 nonisolated enum TerminalPaneRuntimeKind: Equatable, Sendable {
     case ordinaryShell
     case directAgentTerminal(provider: ConductorCLIID)
-    case ensembleRole
-    case ensembleCoordinator
     case unavailableAgentTerminal
     case unavailableEnsemble
 }
@@ -389,7 +387,7 @@ nonisolated struct TerminalPaneSnapshot: Equatable, Sendable {
                     startAvailability
                 )
             }
-        case .ordinaryShell, .directAgentTerminal, .ensembleRole, .ensembleCoordinator:
+        case .ordinaryShell, .directAgentTerminal:
             break
         }
 

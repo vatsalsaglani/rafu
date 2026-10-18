@@ -92,8 +92,9 @@ final class NotchNowPlaying {
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var currentPlayer: NowPlayingPlayer?
     @ObservationIgnored private let preferences: NotchDisplayPreferenceStore
-    @ObservationIgnored private let readTrack: @Sendable (NowPlayingPlayer) async ->
-        NowPlayingReadResult
+    @ObservationIgnored private let readTrack:
+        @Sendable (NowPlayingPlayer) async ->
+            NowPlayingReadResult
     @ObservationIgnored private let sendCommand:
         @Sendable (NowPlayingCommand, NowPlayingPlayer) async -> NowPlayingReadResult?
     @ObservationIgnored private let runningPlayers: @MainActor () -> Set<NowPlayingPlayer>
@@ -103,7 +104,8 @@ final class NotchNowPlaying {
         readTrack: @escaping @Sendable (NowPlayingPlayer) async -> NowPlayingReadResult = {
             await NowPlayingScriptRunner.read($0)
         },
-        sendCommand: @escaping @Sendable (NowPlayingCommand, NowPlayingPlayer) async ->
+        sendCommand:
+            @escaping @Sendable (NowPlayingCommand, NowPlayingPlayer) async ->
             NowPlayingReadResult? = { await NowPlayingScriptRunner.send($0, to: $1) },
         runningPlayers: @escaping @MainActor () -> Set<NowPlayingPlayer> = {
             let ids = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))

@@ -15,9 +15,6 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
     case search
     case sourceControl
     case terminals
-    /// Conductor runs (ADR 0018, conductor/C0-shim.md). The tolerant decode
-    /// below already protects restoration for builds that predate this case.
-    case runs
 
     var title: String {
         switch self {
@@ -25,7 +22,6 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
         case .search: "Search"
         case .sourceControl: "Source Control"
         case .terminals: "Terminals"
-        case .runs: "Runs"
         }
     }
 
@@ -35,12 +31,12 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
         case .search: "magnifyingglass"
         case .sourceControl: "arrow.triangle.branch"
         case .terminals: "terminal"
-        case .runs: "list.bullet.rectangle"
         }
     }
 
     /// Tolerant decode: a persisted raw value this build does not know (an
-    /// older build reading a newer `RestorableWorkspace`) falls back to
+    /// older build reading a newer `RestorableWorkspace`, or a value for a
+    /// removed mode such as the retired `runs` navigator) falls back to
     /// `.files` instead of throwing. Without this, ONE unknown mode string
     /// fails the whole `RestorableWorkspace` decode and
     /// `restoreLastWorkspaceIfAvailable()`'s catch clears restoration —
@@ -242,53 +238,7 @@ final class WorkspaceSession {
     var openFolderErrorTitle = "Unable to Open Folder"
     var openFolderErrorMessage = ""
 
-    /// Conductor run seams (ADR 0018, conductor/C0-shim.md), pre-landed here
-    /// exactly as the git phase pre-landed its seams so C1's run engine and
-    /// C5's runs navigator fill them WITHOUT editing this shared file.
-    ///
-    /// C1 reloads persisted manifests eagerly (`reloadConductorRuns(for:)`,
-    /// called from both `openLocalWorkspace(at:)` and
-    /// `restoreLastWorkspaceIfAvailable()`), so this reflects `.rafu/runs/`
-    /// as read at the moment a workspace opens, replaces, or restores — not
-    /// only when the `.runs` navigator panel happens to be mounted.
-    var conductorRuns: [ConductorRunManifest] {
-        conductorRunController.runs
-    }
-    /// The run the `.runs` panel and (C5) the run-detail canvas are showing.
-    var selectedConductorRunID: String?
-
-    /// Non-nil while the editor canvas hosts the run-detail timeline (C5).
-    /// Distinct from `selectedConductorRunID` (the panel's own selection,
-    /// which persists across canvas visibility): revealing a live step's
-    /// terminal must REPLACE the canvas, not sit behind it, so
-    /// `revealTerminalSession(_:)` clears this while leaving the panel
-    /// selection alone.
-    var conductorRunCanvasID: String?
-
-    /// This window's run engine — C1 FILLS IT (`conductor/C1-single-role-runs
-    /// .md`). Pre-landed here because C1 may not add stored properties to
-    /// this shared file without stopping to report, and because one window
-    /// owns exactly one run controller, the same way it owns one terminal
-    /// manager.
-    ///
-    /// Constructing it does NO work: it only captures the adapter registry
-    /// (seven pure value types) and holds `.idle` state. Nothing runs, and
-    /// no `.rafu/` path is touched, until C1's explicit user-initiated run
-    /// (ADR 0018).
-    /// The adapter registry every conductor engine in this window resolves
-    /// against. Defaults to the real one; tests inject `FakeConductorAdapter`
-    /// so orchestration behaviour stays verifiable on a machine with no
-    /// vendor CLI installed — a CI runner has none, and a test that reaches
-    /// the real registry there fails with "agent adapter is unavailable"
-    /// while passing on any developer Mac that happens to have Claude Code.
-    @ObservationIgnored
-    private let conductorAdapters: [any ConductorCLIAdapter]
-
-    @ObservationIgnored
-    let conductorRunController: ConductorRunController
-
     init(
-        conductorAdapters: [any ConductorCLIAdapter] = ConductorAdapterRegistry.all,
         restorationStore: WorkspaceRestorationStore = WorkspaceRestorationStore(),
         closeSaveTracker: WorkspaceCloseSaveTracker = .shared,
         canvasStore: WorkspaceCanvasStore = WorkspaceCanvasStore()
@@ -296,136 +246,6 @@ final class WorkspaceSession {
         self.canvas = canvasStore
         self.closeSaveTracker = closeSaveTracker
         self.restorationStore = restorationStore
-        self.conductorAdapters = conductorAdapters
-        self.conductorRunController = ConductorRunController(adapters: conductorAdapters)
-    }
-
-    /// This window's C5 pipeline engine — a PEER of `conductorRunController`,
-    /// publishing every manifest write through it (`ConductorRunController
-    /// .publish`). `lazy` so a window that never starts a workflow run never
-    /// constructs it; `onGateReady` is wired once, here, rather than at every
-    /// call site.
-    @ObservationIgnored
-    private(set) lazy var conductorWorkflowController: ConductorWorkflowController = {
-        let controller = ConductorWorkflowController(
-            runsPublisher: conductorRunController,
-            adapters: conductorAdapters)
-        controller.onGateReady = { [weak self] event in
-            self?.raiseConductorGateAttention(event)
-        }
-        return controller
-    }()
-
-    /// This window's C6 bounded pool of pipeline engines — the durable owner
-    /// of every run started from the Runs panel. `conductorWorkflowController`
-    /// above remains the fallback for a run this pool no longer tracks (it
-    /// prunes completed/aborted runs) so historical selections still resolve.
-    /// Route every gate/abort/retry/reveal verb through
-    /// `workflowController(forRunID:)`, never the singular controller directly.
-    @ObservationIgnored
-    private(set) lazy var conductorConcurrentRuns: ConductorConcurrentRunCoordinator = {
-        let coordinator = ConductorConcurrentRunCoordinator(
-            runsPublisher: conductorRunController,
-            adapters: conductorAdapters)
-        coordinator.onGateReady = { [weak self] event in
-            self?.raiseConductorGateAttention(event)
-        }
-        return coordinator
-    }()
-
-    /// Resolves the engine that owns `runID`: the concurrent pool first, then
-    /// the singular controller when its current manifest matches. Returns
-    /// `nil` for a historical run no live engine owns — callers must treat that
-    /// as "no verbs available", not as an error.
-    func workflowController(forRunID runID: String?) -> ConductorWorkflowController? {
-        guard let runID else { return nil }
-        if let owned = conductorConcurrentRuns.controller(runID: runID) { return owned }
-        return conductorWorkflowController.manifest?.id == runID
-            ? conductorWorkflowController : nil
-    }
-
-    /// The engine driving the run the UI is currently showing, if any.
-    var selectedWorkflowController: ConductorWorkflowController? {
-        workflowController(forRunID: selectedConductorRunID)
-    }
-
-    /// Adopts a persisted, interrupted run (C7 recovery) into a live engine so
-    /// its Retry Step / Abort / Keep Worktree verbs work in this app process.
-    /// Idempotent: a run already owned by an engine is returned as-is. Returns
-    /// `nil` when the run cannot be adopted — the caller then shows it as
-    /// read-only history rather than offering verbs that would do nothing.
-    @discardableResult
-    func adoptInterruptedRun(_ runID: String) -> ConductorWorkflowController? {
-        if let existing = workflowController(forRunID: runID) { return existing }
-        guard let rootURL,
-            let manifest = conductorRuns.first(where: { $0.id == runID }),
-            manifest.steps.contains(where: { $0.status == .interrupted })
-        else { return nil }
-
-        let launcher = WorkspaceConductorRunLauncher(workspaceSession: self, runID: runID)
-        // Adopted into the singular controller, not the concurrent pool: the
-        // pool's `start` is for NEW runs (it reserves a run id and materializes
-        // a worktree), while this run's worktree already exists on disk.
-        guard
-            conductorWorkflowController.restoreInterrupted(
-                manifest: manifest,
-                workspaceRoot: rootURL,
-                launcher: launcher)
-        else { return nil }
-        return conductorWorkflowController
-    }
-
-    /// Whether this window may start another pipeline. C6 deliberately allows
-    /// several at once, so this is a CAP check (`activeLimit`), not an
-    /// is-anything-running check — the pre-C6 guard was the latter and would
-    /// have silently kept the concurrency story unreachable.
-    var canStartConductorWorkflowRun: Bool {
-        conductorRunController.canStartNewRun
-            && !conductorWorkflowController.isInFlight
-            && conductorConcurrentRuns.activeCount < conductorConcurrentRuns.activeLimit
-    }
-
-    private(set) var conductorCoordinatorSessions: [ConductorCoordinatorSession] = []
-
-    @ObservationIgnored
-    private var conductorCoordinatorEndHandlers: [String: @MainActor () -> Void] = [:]
-
-    func registerCoordinatorSession(
-        _ coordinatorSession: ConductorCoordinatorSession,
-        onEnd: @escaping @MainActor () -> Void = {}
-    ) {
-        if let index = conductorCoordinatorSessions.firstIndex(where: {
-            $0.id == coordinatorSession.id
-        }) {
-            conductorCoordinatorSessions[index] = coordinatorSession
-        } else {
-            conductorCoordinatorSessions.append(coordinatorSession)
-        }
-        conductorCoordinatorEndHandlers[coordinatorSession.id] = onEnd
-    }
-
-    func coordinatorSessionDidEnd(_ id: String) {
-        guard let index = conductorCoordinatorSessions.firstIndex(where: { $0.id == id }),
-            conductorCoordinatorSessions[index].endedAt == nil
-        else { return }
-        conductorCoordinatorSessions[index].endedAt = Date()
-        let onEnd = conductorCoordinatorEndHandlers.removeValue(forKey: id)
-        onEnd?()
-    }
-
-    private func endCoordinatorSession(for terminalSessionID: UUID) {
-        guard
-            let coordinatorID = conductorCoordinatorSessions.first(where: {
-                $0.terminalSessionID == terminalSessionID && $0.endedAt == nil
-            })?.id
-        else { return }
-        coordinatorSessionDidEnd(coordinatorID)
-    }
-
-    private func endAllCoordinatorSessions() {
-        for id in conductorCoordinatorSessions.filter({ $0.endedAt == nil }).map(\.id) {
-            coordinatorSessionDidEnd(id)
-        }
     }
 
     /// Single terminal teardown funnel for workspace replacement, window
@@ -446,7 +266,6 @@ final class WorkspaceSession {
         cancelLocationNavigation()
         endTerminalGroupLibrary()
         cleanupTerminalSessions(terminal.sessions.map(\.id))
-        endAllCoordinatorSessions()
         drainTerminalLifecycleCallbacks()
         terminal.shutdownAll()
         pendingTerminalGroupClose = nil
@@ -567,67 +386,6 @@ final class WorkspaceSession {
         navigatorMode = navigatorMode == mode ? .files : mode
     }
 
-    /// Reveals a Conductor run (ADR 0018). C0 only records the selection and
-    /// opens the `.runs` navigator so the seam is typed and exercised; C5
-    /// adds the editor-hosted run-detail canvas behind the same call, so no
-    /// caller changes when it lands. Reading run evidence starts nothing.
-    func openConductorRun(_ runID: String) {
-        installTerminalHandlersIfNeeded()
-        selectedConductorRunID = runID
-        navigatorMode = .runs
-        conductorRunController.revealLiveTerminal(for: runID, in: self)
-    }
-
-    /// Selects the run-detail tab in its editor group. The group's file
-    /// selection and live editor remain intact below the auxiliary content.
-    func showConductorRunDetail(_ runID: String) {
-        prepareAuxiliarySelection()
-        selectedConductorRunID = runID
-        navigatorMode = .runs
-        conductorRunCanvasID = runID
-        conductorGraphVisible = false
-        ensembleStartCanvasVisible = false
-        ensembleNewRunCanvasVisible = false
-        settingsVisible = false
-        selectedDocumentID = nil
-        selectedTreePath = nil
-        recordAuxiliaryTab(.runDetail(runID))
-    }
-
-    /// Closes run detail and returns to its group's selected file or terminal.
-    func closeConductorRunDetail() {
-        guard let conductorRunCanvasID else { return }
-        closeAuxiliaryTab(.runDetail(conductorRunCanvasID))
-    }
-
-    /// Hosts the workspace-wide Ensemble projection in the editor canvas.
-    /// Graph, run detail, and terminal are peer occupants: opening one clears
-    /// the other canvas route without changing the Runs panel selection.
-    var conductorGraphVisible = false
-
-    func showConductorGraph() {
-        prepareAuxiliarySelection()
-        conductorGraphVisible = true
-        conductorRunCanvasID = nil
-        ensembleStartCanvasVisible = false
-        ensembleNewRunCanvasVisible = false
-        settingsVisible = false
-        selectedDocumentID = nil
-        selectedTreePath = nil
-        navigatorMode = .runs
-        recordAuxiliaryTab(.graph)
-    }
-
-    func closeConductorGraph() {
-        closeAuxiliaryTab(.graph)
-    }
-
-    /// Ensemble creation tabs share an editor group with files. Only one
-    /// auxiliary route is selected, but open auxiliary tabs remain available.
-    var ensembleStartCanvasVisible = false
-    var ensembleNewRunCanvasVisible = false
-    @ObservationIgnored private var ensembleStartLaunchInProgress = false
-
     /// Hosts Settings as a window-scoped, non-restorable editor canvas.
     /// The native Settings scene remains the no-window fallback for ⌘,;
     /// focused workspace windows route here instead.
@@ -641,15 +399,6 @@ final class WorkspaceSession {
             closeGitDiff()
         }
         settingsVisible = true
-        conductorRunCanvasID = nil
-        conductorGraphVisible = false
-        // UX-01 landed the creation canvases in parallel with this one, so
-        // neither branch cleared the other's flags. Settings is their peer:
-        // without these two lines the resolver's ordering silently becomes
-        // load-bearing (editor-canvas-routing.md, "Exclusivity lives in the
-        // mutators").
-        ensembleStartCanvasVisible = false
-        ensembleNewRunCanvasVisible = false
         selectedDocumentID = nil
         selectedTreePath = nil
         recordAuxiliaryTab(.settings)
@@ -657,55 +406,6 @@ final class WorkspaceSession {
 
     func closeSettings() {
         closeAuxiliaryTab(.settings)
-    }
-
-    /// C8-07's four "New Ensemble…" entry points share this guarded seam.
-    func showEnsembleStart() {
-        guard descriptor != nil else { return }
-        prepareAuxiliarySelection()
-        ensembleStartCanvasVisible = true
-        ensembleNewRunCanvasVisible = false
-        conductorGraphVisible = false
-        conductorRunCanvasID = nil
-        settingsVisible = false
-        selectedDocumentID = nil
-        selectedTreePath = nil
-        navigatorMode = .runs
-        recordAuxiliaryTab(.ensembleStart)
-    }
-
-    func closeEnsembleStart() {
-        closeAuxiliaryTab(.ensembleStart)
-    }
-
-    /// Coordinator launch reveals its terminal as part of starting Door 1.
-    /// Keep the copyable-goal confirmation canvas in front during that
-    /// internal reveal; an ordinary user-requested terminal reveal still
-    /// replaces the canvas.
-    func beginEnsembleStartLaunch() {
-        ensembleStartLaunchInProgress = true
-    }
-
-    func endEnsembleStartLaunch() {
-        ensembleStartLaunchInProgress = false
-    }
-
-    func showEnsembleNewRun() {
-        guard descriptor != nil, canStartConductorWorkflowRun else { return }
-        prepareAuxiliarySelection()
-        ensembleNewRunCanvasVisible = true
-        ensembleStartCanvasVisible = false
-        conductorGraphVisible = false
-        conductorRunCanvasID = nil
-        settingsVisible = false
-        selectedDocumentID = nil
-        selectedTreePath = nil
-        navigatorMode = .runs
-        recordAuxiliaryTab(.ensembleNewRun)
-    }
-
-    func closeEnsembleNewRun() {
-        closeAuxiliaryTab(.ensembleNewRun)
     }
 
     /// Drives `WorkspaceWindowView`'s `NavigationSplitView` column
@@ -899,7 +599,6 @@ final class WorkspaceSession {
     /// preserves its pane-tree order; teardown passes manager session order.
     private func cleanupTerminalSessions(_ sessionIDs: [UUID]) {
         for sessionID in sessionIDs {
-            endCoordinatorSession(for: sessionID)
             consumeTerminalLifecycleCallback(for: sessionID)
         }
     }
@@ -1117,10 +816,6 @@ final class WorkspaceSession {
                 return .init(
                     isEnabled: false,
                     reason: "Agent Terminal profiles are not saved in this version.")
-            case .ensembleRole, .ensembleCoordinator:
-                return .init(
-                    isEnabled: false,
-                    reason: "Ensemble terminal panes cannot set a saved starting folder.")
             case .unavailableEnsemble:
                 return .init(
                     isEnabled: false,
@@ -1290,74 +985,6 @@ final class WorkspaceSession {
             notifier.post(
                 TerminalAttentionNotification(
                     sessionID: controller.id, title: controller.displayName, body: snippet))
-        }
-    }
-
-    /// Surfaces a C5 gate becoming ready through the SAME HUD/notification
-    /// arbitration `notifyIfNeeded(for:)` uses for a terminal bell, but with
-    /// its OWN bounded strings: the workflow name and the step name that
-    /// reached the gate, and NOTHING else. Deliberately never calls
-    /// `recentOutputSnippet()` or reads an artifact/prompt — a gate
-    /// notification is a "come look" signal, not evidence (ADR 0018). The
-    /// event carries a FRESH `UUID`, never a real terminal session id
-    /// (coordinator decision): there is no live pty to reply into for a
-    /// gate, so an unrecognized id simply drops reply routing silently —
-    /// the same safe-by-construction fallback `TerminalAttentionCenter
-    /// .deliverReply` already has for any unknown id.
-    /// Whether the notch companion is currently showing this run's tile. It no
-    /// longer does: the rebuilt notch lists open Ensembles and their agents,
-    /// not workflow runs, so a gate always raises its own attention surface.
-    private func notchCompanionShowsActiveRun(_ runID: String) -> Bool {
-        false
-    }
-
-    func raiseConductorGateAttention(_ event: ConductorGateReadyEvent) {
-        ConductorEnsembleEventCenter.shared.gateReady(event: event)
-        let runName = event.workflowName
-        let stepName = event.agentName
-        let preference = terminalAttentionSurfaceStore.surface()
-        let eventID = UUID()
-        // `runName`/`stepName` come from user-authored `.rafu/agents|
-        // workflows/*.md` frontmatter, capped at 1 MiB per FILE, not per
-        // field (advisor D6) — bound both to a short UTF-8 prefix before
-        // they ever reach a HUD event or notification body, mirroring
-        // `TerminalAttentionPolicy`'s private `boundedUTF8` idiom (not
-        // visible from here, so reproduced locally rather than widening
-        // that type's access).
-        let title = Self.boundedConductorAttentionString(runName)
-        let body = "\(Self.boundedConductorAttentionString(stepName)) is ready for review."
-
-        // ADR 0016 arbitration: when the companion strip is already showing
-        // this run's progress tile, its own attention dot IS the signal — a
-        // second notch drop-down for the same gate would be two surfaces
-        // shouting the same thing.
-        let companionShowsRun = notchCompanionShowsActiveRun(event.runID)
-        if !companionShowsRun, NotchHUDPolicy.surfaces(for: preference, authorized: false).hud {
-            resolvedAttentionHUD().show(
-                NotchHUDEvent(sessionID: eventID, title: title, snippet: body, color: nil),
-                theme: hudThemeProvider())
-        }
-
-        guard NotchHUDPolicy.surfaces(for: preference, authorized: true).notification else {
-            return
-        }
-        let notifier = resolvedAttentionNotifier()
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let authorized = await notifier.requestAuthorizationIfNeeded()
-            let surfaces = NotchHUDPolicy.surfaces(
-                for: self.terminalAttentionSurfaceStore.surface(), authorized: authorized)
-            guard surfaces.notification else { return }
-            notifier.post(
-                TerminalAttentionNotification(
-                    sessionID: eventID,
-                    title: title,
-                    body: body,
-                    // Approve is offered ONLY for a `[gate:remote]` step gate;
-                    // every other gate offers Open Run alone.
-                    kind: .ensembleGate(
-                        runID: event.runID,
-                        allowsApprove: event.safeToApproveRemotely)))
         }
     }
 
@@ -1851,15 +1478,7 @@ final class WorkspaceSession {
             presentTerminalGroupError(error.localizedDescription)
             return
         }
-        // Terminal Groups occupy the same editor canvas slot as run detail,
-        // graph, Ensemble creation, and Settings. Keep the Runs selection so
-        // the panel remains stable while a terminal replaces its canvas.
-        conductorRunCanvasID = nil
-        conductorGraphVisible = false
-        if !ensembleStartLaunchInProgress {
-            ensembleStartCanvasVisible = false
-        }
-        ensembleNewRunCanvasVisible = false
+        // Terminal Groups occupy the same editor canvas slot as Settings.
         settingsVisible = false
         if let tab = editorLayout.tab(matching: .terminalGroup(groupID: groupID)),
             let editorGroupID = editorLayout.group(containing: tab.id)?.id
@@ -1912,7 +1531,6 @@ final class WorkspaceSession {
             case .terminal(let sessionID) = tab.resource
         else { return }
         _ = editorLayout.closeTab(tabID)
-        endCoordinatorSession(for: sessionID)
         terminal.close(sessionID)
         synchronizeSelectionFromLayout()
         persistWorkspaceState()
@@ -1932,7 +1550,6 @@ final class WorkspaceSession {
         if let tab = editorLayout.tab(matching: .terminal(sessionID: sessionID)) {
             _ = editorLayout.closeTab(tab.id)
         }
-        endCoordinatorSession(for: sessionID)
         terminal.close(sessionID)
         synchronizeSelectionFromLayout()
         persistWorkspaceState()
@@ -2861,26 +2478,12 @@ final class WorkspaceSession {
         languageIntelligence.workspaceDidClose()
         RecentWorkspacesStore().record(url: url, displayName: name)
         Task { await refreshWorkspace() }
-        reloadConductorRuns(for: url)
         startFileWatcher()
         languageIntelligence.workspaceDidOpen(root: url)
         beginTerminalGroupLibrary(for: url)
         persistWorkspaceState()
 
         previousSecurityScopedURL?.stopAccessingSecurityScopedResource()
-    }
-
-    /// Loads persisted `.rafu/runs/` manifests for `url`, independent of
-    /// whether the `.runs` navigator panel is mounted (`ConductorRunsPanelView`
-    /// separately reloads on `.task(id:)` for its own live-attachment case —
-    /// this is a second, idempotent, read-only caller of the same
-    /// evidence-only path, not a replacement for it). Called from both
-    /// `openLocalWorkspace(at:)` and `restoreLastWorkspaceIfAvailable()`, the
-    /// two funnels that give a window a new workspace root.
-    private func reloadConductorRuns(for url: URL) {
-        Task { await conductorRunController.attachAndReload(workspaceRoot: url) }
-        conductorWorkflowController.attach(workspaceRoot: url)
-        conductorConcurrentRuns.attach(workspaceRoot: url)
     }
 
     /// Starts (or restarts) the FSEvents watcher on the current root so
@@ -4649,9 +4252,7 @@ final class WorkspaceSession {
             MemoryTimeline.shared.note(.diffClosed, source: memoryTimelineSource)
         }
         gitOpenDiff = nil
-        // A run diff opened from the run-detail canvas (C5) returns to the
-        // timeline, not a document fallback — the canvas is still hosting.
-        if wasSelected, conductorRunCanvasID == nil, let fallback = openDocuments.last {
+        if wasSelected, let fallback = openDocuments.last {
             select(fallback)
         }
     }
@@ -5741,7 +5342,6 @@ final class WorkspaceSession {
             guard self.rootURL == resolved.url else { return }
 
             languageIntelligence.workspaceDidOpen(root: resolved.url)
-            reloadConductorRuns(for: resolved.url)
             for relativePath in restored.openRelativePaths {
                 let url = resolved.url.appending(path: relativePath)
                 guard FileManager.default.fileExists(atPath: url.path) else { continue }
@@ -5958,7 +5558,7 @@ final class WorkspaceSession {
                 case .ordinaryShell: kind = .ordinaryShell
                 case .directAgentTerminal, .unavailableAgentTerminal:
                     kind = .unavailableAgentTerminal
-                case .ensembleRole, .ensembleCoordinator, .unavailableEnsemble:
+                case .unavailableEnsemble:
                     kind = .unavailableEnsemble
                 }
                 return try? TerminalGroupOpenPaneRestorationRecord(
@@ -6034,20 +5634,6 @@ final class WorkspaceSession {
             (error as? LocalizedError)?.errorDescription
             ?? "Commit-message generation failed."
         return String(decoding: message.utf8.prefix(512), as: UTF8.self)
-    }
-
-    /// Same `String(decoding:as:)`-on-a-UTF-8-prefix idiom as
-    /// `boundedAIErrorMessage` above (and `TerminalAttentionPolicy`'s
-    /// private `boundedUTF8`) — truncating on a byte boundary repairs an
-    /// incomplete trailing multibyte sequence into one replacement
-    /// character rather than corrupting further bytes. 200 bytes mirrors
-    /// `TerminalAttentionPolicy.snippet`'s per-line cap: plenty for a HUD
-    /// pill or notification title, nowhere near the 1 MiB per-FILE cap that
-    /// bounds a `.rafu/agents|workflows/*.md` frontmatter field.
-    private static func boundedConductorAttentionString(
-        _ text: String, maxBytes: Int = 200
-    ) -> String {
-        String(decoding: text.utf8.prefix(maxBytes), as: UTF8.self)
     }
 
     private func synchronizeSelectionFromLayout(fallback: EditorDocument? = nil) {

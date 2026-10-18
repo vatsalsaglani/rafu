@@ -213,114 +213,6 @@ func focusEditorNoOpAfterUnregister() {
     model.focusEditor(id)
 }
 
-// MARK: - Active Ensemble runs
-
-private func notchRunManifest(
-    id: String = "notch-run",
-    statuses: [RunStepStatus] = [.completed, .running]
-) -> ConductorRunManifest {
-    let steps = statuses.enumerated().map { index, status in
-        ConductorRunManifest.Step(
-            agentName: index == 0 ? "Advisor" : "Implementor",
-            binding: ConductorRunManifest.AgentBinding(
-                provider: index == 0 ? .claudeCode : .codex,
-                model: "",
-                autonomy: .readOnly,
-                adapterVersion: nil),
-            inputArtifacts: [],
-            handoffArtifact: "step-\(index + 1).md",
-            gateAfter: false,
-            status: status,
-            startedAt: nil,
-            finishedAt: nil)
-    }
-    return ConductorRunManifest(
-        id: id,
-        workflowName: "Review then implement",
-        baseCommit: "abc123",
-        worktreeBranch: "",
-        createdAt: .distantPast,
-        updatedAt: .distantPast,
-        steps: steps)
-}
-
-@Test("Active run item maps the current step without reading process or provider state")
-func activeRunItemMapsCurrentStep() {
-    let workspaceID = UUID()
-    let item = ConductorNotchRunItem.item(
-        manifest: notchRunManifest(),
-        state: .runningStep(index: 1),
-        workspaceID: workspaceID)
-
-    #expect(item?.workspaceID == workspaceID)
-    #expect(item?.runID == "notch-run")
-    #expect(item?.workflowName == "Review then implement")
-    #expect(item?.roleName == "Implementor")
-    #expect(item?.stepNumber == 2)
-    #expect(item?.stepCount == 2)
-    #expect(item?.isGateWaiting == false)
-    #expect(item?.stepLabel == "Step 2 of 2")
-}
-
-@Test("Active run item marks step and merge gates as waiting")
-func activeRunItemMarksGateWaiting() {
-    let manifest = notchRunManifest()
-    let workspaceID = UUID()
-
-    let stepGate = ConductorNotchRunItem.item(
-        manifest: manifest,
-        state: .awaitingGate(index: 0),
-        workspaceID: workspaceID)
-    let mergeGate = ConductorNotchRunItem.item(
-        manifest: manifest,
-        state: .awaitingMergeGate,
-        workspaceID: workspaceID)
-
-    #expect(stepGate?.roleName == "Advisor")
-    #expect(stepGate?.stepNumber == 1)
-    #expect(stepGate?.isGateWaiting == true)
-    #expect(mergeGate?.roleName == "Implementor")
-    #expect(mergeGate?.stepNumber == 2)
-    #expect(mergeGate?.isGateWaiting == true)
-}
-
-@Test("Inactive or inconsistent workflow state produces no notch run item")
-func inactiveWorkflowProducesNoRunItem() {
-    let manifest = notchRunManifest()
-    let workspaceID = UUID()
-
-    #expect(
-        ConductorNotchRunItem.item(
-            manifest: manifest,
-            state: .completed,
-            workspaceID: workspaceID) == nil)
-    #expect(
-        ConductorNotchRunItem.item(
-            manifest: manifest,
-            state: .runningStep(index: 99),
-            workspaceID: workspaceID) == nil)
-    #expect(
-        ConductorNotchRunItem.item(
-            manifest: nil,
-            state: .preparing,
-            workspaceID: workspaceID) == nil)
-}
-
-@Test("A waiting gate wins the notch strip's single active-run slot")
-func gateWaitingRunHasPrimaryPriority() {
-    let normal = ConductorNotchRunItem.item(
-        manifest: notchRunManifest(id: "normal"),
-        state: .runningStep(index: 1),
-        workspaceID: UUID())!
-    let gate = ConductorNotchRunItem.item(
-        manifest: notchRunManifest(id: "gate"),
-        state: .awaitingGate(index: 0),
-        workspaceID: UUID())!
-
-    #expect(ConductorNotchRunItem.primary(in: [normal, gate]) == gate)
-    #expect(ConductorNotchRunItem.primary(in: []) == nil)
-}
-
 // MARK: - NotchCompanionPreferenceStore
 
 @MainActor
@@ -568,84 +460,60 @@ private func fixtureReader(providerIDs: [UsageProviderID]) -> UsageRegistryReade
         })
 }
 
-/// `peekContentHeight()`'s usage-front-line term (agent-usage-providers.md,
-/// "Multi-provider display in the notch", amended 2026-07-23: per-row
-/// front line): 0 providers contributes nothing, and each additional
-/// provider row grows the height by the SAME constant amount
-/// (`usageFrontLineRowHeight`) — proven here via deltas between provider
-/// counts rather than the private row-height constant itself, so the test
-/// does not need to know its literal value. The delta from 0→1 providers
-/// is strictly larger than the 1→2 delta because the front line's
-/// one-time top padding is folded into the FIRST row only, never repeated
-/// per row.
+/// The open panel is a fixed size (Cider-style): usage rows, feed cards and
+/// search results scroll inside it, so none of them may change the height.
 @MainActor
-@Test(
-    "peekContentHeight: 0 with no snapshots, then grows by a constant per-provider amount, with a one-time top-padding term folded into the first row"
-)
-func peekContentHeightGrowsPerFrontLineProvider() async {
-    let zero = NotchCompanionModel()
-    zero.usageReader = fixtureReader(providerIDs: [])
-    await zero.refreshUsage()?.value
-
-    let one = NotchCompanionModel()
-    one.usageReader = fixtureReader(providerIDs: [.claude])
-    await one.refreshUsage()?.value
-
-    let two = NotchCompanionModel()
-    two.usageReader = fixtureReader(providerIDs: [.claude, .codex])
-    await two.refreshUsage()?.value
+@Test("peekContentHeight: fixed — usage providers do not change it")
+func peekContentHeightIsFixed() async {
+    let none = NotchCompanionModel()
+    none.usageReader = fixtureReader(providerIDs: [])
+    await none.refreshUsage()?.value
 
     let four = NotchCompanionModel()
     four.usageReader = fixtureReader(providerIDs: [.claude, .codex, .cline, .openCode])
     await four.refreshUsage()?.value
 
-    #expect(zero.usageFrontLine.isEmpty)
-    #expect(one.usageFrontLine.count == 1)
-    #expect(two.usageFrontLine.count == 2)
     #expect(four.usageFrontLine.count == 4)
-    // All four counts stay within `frontLineCap`, so none of these models
-    // has an overflow disclosure/grid term to also account for.
-    #expect(zero.usageOverflow.isEmpty)
-    #expect(four.usageOverflow.isEmpty)
-
-    let zeroToOneDelta = one.peekContentHeight() - zero.peekContentHeight()
-    let oneToTwoDelta = two.peekContentHeight() - one.peekContentHeight()
-    let twoToFourDelta = four.peekContentHeight() - two.peekContentHeight()
-
-    // 0 providers contributes nothing beyond the baseline every model
-    // already shares (empty editors list, no feed) — the front-line term
-    // is exactly 0, so 0→1 is entirely the first row's height plus its
-    // one-time top padding.
-    #expect(zeroToOneDelta > 0)
-    // 1→2 adds exactly one more row, no additional top padding.
-    #expect(oneToTwoDelta > 0)
-    // 2→4 adds exactly two more rows at the SAME per-row rate as 1→2.
-    #expect(twoToFourDelta == 2 * oneToTwoDelta)
-    // The 0→1 delta includes the one-time top-padding term that 1→2 does
-    // not, so it must be strictly larger than a single row's own height.
-    #expect(zeroToOneDelta > oneToTwoDelta)
+    #expect(none.peekContentHeight() == four.peekContentHeight())
+    #expect(
+        none.peekContentHeight()
+            == none.stripHeight + NotchCompanionGeometry.openPanelBodyHeight)
 }
 
 @MainActor
-@Test("toggleUsageOverflow: flips isUsageOverflowExpanded")
-func toggleUsageOverflowFlipsExpandedState() {
+@Test("isPanelOpen: pinned always; peeking only with hover-to-open on; resting never")
+func isPanelOpenFollowsHoverPolicy() {
     let model = NotchCompanionModel()
-    #expect(model.isUsageOverflowExpanded == false)
-    model.toggleUsageOverflow()
-    #expect(model.isUsageOverflowExpanded == true)
-    model.toggleUsageOverflow()
-    #expect(model.isUsageOverflowExpanded == false)
-}
-
-@MainActor
-@Test("escapePressed: collapsing to .resting resets isUsageOverflowExpanded to false")
-func escapePressedResetsUsageOverflowExpanded() {
-    let model = NotchCompanionModel()
+    #expect(model.isPanelOpen == false)
     model.clicked()
-    model.toggleUsageOverflow()
-    #expect(model.isUsageOverflowExpanded == true)
-
+    #expect(model.hoverState == .pinned)
+    #expect(model.isPanelOpen == true)
+    model.clicked()
+    #expect(model.hoverState == .peeking)
+    #expect(model.isPanelOpen == model.opensOnHover)
     model.escapePressed()
+    #expect(model.hoverState == .resting)
+    #expect(model.isPanelOpen == false)
+}
 
-    #expect(model.isUsageOverflowExpanded == false)
+@MainActor
+@Test("focusAgent: a no-op for a row whose window is unknown — no crash")
+func focusAgentNoOpForUnknownWindow() {
+    let model = NotchCompanionModel()
+    let row = NotchAgentRow(
+        id: UUID(), title: "claude", cli: .claudeCode, phase: .needsYou, windowID: UUID())
+    model.focusAgent(row)
+    #expect(model.hoverState == .resting)
+}
+
+@MainActor
+@Test("allAgentRows: an ordinary shell is not listed; a terminal titled as an agent is")
+func allAgentRowsListsOnlyAgents() {
+    let model = NotchCompanionModel()
+    let host = session(named: "rafu", path: "/tmp/notch-agents")
+    model.register(host)
+    host.newTerminalTab()
+    #expect(model.allAgentRows.isEmpty)
+    #expect(model.agentSummary.live == 0)
+    #expect(model.mascotState.mood == .idle)
 }
