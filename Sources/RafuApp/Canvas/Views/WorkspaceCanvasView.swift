@@ -535,6 +535,12 @@ struct WorkspaceCanvasView: View {
             // Return on a selected note starts editing (Zoom to Card first below 50%).
             if model.beginEditing() { return }
         }
+        // Return on a selected whiteboard item or Mermaid card opens its editor.
+        if case .mermaid = card.content {
+            CanvasWhiteboardEditing.shared.request(card.id)
+            return
+        }
+        if CanvasWhiteboardEditing.shared.requestEditing(card) { return }
         if case .terminal = card.content,
             let primary = CanvasCardCommands(card: card, board: board, session: session).primary,
             primary.id == "start" || primary.id == "restart"

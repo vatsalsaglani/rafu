@@ -93,10 +93,8 @@ struct CanvasCardShell: View {
     /// whiteboard items) draws through `CanvasWhiteboardCardFace`; a Mermaid
     /// diagram keeps the standard header and uses the face as its body.
     private var isWhiteboardItem: Bool {
-        switch card.content {
-        case .file, .image, .note, .terminal, .web, .nativeApp, .mermaid: false
-        default: true
-        }
+        // One rule, owned by the whiteboard face, for which kinds skip chrome.
+        !CanvasWhiteboardCardFace.usesCardChrome(card.content)
     }
 
     @ViewBuilder

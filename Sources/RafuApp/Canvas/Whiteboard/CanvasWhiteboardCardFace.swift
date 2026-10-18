@@ -9,12 +9,13 @@ struct CanvasWhiteboardCardFace: View {
     let board: CanvasBoardState
 
     /// Whether the shell draws its standard header and frame. Whiteboard items
-    /// stay light (selection handles only); Mermaid diagrams and frames keep
-    /// a titled look.
+    /// stay light (selection handles only); a frame draws its own titled look
+    /// (`CanvasDiagramCardFace`), so the shell adds no second header. Mermaid
+    /// diagrams keep the standard header.
     static func usesCardChrome(_ content: CanvasCardContent) -> Bool {
         switch content {
-        case .shape, .stroke, .text, .serviceIcon: false
-        case .mermaid, .frame: true
+        case .shape, .stroke, .text, .serviceIcon, .frame: false
+        case .mermaid: true
         case .file, .image, .note, .terminal, .web, .nativeApp: true
         }
     }
