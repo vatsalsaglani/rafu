@@ -50,6 +50,14 @@ struct CanvasNoteSyntaxZoomTests {
         #expect(found.contains { $0.0 == .link && $0.1 == "[docs](a/b.md)" })
     }
 
+    @Test("Inline markers inside a heading are muted but keep the heading size")
+    func headingInline() {
+        let source = "# a **b**"
+        let found = pieces(source, CanvasNoteSyntax.runs(in: source, restrictedTo: nil))
+        #expect(!found.contains { $0.0 == .strong })
+        #expect(found.filter { $0.0 == .marker }.map(\.1) == ["#", "**", "**"])
+    }
+
     @Test("Fenced code is styled as code, not as Markdown")
     func fences() {
         let source = "```\n# not heading **x**\n```\n# real"
@@ -63,7 +71,8 @@ struct CanvasNoteSyntaxZoomTests {
     @Test("Restricting to a range scans only the touched lines")
     func restricted() {
         let source = "# one\n**two**\n# three"
-        let result = CanvasNoteSyntax.runs(in: source, restrictedTo: NSRange(location: 8, length: 0))
+        let result = CanvasNoteSyntax.runs(
+            in: source, restrictedTo: NSRange(location: 8, length: 0))
         #expect(result.covered == NSRange(location: 6, length: 8))
         #expect(pieces(source, result).contains { $0.0 == .strong && $0.1 == "two" })
         #expect(!result.runs.contains { if case .heading = $0.style { true } else { false } })
@@ -98,7 +107,8 @@ struct CanvasNoteSyntaxZoomTests {
     @Test("Zooming to a card centres it at a usable scale")
     func viewportForCard() {
         let rect = CanvasRect(x: 100, y: 200, width: 400, height: 300)
-        let viewport = CanvasNoteZoom.viewport(centering: rect, in: CGSize(width: 1_000, height: 800))
+        let viewport = CanvasNoteZoom.viewport(
+            centering: rect, in: CGSize(width: 1_000, height: 800))
         #expect(viewport.scale == 1)
         #expect(viewport.x == 1_000 / 2 - 300)
         #expect(viewport.y == 800 / 2 - 350)
@@ -120,7 +130,8 @@ struct CanvasNoteSyntaxZoomTests {
         #expect(CanvasNoteLink.classify(outside, root: root) == .ignored)
         let web = URL(string: "https://example.com/x")!
         #expect(CanvasNoteLink.classify(web, root: root) == .external(web))
-        #expect(CanvasNoteLink.classify(URL(string: "javascript:alert(1)")!, root: root) == .ignored)
+        #expect(
+            CanvasNoteLink.classify(URL(string: "javascript:alert(1)")!, root: root) == .ignored)
         #expect(CanvasNoteLink.classify(URL(string: "file:///work/space")!, root: root) == .ignored)
     }
 }

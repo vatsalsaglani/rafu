@@ -40,7 +40,9 @@ nonisolated enum CanvasNoteSyntax {
     static func runs(in source: String, restrictedTo range: NSRange?) -> Result {
         let text = Array(source.utf16)
         let lines = CanvasNoteMarkdown.lines(in: text)
-        guard !lines.isEmpty else { return Result(covered: NSRange(location: 0, length: 0), runs: []) }
+        guard !lines.isEmpty else {
+            return Result(covered: NSRange(location: 0, length: 0), runs: [])
+        }
         let roles = CanvasNoteMarkdown.fenceRoles(in: text, lines: lines)
         var first = 0
         var last = lines.count - 1
@@ -78,6 +80,7 @@ nonisolated enum CanvasNoteSyntax {
         guard position < end else { return [] }
 
         var inlineStart = position
+        var isHeading = false
         if text[position] == 35 {
             var hashes = 0
             while position + hashes < end, text[position + hashes] == 35 { hashes += 1 }
@@ -89,12 +92,19 @@ nonisolated enum CanvasNoteSyntax {
                         style: .heading(hashes)))
                 runs.append(Run(range: NSRange(location: position, length: hashes), style: .marker))
                 inlineStart = min(next + 1, end)
+                isHeading = true
             }
         } else if text[position] == 62 {
             runs.append(
                 Run(range: NSRange(location: position, length: end - position), style: .quote))
         }
-        runs.append(contentsOf: inlineRuns(text, from: inlineStart, to: end))
+        let inline = inlineRuns(text, from: inlineStart, to: end)
+        if isHeading {
+            // A heading keeps its own size; only the markers inside it are muted.
+            runs.append(contentsOf: inline.filter { $0.style == .marker })
+        } else {
+            runs.append(contentsOf: inline)
+        }
         return runs
     }
 
@@ -111,7 +121,8 @@ nonisolated enum CanvasNoteSyntax {
                     if close > index + open {
                         runs.append(
                             Run(
-                                range: NSRange(location: index + open, length: close - index - open),
+                                range: NSRange(
+                                    location: index + open, length: close - index - open),
                                 style: .code))
                     }
                     runs.append(Run(range: NSRange(location: close, length: open), style: .marker))
