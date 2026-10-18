@@ -40,7 +40,7 @@ final class WorkspaceCanvasStore {
         fileBindings = [:]
         library = []
         workspace = key
-        root = root.standardizedFileURL
+        self.root = root.standardizedFileURL
         generation = UUID()
         await refreshLibrary()
         return true

@@ -125,18 +125,23 @@ final class CanvasIconPackLibrary {
         notice = nil
         let folder = FileManager.default.temporaryDirectory.appending(
             path: "rafu-icon-download-\(UUID().uuidString)", directoryHint: .isDirectory)
+        // Built here, where `self` is a plain let: a nested closure inside the
+        // task would capture the task's `weak var self`, which Swift 6 rejects
+        // in concurrently executing code.
+        let vendor = source.vendor
+        let progress: @Sendable (Int64, Int64?) -> Void = { [weak self] received, expected in
+            let library = self
+            Task { @MainActor in
+                guard let library, library.download?.vendor == vendor else { return }
+                library.download?.received = received
+                library.download?.expected = expected
+            }
+        }
         downloadTask = Task { [weak self] in
             defer { try? FileManager.default.removeItem(at: folder) }
             do {
                 let file = try await CanvasIconPackDownloads.download(
-                    source, into: folder,
-                    progress: { received, expected in
-                        Task { @MainActor [weak self] in
-                            guard self?.download?.vendor == source.vendor else { return }
-                            self?.download?.received = received
-                            self?.download?.expected = expected
-                        }
-                    })
+                    source, into: folder, progress: progress)
                 try Task.checkCancellation()
                 self?.download = nil
                 guard let self else { return }
