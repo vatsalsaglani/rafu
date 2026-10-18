@@ -404,29 +404,11 @@ func terminalGroupAdoptsClassifiedLegacySessions() throws {
             executableURL: URL(fileURLWithPath: "/bin/echo"), arguments: [],
             currentDirectoryPath: "/tmp", environment: [:], roleBadge: "Codex",
             agentProvider: .codex))
-    let role = manager.newSession(
-        spec: TerminalProcessSpec(
-            executableURL: URL(fileURLWithPath: "/bin/echo"), arguments: [],
-            currentDirectoryPath: "/tmp", environment: [:], roleBadge: "Implementor",
-            outputLogURL: URL(fileURLWithPath: "/tmp/output.log")))
-    let coordinator = manager.newSession(
-        spec: TerminalProcessSpec(
-            executableURL: URL(fileURLWithPath: "/bin/echo"), arguments: [],
-            currentDirectoryPath: "/tmp", environment: ["RAFU_ENSEMBLE_TOKEN": "opaque"],
-            roleBadge: "Coordinator"))
-
     let agentGroup = try manager.adoptUngroupedSession(agent.id)
-    let roleGroup = try manager.adoptUngroupedSession(role.id)
-    let coordinatorGroup = try manager.adoptUngroupedSession(coordinator.id)
     #expect(agentGroup.panes.first?.runtimeKind == .directAgentTerminal(provider: .codex))
-    #expect(roleGroup.panes.first?.runtimeKind == .ensembleRole)
-    #expect(coordinatorGroup.panes.first?.runtimeKind == .ensembleCoordinator)
-    #expect(
-        [agentGroup, roleGroup, coordinatorGroup].allSatisfy {
-            $0.panes.first?.startAvailability == .notRestartable
-                && $0.panes.first?.launchProfile == nil
-        })
-    #expect(manager.sessions.count == 3)
+    #expect(agentGroup.panes.first?.startAvailability == .notRestartable)
+    #expect(agentGroup.panes.first?.launchProfile == nil)
+    #expect(manager.sessions.count == 1)
 }
 
 @MainActor

@@ -98,17 +98,14 @@ struct ConductorModelResolutionTests {
                 || settings.detailedLabel.contains("your default"))
     }
 
-    /// This string drifted once already — run detail said "Adapter default",
-    /// the creation canvas said "Provider default", for the same state — and
-    /// the drift was invisible because each site read correctly on its own.
+    /// This string drifted once already — two surfaces said "Adapter default"
+    /// and "Provider default" for the same state — and the drift was invisible because each site read correctly on its own.
     /// Every surface now reads one constant, so a source scan is the guard
     /// that keeps a fresh literal from reintroducing a second vocabulary.
     @Test("One unset wording, referenced rather than retyped, across every surface")
     func unsetWordingIsCentralised() throws {
         let sites = [
-            "Sources/RafuApp/Conductor/Run/ConductorRunPresentation.swift",
-            "Sources/RafuApp/Views/EnsembleModelField.swift",
-            "Sources/RafuApp/Settings/ConductorSettingsTab.swift",
+            "Sources/RafuApp/Settings/ConductorSettingsTab.swift"
         ]
         for site in sites {
             let text = try Self.source(site)

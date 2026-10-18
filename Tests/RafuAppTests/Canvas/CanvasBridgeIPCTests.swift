@@ -34,7 +34,6 @@ struct CanvasBridgeIPCTests {
                 #expect(received.requestID == envelope.requestID)
                 #expect(received.canvasBridge == request)
                 #expect(received.payload == nil)
-                #expect(received.ensemble == nil)
                 return .canvasBridge(expected)
             })
         try await server.startListening()

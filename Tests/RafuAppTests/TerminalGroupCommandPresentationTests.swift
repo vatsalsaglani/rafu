@@ -301,37 +301,6 @@ func liveClassifiedPaneFolderReasons() throws {
     let newPane = try #require(group.panes.first(where: { $0.id == session.focusedTerminalPaneID }))
     #expect(newPane.runtimeKind == .ordinaryShell)
     #expect(newPane.launchProfile?.startingFolder == .root)
-
-    let role = session.terminal.newSession(
-        spec: TerminalProcessSpec(
-            executableURL: URL(fileURLWithPath: "/bin/echo"), arguments: [],
-            currentDirectoryPath: root.path, environment: [:], roleBadge: "Implementor",
-            outputLogURL: URL(fileURLWithPath: "/tmp/tg41-role.log")))
-    let roleGroup = try session.terminal.adoptUngroupedSession(role.id)
-    session.revealTerminalGroup(roleGroup.id)
-    #expect(
-        session.terminalGroupPresentationAvailability(.setFolder).reason
-            == "Ensemble terminal panes cannot set a saved starting folder.")
-    #expect(session.terminalGroupPresentationAvailability(.splitRight).isEnabled)
-    #expect(session.terminalGroupPresentationAvailability(.splitDown).isEnabled)
-    session.splitFocusedTerminalPane(.down)
-    let ensembleFallback = try #require(
-        session.terminal.terminalGroup(roleGroup.id)?.panes.first(where: {
-            $0.id == session.focusedTerminalPaneID
-        }))
-    #expect(ensembleFallback.runtimeKind == .ordinaryShell)
-    #expect(ensembleFallback.launchProfile?.startingFolder == .root)
-
-    let coordinator = session.terminal.newSession(
-        spec: TerminalProcessSpec(
-            executableURL: URL(fileURLWithPath: "/bin/echo"), arguments: [],
-            currentDirectoryPath: root.path, environment: ["RAFU_ENSEMBLE_TOKEN": "opaque"],
-            roleBadge: "Coordinator"))
-    let coordinatorGroup = try session.terminal.adoptUngroupedSession(coordinator.id)
-    session.revealTerminalGroup(coordinatorGroup.id)
-    #expect(
-        session.terminalGroupPresentationAvailability(.setFolder).reason
-            == "Ensemble terminal panes cannot set a saved starting folder.")
 }
 
 @MainActor

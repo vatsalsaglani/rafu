@@ -37,7 +37,7 @@ struct EditorCanvasView: View {
         // Keep the same layout-tree identity while an auxiliary tab is open.
         // Only the owning group's content changes; every split stays visible.
         switch route {
-        case .settings, .ensembleStart, .ensembleNewRun, .graph, .runDetail:
+        case .settings:
             return .editor
         case .welcome, .empty:
             return session.auxiliaryTabs.isEmpty ? route : .editor
@@ -71,14 +71,6 @@ struct EditorCanvasView: View {
             if let openDiff = session.gitOpenDiff {
                 GitStandaloneDiffCanvas(openDiff: openDiff, session: session)
             }
-        case .graph:
-            ConductorGraphCanvas(session: session)
-        case .runDetail:
-            ConductorRunDetailCanvas(session: session)
-        case .ensembleStart:
-            EnsembleStartCanvas(session: session)
-        case .ensembleNewRun:
-            ConductorNewRunCanvas(session: session)
         case .settings:
             SettingsCanvas(session: session)
         case .editor:

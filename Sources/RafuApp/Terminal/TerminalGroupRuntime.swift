@@ -150,7 +150,7 @@ nonisolated struct TerminalGroupRuntime: Sendable {
             // TG-10's `TerminalPaneSnapshot` initializer has already pinned
             // their unavailable status, nil profile, and unavailable start.
             return pane.status == .unavailable
-        case .directAgentTerminal, .ensembleRole, .ensembleCoordinator:
+        case .directAgentTerminal:
             return false
         }
     }

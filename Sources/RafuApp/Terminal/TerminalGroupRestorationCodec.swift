@@ -100,7 +100,7 @@ nonisolated struct TerminalGroupRestorationCodec: Sendable {
             case .directAgentTerminal, .unavailableAgentTerminal:
                 kind = .unavailableAgentTerminal
                 profile = nil
-            case .ensembleRole, .ensembleCoordinator, .unavailableEnsemble:
+            case .unavailableEnsemble:
                 kind = .unavailableEnsemble
                 profile = nil
             }

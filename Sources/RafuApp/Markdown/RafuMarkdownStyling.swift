@@ -5,13 +5,11 @@ import SwiftUI
 /// colors, the flat table treatment, the card-anatomy code block, and the
 /// Tree-sitter syntax highlighter.
 ///
-/// It exists because there are now two Markdown surfaces — the document
-/// preview (`MarkdownPreviewView`) and the New Ensemble goal pane
-/// (`EnsembleGoalPane`) — and a second hand-rolled copy of these six
-/// modifiers is exactly how two Markdown surfaces drift apart. Anything
-/// genuinely per-document (`baseURL`, `imageBaseURL`, the local-file image
-/// provider) deliberately stays at the call site: the goal pane has no
-/// document and therefore no base directory to resolve against.
+/// It exists so every Markdown surface shares one copy of these six
+/// modifiers; a second hand-rolled copy is exactly how two Markdown surfaces
+/// drift apart. Anything genuinely per-document (`baseURL`, `imageBaseURL`,
+/// the local-file image provider) deliberately stays at the call site, so a
+/// surface with no document needs no base directory to resolve against.
 struct RafuMarkdownStyling: ViewModifier {
     @Environment(\.rafuTheme) private var theme
 

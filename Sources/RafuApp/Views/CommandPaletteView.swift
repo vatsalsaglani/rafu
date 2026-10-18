@@ -702,13 +702,6 @@ struct CommandPaletteView: View {
                 session.navigatorMode = .terminals
             },
             .init(
-                title: "Show Runs", symbolName: "list.bullet.rectangle",
-                keywords: ["conductor", "agents", "workflow", "panel"]
-            ) {
-                dismiss()
-                session.navigatorMode = .runs
-            },
-            .init(
                 title: "Install rafu CLI", detail: "Installs to ~/.local/bin",
                 symbolName: "terminal", keywords: ["command line"]
             ) {
@@ -915,46 +908,6 @@ struct CommandPaletteView: View {
         if session.rootURL != nil {
             commands.append(
                 .init(
-                    id: "conductor.new-ensemble",
-                    title: "New Ensemble…",
-                    symbolName: "circle.hexagongrid",
-                    keywords: ["ensemble", "coordinator", "goal", "new"],
-                    shortcut: "⌘⇧E"
-                ) {
-                    dismiss()
-                    session.showEnsembleStart()
-                }
-            )
-        }
-
-        if session.rootURL != nil, session.canStartConductorWorkflowRun {
-            commands.append(
-                .init(
-                    id: "conductor.new-run",
-                    title: "New Run…",
-                    symbolName: "person.crop.rectangle.stack",
-                    keywords: ["ensemble", "agent", "role", "task", "workflow"]
-                ) {
-                    dismiss()
-                    session.showEnsembleNewRun()
-                }
-            )
-        }
-
-        if session.rootURL != nil {
-            commands.append(
-                .init(
-                    id: "conductor.show-graph",
-                    title: "Ensemble: Show Graph",
-                    symbolName: "point.3.connected.trianglepath.dotted",
-                    keywords: ["ensemble", "graph", "runs"]
-                ) {
-                    dismiss()
-                    session.showConductorGraph()
-                }
-            )
-            commands.append(
-                .init(
                     id: "terminal.new-agent",
                     title: "New Agent Terminal…",
                     symbolName: "terminal.badge",
@@ -979,64 +932,6 @@ struct CommandPaletteView: View {
                 ) {
                     dismiss()
                     launchAgentTerminal(option)
-                }
-            )
-        }
-
-        // Verbs act on the engine owning the SELECTED run (C6 concurrency),
-        // so a gate in run B is not approved by a palette entry that read
-        // run A's state.
-        let selectedWorkflow = session.selectedWorkflowController
-
-        if case .awaitingGate = selectedWorkflow?.state, let selectedWorkflow {
-            commands.append(
-                .init(
-                    id: "conductor.approve-gate",
-                    title: "Approve Gate",
-                    symbolName: "checkmark.circle",
-                    keywords: ["ensemble", "workflow", "run"]
-                ) {
-                    dismiss()
-                    Task { await selectedWorkflow.approveGate() }
-                }
-            )
-            commands.append(
-                .init(
-                    id: "conductor.revise-gate-artifact",
-                    title: "Revise Gate Artifact",
-                    symbolName: "pencil.circle",
-                    keywords: ["ensemble", "workflow", "artifact"]
-                ) {
-                    dismiss()
-                    selectedWorkflow.reviseArtifact(in: session)
-                }
-            )
-        }
-
-        if let selectedWorkflow, selectedWorkflow.isInFlight {
-            commands.append(
-                .init(
-                    id: "conductor.abort-run",
-                    title: "Abort Run",
-                    symbolName: "xmark.circle",
-                    keywords: ["ensemble", "workflow", "stop"]
-                ) {
-                    dismiss()
-                    selectedWorkflow.abort()
-                }
-            )
-        }
-
-        if case .failed = selectedWorkflow?.state, let selectedWorkflow {
-            commands.append(
-                .init(
-                    id: "conductor.retry-failed-step",
-                    title: "Retry Failed Step",
-                    symbolName: "arrow.clockwise",
-                    keywords: ["ensemble", "workflow", "retry"]
-                ) {
-                    dismiss()
-                    Task { await selectedWorkflow.retryFailedStep() }
                 }
             )
         }
