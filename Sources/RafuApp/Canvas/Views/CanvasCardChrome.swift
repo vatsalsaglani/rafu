@@ -68,6 +68,9 @@ struct CanvasCardCommands {
             return Action(
                 id: "open", title: "Open \(card.title)", symbol: "arrow.up.forward.app"
             ) { resources?.nativeApp(for: card)?.openApp() }
+        default:
+            // Whiteboard and diagram kinds have no primary action.
+            return nil
         }
     }
 
