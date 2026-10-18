@@ -49,9 +49,8 @@ struct EditorTerminalTabIdentityTests {
     func editorTabShowsVendorMark() throws {
         let canvas = try Self.source("Sources/RafuApp/Views/EditorCanvasView.swift")
 
-        #expect(canvas.contains("if let provider = controller.agentProvider {"))
-        #expect(
-            canvas.contains("FileIconView(icon: ConductorCLIIcons.icon(for: provider), size: 12)"))
+        #expect(canvas.contains("if let provider = controller.resolvedAgentProvider {"))
+        #expect(canvas.contains("AgentIconView(cli: provider, size: 13)"))
         // The glyph stays for login shells rather than being deleted outright.
         #expect(canvas.contains(#"Image(systemName: "terminal")"#))
     }

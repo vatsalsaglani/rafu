@@ -258,10 +258,13 @@ struct CommandPaletteView: View {
         } label: {
             HStack(spacing: 10) {
                 Group {
-                    if let fileIcon = row.fileIcon {
-                        FileIconView(icon: fileIcon, size: 13)
+                    if let agent = row.agent {
+                        AgentIconView(cli: agent, size: 16)
+                    } else if let fileIcon = row.fileIcon {
+                        FileIconView(icon: fileIcon, size: 16)
                     } else {
                         Image(systemName: row.symbolName)
+                            .font(.system(size: 13))
                             .foregroundStyle(iconColor(for: row, isSelected: isSelected))
                     }
                 }
@@ -507,6 +510,7 @@ struct CommandPaletteView: View {
                 id: command.id ?? "command:\(command.title)",
                 symbolName: command.symbolName,
                 iconTint: nil,
+                agent: command.agent,
                 title: command.title,
                 detail: command.detail,
                 shortcut: command.shortcut,
@@ -970,7 +974,8 @@ struct CommandPaletteView: View {
                     title: "Agent Terminal: \(option.displayName)",
                     detail: option.launchVerificationNote,
                     symbolName: "terminal",
-                    keywords: ["agent", "terminal", option.displayName]
+                    keywords: ["agent", "terminal", option.displayName],
+                    agent: option.id
                 ) {
                     dismiss()
                     launchAgentTerminal(option)
@@ -1315,6 +1320,9 @@ private struct PaletteRow: Identifiable {
     let symbolName: String
     let iconTint: FileIconProvider.Tint?
     var fileIcon: FileIconProvider.Icon? = nil
+    /// Set for rows that start or name an agent CLI; drawn with the shared
+    /// vendor mark instead of `symbolName`.
+    var agent: ConductorCLIID? = nil
     let title: String
     let detail: String?
     /// Keyboard shortcut glyphs shown right-aligned on the row, when the
@@ -1336,6 +1344,8 @@ private struct PaletteCommand {
     var keywords: [String]
     var shortcut: String? = nil
     var isEnabled = true
+    /// The agent CLI this command starts, if any (drawn as its vendor mark).
+    var agent: ConductorCLIID? = nil
     let action: @MainActor () -> Void
 
     var searchText: String { ([title, detail ?? ""] + keywords).joined(separator: " ") }
