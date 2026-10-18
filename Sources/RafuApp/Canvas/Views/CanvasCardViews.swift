@@ -418,12 +418,15 @@ struct CanvasCardShell: View {
     }
 
     /// The agent CLI this terminal runs: a direct agent terminal names its
-    /// provider; a live shell is matched by its reported title.
+    /// provider; a live shell asks its controller (the Rafu-launched provider,
+    /// else detection from the terminal title).
     private var agentCLI: ConductorCLIID? {
         guard let pane = terminalPane else { return nil }
         if case .directAgentTerminal(let provider) = pane.runtimeKind { return provider }
-        guard pane.status == .live else { return nil }
-        return ConductorCLIID.detect(command: nil, title: pane.reportedTitle?.rawValue)
+        guard pane.status == .live,
+            let controller = session.terminal.terminalController(for: pane.id)
+        else { return nil }
+        return controller.resolvedAgentProvider
     }
 
     private var terminalReportedTitle: String? { terminalPane?.reportedTitle?.rawValue }

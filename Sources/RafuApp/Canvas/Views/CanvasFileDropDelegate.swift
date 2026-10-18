@@ -24,6 +24,9 @@ struct CanvasFileDropDelegate: DropDelegate {
 
     func validateDrop(info: DropInfo) -> Bool {
         if !info.itemProviders(for: [.rafuEditorDrag]).isEmpty {
+            // A dragged editor TAB belongs to the editor group's edge-split
+            // target, not to the board (`EditorDropRouting`).
+            guard EditorDropRouting.canvasAccepts(session.activeEditorDrag) else { return false }
             return CanvasFileDrop.accepts(count: 1, boardID: boardID, session: session)
         }
         let count = info.itemProviders(for: [.fileURL]).count

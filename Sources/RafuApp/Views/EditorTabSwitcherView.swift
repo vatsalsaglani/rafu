@@ -242,7 +242,8 @@ struct EditorTabSwitcherOverlay: View {
             return Presentation(
                 title: controller.displayName,
                 detail: terminalDetail(controller.status, isPresented: isPresented),
-                fileIcon: EditorTabSwitcherAgentIdentity.icon(for: controller.agentProvider),
+                fileIcon: EditorTabSwitcherAgentIdentity.icon(
+                    for: controller.resolvedAgentProvider),
                 symbolName: terminalSymbol(controller.status)
             )
 

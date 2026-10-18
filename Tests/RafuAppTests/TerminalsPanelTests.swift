@@ -524,9 +524,8 @@ struct TerminalIdentityGlyphTests {
         let panel = try Self.source("Sources/RafuApp/Views/WorkspaceTerminalsPanelView.swift")
 
         // Identity in the well, terminal glyph only as the login-shell fallback.
-        #expect(panel.contains("if let provider = row.agentProvider {"))
-        #expect(
-            panel.contains("FileIconView(icon: ConductorCLIIcons.icon(for: provider), size: 15)"))
+        #expect(panel.contains("if let provider = row.resolvedAgentProvider {"))
+        #expect(panel.contains("AgentIconView(cli: provider, size: 16)"))
         #expect(panel.contains(#"Image(systemName: "terminal")"#))
         // Status survives as a WORD in the caption — the carrier that replaced
         // the glyph. Losing this line is the regression worth failing on.
