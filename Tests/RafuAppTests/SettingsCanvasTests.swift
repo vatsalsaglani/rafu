@@ -4,7 +4,11 @@ import Testing
 
 @testable import RafuApp
 
-@Suite("Settings canvas")
+/// Settings opens only as the standard Settings window. The editor-canvas
+/// routes below are internal leftovers: no UI or command reaches them (see
+/// `SettingsPresentationTests.settingsOpensOnlyTheSettingsScene`), but their
+/// exclusivity invariants stay covered until the routes are removed.
+@Suite("Settings canvas (internal routes)")
 struct SettingsCanvasTests {
     private typealias Inputs = EditorCanvasRoute.Inputs
 
@@ -97,32 +101,6 @@ struct SettingsCanvasTests {
         )
 
         #expect(EditorCanvasRoute.resolve(inputs) == .editor)
-    }
-
-    @MainActor
-    @Test("Settings command opens the focused workspace canvas")
-    func settingsCommandWithWorkspace() {
-        let session = WorkspaceSession()
-        var fallbackOpened = false
-
-        SettingsCommandRouter.open(workspaceSession: session) {
-            fallbackOpened = true
-        }
-
-        #expect(session.settingsVisible)
-        #expect(!fallbackOpened)
-    }
-
-    @MainActor
-    @Test("Settings command opens the native fallback without a workspace window")
-    func settingsCommandWithoutWindow() {
-        var fallbackOpened = false
-
-        SettingsCommandRouter.open(workspaceSession: nil) {
-            fallbackOpened = true
-        }
-
-        #expect(fallbackOpened)
     }
 
     @MainActor
