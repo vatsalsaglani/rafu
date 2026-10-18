@@ -59,7 +59,11 @@ final class CanvasBoardState: Identifiable {
 
     init(document: CanvasDocument) {
         id = document.id
-        self.document = document
+        var value = document
+        // A board saved before frame bounds were derived may hold a frame
+        // that no longer fits. This is not an edit: the next save keeps it.
+        CanvasBoardState.normalizeFrames(&value, previous: nil)
+        self.document = value
     }
 
     var title: String {
@@ -136,6 +140,7 @@ final class CanvasBoardState: Identifiable {
     func edit(_ action: (inout CanvasDocument) throws -> Void) throws {
         var changed = document
         try action(&changed)
+        Self.normalizeFrames(&changed, previous: document)
         try changed.validate()
         guard changed != document else { return }
         remember(document, in: &undo)
@@ -233,12 +238,48 @@ final class CanvasBoardState: Identifiable {
 
     func beginGesture() { if gestureStart == nil { gestureStart = document } }
 
-    func setRect(_ rect: CanvasRect, for id: CanvasCardID) {
-        guard rect.isValid, let index = document.cards.firstIndex(where: { $0.id == id }),
-            document.cards[index].rect != rect
-        else { return }
-        document.cards[index].rect = rect
+    func setRect(_ rect: CanvasRect, for id: CanvasCardID) { setRects([id: rect]) }
+
+    /// Sets several card rects in one step (a group drag), then refits the
+    /// frames. The surrounding gesture owns the undo step. Invalid rects are
+    /// ignored.
+    func setRects(_ rects: [CanvasCardID: CanvasRect]) {
+        var value = document
+        var changed = false
+        for index in value.cards.indices {
+            guard let rect = rects[value.cards[index].id], rect.isValid,
+                value.cards[index].rect != rect
+            else { continue }
+            value.cards[index].rect = rect
+            changed = true
+        }
+        guard changed else { return }
+        Self.normalizeFrames(&value, previous: document)
+        guard value != document else { return }
+        document = value
         markDirty()
+    }
+
+    /// The single choke point for derived frame bounds: every edit, gesture
+    /// step and raise passes through it, inside the same undo step. Members
+    /// follow a frame that moved on its own, each frame then fits its members,
+    /// and frames go behind their members (`CanvasFrameLayout.normalized`).
+    static func normalizeFrames(_ value: inout CanvasDocument, previous: CanvasDocument?) {
+        guard value.cards.contains(where: { $0.content.diagramFrame != nil }) else { return }
+        let nodes = CanvasFrameLayout.nodes(value.cards)
+        let result = CanvasFrameLayout.normalized(
+            nodes, previous: previous.map { CanvasFrameLayout.nodes($0.cards) })
+        guard result != nodes else { return }
+        var byID: [CanvasCardID: CanvasCard] = [:]
+        for card in value.cards {
+            // Duplicate ids: validation rejects the document anyway.
+            guard byID.updateValue(card, forKey: card.id) == nil else { return }
+        }
+        value.cards = result.compactMap { node in
+            guard var card = byID[node.id] else { return nil }
+            card.rect = node.rect
+            return card
+        }
     }
 
     func endGesture() {
@@ -279,9 +320,11 @@ final class CanvasBoardState: Identifiable {
     func raiseDuringGesture(_ ids: Set<CanvasCardID>) {
         guard !ids.isEmpty else { return }
         beginGesture()
-        let next = CanvasLayoutMath.reordered(document.cards, moving: ids, toFront: true)
-        guard next != document.cards else { return }
-        document.cards = next
+        var value = document
+        value.cards = CanvasLayoutMath.reordered(document.cards, moving: ids, toFront: true)
+        Self.normalizeFrames(&value, previous: document)
+        guard value != document else { return }
+        document = value
         markDirty()
     }
 

@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import RafuCore
 import Testing
 
 @testable import RafuApp
@@ -300,6 +301,20 @@ struct CanvasFrameLayoutTests {
         #expect(huge.isValid)
     }
 
+    @Test("The agent-side frame preview matches the app's frame rect")
+    func agentBoundsMatch() throws {
+        let rects = [rect(100, 200), rect(300, 260, 100, 80), rect(-40, 500, 160, 128)]
+        let app = try #require(CanvasFrameLayout.enclosingRect(rects))
+        let agent = try #require(
+            CanvasAgentDiagramLayout.bounds(
+                rects.map {
+                    CanvasAgentRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height)
+                }))
+        #expect(CanvasRect(x: agent.x, y: agent.y, width: agent.width, height: agent.height) == app)
+        #expect(CanvasAgentDiagramLayout.framePadding == CanvasFrameLayout.padding)
+        #expect(CanvasAgentDiagramLayout.frameTitleBand == CanvasFrameLayout.titleBand)
+    }
+
     @Test("Moving a frame moves its members, nested members too, and nothing else")
     func frameMove() {
         let a = CanvasCardID()
@@ -333,28 +348,81 @@ struct CanvasFrameLayoutTests {
         #expect(CanvasFrameLayout.stackedFramesBehindMembers(nodes).count == 2)
     }
 
-    @Test("Members follow a frame moved alone, but not on resize or a joint move")
+    @Test("Members follow a frame moved alone, but not one that moved with it")
     func follow() {
+        let frame = CanvasCardID()
         let member = CanvasCardID()
         let other = CanvasCardID()
-        let old = CanvasFrameLayout.FollowState(
-            frame: rect(0, 0, 400, 300), memberIDs: [member, other],
-            memberRects: [rect(20, 60), rect(200, 60)])
+        let old: [CanvasFrameLayout.Node] = [
+            .init(id: frame, rect: rect(0, 0, 400, 300), frameMembers: [member, other]),
+            .init(id: member, rect: rect(20, 60)), .init(id: other, rect: rect(200, 60)),
+        ]
         var moved = old
-        moved.frame = rect(50, 20, 400, 300)
-        #expect(CanvasFrameLayout.followMoves(from: old, to: moved)[member] == rect(70, 80))
-        #expect(CanvasFrameLayout.followMoves(from: old, to: moved).count == 2)
+        moved[0].rect = rect(50, 20, 400, 300)
+        let followed = CanvasFrameLayout.followed(moved, previous: old)
+        #expect(followed[1].rect == rect(70, 80))
+        #expect(followed[2].rect == rect(250, 80))
 
         var joint = moved
-        joint.memberRects[0] = rect(70, 80)
-        let jointMoves = CanvasFrameLayout.followMoves(from: old, to: joint)
-        #expect(jointMoves[member] == nil)
-        #expect(jointMoves[other] == rect(250, 80))
+        joint[1].rect = rect(70, 80)
+        let jointFollowed = CanvasFrameLayout.followed(joint, previous: old)
+        #expect(jointFollowed[1].rect == rect(70, 80))
+        #expect(jointFollowed[2].rect == rect(250, 80))
 
-        var resized = old
-        resized.frame = rect(-10, 0, 410, 300)
-        #expect(CanvasFrameLayout.followMoves(from: old, to: resized).isEmpty)
-        #expect(CanvasFrameLayout.followMoves(from: old, to: old).isEmpty)
+        // An agent that sets x, y, width and height still moves the members.
+        var placed = old
+        placed[0].rect = rect(-10, 0, 900, 900)
+        #expect(CanvasFrameLayout.followed(placed, previous: old)[1].rect == rect(10, 60))
+        #expect(CanvasFrameLayout.followed(old, previous: old) == old)
+    }
+
+    @Test("Frames fit their members, inner frames first; an empty frame keeps its rect")
+    func fitted() throws {
+        let a = CanvasCardID()
+        let b = CanvasCardID()
+        let inner = CanvasCardID()
+        let outer = CanvasCardID()
+        let empty = CanvasCardID()
+        let nodes: [CanvasFrameLayout.Node] = [
+            .init(id: outer, rect: rect(0, 0, 200, 200), frameMembers: [inner, a]),
+            .init(id: inner, rect: rect(900, 900, 200, 200), frameMembers: [b]),
+            .init(id: empty, rect: rect(5, 5, 300, 300), frameMembers: [CanvasCardID()]),
+            .init(id: a, rect: rect(400, 100)),
+            .init(id: b, rect: rect(100, 300)),
+        ]
+        let result = CanvasFrameLayout.fitted(nodes)
+        let innerRect = try #require(CanvasFrameLayout.enclosingRect([rect(100, 300)]))
+        #expect(result[1].rect == innerRect)
+        #expect(result[0].rect == CanvasFrameLayout.enclosingRect([innerRect, rect(400, 100)]))
+        #expect(result[2].rect == rect(5, 5, 300, 300))
+        #expect(CanvasFrameLayout.fitted(result) == result)
+    }
+
+    @Test("Normalizing follows, fits and stacks in one pass")
+    func normalized() throws {
+        let frame = CanvasCardID()
+        let a = CanvasCardID()
+        let b = CanvasCardID()
+        let fit = try #require(CanvasFrameLayout.enclosingRect([rect(0, 0), rect(300, 0)]))
+        let old: [CanvasFrameLayout.Node] = [
+            .init(id: frame, rect: fit, frameMembers: [a, b]),
+            .init(id: a, rect: rect(0, 0)), .init(id: b, rect: rect(300, 0)),
+        ]
+        // A member that moves grows the frame.
+        var memberMoved = old
+        memberMoved[2].rect = rect(600, 50)
+        let grown = CanvasFrameLayout.normalized(memberMoved, previous: old)
+        #expect(grown[0].rect == CanvasFrameLayout.enclosingRect([rect(0, 0), rect(600, 50)]))
+        // A frame raised to the front goes back behind its members.
+        let raised = [old[1], old[2], old[0]]
+        #expect(CanvasFrameLayout.normalized(raised, previous: old).map(\.id) == [frame, a, b])
+        // A frame moved alone carries its members, and the refit is a no-op.
+        var frameMoved = old
+        frameMoved[0].rect = CanvasFrameLayout.moved(fit, dx: 40, dy: 8)
+        let carried = CanvasFrameLayout.normalized(frameMoved, previous: old)
+        #expect(carried[0].rect == CanvasFrameLayout.moved(fit, dx: 40, dy: 8))
+        #expect(carried[1].rect == rect(40, 8))
+        #expect(carried[2].rect == rect(340, 8))
     }
 
     @Test("Frames stack just behind their earliest member; correct orders are kept")
@@ -530,5 +598,92 @@ struct CanvasExportWriterTests {
             try await CanvasDiagramExportWriter.write(bytes, fileName: "escape.png", root: alias)
         }
         #expect(!fm.fileExists(atPath: outside.appending(path: "escape.png").path))
+    }
+}
+
+@Suite("Canvas frame bounds on a board")
+@MainActor
+struct CanvasFrameBoardTests {
+    private func rect(_ x: Double, _ y: Double) -> CanvasRect {
+        CanvasRect(x: x, y: y, width: 160, height: 128)
+    }
+
+    private func makeBoard() throws -> (CanvasBoardState, CanvasCardID, CanvasCardID, CanvasCardID)
+    {
+        var document = CanvasDocument(title: "Diagram")
+        let a = CanvasCard(title: "A", rect: rect(0, 0), content: .text(CanvasText(text: "A")))
+        let b = CanvasCard(title: "B", rect: rect(400, 0), content: .text(CanvasText(text: "B")))
+        document.cards = [a, b]
+        let board = CanvasBoardState(document: document)
+        let created = try board.createFrame(title: "Group", memberIDs: [a.id, b.id])
+        let frame = try #require(created)
+        return (board, frame, a.id, b.id)
+    }
+
+    private func frameRect(_ board: CanvasBoardState, _ id: CanvasCardID) -> CanvasRect? {
+        board.cards.first { $0.id == id }?.rect
+    }
+
+    private func fit(_ board: CanvasBoardState, _ ids: [CanvasCardID]) -> CanvasRect? {
+        CanvasFrameLayout.enclosingRect(board.cards.filter { ids.contains($0.id) }.map(\.rect))
+    }
+
+    @Test("A member move refits the frame in the same undo step")
+    func memberMove() throws {
+        let (board, frame, a, b) = try makeBoard()
+        let before = frameRect(board, frame)
+        board.select([b])
+        try board.moveSelection(dx: 0, dy: 300)
+        #expect(frameRect(board, frame) == fit(board, [a, b]))
+        #expect(frameRect(board, frame) != before)
+        board.performUndo()
+        #expect(frameRect(board, frame) == before)
+        #expect(board.cards.first { $0.id == b }?.rect == rect(400, 0))
+    }
+
+    @Test("A member resize and a member removal refit the frame")
+    func memberResizeAndRemove() throws {
+        let (board, frame, a, b) = try makeBoard()
+        board.beginGesture()
+        board.setRect(CanvasRect(x: 400, y: 0, width: 600, height: 500), for: b)
+        board.endGesture()
+        #expect(frameRect(board, frame) == fit(board, [a, b]))
+        let grown = frameRect(board, frame)
+        board.select([b])
+        try board.removeSelection()
+        #expect(frameRect(board, frame) == fit(board, [a]))
+        board.performUndo()
+        #expect(frameRect(board, frame) == grown)
+    }
+
+    @Test("Moving the frame moves its members; resizing a frame does nothing")
+    func frameMoveAndResize() throws {
+        let (board, frame, a, b) = try makeBoard()
+        let before = try #require(frameRect(board, frame))
+        board.select([frame])
+        try board.moveSelection(dx: 24, dy: 16)
+        #expect(board.cards.first { $0.id == a }?.rect == rect(24, 16))
+        #expect(board.cards.first { $0.id == b }?.rect == rect(424, 16))
+        #expect(frameRect(board, frame) == CanvasFrameLayout.moved(before, dx: 24, dy: 16))
+        let moved = frameRect(board, frame)
+        try board.resizeSelection(dw: 80, dh: 80)
+        #expect(frameRect(board, frame) == moved)
+        #expect(board.cards.first?.id == frame)
+    }
+
+    @Test("Nested frames fit inner first, and an outer move carries everything")
+    func nested() throws {
+        let (board, inner, a, b) = try makeBoard()
+        let created = try board.createFrame(title: "Outer", memberIDs: [inner])
+        let outer = try #require(created)
+        #expect(frameRect(board, outer) == fit(board, [inner]))
+        #expect(board.cards.map(\.id).prefix(2) == [outer, inner])
+        board.select([a])
+        try board.moveSelection(dx: -200, dy: 0)
+        #expect(frameRect(board, inner) == fit(board, [a, b]))
+        #expect(frameRect(board, outer) == fit(board, [inner]))
+        try board.moveFrame(outer, by: CGSize(width: 0, height: 40))
+        #expect(board.cards.first { $0.id == b }?.rect == rect(400, 40))
+        #expect(frameRect(board, outer) == fit(board, [inner]))
     }
 }

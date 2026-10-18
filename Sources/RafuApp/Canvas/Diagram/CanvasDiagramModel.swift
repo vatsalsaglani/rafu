@@ -295,6 +295,10 @@ nonisolated extension CanvasCardContent {
         return nil
     }
 
+    /// True for a frame: its rect is derived from its members, so it has no
+    /// resize handles or resize commands. The title stays editable.
+    var hasDerivedSize: Bool { diagramFrame != nil }
+
     /// The icon value of a `.serviceIcon` card.
     var diagramServiceIcon: CanvasServiceIcon? {
         if case .serviceIcon(let icon) = self { return icon }

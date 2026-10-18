@@ -421,7 +421,7 @@ struct CanvasEdgeOverlay: View {
                         board.labelEditorIsForNewConnection = false
                     }
                 }
-                .offset(x: display.route.midpoint.x, y: display.route.midpoint.y)
+                .offset(x: display.label.center.x, y: display.label.center.y)
         }
         if let request = connectNew {
             Color.clear.frame(width: 1, height: 1)
