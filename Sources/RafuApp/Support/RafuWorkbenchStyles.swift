@@ -234,30 +234,68 @@ struct AttachedWorkbenchTab<Content: View>: View {
     }
 }
 
+/// What the trailing slot of an editor tab shows. The slot keeps one stable
+/// position: "×" on the selected tab and on hover; a dirty document shows a
+/// dot there that turns into "×" on hover (the Safari/Xcode pattern). The
+/// button stays in the layout and the accessibility tree in every case, so
+/// "Close" is always reachable by VoiceOver and Full Keyboard Access.
+nonisolated enum EditorTabAccessory: Equatable, Sendable {
+    case hidden
+    case close
+    case dirtyDot
+
+    static func resolve(isSelected: Bool, isHovering: Bool, isDirty: Bool) -> Self {
+        if isHovering { return .close }
+        if isDirty { return .dirtyDot }
+        return isSelected ? .close : .hidden
+    }
+}
+
 /// Standard close affordance for attached tabs. The glyph and hit region scale
 /// independently so larger text never makes the close action unreachable.
+/// `presentation` defaults to an always-visible "×" for single-tab canvases.
 struct AttachedWorkbenchTabCloseButton: View {
     let accessibilityLabel: String
     let help: String
+    var presentation: EditorTabAccessory = .close
     let action: () -> Void
 
     @Environment(\.rafuTheme) private var theme
     @ScaledMetric(relativeTo: .body) private var scaledTarget: CGFloat = 22
 
+    init(
+        accessibilityLabel: String,
+        help: String,
+        presentation: EditorTabAccessory = .close,
+        action: @escaping () -> Void
+    ) {
+        self.accessibilityLabel = accessibilityLabel
+        self.help = help
+        self.presentation = presentation
+        self.action = action
+    }
+
     var body: some View {
         Button(action: action) {
-            Image(systemName: "xmark")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(theme.palette.textSecondary)
-                .frame(
-                    width: WorkbenchTextHeightPolicy.attachedTabCloseTarget(
-                        for: scaledTarget
-                    ),
-                    height: WorkbenchTextHeightPolicy.attachedTabCloseTarget(
-                        for: scaledTarget
-                    )
+            ZStack {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .opacity(presentation == .close ? 1 : 0)
+                Circle()
+                    .fill(theme.palette.textSecondary)
+                    .frame(width: 7, height: 7)
+                    .opacity(presentation == .dirtyDot ? 1 : 0)
+            }
+            .frame(
+                width: WorkbenchTextHeightPolicy.attachedTabCloseTarget(
+                    for: scaledTarget
+                ),
+                height: WorkbenchTextHeightPolicy.attachedTabCloseTarget(
+                    for: scaledTarget
                 )
-                .contentShape(Rectangle())
+            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
@@ -317,7 +355,13 @@ nonisolated struct TerminalSurfaceBorderResolution: Equatable, Sendable {
 /// remains a separate textual/icon signal owned by the terminal presentation.
 nonisolated struct TerminalSurfaceBorderStyle {
     nonisolated enum Context: Equatable, Sendable {
-        case editorGroup(isFocused: Bool)
+        /// - `hostsTerminal`: the group's selected tab is a terminal or
+        ///   Terminal Group. Only then does focus use the gold `focusRing`;
+        ///   a document or Canvas group keeps a neutral `borderSubtle` frame.
+        /// - `hasSiblings`: more than one editor group is visible. Only then
+        ///   does focus carry information for a non-terminal group, and it is
+        ///   shown as a subtle `borderStrong` hairline, never gold.
+        case editorGroup(isFocused: Bool, hostsTerminal: Bool = false, hasSiblings: Bool = false)
         case managerRow(isCurrent: Bool, needsAttention: Bool)
     }
 
@@ -335,25 +379,30 @@ nonisolated struct TerminalSurfaceBorderStyle {
     ) -> TerminalSurfaceBorderResolution {
         let hasIdentity = identity != .none
         switch context {
-        case .editorGroup(let isFocused):
+        case .editorGroup(let isFocused, let hostsTerminal, let hasSiblings):
+            let terminalFocus = isFocused && (hostsTerminal || hasIdentity)
+            let siblingFocus = isFocused && hasSiblings && !terminalFocus
             let emphasisWidth: CGFloat =
-                if isFocused {
+                if terminalFocus {
                     hasIdentity
                         ? RafuMetrics.terminalBorderWidth
                         : RafuMetrics.focusedTerminalBorderWidth
+                } else if siblingFocus {
+                    RafuMetrics.terminalBorderWidth
                 } else {
                     0
                 }
             return TerminalSurfaceBorderResolution(
-                neutralStructure: isFocused || contrast == .increased
+                neutralStructure: terminalFocus || contrast == .increased
                     ? .borderStrong
                     : .borderSubtle,
                 neutralWidth: RafuMetrics.terminalBorderWidth,
                 showsIdentityAccent: hasIdentity,
                 identityWidth: hasIdentity ? RafuMetrics.focusedTerminalBorderWidth : 0,
                 identityInset: hasIdentity ? RafuMetrics.terminalBorderWidth : 0,
-                emphasis: isFocused ? .editorFocus : .none,
-                emphasisRole: isFocused ? .focusRing : .clear,
+                emphasis: (terminalFocus || siblingFocus) ? .editorFocus : .none,
+                emphasisRole: terminalFocus
+                    ? .focusRing : (siblingFocus ? .borderStrong : .clear),
                 emphasisWidth: emphasisWidth,
                 emphasisInset: 0,
                 drawOrder: hasIdentity
@@ -484,6 +533,8 @@ struct EditorGroupSurface<Content: View>: View {
     let isFocused: Bool
     let terminalIdentityColor: Color?
     var identityMatchesEditorBackground = false
+    var hostsTerminal = false
+    var hasSiblings = false
     @ViewBuilder let content: Content
 
     @Environment(\.rafuTheme) private var theme
@@ -492,11 +543,15 @@ struct EditorGroupSurface<Content: View>: View {
         isFocused: Bool,
         terminalIdentityColor: Color? = nil,
         identityMatchesEditorBackground: Bool = false,
+        hostsTerminal: Bool = false,
+        hasSiblings: Bool = false,
         @ViewBuilder content: () -> Content
     ) {
         self.isFocused = isFocused
         self.terminalIdentityColor = terminalIdentityColor
         self.identityMatchesEditorBackground = identityMatchesEditorBackground
+        self.hostsTerminal = hostsTerminal
+        self.hasSiblings = hasSiblings
         self.content = content()
     }
 
@@ -510,7 +565,11 @@ struct EditorGroupSurface<Content: View>: View {
                 )
             }
             .rafuTerminalSurfaceBorder(
-                context: .editorGroup(isFocused: isFocused),
+                context: .editorGroup(
+                    isFocused: isFocused,
+                    hostsTerminal: hostsTerminal,
+                    hasSiblings: hasSiblings
+                ),
                 identityColor: terminalIdentityColor,
                 identityMatchesEditorBackground: identityMatchesEditorBackground,
                 radius: RafuMetrics.radiusEditorGroup

@@ -11,7 +11,13 @@ struct TerminalGroupSwitcherPresentationTests {
             name: "Build", paneCount: 3, focusedPaneName: "Server", attentionCount: 2,
             isParked: true)
         #expect(presentation.title == "Build")
-        #expect(presentation.detail == "Parked · 3 panes · Focused: Server · 2 need attention")
+        #expect(
+            presentation.detail == "Not running · 3 panes · Focused: Server · 2 need attention")
+
+        let single = EditorTerminalGroupSwitcherPresentation(
+            name: "Solo", paneCount: 1, focusedPaneName: "Shell", attentionCount: 0,
+            isParked: false)
+        #expect(single.detail == "Terminal Group · 1 pane · Focused: Shell")
     }
 
     @MainActor
@@ -67,7 +73,8 @@ struct TerminalGroupSwitcherPresentationTests {
 
         let presentationSource = try source("Sources/RafuApp/Editor/EditorTabSwitcher.swift")
         #expect(presentationSource.contains("Focused:"))
-        #expect(presentationSource.contains("Parked"))
+        #expect(presentationSource.contains("Not running"))
+        #expect(presentationSource.contains("1 pane"))
         #expect(presentationSource.contains("need attention"))
     }
 

@@ -110,11 +110,46 @@ protocol DocumentFindControlling: AnyObject {
     func select(_ range: NSRange)
     func focusEditor()
     func detach()
+    /// The editor's current non-empty selection, captured when the user turns
+    /// on "Find in Selection". `nil` when there is nothing to scope to.
+    func findScopeSelection() -> NSRange?
 }
 
 extension DocumentFindControlling {
     func focusEditor() {}
     func detach() {}
+    func findScopeSelection() -> NSRange? { nil }
+}
+
+/// Pure helpers for "Find in Selection". The scope is a character range that
+/// is captured once and then follows edits, so Replace and Replace All stay
+/// inside the original selection while its length changes.
+nonisolated enum FindSelectionScope {
+    /// Keeps only matches that lie fully inside `scope`. A `nil` scope keeps all.
+    static func filter(_ matches: [TextSearchMatch], within scope: NSRange?) -> [TextSearchMatch] {
+        guard let scope else { return matches }
+        let end = scope.location + scope.length
+        return matches.filter { match in
+            match.range.location >= scope.location
+                && match.range.location + match.range.length <= end
+        }
+    }
+
+    /// Moves or resizes `scope` after a text edit. `editedRange` is the edited
+    /// range in the NEW text and `changeInLength` the net length change, as
+    /// reported by `NSTextStorage`. An edit wholly before the scope shifts it;
+    /// an edit wholly after leaves it alone; an edit inside it resizes it.
+    static func adjusted(_ scope: NSRange, editedRange: NSRange, changeInLength: Int) -> NSRange {
+        let oldLength = max(0, editedRange.length - changeInLength)
+        let oldEnd = editedRange.location + oldLength
+        if oldEnd <= scope.location {
+            return NSRange(location: max(0, scope.location + changeInLength), length: scope.length)
+        }
+        if editedRange.location >= scope.location + scope.length {
+            return scope
+        }
+        return NSRange(location: scope.location, length: max(0, scope.length + changeInLength))
+    }
 }
 
 @Observable
@@ -141,6 +176,11 @@ final class DocumentFindState {
     /// A presentation edge, not a Boolean state. Every Find command advances
     /// the value so a bar that is already visible can focus its query again.
     private(set) var queryFocusRequest = 0
+    /// While set, only matches fully inside this range count ("Find in
+    /// Selection"). The controller keeps it aligned with edits.
+    fileprivate(set) var selectionScope: NSRange?
+
+    var isLimitedToSelection: Bool { selectionScope != nil }
 
     @ObservationIgnored
     private weak var controller: (any DocumentFindControlling)?
@@ -185,6 +225,20 @@ final class DocumentFindState {
     func deactivate() {
         guard isActive else { return }
         isActive = false
+        selectionScope = nil
+        controller?.refresh(using: self)
+    }
+
+    /// Turns "Find in Selection" on (capturing the editor's current selection)
+    /// or off. Turning it on with an empty selection does nothing. The cached
+    /// search stays valid because scoping is applied to its result.
+    func setLimitedToSelection(_ enabled: Bool) {
+        if enabled {
+            guard let range = controller?.findScopeSelection(), range.length > 0 else { return }
+            selectionScope = range
+        } else {
+            selectionScope = nil
+        }
         controller?.refresh(using: self)
     }
 
@@ -211,6 +265,7 @@ final class DocumentFindState {
         controller.detach()
         self.controller = nil
         isActive = false
+        selectionScope = nil
         update(matchCount: 0, currentMatchIndex: nil, errorMessage: nil)
     }
 
@@ -377,6 +432,10 @@ final class NSTextViewFindController: NSObject, DocumentFindControlling {
         guard let storage = notification.object as? NSTextStorage,
             storage.editedMask.contains(.editedCharacters)
         else { return }
+        if let state, let scope = state.selectionScope {
+            state.selectionScope = FindSelectionScope.adjusted(
+                scope, editedRange: storage.editedRange, changeInLength: storage.changeInLength)
+        }
         revision += 1
         cached = nil
         lastZeroLengthSelection = nil
@@ -520,7 +579,8 @@ final class NSTextViewFindController: NSObject, DocumentFindControlling {
         case .failure(let message):
             state.update(matchCount: 0, currentMatchIndex: nil, errorMessage: message)
             clearHighlights()
-        case .matches(let matches):
+        case .matches(let allMatches):
+            let matches = FindSelectionScope.filter(allMatches, within: state.selectionScope)
             let currentIndex = selectedMatchIndex(in: matches)
             state.update(
                 matchCount: matches.count, currentMatchIndex: currentIndex, errorMessage: nil)
@@ -639,6 +699,11 @@ final class NSTextViewFindController: NSObject, DocumentFindControlling {
     func focusEditor() {
         guard let textView else { return }
         textView.window?.makeFirstResponder(textView)
+    }
+
+    func findScopeSelection() -> NSRange? {
+        guard let range = textView?.selectedRange(), range.length > 0 else { return nil }
+        return range
     }
 
     func clearHighlights() {

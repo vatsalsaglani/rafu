@@ -45,9 +45,10 @@ nonisolated struct EditorTerminalGroupSwitcherPresentation: Equatable, Sendable 
     init(name: String, paneCount: Int, focusedPaneName: String, attentionCount: Int, isParked: Bool)
     {
         title = name
-        let placement = isParked ? "Parked" : "Terminal Group"
+        let placement = isParked ? "Not running" : "Terminal Group"
         let attention = attentionCount == 0 ? "" : " · \(attentionCount) need attention"
-        detail = "\(placement) · \(paneCount) panes · Focused: \(focusedPaneName)\(attention)"
+        let panes = paneCount == 1 ? "1 pane" : "\(paneCount) panes"
+        detail = "\(placement) · \(panes) · Focused: \(focusedPaneName)\(attention)"
     }
 }
 

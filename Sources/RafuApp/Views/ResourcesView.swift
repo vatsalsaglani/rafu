@@ -1,4 +1,65 @@
+import AppKit
 import SwiftUI
+
+/// The single resident-memory reading for the whole process. The status bar
+/// and the Resources popover both read it, so they always show the same
+/// number. Reading is on demand (the popover's visible-only loop, or the
+/// status bar's opt-in loop); there is no timer of its own.
+@Observable
+@MainActor
+final class ResidentMemoryMonitor {
+    static let shared = ResidentMemoryMonitor()
+
+    private(set) var sample: ProcessMemorySample?
+
+    init() {}
+
+    func refresh() {
+        sample = ProcessMemorySampler().sample()
+    }
+}
+
+/// The one-line summary at the top of the Resources popover, built from the
+/// same data as the rows below it.
+nonisolated enum ResourceSummary {
+    static func line(
+        appBytes: UInt64?,
+        groups: [MemoryProcessGroup],
+        languageServerCount: Int
+    ) -> String {
+        let terminalGroups = groups.filter {
+            $0.kind == .terminalShell || $0.kind == .agentTerminal
+        }
+        let terminalCount = terminalGroups.reduce(0) { $0 + $1.count }
+        let terminalBytes = terminalGroups.compactMap(\.totalBytes).reduce(0, +)
+
+        var terminals = "\(terminalCount) \(terminalCount == 1 ? "terminal" : "terminals")"
+        if terminalCount > 0, terminalBytes > 0 {
+            terminals += " \(ResourceMemoryFormat.label(terminalBytes))"
+        }
+        let servers =
+            "\(languageServerCount) \(languageServerCount == 1 ? "language server" : "language servers")"
+        return "Rafu \(ResourceMemoryFormat.label(appBytes)) · \(terminals) · \(servers)"
+    }
+}
+
+/// Height rule for the Resources popover: as tall as its content, but never
+/// taller than the window minus 40 pt, scrolling beyond that.
+nonisolated enum ResourcesPopoverLayout {
+    static let windowMargin: CGFloat = 40
+    static let minimumScrollHeight: CGFloat = 160
+    static let fallbackWindowHeight: CGFloat = 600
+
+    static func scrollHeight(
+        headerHeight: CGFloat,
+        contentHeight: CGFloat,
+        windowHeight: CGFloat?
+    ) -> CGFloat {
+        let available =
+            (windowHeight ?? fallbackWindowHeight) - windowMargin - headerHeight
+        return min(contentHeight, max(minimumScrollHeight, available))
+    }
+}
 
 /// Locale-independent MB/GB byte formatting for the Resources popover. Uses
 /// `String(format:)` (POSIX `%f` semantics) rather than `NumberFormatter` so
@@ -95,9 +156,11 @@ private enum ResourcesTab: String, CaseIterable, Identifiable {
 /// is cancelled when the view disappears, so there is no standing timer.
 struct ResourcesView: View {
     @Environment(\.rafuTheme) private var theme
-    @State private var appSample: ProcessMemorySample?
     @State private var rows: [ProcessResourceRegistry.ProcessResourceSample] = []
     @State private var tab: ResourcesTab = .composition
+    @State private var showsExplanation = false
+    @State private var headerHeight: CGFloat = 96
+    @State private var contentHeight: CGFloat = 320
     let coordinator: LanguageIntelligenceCoordinator
     /// Optional so the popover still renders in contexts that have no
     /// workspace session to count (and so previews/tests stay cheap); the
@@ -105,6 +168,9 @@ struct ResourcesView: View {
     var session: WorkspaceSession?
 
     private var timeline = MemoryTimeline.shared
+    /// The one resident-memory sample shared with the status bar, so the
+    /// number in the bar and in this popover can never disagree.
+    private var memory = ResidentMemoryMonitor.shared
 
     init(coordinator: LanguageIntelligenceCoordinator, session: WorkspaceSession? = nil) {
         self.coordinator = coordinator
@@ -119,6 +185,26 @@ struct ResourcesView: View {
         MemoryComposition.groups(from: rows)
     }
 
+    /// "Rafu 145.1 MB · 2 terminals 1.1 MB · 0 language servers".
+    private var summaryLine: String {
+        ResourceSummary.line(
+            appBytes: memory.sample?.residentBytes,
+            groups: groups,
+            languageServerCount: serverStatuses.count
+        )
+    }
+
+    private static let compositionExplanation =
+        "macOS reports one resident size per process, and every Rafu window "
+        + "shares one process, so this number and the process sections below "
+        + "cover all open windows, not just this one. They are separate "
+        + "processes Rafu spawned, not slices of that number."
+
+    private static let timelineExplanation =
+        "Change in the whole app's resident memory measured shortly after each "
+        + "action, across all open windows. It covers everything happening in "
+        + "that interval, so treat it as a correlation, not the action's cost."
+
     private var contentRows: [ContentMetricRow] {
         guard let session else { return [] }
         return MemoryComposition.contentRows(for: WorkspaceContentAdapter.metrics(for: session))
@@ -127,6 +213,11 @@ struct ResourcesView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
+                .onGeometryChange(for: CGFloat.self) {
+                    $0.size.height
+                } action: {
+                    headerHeight = $0
+                }
             Divider().overlay(theme.palette.borderSubtle)
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
@@ -137,13 +228,24 @@ struct ResourcesView: View {
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .onGeometryChange(for: CGFloat.self) {
+                    $0.size.height
+                } action: {
+                    contentHeight = $0
+                }
             }
+            .frame(
+                height: ResourcesPopoverLayout.scrollHeight(
+                    headerHeight: headerHeight + 1,
+                    contentHeight: contentHeight,
+                    windowHeight: NSApp.keyWindow?.contentLayoutRect.height
+                )
+            )
         }
-        .frame(width: 340, height: 420)
+        .frame(width: 340)
         .task {
-            let sampler = ProcessMemorySampler()
             while !Task.isCancelled {
-                appSample = sampler.sample()
+                memory.refresh()
                 rows = await ProcessResourceRegistry.shared.sample()
                 timeline.recordPeriodicReading()
                 do {
@@ -159,8 +261,32 @@ struct ResourcesView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Resources", systemImage: "memorychip")
-                .font(.headline)
+            HStack(spacing: 6) {
+                Label("Resources", systemImage: "memorychip")
+                    .font(.headline)
+                Spacer(minLength: 0)
+                Button {
+                    showsExplanation.toggle()
+                } label: {
+                    Image(systemName: "info.circle")
+                }
+                .buttonStyle(RafuIconButtonStyle(isActive: showsExplanation, size: 24))
+                .help("About these numbers")
+                .accessibilityLabel("About these numbers")
+                .accessibilityValue(showsExplanation ? "Shown" : "Hidden")
+            }
+            Text(summaryLine)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(theme.palette.textSecondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel("Summary: \(summaryLine)")
+            if showsExplanation {
+                Text(tab == .composition ? Self.compositionExplanation : Self.timelineExplanation)
+                    .font(.caption2)
+                    .foregroundStyle(theme.palette.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             RafuSegmentedPicker(
                 items: ResourcesTab.allCases,
                 selection: $tab,
@@ -176,15 +302,6 @@ struct ResourcesView: View {
     @ViewBuilder
     private var compositionContent: some View {
         appRow
-        Text(
-            "macOS reports one resident size per process, and every Rafu window "
-                + "shares one process — so this number and the process sections below "
-                + "cover ALL open windows, not just this one. They are separate "
-                + "processes Rafu spawned, not slices of that number."
-        )
-        .font(.caption2)
-        .foregroundStyle(theme.palette.textMuted)
-        .fixedSize(horizontal: false, vertical: true)
 
         if groups.isEmpty {
             Text("No other Rafu-spawned processes.")
@@ -226,7 +343,7 @@ struct ResourcesView: View {
     }
 
     private var appRow: some View {
-        let label = ResourceMemoryFormat.label(appSample?.residentBytes)
+        let label = ResourceMemoryFormat.label(memory.sample?.residentBytes)
         return resourceRow {
             HStack {
                 Label("Rafu (this app)", systemImage: "app.badge")
@@ -308,8 +425,7 @@ struct ResourcesView: View {
                     Button("Restart") {
                         coordinator.restartServer(languageID: status.languageID)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(theme.palette.accent)
+                    .buttonStyle(RafuSecondaryButtonStyle(compact: true))
                     .accessibilityLabel("Restart \(status.serverName)")
                 }
             }
@@ -328,15 +444,6 @@ struct ResourcesView: View {
             .accessibilityValue(
                 "\(timeline.readings.count) readings, latest "
                     + ResourceMemoryFormat.label(timeline.readings.last))
-
-        Text(
-            "Change in the whole app's resident memory measured shortly after each "
-                + "action, across ALL open windows. It covers everything happening in "
-                + "that interval, so treat it as a correlation, not the action's cost."
-        )
-        .font(.caption2)
-        .foregroundStyle(theme.palette.textMuted)
-        .fixedSize(horizontal: false, vertical: true)
 
         if timeline.recentEvents.isEmpty {
             Text("No activity recorded yet.")
@@ -426,7 +533,8 @@ private struct MemorySparkline: View {
                 if points.count >= 2 {
                     path(points, in: proxy.size)
                         .stroke(
-                            theme.palette.accent, style: .init(lineWidth: 1.5, lineJoin: .round)
+                            theme.palette.textSecondary,
+                            style: .init(lineWidth: 1.5, lineJoin: .round)
                         )
                         .padding(.vertical, 6)
                         .padding(.horizontal, 8)
