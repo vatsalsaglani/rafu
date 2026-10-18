@@ -4,6 +4,7 @@ import SwiftUI
 struct WorkspaceStatusBar: View {
     @AppStorage("showsProcessMemory") private var showsProcessMemory = false
     @Environment(\.rafuTheme) private var theme
+    @Environment(\.openSettings) private var openSettings
     @State private var memorySample: ProcessMemorySample?
     @Bindable var session: WorkspaceSession
 
@@ -50,7 +51,7 @@ struct WorkspaceStatusBar: View {
                 .foregroundStyle(theme.palette.textMuted)
 
             Button {
-                session.showSettings()
+                openSettings()
             } label: {
                 Image(systemName: "gearshape")
             }

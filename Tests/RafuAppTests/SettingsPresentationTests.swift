@@ -5,7 +5,7 @@ import Testing
 
 @Suite("Settings presentation")
 struct SettingsPresentationTests {
-    @Test("All Settings panes keep a title, subtitle, and unique glyph")
+    @Test("All Settings panes keep a title and a unique glyph")
     func paneMetadataIsComplete() {
         #expect(
             SettingsPane.allCases == [
@@ -16,55 +16,50 @@ struct SettingsPresentationTests {
                 "General", "Appearance", "AI", "Language Servers", "Usage", "Agents", "Ensemble",
             ])
         #expect(SettingsPane.allCases.allSatisfy { !$0.title.isEmpty })
-        #expect(SettingsPane.allCases.allSatisfy { !$0.subtitle.isEmpty })
         #expect(SettingsPane.allCases.allSatisfy { !$0.systemImage.isEmpty })
         #expect(Set(SettingsPane.allCases.map(\.systemImage)).count == SettingsPane.allCases.count)
     }
 
-    @Test("Settings navigation switches only from available canvas width")
-    func compactNavigationBreakpoint() {
-        #expect(SettingsPresentationLayout.usesCompactNavigation(forAvailableCanvasWidth: 811))
-        #expect(SettingsPresentationLayout.usesCompactNavigation(forAvailableCanvasWidth: 811.9))
-        #expect(!SettingsPresentationLayout.usesCompactNavigation(forAvailableCanvasWidth: 812))
-        #expect(!SettingsPresentationLayout.usesCompactNavigation(forAvailableCanvasWidth: 832))
-        #expect(!SettingsPresentationLayout.usesCompactNavigation(forAvailableCanvasWidth: 1_440))
-        #expect(SettingsPresentationLayout.navigationBreakpoint == 812)
-    }
-
-    @Test("Settings page measure preserves the compact desktop hierarchy")
-    func pageMeasure() {
-        #expect(SettingsPresentationLayout.regularNavigationWidth == 188)
-        #expect(SettingsPresentationLayout.navigationPageGap == 16)
-        #expect(SettingsPresentationLayout.pageMaximumWidth == 840)
-        #expect(SettingsPresentationLayout.outerPadding == 24)
-        #expect(SettingsPresentationLayout.regularCombinedMaximumWidth == 1_092)
+    @Test("The Settings window is 680 points wide and popups never shrink below 140")
+    func windowMeasure() {
+        #expect(SettingsPresentationLayout.windowWidth == 680)
+        #expect(SettingsPresentationLayout.minimumPopupWidth == 140)
+        #expect(
+            SettingsPresentationLayout.minimumPaneHeight
+                <= SettingsPresentationLayout.idealPaneHeight)
+        #expect(
+            SettingsPresentationLayout.idealPaneHeight
+                <= SettingsPresentationLayout.maximumPaneHeight)
     }
 
     // This is a source policy check. Runtime retention and initialization counts
-    // require a mounted Settings view and resize/selection events.
-    @Test("Source policy keeps one lazy pane host outside navigation variants")
-    func retainedPaneHostSourcePolicy() throws {
+    // require a mounted Settings view and tab selection events.
+    @Test("Source policy hosts the panes as native toolbar tabs, built on first visit")
+    func toolbarPaneHostSourcePolicy() throws {
         let source = try Self.source("Sources/RafuApp/Settings/RafuSettingsView.swift")
-        #expect(source.components(separatedBy: "private var paneContent: some View").count - 1 == 1)
-        #expect(source.components(separatedBy: "ZStack {").count - 1 == 1)
+        #expect(source.contains("TabView(selection: $pane)"))
+        #expect(source.contains("ForEach(SettingsPane.allCases)"))
+        #expect(source.contains("Label(candidate.title, systemImage: candidate.systemImage)"))
+        #expect(source.contains(".tabItem"))
+        #expect(source.contains(".formStyle(.grouped)"))
         #expect(source.contains("@State private var visitedPanes: Set<SettingsPane> = [.general]"))
         #expect(source.contains("visitedPanes.insert(newPane)"))
-        #expect(source.contains("ForEach(SettingsPane.allCases.filter(visitedPanes.contains))"))
-        #expect(!source.contains("ForEach(SettingsPane.allCases) { candidate in"))
-        #expect(source.contains(".opacity(candidate == pane ? 1 : 0)"))
-        #expect(source.contains(".disabled(candidate != pane)"))
-        #expect(source.contains(".accessibilityHidden(candidate != pane)"))
-
-        let pageColumnStart = try #require(source.range(of: "private func pageColumn"))
-        let pageIdentityStart = try #require(source.range(of: "private func pageIdentity"))
-        let pageColumn = String(source[pageColumnStart.lowerBound..<pageIdentityStart.lowerBound])
-        #expect(pageColumn.contains("pageIdentity(isCompact: isCompact)"))
-        #expect(pageColumn.contains("paneContent"))
-        #expect(!pageColumn.contains("if isCompact"))
+        #expect(source.contains("visitedPanes.contains(candidate)"))
+        #expect(!source.contains("ZStack {"))
     }
 
-    @Test("Settings page groups use the shared accessible section container")
-    func settingsGroupsUseSharedSectionContainer() throws {
+    @MainActor
+    @Test("General offers the Canvas haptics toggle bound to the shared defaults key")
+    func canvasHapticsToggle() throws {
+        let source = try Self.source("Sources/RafuApp/Settings/RafuSettingsView.swift")
+        #expect(source.contains("@AppStorage(RafuHaptics.canvasHapticsDefaultsKey)"))
+        #expect(source.contains("Toggle(\"Haptic feedback on the Canvas\""))
+        #expect(source.contains("Plays only on Force Touch trackpads."))
+        #expect(RafuHaptics.canvasHapticsDefaultsKey == "canvasHapticsEnabled")
+    }
+
+    @Test("Settings panes are grouped forms, not the old custom section container")
+    func panesUseGroupedFormContent() throws {
         let paths = [
             "Sources/RafuApp/Settings/RafuSettingsView.swift",
             "Sources/RafuApp/Settings/ThemeSettingsSection.swift",
@@ -75,26 +70,51 @@ struct SettingsPresentationTests {
             "Sources/RafuApp/Settings/UsageSettingsTab.swift",
             "Sources/RafuApp/AI/AIProviderSettingsSection.swift",
         ]
-
         for path in paths {
-            #expect(
-                try Self.source(path).contains("RafuSettingsSection"),
-                Comment(rawValue: path)
-            )
+            let source = try Self.source(path)
+            #expect(!source.contains("RafuSettingsSection"), Comment(rawValue: path))
+            #expect(!source.contains("RafuSettingsRow"), Comment(rawValue: path))
         }
-
-        let styles = try Self.source("Sources/RafuApp/Support/RafuWorkbenchStyles.swift")
-        #expect(styles.contains(".accessibilityAddTraits(.isHeader)"))
-        #expect(styles.contains(".accessibilityElement(children: .contain)"))
-        #expect(styles.contains("minHeight: RafuMetrics.settingsRowMinHeight"))
     }
 
-    @Test("Editor-hosted Settings keeps the attached tab construction")
-    func settingsCanvasUsesAttachedTab() throws {
-        let source = try Self.source("Sources/RafuApp/Settings/SettingsCanvas.swift")
-        #expect(source.contains("AttachedWorkbenchTab(isSelected: true)"))
-        #expect(source.contains("AttachedWorkbenchTabCloseButton"))
-        #expect(source.contains("action: session.closeSettings"))
+    @Test("Settings opens only the standard Settings window")
+    func settingsOpensOnlyTheSettingsScene() throws {
+        let commands = try Self.source("Sources/RafuApp/App/RafuAppCommands.swift")
+        #expect(commands.contains("openSettings()"))
+        #expect(!commands.contains("showSettings"))
+        #expect(!commands.contains("SettingsCommandRouter"))
+
+        let statusBar = try Self.source("Sources/RafuApp/Views/WorkspaceStatusBar.swift")
+        #expect(statusBar.contains("openSettings()"))
+        #expect(!statusBar.contains("showSettings"))
+
+        let app = try Self.source("Sources/RafuApp/App/RafuApp.swift")
+        #expect(app.contains("Settings {"))
+        #expect(app.contains("RafuSettingsView()"))
+
+        let canvas = try Self.source("Sources/RafuApp/Settings/SettingsCanvas.swift")
+        #expect(!canvas.contains("RafuSettingsView()"))
+        #expect(canvas.contains("openSettings()"))
+        #expect(canvas.contains("session.closeSettings()"))
+    }
+
+    @Test("Settings headers are title case and the old icon-only theme buttons are gone")
+    func labelsAreWordsInTitleCase() throws {
+        let theme = try Self.source("Sources/RafuApp/Settings/ThemeSettingsSection.swift")
+        for label in ["Duplicate…", "Import…", "Reload Themes", "Show Theme Folder"] {
+            #expect(theme.contains("Button(\"\(label)\""), Comment(rawValue: label))
+        }
+        #expect(!theme.contains(".labelStyle(.iconOnly)"))
+        #expect(theme.contains("Follow System Appearance"))
+        #expect(theme.contains("Light appearance"))
+        #expect(theme.contains("Dark appearance"))
+
+        let servers = try Self.source("Sources/RafuApp/Settings/LanguageServersSettingsSection.swift")
+        #expect(servers.contains(".help(\"Refresh\")"))
+        #expect(servers.contains("Table(rows)"))
+
+        let ensemble = try Self.source("Sources/RafuApp/Settings/EnsembleSettingsTab.swift")
+        #expect(!ensemble.contains("Verb version"))
     }
 
     private static func source(_ path: String, file: StaticString = #filePath) throws -> String {
