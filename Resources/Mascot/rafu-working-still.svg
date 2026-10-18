@@ -1,33 +1,50 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc" data-state="working" data-motion="still" style="--rafu-body:#E7EAF2;--rafu-shade:#A9B1C6;--rafu-ink:#151A24;--rafu-thread:#E3A857">
-  <title id="title">Rafu</title>
-  <desc id="desc">Rafu leaning side to side with narrowed eyes while agents run. A round ball of mending yarn with a darning needle in its top. The thread through the needle is the theme accent. Colours are CSS variables (--rafu-body, --rafu-shade, --rafu-ink, --rafu-thread) that default to the Indigo theme; the app renders the same artwork natively with the active theme.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc" data-state="working" data-motion="still">
+  <title id="title">Rafu, the little thread sprite</title>
+  <desc id="desc">Rafu working: its eyes look down in focus, its antenna bobs, and a short thread trail circles the loop. A small, round, soft sprite. Its body outline is one gold thread, and a thin antenna ends in a small thread loop, like the eye of a needle. Big dark glossy eyes, a small smile and two tiny feet. Colours are CSS variables (--rafu-body-light, --rafu-body, --rafu-body-shade, --rafu-rim, --rafu-thread, --rafu-blush) that default to the Indigo accent; the app draws the same artwork natively from the active theme accent. This is the still pose for Reduce Motion: it has no animation.</desc>
   <defs>
-    <linearGradient id="body" x1=".2" y1=".1" x2=".85" y2="1">
-      <stop offset="0" stop-color="var(--rafu-body)"/><stop offset="1" stop-color="var(--rafu-shade)"/>
+    <linearGradient id="body" gradientUnits="userSpaceOnUse" x1="150" y1="160" x2="360" y2="448">
+      <stop class="s-light" offset="0" stop-color="#F1D4AB"/><stop class="s-body" offset=".4" stop-color="#E3A857"/><stop class="s-body" offset=".7" stop-color="#E3A857"/><stop class="s-shade" offset="1" stop-color="#9F763D"/>
     </linearGradient>
-    <clipPath id="ball"><ellipse cx="256" cy="300" rx="176" ry="160"/></clipPath>
+    <radialGradient id="light" gradientUnits="userSpaceOnUse" cx="190" cy="214" r="240">
+      <stop offset="0" stop-color="#fff" stop-opacity=".42"/><stop offset=".5" stop-color="#fff" stop-opacity=".06"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="foot" gradientUnits="userSpaceOnUse" x1="0" y1="420" x2="0" y2="466">
+      <stop class="s-body" offset="0" stop-color="#E3A857"/><stop class="s-shade" offset="1" stop-color="#9F763D"/>
+    </linearGradient>
+    <linearGradient id="eye" x1="0" y1="0" x2=".35" y2="1">
+      <stop offset="0" stop-color="#3B3141"/><stop offset=".6" stop-color="#1B151F"/><stop offset="1" stop-color="#0C090F"/>
+    </linearGradient>
+    <linearGradient id="ink" gradientUnits="userSpaceOnUse" x1="0" y1="270" x2="0" y2="390">
+      <stop offset="0" stop-color="#1B151F"/><stop offset="1" stop-color="#0C090F"/>
+    </linearGradient>
+    <path id="silhouette" d="M256 150 C352 150 426 216 430 304 C434 390 360 440 256 440 C152 440 78 390 82 304 C86 216 160 150 256 150 Z"/>
+    <clipPath id="body-clip"><use href="#silhouette"/></clipPath>
   </defs>
+  <style>
+    .s-light { stop-color: var(--rafu-body-light, #F1D4AB); }
+    .s-body { stop-color: var(--rafu-body, #E3A857); }
+    .s-shade { stop-color: var(--rafu-body-shade, #9F763D); }
+    .rim { stroke: var(--rafu-rim, #F1D4AB); }
+    .thread { stroke: var(--rafu-thread, #E9B979); }
+    .thread-fill { fill: var(--rafu-thread, #E9B979); }
+    .blush { fill: var(--rafu-blush, #E18768); }
+    .sparkle { fill: var(--rafu-rim, #F1D4AB); }
+  </style>
   <g class="sprite">
-    <g class="needle" transform="rotate(-7 300 150)">
-      <path d="M300 150 L352 46" fill="none" stroke="var(--rafu-body)" stroke-width="15" stroke-linecap="round"/>
-      <circle cx="349" cy="52" r="5.5" fill="var(--rafu-ink)"/>
-      <path d="M349 52 C438 44 478 168 430 256 M349 52 C336 40 318 44 312 60" fill="none" stroke="var(--rafu-thread)" stroke-width="11" stroke-linecap="round"/>
+    <g transform="rotate(-6 262 152)"><g class="antenna"><path class="thread" d="M262 172 C258 140 262 112 276 96 C292 78 314 70 312 48 C310 28 284 22 272 36 C262 48 268 68 284 78 C292 83 300 86 308 86" fill="none" stroke="#E9B979" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/><g class="trail" fill="none" stroke-linecap="round"><path class="thread" d="M264.6 14.3 A46 46 0 0 1 328.7 25.6" stroke="#E9B979" stroke-width="7" opacity=".8"/><path class="thread" d="M247.3 37.8 A46 46 0 0 1 257.9 20.0" stroke="#E9B979" stroke-width="5" opacity=".4"/><circle class="thread-fill" cx="328.7" cy="25.6" r="7" fill="#E9B979"/></g></g></g>
+    <ellipse cx="208" cy="442" rx="28" ry="17" fill="url(#foot)"/>
+    <ellipse cx="304" cy="442" rx="28" ry="17" fill="url(#foot)"/>
+    <use href="#silhouette" fill="url(#body)"/>
+    <use href="#silhouette" fill="url(#light)"/>
+    <g clip-path="url(#body-clip)">
+      <use class="rim" href="#silhouette" transform="translate(256 300) scale(.9) translate(-256 -300)" fill="none" stroke="#F1D4AB" stroke-width="5.5" stroke-dasharray="14 14" stroke-linecap="round" opacity=".3"/>
     </g>
-    <ellipse cx="256" cy="300" rx="176" ry="160" fill="url(#body)"/>
-    <ellipse cx="186" cy="208" rx="65" ry="38" fill="#fff" opacity=".28" transform="rotate(-24 186 208)"/>
-    <g clip-path="url(#ball)" fill="none" stroke="var(--rafu-thread)" stroke-width="12" stroke-linecap="round">
-      <path d="M70 270 C150 330 330 330 442 262" opacity=".55"/>
-      <path d="M70 360 C160 410 340 410 442 350" opacity=".55"/>
-      <path d="M150 150 C215 215 230 330 206 470" opacity=".35"/>
-    </g>
-    <g class="gaze">
-    <g class="eyes">
-      <g class="eye eye-left"><rect x="168" y="259.0" width="38" height="52" rx="19" fill="var(--rafu-ink)"/><circle cx="193" cy="275.0" r="6.5" fill="#fff" opacity=".9"/></g>
-      <g class="eye eye-right"><rect x="306" y="259.0" width="38" height="52" rx="19" fill="var(--rafu-ink)"/><circle cx="331" cy="275.0" r="6.5" fill="#fff" opacity=".9"/></g>
-    </g>
-    </g>
-    <ellipse cx="142" cy="344" rx="23" ry="14" fill="var(--rafu-thread)" opacity=".4"/>
-    <ellipse cx="370" cy="344" rx="23" ry="14" fill="var(--rafu-thread)" opacity=".4"/>
-    <path d="M238 356 L274 356" fill="none" stroke="var(--rafu-ink)" stroke-width="9" stroke-linecap="round"/>
+    <use class="rim" href="#silhouette" fill="none" stroke="#F1D4AB" stroke-width="8" opacity=".9"/>
+    <ellipse cx="182" cy="208" rx="46" ry="22" transform="rotate(-30 182 208)" fill="#fff" opacity=".42"/>
+    <circle cx="232" cy="180" r="8" fill="#fff" opacity=".4"/>
+    <ellipse class="blush" cx="144" cy="356" rx="26" ry="15" fill="#E18768" opacity=".5"/>
+    <ellipse class="blush" cx="368" cy="356" rx="26" ry="15" fill="#E18768" opacity=".5"/>
+    <g class="gaze"><g class="eye eye-left"><ellipse cx="200" cy="310" rx="28" ry="31" fill="url(#eye)"/><circle cx="209.5" cy="297.6" r="10.1" fill="#fff"/><circle cx="189.9" cy="323.0" r="4.2" fill="#fff" opacity=".6"/></g><g class="eye eye-right"><ellipse cx="324" cy="310" rx="28" ry="31" fill="url(#eye)"/><circle cx="333.5" cy="297.6" r="10.1" fill="#fff"/><circle cx="313.9" cy="323.0" r="4.2" fill="#fff" opacity=".6"/></g></g>
+    <path d="M247 362 C253 366 261 366 267 362" fill="none" stroke="url(#ink)" stroke-width="9" stroke-linecap="round"/>
   </g>
 </svg>
