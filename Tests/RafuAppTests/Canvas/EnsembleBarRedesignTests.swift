@@ -115,6 +115,32 @@ struct EnsembleBarRedesignTests {
         #expect(Nav.move(0, .down, tileCount: 0, chipCount: 0) == 0)
     }
 
+    @Test("Terminal groups are cards with pane chips, not an accordion; the card stays draggable")
+    func terminalGroupCards() throws {
+        let panel = try Self.source("Sources/RafuApp/Views/WorkspaceTerminalsPanelView.swift")
+        #expect(!panel.contains("chevron.right"))
+        #expect(!panel.contains("expandedGroupIDs"))
+        #expect(!panel.contains("TerminalGroupPaneRowView"))
+        #expect(panel.contains("AgentStatusPill("))
+        #expect(panel.contains("TerminalPaneChipView("))
+        // The whole card is still the drag source, carrying only the group id.
+        let card = try #require(panel.range(of: "private struct TerminalGroupManagerRowView"))
+        let next = try #require(
+            panel.range(
+                of: "private struct TerminalPaneMenuItems", range: card.upperBound..<panel.endIndex)
+        )
+        let cardSource = String(panel[card.upperBound..<next.lowerBound])
+        #expect(cardSource.contains(".onDrag("))
+        #expect(
+            cardSource.contains(
+                "CanvasBoardDragPayload(terminalGroupID: row.id).makeItemProvider()"))
+        // Hover-revealed ⋯, backed by the same items in a context menu.
+        #expect(cardSource.contains(".contextMenu { actions }"))
+        #expect(cardSource.contains(".opacity(isHovering || isFocused ? 1 : 0)"))
+        // One tap handler: double-click renames without delaying a click.
+        #expect(cardSource.contains("TabClickIntent.current() == .selectAndRename"))
+    }
+
     private static func root(file: StaticString = #filePath) -> URL? {
         var directory = URL(fileURLWithPath: "\(file)").deletingLastPathComponent()
         while directory.path != "/" {
