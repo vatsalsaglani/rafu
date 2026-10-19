@@ -2,6 +2,7 @@ import Darwin
 import Foundation
 import OSLog
 import RafuCore
+import Synchronization
 
 nonisolated enum LauncherIPCServerError: Error, Equatable, Sendable {
     case alreadyRunning
@@ -9,9 +10,11 @@ nonisolated enum LauncherIPCServerError: Error, Equatable, Sendable {
     case systemCall(name: String, code: Int32)
 }
 
-/// Owns Rafu's one same-user Unix-domain listener. Blocking socket syscalls
-/// run only in detached tasks; actor state owns the listener fd, tracks each
-/// accepted fd for shutdown, and never shares mutable byte buffers.
+/// Owns Rafu's one same-user Unix-domain listener. The blocking `accept` runs
+/// on one dedicated thread, never on the Swift concurrency cooperative pool;
+/// each connection's bounded read and write run in a detached task. Actor
+/// state owns the listener fd, tracks each accepted fd for shutdown, and
+/// never shares mutable byte buffers.
 actor LauncherIPCServer {
     typealias PeerUIDProvider = @Sendable (Int32) throws -> uid_t
     typealias RequestHandler =
@@ -27,6 +30,13 @@ actor LauncherIPCServer {
     private struct Connection: Sendable {
         let fileDescriptor: Int32
         let task: Task<Void, Never>
+    }
+
+    /// The accept thread's stop request, and a stream that finishes when the
+    /// thread returns.
+    private struct AcceptLoop {
+        let stop: AcceptLoopStop
+        let finished: AsyncStream<Void>
     }
 
     /// Default per-connection `SO_RCVTIMEO`/`SO_SNDTIMEO` bound. A same-user
@@ -46,7 +56,7 @@ actor LauncherIPCServer {
     private let maxConnections: Int
     private var listenerFileDescriptor: Int32?
     private var ownsSocketPath = false
-    private var acceptTask: Task<Void, Never>?
+    private var acceptLoop: AcceptLoop?
     private var connections: [UUID: Connection] = [:]
 
     init(
@@ -85,8 +95,8 @@ actor LauncherIPCServer {
     }
 
     /// Creates the private directory, safely removes only a stale socket,
-    /// binds with mode 0600, and starts the detached accept loop. Idempotent
-    /// for repeated calls on this actor instance.
+    /// binds with mode 0600, and starts the accept thread. Idempotent for
+    /// repeated calls on this actor instance.
     func startListening() throws {
         guard listenerFileDescriptor == nil else { return }
 
@@ -135,17 +145,16 @@ actor LauncherIPCServer {
         }
 
         listenerFileDescriptor = listener
-        acceptTask = Task.detached(name: "Launcher IPC accept") { [weak self] in
-            await self?.runAcceptLoop(listener: listener)
-        }
+        acceptLoop = startAcceptThread(listener: listener)
     }
 
-    /// Closes the listener, shuts down every accepted fd to unblock reads,
-    /// awaits their detached tasks, and removes only this server's socket.
+    /// Closes the listener, which ends the accept thread's blocked `accept`;
+    /// shuts down every accepted fd to unblock reads; waits for the accept
+    /// thread and the connection tasks; and removes only this server's socket.
     func stopListening() async {
-        let acceptTask = acceptTask
-        self.acceptTask = nil
-        acceptTask?.cancel()
+        let acceptLoop = acceptLoop
+        self.acceptLoop = nil
+        acceptLoop?.stop.request()
 
         if let listenerFileDescriptor {
             self.listenerFileDescriptor = nil
@@ -159,7 +168,9 @@ actor LauncherIPCServer {
             Darwin.shutdown(connection.fileDescriptor, SHUT_RDWR)
         }
 
-        await acceptTask?.value
+        if let acceptLoop {
+            for await _ in acceptLoop.finished {}
+        }
         for connection in activeConnections {
             await connection.task.value
         }
@@ -190,18 +201,48 @@ actor LauncherIPCServer {
     /// fixed sleep.
     var liveConnectionCountForTesting: Int { connections.count }
 
-    private nonisolated func runAcceptLoop(listener: Int32) async {
-        while !Task.isCancelled {
+    /// Starts the one accept thread. A blocking `accept` on the cooperative
+    /// pool would hold one of its few threads for the whole app session, so
+    /// it runs on a thread of its own.
+    private func startAcceptThread(listener: Int32) -> AcceptLoop {
+        let stop = AcceptLoopStop()
+        let (finished, finish) = AsyncStream.makeStream(of: Void.self)
+        let server: @Sendable () -> LauncherIPCServer? = { [weak self] in self }
+        let thread = Thread {
+            Self.runAcceptLoop(listener: listener, stop: stop, server: server)
+            finish.finish()
+        }
+        thread.name = "Launcher IPC accept"
+        thread.start()
+        return AcceptLoop(stop: stop, finished: finished)
+    }
+
+    /// The accept thread's body. `accept` blocks until a peer connects or
+    /// `stopListening()` closes the listener, which ends it with an error.
+    /// Each accepted fd goes to the actor, and the thread waits for that
+    /// registration before it accepts again, so connections register one at
+    /// a time and the live-connection cap is checked for each in turn.
+    private nonisolated static func runAcceptLoop(
+        listener: Int32, stop: AcceptLoopStop, server: @Sendable () -> LauncherIPCServer?
+    ) {
+        while !stop.isRequested {
             let accepted = Darwin.accept(listener, nil, nil)
             if accepted < 0 {
                 if errno == EINTR { continue }
                 return
             }
-            if Task.isCancelled {
+            guard !stop.isRequested, let server = server() else {
                 Darwin.close(accepted)
                 return
             }
-            await registerConnection(accepted)
+            // This thread is not in the cooperative pool, so waiting here
+            // holds no pool thread.
+            let registered = DispatchSemaphore(value: 0)
+            Task {
+                await server.registerConnection(accepted)
+                registered.signal()
+            }
+            registered.wait()
         }
     }
 
@@ -475,5 +516,17 @@ actor LauncherIPCServer {
             return .canvasBridge(await CanvasLiveBridge.shared.handle(request))
         }
         return LauncherRequestRouter.shared.handle(envelope)
+    }
+}
+
+/// Set once by `LauncherIPCServer.stopListening()`; read by the accept thread
+/// before and after each blocking `accept`.
+private nonisolated final class AcceptLoopStop: Sendable {
+    private let requested = Atomic<Bool>(false)
+
+    var isRequested: Bool { requested.load(ordering: .acquiring) }
+
+    func request() {
+        requested.store(true, ordering: .releasing)
     }
 }

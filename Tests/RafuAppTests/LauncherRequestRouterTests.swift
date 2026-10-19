@@ -243,6 +243,44 @@ struct LauncherIPCServerTests {
         Darwin.close(overflowClient)
         await server.stopListening()
     }
+
+    /// The accept loop runs on its own thread. `stopListening()` must end
+    /// that thread (it waits for it) and leave the instance able to listen
+    /// and accept again.
+    @Test("A stopped listener ends its accept thread and the same server listens again")
+    func listenerRestartsAfterStop() async throws {
+        let temporaryRoot = URL(
+            fileURLWithPath: "/tmp/rafu-ipc-restart-\(UUID().uuidString.prefix(8))",
+            isDirectory: true
+        )
+        let socketURL = LauncherIPCSocketPath.resolve(baseDirectory: temporaryRoot)
+        defer { try? FileManager.default.removeItem(at: temporaryRoot) }
+        let accepted = LauncherIPCResponse.accepted(
+            workspaceMatched: false, windowFocused: false, waitSupported: false)
+        let server = LauncherIPCServer(socketURL: socketURL, handler: { _ in accepted })
+
+        for round in 0..<2 {
+            try await server.startListening()
+            let envelope = LauncherIPCEnvelope(kind: .handshake, requestID: "restart-\(round)")
+            let response: LauncherIPCResponse
+            do {
+                // The bridge client's read deadline, for the same reason as
+                // `CanvasBridgeIPCTests.bridgeClient`.
+                response = try await Task.detached(name: "Launcher restart round trip") {
+                    try LauncherIPCClient(
+                        socketURL: socketURL,
+                        timeoutSeconds: LauncherIPCClient.canvasBridgeTimeoutSeconds
+                    ).exchange(envelope)
+                }.value
+            } catch {
+                await server.stopListening()
+                throw error
+            }
+            await server.stopListening()
+            #expect(response == accepted)
+            #expect(!FileManager.default.fileExists(atPath: socketURL.path))
+        }
+    }
 }
 
 @Suite("Launcher request routing")

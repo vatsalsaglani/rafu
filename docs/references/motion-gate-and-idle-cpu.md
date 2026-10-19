@@ -4,7 +4,8 @@
   ones hosted in an `NSHostingView` on a panel (the notch companion), plus the
   periodic timers and the status-bar memory readout.
 - **Last verified:** Apple Swift 6.4 (swiftlang-6.4.0.34.1), macOS 27.0.1
-  (26A434), on 2026-10-20, on `main` at 716370a.
+  (26A434), on 2026-10-20, on `main` at 716370a; the leftovers were fixed
+  and measured on the same toolchain at 0dce2ae and the commit after it.
 
 ## Rule or observed behaviour
 
@@ -111,15 +112,27 @@ was never committed). `top -l 50 -s 1`, mean of the last 25 samples:
   `ProcessMemorySample.displayBytes`, the same figure as the status bar. The
   entry field is still named `residentBytes`.
 
-## Known leftovers
+- **Launcher accept loop.** `LauncherIPCServer` ran its blocking `accept` in
+  a `Task.detached`, which held one cooperative-pool thread for the whole app
+  session. It now runs on one dedicated `Thread` named "Launcher IPC accept".
+  The thread hands each accepted fd to the actor and waits on a
+  `DispatchSemaphore` until that registration ends, so connections still
+  register one at a time against the live-connection cap. `stopListening()`
+  sets an `Atomic<Bool>` stop flag, closes the listener (which ends the
+  blocked `accept` with an error), and awaits an `AsyncStream` that the
+  thread finishes when it returns. Each connection's reads still run in a
+  detached task, bounded by `SO_RCVTIMEO` (5 s).
 
-- `LauncherIPCServer`'s accept loop runs on the cooperative pool.
+No known leftovers remain from 716370a.
 
 ## Related code, ADRs, and phases
 
 - `RafuMotionGate` and the `\.rafuMotionAllowed` environment key; the notch
   companion views.
+- `RafuMascotWorkingMotion` and `NotchPlaybackIndicator` in
+  `Sources/RafuApp/Notch/NotchMascotView.swift`; the accept thread in
+  `Sources/RafuApp/Launcher/LauncherIPCServer.swift`.
 - [`notch-companion.md`](notch-companion.md),
   [`memory-attribution-and-timeline.md`](memory-attribution-and-timeline.md),
   [`memory-caps-and-pressure.md`](memory-caps-and-pressure.md)
-- Commits on `main`: 5a0e873, 716370a, and the follow-up motion commit.
+- Commits on `main`: 5a0e873, 716370a, 0dce2ae, and the launcher accept-thread commit.
