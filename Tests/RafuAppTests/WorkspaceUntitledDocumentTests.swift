@@ -100,4 +100,15 @@ struct WorkspaceUntitledDocumentSessionTests {
         session.toggleSidebar()
         #expect(!session.isSidebarCollapsed)
     }
+
+    @Test("Sidebar collapse state is isolated per workspace session")
+    func sidebarCollapseStateIsPerSession() {
+        let first = WorkspaceSession()
+        let second = WorkspaceSession()
+
+        first.toggleSidebar()
+
+        #expect(first.isSidebarCollapsed)
+        #expect(!second.isSidebarCollapsed)
+    }
 }
