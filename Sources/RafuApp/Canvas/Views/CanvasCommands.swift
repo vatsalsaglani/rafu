@@ -23,19 +23,6 @@ struct CanvasCommands: Commands {
                 cardNavigationItems(board: board, session: session)
             }
             Divider()
-            Button("Board") {
-                board?.backToBoard()
-                board?.showsList = false
-            }
-            .keyboardShortcut("1", modifiers: [.control, .command])
-            .disabled(board == nil)
-            Button("List") {
-                board?.backToBoard()
-                board?.showsList = true
-            }
-            .keyboardShortcut("2", modifiers: [.control, .command])
-            .disabled(board == nil)
-            Divider()
             Button("Zoom to Fit") { board?.fitAll() }
                 .keyboardShortcut("9", modifiers: .command)
                 .disabled(board == nil)

@@ -24,8 +24,8 @@ struct AgentActivityGlyph: View {
     @Environment(\.rafuTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let status: AgentCardStatus
-    /// Whether a `.working` glyph spins. `false` in the Canvas List's dense
-    /// rows, which intentionally never animate.
+    /// Whether a `.working` glyph spins. Pass `false` for a dense row that
+    /// must stay still; Reduce Motion stops the spin regardless.
     var animates = true
     @State private var isSpinning = false
 

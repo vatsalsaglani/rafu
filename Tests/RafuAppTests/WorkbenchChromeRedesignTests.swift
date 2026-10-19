@@ -464,11 +464,12 @@ struct WorkbenchChromeRedesignTests {
         #expect(stack.lowerBound < palette.lowerBound)
         #expect(palette.lowerBound < notice.lowerBound)
         #expect(overlay.contains("if showsRestoredLinksNotice && pausedLinkCount > 0"))
-        // The board surface shows the palette only through this stack, and
-        // the list (no palette) keeps its own notice.
+        // The board surface shows the palette only through this stack: one
+        // construction, so the split yields two pieces. The List view and
+        // its separate top notice are gone.
         #expect(source.components(separatedBy: "CanvasToolPalette(").count == 2)
-        #expect(
-            source.contains("if board.showsList, showsRestoredLinksNotice, pausedLinkCount > 0"))
+        #expect(!source.contains("board.showsList"))
+
         // The palette no longer places itself, so it cannot overlap.
         let paletteFile = try Self.source(
             "Sources/RafuApp/Canvas/Whiteboard/CanvasToolPalette.swift")

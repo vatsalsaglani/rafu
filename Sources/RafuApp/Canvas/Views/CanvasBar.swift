@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The one 36 pt Canvas bar (review C1, C2, C14, C17): the canvas name as a
-/// pull-down, the link status, Board | List, Add, Arrange and the overflow.
+/// pull-down, the link status, Add, Arrange and the overflow.
 struct CanvasBar: View {
     @Environment(\.rafuTheme) private var theme
     let board: CanvasBoardState
@@ -13,7 +13,6 @@ struct CanvasBar: View {
             Spacer(minLength: 8)
             CanvasLinkStatusItem(board: board)
             CanvasAgentSummaryBar(board: board, session: session)
-            CanvasModeControl(board: board)
             CanvasAddCardMenu(board: board, session: session)
             arrangeMenu
             overflowMenu
@@ -153,57 +152,6 @@ struct CanvasBar: View {
 
     private var linkVisibility: Binding<CanvasLinkVisibility> {
         Binding(get: { board.linkVisibility }, set: { board.linkVisibility = $0 })
-    }
-}
-
-/// Board | List as two icons. The current mode stays visible (review C14).
-struct CanvasModeControl: View {
-    @Environment(\.rafuTheme) private var theme
-    let board: CanvasBoardState
-
-    var body: some View {
-        HStack(spacing: 2) {
-            segment(
-                symbol: "square.on.square.dashed", label: "Board", help: "Board (⌃⌘1)", list: false)
-            segment(symbol: "list.bullet", label: "List", help: "List (⌃⌘2)", list: true)
-        }
-        .padding(2)
-        .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(theme.palette.appBackground.opacity(0.6))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .strokeBorder(theme.palette.borderSubtle)
-        )
-    }
-
-    private func segment(symbol: String, label: String, help: String, list: Bool) -> some View {
-        let selected = board.showsList == list
-        return Button {
-            board.backToBoard()
-            board.showsList = list
-        } label: {
-            Image(systemName: symbol)
-                .font(.system(size: 12, weight: selected ? .semibold : .regular))
-                .foregroundStyle(selected ? theme.palette.textPrimary : theme.palette.textSecondary)
-                .frame(width: 26, height: 20)
-                .background {
-                    if selected {
-                        RoundedRectangle(cornerRadius: 5.5, style: .continuous)
-                            .fill(theme.palette.elevatedBackground)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 5.5, style: .continuous)
-                                    .strokeBorder(theme.palette.borderStrong.opacity(0.6))
-                            )
-                    }
-                }
-                .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .help(help)
-        .accessibilityLabel(label)
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 

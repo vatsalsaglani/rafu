@@ -37,6 +37,9 @@ struct WorkspaceCanvasView: View {
     @FocusState private var boardHasKeyboardFocus: Bool
     @AppStorage("canvasEmptyBoardTipDismissed") private var tipDismissed = false
     @State private var showsRestoredLinksNotice = false
+    /// Rotor targets: every rendered card shell registers here, so the
+    /// "Cards" rotor gives VoiceOver the list-like path the List view had.
+    @Namespace private var cardRotorNamespace
 
     private var pausedLinkCount: Int {
         CanvasLiveBridge.shared.linkStates(in: board).values.count { $0.kind == .paused }
@@ -57,21 +60,10 @@ struct WorkspaceCanvasView: View {
             }
             CanvasBar(board: board, session: session)
             Divider()
-            ZStack(alignment: .top) {
-                if board.showsList {
-                    CanvasListView(board: board, session: session)
-                } else {
-                    boardSurface
-                }
-                // The list has no tool palette, so the notice sits at the top.
-                // On the board it stacks below the palette (`boardTopOverlay`).
-                if board.showsList, showsRestoredLinksNotice, pausedLinkCount > 0 {
-                    pausedLinksNotice
-                        .padding(.top, 10)
-                        .transition(.opacity)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            // The board is the only surface. The restored-links notice stacks
+            // below the tool palette (`boardTopOverlay`).
+            boardSurface
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(theme.palette.editorBackground)
@@ -106,7 +98,6 @@ struct WorkspaceCanvasView: View {
             connectionDrag.reset()
             session.canvasResources[board.id]?.hide(owner: presentationID)
         }
-        .onChange(of: board.showsList) { _, showsList in if showsList { connectionDrag.reset() } }
     }
 
     private var cardTransition: AnyTransition {
@@ -120,6 +111,22 @@ struct WorkspaceCanvasView: View {
     private var boardSurface: some View {
         GeometryReader { geometry in
             boardKeys(boardChrome(boardLayers(geometry), geometry: geometry))
+        }
+        // VoiceOver's list-like path through the board: every card by its
+        // display title. Choosing one selects it and scrolls it into view;
+        // off-screen cards are not rendered, so `prepare` reveals first.
+        .accessibilityRotor("Cards") {
+            ForEach(board.cards) { card in
+                AccessibilityRotorEntry(
+                    Text(
+                        CanvasCardPresentation.displayTitle(
+                            title: card.title, content: card.content)),
+                    id: card.id, in: cardRotorNamespace
+                ) {
+                    board.select([card.id])
+                    board.revealCard(card.id)
+                }
+            }
         }
     }
 
@@ -195,6 +202,7 @@ struct WorkspaceCanvasView: View {
                     y: card.rect.y * board.viewport.scale + board.viewport.y
                 )
                 .transition(cardTransition)
+                .accessibilityRotorEntry(id: card.id, in: cardRotorNamespace)
             }
             CanvasEdgeOverlay(board: board, session: session, drag: connectionDrag)
             // X5 whiteboard
@@ -489,7 +497,7 @@ struct WorkspaceCanvasView: View {
     private var emptyBoardTip: some View {
         VStack(spacing: 14) {
             VStack(spacing: 6) {
-                Image(systemName: "square.on.square.dashed")
+                Image(systemName: CanvasBoardState.ensembleSymbol)
                     .font(.system(size: 24, weight: .light))
                     .foregroundStyle(theme.palette.textSecondary)
                     .accessibilityHidden(true)

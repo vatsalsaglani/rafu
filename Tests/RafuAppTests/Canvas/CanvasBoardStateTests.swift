@@ -12,9 +12,7 @@ struct CanvasBoardStateTests {
         try board.add(title: "Terminal", content: .terminal(groupID: TerminalGroupID()))
         let id = try #require(board.cards.first?.id)
         #expect(!board.contentIsActive)
-        board.showsList = true
         board.focus(id)
-        #expect(!board.showsList)
         #expect(board.selection == [id])
         #expect(board.focusedCardID == id)
         #expect(board.contentIsActive)
