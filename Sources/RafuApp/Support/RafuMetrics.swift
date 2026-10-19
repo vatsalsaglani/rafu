@@ -21,7 +21,7 @@ nonisolated enum RafuMetrics {
     // deliberately leave radiusPanel intact.
     static let workbenchInset: CGFloat = 8
     static let editorGroupGapTarget: CGFloat = 4
-    static let radiusWorkbenchDeck: CGFloat = 10
+    static let radiusWorkbenchDeck: CGFloat = 12
     static let radiusEditorGroup: CGFloat = 5
     /// Soft shadow cast by the raised workbench deck onto the frame beneath
     /// it (frame + card redesign, phase 1). Radius + vertical offset stay

@@ -160,6 +160,9 @@ struct EditorTabStripDropRoutingTests {
     func tabHalvesResolve() throws {
         let fixture = try StripDropFixture(tabCount: 12)
         defer { fixture.remove() }
+        // The strip opens scrolled to reveal its selected (last) tab; the
+        // slots below are measured from the leading edge.
+        try fixture.scrollStrip(by: 0)
         try verifyHalves(fixture, slots: [1, 4, 6])
     }
 

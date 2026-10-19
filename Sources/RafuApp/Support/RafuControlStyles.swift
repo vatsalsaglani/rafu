@@ -91,9 +91,12 @@ struct RafuIconButtonStyle: ButtonStyle {
     }
 }
 
-/// Compact activity-rail button with a close-fit selected shape and a
-/// deck-facing bar. Selection, hover, press, disabled, inactive-window, badge,
-/// tooltip, and accessibility states remain separate and theme-owned.
+/// Compact activity-rail button: the selected destination is a filled
+/// rounded square (`selection`), hover is a quieter `hover` wash, and there
+/// is no hairline border and no accent side bar. Selection, hover, press,
+/// disabled, inactive-window, badge, tooltip, and accessibility states
+/// remain separate and theme-owned. `deckFacingEdge` is kept for callers
+/// (and a possible right-hand rail); it no longer draws anything.
 struct RafuRailButtonStyle: ButtonStyle {
     var isSelected = false
     var deckFacingEdge: HorizontalEdge = .trailing
@@ -104,7 +107,6 @@ struct RafuRailButtonStyle: ButtonStyle {
         StyleBody(
             configuration: configuration,
             isSelected: isSelected,
-            deckFacingEdge: deckFacingEdge,
             tooltip: tooltip,
             badge: badge
         )
@@ -113,7 +115,6 @@ struct RafuRailButtonStyle: ButtonStyle {
     private struct StyleBody: View {
         let configuration: Configuration
         let isSelected: Bool
-        let deckFacingEdge: HorizontalEdge
         let tooltip: String
         let badge: Int?
 
@@ -125,30 +126,12 @@ struct RafuRailButtonStyle: ButtonStyle {
         var body: some View {
             configuration.label
                 .labelStyle(.iconOnly)
-                .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(foreground)
                 .frame(width: 30, height: 30)
                 .background {
-                    RoundedRectangle(
-                        cornerRadius: RafuMetrics.radiusDenseSelection,
-                        style: .continuous
-                    )
-                    .fill(background)
-                }
-                .overlay {
-                    RoundedRectangle(
-                        cornerRadius: RafuMetrics.radiusDenseSelection,
-                        style: .continuous
-                    )
-                    .strokeBorder(boundary, lineWidth: RafuMetrics.hairline)
-                }
-                .overlay(alignment: deckFacingEdge == .leading ? .leading : .trailing) {
-                    if isSelected {
-                        RoundedRectangle(cornerRadius: 1, style: .continuous)
-                            .fill(selectedAccent)
-                            .frame(width: 2, height: 16)
-                            .padding(.vertical, 7)
-                    }
+                    RoundedRectangle(cornerRadius: RafuMetrics.radiusField, style: .continuous)
+                        .fill(background)
                 }
                 .overlay(alignment: .topTrailing) {
                     if let badge, badge > 0 {
@@ -162,10 +145,7 @@ struct RafuRailButtonStyle: ButtonStyle {
                     }
                 }
                 .contentShape(
-                    RoundedRectangle(
-                        cornerRadius: RafuMetrics.radiusDenseSelection,
-                        style: .continuous
-                    )
+                    RoundedRectangle(cornerRadius: RafuMetrics.radiusField, style: .continuous)
                 )
                 .onHover { isHovering = $0 }
                 .help(tooltip)
@@ -179,30 +159,19 @@ struct RafuRailButtonStyle: ButtonStyle {
 
         private var foreground: Color {
             guard isEnabled else { return theme.palette.textMuted }
+            // An inactive window keeps the selected fill but quiets the
+            // glyph, the way native sidebars dim their selection.
             if isSelected {
-                return isInactiveWindow ? theme.palette.textPrimary : theme.palette.accent
+                return isInactiveWindow ? theme.palette.textSecondary : theme.palette.textPrimary
             }
             if configuration.isPressed || isHovering { return theme.palette.textPrimary }
             return theme.palette.textSecondary
         }
 
         private var background: Color {
-            if configuration.isPressed { return theme.palette.selection }
-            if isSelected {
-                return isInactiveWindow ? theme.palette.selection : theme.palette.accentSoft
-            }
+            if configuration.isPressed || isSelected { return theme.palette.selection }
             if isHovering { return theme.palette.hover }
             return .clear
-        }
-
-        private var boundary: Color {
-            if isSelected { return theme.palette.borderStrong }
-            if configuration.isPressed { return theme.palette.borderSubtle }
-            return .clear
-        }
-
-        private var selectedAccent: Color {
-            isInactiveWindow ? theme.palette.borderStrong : theme.palette.accent
         }
 
         private var accessibilityValue: String {

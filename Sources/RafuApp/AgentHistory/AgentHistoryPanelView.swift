@@ -398,7 +398,7 @@ struct AgentHistorySessionMenuItems: View {
         Button("Resume in Terminal", systemImage: "terminal") {
             session.resumeAgentSession(summary)
         }
-        Button("Resume in Ensemble", systemImage: "rectangle.3.group") {
+        Button("Resume in Ensemble", systemImage: CanvasBoardState.ensembleSymbol) {
             session.resumeAgentSessionInEnsemble(summary)
         }
         AgentHandoffMenuItems(session: session, summary: summary)

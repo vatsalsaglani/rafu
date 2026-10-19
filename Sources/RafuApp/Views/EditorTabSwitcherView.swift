@@ -219,7 +219,7 @@ struct EditorTabSwitcherOverlay: View {
                 return Presentation(
                     title: session.canvas.boards[id]?.title ?? "Ensemble",
                     detail: editorDetail(groupID: groupID, suffix: "Ensemble"),
-                    symbolName: "rectangle.3.group",
+                    symbolName: CanvasBoardState.ensembleSymbol,
                     isDirty: session.canvas.boards[id]?.isDirty == true)
             case .terminalGroup:
                 return Presentation(

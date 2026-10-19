@@ -6,6 +6,7 @@ import SwiftUI
 nonisolated enum WorkbenchPaletteRole: Equatable, Sendable {
     case clear
     case editorBackground
+    case elevatedBackground
     case tabActiveBackground
     case chipBackground
     case borderSubtle
@@ -47,27 +48,30 @@ nonisolated enum WorkbenchTextHeightPolicy {
     }
 }
 
-/// Window redesign phase 4: tabs are detached rounded cards, not attached
-/// caps with an open bottom edge. The selected tab is raised — a filled
-/// card, a hairline border on all four edges, and a soft shadow; an inactive
-/// tab is a quiet fill with secondary text. There is no seam to mask because
-/// the tab no longer visually joins the content below it.
+/// Tabs are detached rounded cards that sit on the deck card's own tone
+/// (the shelf is `editorBackground`, never the frame colour). The selected
+/// tab is raised: an elevated fill, a hairline border on all four edges, and
+/// a soft shadow. An inactive tab has no fill at all, only secondary text, so
+/// the header row reads as part of the card instead of a strip of chips.
+/// Increase Contrast promotes the selected hairline to `borderStrong`; the
+/// light theme relies on that hairline because its elevated fill (white) is
+/// close to the card tone.
 nonisolated struct AttachedWorkbenchTabPresentation: Equatable, Sendable {
     let fill: WorkbenchPaletteRole
     let outline: WorkbenchPaletteRole
     let outlineEdges: Set<WorkbenchBorderEdge>
 
-    static func resolve(isSelected: Bool) -> Self {
+    static func resolve(isSelected: Bool, contrastIncreased: Bool = false) -> Self {
         guard isSelected else {
             return Self(
-                fill: .chipBackground,
+                fill: .clear,
                 outline: .clear,
                 outlineEdges: []
             )
         }
         return Self(
-            fill: .tabActiveBackground,
-            outline: .borderStrong,
+            fill: .elevatedBackground,
+            outline: contrastIncreased ? .borderStrong : .borderSubtle,
             outlineEdges: [.top, .leading, .trailing, .bottom]
         )
     }
@@ -180,10 +184,11 @@ nonisolated enum WorkbenchDeckShadowStyle {
 }
 
 /// Makes the complete tab shape (padding, minimum width and height included)
-/// select the tab. Without it only the inner label button is hit-testable, so
-/// the padding around the label swallows clicks. Child buttons (the label and
-/// the close button) keep priority in their own areas, so "Close" never also
-/// selects. The inner label button stays the single accessibility element.
+/// the one click target that selects the tab. The label is plain content,
+/// never a `Button`: a button's press tracking owns the mouse-down over the
+/// icon and title, so the tab's `.onDrag` could start only from the padding.
+/// The close button stays a `Button` and keeps priority in its own area, so
+/// "Close" never also selects.
 private struct AttachedWorkbenchTabSelectTarget: ViewModifier {
     let select: (() -> Void)?
 
@@ -195,6 +200,38 @@ private struct AttachedWorkbenchTabSelectTarget: ViewModifier {
         } else {
             content
         }
+    }
+}
+
+/// Accessibility for a tab card's plain label (icon + title, no `Button`):
+/// one element that VoiceOver and Full Keyboard Access read as a button,
+/// with the selected trait and a default action that selects the tab. The
+/// close button stays its own element beside it.
+struct WorkbenchTabLabelAccessibility: ViewModifier {
+    let label: String
+    var value: String = ""
+    let isSelected: Bool
+    let select: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .contentShape(.rect)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(label)
+            .accessibilityValue(value)
+            .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+            .accessibilityAction { select() }
+    }
+}
+
+extension View {
+    /// See `WorkbenchTabLabelAccessibility`.
+    func workbenchTabLabel(
+        _ label: String, value: String = "", isSelected: Bool, select: @escaping () -> Void
+    ) -> some View {
+        modifier(
+            WorkbenchTabLabelAccessibility(
+                label: label, value: value, isSelected: isSelected, select: select))
     }
 }
 
@@ -212,6 +249,9 @@ struct AttachedWorkbenchTab<Content: View>: View {
     @Environment(\.rafuTheme) private var theme
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @ScaledMetric(relativeTo: .body) private var scaledHeight = RafuMetrics.tabBarHeight
+    /// Hover wash for an unselected (unfilled) tab. Owned here so every tab
+    /// kind gets the same feedback without its own background layer.
+    @State private var isHovering = false
 
     init(
         isSelected: Bool,
@@ -226,7 +266,10 @@ struct AttachedWorkbenchTab<Content: View>: View {
     }
 
     var body: some View {
-        let presentation = AttachedWorkbenchTabPresentation.resolve(isSelected: isSelected)
+        let presentation = AttachedWorkbenchTabPresentation.resolve(
+            isSelected: isSelected,
+            contrastIncreased: colorSchemeContrast == .increased
+        )
         content
             .foregroundStyle(
                 isSelected ? theme.palette.textPrimary : theme.palette.textSecondary
@@ -239,7 +282,11 @@ struct AttachedWorkbenchTab<Content: View>: View {
             )
             .background {
                 RoundedRectangle(cornerRadius: RafuMetrics.radiusWorkbenchTab, style: .continuous)
-                    .fill(theme.palette.workbenchColor(for: presentation.fill))
+                    .fill(
+                        !isSelected && isHovering
+                            ? theme.palette.hover
+                            : theme.palette.workbenchColor(for: presentation.fill)
+                    )
                     .shadow(
                         color: isSelected
                             ? WorkbenchDeckShadowStyle.color(
@@ -265,6 +312,7 @@ struct AttachedWorkbenchTab<Content: View>: View {
                 }
             }
             .modifier(AttachedWorkbenchTabSelectTarget(select: select))
+            .onHover { isHovering = $0 }
             .zIndex(isSelected ? 1 : 0)
             .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
@@ -634,6 +682,7 @@ extension RafuThemePalette {
         switch role {
         case .clear: .clear
         case .editorBackground: editorBackground
+        case .elevatedBackground: elevatedBackground
         case .tabActiveBackground: tabActiveBackground
         case .chipBackground: chipBackground
         case .borderSubtle: borderSubtle

@@ -595,14 +595,14 @@ struct CommandPaletteView: View {
     private func makeCommands() -> [PaletteCommand] {
         var commands: [PaletteCommand] = [
             .init(
-                title: "New Ensemble…", symbolName: "rectangle.3.group",
+                title: "New Ensemble…", symbolName: CanvasBoardState.ensembleSymbol,
                 keywords: ["board", "spatial"]
             ) {
                 dismiss()
                 session.requestNewCanvas()
             },
             .init(
-                title: "Open Ensemble…", symbolName: "rectangle.3.group",
+                title: "Open Ensemble…", symbolName: CanvasBoardState.ensembleSymbol,
                 keywords: ["board", "saved"]
             ) {
                 dismiss()
@@ -1296,7 +1296,8 @@ struct CommandPaletteView: View {
                 session.resumeAgentSession(summary)
             },
             .init(
-                title: "Agent Session: Resume in Ensemble", symbolName: "rectangle.3.group",
+                title: "Agent Session: Resume in Ensemble",
+                symbolName: CanvasBoardState.ensembleSymbol,
                 keywords: ["claude", "codex", "history", "continue", "board"]
             ) {
                 dismiss()

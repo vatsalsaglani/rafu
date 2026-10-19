@@ -10,7 +10,7 @@ struct RafuWorkbenchStyleContractTests {
     func compactMetrics() {
         #expect(RafuMetrics.workbenchInset == 8)
         #expect(RafuMetrics.editorGroupGapTarget == 4)
-        #expect(RafuMetrics.radiusWorkbenchDeck == 10)
+        #expect(RafuMetrics.radiusWorkbenchDeck == 12)
         #expect(RafuMetrics.radiusEditorGroup == 5)
         // The shadow must stay inside the deck lane's 8 pt gutter, or the
         // lane would clip it.
@@ -116,17 +116,30 @@ struct RafuWorkbenchStyleContractTests {
         #expect(source.contains("FillStyle(eoFill: true)"))
     }
 
-    @Test("Inactive tabs are a quiet fill; the selected tab is a fully outlined raised card")
-    func attachedTabGeometry() {
+    @Test("Inactive tabs are unfilled; the selected tab is a fully outlined raised card")
+    func attachedTabGeometry() throws {
         let inactive = AttachedWorkbenchTabPresentation.resolve(isSelected: false)
-        #expect(inactive.fill == .chipBackground)
+        #expect(inactive.fill == .clear)
         #expect(inactive.outline == .clear)
         #expect(inactive.outlineEdges.isEmpty)
 
         let selected = AttachedWorkbenchTabPresentation.resolve(isSelected: true)
-        #expect(selected.fill == .tabActiveBackground)
-        #expect(selected.outline == .borderStrong)
+        #expect(selected.fill == .elevatedBackground)
+        #expect(selected.outline == .borderSubtle)
         #expect(selected.outlineEdges == [.top, .leading, .trailing, .bottom])
+
+        let source = try Self.workbenchStyleSource()
+        #expect(source.contains("case .elevatedBackground: elevatedBackground"))
+        let tabSection = try Self.section(
+            of: source,
+            from: "struct AttachedWorkbenchTab<Content: View>: View",
+            to: "/// What the trailing slot of an editor tab shows."
+        )
+        // Increase Contrast promotes the selected hairline; hover washes only
+        // an unselected tab.
+        #expect(tabSection.contains("contrastIncreased: colorSchemeContrast == .increased"))
+        #expect(tabSection.contains("!isSelected && isHovering"))
+        #expect(tabSection.contains("theme.palette.hover"))
     }
 
     @Test("Text-bearing chrome uses scalable minimums instead of fixed clipping boxes")
@@ -394,6 +407,33 @@ struct RafuWorkbenchStyleContractTests {
         let railEnd = try #require(railTail.range(of: "struct RafuProminentButtonStyle"))
         let railSource = String(railTail[..<railEnd.lowerBound])
         #expect(!railSource.contains(".animation("))
+        // Selected is a filled rounded square: no hairline, no side bar.
+        #expect(!railSource.contains("strokeBorder"))
+        #expect(!railSource.contains(".frame(width: 2, height: 16)"))
+        #expect(railSource.contains("cornerRadius: RafuMetrics.radiusField"))
+        #expect(!railSource.contains("radiusDenseSelection"))
+        #expect(railSource.contains("return theme.palette.selection"))
+        #expect(railSource.contains(".font(.system(size: 14, weight: .medium))"))
+    }
+
+    @Test("The sidebar seam draws nothing at rest and a grab bar only on hover or drag")
+    func sidebarSeamIsIdleClear() throws {
+        let source = try Self.source("Sources/RafuApp/Views/WorkbenchSplitHandle.swift")
+        let seam = try Self.section(
+            of: source, from: "private var seam: some View", to: "// MARK: - Drag")
+        let hoverBranch = try #require(seam.range(of: "if isHovering || isDragging {"))
+        let grabBar = try #require(seam.range(of: ".fill(theme.palette.borderStrong)"))
+        let idleBranch = try #require(seam.range(of: "} else {"))
+        #expect(hoverBranch.lowerBound < grabBar.lowerBound)
+        #expect(grabBar.lowerBound < idleBranch.lowerBound)
+        let idle = String(seam[idleBranch.upperBound...])
+        #expect(idle.contains("Color.clear"))
+        #expect(!idle.contains(".fill("))
+        #expect(!seam.contains("borderSubtle"))
+        // Hit area, cursor, and VoiceOver adjustment are unchanged.
+        #expect(source.contains("static let hitAreaWidth: CGFloat = 10"))
+        #expect(source.contains("NSCursor.resizeLeftRight.push()"))
+        #expect(source.contains(".accessibilityAdjustableAction(handleAccessibilityAdjustment)"))
     }
 
     private static func workbenchStyleSource() throws -> String {

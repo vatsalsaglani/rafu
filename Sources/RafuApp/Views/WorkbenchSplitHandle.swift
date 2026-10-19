@@ -40,8 +40,8 @@ nonisolated enum WorkbenchSidebarResize {
 }
 
 /// The explicit boundary between the left sidebar and the workbench deck
-/// (window redesign phase 3). It renders a 1 pt seam inside a wider hit
-/// area, resizes `session.sidebarWidth` live while dragging, and collapses
+/// (window redesign phase 3). It draws nothing at rest and a short grab bar
+/// on hover or drag, inside a wider hit area; it resizes `session.sidebarWidth` live while dragging, and collapses
 /// or reopens the sidebar at `WorkbenchSidebarResize`'s thresholds. It stays
 /// present at the collapsed edge (right after the Activity Rail) so a drag
 /// outward can reopen the sidebar without a separate affordance.
@@ -57,7 +57,7 @@ struct WorkbenchSplitHandle: View {
     /// threshold.
     @State private var dragStartWidth: Double?
 
-    /// The hit area's full width; the drawn seam is 1 pt, centred inside it.
+    /// The hit area's full width; the hover grab bar is centred inside it.
     static let hitAreaWidth: CGFloat = 10
     private static let grabBarSize = CGSize(width: 3, height: 28)
 
@@ -92,10 +92,10 @@ struct WorkbenchSplitHandle: View {
                 .fill(theme.palette.borderStrong)
                 .frame(width: Self.grabBarSize.width, height: Self.grabBarSize.height)
         } else {
-            Rectangle()
-                .fill(theme.palette.borderSubtle)
-                .frame(width: 1)
-                .frame(maxHeight: .infinity)
+            // Idle: nothing drawn. The deck card's own hairline is the one
+            // line between the sidebar and the content; a second 1 pt seam
+            // beside it read as a gutter.
+            Color.clear
         }
     }
 

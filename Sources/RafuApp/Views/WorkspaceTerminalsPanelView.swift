@@ -754,7 +754,7 @@ private struct TerminalGroupManagerRowView: View {
                     .truncationMode(.middle)
             }
             if row.isCanvasOwned {
-                Image(systemName: "rectangle.3.group")
+                Image(systemName: CanvasBoardState.ensembleSymbol)
                     .font(.system(size: 9))
                     .foregroundStyle(theme.palette.textMuted)
                     .accessibilityLabel("On an Ensemble")

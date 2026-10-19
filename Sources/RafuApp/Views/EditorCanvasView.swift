@@ -206,7 +206,7 @@ private struct EditorGroupView: View {
                                 ContentUnavailableView {
                                     Label(
                                         "Terminal is in an Ensemble",
-                                        systemImage: "rectangle.3.group")
+                                        systemImage: CanvasBoardState.ensembleSymbol)
                                 } description: {
                                     Text("Transfer its existing view to this tab to continue here.")
                                 } actions: {
@@ -787,11 +787,14 @@ extension View {
     }
 }
 
-/// Full-width shelf the floating tab cards sit inside. Window redesign phase
-/// 4: tabs are detached rounded cards, not attached caps, so there is no
-/// shared tab/content seam for this shelf to mask — it only owns the
-/// breathing room around the cards and the one hairline border separating
-/// the strip from the editor content beneath it.
+/// Full-width shelf the floating tab cards sit inside: the header row of the
+/// deck card. It is painted in the card's own tone (`editorBackground`), not
+/// the frame's `tabBarBackground`, so the card has no frame-coloured band at
+/// its top and the tabs read as part of it. It owns the breathing room around
+/// the cards and the one hairline border separating the row from the content
+/// beneath it. Its height is FIXED (still scaled with Larger Text through
+/// `WorkbenchTextHeightPolicy`): a `minHeight` let the horizontal scroll view
+/// grow the shelf by a scroller's height the moment the tabs overflowed.
 private struct EditorTabShelf<Content: View>: View {
     @ViewBuilder let content: Content
 
@@ -806,12 +809,9 @@ private struct EditorTabShelf<Content: View>: View {
         let tabHeight = WorkbenchTextHeightPolicy.attachedTabHeight(for: scaledHeight)
         content
             .padding(.vertical, RafuMetrics.tabShelfBreathingRoom)
-            .frame(
-                maxWidth: .infinity,
-                minHeight: WorkbenchTextHeightPolicy.tabShelfHeight(forTabHeight: tabHeight),
-                alignment: .center
-            )
-            .background(theme.palette.tabBarBackground)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .frame(height: WorkbenchTextHeightPolicy.tabShelfHeight(forTabHeight: tabHeight))
+            .background(theme.palette.editorBackground)
             .overlay(alignment: .bottom) {
                 Rectangle()
                     .fill(theme.palette.borderSubtle)
@@ -1156,14 +1156,17 @@ private struct EditorGroupTabBar: View {
     /// compare directly: the frames already include the strip's leading
     /// inset, spacing, and current scroll offset.
     private static let coordinateSpaceName = "editorTabStrip"
+    /// Inset of the tab row inside the scrolling strip, each side.
+    private static let stripMargin: CGFloat = RafuMetrics.space2
 
     @Environment(\.rafuTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var stripGeometry = TabStripGeometry()
     @State private var hoveredInsertion: TabStripInsertion?
-    /// Visible width of the scrolling strip. The tab row stretches to at
-    /// least this width, leading-aligned, so a short row starts at the
-    /// strip's leading edge and its empty remainder stays hit-testable.
+    /// Visible width of the scrolling strip inside its horizontal content
+    /// margins. The tab row stretches to at least this width,
+    /// leading-aligned, so a short row starts at the strip's leading edge and
+    /// its empty remainder stays hit-testable.
     @State private var stripViewportWidth: CGFloat = 0
 
     let group: EditorGroupState
@@ -1173,59 +1176,67 @@ private struct EditorGroupTabBar: View {
     var body: some View {
         EditorTabShelf {
             HStack(spacing: 0) {
-                ScrollView(.horizontal) {
-                    HStack(spacing: RafuMetrics.space1) {
-                        ForEach(group.tabs) { tab in
-                            tabRow(for: tab)
-                                .background {
-                                    GeometryReader { proxy in
-                                        Color.clear.preference(
-                                            key: TabStripFramePreferenceKey.self,
-                                            value: [
-                                                tab.id: proxy.frame(
-                                                    in: .named(Self.coordinateSpaceName))
-                                            ]
-                                        )
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal) {
+                        HStack(spacing: RafuMetrics.space1) {
+                            ForEach(group.tabs) { tab in
+                                tabRow(for: tab)
+                                    .background {
+                                        GeometryReader { geometry in
+                                            Color.clear.preference(
+                                                key: TabStripFramePreferenceKey.self,
+                                                value: [
+                                                    tab.id: geometry.frame(
+                                                        in: .named(Self.coordinateSpaceName))
+                                                ]
+                                            )
+                                        }
                                     }
-                                }
-                        }
-                        ForEach(session.auxiliaryTabs(in: group.id)) { tab in
-                            if case .gitDiff = tab, let openDiff = session.gitOpenDiff {
-                                GitDiffTabItem(
-                                    openDiff: openDiff,
-                                    isSelected: session.selectedAuxiliaryTab(in: group.id) == tab,
-                                    select: { session.selectAuxiliaryTab(tab) },
-                                    close: { session.closeAuxiliaryTab(tab) }
-                                )
-                            } else {
-                                AuxiliaryEditorTabItem(
-                                    tab: tab,
-                                    isSelected: session.selectedAuxiliaryTab(in: group.id) == tab,
-                                    select: { session.selectAuxiliaryTab(tab) },
-                                    close: { session.closeAuxiliaryTab(tab) }
-                                )
+                                    .id(tab.id)
+                            }
+                            ForEach(session.auxiliaryTabs(in: group.id)) { auxTab in
+                                auxiliaryTabRow(for: auxTab)
+                                    .id(auxTab)
                             }
                         }
+                        // Forces the enclosing NSScrollView's scrollers off
+                        // (and to the overlay style) even when System
+                        // Settings requests always-visible bars, so the row
+                        // never reserves a scroller's height on overflow.
+                        .background(ScrollerHidingConfigurator())
+                        .frame(minWidth: stripViewportWidth, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
-                    // Forces the enclosing NSScrollView's legacy scroller off
-                    // even when System Settings requests always-visible bars.
-                    .background(ScrollerHidingConfigurator())
-                    .frame(minWidth: stripViewportWidth, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .scrollIndicators(.hidden)
-                .onGeometryChange(for: CGFloat.self) {
-                    $0.size.width
-                } action: {
-                    stripViewportWidth = $0
+                    // The first tab never touches the card's edge, and
+                    // `scrollTo` keeps a revealed tab clear of the trailing
+                    // fade, because it scrolls within these margins.
+                    .contentMargins(.horizontal, Self.stripMargin, for: .scrollContent)
+                    .scrollIndicators(.never)
+                    .onGeometryChange(for: CGFloat.self) {
+                        $0.size.width
+                    } action: {
+                        // The row fills the strip inside its content margins.
+                        stripViewportWidth = max(0, $0 - Self.stripMargin * 2)
+                    }
+                    // Keep the selected tab visible: a newly opened tab is
+                    // appended past the trailing edge once the row overflows,
+                    // and a tab picked from the overflow menu may be scrolled
+                    // away. `anchor: nil` scrolls only as far as needed, and
+                    // never animates (tab changes are immediate).
+                    .onAppear { revealSelectedTab(with: proxy) }
+                    .onChange(of: group.selectedTabID) { revealSelectedTab(with: proxy) }
+                    .onChange(of: session.selectedAuxiliaryTab(in: group.id)) {
+                        revealSelectedTab(with: proxy)
+                    }
+                    .onChange(of: group.tabs.count) { revealSelectedTab(with: proxy) }
                 }
                 // Tabs scroll under a trailing fade, so the fixed controls
                 // below never overlap (or clip) a tab or its close button.
                 .overlay(alignment: .trailing) {
                     LinearGradient(
                         colors: [
-                            theme.palette.tabBarBackground.opacity(0),
-                            theme.palette.tabBarBackground,
+                            theme.palette.editorBackground.opacity(0),
+                            theme.palette.editorBackground,
                         ],
                         startPoint: .leading,
                         endPoint: .trailing
@@ -1301,6 +1312,43 @@ private struct EditorGroupTabBar: View {
         }
     }
 
+    /// Scrolls the strip just far enough to show the selected tab (an
+    /// auxiliary tab when one is selected). No animation: tab and cursor
+    /// changes are immediate. Deferred one turn so a tab appended in the
+    /// same update is laid out before the scroll view resolves its id.
+    private func revealSelectedTab(with proxy: ScrollViewProxy) {
+        let target: AnyHashable?
+        if let auxTab = session.selectedAuxiliaryTab(in: group.id) {
+            target = AnyHashable(auxTab)
+        } else {
+            target = group.selectedTabID.map(AnyHashable.init)
+        }
+        guard let target else { return }
+        proxy.scrollTo(target, anchor: nil)
+        Task { @MainActor in
+            proxy.scrollTo(target, anchor: nil)
+        }
+    }
+
+    @ViewBuilder
+    private func auxiliaryTabRow(for tab: WorkspaceAuxiliaryTab) -> some View {
+        if case .gitDiff = tab, let openDiff = session.gitOpenDiff {
+            GitDiffTabItem(
+                openDiff: openDiff,
+                isSelected: session.selectedAuxiliaryTab(in: group.id) == tab,
+                select: { session.selectAuxiliaryTab(tab) },
+                close: { session.closeAuxiliaryTab(tab) }
+            )
+        } else {
+            AuxiliaryEditorTabItem(
+                tab: tab,
+                isSelected: session.selectedAuxiliaryTab(in: group.id) == tab,
+                select: { session.selectAuxiliaryTab(tab) },
+                close: { session.closeAuxiliaryTab(tab) }
+            )
+        }
+    }
+
     private var selectedDocument: EditorDocument? {
         guard session.selectedAuxiliaryTab(in: group.id) == nil,
             let selectedTabID = group.selectedTabID,
@@ -1328,7 +1376,7 @@ private struct EditorGroupTabBar: View {
                 session.newTerminalGroup()
             }
             .disabled(session.isTerminalGroupModalInputBlocked)
-            Button("New Ensemble", systemImage: "square.on.square.dashed") {
+            Button("New Ensemble", systemImage: CanvasBoardState.ensembleSymbol) {
                 session.editorLayout.focus(group.id)
                 session.requestNewCanvas()
             }
@@ -1470,7 +1518,8 @@ private struct EditorGroupTabBar: View {
             }
         case .canvas(let id):
             overflowTabMenuButton(
-                title: session.canvas.boards[id]?.title ?? "Ensemble", glyph: "rectangle.3.group",
+                title: session.canvas.boards[id]?.title ?? "Ensemble",
+                glyph: CanvasBoardState.ensembleSymbol,
                 isDirty: false, tab: tab)
         case .restorable:
             EmptyView()
@@ -1493,25 +1542,6 @@ private struct EditorGroupTabBar: View {
         .accessibilityValue(
             [isSelected ? "Selected" : nil, isDirty ? "Unsaved changes" : nil]
                 .compactMap(\.self).joined(separator: ", "))
-    }
-}
-
-/// Secondary stitched motif on the selected cap's top edge. The attached fill
-/// and open-bottom outline remain the primary grayscale selection signal.
-private struct StitchedAccentEdge: View {
-    let color: Color
-
-    var body: some View {
-        Canvas { context, size in
-            var path = Path()
-            path.move(to: CGPoint(x: 2, y: size.height / 2))
-            path.addLine(to: CGPoint(x: size.width - 2, y: size.height / 2))
-            context.stroke(
-                path, with: .color(color),
-                style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [5, 3.5]))
-        }
-        .frame(height: 2)
-        .accessibilityHidden(true)
     }
 }
 
@@ -1543,9 +1573,6 @@ private struct GitStandaloneBlameCanvas: View {
                             )
                             .opacity(isHoveringTab ? 1 : 0.75)
                         }
-                    }
-                    .overlay(alignment: .top) {
-                        StitchedAccentEdge(color: theme.palette.accent)
                     }
                     .help("Blame • \(fileName)")
                     .accessibilityLabel("Blame • \(fileName)")
@@ -1720,21 +1747,18 @@ private struct GitDiffTabItem: View {
     var body: some View {
         AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true, select: select) {
             HStack(spacing: 6) {
-                Button(action: select) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.left.arrow.right")
-                            .font(.system(size: 11))
-                            .foregroundStyle(theme.palette.info)
-                            .accessibilityHidden(true)
-                        Text(openDiff.title)
-                            .lineLimit(1)
-                            .help(openDiff.title)
-                    }
-                    .contentShape(.rect)
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.palette.info)
+                        .accessibilityHidden(true)
+                    Text(openDiff.title)
+                        .lineLimit(1)
+                        .help(openDiff.title)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(openDiff.title)
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .workbenchTabLabel(
+                    openDiff.title, value: isSelected ? "Selected" : "", isSelected: isSelected,
+                    select: select)
                 AttachedWorkbenchTabCloseButton(
                     accessibilityLabel: "Close \(openDiff.title)",
                     help: "Close \(openDiff.title)",
@@ -1745,17 +1769,6 @@ private struct GitDiffTabItem: View {
                     ),
                     action: close
                 )
-            }
-        }
-        .background {
-            if isHovering && !isSelected {
-                RoundedRectangle(cornerRadius: RafuMetrics.radiusWorkbenchTab, style: .continuous)
-                    .fill(theme.palette.hover.opacity(0.6))
-            }
-        }
-        .overlay(alignment: .top) {
-            if isSelected {
-                StitchedAccentEdge(color: theme.palette.accent)
             }
         }
         .onHover { isHovering = $0 }
@@ -1783,31 +1796,22 @@ private struct EditorTabItem: View {
         let selectTab = { session.selectEditorTabFromClick(tabID, in: groupID) }
         AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true, select: selectTab) {
             HStack(spacing: 6) {
-                Button {
-                    session.selectEditorTabFromClick(tabID, in: groupID)
-                } label: {
-                    HStack(spacing: 6) {
-                        FileIconView(icon: icon, size: 13)
-                            .fixedSize()
-                        Text(document.displayName)
-                            .lineLimit(1)
-                            .foregroundStyle(
-                                isSelected
-                                    ? theme.palette.textPrimary : theme.palette.textSecondary
-                            )
-                            .layoutPriority(1)
-                            .help(document.displayName)
-                    }
-                    .contentShape(.rect)
+                HStack(spacing: 6) {
+                    FileIconView(icon: icon, size: 13)
+                        .fixedSize()
+                    Text(document.displayName)
+                        .lineLimit(1)
+                        .foregroundStyle(
+                            isSelected
+                                ? theme.palette.textPrimary : theme.palette.textSecondary
+                        )
+                        .layoutPriority(1)
+                        .help(document.displayName)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(
-                    isSelected ? theme.palette.textPrimary : theme.palette.textSecondary
-                )
                 .layoutPriority(1)
-                .accessibilityLabel(document.displayName)
-                .accessibilityValue(documentTabAccessibilityValue)
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .workbenchTabLabel(
+                    document.displayName, value: documentTabAccessibilityValue,
+                    isSelected: isSelected, select: selectTab)
 
                 AttachedWorkbenchTabCloseButton(
                     accessibilityLabel: "Close \(document.displayName)",
@@ -1824,17 +1828,6 @@ private struct EditorTabItem: View {
             }
         }
         .fixedSize(horizontal: true, vertical: false)
-        .background {
-            if isHovering && !isSelected {
-                RoundedRectangle(cornerRadius: RafuMetrics.radiusWorkbenchTab, style: .continuous)
-                    .fill(theme.palette.hover.opacity(0.6))
-            }
-        }
-        .overlay(alignment: .top) {
-            if isSelected {
-                StitchedAccentEdge(color: theme.palette.accent)
-            }
-        }
         .onHover { isHovering = $0 }
         .tabHoverPreview(
             isHovering: isHovering,
@@ -1938,52 +1931,43 @@ private struct EditorTerminalTabItem: View {
         let activityKind = EditorTabActivityKind.from(activity.status)
         AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true, select: selectTab) {
             HStack(spacing: 6) {
-                Button {
-                    session.selectEditorTab(tabID, in: groupID)
-                } label: {
-                    HStack(spacing: 6) {
-                        // An agent terminal shows its VENDOR mark; the generic
-                        // terminal glyph remains the login-shell fallback.
-                        if let provider = controller.resolvedAgentProvider {
-                            AgentIconView(cli: provider, size: 13)
-                                .fixedSize()
-                                .accessibilityHidden(true)
-                        } else {
-                            Image(systemName: "terminal")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(theme.palette.textSecondary)
-                                .fixedSize()
-                                .accessibilityHidden(true)
-                        }
-                        Text(title)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .foregroundStyle(
-                                isSelected
-                                    ? theme.palette.textPrimary : theme.palette.textSecondary
-                            )
-                            .layoutPriority(1)
-                            .help(title)
-                        // Exited remains textual in accessibility and in the
-                        // content overlay; the dot is only a redundant cue.
-                        if TerminalSessionPresentation.isExited(controller.status) {
-                            Circle()
-                                .fill(theme.palette.textMuted)
-                                .frame(width: 6, height: 6)
-                                .fixedSize()
-                                .accessibilityHidden(true)
-                        }
+                HStack(spacing: 6) {
+                    // An agent terminal shows its VENDOR mark; the generic
+                    // terminal glyph remains the login-shell fallback.
+                    if let provider = controller.resolvedAgentProvider {
+                        AgentIconView(cli: provider, size: 13)
+                            .fixedSize()
+                            .accessibilityHidden(true)
+                    } else {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(theme.palette.textSecondary)
+                            .fixedSize()
+                            .accessibilityHidden(true)
                     }
-                    .contentShape(.rect)
+                    Text(title)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .foregroundStyle(
+                            isSelected
+                                ? theme.palette.textPrimary : theme.palette.textSecondary
+                        )
+                        .layoutPriority(1)
+                        .help(title)
+                    // Exited remains textual in accessibility and in the
+                    // content overlay; the dot is only a redundant cue.
+                    if TerminalSessionPresentation.isExited(controller.status) {
+                        Circle()
+                            .fill(theme.palette.textMuted)
+                            .frame(width: 6, height: 6)
+                            .fixedSize()
+                            .accessibilityHidden(true)
+                    }
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(
-                    isSelected ? theme.palette.textPrimary : theme.palette.textSecondary
-                )
                 .layoutPriority(1)
-                .accessibilityLabel(title)
-                .accessibilityValue(terminalTabAccessibilityValue(status: activity.status))
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .workbenchTabLabel(
+                    title, value: terminalTabAccessibilityValue(status: activity.status),
+                    isSelected: isSelected, select: selectTab)
 
                 AttachedWorkbenchTabCloseButton(
                     accessibilityLabel: "Close \(title)",
@@ -2001,17 +1985,6 @@ private struct EditorTerminalTabItem: View {
             }
         }
         .fixedSize(horizontal: true, vertical: false)
-        .background {
-            if isHovering && !isSelected {
-                RoundedRectangle(cornerRadius: RafuMetrics.radiusWorkbenchTab, style: .continuous)
-                    .fill(theme.palette.hover.opacity(0.6))
-            }
-        }
-        .overlay(alignment: .top) {
-            if isSelected {
-                StitchedAccentEdge(color: theme.palette.accent)
-            }
-        }
         .overlay(alignment: .leading) {
             // This exact resolved identity value also surrounds the selected
             // live tile; it has no independent precedence or fallback.
@@ -2172,25 +2145,22 @@ private struct EditorTerminalGroupTabItem: View {
                         .onSubmit(commitRename)
                         .onExitCommand(perform: cancelRename)
                 } else {
-                    Button {
-                        selectOrRename(title: title)
-                    } label: {
-                        Text(title).lineLimit(1).truncationMode(.middle)
-                            .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Terminal Group \(title)")
-                    .accessibilityAddTraits(isSelected ? .isSelected : [])
-                    .accessibilityValue(
-                        [
-                            isSelected ? "Selected" : nil,
-                            snapshot.panes.count > 1 ? "\(snapshot.panes.count) panes" : nil,
-                            attentionCount > 0
-                                ? "\(attentionCount) \(attentionCount == 1 ? "pane needs" : "panes need") attention"
-                                : nil,
-                            activity.status?.word,
-                        ]
-                        .compactMap(\.self).joined(separator: ", "))
+                    Text(title).lineLimit(1).truncationMode(.middle)
+                        .workbenchTabLabel(
+                            "Terminal Group \(title)",
+                            value: [
+                                isSelected ? "Selected" : nil,
+                                snapshot.panes.count > 1 ? "\(snapshot.panes.count) panes" : nil,
+                                attentionCount > 0
+                                    ? "\(attentionCount) \(attentionCount == 1 ? "pane needs" : "panes need") attention"
+                                    : nil,
+                                activity.status?.word,
+                            ]
+                            .compactMap(\.self).joined(separator: ", "),
+                            isSelected: isSelected,
+                            // VoiceOver's default action only selects; rename
+                            // stays on the context menu.
+                            select: { session.selectEditorTab(tabID, in: groupID) })
                 }
                 if !isRenaming {
                     if snapshot.panes.count > 1 {
@@ -2260,7 +2230,7 @@ private struct EditorTerminalGroupTabItem: View {
             Button("Split Right", systemImage: "rectangle.split.2x1") {
                 session.splitEditorTab(tabID, at: .trailing)
             }
-            Button("Move to Ensemble", systemImage: "square.on.square.dashed") {
+            Button("Move to Ensemble", systemImage: CanvasBoardState.ensembleSymbol) {
                 session.moveTerminalGroupToCurrentEnsemble(snapshot.id)
             }
             .disabled(!session.canMoveTerminalGroupToEnsemble(snapshot.id))

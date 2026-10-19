@@ -35,13 +35,11 @@ struct AuxiliaryEditorTabItem: View {
     var body: some View {
         AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true, select: select) {
             HStack(spacing: 6) {
-                Button(action: select) {
-                    Label(tab.title, systemImage: tab.symbol)
-                        .lineLimit(1)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                Label(tab.title, systemImage: tab.symbol)
+                    .lineLimit(1)
+                    .workbenchTabLabel(
+                        tab.title, value: isSelected ? "Selected" : "", isSelected: isSelected,
+                        select: select)
                 AttachedWorkbenchTabCloseButton(
                     accessibilityLabel: "Close \(tab.title)",
                     help: "Close \(tab.title)",

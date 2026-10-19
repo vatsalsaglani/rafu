@@ -29,17 +29,28 @@ struct CanvasEditorTabItem: View {
 
     var body: some View {
         let activityKind: EditorTabActivityKind? = hasCardNeedingApproval ? .needsYou : nil
+        let selectTab = { session.selectEditorTab(tab.id, in: groupID) }
         AttachedWorkbenchTab(
-            isSelected: isSelected, usesDocumentWidth: true,
-            select: { session.selectEditorTab(tab.id, in: groupID) }
+            isSelected: isSelected, usesDocumentWidth: true, select: selectTab
         ) {
             HStack(spacing: 6) {
-                Image(systemName: "rectangle.3.group").accessibilityHidden(true)
-                Button(board.title) { session.selectEditorTab(tab.id, in: groupID) }
-                    .buttonStyle(.plain).lineLimit(1)
+                HStack(spacing: 6) {
+                    Image(systemName: CanvasBoardState.ensembleSymbol).accessibilityHidden(true)
+                    Text(board.title).lineLimit(1)
+                }
+                .workbenchTabLabel(
+                    board.title,
+                    value: [
+                        isSelected ? "Selected" : nil,
+                        board.isDirty ? "Modified" : nil,
+                        hasCardNeedingApproval ? "Needs approval" : nil,
+                    ]
+                    .compactMap(\.self).joined(separator: ", "),
+                    isSelected: isSelected, select: selectTab)
                 if board.isDirty {
+                    // Redundant with the label's "Modified" value.
                     Image(systemName: "circle.fill").font(.system(size: 6))
-                        .accessibilityLabel("Modified")
+                        .accessibilityHidden(true)
                 }
                 AttachedWorkbenchTabCloseButton(
                     accessibilityLabel: "Close Ensemble", help: "Close Ensemble",
@@ -50,6 +61,7 @@ struct CanvasEditorTabItem: View {
                 ) { session.closeCanvas(board.id) }
             }
         }
+        .fixedSize(horizontal: true, vertical: false)
         .onHover { isHovering = $0 }
         .tabHoverPreview(
             isHovering: isHovering,
@@ -65,7 +77,7 @@ struct CanvasEditorTabItem: View {
             },
             preview: {
                 RafuDragPreviewLabel(
-                    icon: Image(systemName: "rectangle.3.group"), title: board.title)
+                    icon: Image(systemName: CanvasBoardState.ensembleSymbol), title: board.title)
             }
         )
         .contextMenu {
@@ -74,5 +86,6 @@ struct CanvasEditorTabItem: View {
             Button("Split Right") { session.splitEditorTab(tab.id, at: .trailing) }
             Button("Close Ensemble") { session.closeCanvas(board.id) }
         }
+        .accessibilityElement(children: .contain)
     }
 }
