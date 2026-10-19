@@ -10,6 +10,17 @@ import UniformTypeIdentifiers
 /// proposal is an explicit `.copy`. AppKit can route the same drag to
 /// `CanvasScrollBridge` instead (see `CanvasBoardDropTarget`); both halves
 /// share `CanvasFileDrop`, so a drop is handled once either way.
+///
+/// While the drag hovers (`validateDrop`, `dropEntered`, `dropUpdated`),
+/// this delegate reads type presence only (`DropInfo.hasItemsConforming`)
+/// and NEVER calls `DropInfo.itemProviders(for:)`. SwiftUI writes every
+/// Rafu private drag (both private types conform to `public.data`) with a
+/// file promise. Building item providers for it outside
+/// `performDragOperation` makes `NSFilePromiseReceiver` raise
+/// `NSInternalInconsistencyException`. AppKit catches it, cancels the
+/// drag, and the unwind leaves the window's SwiftUI input dead: no tab,
+/// row, or button reacts to a click again. Providers are decoded in
+/// `performDrop` only. See `docs/references/swiftui-drop-hover-file-promise.md`.
 struct CanvasFileDropDelegate: DropDelegate {
     let boardID: CanvasID
     let session: WorkspaceSession
@@ -22,11 +33,7 @@ struct CanvasFileDropDelegate: DropDelegate {
 
     func dropEntered(info: DropInfo) {
         let valid = updatePreview(info: info)
-        DragDiag.note(
-            "board(SwiftUI) entered valid=\(valid) "
-                + "ensemble=\(!info.itemProviders(for: [.rafuEnsembleDrag]).isEmpty) "
-                + "editor=\(!info.itemProviders(for: [.rafuEditorDrag]).isEmpty) "
-                + "files=\(info.itemProviders(for: [.fileURL]).count)")
+        DragDiag.note("board(SwiftUI) entered valid=\(valid) kind=\(hoverKind(info))")
     }
 
     func dropExited(info: DropInfo) {
@@ -35,19 +42,8 @@ struct CanvasFileDropDelegate: DropDelegate {
     }
 
     func validateDrop(info: DropInfo) -> Bool {
-        if !info.itemProviders(for: [.rafuEnsembleDrag]).isEmpty {
-            return CanvasFileDrop.acceptsAgentSession(boardID: boardID, session: session)
-        }
-        if !info.itemProviders(for: [.rafuEditorDrag]).isEmpty {
-            // The session cache only hints at the kind. An editor tab is
-            // handled by the board even when no file would fit on it.
-            if case .tab? = session.activeEditorDrag {
-                return CanvasFileDrop.acceptsTab(boardID: boardID, session: session)
-            }
-            return CanvasFileDrop.accepts(count: 1, boardID: boardID, session: session)
-        }
-        let count = info.itemProviders(for: [.fileURL]).count
-        return CanvasFileDrop.accepts(count: count, boardID: boardID, session: session)
+        let kind = hoverKind(info)
+        return accepts(kind, fileCount: kind == .files ? hoverFileCount() : 0)
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
@@ -57,11 +53,21 @@ struct CanvasFileDropDelegate: DropDelegate {
 
     func performDrop(info: DropInfo) -> Bool {
         dropPreview.wrappedValue = nil
-        DragDiag.note("board(SwiftUI) performDrop valid=\(validateDrop(info: info))")
-        guard validateDrop(info: info) else { return false }
+        // `performDrop` runs inside `performDragOperation`, the one phase in
+        // which decoding item providers (and so receiving a file promise)
+        // is legal. Every provider read in this type lives below this line.
+        let kind = hoverKind(info)
+        let fileProviders = kind == .files ? info.itemProviders(for: [.fileURL]) : []
+        let valid = accepts(kind, fileCount: fileProviders.count)
+        DragDiag.note("board(SwiftUI) performDrop valid=\(valid)")
+        guard valid else { return false }
         let location = info.location
         let surface = surfaceSize
-        if let provider = info.itemProviders(for: [.rafuEnsembleDrag]).first {
+        switch kind {
+        case .ensemble:
+            guard let provider = info.itemProviders(for: [.rafuEnsembleDrag]).first else {
+                return false
+            }
             // `action` closes over only a `@MainActor` class and the board id,
             // so it is safe to hand to the off-actor load handler.
             let action: @MainActor @Sendable (CanvasBoardDragPayload?) -> Void = {
@@ -88,8 +94,10 @@ struct CanvasFileDropDelegate: DropDelegate {
                 Task { @MainActor in action(payload) }
             }
             return true
-        }
-        if let provider = info.itemProviders(for: [.rafuEditorDrag]).first {
+        case .editor:
+            guard let provider = info.itemProviders(for: [.rafuEditorDrag]).first else {
+                return false
+            }
             // A cancelled or cross-window drag can leave a stale session cache.
             // Only the incoming provider identifies this drop, so it is
             // always decoded: a file path or a tab id.
@@ -114,17 +122,59 @@ struct CanvasFileDropDelegate: DropDelegate {
                 Task { @MainActor in action(content) }
             }
             return true
-        }
-        let providers = info.itemProviders(for: [.fileURL])
-        let collector = CanvasFileDropCollector(
-            count: providers.count, boardID: boardID, location: location, session: session)
-        for (index, provider) in providers.enumerated() {
-            _ = provider.loadDataRepresentation(for: .fileURL) { data, _ in
-                let url = data.flatMap(CanvasFileDropDecoder.externalURL)
-                Task { @MainActor in collector.receive(url, at: index) }
+        case .files:
+            let collector = CanvasFileDropCollector(
+                count: fileProviders.count, boardID: boardID, location: location,
+                session: session)
+            for (index, provider) in fileProviders.enumerated() {
+                _ = provider.loadDataRepresentation(for: .fileURL) { data, _ in
+                    let url = data.flatMap(CanvasFileDropDecoder.externalURL)
+                    Task { @MainActor in collector.receive(url, at: index) }
+                }
             }
+            return true
+        case .none:
+            return false
         }
-        return true
+    }
+
+    /// What the drag carries, from type presence alone. Safe in every drag
+    /// phase: `hasItemsConforming(to:)` never builds an item provider.
+    private func hoverKind(_ info: DropInfo) -> CanvasBoardDropHoverKind {
+        CanvasBoardDropHoverKind.resolve(
+            hasEnsembleDrag: info.hasItemsConforming(to: [.rafuEnsembleDrag]),
+            hasEditorDrag: info.hasItemsConforming(to: [.rafuEditorDrag]),
+            hasFileURL: info.hasItemsConforming(to: [.fileURL]))
+    }
+
+    /// The board's acceptance rule for `kind`. `fileCount` matters only for
+    /// `.files`: the hover count from the drag pasteboard, or the real
+    /// provider count at `performDrop`.
+    private func accepts(_ kind: CanvasBoardDropHoverKind, fileCount: Int) -> Bool {
+        switch kind {
+        case .ensemble:
+            return CanvasFileDrop.acceptsAgentSession(boardID: boardID, session: session)
+        case .editor:
+            // The session cache only hints at the kind. An editor tab is
+            // handled by the board even when no file would fit on it.
+            if case .tab? = session.activeEditorDrag {
+                return CanvasFileDrop.acceptsTab(boardID: boardID, session: session)
+            }
+            return CanvasFileDrop.accepts(count: 1, boardID: boardID, session: session)
+        case .files:
+            return CanvasFileDrop.accepts(count: fileCount, boardID: boardID, session: session)
+        case .none:
+            return false
+        }
+    }
+
+    /// How many files a hovering external drag carries, read the way the
+    /// AppKit half reads them (`NSURL` objects, file URLs only, straight from
+    /// the drag pasteboard) — never through an item provider, so a file
+    /// promise is never received. At least 1: a drag that only promises its
+    /// files has no URLs until it is dropped.
+    private func hoverFileCount() -> Int {
+        max(1, CanvasBoardDropHoverKind.dragPasteboardFileURLs().count)
     }
 
     /// Updates `dropPreview` from the best hint available WITHOUT decoding
@@ -134,10 +184,11 @@ struct CanvasFileDropDelegate: DropDelegate {
     /// `performDrop`; this never drives acceptance, only the label.
     @discardableResult
     private func updatePreview(info: DropInfo) -> Bool {
-        let valid = validateDrop(info: info)
+        let kind = hoverKind(info)
+        let valid = accepts(kind, fileCount: kind == .files ? hoverFileCount() : 0)
         let preview: CanvasDropPreview? =
             valid
-            ? hintedContent(for: info).flatMap {
+            ? hintedContent(for: kind).flatMap {
                 CanvasFileDrop.preview(
                     for: $0, at: info.location, surface: surfaceSize, boardID: boardID,
                     session: session)
@@ -151,14 +202,14 @@ struct CanvasFileDropDelegate: DropDelegate {
     /// What this drag probably carries, from type presence and same-window
     /// hints only — never a provider decode. A cross-window drag with no
     /// cached hint still gets a generic, never-incorrect preview.
-    private func hintedContent(for info: DropInfo) -> CanvasBoardDropContent? {
-        if !info.itemProviders(for: [.rafuEnsembleDrag]).isEmpty {
+    private func hintedContent(for kind: CanvasBoardDropHoverKind) -> CanvasBoardDropContent? {
+        switch kind {
+        case .ensemble:
             if case .terminalGroup = session.activeEnsembleDragHint {
                 return .terminalGroup(TerminalGroupID())
             }
             return .agentSession(AgentHistorySessionKey(provider: .claudeCode, sessionID: ""))
-        }
-        if !info.itemProviders(for: [.rafuEditorDrag]).isEmpty {
+        case .editor:
             if case .tab(let id)? = session.activeEditorDrag { return .tab(id) }
             if case .file(let path)? = session.activeEditorDrag,
                 let url = CanvasFileDropDecoder.url(for: .file(path: path))
@@ -166,17 +217,43 @@ struct CanvasFileDropDelegate: DropDelegate {
                 return .files([url], fromFilesTree: true)
             }
             return .files([URL(fileURLWithPath: "/")], fromFilesTree: true)
+        case .files:
+            let urls = CanvasBoardDropHoverKind.dragPasteboardFileURLs()
+            guard !urls.isEmpty else {
+                return .files([URL(fileURLWithPath: "/placeholder")], fromFilesTree: false)
+            }
+            return .files(urls, fromFilesTree: false)
+        case .none:
+            return nil
         }
-        let fileProviders = info.itemProviders(for: [.fileURL])
-        guard !fileProviders.isEmpty else { return nil }
-        if fileProviders.count == 1,
-            fileProviders[0].hasItemConformingToTypeIdentifier(UTType.image.identifier)
-        {
-            return .files([URL(fileURLWithPath: "/placeholder.png")], fromFilesTree: false)
-        }
-        return .files(
-            Array(repeating: URL(fileURLWithPath: "/placeholder"), count: fileProviders.count),
-            fromFilesTree: false)
+    }
+}
+
+/// What a drag hovering the board carries, from type presence only, with
+/// the board's priority: `rafuEnsembleDrag` > `rafuEditorDrag` > `fileURL`.
+/// The hover half of `CanvasFileDropDelegate` decides with this instead of
+/// `DropInfo.itemProviders(for:)` (see that type's comment for why).
+nonisolated enum CanvasBoardDropHoverKind: Equatable, Sendable {
+    case ensemble
+    case editor
+    case files
+    case none
+
+    static func resolve(hasEnsembleDrag: Bool, hasEditorDrag: Bool, hasFileURL: Bool) -> Self {
+        if hasEnsembleDrag { return .ensemble }
+        if hasEditorDrag { return .editor }
+        if hasFileURL { return .files }
+        return .none
+    }
+
+    /// The acceptable local file URLs on the system drag pasteboard, read as
+    /// `NSURL` objects (file URLs only). Reading `NSURL` never constructs an
+    /// `NSFilePromiseReceiver`, so it is safe while a drag hovers.
+    @MainActor
+    static func dragPasteboardFileURLs() -> [URL] {
+        let objects = NSPasteboard(name: .drag).readObjects(
+            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+        return ((objects as? [URL]) ?? []).filter(CanvasFileDropDecoder.isAcceptable)
     }
 }
 

@@ -37,6 +37,11 @@
   registration exclusion alone. See [`appkit-drag-destination-type-precedence.md`](appkit-drag-destination-type-precedence.md)
   for the complete classification fix. The `acceptableDragTypes` exclusion
   remains useful for the internal-payload case; it is insufficient by itself.
+- Consequence (2026-10-20): because the private types conform to
+  `public.data`, SwiftUI writes every Rafu drag with a file promise. Never
+  call `DropInfo.itemProviders(for:)` while a drag hovers; it raises inside
+  `NSFilePromiseReceiver` and leaves the window's SwiftUI clicks dead. See
+  [`swiftui-drop-hover-file-promise.md`](swiftui-drop-hover-file-promise.md).
 - `DropProposal(operation: .move)` from an `.onDrag`-originated SwiftUI drag
   session can be rejected by macOS's drag source mask, silently preventing
   `performDrop` from firing even once the UTI conformance problem above is
