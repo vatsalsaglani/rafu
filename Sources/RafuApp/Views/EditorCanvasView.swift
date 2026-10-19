@@ -2248,7 +2248,13 @@ private struct EditorTabItem: View {
             value: .bounds
         ) { isSelected ? $0 : nil }
         .onHover { isHovering = $0 }
-        .onDrag { session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString)) }
+        .onDrag(
+            { session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString)) },
+            preview: {
+                RafuDragPreviewLabel(
+                    icon: FileIconView(icon: icon), title: document.displayName)
+            }
+        )
         .contextMenu {
             Button("Split Left", systemImage: "rectangle.split.2x1") {
                 session.splitEditorTab(tabID, at: .leading)
@@ -2301,6 +2307,7 @@ private struct EditorTerminalTabItem: View {
 
     var body: some View {
         let title = TerminalSessionPresentation.tabLabel(controller.presentedTitle)
+        let previewAgent = controller.resolvedAgentProvider
         let selectTab = { session.selectEditorTab(tabID, in: groupID) }
         AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true, select: selectTab) {
             HStack(spacing: 6) {
@@ -2399,7 +2406,19 @@ private struct EditorTerminalTabItem: View {
             value: .bounds
         ) { isSelected ? $0 : nil }
         .onHover { isHovering = $0 }
-        .onDrag { session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString)) }
+        .onDrag(
+            { session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString)) },
+            preview: {
+                RafuDragPreviewLabel(
+                    icon: Group {
+                        if let previewAgent {
+                            AgentIconView(cli: previewAgent, size: 13)
+                        } else {
+                            Image(systemName: "terminal").font(.system(size: 13, weight: .medium))
+                        }
+                    }, title: title)
+            }
+        )
         .contextMenu {
             Button("Split Left", systemImage: "rectangle.split.2x1") {
                 session.splitEditorTab(tabID, at: .leading)
@@ -2545,7 +2564,19 @@ private struct EditorTerminalGroupTabItem: View {
         }
         .fixedSize(horizontal: true, vertical: false)
         .onHover { isHovering = $0 }
-        .onDrag { session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString)) }
+        .onDrag(
+            { session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString)) },
+            preview: {
+                RafuDragPreviewLabel(
+                    icon: Group {
+                        if let agent {
+                            AgentIconView(cli: agent.cli, size: 13)
+                        } else {
+                            Image(systemName: "rectangle.3.group")
+                        }
+                    }, title: title)
+            }
+        )
         .contextMenu {
             Button("Rename", systemImage: "pencil") { beginRename(title: title) }
             Divider()

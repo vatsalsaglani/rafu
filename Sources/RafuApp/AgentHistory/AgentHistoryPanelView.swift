@@ -239,12 +239,18 @@ private struct AgentHistorySessionList: View {
         }
         // Drag a row onto an Ensemble to resume the session there. The
         // payload holds only the provider and the session id.
-        .onDrag {
-            session.activeEnsembleDragHint = .agentSession
-            return CanvasBoardDragPayload.agentSession(
-                provider: summary.key.provider, sessionID: summary.key.sessionID
-            ).makeItemProvider()
-        }
+        .onDrag(
+            {
+                session.activeEnsembleDragHint = .agentSession
+                return CanvasBoardDragPayload.agentSession(
+                    provider: summary.key.provider, sessionID: summary.key.sessionID
+                ).makeItemProvider()
+            },
+            preview: {
+                RafuDragPreviewLabel(
+                    icon: AgentIconView(cli: summary.provider.cli, size: 13), title: summary.title)
+            }
+        )
     }
 
     private func expansion(for id: String) -> Binding<Bool> {

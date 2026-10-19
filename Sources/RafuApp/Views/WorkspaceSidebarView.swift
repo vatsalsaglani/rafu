@@ -308,9 +308,14 @@ struct WorkspaceFileTreeItem: View {
             interactiveRow
             .contextMenu { contextMenu }
             .listRowBackground(Color.clear)
+        let icon = FileIconProvider.icon(for: node.url, isDirectory: node.isDirectory)
+        let name = node.name
         if node.isDirectory {
             base
-                .onDrag { NSItemProvider(object: node.url as NSURL) }
+                .onDrag(
+                    { NSItemProvider(object: node.url as NSURL) },
+                    preview: { RafuDragPreviewLabel(icon: FileIconView(icon: icon), title: name) }
+                )
                 .dropDestination(for: URL.self) { urls, _ in
                     Task { await session.handleTreeDrop(urls, into: node.url) }
                     return true
@@ -318,11 +323,14 @@ struct WorkspaceFileTreeItem: View {
                     isDropTargeted = $0
                 }
         } else {
-            base.onDrag {
-                let provider = session.beginEditorDrag(.file(path: node.url.path))
-                provider.registerObject(node.url as NSURL, visibility: .all)
-                return provider
-            }
+            base.onDrag(
+                {
+                    let provider = session.beginEditorDrag(.file(path: node.url.path))
+                    provider.registerObject(node.url as NSURL, visibility: .all)
+                    return provider
+                },
+                preview: { RafuDragPreviewLabel(icon: FileIconView(icon: icon), title: name) }
+            )
         }
     }
 

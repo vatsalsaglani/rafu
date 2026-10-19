@@ -25,7 +25,13 @@ struct CanvasEditorTabItem: View {
                 ) { session.closeCanvas(board.id) }
             }
         }
-        .onDrag { session.beginEditorDrag(.tab(id: tab.id.rawValue.uuidString)) }
+        .onDrag(
+            { session.beginEditorDrag(.tab(id: tab.id.rawValue.uuidString)) },
+            preview: {
+                RafuDragPreviewLabel(
+                    icon: Image(systemName: "rectangle.3.group"), title: board.title)
+            }
+        )
         .contextMenu {
             Button("Rename Ensemble…") { session.canvasDialog = .renameBoard(board.id) }
             Button("Split Left") { session.splitEditorTab(tab.id, at: .leading) }

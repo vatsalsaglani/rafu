@@ -647,10 +647,16 @@ private struct TerminalGroupManagerRowView: View {
         // (running or stopped) moves there with `moveTerminalGroupToEnsemble`
         // (lease, keeps running); the existing refusals (more than one pane,
         // already on a board, board full) apply unchanged at drop time.
-        .onDrag {
-            beginDrag()
-            return CanvasBoardDragPayload(terminalGroupID: row.id).makeItemProvider()
-        }
+        .onDrag(
+            {
+                beginDrag()
+                return CanvasBoardDragPayload(terminalGroupID: row.id).makeItemProvider()
+            },
+            preview: {
+                RafuDragPreviewLabel(
+                    icon: Image(systemName: "rectangle.3.group"), title: row.displayName)
+            }
+        )
         .onTapGesture(perform: reveal)
         .focusable()
         .onKeyPress(.return) {
