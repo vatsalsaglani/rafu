@@ -240,6 +240,16 @@ cat >"$INFO_PLIST" <<PLIST
         </array>
       </dict>
     </dict>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>dev.vatsalsaglani.rafu.ensemble-drag</string>
+      <key>UTTypeDescription</key>
+      <string>Rafu Ensemble drag item</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.data</string>
+      </array>
+    </dict>
   </array>
 </dict>
 </plist>
@@ -290,6 +300,10 @@ test "$(plutil -extract UTExportedTypeDeclarations.1.UTTypeIdentifier raw "$INFO
 # Keep the saved-workspace file type in lockstep with `UTType.rafuWorkspace`
 # and `RafuWorkspaceFile.typeIdentifier` (WorkspaceFileActions.swift).
 test "$(plutil -extract UTExportedTypeDeclarations.2.UTTypeIdentifier raw "$INFO_PLIST")" = "dev.rafu.workspace"
+# Keep the Ensemble drag type (Agent History row to board) in lockstep with
+# `UTType.rafuEnsembleDrag` in CanvasBoardDragPayload.swift. Like the editor
+# drag type, it must conform to public.data or the drag bridge drops it.
+test "$(plutil -extract UTExportedTypeDeclarations.3.UTTypeIdentifier raw "$INFO_PLIST")" = "dev.vatsalsaglani.rafu.ensemble-drag"
 test -f "$APP_RESOURCES/Themes/indigo.json"
 test -f "$APP_RESOURCES/Themes/khadi.json"
 test -f "$APP_RESOURCES/Themes/dracula.json"

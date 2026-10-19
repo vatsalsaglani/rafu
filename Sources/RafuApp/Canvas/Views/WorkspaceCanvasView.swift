@@ -241,9 +241,10 @@ struct WorkspaceCanvasView: View {
                     dismiss: { interaction.addPopoverAnchor = nil })
             }
             .onDrop(
-                of: [.rafuEditorDrag, .fileURL],
+                of: [.rafuEnsembleDrag, .rafuEditorDrag, .fileURL],
                 delegate: CanvasFileDropDelegate(
-                    boardID: board.id, session: session, isTargeted: $isDropTargeted)
+                    boardID: board.id, session: session, surfaceSize: geometry.size,
+                    isTargeted: $isDropTargeted)
             )
             .background(
                 CanvasScrollBridge(
@@ -469,6 +470,7 @@ struct WorkspaceCanvasView: View {
             VStack(alignment: .leading, spacing: 7) {
                 tipRow("cursorarrow.click.2", "Double-click the board to add a card")
                 tipRow("doc.on.doc", "Drag files here from the Files list or Finder")
+                tipRow("terminal", "Drag a History chat or a terminal tab here")
                 tipRow("hand.draw", "Drag the board to pan; Shift-drag to select")
                 tipRow(
                     "point.3.connected.trianglepath.dotted", "Drag from a card's edge to connect")

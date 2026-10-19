@@ -330,12 +330,21 @@ struct FlatWindowChrome: NSViewRepresentable {
             // (or drag-to-split) also drags the WHOLE WINDOW along. Window
             // movement is restored explicitly through `WindowDragHandle`
             // (`WindowDragGesture` bypasses `isMovable`).
-            window.isMovable = false
-            window.styleMask.insert(.fullSizeContentView)
-            window.titlebarAppearsTransparent = true
-            window.titleVisibility = .hidden
-            window.titlebarSeparatorStyle = .none
-            window.backgroundColor = titleBarColor
+            //
+            // Every tab switch re-runs this pass (and three delayed ones).
+            // Each AppKit setter below can invalidate the titlebar or the
+            // window, so assign only a value that differs from the window's
+            // live one. The result is the same; a repeated pass does no work.
+            if window.isMovable { window.isMovable = false }
+            if !window.styleMask.contains(.fullSizeContentView) {
+                window.styleMask.insert(.fullSizeContentView)
+            }
+            if !window.titlebarAppearsTransparent { window.titlebarAppearsTransparent = true }
+            if window.titleVisibility != .hidden { window.titleVisibility = .hidden }
+            if window.titlebarSeparatorStyle != .none { window.titlebarSeparatorStyle = .none }
+            if !window.backgroundColor.isEqual(titleBarColor) {
+                window.backgroundColor = titleBarColor
+            }
             cancelTitlebarSafeArea(of: window)
             scrubTitlebarBackdrop(of: window)
             applyTrafficLightVisibility(to: window)

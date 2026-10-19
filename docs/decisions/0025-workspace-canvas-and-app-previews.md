@@ -87,3 +87,19 @@ lifetime. The Canvas store owns no terminal process or full source-file text.
 Existing dirty documents and their undo stacks must survive all Canvas switches.
 Missing or corrupt saved Canvas data cannot discard the rest of the workspace.
 Multiwindow writes must detect conflicts rather than silently overwrite notes.
+
+## Amendment (2026-10-19): moving a live Terminal Group onto a board
+
+The user asked to drag terminal tabs and Agent History chats onto an Ensemble.
+A one-pane Terminal Group tab can now move onto a board by an explicit drag
+(centre zone) or the tab menu's "Move to Ensemble". The move keeps the same
+runtime owner, controller, and PTY: the process is not restarted, the tab
+leaves the editor, the group is parked, and the card takes the presentation
+lease described above. Undo removes only the card; the group stays live and
+parked and remains reachable from the Terminals list. Refused with a message:
+more than one pane, already on a loaded board, board full, or a tab from
+another window. Nothing else changes: no process starts without an explicit
+user action, no new process allowance, no change to saved-board restoration. A
+dropped Agent History row creates the existing resume card (existing
+Resume in Ensemble rules). Detail: `docs/references/canvas-interaction.md`,
+"Board drops".

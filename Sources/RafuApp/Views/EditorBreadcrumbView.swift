@@ -63,6 +63,21 @@ nonisolated enum EditorBreadcrumbPath {
             + [Segment(title: fileName, path: filePath, kind: .file)]
     }
 
+    /// Segments for one document, including the no-workspace case (only the
+    /// file). Pure and cheap, so the view computes it in `body` and the first
+    /// frame after a tab switch already shows the new path.
+    static func segments(
+        forFileAt filePath: String,
+        displayName: String,
+        rootPath: String?,
+        workspaceName: String
+    ) -> [Segment] {
+        guard let rootPath else {
+            return [Segment(title: displayName, path: filePath, kind: .file)]
+        }
+        return segments(workspaceName: workspaceName, rootPath: rootPath, filePath: filePath)
+    }
+
     private static func normalized(_ path: String) -> String {
         path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path
     }
@@ -75,11 +90,21 @@ struct EditorBreadcrumbView: View {
     @Bindable var session: WorkspaceSession
     let document: EditorDocument
 
-    @State private var segments: [EditorBreadcrumbPath.Segment] = []
+    /// Derived from the document on every render. Storing it in `@State`
+    /// filled by `.task(id:)` left the previous document's path on screen for
+    /// at least one frame after a tab switch.
+    private var currentSegments: [EditorBreadcrumbPath.Segment] {
+        EditorBreadcrumbPath.segments(
+            forFileAt: document.url.path,
+            displayName: document.displayName,
+            rootPath: session.rootURL?.path,
+            workspaceName: session.descriptor?.displayName ?? session.rootURL?.lastPathComponent
+                ?? "")
+    }
 
     var body: some View {
         HStack(spacing: 2) {
-            ForEach(Array(segments.enumerated()), id: \.element.id) { index, segment in
+            ForEach(Array(currentSegments.enumerated()), id: \.element.id) { index, segment in
                 if index > 0 {
                     Image(systemName: "chevron.compact.right")
                         .font(.system(size: 9, weight: .semibold))
@@ -100,7 +125,6 @@ struct EditorBreadcrumbView: View {
         .background(WindowDragHandle())
         .background(theme.palette.tabBarBackground)
         .overlay(alignment: .bottom) { Divider().overlay(theme.palette.borderSubtle) }
-        .task(id: document.url) { rebuildSegments() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("File path")
     }
@@ -130,24 +154,6 @@ struct EditorBreadcrumbView: View {
             .help("Reveal \(segment.title) in the sidebar")
             .accessibilityLabel("Reveal \(segment.title) in sidebar")
         }
-    }
-
-    private func rebuildSegments() {
-        guard let rootURL = session.rootURL else {
-            segments = [
-                EditorBreadcrumbPath.Segment(
-                    title: document.displayName,
-                    path: document.url.path,
-                    kind: .file
-                )
-            ]
-            return
-        }
-        segments = EditorBreadcrumbPath.segments(
-            workspaceName: session.descriptor?.displayName ?? rootURL.lastPathComponent,
-            rootPath: rootURL.path,
-            filePath: document.url.path
-        )
     }
 }
 

@@ -933,11 +933,14 @@ private struct TerminalSessionRowView: View {
             RoundedRectangle(cornerRadius: rowRadius, style: .continuous)
                 .fill(isHovering ? theme.palette.hover : theme.palette.cardBackground)
         )
-        // Double-click edits the name in place. Registered BEFORE the
-        // single-click reveal so SwiftUI can disambiguate; a single click
-        // still reveals.
-        .onTapGesture(count: 2) { beginRename() }
-        .onTapGesture { reveal() }
+        // One tap handler. A second `onTapGesture(count: 2)` would make the
+        // system hold every single click for the double-click interval before
+        // it revealed the row. Reveal at once; a double-click (the second
+        // click has `clickCount == 2`) also edits the name in place.
+        .onTapGesture {
+            reveal()
+            if TabClickIntent.current() == .selectAndRename { beginRename() }
+        }
         .focusable()
         .onKeyPress(.return) {
             reveal()

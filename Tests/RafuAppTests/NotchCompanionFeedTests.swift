@@ -112,6 +112,17 @@ func clearFeedItemNoOpForUnknown() {
 @Test("arbitration: resting routes to the drop-down; a click-pinned panel routes to the feed")
 func arbitrationFollowsModelHoverState() {
     let model = NotchCompanionModel()
+    // `clicked()` pins the panel, which refreshes usage: the production
+    // reader would read the real Keychain and block on its access prompt.
+    model.usageReader = UsageRegistryReader(
+        descriptors: [],
+        makeContext: { _ in
+            .init(
+                now: .now, readFile: { _ in nil }, http: .noop, credential: { _ in nil },
+                cookieHeader: { _ in nil })
+        },
+        isEnabled: { _ in false }, resolveCredentials: { _, _ in [:] },
+        hasNetworkConsent: { _ in false })
     #expect(model.hoverState == .resting)
     let resting = CompanionHoverPolicy.companionArbitration(hoverState: model.hoverState)
     #expect(resting == (routeToFeed: false, showDropDown: true))

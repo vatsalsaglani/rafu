@@ -168,6 +168,17 @@ resolves to the Ensemble bridge wrapper (board tools and links). Codex
 `resume` does not attach to the bridge (`CanvasBridgeLaunch.shouldAttach`).
 Agent control (Off / Ask / Allow) does not apply: the person asks for it.
 
+**Drag a row onto an Ensemble** (2026-10-19). Each History row has
+`.onDrag` with `CanvasBoardDragPayload.agentSession(provider:sessionID:)`
+(provider and session id only). Dropped on a visible board, it becomes the
+same resume card as "Resume in Ensemble", placed at the drop point; the
+summary comes from `AgentHistoryStore.shared`, so a row from another window
+works, and a session that left the index shows "This session is no longer in
+Agent History." The decoder refuses an id that
+`AgentHistoryResumeCommand.arguments(for:)` rejects. Details and manual checks:
+[`canvas-interaction.md`](canvas-interaction.md), "Board drops";
+[`drag-and-drop-custom-uttype.md`](drag-and-drop-custom-uttype.md).
+
 ### Open Project Folder
 
 The key window consumes `ExternalOpenRequests.pending` itself, so a plain

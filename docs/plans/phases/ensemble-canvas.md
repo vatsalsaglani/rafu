@@ -215,3 +215,26 @@ exit 0 always, bounded input, private spool directory 0700, files 0600).
   not start native sidebar/tab drag sessions (no source callback was observed);
   do not claim the file-drop or tab-drag path was verified by that pass. Board
   drawing gestures and editor splits through the menu did work.
+
+## Status (2026-10-19)
+
+- Drag to the board: Agent History rows and one-pane Terminal Group tabs can be
+  dropped on an Ensemble. A terminal tab moves the live terminal (no restart),
+  with a "Move to Ensemble" tab-menu path. Private type
+  `dev.vatsalsaglani.rafu.ensemble-drag`, Info.plist index 3. See
+  [`canvas-interaction.md`](../../references/canvas-interaction.md) "Board
+  drops", [`drag-and-drop-custom-uttype.md`](../../references/drag-and-drop-custom-uttype.md),
+  [`agent-history.md`](../../references/agent-history.md), and the ADR 0025
+  amendment.
+- Hidden editors under the board no longer livelock the main thread when the
+  board opens or a terminal card is added
+  ([`editor-gutter-ruler-tiling.md`](../../references/editor-gutter-ruler-tiling.md)).
+- Verification on main (macOS 27.0.1 (26A434)): lint clean; build clean apart
+  from the known SwiftPM "missing creator for mutated node ...
+  SwiftTerm_SwiftTerm.bundle" warning; parallel suite 250 + 2522 tests passed;
+  `--no-parallel` suite 250 + 2522 passed; `./script/build_and_run.sh
+  --verify` exit 0.
+- Still open (manual, not provable headlessly): real mouse drags of a History
+  row and of a terminal tab (centre versus edge band); whether tab edge-split
+  under a visible board was broken since bc795ec and is now fixed; Close never
+  selecting a tab.

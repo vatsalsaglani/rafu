@@ -2,18 +2,19 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The board's file drop target in AppKit terms. AppKit sends a drag session
-/// to a registered `NSView` under the pointer. Over the board, that can be a
-/// hidden editor view of the same group (mounted below the Canvas overlay)
-/// instead of SwiftUI's `.onDrop`, so this bridge view accepts the drop
-/// itself. See `docs/references/canvas-interaction.md`, "File drops".
+/// The board's drop target in AppKit terms. AppKit sends a drag session to a
+/// registered `NSView` under the pointer. Over the board, that can be a hidden
+/// editor view of the same group (mounted below the Canvas overlay) instead of
+/// SwiftUI's `.onDrop`, so this bridge view accepts the drop itself. Over a
+/// visible board it owns every drag: files, Agent History rows, and editor
+/// tabs. See `docs/references/canvas-interaction.md`, "File drops".
 struct CanvasBoardDropTarget {
-    /// The number of files the drag carries; false rejects the whole drag.
-    let accepts: (Int) -> Bool
+    /// Whether the board takes this decoded drag. False rejects the drag.
+    let accepts: (CanvasBoardDropContent) -> Bool
     let targeted: (Bool) -> Void
-    /// The dropped file URLs, whether they came from the Files tree, and the
-    /// drop point in the bridge's top-left space.
-    let perform: ([URL], Bool, CGPoint) -> Bool
+    /// The decoded drag, the drop point in the bridge's top-left space, and
+    /// the bridge's size (for the edge bands of a dropped tab).
+    let perform: (CanvasBoardDropContent, CGPoint, CGSize) -> Bool
 }
 
 /// SwiftUI has no desktop wheel event with scoped modifier/delta access.
@@ -60,8 +61,7 @@ struct CanvasScrollBridge: NSViewRepresentable {
         private var lockObserver: NSObjectProtocol?
         private var unlockObserver: NSObjectProtocol?
         private var dropSequence: Int?
-        private var dropURLs: [URL]?
-        private var dropIsInternal = false
+        private var dropContent: CanvasBoardDropContent?
 
         var drop: CanvasBoardDropTarget? {
             didSet {
@@ -69,13 +69,15 @@ struct CanvasScrollBridge: NSViewRepresentable {
                 if drop == nil {
                     unregisterDraggedTypes()
                 } else {
-                    registerForDraggedTypes([Self.editorDragType, .fileURL])
+                    registerForDraggedTypes([Self.ensembleDragType, Self.editorDragType, .fileURL])
                 }
             }
         }
 
         private static let editorDragType = NSPasteboard.PasteboardType(
             UTType.rafuEditorDrag.identifier)
+        private static let ensembleDragType = NSPasteboard.PasteboardType(
+            UTType.rafuEnsembleDrag.identifier)
 
         override init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
@@ -90,14 +92,14 @@ struct CanvasScrollBridge: NSViewRepresentable {
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
         override var acceptsFirstResponder: Bool { false }
 
-        // MARK: File drops
+        // MARK: Drops
 
         override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
             draggingUpdated(sender)
         }
 
         override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-            guard let drop, let urls = droppedURLs(sender), drop.accepts(urls.count) else {
+            guard let drop, let content = droppedContent(sender), drop.accepts(content) else {
                 drop?.targeted(false)
                 return []
             }
@@ -111,18 +113,18 @@ struct CanvasScrollBridge: NSViewRepresentable {
         }
 
         override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
-            guard let drop, let urls = droppedURLs(sender) else { return false }
-            return drop.accepts(urls.count)
+            guard let drop, let content = droppedContent(sender) else { return false }
+            return drop.accepts(content)
         }
 
         override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
             drop?.targeted(false)
-            guard let drop, let urls = droppedURLs(sender), drop.accepts(urls.count) else {
+            guard let drop, let content = droppedContent(sender), drop.accepts(content) else {
                 return false
             }
             let local = convert(sender.draggingLocation, from: nil)
             let point = CGPoint(x: local.x, y: isFlipped ? local.y : bounds.height - local.y)
-            return drop.perform(urls, dropIsInternal, point)
+            return drop.perform(content, point, bounds.size)
         }
 
         override func concludeDragOperation(_ sender: NSDraggingInfo?) {
@@ -130,35 +132,40 @@ struct CanvasScrollBridge: NSViewRepresentable {
             dropSequence = nil
         }
 
-        /// The file URLs of this drag, read once per drag session. The private
-        /// Files-tree payload wins over its public file URL. A tab payload,
-        /// plain text, or any unreadable URL gives nil, which rejects the drag.
-        private func droppedURLs(_ sender: NSDraggingInfo) -> [URL]? {
-            if dropSequence == sender.draggingSequenceNumber { return dropURLs }
+        /// What this drag carries, classified and decoded once per drag
+        /// session. Priority: Agent History row, then the private editor
+        /// payload (a Files-tree file or an editor tab), then Finder file
+        /// URLs. Plain text or anything unreadable gives nil, which rejects
+        /// the drag.
+        private func droppedContent(_ sender: NSDraggingInfo) -> CanvasBoardDropContent? {
+            if dropSequence == sender.draggingSequenceNumber { return dropContent }
             let pasteboard = sender.draggingPasteboard
             let types = Set((pasteboard.types ?? []).map(\.rawValue))
-            var urls: [URL]?
-            switch EditorDragKind.classify(typeIdentifiers: types) {
-            case .internalPayload:
-                dropIsInternal = true
-                if let data = pasteboard.data(forType: Self.editorDragType),
-                    let url = CanvasFileDropDecoder.privateURL(data)
-                {
-                    urls = [url]
+            var content: CanvasBoardDropContent?
+            if types.contains(UTType.rafuEnsembleDrag.identifier) {
+                content = pasteboard.data(forType: Self.ensembleDragType)
+                    .flatMap(CanvasBoardDragPayload.decode)
+                    .map { .agentSession($0.sessionKey) }
+            } else {
+                switch EditorDragKind.classify(typeIdentifiers: types) {
+                case .internalPayload:
+                    content = pasteboard.data(forType: Self.editorDragType)
+                        .flatMap(CanvasFileDropDecoder.editorContent)
+                case .externalFiles:
+                    let objects = pasteboard.readObjects(
+                        forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+                    let read = (objects as? [URL]) ?? []
+                    let valid = read.filter { CanvasFileDropDecoder.isAcceptable($0) }
+                    if !valid.isEmpty, valid.count == read.count {
+                        content = .files(valid, fromFilesTree: false)
+                    }
+                case .text:
+                    break
                 }
-            case .externalFiles:
-                dropIsInternal = false
-                let objects = pasteboard.readObjects(
-                    forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
-                let read = (objects as? [URL]) ?? []
-                let valid = read.filter { CanvasFileDropDecoder.isAcceptable($0) }
-                if !valid.isEmpty, valid.count == read.count { urls = valid }
-            case .text:
-                dropIsInternal = false
             }
             dropSequence = sender.draggingSequenceNumber
-            dropURLs = urls
-            return urls
+            dropContent = content
+            return content
         }
 
         // MARK: Scroll, zoom and visibility

@@ -335,6 +335,23 @@ struct CodeEditorView: NSViewRepresentable {
         }
     }
 
+    /// Decides whether a tab click may move keyboard focus into the newly
+    /// visible editor. Focus moves only when nothing owns it (no responder,
+    /// the window itself, or a hidden view) or when another editor text view
+    /// owns it. A terminal, a text field, the palette's field editor, or a
+    /// sheet keeps focus.
+    @MainActor
+    enum EditorClickFocusPolicy {
+        static func allowsTakingFocus(in window: NSWindow, for textView: NSTextView) -> Bool {
+            guard window.attachedSheet == nil else { return false }
+            guard let responder = window.firstResponder, responder !== window else { return true }
+            if responder === textView { return false }
+            if responder is RafuTextView { return true }
+            if let view = responder as? NSView, view.isHiddenOrHasHiddenAncestor { return true }
+            return false
+        }
+    }
+
     @MainActor
     final class EditorMountHostView: NSView {
         fileprivate var resources: EditorResources?
@@ -354,8 +371,30 @@ struct CodeEditorView: NSViewRepresentable {
             {
                 window.makeFirstResponder(nil)
             }
+            if !visible {
+                wantsClickFocus = false
+            } else if resources?.coordinator.document?.consumeFocusEditorOnShow() == true {
+                wantsClickFocus = true
+            }
             resources?.scrollView.isHidden = !visible
             if changed { updateCaretVisibility(in: resources?.scrollView) }
+            takeClickFocusIfPossible()
+        }
+
+        /// A click on this document's tab asked for focus. The host may not
+        /// be in a window yet (first mount), so the request waits for
+        /// `viewDidMoveToWindow`.
+        private var wantsClickFocus = false
+
+        private func takeClickFocusIfPossible() {
+            guard wantsClickFocus, isEditorVisible, let window,
+                let textView = resources?.coordinator.textView
+            else { return }
+            wantsClickFocus = false
+            guard EditorClickFocusPolicy.allowsTakingFocus(in: window, for: textView) else {
+                return
+            }
+            window.makeFirstResponder(textView)
         }
 
         private func updateCaretVisibility(in view: NSView?) {
@@ -372,6 +411,7 @@ struct CodeEditorView: NSViewRepresentable {
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             restoreFocusIfAttached()
+            takeClickFocusIfPossible()
         }
 
         private func restoreFocusIfAttached() {

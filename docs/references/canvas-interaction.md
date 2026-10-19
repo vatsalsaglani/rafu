@@ -104,9 +104,9 @@ pending).
   pointer; editors of the same group stay mounted (hidden) below the Canvas
   overlay, and SwiftUI `.onDrop` did not receive drags over AppKit subtrees
   (see `drag-and-drop-custom-uttype.md`, "AppKit subtree dead zone"). Both the
-  SwiftUI delegate and the bridge use `CanvasFileDrop`. Tab payloads are
-  rejected on both paths (`EditorDropRouting.canvasAccepts` in SwiftUI; the
-  bridge decodes the payload and accepts only `.file`).
+  SwiftUI delegate and the bridge use `CanvasFileDrop`. (Until 2026-10-19 tab
+  payloads were rejected on both paths and only `.file` was accepted from an
+  editor drag. The board now owns every drag; see "Board drops" below.)
 - **Dropped content.** Folders are skipped without an error; raster image
   extensions become image cards; files outside the workspace still reject
   the whole batch.
@@ -121,6 +121,57 @@ pending).
   marquee; Space-drag over a card; Files-tree and Finder drops with and
   without open documents in the group; a tab dragged over a Canvas tab still
   splits.
+
+### Board drops (2026-10-19)
+
+Replaces the earlier "file drops" description. Verified by build, lint, and
+tests on main (macOS 27.0.1 (26A434); Apple Swift 6.4 (swiftlang-6.4.0.34.1)):
+parallel 250 + 2522 tests passed, `--no-parallel` 250 + 2522 passed,
+`./script/build_and_run.sh --verify` exit 0. Real mouse drags were NOT driven
+by UI automation; the manual checks listed below are still open. (The
+`CanvasScrollBridge.swift` header comment still says "File drops" for this
+section.)
+
+- **Cause of "cannot drag a History chat or a terminal tab onto the board".**
+  The History row had only a `.contextMenu`, so no drag was ever built. The
+  board accepted only `.rafuEditorDrag` (files) and `.fileURL`, and refused
+  `.tab` payloads in both the SwiftUI delegate and the AppKit
+  `CanvasScrollBridge`.
+- **The board owns every drag over a visible board.** Both halves decode into
+  one `CanvasBoardDropContent` (`.files`, `.agentSession`, `.tab`) and share
+  the `CanvasFileDrop` policy, so a drop is handled once whichever half AppKit
+  picks. Type priority: `rafuEnsembleDrag` > `rafuEditorDrag` > `fileURL`. The
+  proposal is an explicit `.copy`.
+- **Agent History row.** `CanvasBoardDragPayload.agentSession(provider,
+  sessionID)` carries ids only (no title, path, or transcript), decodes at most
+  16 KB, and rejects an id that `AgentHistoryResumeCommand.arguments(for:)`
+  refuses. Drop creates the normal resume card at the drop point
+  (`CanvasBoardDropGeometry.boardPoint`). The summary is looked up in
+  `AgentHistoryStore.shared`, so a row dragged from another window works.
+  Existing rules apply: folder rules, full board refusal.
+- **Terminal Group tab.** A one-pane Terminal Group tab dropped in the CENTRE
+  zone calls `moveTerminalGroupToEnsemble`, which moves the LIVE terminal (no
+  restart). The tab leaves the editor, the group is parked, and the card takes
+  the ADR 0025 presentation lease. Undo removes only the card; the group stays
+  live and parked, reachable from the Terminals list or Ctrl-Tab. Refusals,
+  each with a message on the board: more than one pane; already on a board;
+  board full; tab from another window. A drop in an EDGE band, or of a
+  non-terminal tab, is forwarded to `handleEditorTabDrop` on the editor group
+  that shows the board, so splitting still works under a visible board.
+- **Menu path.** "Move to Ensemble" in the Terminal Group tab context menu
+  (`moveTerminalGroupToCurrentEnsemble`).
+- **Possible older bug, unverified.** Since commit bc795ec the bridge
+  registers `rafuEditorDrag`, so it may have swallowed tab drags over a visible
+  board and broken edge-split. The forward-to-group rule above is meant to fix
+  that, but only a manual drag can confirm it.
+- **Never route a drop with the cached `activeEditorDrag`.** A cancelled drag
+  can leave it stale. Decode the incoming provider at drop time. The cache is
+  only a `validateDrop` hint.
+- Dead code `addCanvasTerminal` was removed.
+- Manual checks still required: drag a History row onto an empty and a busy
+  board, from a second window, and onto a full board; drag a one-pane terminal
+  tab to the centre; drag it to an edge (must split); drag a two-pane group
+  (refusal message); undo after a move; drag a file tab onto the board.
 
 ### Z-order is array order
 

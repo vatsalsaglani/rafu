@@ -120,6 +120,36 @@ What *was* independently verified in this change:
 - [`build-and-run.md`](build-and-run.md)
 - `docs/plans/phases/pre-initial-push-workbench.md`
 
+## Second private type: `ensemble-drag` (2026-10-19)
+
+Agent History rows drag onto an Ensemble board with their own type,
+`dev.vatsalsaglani.rafu.ensemble-drag` (`UTType.rafuEnsembleDrag`,
+`conformingTo: .data`), so editor groups and text views never see it. It has no
+public text or file representation, so a drop anywhere else pastes nothing.
+The item provider uses the same registration as
+`EditorDragPayload.makeItemProvider` (`registerDataRepresentation`, `.all`
+visibility).
+
+- `script/build_and_run.sh` declares it as `UTExportedTypeDeclarations` index
+  3 (0 is `editor-drag`, 1 `dev.rafu.ensemble`, 2 `dev.rafu.workspace`) and
+  asserts it with `plutil -extract UTExportedTypeDeclarations.3.UTTypeIdentifier
+  raw`. Release packaging uses the same script. Verified on 2026-10-19: the
+  command returned `dev.vatsalsaglani.rafu.ensemble-drag` for
+  `dist/Rafu Lightning.app/Contents/Info.plist`. Adding a fifth declaration
+  means adding the next index assert in the same change.
+- `UTType.conforms(to: .data)` is false inside a test process (the test
+  runner has no app Info.plist). No test can check the declaration; only a
+  source check of the script covers it. Do not write a test that expects
+  conformance and conclude the plist is wrong when it fails.
+- Never route a drop using the cached `session.activeEditorDrag`. After a
+  cancelled drag it can be stale. Always decode the provider at drop time; the
+  cache is only a hint for `validateDrop`. (This sharpens the "fast path" rule
+  earlier in this note: the fast path is for decoding a payload already known
+  to be valid, not for deciding what the drop is.)
+- The board accepts this type, `rafuEditorDrag`, and `.fileURL`, in that
+  priority. See [`canvas-interaction.md`](canvas-interaction.md), "Board
+  drops".
+
 ## AppKit subtree dead zone (2026-07-13 follow-up)
 
 SwiftUI `.onDrop` on the editor group only received drag events while the
