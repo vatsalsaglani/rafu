@@ -151,6 +151,9 @@ final class EditorDropForwardingScrollView: NSScrollView {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        DragDiag.note(
+            "editor(AppKit) entered forwarding=\(dropForwarding != nil) "
+                + "text=\(dragKind(sender) == .text)")
         guard let dropForwarding, dragKind(sender) != .text else { return [] }
         dropForwarding.updated(topLeftLocation(sender), bounds.size)
         return .copy
@@ -171,6 +174,7 @@ final class EditorDropForwardingScrollView: NSScrollView {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        DragDiag.note("editor(AppKit) performDragOperation")
         guard let dropForwarding else { return false }
         switch dragKind(sender) {
         case .internalPayload:

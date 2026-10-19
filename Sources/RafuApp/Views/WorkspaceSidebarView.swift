@@ -315,10 +315,14 @@ struct WorkspaceFileTreeItem: View {
             base
                 .onDrag(
                     {
+                        DragDiag.note("source folder-row onDrag")
                         session.beginDragSourceTracking(dragToken)
                         return NSItemProvider(object: node.url as NSURL)
                     },
-                    preview: { RafuDragPreviewLabel(icon: FileIconView(icon: icon), title: name) }
+                    preview: {
+                        let _ = DragDiag.note("preview folder-row built")
+                        RafuDragPreviewLabel(icon: FileIconView(icon: icon), title: name)
+                    }
                 )
                 .dropDestination(for: URL.self) { urls, _ in
                     Task { await session.handleTreeDrop(urls, into: node.url) }
@@ -329,12 +333,16 @@ struct WorkspaceFileTreeItem: View {
         } else {
             base.onDrag(
                 {
+                    DragDiag.note("source file-row onDrag")
                     session.beginDragSourceTracking(dragToken)
                     let provider = session.beginEditorDrag(.file(path: node.url.path))
                     provider.registerObject(node.url as NSURL, visibility: .all)
                     return provider
                 },
-                preview: { RafuDragPreviewLabel(icon: FileIconView(icon: icon), title: name) }
+                preview: {
+                    let _ = DragDiag.note("preview file-row built")
+                    RafuDragPreviewLabel(icon: FileIconView(icon: icon), title: name)
+                }
             )
         }
     }
@@ -347,10 +355,26 @@ struct WorkspaceFileTreeItem: View {
                     TapGesture().onEnded { activateRow() }
                 )
         } else {
-            Button(action: activateRow) {
-                rowLabel
-            }
-            .buttonStyle(.plain)
+            // Not a `Button`: its press tracking competes with the row's
+            // `.onDrag` lift gesture for the same mouse-down, and a Button
+            // fires on any mouse-up it still owns, so a failed drag reads
+            // as a click that opens the file. Directory rows and
+            // Terminals-panel rows already use plain gestures. One tap
+            // handler (no `count: 2` sibling, so no double-click delay)
+            // keeps single-click opening; the modifiers below restore what
+            // `Button` gave for free: Full Keyboard Access focus
+            // (activation-only, so a click never moves focus), Return/Space,
+            // and one VoiceOver button element with a default action.
+            rowLabel
+                .onTapGesture(perform: activateRow)
+                .focusable(interactions: .activate)
+                .onKeyPress(keys: [.return, .space]) { _ in
+                    activateRow()
+                    return .handled
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { activateRow() }
         }
     }
 
@@ -368,6 +392,7 @@ struct WorkspaceFileTreeItem: View {
     /// during editor navigation and reveal, so observing that value would
     /// create a second, unwanted editor-navigation action.
     func activateRow() {
+        DragDiag.note("click \(node.isDirectory ? "folder" : "file")-row activate")
         session.selectedTreePath = node.url.path
         if !node.isDirectory { session.open(node) }
     }

@@ -21,10 +21,16 @@ struct CanvasFileDropDelegate: DropDelegate {
     var dropPreview: Binding<CanvasDropPreview?> = .constant(nil)
 
     func dropEntered(info: DropInfo) {
-        updatePreview(info: info)
+        let valid = updatePreview(info: info)
+        DragDiag.note(
+            "board(SwiftUI) entered valid=\(valid) "
+                + "ensemble=\(!info.itemProviders(for: [.rafuEnsembleDrag]).isEmpty) "
+                + "editor=\(!info.itemProviders(for: [.rafuEditorDrag]).isEmpty) "
+                + "files=\(info.itemProviders(for: [.fileURL]).count)")
     }
 
     func dropExited(info: DropInfo) {
+        DragDiag.note("board(SwiftUI) exited")
         dropPreview.wrappedValue = nil
     }
 
@@ -51,6 +57,7 @@ struct CanvasFileDropDelegate: DropDelegate {
 
     func performDrop(info: DropInfo) -> Bool {
         dropPreview.wrappedValue = nil
+        DragDiag.note("board(SwiftUI) performDrop valid=\(validateDrop(info: info))")
         guard validateDrop(info: info) else { return false }
         let location = info.location
         let surface = surfaceSize
