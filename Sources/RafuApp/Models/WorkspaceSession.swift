@@ -191,6 +191,12 @@ final class WorkspaceSession {
     /// decode what the drop actually does.
     @ObservationIgnored
     var activeEnsembleDragHint: EnsembleDragHint?
+    /// The token of this window's own drag currently in flight (a file row,
+    /// tab, Agent History row, or Terminals-panel Terminal Group row), or
+    /// `nil`. Drives ONLY the dimmed source ghost while dragging — never
+    /// drop routing (see `activeEditorDrag`, `activeEnsembleDragHint`).
+    /// Tracked (not `@ObservationIgnored`) so a row's opacity updates live.
+    var dragInFlight: RafuDragSourceToken?
     var pendingCloseDocument: EditorDocument?
     var pendingFileCreation: FileCreationRequest?
     var pendingFileName = ""
@@ -3957,6 +3963,47 @@ final class WorkspaceSession {
 
     func clearEditorDrag() {
         activeEditorDrag = nil
+    }
+
+    /// Marks `token`'s source as dragging (for its dimmed "source ghost")
+    /// and arranges to clear it again. SwiftUI gives no drag end/cancel
+    /// callback on macOS, so this installs ONE local event monitor — never
+    /// a global one, which only fires while this app is NOT active, and an
+    /// in-app drag (sidebar/tab/panel row to the editor or an Ensemble
+    /// board) keeps Rafu active the whole time — for `.leftMouseUp` (the
+    /// drag ended, dropped or not) and Escape (cancelled). The monitor
+    /// ALWAYS returns the event unchanged, so it is categorically incapable
+    /// of intercepting a click, a double-click rename, a context menu, or
+    /// any other gesture anywhere in the app; this is a read-only tap, not
+    /// a filter. A 12 s fallback self-heals if some teardown path misses
+    /// both signals (belt and suspenders, not the primary signal).
+    @discardableResult
+    func beginDragSourceTracking(_ token: RafuDragSourceToken) -> RafuDragSourceToken {
+        dragInFlight = RafuDragSourceLifecycle.begin(token)
+        var monitor: Any?
+        func stopWatching() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp, .keyDown]) {
+            [weak self] event in
+            guard let self else { return event }
+            if event.type == .leftMouseUp {
+                dragInFlight = RafuDragSourceLifecycle.end(token, clearing: dragInFlight)
+                stopWatching()
+            } else if event.keyCode == 53 {
+                dragInFlight = RafuDragSourceLifecycle.cancel(token, clearing: dragInFlight)
+                stopWatching()
+            }
+            return event
+        }
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(12))
+            guard let self else { return }
+            dragInFlight = RafuDragSourceLifecycle.end(token, clearing: dragInFlight)
+            stopWatching()
+        }
+        return token
     }
 
     /// Handles a dropped tab. `nil` edge moves the tab into the hovered

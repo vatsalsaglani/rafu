@@ -6,6 +6,10 @@ struct CanvasEditorTabItem: View {
     let board: CanvasBoardState
     let isSelected: Bool
     let session: WorkspaceSession
+    /// This tab's own identity for the dimmed source ghost while it is
+    /// being dragged — stable for the tab's lifetime, compared against
+    /// `session.dragInFlight`.
+    @State private var dragToken = RafuDragSourceToken()
 
     var body: some View {
         AttachedWorkbenchTab(
@@ -25,8 +29,12 @@ struct CanvasEditorTabItem: View {
                 ) { session.closeCanvas(board.id) }
             }
         }
+        .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
         .onDrag(
-            { session.beginEditorDrag(.tab(id: tab.id.rawValue.uuidString)) },
+            {
+                session.beginDragSourceTracking(dragToken)
+                return session.beginEditorDrag(.tab(id: tab.id.rawValue.uuidString))
+            },
             preview: {
                 RafuDragPreviewLabel(
                     icon: Image(systemName: "rectangle.3.group"), title: board.title)

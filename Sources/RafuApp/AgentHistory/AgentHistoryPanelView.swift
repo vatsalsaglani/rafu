@@ -232,25 +232,12 @@ private struct AgentHistorySessionList: View {
         AgentHistorySessionRow(
             summary: summary,
             isOpen: state.visibleSession?.key == summary.key,
+            session: session,
             open: { session.openAgentSession(summary) }
         )
         .contextMenu {
             AgentHistorySessionMenuItems(session: session, summary: summary, includesOpen: true)
         }
-        // Drag a row onto an Ensemble to resume the session there. The
-        // payload holds only the provider and the session id.
-        .onDrag(
-            {
-                session.activeEnsembleDragHint = .agentSession
-                return CanvasBoardDragPayload.agentSession(
-                    provider: summary.key.provider, sessionID: summary.key.sessionID
-                ).makeItemProvider()
-            },
-            preview: {
-                RafuDragPreviewLabel(
-                    icon: AgentIconView(cli: summary.provider.cli, size: 13), title: summary.title)
-            }
-        )
     }
 
     private func expansion(for id: String) -> Binding<Bool> {
@@ -294,8 +281,13 @@ private struct AgentHistoryProjectLabel: View {
 private struct AgentHistorySessionRow: View {
     let summary: AgentHistorySessionSummary
     let isOpen: Bool
+    let session: WorkspaceSession
     let open: () -> Void
     @Environment(\.rafuTheme) private var theme
+    /// This row's own identity for the dimmed source ghost while it is
+    /// being dragged — stable for the row's lifetime, compared against
+    /// `session.dragInFlight`.
+    @State private var dragToken = RafuDragSourceToken()
 
     var body: some View {
         Button(action: open) {
@@ -322,6 +314,22 @@ private struct AgentHistorySessionRow: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
+        // Drag a row onto an Ensemble to resume the session there. The
+        // payload holds only the provider and the session id.
+        .onDrag(
+            {
+                session.beginDragSourceTracking(dragToken)
+                session.activeEnsembleDragHint = .agentSession
+                return CanvasBoardDragPayload.agentSession(
+                    provider: summary.key.provider, sessionID: summary.key.sessionID
+                ).makeItemProvider()
+            },
+            preview: {
+                RafuDragPreviewLabel(
+                    icon: AgentIconView(cli: summary.provider.cli, size: 13), title: summary.title)
+            }
+        )
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
         .accessibilityAddTraits(isOpen ? .isSelected : [])

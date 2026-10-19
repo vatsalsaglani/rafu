@@ -2172,6 +2172,10 @@ private struct GitDiffCell: View {
 private struct EditorTabItem: View {
     @Environment(\.rafuTheme) private var theme
     @State private var isHovering = false
+    /// This tab's own identity for the dimmed source ghost while it is
+    /// being dragged — stable for the tab's lifetime, compared against
+    /// `session.dragInFlight`.
+    @State private var dragToken = RafuDragSourceToken()
 
     let tabID: EditorTabID
     let groupID: EditorGroupID
@@ -2248,8 +2252,12 @@ private struct EditorTabItem: View {
             value: .bounds
         ) { isSelected ? $0 : nil }
         .onHover { isHovering = $0 }
+        .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
         .onDrag(
-            { session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString)) },
+            {
+                session.beginDragSourceTracking(dragToken)
+                return session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString))
+            },
             preview: {
                 RafuDragPreviewLabel(
                     icon: FileIconView(icon: icon), title: document.displayName)
@@ -2297,6 +2305,10 @@ private struct EditorTabItem: View {
 private struct EditorTerminalTabItem: View {
     @Environment(\.rafuTheme) private var theme
     @State private var isHovering = false
+    /// This tab's own identity for the dimmed source ghost while it is
+    /// being dragged — stable for the tab's lifetime, compared against
+    /// `session.dragInFlight`.
+    @State private var dragToken = RafuDragSourceToken()
 
     let tabID: EditorTabID
     let groupID: EditorGroupID
@@ -2406,8 +2418,12 @@ private struct EditorTerminalTabItem: View {
             value: .bounds
         ) { isSelected ? $0 : nil }
         .onHover { isHovering = $0 }
+        .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
         .onDrag(
-            { session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString)) },
+            {
+                session.beginDragSourceTracking(dragToken)
+                return session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString))
+            },
             preview: {
                 RafuDragPreviewLabel(
                     icon: Group {
@@ -2460,6 +2476,10 @@ private struct EditorTerminalGroupTabItem: View {
     @State private var isRenaming = false
     @State private var renameText = ""
     @FocusState private var renameFieldFocused: Bool
+    /// This tab's own identity for the dimmed source ghost while it is
+    /// being dragged — stable for the tab's lifetime, compared against
+    /// `session.dragInFlight`.
+    @State private var dragToken = RafuDragSourceToken()
 
     let tabID: EditorTabID
     let groupID: EditorGroupID
@@ -2564,8 +2584,12 @@ private struct EditorTerminalGroupTabItem: View {
         }
         .fixedSize(horizontal: true, vertical: false)
         .onHover { isHovering = $0 }
+        .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
         .onDrag(
-            { session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString)) },
+            {
+                session.beginDragSourceTracking(dragToken)
+                return session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString))
+            },
             preview: {
                 RafuDragPreviewLabel(
                     icon: Group {

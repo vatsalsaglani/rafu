@@ -308,12 +308,16 @@ struct WorkspaceFileTreeItem: View {
             interactiveRow
             .contextMenu { contextMenu }
             .listRowBackground(Color.clear)
+            .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
         let icon = FileIconProvider.icon(for: node.url, isDirectory: node.isDirectory)
         let name = node.name
         if node.isDirectory {
             base
                 .onDrag(
-                    { NSItemProvider(object: node.url as NSURL) },
+                    {
+                        session.beginDragSourceTracking(dragToken)
+                        return NSItemProvider(object: node.url as NSURL)
+                    },
                     preview: { RafuDragPreviewLabel(icon: FileIconView(icon: icon), title: name) }
                 )
                 .dropDestination(for: URL.self) { urls, _ in
@@ -325,6 +329,7 @@ struct WorkspaceFileTreeItem: View {
         } else {
             base.onDrag(
                 {
+                    session.beginDragSourceTracking(dragToken)
                     let provider = session.beginEditorDrag(.file(path: node.url.path))
                     provider.registerObject(node.url as NSURL, visibility: .all)
                     return provider
@@ -368,6 +373,10 @@ struct WorkspaceFileTreeItem: View {
     }
 
     @State private var isDropTargeted = false
+    /// This row's own identity for the dimmed source ghost while it is
+    /// being dragged — stable for the row's lifetime, compared against
+    /// `session.dragInFlight`.
+    @State private var dragToken = RafuDragSourceToken()
 
     @ViewBuilder
     private var contextMenu: some View {

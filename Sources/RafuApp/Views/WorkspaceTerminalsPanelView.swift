@@ -271,7 +271,7 @@ struct WorkspaceTerminalsPanelView: View {
                             startAll: group.hasRestartablePane
                                 ? { session.startAllRestartableTerminalPanes(in: group.id) } : nil,
                             close: { session.requestTerminalGroupClose(group.id) },
-                            beginDrag: { session.activeEnsembleDragHint = .terminalGroup }
+                            session: session
                         )
                     case .pane(let pane):
                         if expandedGroupIDs.contains(pane.groupID) {
@@ -555,12 +555,16 @@ private struct TerminalGroupManagerRowView: View {
     let updateSavedLayout: (() -> Void)?
     let startAll: (() -> Void)?
     let close: () -> Void
-    /// Marks this row's kind as the in-flight `rafuEnsembleDrag`, same-window
-    /// only, so a board's hover preview can say "Move terminal here" rather
-    /// than a generic label. Never used to decide what a drop does.
-    var beginDrag: () -> Void = {}
+    /// Needed only to mark this row's drag in flight (the dimmed source
+    /// ghost) and its kind (same-window hover-label hint). Never read to
+    /// decide what a drop does.
+    let session: WorkspaceSession
 
     @Environment(\.rafuTheme) private var theme
+    /// This row's own identity for the dimmed source ghost while it is
+    /// being dragged — stable for the row's lifetime, compared against
+    /// `session.dragInFlight`.
+    @State private var dragToken = RafuDragSourceToken()
 
     var body: some View {
         HStack(spacing: RafuMetrics.space2) {
@@ -641,6 +645,7 @@ private struct TerminalGroupManagerRowView: View {
         .background(theme.palette.cardBackground)
         .clipShape(.rect(cornerRadius: RafuMetrics.radiusDenseCard))
         .contentShape(.rect)
+        .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
         // Carries only the group's id over the private `rafuEnsembleDrag`
         // type, exactly like an Agent History row — never a title, path, or
         // transcript. Dropped on an Ensemble board centre, a one-pane group
@@ -649,7 +654,8 @@ private struct TerminalGroupManagerRowView: View {
         // already on a board, board full) apply unchanged at drop time.
         .onDrag(
             {
-                beginDrag()
+                session.beginDragSourceTracking(dragToken)
+                session.activeEnsembleDragHint = .terminalGroup
                 return CanvasBoardDragPayload(terminalGroupID: row.id).makeItemProvider()
             },
             preview: {
