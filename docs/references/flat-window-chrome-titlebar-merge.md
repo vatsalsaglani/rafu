@@ -4,9 +4,12 @@
 `Sources/RafuApp/Views/WorkspaceWindowView.swift`,
 `WindowTopLeftControlCluster` in
 `Sources/RafuApp/Views/WorkspaceNavigatorView.swift`
-(`WorkspaceSidebarRail` was removed on 2026-10-19; see "No left rail" below).
+(`WorkspaceSidebarRail` was removed on 2026-10-19 and replaced the same day by
+`WorkspaceActivityRail`; see "One left Activity Rail" below).
 **Last verified:** macOS 26 (Darwin 25.5.0), Swift 6.2, 2026-07-25, via the
-throwaway TitleBarProto spike and the shipped implementation.
+throwaway TitleBarProto spike and the shipped implementation; the window-frame
+colour and drag-surface list re-verified on Apple Swift 6.4
+(swiftlang-6.4.0.34.1), macOS 27.0.1 (26A434), 2026-10-19, on `main` 96e54b3.
 
 ## Rules
 
@@ -48,10 +51,12 @@ throwaway TitleBarProto spike and the shipped implementation.
    The titlebar's implicit drag region sits under the tab strip, so a tab
    drag (or drag-to-split) also moved the window. `FlatWindowChrome` sets
    `isMovable = false` and window movement is opt-in via `WindowDragHandle`
-   (a `WindowDragGesture` surface, which bypasses `isMovable`): the left
-   rail (removed 2026-10-19), the utility rail's background, the sidebar
-   header's background, and the breadcrumb's background. The current list
-   is in "No left rail" below. The tab strip itself cannot host a
+   (a `WindowDragGesture` surface, which bypasses `isMovable`). The current
+   list is three surfaces: the titlebar row (`TitlebarDragSurface`), the left
+   `WorkspaceActivityRail`, and the sidebar header. The `WorkbenchSplitHandle`
+   is **not** a drag surface — it resizes the sidebar
+   ([`workbench-split-handle.md`](workbench-split-handle.md)). The history of
+   this list is in "One left Activity Rail" below. The tab strip itself cannot host a
    handle — its `ScrollView` swallows background hits. Known tradeoffs:
    the strip's empty trailing area does not move the window, and
    titlebar double-click-to-zoom is lost (zoom stays available via the
@@ -119,7 +124,14 @@ no work. Keep any new window write behind the same comparison. Context and the
 other tab-click causes: [`swiftui-macos-click-latency.md`](swiftui-macos-click-latency.md).
 macOS 27.0.1 (26A434), 2026-10-19; not measured, so no latency gain is claimed.
 
-## No left rail (2026-10-19)
+## No left rail (2026-10-19) — SUPERSEDED the same day
+
+Kept as history. The conclusion "no left icon rail replaces it" held for hours.
+Later on 2026-10-19 the user directed the framed-workbench redesign, and a left
+rail returned carrying every navigator mode. Read "One left Activity Rail"
+below for the current state; the drag-surface and safe-area reasoning here is
+still correct.
+
 
 Last verified: Apple Swift 6.4 (swiftlang-6.4.0.34.1), macOS 27.0.1 (26A434),
 2026-10-19, on `main`. A person has not yet looked at the window.
@@ -159,6 +171,39 @@ parallel suite 250 + 2545 tests passed; `--no-parallel` (CI mode) 250 + 2545
 passed; `./script/build_and_run.sh --verify` passed for Rafu Lightning.
 Still open by hand: the left edge in both sidebar states, in light, dark, and
 Increase Contrast, and in a second window.
+
+## One left Activity Rail (2026-10-19, current)
+
+Last verified: Apple Swift 6.4 (swiftlang-6.4.0.34.1), macOS 27.0.1 (26A434),
+2026-10-19, on `main` 96e54b3. A person has not yet looked at the window.
+
+Decision: [ADR 0030](../decisions/0030-framed-workbench-left-rail-and-detached-tabs.md).
+
+- `WorkspaceActivityRail` is 40 pt wide on the window's left edge, below the
+  titlebar row, and is never gated on sidebar collapse. It carries Files,
+  Search, Source Control, Terminals, and History.
+- The window frame is `appBackground`: both `FlatWindowChrome.titleBarColor`
+  (the `NSWindow.backgroundColor` write that colours the titlebar zone) and the
+  `WindowTitlebarRow` background. Any statement elsewhere that the titlebar band
+  takes the sidebar fill is stale.
+- The editor deck is the one raised rounded card (8 pt inset, 10 pt radius, one
+  bounded theme-aware shadow). The rail, sidebar, and status bar stay
+  edge-attached rear plane.
+- **Drag surfaces, current and complete** (`isMovable` is still false): the
+  `TitlebarDragSurface` behind the 28 pt `WindowTitlebarRow`, the left
+  `WorkspaceActivityRail` background (`WindowDragHandle`), and the sidebar
+  header background (`WindowDragHandle`). The `WorkbenchSplitHandle` between
+  sidebar and deck is **not** a drag surface. Check this list before removing
+  another background-level drag handle.
+- The window minimum width is 770 pt (40 rail + 220 sidebar minimum + 10 handle
+  + 472 deck + 16 inset = 758).
+
+Gates on `main` 96e54b3: `./script/format.sh --lint` clean; build with 0
+warnings; parallel suite 250 + 2651 tests passed; `--no-parallel` (CI mode)
+250 + 2651 passed; `./script/build_and_run.sh --verify` passed for Rafu
+Lightning. Still open by hand: the whole visual pass (light and dark x
+Indigo/Khadi, Increase Contrast, Reduce Motion), VoiceOver on the rail, handle,
+and tabs, full screen, a second window, and the 770 pt minimum window.
 
 ## Why it matters
 

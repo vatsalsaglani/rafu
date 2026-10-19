@@ -368,6 +368,21 @@ some compile fixes. Then check by hand:
 - Second window, keyboard reachability, and VoiceOver/Reduce Motion behaviour
   of the new Canvas controls.
 
+### Window redesign on `main` (2026-10-19)
+
+A separate, user-directed four-increment window redesign landed on `main` after
+this phase (703e827, 4c72f8c, 450c453, a28c154, 96e54b3): an `appBackground`
+window frame with one raised rounded editor deck, a 40 pt left Activity Rail
+carrying all five navigator modes, a custom drag-to-resize sidebar handle, and
+detached rounded tab cards with activity dots and a text-only hover preview. It
+changes the `WindowTitlebarRow` and tab-strip results recorded under W1 above.
+Status, gates, and the open manual checks live in
+[`workbench-presentation-upgrade.md`](workbench-presentation-upgrade.md); the
+decision is
+[ADR 0030](../../decisions/0030-framed-workbench-left-rail-and-detached-tabs.md).
+This phase's "Do not edit ADRs" instruction was scoped to these workstreams,
+which had no macOS toolchain; it does not bind that work.
+
 ### Follow-ups
 
 - After the build is green, remove the unreachable Settings-tab code and the

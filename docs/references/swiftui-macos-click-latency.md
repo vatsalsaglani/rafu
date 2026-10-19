@@ -26,6 +26,32 @@ causes were found. Each can recur on a new tab or row type.
    own areas, so Close never also selects. The inner label button stays the
    one accessibility element. New tab kinds must pass `select:`. Close-never-
    selects cannot be proved headlessly; it needs a manual check.
+
+   Since 2026-10-19 (ADR 0030) tabs are **detached** rounded cards of radius 10
+   rather than top-rounded attached caps, so each tab's hit shape is its whole
+   card and the gaps between cards belong to the tab bar, not to a neighbour.
+   The hit-target rule above is unchanged: `.contentShape(.rect)` plus
+   `.onTapGesture` stays the outermost modifier on the card.
+
+   **Accessory precedence** on a tab is hover → close, then activity dot, then
+   dirty dot; a selected tab shows close. The activity dot comes from
+   `EditorTabActivityKind`, derived from `AgentCardStatus` through
+   `CanvasCardCommands.agentCardStatus(pane:in:)` (ADR 0029's vocabulary), and
+   is always paired with text via `help` and `accessibilityValue` — colour is
+   never the only signal. An Ensemble tab shows only a needsYou dot, and its
+   close button is now hover/selected-gated like every other tab's. Place a new
+   accessory inside that precedence instead of stacking it beside the close
+   control, or the close target shrinks.
+
+   **The tab hover preview must not be a `.popover`.** It is an
+   `overlayPreferenceValue` overlay mounted on the tab bar *outside* the
+   `ScrollView`, precisely so it cannot take key focus away from the editor or
+   a terminal — a popover would. It appears after a 500 ms delay driven by
+   `.task(id:)`, is `allowsHitTesting(false)` and `accessibilityHidden`, has no
+   transition under Reduce Motion, and its content is text only (built by the
+   pure `TabHoverPreviewContentBuilder`; no thumbnails). Its x-position is
+   clamped; the y-position is approximate, and whether it sits above split
+   groups and terminal panes is unverified.
 2. **`onTapGesture(count: 2)` next to a single tap.** With both gestures,
    SwiftUI holds every single click until the system double-click interval
    passes. It affected the Terminals panel row and the Terminal Group tab

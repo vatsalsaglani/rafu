@@ -142,6 +142,23 @@ carry through when assigned; uncolored sessions remain neutral.
 - `ui-design-language.md` and `settings-surface.md` must be updated when the
   implementation replaces their currently verified layout rules.
 
+## Partially superseded by ADR 0030 (2026-10-19)
+
+The revisit trigger below fired on the user's direction.
+[ADR 0030](0030-framed-workbench-left-rail-and-detached-tabs.md) supersedes:
+
+- the 4 pt deck inset (now 8 pt) and the 6 pt deck radius (now 10 pt);
+- the attached-cap tab clause — tabs are detached 10 pt rounded cards, and
+  `masksBottomSeam`, the seam overlay, and `radiusAttachedTab` are removed;
+- the "no shadow, material, blur, bevel, or gradient" consequence, in the
+  shadow part only: the deck and the selected tab each carry one bounded
+  theme-aware shadow. Materials, blur, bevels, and gradients remain excluded.
+
+ADR 0030 also removes the right utility panel that formed part of the deck
+above, so the deck is the editor alone. This ADR's theme-token ownership (no new
+JSON keys), its rule that Rafu owns geometry and the theme owns colour, its
+editor-group separation, and its terminal-perimeter clauses are unchanged.
+
 ## Revisit trigger
 
 Revisit if measured minimum-window usability, splitter accessibility, TextKit or

@@ -34,3 +34,13 @@ two-panel workflows (browse files while reviewing changes) impossible.
   branches in `WorkspaceWindowView`.
 - ADR 0002's remaining decisions (editor groups, authoritative selection, one
   system sidebar toggle) stay in force.
+
+## Superseded by ADR 0030 (2026-10-19)
+
+On the user's direction, [ADR 0030](0030-framed-workbench-left-rail-and-detached-tabs.md)
+replaces the mode placement above: one always-visible **left** Activity Rail
+carries all five modes (Files, Search, Source Control, Terminals, History), and
+the right rail and right utility panel are removed. `navigatorMode` is
+reinterpreted a second time — it now names the section the left sidebar shows and
+can never mean "closed"; visibility is the separate `isSidebarCollapsed` state.
+The editor-hosted diffs/details clause above still holds.

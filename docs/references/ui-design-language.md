@@ -3,6 +3,34 @@
 - **Applies to:** themes, palette tokens, RafuMetrics spacing/radius, shared components, button styles, toolbar configuration, and surface-level chrome across all Rafu windows
 - **Last verified:** Swift 6.2.4, Xcode 26.3, macOS 26.1 on 2026-07-18; theme-tint and pane-strip rules re-verified on 2026-07-26 (UX2-01)
 
+**Window composition superseded (2026-10-19).** The framed workbench
+([ADR 0030](../decisions/0030-framed-workbench-left-rail-and-detached-tabs.md),
+accepted on the user's direction) replaces the window-level parts of the
+surface map below. Current language:
+
+- **Frame.** The window frame — titlebar zone, `WindowTitlebarRow`, status bar
+  — is `appBackground`. It is the quiet rear plane. (The titlebar band no longer
+  takes `sidebarBackground`.)
+- **Card.** The editor deck is the one raised rounded card: 8 pt
+  `workbenchInset`, 10 pt `radiusWorkbenchDeck`, and one soft theme-aware shadow
+  (`WorkbenchDeckShadowStyle`: opacity 0.18 dark / 0.10 light, halved under
+  Increase Contrast, radius 6 with y-offset 2 so its 8 pt reach fits the inset).
+  The shadow goes on the card's background shape only — never on a TextKit or
+  SwiftTerm viewport, and with no `clipShape` or `mask` over one. No material,
+  blur, bevel, or gradient; Reduce Transparency is a no-op here.
+- **Rail.** A 40 pt always-visible left `WorkspaceActivityRail` carries all five
+  navigator modes, on a `WindowDragHandle` background. There is no right rail and
+  no right utility panel. Sidebar bounds are 220 / 300 / 560 pt.
+- **Tabs.** Detached `RoundedRectangle` cards of radius 10, `space1` spacing,
+  `tabShelfHeight` 40 pt as a floor that grows with Larger Text. Selected:
+  `tabActiveBackground` + a `borderStrong` hairline on all four edges + a tab
+  shadow (radius 3, y 1) through the same helper. Inactive: `chipBackground`.
+  The attached-cap grammar (`masksBottomSeam`, seam overlay,
+  `radiusAttachedTab`) is removed.
+- **Shadow budget.** Exactly two shadows exist in the workbench — the deck and
+  the selected tab — and both go through `WorkbenchDeckShadowStyle`. A source
+  test pins that count, so a third shadow is a test failure, not a review note.
+
 **Proposed successor:** the 2026-07-29
 [`workbench-presentation-upgrade.md`](../plans/phases/workbench-presentation-upgrade.md)
 and [ADR 0022](../decisions/0022-recessed-workbench-deck.md) propose revisiting

@@ -186,6 +186,26 @@ left-edge surface: it comes from the titlebar row's drag surface and from the
 Files sidebar header's background. Nothing else in this ADR changes.
 Detail: `docs/references/flat-window-chrome-titlebar-merge.md`, "No left rail".
 
+## Superseded by ADR 0030 (2026-10-19)
+
+Later the same day, on the user's direction,
+[ADR 0030](0030-framed-workbench-left-rail-and-detached-tabs.md) supersedes two
+parts of this ADR:
+
+- The amendment directly above. A 40 pt left **Activity Rail** now carries all
+  five navigator modes, because ADR 0003's right-rail placement — the premise for
+  rejecting a left rail — is itself superseded. The rail is also a
+  `WindowDragHandle`, so the left edge is a drag surface again.
+- The no-shadow rule in the decision body. The editor deck and the selected tab
+  each carry one bounded, theme-aware shadow (`WorkbenchDeckShadowStyle`), halved
+  under Increase Contrast and applied to background shapes only. No material,
+  blur, bevel, or gradient is introduced, and Reduce Transparency stays a no-op.
+
+This ADR's theme authority, opaque tonal surfaces, native controls and
+accessibility requirements, no-`NSToolbar` titlebar treatment, and
+no-Liquid-Glass rule all remain in force. The titlebar zone is now coloured
+`appBackground`, not the sidebar fill.
+
 ## Related plan, reference, and implementation paths
 
 - Plan: [`ui-flat-modern-refresh.md`](../plans/phases/ui-flat-modern-refresh.md)

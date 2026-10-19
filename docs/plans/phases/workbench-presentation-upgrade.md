@@ -16,6 +16,46 @@ scale. Until that decision is accepted and the work below lands,
 [`ui-design-language.md`](../../references/ui-design-language.md) continues to
 describe the implemented UI.
 
+**Window redesign landed on `main` (2026-10-19).** On the user's direction, from
+reference images and videos the user supplied, a four-increment window redesign
+superseded parts of ADR 0022 and of this brief. It is recorded in
+[ADR 0030](../../decisions/0030-framed-workbench-left-rail-and-detached-tabs.md).
+Commits on `main`:
+
+| Increment | Commit | Delivered |
+|---|---|---|
+| Phase 1 — frame and card | 703e827 | `appBackground` window frame, `workbenchInset` 4 → 8 pt, `radiusWorkbenchDeck` 6 → 10 pt, bounded theme-aware `WorkbenchDeckShadowStyle` |
+| Phase 2 — left Activity Rail | 4c72f8c | 40 pt `WorkspaceActivityRail` with all five modes; right rail and right utility panel removed; `navigatorMode` now names a section, never "closed" |
+| Phase 3 — resize handle | 450c453 | Outer `HSplitView` → `HStack` + 10 pt `WorkbenchSplitHandle`, pure `WorkbenchSidebarResize` rules, persisted `sidebarWidth`/`isSidebarCollapsed`, window minimum 770 pt |
+| Phase 4a — detached tabs | a28c154 | Radius-10 tab cards, attached-cap grammar removed, `+` becomes a menu (primary New File) |
+| Phase 4b — activity dots and preview | 96e54b3 | `EditorTabActivityKind` from `AgentCardStatus`, accessory precedence, focus-safe text-only hover preview |
+
+Gates on `main` 96e54b3: `./script/format.sh --lint` clean; `swift build` with 0
+warnings; parallel suite 250 + 2651 tests passed; `./script/test.sh
+--no-parallel` (the CI gate) 250 + 2651 passed; `./script/build_and_run.sh
+--verify` launched Rafu Lightning.
+
+Manual checks still open — no person has looked at the window yet:
+
+- Light and dark x Indigo and Khadi, plus an imported theme, for the frame,
+  deck shadow, rail, and tab cards.
+- Increase Contrast (shadow opacity halved) and Reduce Motion (no preview
+  transition).
+- VoiceOver on the Activity Rail, the split handle's "Sidebar width" adjustable,
+  and the tab accessories.
+- Full screen round trip and a second window.
+- The 770 pt minimum window, and a restart keeping the stored sidebar width.
+- The hover preview's z-order over split groups and terminal panes (known open:
+  x-position is clamped, y is approximate).
+- The `+` menu items (New File, New Terminal, New Terminal Group, New Ensemble).
+- The Ensemble tab's close button now hover/selected-gated.
+
+New and updated documentation:
+[`workbench-split-handle.md`](../../references/workbench-split-handle.md) (new),
+[`flat-window-chrome-titlebar-merge.md`](../../references/flat-window-chrome-titlebar-merge.md),
+[`swiftui-macos-click-latency.md`](../../references/swiftui-macos-click-latency.md),
+[`ui-design-language.md`](../../references/ui-design-language.md).
+
 Parallel execution is specified by
 [`workbench-presentation-upgrade/README.md`](workbench-presentation-upgrade/README.md):
 one serial shared foundation, six file-disjoint worktrees from its exact commit,
