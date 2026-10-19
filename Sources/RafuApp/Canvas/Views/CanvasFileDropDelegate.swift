@@ -16,15 +16,16 @@ struct CanvasFileDropDelegate: DropDelegate {
     /// The board surface, in the same space as `DropInfo.location`. The edge
     /// bands of a dropped tab are measured against it.
     var surfaceSize: CGSize = .zero
-    /// Drives the dashed drop outline on the board (review 7.4).
-    var isTargeted: Binding<Bool> = .constant(false)
+    /// The board's hover preview: a tinted highlight and a one-line label
+    /// for what a drop here would do, or `nil` to show nothing.
+    var dropPreview: Binding<CanvasDropPreview?> = .constant(nil)
 
     func dropEntered(info: DropInfo) {
-        isTargeted.wrappedValue = validateDrop(info: info)
+        updatePreview(info: info)
     }
 
     func dropExited(info: DropInfo) {
-        isTargeted.wrappedValue = false
+        dropPreview.wrappedValue = nil
     }
 
     func validateDrop(info: DropInfo) -> Bool {
@@ -44,13 +45,12 @@ struct CanvasFileDropDelegate: DropDelegate {
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        let valid = validateDrop(info: info)
-        if isTargeted.wrappedValue != valid { isTargeted.wrappedValue = valid }
+        let valid = updatePreview(info: info)
         return DropProposal(operation: valid ? .copy : .cancel)
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        isTargeted.wrappedValue = false
+        dropPreview.wrappedValue = nil
         guard validateDrop(info: info) else { return false }
         let location = info.location
         let surface = surfaceSize
@@ -120,6 +120,57 @@ struct CanvasFileDropDelegate: DropDelegate {
         return true
     }
 
+    /// Updates `dropPreview` from the best hint available WITHOUT decoding
+    /// the provider (type presence, and the same-window `activeEditorDrag`/
+    /// `activeEnsembleDragHint` caches `validateDrop` already uses) and
+    /// returns whether the drag validates. The real drop always decodes at
+    /// `performDrop`; this never drives acceptance, only the label.
+    @discardableResult
+    private func updatePreview(info: DropInfo) -> Bool {
+        let valid = validateDrop(info: info)
+        let preview: CanvasDropPreview? =
+            valid
+            ? hintedContent(for: info).flatMap {
+                CanvasFileDrop.preview(
+                    for: $0, at: info.location, surface: surfaceSize, boardID: boardID,
+                    session: session)
+            } : nil
+        if CanvasDropPreview.changed(from: dropPreview.wrappedValue, to: preview) {
+            dropPreview.wrappedValue = preview
+        }
+        return valid
+    }
+
+    /// What this drag probably carries, from type presence and same-window
+    /// hints only — never a provider decode. A cross-window drag with no
+    /// cached hint still gets a generic, never-incorrect preview.
+    private func hintedContent(for info: DropInfo) -> CanvasBoardDropContent? {
+        if !info.itemProviders(for: [.rafuEnsembleDrag]).isEmpty {
+            if case .terminalGroup = session.activeEnsembleDragHint {
+                return .terminalGroup(TerminalGroupID())
+            }
+            return .agentSession(AgentHistorySessionKey(provider: .claudeCode, sessionID: ""))
+        }
+        if !info.itemProviders(for: [.rafuEditorDrag]).isEmpty {
+            if case .tab(let id)? = session.activeEditorDrag { return .tab(id) }
+            if case .file(let path)? = session.activeEditorDrag,
+                let url = CanvasFileDropDecoder.url(for: .file(path: path))
+            {
+                return .files([url], fromFilesTree: true)
+            }
+            return .files([URL(fileURLWithPath: "/")], fromFilesTree: true)
+        }
+        let fileProviders = info.itemProviders(for: [.fileURL])
+        guard !fileProviders.isEmpty else { return nil }
+        if fileProviders.count == 1,
+            fileProviders[0].hasItemConformingToTypeIdentifier(UTType.image.identifier)
+        {
+            return .files([URL(fileURLWithPath: "/placeholder.png")], fromFilesTree: false)
+        }
+        return .files(
+            Array(repeating: URL(fileURLWithPath: "/placeholder"), count: fileProviders.count),
+            fromFilesTree: false)
+    }
 }
 
 /// The one drop policy for the board, shared by the SwiftUI delegate and the
@@ -210,17 +261,74 @@ enum CanvasFileDrop {
         return true
     }
 
+    /// The `CanvasDropAction.Context` for `content` on `boardID`, built once
+    /// and shared by both drop halves so a hover label and the drop it
+    /// describes cannot disagree. Mirrors the refusal order checked at drop
+    /// time in `WorkspaceSession.moveTerminalGroupToEnsemble` and
+    /// `CanvasDroppedFileKind.fits`.
+    static func previewContext(
+        for content: CanvasBoardDropContent, boardID: CanvasID, session: WorkspaceSession
+    ) -> CanvasDropAction.Context {
+        guard let board = session.canvas.boards[boardID] else {
+            return CanvasDropAction.Context(hasWorkspace: session.rootURL != nil)
+        }
+        var context = CanvasDropAction.Context(
+            hasWorkspace: session.rootURL != nil, cardCount: board.cards.count,
+            boardFull: board.cards.count >= CanvasLimits.cards)
+        var groupID: TerminalGroupID?
+        if case .terminalGroup(let id) = content {
+            groupID = id
+            context.isTerminalGroupTab = true
+        } else if case .tab(let value) = content, let uuid = UUID(uuidString: value) {
+            let tabID = EditorTabID(rawValue: uuid)
+            if let tab = session.editorLayout.group(containing: tabID)?.tabs.first(where: {
+                $0.id == tabID
+            }), case .terminalGroup(let id) = tab.resource {
+                groupID = id
+                context.isTerminalGroupTab = true
+            }
+        }
+        if let groupID {
+            context.paneCount = session.terminal.terminalGroup(groupID)?.panes.count ?? 0
+            let terminalContent = CanvasCardContent.terminal(groupID: groupID)
+            context.alreadyOnABoard = session.canvas.boards.values.contains {
+                $0.cards.contains { $0.content == terminalContent }
+            }
+        }
+        return context
+    }
+
+    /// The preview `content` would produce at `location`/`surface` on
+    /// `boardID`, or `nil` when there is no board or no workspace.
+    static func preview(
+        for content: CanvasBoardDropContent, at location: CGPoint, surface: CGSize,
+        boardID: CanvasID, session: WorkspaceSession
+    ) -> CanvasDropPreview? {
+        guard let board = session.canvas.boards[boardID] else { return nil }
+        let context = previewContext(for: content, boardID: boardID, session: session)
+        return CanvasDropAction.resolve(
+            content: content, at: location, surface: surface, viewport: board.viewport,
+            context: context)
+    }
+
     /// The AppKit half of the drop target for one board.
     static func target(
-        boardID: CanvasID, session: WorkspaceSession, isTargeted: Binding<Bool>
+        boardID: CanvasID, session: WorkspaceSession, dropPreview: Binding<CanvasDropPreview?>
     ) -> CanvasBoardDropTarget {
         CanvasBoardDropTarget(
             accepts: { [weak session] content in
                 guard let session else { return false }
                 return accepts(content, boardID: boardID, session: session)
             },
-            targeted: { value in
-                if isTargeted.wrappedValue != value { isTargeted.wrappedValue = value }
+            preview: { [weak session] content, point, surface in
+                guard let session else { return nil }
+                return preview(
+                    for: content, at: point, surface: surface, boardID: boardID, session: session)
+            },
+            update: { value in
+                if CanvasDropPreview.changed(from: dropPreview.wrappedValue, to: value) {
+                    dropPreview.wrappedValue = value
+                }
             },
             perform: { [weak session] content, point, surface in
                 guard let session else { return false }

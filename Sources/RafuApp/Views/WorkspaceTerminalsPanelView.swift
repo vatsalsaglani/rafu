@@ -270,7 +270,8 @@ struct WorkspaceTerminalsPanelView: View {
                                 ? nil : { session.requestTerminalGroupSave(group.id) },
                             startAll: group.hasRestartablePane
                                 ? { session.startAllRestartableTerminalPanes(in: group.id) } : nil,
-                            close: { session.requestTerminalGroupClose(group.id) }
+                            close: { session.requestTerminalGroupClose(group.id) },
+                            beginDrag: { session.activeEnsembleDragHint = .terminalGroup }
                         )
                     case .pane(let pane):
                         if expandedGroupIDs.contains(pane.groupID) {
@@ -554,6 +555,10 @@ private struct TerminalGroupManagerRowView: View {
     let updateSavedLayout: (() -> Void)?
     let startAll: (() -> Void)?
     let close: () -> Void
+    /// Marks this row's kind as the in-flight `rafuEnsembleDrag`, same-window
+    /// only, so a board's hover preview can say "Move terminal here" rather
+    /// than a generic label. Never used to decide what a drop does.
+    var beginDrag: () -> Void = {}
 
     @Environment(\.rafuTheme) private var theme
 
@@ -642,7 +647,10 @@ private struct TerminalGroupManagerRowView: View {
         // (running or stopped) moves there with `moveTerminalGroupToEnsemble`
         // (lease, keeps running); the existing refusals (more than one pane,
         // already on a board, board full) apply unchanged at drop time.
-        .onDrag { CanvasBoardDragPayload(terminalGroupID: row.id).makeItemProvider() }
+        .onDrag {
+            beginDrag()
+            return CanvasBoardDragPayload(terminalGroupID: row.id).makeItemProvider()
+        }
         .onTapGesture(perform: reveal)
         .focusable()
         .onKeyPress(.return) {

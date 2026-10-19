@@ -166,35 +166,33 @@ final class CanvasBoardState: Identifiable {
         guard cards.count < CanvasLimits.cards else { throw CanvasError.capacity }
         let center = center ?? creationCenter
         creationCenter = nil
-        var rect = CanvasRect(x: 40, y: 40)
-        switch content {
-        case .terminal, .web:
-            rect.width = 640
-            rect.height = 420
-        default: break
-        }
+        let size = CanvasBoardDropGeometry.defaultSize(for: content)
+        var rect: CanvasRect
         if let center {
-            rect.x = Double(center.x) - rect.width / 2
-            rect.y = Double(center.y) - rect.height / 2
-        } else if visibleSize.width > 0, visibleSize.height > 0 {
-            let scale = document.viewport.scale
-            rect.x = (Double(visibleSize.width) / 2 - document.viewport.x) / scale - rect.width / 2
-            rect.y =
-                (Double(visibleSize.height) / 2 - document.viewport.y) / scale - rect.height / 2
-            while let last = lastCreatedOrigin, abs(last.x - rect.x) < 1,
-                abs(last.y - rect.y) < 1
-            {
-                rect.x += 24
-                rect.y += 24
-            }
-            lastCreatedOrigin = CGPoint(x: rect.x, y: rect.y)
+            rect = CanvasBoardDropGeometry.defaultRect(for: content, centeredAt: center)
         } else {
-            let offset = Double(cards.count % 5) * 36
-            rect.x += offset
-            rect.y += offset
+            rect = CanvasRect(x: 40, y: 40, width: size.width, height: size.height)
+            if visibleSize.width > 0, visibleSize.height > 0 {
+                let scale = document.viewport.scale
+                rect.x =
+                    (Double(visibleSize.width) / 2 - document.viewport.x) / scale - rect.width / 2
+                rect.y =
+                    (Double(visibleSize.height) / 2 - document.viewport.y) / scale - rect.height / 2
+                while let last = lastCreatedOrigin, abs(last.x - rect.x) < 1,
+                    abs(last.y - rect.y) < 1
+                {
+                    rect.x += 24
+                    rect.y += 24
+                }
+                lastCreatedOrigin = CGPoint(x: rect.x, y: rect.y)
+            } else {
+                let offset = Double(cards.count % 5) * 36
+                rect.x += offset
+                rect.y += offset
+            }
+            rect.x = min(50_000, max(-50_000, rect.x.rounded()))
+            rect.y = min(50_000, max(-50_000, rect.y.rounded()))
         }
-        rect.x = min(50_000, max(-50_000, rect.x.rounded()))
-        rect.y = min(50_000, max(-50_000, rect.y.rounded()))
         let card = CanvasCard(title: title, rect: rect, content: content)
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         try withAnimation(

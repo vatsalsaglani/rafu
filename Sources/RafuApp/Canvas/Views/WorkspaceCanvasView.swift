@@ -24,7 +24,9 @@ struct WorkspaceCanvasView: View {
     @State private var presentationID = UUID()
     @State private var spaceIsDown = false
     @State private var isPanning = false
-    @State private var isDropTargeted = false
+    /// The board's hover drop preview: a tinted highlight and a one-line
+    /// label for what a drop here would do. `nil` shows nothing.
+    @State private var dropPreview: CanvasDropPreview?
     @FocusState private var boardHasKeyboardFocus: Bool
     @AppStorage("canvasEmptyBoardTipDismissed") private var tipDismissed = false
     @State private var showsRestoredLinksNotice = false
@@ -198,13 +200,11 @@ struct WorkspaceCanvasView: View {
                     .offset(x: marquee.minX, y: marquee.minY)
                     .allowsHitTesting(false).accessibilityHidden(true)
             }
-            if isDropTargeted {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(
-                        theme.palette.accent, style: StrokeStyle(lineWidth: 2, dash: [8, 5])
-                    )
-                    .padding(6)
-                    .allowsHitTesting(false).accessibilityHidden(true)
+            if let dropPreview {
+                dropPreviewOverlay(dropPreview, in: geometry.size)
+                    .animation(
+                        RafuMotion.resolve(RafuMotion.targetHighlight, reduceMotion: reduceMotion),
+                        value: dropPreview)
             }
             if board.cards.isEmpty, !tipDismissed {
                 emptyBoardTip
@@ -244,7 +244,7 @@ struct WorkspaceCanvasView: View {
                 of: [.rafuEnsembleDrag, .rafuEditorDrag, .fileURL],
                 delegate: CanvasFileDropDelegate(
                     boardID: board.id, session: session, surfaceSize: geometry.size,
-                    isTargeted: $isDropTargeted)
+                    dropPreview: $dropPreview)
             )
             .background(
                 CanvasScrollBridge(
@@ -275,7 +275,7 @@ struct WorkspaceCanvasView: View {
                     },
                     hidden: {},
                     drop: CanvasFileDrop.target(
-                        boardID: board.id, session: session, isTargeted: $isDropTargeted)
+                        boardID: board.id, session: session, dropPreview: $dropPreview)
                 )
             )
             // Space-drag pans over cards too. Without Space this mask disables
@@ -523,6 +523,97 @@ struct WorkspaceCanvasView: View {
             .offset(x: origin.x - (isVertical ? 0.5 : 0), y: origin.y - (isVertical ? 0 : 0.5))
             .transition(.opacity)
             .allowsHitTesting(false).accessibilityHidden(true)
+    }
+
+    /// The board's hover drop preview: a ghost card, an edge split band, or a
+    /// generic board highlight, each with its one-line label. `.card`'s rect
+    /// is board-space; it is projected through the viewport here (`project`)
+    /// so a hover label and the eventual drop it describes never disagree on
+    /// where the card lands.
+    @ViewBuilder
+    private func dropPreviewOverlay(_ preview: CanvasDropPreview, in size: CGSize) -> some View {
+        let color = preview.tone == .warn ? theme.palette.warning : theme.palette.accent
+        switch preview.shape {
+        case .card(let rect):
+            let origin = project(rect.origin)
+            ZStack(alignment: .top) {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(color.opacity(0.1))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(color, style: StrokeStyle(lineWidth: 2, dash: [8, 5]))
+                    )
+                    .frame(
+                        width: rect.width * board.viewport.scale,
+                        height: rect.height * board.viewport.scale)
+                dropPreviewLabel(preview.label, tone: preview.tone)
+                    .offset(y: -22)
+            }
+            .offset(x: origin.x, y: origin.y)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        case .edge(let edge):
+            ZStack(alignment: edgeAlignment(edge)) {
+                edgeBand(edge, color: color, in: size)
+                dropPreviewLabel(preview.label, tone: preview.tone)
+                    .padding(14)
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        case .board:
+            ZStack(alignment: .top) {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(color.opacity(0.06))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(color, style: StrokeStyle(lineWidth: 2, dash: [8, 5]))
+                    )
+                    .padding(6)
+                dropPreviewLabel(preview.label, tone: preview.tone)
+                    .padding(.top, 14)
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+    }
+
+    private func dropPreviewLabel(_ text: String, tone: CanvasDropPreview.Tone) -> some View {
+        Text(text)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(theme.palette.onAccent)
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(
+                Capsule().fill(tone == .warn ? theme.palette.warning : theme.palette.accent)
+            )
+            .fixedSize()
+    }
+
+    /// A thin band along one edge of a `size` surface, for the "this tab
+    /// will split here" preview.
+    private func edgeBand(_ edge: EditorSplitEdge, color: Color, in size: CGSize) -> some View {
+        let thickness: CGFloat = 10
+        let rect: CGRect
+        switch edge {
+        case .leading: rect = CGRect(x: 0, y: 0, width: thickness, height: size.height)
+        case .trailing:
+            rect = CGRect(x: size.width - thickness, y: 0, width: thickness, height: size.height)
+        case .top: rect = CGRect(x: 0, y: 0, width: size.width, height: thickness)
+        case .bottom:
+            rect = CGRect(x: 0, y: size.height - thickness, width: size.width, height: thickness)
+        }
+        return Rectangle()
+            .fill(color.opacity(0.5))
+            .frame(width: rect.width, height: rect.height)
+            .position(x: rect.midX, y: rect.midY)
+    }
+
+    private func edgeAlignment(_ edge: EditorSplitEdge) -> Alignment {
+        switch edge {
+        case .leading: .leading
+        case .trailing: .trailing
+        case .top: .top
+        case .bottom: .bottom
+        }
     }
 
     /// Arrow keys move the selection 8 pt (Shift: 40 pt). Option-Command with

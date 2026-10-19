@@ -12,7 +12,11 @@ import UniformTypeIdentifiers
 struct CanvasBoardDropTarget {
     /// Whether the board takes this decoded drag. False rejects the drag.
     let accepts: (CanvasBoardDropContent) -> Bool
-    let targeted: (Bool) -> Void
+    /// The hover preview `content` would produce at the drop point (bridge's
+    /// top-left space) on a bridge of size `surface`, or `nil` for none.
+    let preview: (CanvasBoardDropContent, CGPoint, CGSize) -> CanvasDropPreview?
+    /// Drives the board's hover preview state.
+    let update: (CanvasDropPreview?) -> Void
     /// The decoded drag, the drop point in the bridge's top-left space, and
     /// the bridge's size (for the edge bands of a dropped tab).
     let perform: (CanvasBoardDropContent, CGPoint, CGSize) -> Bool
@@ -101,15 +105,16 @@ struct CanvasScrollBridge: NSViewRepresentable {
 
         override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
             guard let drop, let content = droppedContent(sender), drop.accepts(content) else {
-                drop?.targeted(false)
+                drop?.update(nil)
                 return []
             }
-            drop.targeted(true)
+            let point = dropPoint(sender)
+            drop.update(drop.preview(content, point, bounds.size))
             return .copy
         }
 
         override func draggingExited(_ sender: NSDraggingInfo?) {
-            drop?.targeted(false)
+            drop?.update(nil)
             dropSequence = nil
         }
 
@@ -119,18 +124,23 @@ struct CanvasScrollBridge: NSViewRepresentable {
         }
 
         override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-            drop?.targeted(false)
+            drop?.update(nil)
             guard let drop, let content = droppedContent(sender), drop.accepts(content) else {
                 return false
             }
-            let local = convert(sender.draggingLocation, from: nil)
-            let point = CGPoint(x: local.x, y: isFlipped ? local.y : bounds.height - local.y)
-            return drop.perform(content, point, bounds.size)
+            return drop.perform(content, dropPoint(sender), bounds.size)
         }
 
         override func concludeDragOperation(_ sender: NSDraggingInfo?) {
-            drop?.targeted(false)
+            drop?.update(nil)
             dropSequence = nil
+        }
+
+        /// The drag's location converted to this view's top-left-origin
+        /// space, matching `EditorDropGeometry`'s SwiftUI-style coordinates.
+        private func dropPoint(_ sender: NSDraggingInfo) -> CGPoint {
+            let local = convert(sender.draggingLocation, from: nil)
+            return CGPoint(x: local.x, y: isFlipped ? local.y : bounds.height - local.y)
         }
 
         /// What this drag carries, classified and decoded once per drag

@@ -349,7 +349,7 @@ private struct EditorGroupView: View {
                     }
                     .overlay {
                         if isDropTargeted {
-                            EditorSplitPreviewOverlay(edge: hoveredDropEdge)
+                            EditorSplitPreviewOverlay(edge: hoveredDropEdge, isTabDrag: isTabDrag)
                         }
                     }
                     // A visible board owns FILE drops (they add nodes), so the
@@ -439,6 +439,15 @@ private struct EditorGroupView: View {
 
     private var isFindPresented: Bool {
         session.isDocumentFindPresented && session.isFocusedGroup(group.id)
+    }
+
+    /// Whether the drag currently hovering this group is a tab — the
+    /// same-window `activeEditorDrag` cache `EditorDropDelegate.validateDrop`
+    /// already reads. A cross-window drag with no cached hint falls back to
+    /// "Open here", a label still correct for the common file-drop case.
+    private var isTabDrag: Bool {
+        if case .tab? = session.activeEditorDrag { return true }
+        return false
     }
 
     /// GX2 hunk-peek/blame-hover wiring for `document`, threaded into
@@ -875,6 +884,10 @@ private struct EditorSplitPreviewOverlay: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.rafuTheme) private var theme
     let edge: EditorSplitEdge?
+    /// Whether the hovering drag is a tab (vs. a Files-tree/Finder file), so
+    /// the center-zone label reads "Move tab to this editor group" instead
+    /// of "Open here".
+    var isTabDrag = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -895,11 +908,30 @@ private struct EditorSplitPreviewOverlay: View {
                         height: previewSize(in: proxy.size).height
                     )
                     .padding(5)
+                    .overlay(alignment: .top) {
+                        Text(label)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(theme.palette.onAccent)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(Capsule().fill(theme.palette.accent))
+                            .fixedSize()
+                            .padding(.top, 14)
+                    }
             }
             .animation(reduceMotion ? nil : .spring(duration: 0.22), value: edge)
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+
+    private var label: String {
+        switch edge {
+        case .leading: "Split editor left"
+        case .trailing: "Split editor right"
+        case .top: "Split editor up"
+        case .bottom: "Split editor down"
+        case nil: isTabDrag ? "Move tab to this editor group" : "Open here"
+        }
     }
 
     private var alignment: Alignment {
@@ -1015,6 +1047,11 @@ private struct EmptyEditorView: View {
     let workspaceName: String
     @Bindable var session: WorkspaceSession
 
+    private var isTabDrag: Bool {
+        if case .tab? = session.activeEditorDrag { return true }
+        return false
+    }
+
     var body: some View {
         VStack(spacing: 18) {
             Image(systemName: "doc.text.magnifyingglass")
@@ -1032,7 +1069,7 @@ private struct EmptyEditorView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay {
             if isDropTargeted {
-                EditorSplitPreviewOverlay(edge: nil)
+                EditorSplitPreviewOverlay(edge: nil, isTabDrag: isTabDrag)
             }
         }
         .onDrop(

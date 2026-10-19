@@ -109,6 +109,13 @@ nonisolated enum CanvasBoardDragPayload: Codable, Equatable, Sendable {
     }
 }
 
+/// Which kind of `rafuEnsembleDrag` a same-window drag is, for the hover
+/// preview label only. See `WorkspaceSession.activeEnsembleDragHint`.
+nonisolated enum EnsembleDragHint: Sendable {
+    case agentSession
+    case terminalGroup
+}
+
 /// Pure geometry for a drop on the board.
 nonisolated enum CanvasBoardDropGeometry {
     /// The board point under a view point. This is the same math as
@@ -117,6 +124,31 @@ nonisolated enum CanvasBoardDropGeometry {
         CGPoint(
             x: (point.x - viewport.x) / viewport.scale,
             y: (point.y - viewport.y) / viewport.scale)
+    }
+
+    /// The default card size for `content`: 640×420 for `.terminal`/`.web`,
+    /// otherwise `CanvasRect`'s stored default (380×260). Shared by
+    /// `CanvasBoardState.add` and the drop preview resolver so a hover ghost
+    /// is always the exact size the card will be.
+    static func defaultSize(for content: CanvasCardContent) -> CGSize {
+        switch content {
+        case .terminal, .web: CGSize(width: 640, height: 420)
+        default: CGSize(width: CanvasRect().width, height: CanvasRect().height)
+        }
+    }
+
+    /// The rect `CanvasBoardState.add(title:content:center:)` creates for
+    /// `content` when centered at `center` (board units): `defaultSize(for:)`,
+    /// centered on `center`, then rounded and clamped to ±50,000 — the same
+    /// rule `add` applies.
+    static func defaultRect(for content: CanvasCardContent, centeredAt center: CGPoint)
+        -> CanvasRect
+    {
+        let size = defaultSize(for: content)
+        var rect = CanvasRect(x: 40, y: 40, width: size.width, height: size.height)
+        rect.x = min(50_000, max(-50_000, (Double(center.x) - rect.width / 2).rounded()))
+        rect.y = min(50_000, max(-50_000, (Double(center.y) - rect.height / 2).rounded()))
+        return rect
     }
 }
 

@@ -184,6 +184,13 @@ final class WorkspaceSession {
     /// every new drag overwrites it and every completed drop clears it.
     @ObservationIgnored
     var activeEditorDrag: EditorDragPayload?
+    /// Which kind of `rafuEnsembleDrag` is in flight, same-window only. Used
+    /// ONLY to pick a hover-preview label on an Ensemble board (an Agent
+    /// History row vs. a Terminals-panel row look identical at the type
+    /// level) — never to decide whether a drop is acceptable, and never to
+    /// decode what the drop actually does.
+    @ObservationIgnored
+    var activeEnsembleDragHint: EnsembleDragHint?
     var pendingCloseDocument: EditorDocument?
     var pendingFileCreation: FileCreationRequest?
     var pendingFileName = ""

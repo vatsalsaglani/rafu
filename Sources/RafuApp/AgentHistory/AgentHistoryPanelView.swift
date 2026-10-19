@@ -240,7 +240,8 @@ private struct AgentHistorySessionList: View {
         // Drag a row onto an Ensemble to resume the session there. The
         // payload holds only the provider and the session id.
         .onDrag {
-            CanvasBoardDragPayload.agentSession(
+            session.activeEnsembleDragHint = .agentSession
+            return CanvasBoardDragPayload.agentSession(
                 provider: summary.key.provider, sessionID: summary.key.sessionID
             ).makeItemProvider()
         }
