@@ -107,14 +107,21 @@ final class CanvasLiveBridge {
             }
             install(controller: controller, token: token)
             directories[controller.id] = launch.directory
+            if launch.pathMayBeReordered {
+                // A soft notice, not a failure: the launch still proceeds. Only a
+                // shell with no private startup hook of its own (environmentOnly)
+                // reaches here, so PATH order after the user's own startup files
+                // is not guaranteed the way it is for every other shell.
+                notice =
+                    "Agent links are on. If your startup files change PATH, the claude and codex commands can start without Rafu."
+            }
             revision &+= 1
             return launch
         } catch {
             guard !Task.isCancelled, controller.generation == generation, isCurrent() else {
                 return nil
             }
-            notice =
-                "Agent links need zsh, bash, or fish. This terminal uses \(controller.shell.basename)."
+            notice = "Agent links are not available. Start a new terminal to try again."
             revision &+= 1
             return nil
         }

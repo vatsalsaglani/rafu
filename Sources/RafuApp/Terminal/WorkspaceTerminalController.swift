@@ -1263,7 +1263,7 @@ final class WorkspaceTerminalController: Identifiable {
                 if let bridge {
                     view.startProcess(
                         executable: bridge.executable, args: bridge.arguments,
-                        environment: bridge.environment, execName: nil,
+                        environment: bridge.environment, execName: bridge.execName,
                         currentDirectory: self.startingDirectory)
                 } else {
                     view.startProcess(
