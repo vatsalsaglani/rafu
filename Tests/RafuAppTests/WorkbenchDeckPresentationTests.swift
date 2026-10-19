@@ -5,7 +5,7 @@ import Testing
 
 @Suite("Workbench deck presentation")
 struct WorkbenchDeckPresentationTests {
-    @Test("Exactly one deck owns the editor and optional utility split")
+    @Test("Exactly one deck surface hosts the editor alone")
     func oneDeckOwnsInnerSplit() throws {
         let source = try Self.source("Sources/RafuApp/Views/WorkspaceWindowView.swift")
         let windowContent = try Self.section(
@@ -16,17 +16,19 @@ struct WorkbenchDeckPresentationTests {
         let deckLane = try Self.section(
             in: windowContent,
             from: "WorkbenchDeckSurface {",
-            through: "Divider().overlay(theme.palette.borderSubtle)"
+            through: ".background(theme.palette.appBackground)"
         )
 
         #expect(Self.occurrences(of: "WorkbenchDeckSurface {", in: windowContent) == 1)
-        #expect(Self.occurrences(of: "HSplitView {", in: windowContent) == 2)
-        #expect(Self.occurrences(of: "HSplitView {", in: deckLane) == 1)
+        // One HSplitView, between the left sidebar pane and the deck lane.
+        // The deck itself no longer owns an inner split: there is no right
+        // panel for it to host.
+        #expect(Self.occurrences(of: "HSplitView {", in: windowContent) == 1)
         #expect(deckLane.contains("editorCanvas"))
-        #expect(deckLane.contains("WorkspaceUtilityPanelView(session: session)"))
+        #expect(!deckLane.contains("WorkspaceUtilityPanelView"))
     }
 
-    @Test("Files, the utility rail, and status remain outside the deck")
+    @Test("The Activity Rail, sidebar, and status remain outside the deck")
     func structuralPlaneStaysOutsideDeck() throws {
         let source = try Self.source("Sources/RafuApp/Views/WorkspaceWindowView.swift")
         let windowContent = try Self.section(
@@ -34,17 +36,19 @@ struct WorkbenchDeckPresentationTests {
             from: "private var windowContent: some View",
             through: "private var editorCanvas: some View"
         )
+        let rail = try #require(
+            windowContent.range(of: "WorkspaceActivityRail(session: session)")
+        )
         let deck = try #require(windowContent.range(of: "WorkbenchDeckSurface {"))
-        let files = try #require(windowContent.range(of: "WorkspaceSidebarView(session: session)"))
-        let utilityRail = try #require(
-            windowContent.range(of: "WorkspaceUtilityRail(session: session)")
+        let sidebar = try #require(
+            windowContent.range(of: "WorkspaceSidebarPanelView(session: session)")
         )
         let status = try #require(
             windowContent.range(of: "WorkspaceStatusBar(session: session)")
         )
 
-        #expect(files.lowerBound < deck.lowerBound)
-        #expect(utilityRail.lowerBound > deck.lowerBound)
+        #expect(rail.lowerBound < deck.lowerBound)
+        #expect(sidebar.lowerBound < deck.lowerBound)
         #expect(status.lowerBound > deck.lowerBound)
         #expect(RafuMetrics.statusBarHeight == 24)
     }
@@ -55,7 +59,7 @@ struct WorkbenchDeckPresentationTests {
         let deckLane = try Self.section(
             in: source,
             from: "WorkbenchDeckSurface {",
-            through: "Divider().overlay(theme.palette.borderSubtle)"
+            through: ".background(theme.palette.appBackground)"
         )
         let padding = try #require(
             deckLane.range(of: ".padding(RafuMetrics.workbenchInset)")
@@ -78,18 +82,16 @@ struct WorkbenchDeckPresentationTests {
             through: "private var editorCanvas: some View"
         )
 
+        // Grown from the Files-only (200/260/420) to fit Search and Source
+        // Control, which were authored for the former 300-520 right panel.
         #expect(
             windowContent.contains(
-                ".frame(minWidth: 200, idealWidth: 260, maxWidth: 420)"
+                ".frame(minWidth: 220, idealWidth: 300, maxWidth: 560)"
             )
         )
         #expect(windowContent.contains(".frame(minWidth: 472, minHeight: 220)"))
-        #expect(
-            windowContent.contains(
-                ".frame(minWidth: 300, idealWidth: 340, maxWidth: 520)"
-            )
-        )
-        #expect(Self.occurrences(of: ".layoutPriority(1)", in: windowContent) >= 4)
+        #expect(!windowContent.contains("WorkspaceUtilityPanelView"))
+        #expect(Self.occurrences(of: ".layoutPriority(1)", in: windowContent) >= 2)
         #expect(!windowContent.contains(".shadow("))
         #expect(!windowContent.contains(".blur("))
         #expect(!windowContent.contains(".material"))
@@ -111,15 +113,31 @@ struct WorkbenchDeckPresentationTests {
         #expect(!source.contains("WorkbenchDeckSurface"))
     }
 
-    @Test("There is no left rail beside the Files sidebar, expanded or collapsed")
-    func noLeftRailBesideFilesSidebar() throws {
+    @Test("The left Activity Rail hosts every navigator mode outside the deck")
+    func leftActivityRailHostsEveryMode() throws {
         let source = try Self.source("Sources/RafuApp/Views/WorkspaceWindowView.swift")
+        let windowContent = try Self.section(
+            in: source,
+            from: "private var windowContent: some View",
+            through: "private var editorCanvas: some View"
+        )
+        let rail = try Self.source("Sources/RafuApp/Views/WorkspaceNavigatorView.swift")
 
-        #expect(!source.contains("WorkspaceSidebarRail"))
-        // The Files pane is the only thing gated on sidebar collapse state
-        // in this file; the sidebar toggle itself lives in
-        // `WindowTitlebarRow`, not here.
-        #expect(Self.occurrences(of: "if !session.isSidebarCollapsed", in: source) == 1)
+        #expect(windowContent.contains("WorkspaceActivityRail(session: session)"))
+        // The rail is a sibling of the HSplitView, not inside it, and is
+        // never gated on `isSidebarCollapsed` — only the sidebar pane is.
+        #expect(Self.occurrences(of: "if !session.isSidebarCollapsed", in: windowContent) == 1)
+        let railBody = try Self.section(
+            in: rail,
+            from: "struct WorkspaceActivityRail: View",
+            through: "private func railButton"
+        )
+        #expect(!railBody.contains("if !session.isSidebarCollapsed"))
+        #expect(rail.contains("ForEach(WorkspaceNavigatorMode.allCases, id: \\.self)"))
+        #expect(
+            WorkspaceNavigatorMode.allCases == [
+                .files, .search, .sourceControl, .terminals, .history,
+            ])
     }
 
     private static func occurrences(of needle: String, in source: String) -> Int {

@@ -25,7 +25,7 @@ extension WorkspaceSession {
     /// Shows the History navigator. `focusSearch` also moves keyboard focus
     /// to its search field ("Search Agent History…").
     func showAgentHistory(focusSearch: Bool = false) {
-        navigatorMode = .history
+        showNavigator(.history)
         if focusSearch { agentHistory.searchFocusRequest &+= 1 }
     }
 

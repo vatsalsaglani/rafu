@@ -94,7 +94,8 @@ struct WorkspaceSidebarView: View {
     /// Workspace name at the leading end (13 pt semibold, truncating) so
     /// several windows are told apart at a glance; the icon actions sit at the
     /// trailing end. "Filter Files" is the file-name filter (the Go to File
-    /// palette); workspace-wide text search belongs to the right rail alone.
+    /// palette); workspace-wide text search lives in the Search section of
+    /// this same sidebar, reached from the Activity Rail.
     private var sidebarHeader: some View {
         HStack(spacing: 4) {
             Text(workspaceTitle)

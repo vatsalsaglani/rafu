@@ -13,7 +13,7 @@ struct AgentHistoryPanelView: View {
                 icon: WorkspaceNavigatorMode.history.symbolName,
                 title: "History",
                 closeAccessibilityLabel: "Close History",
-                onClose: { session.navigatorMode = .files }
+                onClose: { session.isSidebarCollapsed = true }
             ) {
                 AgentHistoryRefreshButton(store: AgentHistoryStore.shared)
             }

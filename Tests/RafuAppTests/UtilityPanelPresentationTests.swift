@@ -27,7 +27,9 @@ struct UtilityPanelPresentationTests {
         )
     }
 
-    @Test("Utility host is solid, headerless, top pinned, and routes Source Control uniformly")
+    @Test(
+        "Sidebar host is solid, headerless, top pinned, one sidebar tone, and routes Source Control uniformly"
+    )
     func utilityHostAndRailContract() throws {
         let navigator = try Self.source(
             "Sources/RafuApp/Views/WorkspaceNavigatorView.swift"
@@ -38,7 +40,11 @@ struct UtilityPanelPresentationTests {
 
         #expect(!navigator.contains("private var panelHeader"))
         #expect(!navigator.contains("sidebarBackground.opacity(0.92)"))
-        #expect(navigator.contains(".background(theme.palette.elevatedBackground)"))
+        // Round 3 (left Activity Rail, user decision 2026-10-19): every
+        // navigator mode is a peer in the SAME left sidebar pane as Files,
+        // so it shares Files' own sidebar tone rather than the former
+        // right-panel elevated card tone.
+        #expect(navigator.contains(".background(theme.palette.sidebarBackground)"))
         #expect(navigator.contains("SourceControlPanelView(session: session)"))
         #expect(
             navigator.components(separatedBy: "RafuUtilityPanelHeader(").count - 1 == 1

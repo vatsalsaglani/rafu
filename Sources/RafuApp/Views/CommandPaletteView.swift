@@ -650,7 +650,7 @@ struct CommandPaletteView: View {
                 keywords: ["find", "replace"], shortcut: "⌘⇧F"
             ) {
                 dismiss()
-                session.navigatorMode = .search
+                session.showNavigator(.search)
             },
             .init(
                 title: "Find in File", symbolName: "doc.text.magnifyingglass",
@@ -664,7 +664,7 @@ struct CommandPaletteView: View {
                 keywords: ["git", "changes"], shortcut: "⌘⇧G"
             ) {
                 dismiss()
-                session.navigatorMode = .sourceControl
+                session.showNavigator(.sourceControl)
             },
             .init(
                 title: "Show Agent History", symbolName: "clock.arrow.circlepath",
@@ -682,11 +682,11 @@ struct CommandPaletteView: View {
                 session.showAgentHistory(focusSearch: true)
             },
             .init(
-                title: "Hide Utility Panel", symbolName: "sidebar.right",
-                keywords: ["close", "panel"]
+                title: "Toggle Sidebar", symbolName: "sidebar.left",
+                keywords: ["close", "hide", "panel", "files"], shortcut: "⌘B"
             ) {
                 dismiss()
-                session.navigatorMode = .files
+                session.toggleSidebar()
             },
             .init(title: "New File", symbolName: "doc.badge.plus", keywords: ["create"]) {
                 dismiss()
@@ -716,7 +716,7 @@ struct CommandPaletteView: View {
                 keywords: ["shell", "sessions", "manager", "panel"]
             ) {
                 dismiss()
-                session.navigatorMode = .terminals
+                session.showNavigator(.terminals)
             },
             .init(
                 title: "Install rafu CLI", detail: "Installs to ~/.local/bin",

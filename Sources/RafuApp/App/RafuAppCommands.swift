@@ -139,19 +139,19 @@ struct RafuAppCommands: Commands {
             .disabled(workspaceSession?.selectedDocument == nil)
 
             Button("Search Workspace") {
-                workspaceSession?.navigatorMode = .search
+                workspaceSession?.showNavigator(.search)
             }
             .keyboardShortcut("f", modifiers: [.command, .shift])
 
             // Issue #14: ⌘⇧G stays Show Source Control — do NOT rebind ⌘G.
             Button("Show Source Control") {
-                workspaceSession?.toggleUtilityPane(.sourceControl)
+                workspaceSession?.showNavigator(.sourceControl)
             }
             .keyboardShortcut("g", modifiers: [.command, .shift])
 
             // Agent History (X12): ⌘⇧H, next to ⌘⇧F Search and ⌘⇧G Source Control.
             Button("Show Agent History") {
-                workspaceSession?.toggleUtilityPane(.history)
+                workspaceSession?.showNavigator(.history)
             }
             .keyboardShortcut("h", modifiers: [.command, .shift])
             .disabled(workspaceSession?.rootURL == nil)
@@ -307,7 +307,7 @@ struct RafuAppCommands: Commands {
             // Down only while a Terminal Group is selected; outside that
             // context it remains disabled for a future Reopen Closed Tab.
             Button("Show Terminals") {
-                workspaceSession?.toggleUtilityPane(.terminals)
+                workspaceSession?.showNavigator(.terminals)
             }
             .disabled(workspaceSession?.rootURL == nil)
 

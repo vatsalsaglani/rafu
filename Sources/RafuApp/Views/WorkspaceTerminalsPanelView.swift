@@ -148,7 +148,7 @@ struct WorkspaceTerminalsPanelView: View {
             icon: "terminal",
             title: "Terminals",
             closeAccessibilityLabel: "Close Terminals",
-            onClose: { session.navigatorMode = .files },
+            onClose: { session.isSidebarCollapsed = true },
             context: {
                 RafuChip(
                     text: "\(count)",

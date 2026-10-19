@@ -21,7 +21,7 @@ struct SourceControlPanelView: View {
                 icon: WorkspaceNavigatorMode.sourceControl.symbolName,
                 title: "Source Control",
                 closeAccessibilityLabel: "Close Source Control",
-                onClose: { session.navigatorMode = .files }
+                onClose: { session.isSidebarCollapsed = true }
             ) {
                 Button("Refresh", systemImage: "arrow.clockwise") {
                     Task { await refreshAllGitState() }

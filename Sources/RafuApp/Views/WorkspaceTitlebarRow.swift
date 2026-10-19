@@ -217,7 +217,7 @@ struct WindowTitlebarRow: View {
         let summary = AgentActivitySummary(sessions: session.terminal.sessions)
         if summary.isActive {
             Button {
-                session.navigatorMode = .terminals
+                session.showNavigator(.terminals)
             } label: {
                 HStack(spacing: 5) {
                     Circle()

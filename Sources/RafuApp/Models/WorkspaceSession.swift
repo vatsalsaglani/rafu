@@ -29,7 +29,7 @@ nonisolated enum WorkspaceNavigatorMode: String, CaseIterable, Codable, Sendable
 
     var symbolName: String {
         switch self {
-        case .files: "doc.on.doc"
+        case .files: "folder"
         case .search: "magnifyingglass"
         case .sourceControl: "arrow.triangle.branch"
         case .terminals: "terminal"
@@ -424,8 +424,28 @@ final class WorkspaceSession {
     @ObservationIgnored
     let languageIntelligence = LanguageIntelligenceCoordinator()
 
-    func toggleUtilityPane(_ mode: WorkspaceNavigatorMode) {
-        navigatorMode = navigatorMode == mode ? .files : mode
+    /// Selects `mode` in the left Activity Rail and shows the sidebar,
+    /// expanding it first if it is currently collapsed. This is the single
+    /// path for every "Show <Mode>" entry point (menu, command palette,
+    /// status bar, titlebar agent capsule) — `mode` is never "closed"; the
+    /// one explicit sidebar toggle lives in `WindowTitlebarRow`/⌘B
+    /// (`toggleSidebar()`), per ADR 0002's "one system sidebar toggle".
+    func showNavigator(_ mode: WorkspaceNavigatorMode) {
+        navigatorMode = mode
+        isSidebarCollapsed = false
+    }
+
+    /// Activity Rail icon click. Clicking the already-selected mode's icon
+    /// toggles the sidebar's visibility (mode is preserved so re-expanding
+    /// returns to the same section); clicking any other mode's icon selects
+    /// it and expands the sidebar if it was collapsed.
+    func selectNavigatorRailIcon(_ mode: WorkspaceNavigatorMode) {
+        if navigatorMode == mode {
+            isSidebarCollapsed.toggle()
+        } else {
+            navigatorMode = mode
+            isSidebarCollapsed = false
+        }
     }
 
     /// Hosts Settings as a window-scoped, non-restorable editor canvas.

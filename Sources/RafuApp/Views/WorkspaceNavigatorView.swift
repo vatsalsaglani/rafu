@@ -1,24 +1,28 @@
 import AppKit
 import SwiftUI
 
-/// Right-hand utility panel hosting Search and Source Control.
-/// The left sidebar is reserved for the file tree (see WorkspaceSidebarView);
-/// this panel is toggled from the utility rail on the window's right edge.
-struct WorkspaceUtilityPanelView: View {
+/// The left sidebar's content: whichever section `session.navigatorMode`
+/// selects. Files keeps its own tree view (`WorkspaceSidebarView`); this
+/// hosts the other four sections, each a peer in the same pane.
+struct WorkspaceSidebarPanelView: View {
     @Bindable var session: WorkspaceSession
     @Environment(\.rafuTheme) private var theme
 
     var body: some View {
         panelContent
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background(theme.palette.elevatedBackground)
+            // One sidebar tone for every section, so switching the rail
+            // selection never changes the pane's own background — only
+            // `WorkspaceSidebarView` painted this before; Search, Source
+            // Control, Terminals, and History now share this same pane.
+            .background(theme.palette.sidebarBackground)
     }
 
     @ViewBuilder
     private var panelContent: some View {
         switch session.navigatorMode {
         case .files:
-            EmptyView()
+            WorkspaceSidebarView(session: session)
         case .search:
             WorkspaceSearchNavigatorView(session: session)
         case .sourceControl:
@@ -31,31 +35,40 @@ struct WorkspaceUtilityPanelView: View {
     }
 }
 
-/// Slim icon rail pinned to the window's right edge. Toggles the utility panel.
-struct WorkspaceUtilityRail: View {
+/// The one always-visible left icon rail (user decision 2026-10-19): every
+/// navigator mode (Files, Search, Source Control, Terminals, History) lives
+/// here, selecting which section the left sidebar shows. This supersedes
+/// ADR 0003's right-rail mode placement — there is no right rail and no
+/// right utility panel anymore. The rail itself is never gated on
+/// `isSidebarCollapsed`; only the sidebar content below it is.
+struct WorkspaceActivityRail: View {
     @Bindable var session: WorkspaceSession
     @Environment(\.rafuTheme) private var theme
 
     var body: some View {
         VStack(spacing: 8) {
-            railButton(.search)
-            railButton(.sourceControl)
-            railButton(.terminals)
-            railButton(.history)
+            ForEach(WorkspaceNavigatorMode.allCases, id: \.self) { mode in
+                railButton(mode)
+            }
             Spacer()
         }
-        // The rail starts below the titlebar row (`WindowTitlebarRow`).
+        // The rail starts below the titlebar row (`WindowTitlebarRow`) so
+        // the traffic lights and sidebar toggle stay clear above it.
         .padding(.top, 8)
         .frame(width: 40)
         .frame(maxHeight: .infinity)
         .fixedSize(horizontal: true, vertical: false)
         .background(WindowDragHandle())
-        .background(theme.palette.sidebarBackground)
+        .background(theme.palette.appBackground)
     }
 
     private func railButton(_ mode: WorkspaceNavigatorMode) -> some View {
         let hasWorkspace = session.descriptor != nil
-        let isActive = hasWorkspace && session.navigatorMode == mode
+        // Files needs no open workspace — it shows "Open a folder to begin"
+        // itself — so it alone stays enabled and can show as selected
+        // without one; the other four modes need a workspace for both.
+        let isEnabled = mode == .files || hasWorkspace
+        let isActive = isEnabled && session.navigatorMode == mode && !session.isSidebarCollapsed
         // Only computed for `.terminals` — deriving it for every rail
         // button would needlessly walk `terminal.sessions` on every render.
         let attentionCount =
@@ -64,17 +77,17 @@ struct WorkspaceUtilityRail: View {
             : 0
         let button =
             Button(mode.title, systemImage: mode.symbolName) {
-                session.navigatorMode = isActive ? .files : mode
+                session.selectNavigatorRailIcon(mode)
             }
             .buttonStyle(
                 RafuRailButtonStyle(
                     isSelected: isActive,
-                    deckFacingEdge: .leading,
-                    tooltip: hasWorkspace ? mode.title : "\(mode.title) — open a folder first",
+                    deckFacingEdge: .trailing,
+                    tooltip: isEnabled ? mode.title : "\(mode.title) — open a folder first",
                     badge: mode == .terminals && attentionCount > 0 ? attentionCount : nil
                 )
             )
-            .disabled(!hasWorkspace)
+            .disabled(!isEnabled)
         return Group {
             if mode == .terminals, attentionCount > 0 {
                 button.accessibilityValue("\(attentionCount) needing attention")
@@ -94,7 +107,7 @@ struct WorkspaceSearchNavigatorView: View {
                 icon: WorkspaceNavigatorMode.search.symbolName,
                 title: "Search",
                 closeAccessibilityLabel: "Close Search",
-                onClose: { session.navigatorMode = .files }
+                onClose: { session.isSidebarCollapsed = true }
             ) {
                 EmptyView()
             }
