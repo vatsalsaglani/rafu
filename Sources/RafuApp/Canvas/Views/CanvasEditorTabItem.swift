@@ -10,8 +10,25 @@ struct CanvasEditorTabItem: View {
     /// being dragged — stable for the tab's lifetime, compared against
     /// `session.dragInFlight`.
     @State private var dragToken = RafuDragSourceToken()
+    @State private var isHovering = false
+
+    /// Window redesign phase 4b: this board-level tab shows one activity
+    /// dot for the whole Ensemble, not per card — warning, and only when
+    /// some card's agent is waiting on an approval. Resolved through the
+    /// same `CanvasCardCommands.agentCardStatus` every card header already
+    /// uses, so the tab and the card it summarizes can never disagree.
+    private var hasCardNeedingApproval: Bool {
+        board.cards.contains { card in
+            guard
+                case .needsYou = CanvasCardCommands(card: card, board: board, session: session)
+                    .agentCardStatus
+            else { return false }
+            return true
+        }
+    }
 
     var body: some View {
+        let activityKind: EditorTabActivityKind? = hasCardNeedingApproval ? .needsYou : nil
         AttachedWorkbenchTab(
             isSelected: isSelected, usesDocumentWidth: true,
             select: { session.selectEditorTab(tab.id, in: groupID) }
@@ -25,10 +42,20 @@ struct CanvasEditorTabItem: View {
                         .accessibilityLabel("Modified")
                 }
                 AttachedWorkbenchTabCloseButton(
-                    accessibilityLabel: "Close Ensemble", help: "Close Ensemble"
+                    accessibilityLabel: "Close Ensemble", help: "Close Ensemble",
+                    presentation: EditorTabAccessory.resolve(
+                        isSelected: isSelected, isHovering: isHovering, isDirty: false,
+                        activity: activityKind
+                    )
                 ) { session.closeCanvas(board.id) }
             }
         }
+        .onHover { isHovering = $0 }
+        .tabHoverPreview(
+            isHovering: isHovering,
+            content: TabHoverPreviewContentBuilder.ensemble(
+                title: board.title, hasCardNeedingApproval: hasCardNeedingApproval)
+        )
         .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
         .onDrag(
             {

@@ -111,6 +111,76 @@ struct WorkbenchChromeRedesignTests {
         )
     }
 
+    // MARK: - Window redesign phase 4b: activity dot
+
+    @Test("Hover always wins; an activity dot outranks a plain dirty dot")
+    func tabAccessoryActivityPrecedence() {
+        // Hover wins even with an active agent status.
+        #expect(
+            EditorTabAccessory.resolve(
+                isSelected: false, isHovering: true, isDirty: false, activity: .working) == .close
+        )
+        // Activity, absent hover, wins over the resting selected/hidden
+        // fallback and over a (never co-occurring in practice) dirty flag.
+        #expect(
+            EditorTabAccessory.resolve(
+                isSelected: false, isHovering: false, isDirty: true, activity: .needsYou)
+                == .activityDot(.needsYou))
+        #expect(
+            EditorTabAccessory.resolve(
+                isSelected: true, isHovering: false, isDirty: false, activity: .failed)
+                == .activityDot(.failed))
+        // No activity at all falls back to today's dirty/selected/hidden
+        // resolution unchanged.
+        #expect(
+            EditorTabAccessory.resolve(isSelected: false, isHovering: false, isDirty: false)
+                == .hidden)
+    }
+
+    @Test("Only working, needsYou, failed, and doneUnread read as activity")
+    func activityKindMapping() {
+        #expect(EditorTabActivityKind.from(.working) == .working)
+        #expect(EditorTabActivityKind.from(.needsYou(.approval)) == .needsYou)
+        #expect(EditorTabActivityKind.from(.needsYou(.input)) == .needsYou)
+        #expect(EditorTabActivityKind.from(.failed) == .failed)
+        #expect(EditorTabActivityKind.from(.doneUnread) == .doneUnread)
+        #expect(EditorTabActivityKind.from(.done) == nil)
+        #expect(EditorTabActivityKind.from(.inactive) == nil)
+        #expect(EditorTabActivityKind.from(.stopped) == nil)
+        #expect(EditorTabActivityKind.from(nil) == nil)
+    }
+
+    @Test("The hover preview content builders never fabricate an elapsed time or a thumbnail")
+    func hoverPreviewContentBuilders() {
+        let file = TabHoverPreviewContentBuilder.file(
+            title: "Session.swift", workspaceRelativePath: "Sources/RafuApp/Session.swift")
+        #expect(file.title == "Session.swift")
+        #expect(file.statusWord == nil)
+        #expect(file.subtitle == "Sources/RafuApp/Session.swift")
+        #expect(file.elapsedLabel == nil)
+
+        let workingTerminal = TabHoverPreviewContentBuilder.terminal(
+            title: "zsh", shellOrAgentName: "zsh", status: .working, elapsedLabel: "4m")
+        #expect(workingTerminal.statusWord == "Working")
+        #expect(workingTerminal.elapsedLabel == "4m")
+
+        // No matched session: no status word, and never an elapsed label
+        // even if one happened to be supplied.
+        let plainShell = TabHoverPreviewContentBuilder.terminal(
+            title: "zsh", shellOrAgentName: "zsh", status: nil, elapsedLabel: "4m")
+        #expect(plainShell.statusWord == nil)
+        #expect(plainShell.elapsedLabel == nil)
+
+        let quietEnsemble = TabHoverPreviewContentBuilder.ensemble(
+            title: "Ensemble", hasCardNeedingApproval: false)
+        #expect(quietEnsemble.statusWord == nil)
+        #expect(quietEnsemble.subtitle == "Ensemble")
+
+        let waitingEnsemble = TabHoverPreviewContentBuilder.ensemble(
+            title: "Ensemble", hasCardNeedingApproval: true)
+        #expect(waitingEnsemble.statusWord == "Needs approval")
+    }
+
     // MARK: - E5: find in selection
 
     @Test("Find in Selection keeps only matches fully inside the scope")

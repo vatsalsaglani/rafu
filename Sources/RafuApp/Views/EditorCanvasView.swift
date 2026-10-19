@@ -726,6 +726,60 @@ private struct TabStripFramePreferenceKey: PreferenceKey {
     }
 }
 
+/// One tab's resolved hover-preview content and its anchor, published only
+/// while that tab is both hovered and past the 500 ms delay. Anchors (not a
+/// named coordinate space) so the reader below stays correct regardless of
+/// horizontal scroll offset, matching the now-removed selected-cap seam
+/// overlay's approach. Internal (not file-private): `CanvasEditorTabItem`
+/// lives in a different file and needs the `tabHoverPreview` modifier below.
+struct TabHoverPreviewAnchor {
+    let content: TabHoverPreviewContent
+    let anchor: Anchor<CGRect>
+}
+
+struct TabHoverPreviewPreferenceKey: PreferenceKey {
+    static var defaultValue: TabHoverPreviewAnchor? = nil
+
+    static func reduce(value: inout TabHoverPreviewAnchor?, nextValue: () -> TabHoverPreviewAnchor?)
+    {
+        value = nextValue() ?? value
+    }
+}
+
+/// Shared delay/cancel logic for every tab kind that shows a hover preview.
+/// `.task(id: isHovering)` is SwiftUI's own cancel-on-change: a hover that
+/// ends before 500 ms elapses cancels the sleeping task instead of showing
+/// anything, and a hover that ends after the preview is already visible
+/// hides it immediately on the same edge.
+struct TabHoverPreviewTrigger: ViewModifier {
+    let isHovering: Bool
+    let content: TabHoverPreviewContent
+
+    @State private var showsPreview = false
+
+    func body(content base: Content) -> some View {
+        base
+            .task(id: isHovering) {
+                guard isHovering else {
+                    showsPreview = false
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled else { return }
+                showsPreview = true
+            }
+            .anchorPreference(key: TabHoverPreviewPreferenceKey.self, value: .bounds) { bounds in
+                showsPreview ? TabHoverPreviewAnchor(content: content, anchor: bounds) : nil
+            }
+    }
+}
+
+extension View {
+    func tabHoverPreview(isHovering: Bool, content: TabHoverPreviewContent) -> some View {
+        modifier(TabHoverPreviewTrigger(isHovering: isHovering, content: content))
+    }
+}
+
 /// Full-width shelf the floating tab cards sit inside. Window redesign phase
 /// 4: tabs are detached rounded cards, not attached caps, so there is no
 /// shared tab/content seam for this shelf to mask — it only owns the
@@ -1178,6 +1232,27 @@ private struct EditorGroupTabBar: View {
                     overflowTabMenu
                 }
             }
+        }
+        // Read above the shelf's own bounds (not clipped — nothing in this
+        // view tree clips, and this shelf is the first thing in its
+        // editor group's VStack, so there is no later sibling to hide
+        // behind): the card's center sits at the shelf's own top edge, which
+        // in practice floats it just above the strip regardless of which tab
+        // is hovered, since every tab sits at the same shallow row.
+        .overlayPreferenceValue(TabHoverPreviewPreferenceKey.self) { anchor in
+            GeometryReader { proxy in
+                if let anchor {
+                    let frame = proxy[anchor.anchor]
+                    TabHoverPreviewCard(content: anchor.content)
+                        .fixedSize()
+                        .position(
+                            x: min(max(frame.midX, 130), max(130, proxy.size.width - 130)),
+                            y: 0
+                        )
+                        .transition(reduceMotion ? .identity : .opacity)
+                }
+            }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: anchor != nil)
         }
     }
 
@@ -2232,6 +2307,13 @@ private struct EditorTabItem: View {
             }
         }
         .onHover { isHovering = $0 }
+        .tabHoverPreview(
+            isHovering: isHovering,
+            content: TabHoverPreviewContentBuilder.file(
+                title: document.displayName,
+                workspaceRelativePath: session.relativePath(for: document.url)
+            )
+        )
         .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
         .onDrag(
             {
@@ -2273,6 +2355,27 @@ private struct EditorTabItem: View {
     }
 }
 
+/// One terminal controller's live agent status and the date its underlying
+/// tracked session last changed (for the activity dot and the hover
+/// preview's elapsed label), resolved via its enclosing Terminal Group pane
+/// — the same `CanvasCardCommands.agentCardStatus(pane:in:)` the Ensemble
+/// card header, the Canvas List row, and the titlebar's agent summary
+/// already share, so a terminal's status can never read differently in two
+/// places. `(nil, nil)` for an ordinary shell no session has matched, or a
+/// controller whose group/pane cannot be found (should not happen for a
+/// live tab, but a missing identity is never worth a crash).
+private func terminalAgentActivity(
+    for controller: WorkspaceTerminalController, in session: WorkspaceSession
+) -> (status: AgentCardStatus?, updatedAt: Date?) {
+    guard let (groupID, paneID) = session.terminal.terminalGroupAndPane(containing: controller.id),
+        let group = session.terminal.terminalGroup(groupID),
+        let pane = group.panes.first(where: { $0.id == paneID })
+    else { return (nil, nil) }
+    let status = CanvasCardCommands.agentCardStatus(pane: pane, in: session)
+    let updatedAt = AgentActivityStore.shared.trackedSession(for: controller)?.updatedAt
+    return (status, updatedAt)
+}
+
 /// Issue #4: a terminal tab, presented with the EXACT SAME chrome as
 /// `EditorTabItem` (icon, label, close button, hover, attached selected cap,
 /// drag/split context menu) — just backed by a live
@@ -2301,6 +2404,8 @@ private struct EditorTerminalTabItem: View {
         let title = TerminalSessionPresentation.tabLabel(controller.presentedTitle)
         let previewAgent = controller.resolvedAgentProvider
         let selectTab = { session.selectEditorTab(tabID, in: groupID) }
+        let activity = terminalAgentActivity(for: controller, in: session)
+        let activityKind = EditorTabActivityKind.from(activity.status)
         AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true, select: selectTab) {
             HStack(spacing: 6) {
                 Button {
@@ -2347,7 +2452,7 @@ private struct EditorTerminalTabItem: View {
                 )
                 .layoutPriority(1)
                 .accessibilityLabel(title)
-                .accessibilityValue(terminalTabAccessibilityValue)
+                .accessibilityValue(terminalTabAccessibilityValue(status: activity.status))
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
 
                 AttachedWorkbenchTabCloseButton(
@@ -2356,7 +2461,8 @@ private struct EditorTerminalTabItem: View {
                     presentation: EditorTabAccessory.resolve(
                         isSelected: isSelected,
                         isHovering: isHovering,
-                        isDirty: false
+                        isDirty: false,
+                        activity: activityKind
                     )
                 ) {
                     session.closeTerminalTab(tabID)
@@ -2387,6 +2493,17 @@ private struct EditorTerminalTabItem: View {
             }
         }
         .onHover { isHovering = $0 }
+        .tabHoverPreview(
+            isHovering: isHovering,
+            content: TabHoverPreviewContentBuilder.terminal(
+                title: title,
+                shellOrAgentName: previewAgent?.displayName ?? controller.shellDisplayName,
+                status: activity.status,
+                elapsedLabel: activity.updatedAt.map {
+                    AgentCardElapsed.label(since: $0, now: AgentActivityStore.shared.now)
+                }
+            )
+        )
         .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
         .onDrag(
             {
@@ -2426,10 +2543,11 @@ private struct EditorTerminalTabItem: View {
         .help("\(title)\n\(controller.currentDirectoryPath ?? controller.startingDirectory)")
     }
 
-    private var terminalTabAccessibilityValue: String {
+    private func terminalTabAccessibilityValue(status: AgentCardStatus?) -> String {
         [
             isSelected ? "Selected" : nil,
             TerminalSessionPresentation.isExited(controller.status) ? "Shell exited" : nil,
+            status?.word,
         ]
         .compactMap(\.self)
         .joined(separator: ", ")
@@ -2480,10 +2598,28 @@ private struct EditorTerminalGroupTabItem: View {
         return (cli, title)
     }
 
+    /// The focused pane's agent status (window redesign phase 4b): the same
+    /// precedence `AgentCardStatus` already resolves for its Ensemble card,
+    /// just mapped onto this Terminal Group tab's accessory slot and hover
+    /// preview. Multi-pane attention already has its own bell badge above
+    /// (pane-status `.bell`, independent of any matched agent session); this
+    /// is a second, narrower signal and the two are not meant to agree.
+    private var focusedPaneActivity: (status: AgentCardStatus?, updatedAt: Date?) {
+        guard let pane = snapshot.panes.first(where: { $0.id == snapshot.focusedPaneID })
+        else { return (nil, nil) }
+        let status = CanvasCardCommands.agentCardStatus(pane: pane, in: session)
+        let updatedAt = session.terminal.terminalController(for: pane.id).flatMap {
+            AgentActivityStore.shared.trackedSession(for: $0)?.updatedAt
+        }
+        return (status, updatedAt)
+    }
+
     var body: some View {
         let agent = focusedAgent
         let title = agent?.title ?? snapshot.name.rawValue
         let selectTab = { selectOrRename(title: title) }
+        let activity = focusedPaneActivity
+        let activityKind = EditorTabActivityKind.from(activity.status)
         AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true, select: selectTab) {
             HStack(spacing: 6) {
                 if let agent {
@@ -2521,6 +2657,7 @@ private struct EditorTerminalGroupTabItem: View {
                             attentionCount > 0
                                 ? "\(attentionCount) \(attentionCount == 1 ? "pane needs" : "panes need") attention"
                                 : nil,
+                            activity.status?.word,
                         ]
                         .compactMap(\.self).joined(separator: ", "))
                 }
@@ -2544,7 +2681,8 @@ private struct EditorTerminalGroupTabItem: View {
                     presentation: EditorTabAccessory.resolve(
                         isSelected: isSelected,
                         isHovering: isHovering,
-                        isDirty: false
+                        isDirty: false,
+                        activity: activityKind
                     )
                 ) {
                     session.requestTerminalGroupClose(snapshot.id)
@@ -2553,6 +2691,17 @@ private struct EditorTerminalGroupTabItem: View {
         }
         .fixedSize(horizontal: true, vertical: false)
         .onHover { isHovering = $0 }
+        .tabHoverPreview(
+            isHovering: isHovering,
+            content: TabHoverPreviewContentBuilder.terminal(
+                title: title,
+                shellOrAgentName: agent?.cli.displayName ?? "Terminal Group",
+                status: activity.status,
+                elapsedLabel: activity.updatedAt.map {
+                    AgentCardElapsed.label(since: $0, now: AgentActivityStore.shared.now)
+                }
+            )
+        )
         .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
         .onDrag(
             {

@@ -159,7 +159,9 @@ struct EditorTabAndGroupPresentationTests {
         #expect(source.contains(".help(document.displayName)"))
         #expect(source.contains(".accessibilityValue(documentTabAccessibilityValue)"))
         #expect(source.contains(#"document.isDirty ? "Unsaved changes" : nil"#))
-        #expect(source.contains(".accessibilityValue(terminalTabAccessibilityValue)"))
+        #expect(
+            source.contains(".accessibilityValue(terminalTabAccessibilityValue(status:")
+        )
         #expect(source.contains(#""Shell exited" : nil"#))
         #expect(source.contains(#"accessibilityLabel: "Close \(document.displayName)""#))
         #expect(source.contains(#"accessibilityLabel: "Close \(title)""#))

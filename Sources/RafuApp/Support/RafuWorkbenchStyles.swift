@@ -270,18 +270,54 @@ struct AttachedWorkbenchTab<Content: View>: View {
     }
 }
 
+/// A terminal, Terminal Group, or Ensemble tab's agent-activity dot, folded
+/// from `AgentCardStatus` (`working`/`needsYou`/`failed`/`doneUnread` only —
+/// `done`, `inactive`, and `stopped` read as no activity, same as a
+/// never-matched session). Kept separate from `AgentCardStatus` itself so
+/// this file never imports `RafuCore`'s session-tracking types; the mapping
+/// is the only thing a tab needs.
+nonisolated enum EditorTabActivityKind: Equatable, Sendable {
+    case working
+    case needsYou
+    case failed
+    case doneUnread
+
+    static func from(_ status: AgentCardStatus?) -> Self? {
+        switch status {
+        case .working: .working
+        case .needsYou: .needsYou
+        case .failed: .failed
+        case .doneUnread: .doneUnread
+        case .done, .inactive, .stopped, nil: nil
+        }
+    }
+}
+
 /// What the trailing slot of an editor tab shows. The slot keeps one stable
-/// position: "×" on the selected tab and on hover; a dirty document shows a
+/// position: "×" on the selected tab and on hover; absent that, a dirty
+/// document or an agent-tracked terminal/Terminal Group/Ensemble tab shows a
 /// dot there that turns into "×" on hover (the Safari/Xcode pattern). The
 /// button stays in the layout and the accessibility tree in every case, so
 /// "Close" is always reachable by VoiceOver and Full Keyboard Access.
+/// Precedence: hover always wins; failing that, an activity dot (whichever
+/// `AgentCardStatus` already resolved to — its own precedence is
+/// stopped/failed/needsYou/working/inactive/doneUnread/done) outranks a
+/// plain dirty dot, because the two never co-occur on one tab kind in
+/// practice but a caller should never need to choose between them.
 nonisolated enum EditorTabAccessory: Equatable, Sendable {
     case hidden
     case close
     case dirtyDot
+    case activityDot(EditorTabActivityKind)
 
-    static func resolve(isSelected: Bool, isHovering: Bool, isDirty: Bool) -> Self {
+    static func resolve(
+        isSelected: Bool,
+        isHovering: Bool,
+        isDirty: Bool,
+        activity: EditorTabActivityKind? = nil
+    ) -> Self {
         if isHovering { return .close }
+        if let activity { return .activityDot(activity) }
         if isDirty { return .dirtyDot }
         return isSelected ? .close : .hidden
     }
@@ -319,9 +355,9 @@ struct AttachedWorkbenchTabCloseButton: View {
                     .foregroundStyle(theme.palette.textSecondary)
                     .opacity(presentation == .close ? 1 : 0)
                 Circle()
-                    .fill(theme.palette.textSecondary)
+                    .fill(dotColor ?? .clear)
                     .frame(width: 7, height: 7)
-                    .opacity(presentation == .dirtyDot ? 1 : 0)
+                    .opacity(dotColor == nil ? 0 : 1)
             }
             .frame(
                 width: WorkbenchTextHeightPolicy.attachedTabCloseTarget(
@@ -336,6 +372,127 @@ struct AttachedWorkbenchTabCloseButton: View {
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
         .help(help)
+    }
+
+    /// `nil` hides the dot entirely (the "×" and the hidden state both pass
+    /// through here). Colour is always paired with the tab's own `.help`
+    /// and accessibility value text — never the only signal, per the
+    /// "never communicate state using colour alone" chrome rule.
+    private var dotColor: Color? {
+        switch presentation {
+        case .dirtyDot: theme.palette.textSecondary
+        case .activityDot(.working): theme.palette.accent
+        case .activityDot(.needsYou): theme.palette.warning
+        case .activityDot(.failed): theme.palette.error
+        case .activityDot(.doneUnread): theme.palette.success
+        case .close, .hidden: nil
+        }
+    }
+}
+
+/// Text-only content for a tab's delayed hover preview (window redesign
+/// phase 4b). Never a thumbnail and never document text — only identity and
+/// status words already resolved elsewhere.
+nonisolated struct TabHoverPreviewContent: Equatable, Sendable {
+    let title: String
+    let statusWord: String?
+    let subtitle: String
+    let elapsedLabel: String?
+}
+
+/// Pure builders so the three tab kinds that show a preview cannot drift in
+/// what they consider "the subtitle" or "when there is an elapsed label".
+nonisolated enum TabHoverPreviewContentBuilder {
+    /// A file tab: no status word, the workspace-relative path as subtitle.
+    static func file(title: String, workspaceRelativePath: String) -> TabHoverPreviewContent {
+        TabHoverPreviewContent(
+            title: title, statusWord: nil, subtitle: workspaceRelativePath, elapsedLabel: nil)
+    }
+
+    /// A terminal or Terminal Group tab: the agent status word (if any) and
+    /// its elapsed label travel together — there is nothing to date without
+    /// a matched session, so an ordinary shell's preview never shows a
+    /// stale or made-up elapsed time.
+    static func terminal(
+        title: String,
+        shellOrAgentName: String,
+        status: AgentCardStatus?,
+        elapsedLabel: String?
+    ) -> TabHoverPreviewContent {
+        TabHoverPreviewContent(
+            title: title,
+            statusWord: status?.word,
+            subtitle: shellOrAgentName,
+            elapsedLabel: status == nil ? nil : elapsedLabel
+        )
+    }
+
+    /// An Ensemble tab: the only status word this board-level preview ever
+    /// shows is "Needs approval", and only when some card does.
+    static func ensemble(title: String, hasCardNeedingApproval: Bool) -> TabHoverPreviewContent {
+        TabHoverPreviewContent(
+            title: title,
+            statusWord: hasCardNeedingApproval ? "Needs approval" : nil,
+            subtitle: "Ensemble",
+            elapsedLabel: nil
+        )
+    }
+}
+
+/// The floating card itself: a bold title with the status word trailing on
+/// the same line, a secondary subtitle line with the elapsed label trailing.
+/// Inert and hidden from accessibility — the tab underneath already
+/// announces its own label and value; this is a redundant visual aid that
+/// must never take key focus or intercept the pointer.
+struct TabHoverPreviewCard: View {
+    let content: TabHoverPreviewContent
+
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: RafuMetrics.space2) {
+                Text(content.title)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(theme.palette.textPrimary)
+                    .lineLimit(1)
+                if let statusWord = content.statusWord {
+                    Spacer(minLength: RafuMetrics.space2)
+                    Text(statusWord)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(theme.palette.textSecondary)
+                        .lineLimit(1)
+                }
+            }
+            HStack(spacing: RafuMetrics.space2) {
+                Text(content.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if let elapsedLabel = content.elapsedLabel {
+                    Spacer(minLength: RafuMetrics.space2)
+                    Text(elapsedLabel)
+                        .font(.caption)
+                        .foregroundStyle(theme.palette.textMuted)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(.horizontal, RafuMetrics.space3)
+        .padding(.vertical, RafuMetrics.space2)
+        .frame(maxWidth: 260, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusTransientPopover, style: .continuous)
+                .fill(theme.palette.elevatedBackground)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusTransientPopover, style: .continuous)
+                .strokeBorder(theme.palette.borderSubtle, lineWidth: RafuMetrics.hairline)
+                .allowsHitTesting(false)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
