@@ -8,6 +8,7 @@ struct WorkspaceStatusBar: View {
     @Bindable var session: WorkspaceSession
     /// Shared with the Resources popover so both always show the same reading.
     private var memory = ResidentMemoryMonitor.shared
+    private var motionGate = RafuMotionGate.shared
 
     init(session: WorkspaceSession) {
         self.session = session
@@ -36,9 +37,11 @@ struct WorkspaceStatusBar: View {
             GitHubAccountStatusView(session: session)
 
             if showsProcessMemory, let sample = memory.sample {
-                Label(ResourceMemoryFormat.label(sample.residentBytes), systemImage: "memorychip")
+                Label(ResourceMemoryFormat.label(sample.displayBytes), systemImage: "memorychip")
                     .foregroundStyle(theme.palette.textMuted)
-                    .help("Rafu process resident memory. This is shared by all windows.")
+                    .help(
+                        "Rafu process memory footprint, as Activity Monitor shows it. "
+                            + "This is shared by all windows.")
             }
 
             Button {
@@ -85,12 +88,14 @@ struct WorkspaceStatusBar: View {
         .frame(height: RafuMetrics.statusBarHeight)
         .background(theme.palette.statusBarBackground)
         .overlay(alignment: .top) { Divider().overlay(theme.palette.borderSubtle) }
-        .task(id: showsProcessMemory) {
-            guard showsProcessMemory else { return }
+        // Pauses while the screen is locked or the displays sleep; the task
+        // restarts, and reads at once, when they come back.
+        .task(id: showsProcessMemory && motionGate.isScreenActive) {
+            guard showsProcessMemory, motionGate.isScreenActive else { return }
             while !Task.isCancelled {
                 memory.refresh()
                 do {
-                    try await Task.sleep(for: .seconds(5))
+                    try await Task.sleep(for: .seconds(5), tolerance: .seconds(1))
                 } catch {
                     return
                 }

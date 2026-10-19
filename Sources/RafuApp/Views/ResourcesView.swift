@@ -1,9 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// The single resident-memory reading for the whole process. The status bar
-/// and the Resources popover both read it, so they always show the same
-/// number. Reading is on demand (the popover's visible-only loop, or the
+/// The single memory reading for the whole process (its footprint, as
+/// Activity Monitor shows it). The status bar and the Resources popover both
+/// read it, so they always show the same number. Reading is on demand (the popover's visible-only loop, or the
 /// status bar's opt-in loop); there is no timer of its own.
 @Observable
 @MainActor
@@ -139,7 +139,7 @@ private enum ResourcesTab: String, CaseIterable, Identifiable {
 
 /// Rafu's honest process memory, in two views.
 ///
-/// **Composition** — what exists right now: Rafu's own resident size, then
+/// **Composition** — what exists right now: Rafu's own memory footprint, then
 /// one section per category of Rafu-spawned process (terminals, Ensemble
 /// agents, language servers, git) with per-category totals, then exact
 /// counts of what this window is holding, then language-server status with a
@@ -168,7 +168,7 @@ struct ResourcesView: View {
     var session: WorkspaceSession?
 
     private var timeline = MemoryTimeline.shared
-    /// The one resident-memory sample shared with the status bar, so the
+    /// The one memory sample shared with the status bar, so the
     /// number in the bar and in this popover can never disagree.
     private var memory = ResidentMemoryMonitor.shared
 
@@ -188,17 +188,17 @@ struct ResourcesView: View {
     /// "Rafu 145.1 MB · 2 terminals 1.1 MB · 0 language servers".
     private var summaryLine: String {
         ResourceSummary.line(
-            appBytes: memory.sample?.residentBytes,
+            appBytes: memory.sample?.displayBytes,
             groups: groups,
             languageServerCount: serverStatuses.count
         )
     }
 
     private static let compositionExplanation =
-        "macOS reports one resident size per process, and every Rafu window "
-        + "shares one process, so this number and the process sections below "
-        + "cover all open windows, not just this one. They are separate "
-        + "processes Rafu spawned, not slices of that number."
+        "Rafu's number is its memory footprint, as Activity Monitor shows it. "
+        + "Every Rafu window shares one process, so this number and the process "
+        + "sections below cover all open windows, not just this one. They are "
+        + "separate processes Rafu spawned, not slices of that number."
 
     private static let timelineExplanation =
         "Change in the whole app's resident memory measured shortly after each "
@@ -343,7 +343,7 @@ struct ResourcesView: View {
     }
 
     private var appRow: some View {
-        let label = ResourceMemoryFormat.label(memory.sample?.residentBytes)
+        let label = ResourceMemoryFormat.label(memory.sample?.displayBytes)
         return resourceRow {
             HStack {
                 Label("Rafu (this app)", systemImage: "app.badge")

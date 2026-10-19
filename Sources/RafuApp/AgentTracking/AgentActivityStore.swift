@@ -154,7 +154,7 @@ final class AgentActivityStore {
         guard clock == nil else { return }
         clock = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: Self.clockInterval)
+                try? await Task.sleep(for: Self.clockInterval, tolerance: Self.clockInterval / 6)
                 guard !Task.isCancelled, let self else { return }
                 await self.drain()
             }

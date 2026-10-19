@@ -888,11 +888,19 @@ final class NotchCompanionModel: NSObject {
 
     private func startUsageTimerIfNeeded() {
         guard usageRefreshTimer == nil else { return }
-        usageRefreshTimer = Timer.scheduledTimer(
+        let timer = Timer.scheduledTimer(
             withTimeInterval: Self.usageTimerInterval, repeats: true
         ) { [weak self] _ in
-            MainActor.assumeIsolated { _ = self?.refreshUsage(force: true) }
+            MainActor.assumeIsolated {
+                // Nobody can see the panel behind a locked or sleeping
+                // screen; the next tick or a hover reads fresh usage.
+                guard RafuMotionGate.shared.isScreenActive else { return }
+                _ = self?.refreshUsage(force: true)
+            }
         }
+        // Lets the system coalesce this wake-up with others.
+        timer.tolerance = Self.usageTimerInterval / 10
+        usageRefreshTimer = timer
     }
 
     private func stopUsageTimer() {

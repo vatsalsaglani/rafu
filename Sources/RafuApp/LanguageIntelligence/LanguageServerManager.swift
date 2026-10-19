@@ -420,7 +420,8 @@ actor LanguageServerManager {
                 }
             }
 
-            try? await Task.sleep(for: bounds.sampleInterval)
+            // A 20% tolerance lets the system coalesce the watchdog wake-up.
+            try? await Task.sleep(for: bounds.sampleInterval, tolerance: bounds.sampleInterval / 5)
         }
     }
 
