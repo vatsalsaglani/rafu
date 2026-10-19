@@ -91,9 +91,9 @@ private nonisolated struct CornerCutoutShape: Shape {
     }
 }
 
-/// The single recessed editor/utility deck. It decorates the existing split
-/// hierarchy but never clips or masks its TextKit, SwiftTerm, or splitter
-/// descendants.
+/// The single raised editor/utility deck: a card inset from the surrounding
+/// frame (`appBackground`). It decorates the existing split hierarchy but
+/// never clips or masks its TextKit, SwiftTerm, or splitter descendants.
 struct WorkbenchDeckSurface<Content: View>: View {
     @ViewBuilder let content: Content
 
@@ -107,6 +107,28 @@ struct WorkbenchDeckSurface<Content: View>: View {
     var body: some View {
         content
             .background(theme.palette.editorBackground)
+            .background {
+                // The shadow is cast by a dedicated rounded shape behind the
+                // card's own flat fill, never applied to `content` itself —
+                // so it never touches the TextKit/SwiftTerm viewport or
+                // forces it offscreen. Reduce Transparency is a no-op here:
+                // a shadow is not a material.
+                RoundedRectangle(
+                    cornerRadius: RafuMetrics.radiusWorkbenchDeck,
+                    style: .continuous
+                )
+                .fill(theme.palette.editorBackground)
+                .shadow(
+                    color: WorkbenchDeckShadowStyle.color(
+                        isDark: theme.isDark,
+                        contrastIncreased: colorSchemeContrast == .increased
+                    ),
+                    radius: RafuMetrics.deckShadowRadius,
+                    x: 0,
+                    y: RafuMetrics.deckShadowY
+                )
+                .accessibilityHidden(true)
+            }
             .overlay {
                 CornerCutoutOverlay(
                     radius: RafuMetrics.radiusWorkbenchDeck,
@@ -125,6 +147,24 @@ struct WorkbenchDeckSurface<Content: View>: View {
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
             }
+    }
+}
+
+/// Theme-aware shadow opacity for the raised workbench deck. Dark themes read
+/// a black shadow stronger, because it must stand out against an already-dark
+/// frame; light themes keep it faint, so it stays a soft depth cue rather than
+/// a dark halo around the card. Increase Contrast halves the opacity: that
+/// mode's accessibility signal is the already-promoted `borderStrong`
+/// hairline, so the shadow stays present but never competes with it as a
+/// second, blurrier boundary.
+nonisolated enum WorkbenchDeckShadowStyle {
+    static func opacity(isDark: Bool, contrastIncreased: Bool = false) -> Double {
+        let base = isDark ? 0.18 : 0.10
+        return contrastIncreased ? base / 2 : base
+    }
+
+    static func color(isDark: Bool, contrastIncreased: Bool = false) -> Color {
+        Color.black.opacity(opacity(isDark: isDark, contrastIncreased: contrastIncreased))
     }
 }
 

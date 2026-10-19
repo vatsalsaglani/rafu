@@ -8,10 +8,14 @@ import Testing
 struct RafuWorkbenchStyleContractTests {
     @Test("Compact workbench metrics are semantic and exact")
     func compactMetrics() {
-        #expect(RafuMetrics.workbenchInset == 4)
+        #expect(RafuMetrics.workbenchInset == 8)
         #expect(RafuMetrics.editorGroupGapTarget == 4)
-        #expect(RafuMetrics.radiusWorkbenchDeck == 6)
+        #expect(RafuMetrics.radiusWorkbenchDeck == 10)
         #expect(RafuMetrics.radiusEditorGroup == 5)
+        // The shadow must stay inside the deck lane's 8 pt gutter, or the
+        // lane would clip it.
+        #expect(
+            RafuMetrics.deckShadowRadius + RafuMetrics.deckShadowY <= RafuMetrics.workbenchInset)
         #expect(RafuMetrics.radiusAttachedTab == 4)
         #expect(RafuMetrics.radiusDenseSelection == 4)
         #expect(RafuMetrics.radiusDenseCard == 6)
@@ -36,6 +40,48 @@ struct RafuWorkbenchStyleContractTests {
         #expect(source.contains("struct EditorGroupSurface<Content: View>"))
         #expect(!source.contains(".clipShape("))
         #expect(!source.contains(".mask("))
+    }
+
+    @Test(
+        "The raised deck casts the window's only shadow, on its background shape, never on content"
+    )
+    func deckIsTheOnlyShadowSource() throws {
+        let workbenchSource = try Self.workbenchStyleSource()
+        #expect(Self.occurrences(of: ".shadow(", in: workbenchSource) == 1)
+
+        let deckSection = try Self.section(
+            of: workbenchSource,
+            from: "struct WorkbenchDeckSurface<Content: View>",
+            to: "enum WorkbenchDeckShadowStyle"
+        )
+        #expect(deckSection.contains(".shadow("))
+        // The shadow lives on a dedicated `RoundedRectangle` background
+        // shape, which sits before the content-touching `.overlay` that
+        // draws the border — never directly on `content` itself.
+        let shapeFill = try #require(deckSection.range(of: ".fill(theme.palette.editorBackground)"))
+        let shadowCall = try #require(deckSection.range(of: ".shadow("))
+        let contentOverlay = try #require(deckSection.range(of: ".overlay {"))
+        #expect(shapeFill.lowerBound < shadowCall.lowerBound)
+        #expect(shadowCall.lowerBound < contentOverlay.lowerBound)
+
+        let windowSource = try Self.source("Sources/RafuApp/Views/WorkspaceWindowView.swift")
+        #expect(!windowSource.contains(".shadow("))
+    }
+
+    @Test("Deck shadow opacity is theme-aware and Increase Contrast subdues it")
+    func deckShadowOpacityIsThemeAware() {
+        let dark = WorkbenchDeckShadowStyle.opacity(isDark: true)
+        let light = WorkbenchDeckShadowStyle.opacity(isDark: false)
+        #expect(dark == 0.18)
+        #expect(light == 0.10)
+        #expect(dark > light)
+
+        #expect(
+            WorkbenchDeckShadowStyle.opacity(isDark: true, contrastIncreased: true) == dark / 2
+        )
+        #expect(
+            WorkbenchDeckShadowStyle.opacity(isDark: false, contrastIncreased: true) == light / 2
+        )
     }
 
     @Test("Corner and seam overlays cannot intercept input or accessibility")
@@ -335,6 +381,19 @@ struct RafuWorkbenchStyleContractTests {
 
     private static func workbenchStyleSource() throws -> String {
         try source("Sources/RafuApp/Support/RafuWorkbenchStyles.swift")
+    }
+
+    private static func occurrences(of needle: String, in source: String) -> Int {
+        source.components(separatedBy: needle).count - 1
+    }
+
+    private static func section(of source: String, from start: String, to end: String) throws
+        -> String
+    {
+        let startRange = try #require(source.range(of: start))
+        let tail = source[startRange.lowerBound...]
+        let endRange = try #require(tail.range(of: end))
+        return String(tail[..<endRange.lowerBound])
     }
 
     private static func source(_ path: String, file: StaticString = #filePath) throws -> String {

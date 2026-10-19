@@ -16,12 +16,21 @@ nonisolated enum RafuMetrics {
     /// Capsule chips/badges/kbd hints.
     static let radiusChip: CGFloat = 999
 
-    // Compact semantic workbench tier (ADR 0022). These values describe
-    // structure, not theme color, and deliberately leave radiusPanel intact.
-    static let workbenchInset: CGFloat = 4
+    // Compact semantic workbench tier (ADR 0022, amended by the frame+card
+    // redesign). These values describe structure, not theme color, and
+    // deliberately leave radiusPanel intact.
+    static let workbenchInset: CGFloat = 8
     static let editorGroupGapTarget: CGFloat = 4
-    static let radiusWorkbenchDeck: CGFloat = 6
+    static let radiusWorkbenchDeck: CGFloat = 10
     static let radiusEditorGroup: CGFloat = 5
+    /// Soft shadow cast by the raised workbench deck onto the frame beneath
+    /// it (frame + card redesign, phase 1). Radius + vertical offset stay
+    /// inside `workbenchInset` so the deck lane's gutter never clips the
+    /// shadow. The user's full decision also shadows the selected tab; that
+    /// is deferred to the phase that redesigns tabs as detached rounded
+    /// cards, where the geometry this shadow would sit against is settled.
+    static let deckShadowRadius: CGFloat = 6
+    static let deckShadowY: CGFloat = 2
     static let radiusAttachedTab: CGFloat = 4
     static let radiusDenseSelection: CGFloat = 4
     static let radiusDenseCard: CGFloat = 6

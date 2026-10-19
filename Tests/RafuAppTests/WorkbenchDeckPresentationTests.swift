@@ -64,7 +64,7 @@ struct WorkbenchDeckPresentationTests {
             deckLane.range(of: ".background(theme.palette.appBackground)")
         )
 
-        #expect(RafuMetrics.workbenchInset == 4)
+        #expect(RafuMetrics.workbenchInset == 8)
         #expect(Self.occurrences(of: ".padding(", in: deckLane) == 1)
         #expect(padding.lowerBound < backing.lowerBound)
     }
@@ -83,7 +83,7 @@ struct WorkbenchDeckPresentationTests {
                 ".frame(minWidth: 200, idealWidth: 260, maxWidth: 420)"
             )
         )
-        #expect(windowContent.contains(".frame(minWidth: 480, minHeight: 220)"))
+        #expect(windowContent.contains(".frame(minWidth: 472, minHeight: 220)"))
         #expect(
             windowContent.contains(
                 ".frame(minWidth: 300, idealWidth: 340, maxWidth: 520)"

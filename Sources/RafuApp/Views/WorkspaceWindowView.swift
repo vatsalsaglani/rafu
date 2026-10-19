@@ -28,7 +28,7 @@ struct WorkspaceWindowView: View {
         .background(
             FlatWindowChrome(
                 titleBarColor: NSColor(
-                    showsWelcome ? theme.palette.editorBackground : theme.palette.sidebarBackground
+                    showsWelcome ? theme.palette.editorBackground : theme.palette.appBackground
                 ),
                 topologyToken: windowChromeTopologyToken,
                 hidesTrafficLights: false,
@@ -125,7 +125,12 @@ struct WorkspaceWindowView: View {
                     WorkbenchDeckSurface {
                         HSplitView {
                             editorCanvas
-                                .frame(minWidth: 480, minHeight: 220)
+                                // The deck lane's inset doubled to 8 pt
+                                // (frame + card redesign); this shrinks by
+                                // the same 8 pt so the window's true
+                                // resize floor (sidebar + deck lane + rail)
+                                // is unchanged.
+                                .frame(minWidth: 472, minHeight: 220)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .layoutPriority(1)
                             if session.descriptor != nil, session.navigatorMode != .files {
