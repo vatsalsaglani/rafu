@@ -19,6 +19,7 @@ struct TerminalChildEnvironmentTests {
             "ANTHROPIC_API_KEY": "fixture-anthropic-key",
             "ANTHROPIC_BASE_URL": "https://fixture.example",
             "CLAUDE_CONFIG_DIR": "/fixture/claude-config",
+            "CLAUDE_CODE_USE_BEDROCK": "1",
             "HOME": "/fixture/home",
             "PATH": "/usr/bin:/bin",
         ]
@@ -31,8 +32,11 @@ struct TerminalChildEnvironmentTests {
         ] {
             #expect(scrubbed[key] == nil, "\(key) should have been removed")
         }
-        for key in ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR", "HOME", "PATH"]
-        {
+        for key in [
+            "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "HOME", "PATH",
+        ] {
             #expect(scrubbed[key] == base[key], "\(key) should have been kept")
         }
     }

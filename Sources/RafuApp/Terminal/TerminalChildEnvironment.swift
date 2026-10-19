@@ -12,18 +12,20 @@ import Foundation
 /// an agent that is not actually its parent (same reasoning as the NO_COLOR
 /// removal in `CanvasTerminalBootstrap.prepare`).
 nonisolated struct TerminalChildEnvironment {
-    /// Exact keys removed regardless of prefix.
-    private static let exactKeys: Set<String> = ["CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT"]
-    /// Every key starting with this prefix describes the launching Claude
-    /// Code session (its socket, token, entrypoint, exec path, bridge/
-    /// session ids) and is removed. Ordinary user configuration such as
-    /// `ANTHROPIC_*` or `CLAUDE_CONFIG_DIR` does NOT use this prefix and is
-    /// kept.
-    private static let removedPrefix = "CLAUDE_CODE_"
+    /// The keys a running Claude Code session sets for its own children: its
+    /// socket, token, entrypoint, exec path, and bridge/session ids. An exact
+    /// list, not a `CLAUDE_CODE_` prefix: user configuration also uses that
+    /// prefix (for example `CLAUDE_CODE_USE_BEDROCK` set through
+    /// `launchctl setenv`) and must reach the child, as must `ANTHROPIC_*`
+    /// and `CLAUDE_CONFIG_DIR`.
+    static let hostSessionKeys: Set<String> = [
+        "CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT",
+        "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_ENTRYPOINT",
+        "CLAUDE_CODE_EXECPATH", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+        "CLAUDE_CODE_BRIDGE_SESSION_ID", "CLAUDE_CODE_SESSION_ATTENDED",
+    ]
 
     static func scrubbed(_ environment: [String: String]) -> [String: String] {
-        environment.filter { key, _ in
-            !exactKeys.contains(key) && !key.hasPrefix(removedPrefix)
-        }
+        environment.filter { key, _ in !hostSessionKeys.contains(key) }
     }
 }
