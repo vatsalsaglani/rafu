@@ -113,7 +113,8 @@ final class CanvasLiveBridge {
             guard !Task.isCancelled, controller.generation == generation, isCurrent() else {
                 return nil
             }
-            notice = "Session bridge unavailable. Use a new zsh or bash Ensemble terminal."
+            notice =
+                "Agent links need zsh, bash, or fish. This terminal uses \(controller.shell.basename)."
             revision &+= 1
             return nil
         }

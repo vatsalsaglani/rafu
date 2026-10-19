@@ -7,10 +7,20 @@ nonisolated struct CanvasTerminalBootstrap: Sendable {
     let environment: [String]
     let directory: URL
 
-    enum BootstrapError: Error {
+    enum BootstrapError: Error, Equatable {
         case unsupportedShell
         case missingSocket
         case invalidCLI
+    }
+
+    /// True when this terminal's shell can host the session bridge: zsh,
+    /// bash, and fish each have a startup hook this type can use to install
+    /// the wrapper directory ahead of the user's own `claude`/`codex`, if
+    /// any, on `PATH`. Single source of truth for `prepare`'s guard; a later
+    /// Ensemble shell picker can reuse it to flag an unsupported shell before
+    /// launch.
+    static func supportsBridge(shellBasename basename: String) -> Bool {
+        basename == "zsh" || basename == "bash" || basename == "fish"
     }
 
     @concurrent
@@ -21,7 +31,9 @@ nonisolated struct CanvasTerminalBootstrap: Sendable {
     ) async throws -> CanvasTerminalBootstrap {
         try Task.checkCancellation()
         let shell = URL(fileURLWithPath: shellPath).lastPathComponent
-        guard shell == "zsh" || shell == "bash" else { throw BootstrapError.unsupportedShell }
+        guard Self.supportsBridge(shellBasename: shell) else {
+            throw BootstrapError.unsupportedShell
+        }
         guard cliURL.isFileURL, FileManager.default.isExecutableFile(atPath: cliURL.path) else {
             throw BootstrapError.invalidCLI
         }
@@ -66,7 +78,7 @@ nonisolated struct CanvasTerminalBootstrap: Sendable {
                 environment["ZDOTDIR"] = directory.path
                 try prepareZsh(directory: directory)
                 arguments = loginArguments + (loginArguments.contains("-i") ? [] : ["-i"])
-            } else {
+            } else if shell == "bash" {
                 try prepareBash(
                     directory: directory,
                     login: loginArguments.contains("-l") || loginArguments.contains("--login"))
@@ -77,6 +89,17 @@ nonisolated struct CanvasTerminalBootstrap: Sendable {
                         "-i",
                     ]
                     + loginArguments.filter { !["-l", "--login", "-i"].contains($0) }
+            } else {
+                // Fish has no ZDOTDIR/rcfile equivalent to redirect privately, but
+                // `--init-command` runs after config.fish and conf.d (so it wins over
+                // a user's `fish_add_path`) and before the first prompt. The command is
+                // a static literal that only reads RAFU_CANVAS_WRAPPER_DIR from the
+                // environment already set above; never interpolate a path or token into it.
+                // A user command typed later (e.g. another `fish_add_path`) can still move
+                // entries afterward — acceptable, same as zsh and bash.
+                arguments =
+                    loginArguments + (loginArguments.contains("-i") ? [] : ["-i"])
+                    + ["--init-command", Self.installFish]
             }
             try Task.checkCancellation()
             return Self(
@@ -91,6 +114,14 @@ nonisolated struct CanvasTerminalBootstrap: Sendable {
 
     private static let install = """
         export PATH="$RAFU_CANVAS_WRAPPER_DIR:$PATH"
+        """
+
+    /// Fish's `PATH` is a list variable, not a colon-joined string; `$PATH`
+    /// expands to its own elements, so prepending reads as a two-element
+    /// insert rather than string concatenation. Passed verbatim to
+    /// `--init-command`, never built from interpolated values.
+    private static let installFish = """
+        set -gx PATH $RAFU_CANVAS_WRAPPER_DIR $PATH
         """
 
     private static let restoreZdotdir = """

@@ -80,6 +80,67 @@ struct CanvasTerminalBootstrapTests {
         #expect(lines[4] == "1/0/0/0")
     }
 
+    @Test func fishPreparesInitCommandAndWrapperDirWithoutZdotdir() async throws {
+        let launch = try await CanvasTerminalBootstrap.prepare(
+            shellPath: "/opt/homebrew/bin/fish", loginArguments: ["-l"],
+            token: "fixture-token", cliURL: URL(fileURLWithPath: "/bin/sh"),
+            socketURL: URL(fileURLWithPath: "/tmp/fixture.sock"),
+            baseEnvironment: ["HOME": "/fixture/home", "PATH": "/usr/bin:/bin"])
+        defer { try? FileManager.default.removeItem(at: launch.directory) }
+        #expect(launch.executable == "/opt/homebrew/bin/fish")
+        #expect(launch.arguments.first == "-l")
+        #expect(launch.arguments.contains("-i"))
+        guard let initIndex = launch.arguments.firstIndex(of: "--init-command"),
+            initIndex + 1 < launch.arguments.count
+        else {
+            Issue.record("Missing --init-command")
+            return
+        }
+        let constant = launch.arguments[initIndex + 1]
+        #expect(constant == "set -gx PATH $RAFU_CANVAS_WRAPPER_DIR $PATH")
+        #expect(!constant.contains("/"))
+        #expect(!constant.contains("fixture-token"))
+        let environment = Self.dictionary(launch.environment)
+        #expect(environment["RAFU_CANVAS_WRAPPER_DIR"] == launch.directory.path)
+        #expect(environment["ZDOTDIR"] == nil)
+        #expect(environment["RAFU_CANVAS_USER_ZDOTDIR"] == nil)
+        for provider in ["claude", "codex"] {
+            let url = launch.directory.appendingPathComponent(provider)
+            #expect(FileManager.default.isExecutableFile(atPath: url.path))
+            let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+            #expect((attributes[.posixPermissions] as? Int) == 0o700)
+        }
+    }
+
+    @Test func zshAndBashPrepareAreUnaffectedByFishSupport() async throws {
+        for (shellPath, login) in [("/bin/zsh", ["-l"]), ("/bin/bash", ["-l"])] {
+            let launch = try await CanvasTerminalBootstrap.prepare(
+                shellPath: shellPath, loginArguments: login, token: "fixture-token",
+                cliURL: URL(fileURLWithPath: "/bin/sh"),
+                socketURL: URL(fileURLWithPath: "/tmp/fixture.sock"),
+                baseEnvironment: ["HOME": "/fixture/home", "PATH": "/usr/bin:/bin"])
+            defer { try? FileManager.default.removeItem(at: launch.directory) }
+            #expect(!launch.arguments.contains("--init-command"))
+        }
+    }
+
+    @Test func supportsBridgeIsTrueOnlyForZshBashAndFish() {
+        #expect(CanvasTerminalBootstrap.supportsBridge(shellBasename: "zsh"))
+        #expect(CanvasTerminalBootstrap.supportsBridge(shellBasename: "bash"))
+        #expect(CanvasTerminalBootstrap.supportsBridge(shellBasename: "fish"))
+        #expect(!CanvasTerminalBootstrap.supportsBridge(shellBasename: "nu"))
+        #expect(!CanvasTerminalBootstrap.supportsBridge(shellBasename: "tcsh"))
+    }
+
+    @Test func unsupportedShellStillRejectsNu() async {
+        await #expect(throws: CanvasTerminalBootstrap.BootstrapError.unsupportedShell) {
+            _ = try await CanvasTerminalBootstrap.prepare(
+                shellPath: "/opt/homebrew/bin/nu", loginArguments: [], token: "fixture-token",
+                cliURL: URL(fileURLWithPath: "/bin/sh"),
+                socketURL: URL(fileURLWithPath: "/tmp/fixture.sock"), baseEnvironment: [:])
+        }
+    }
+
     @Test func cancelledBootstrapRejectsBeforeFilesystemSetup() async {
         let cancelled = await Task {
             withUnsafeCurrentTask { $0?.cancel() }
