@@ -113,6 +113,28 @@ struct WorkbenchDeckPresentationTests {
         #expect(!source.contains("WorkbenchDeckSurface"))
     }
 
+    @Test("A collapsed sidebar removes the rail and its hairline together")
+    func collapsedSidebarRemovesRailAndDividerTogether() throws {
+        let source = try Self.source("Sources/RafuApp/Views/WorkspaceWindowView.swift")
+
+        #expect(Self.occurrences(of: "if !session.isSidebarCollapsed", in: source) == 2)
+
+        _ = try Self.section(
+            in: source,
+            from: "if !session.isSidebarCollapsed {",
+            through: "WorkspaceSidebarRail()"
+        )
+
+        let gated = try Self.section(
+            in: source,
+            from: "if !session.isSidebarCollapsed {",
+            through: "Divider().overlay(theme.palette.borderSubtle)"
+        )
+
+        #expect(gated.contains("WorkspaceSidebarRail()"))
+        #expect(gated.contains("Divider().overlay(theme.palette.borderSubtle)"))
+    }
+
     private static func occurrences(of needle: String, in source: String) -> Int {
         source.components(separatedBy: needle).count - 1
     }

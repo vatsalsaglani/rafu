@@ -105,10 +105,15 @@ struct WorkspaceWindowView: View {
             // pane while preserving drag-to-resize; ⌘B and the toolbar toggle
             // both drive `session.isSidebarCollapsed`.
             HStack(spacing: 0) {
-                // Mirrors `WorkspaceUtilityRail` on the right edge. The
-                // sidebar toggle lives in `WindowTitlebarRow` above.
-                WorkspaceSidebarRail()
-                Divider().overlay(theme.palette.borderSubtle)
+                // Structural chrome for the Files surface. It disappears
+                // with Files: a collapsed sidebar must not leave an empty
+                // rail (and hairline) at the window edge. The sidebar
+                // toggle and traffic lights stay in `WindowTitlebarRow`
+                // above regardless of this state.
+                if !session.isSidebarCollapsed {
+                    WorkspaceSidebarRail()
+                    Divider().overlay(theme.palette.borderSubtle)
+                }
                 HSplitView {
                     if !session.isSidebarCollapsed {
                         WorkspaceSidebarView(session: session)
