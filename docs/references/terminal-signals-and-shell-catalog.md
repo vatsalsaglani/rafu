@@ -128,6 +128,14 @@ tests passed, `--no-parallel` 250 + 2545 passed) plus
   value surviving.
 - `Sources/RafuApp/Views/TerminalShellPickerView.swift` is built and tested but
   has no call site. Check whether it fits before adding another shell picker.
+- **Agent-link (bridge) support per shell is a separate matter from this
+  catalog.** The catalog decides which shells exist and which take `-l`; the
+  per-shell agent-link mechanism, its verified and unverified shells, and its
+  residual limits live in
+  [`canvas-live-sessions.md`](canvas-live-sessions.md), "Per-shell bridge
+  strategies" (ADR 0028). Ordinary (non-bridge) terminals pass
+  `environment: nil` to SwiftTerm, which then builds its own small fixed
+  environment, so they inherit nothing from the app process.
 
 ## Why it matters
 

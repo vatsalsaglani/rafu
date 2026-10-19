@@ -37,6 +37,7 @@ Accepted ADRs take precedence over older plan suggestions when they explicitly s
 | [0025](0025-workspace-canvas-and-app-previews.md) | Accepted; amended 2026-10-19 | Optional Workspace Canvas with native notes, one-owner terminal presentation, bounded local web and selected-window app previews, and inert restoration. Amendment: a one-pane live Terminal Group can move onto a board by drag or menu without restarting |
 
 | [0027](0027-connected-usage-refresh.md) | Accepted | Allow bounded Claude Keychain re-reads after Connect and visibly stale usage retention; preserve external token and network consent boundaries |
+| [0028](0028-ensemble-bridge-shell-strategies.md) | Accepted | Agent links on non-native shells use per-basename strategies — login emulation with a private `ENV` file for sh/dash/ksh/mksh, `HOME` forwarding for tcsh/csh, documented post-config hooks for fish/nu/xonsh, and environment-only PATH with an honest notice for elvish and unknown shells; no user rc file is edited, and host Claude Code session variables are scrubbed from the bridge environment by an exact list |
 
 Unresolved choices are tracked in [`open-decisions.md`](open-decisions.md).
 

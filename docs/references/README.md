@@ -126,7 +126,7 @@ Keep one focused subject per note. Add it to this index. Use an ADR instead when
 
 - [Canvas native boundaries and initial evidence](canvas-native-boundaries.md) — C0 probes, Swift picker value semantics, and bounded persistence.
 
-- [Canvas live sessions](canvas-live-sessions.md): provider interfaces, shell startup, and live connection checks.
+- [Canvas live sessions](canvas-live-sessions.md): provider interfaces, per-shell bridge strategies, host-environment scrub, and live connection checks.
 
 - [macOS redesign visual system](macos-redesign-visual-system.md): the "One Gold Thread" rules: gold budget, neutral structure, focus language, Canvas-only shadows, typography roles, `RafuMotion` values, and `RafuHaptics` rules.
 - [Linux Swift verification](linux-swift-verification.md): checking Swift changes in a Linux container without the macOS SDK (`swiftc -parse -swift-version 6`, `swift-format lint`, scratch SwiftPM packages) and why a Mac build stays mandatory.

@@ -280,3 +280,43 @@ workbench shell. Owned paths: `Sources/RafuApp/Canvas/` (`CanvasAddMenu.swift`,
   save and reopen keeping the shell name; VoiceOver labels; the window's left
   edge in both sidebar states in light, dark, and Increase Contrast; a second
   window.
+
+## Status (2026-10-19, third increment)
+
+Agent links on every shell the catalog can offer, plus a scrub of inherited
+Claude Code session variables. Commits 0c6fbab, e253585, a521f8d. Owned paths:
+`Sources/RafuApp/Canvas/Integration/CanvasTerminalBootstrap.swift`,
+`Sources/RafuApp/Terminal/TerminalChildEnvironment.swift`,
+`Sources/RafuApp/Terminal/WorkspaceTerminalController.swift`, and
+`CanvasTerminalBootstrapTests`.
+
+- A fish card previously showed "Disconnected" and had no Rafu MCP tools,
+  because only zsh and bash received the bridge environment and the wrapper
+  PATH. `CanvasShellBridgeStrategy` now picks a mechanism per shell basename;
+  `supportsBridge(shellBasename:)` means guaranteed wrapper PATH order after the
+  user's startup files. `BootstrapError.unsupportedShell` is removed, and
+  environment-only shells carry a soft notice instead of a failure.
+- `TerminalChildEnvironment.scrubbed(_:)` removes an exact list of 11 host
+  Claude Code session variables from the bridge environment, because
+  `script/build_and_run.sh` launches the app with `open -n`, which passes the
+  caller's environment. It is not a prefix rule; user settings such as
+  `CLAUDE_CODE_USE_BEDROCK`, `ANTHROPIC_*`, and `CLAUDE_CONFIG_DIR` survive.
+- References:
+  [`canvas-live-sessions.md`](../../references/canvas-live-sessions.md)
+  "Per-shell bridge strategies" and "Host session variables must be scrubbed
+  from bridge terminals";
+  [`terminal-signals-and-shell-catalog.md`](../../references/terminal-signals-and-shell-catalog.md)
+  cross-reference. New decision:
+  [ADR 0028](../../decisions/0028-ensemble-bridge-shell-strategies.md).
+- Verification on `main` at a521f8d (Apple Swift 6.4 (swiftlang-6.4.0.34.1),
+  macOS 27.0.1 (26A434)): format lint clean; build with 0 new warnings;
+  parallel suite 250 + 2563 tests passed; `--no-parallel` (CI mode)
+  250 + 2563 passed; `./script/build_and_run.sh --verify` launched Rafu
+  Lightning. The user confirmed agent links end to end in a fish card before the
+  other shells landed; the other shells are not checked by a person yet.
+- Open manual checks: for each installed shell, start `claude` in a card,
+  confirm `/mcp` lists `rafu`, and confirm the link goes Live; nu, xonsh,
+  elvish, and mksh on a Mac that has them (all four are unverified by
+  execution); re-check whether the `server:rafu` channel warning is fully
+  explained by the inherited variables; the csh `logout` ("Not a login shell")
+  and tcsh `~/.cshdirs` limitations of emulated login.

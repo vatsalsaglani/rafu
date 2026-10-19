@@ -1,8 +1,9 @@
 # Canvas live session boundary
 
-- Applies to: Canvas terminal session links (ADR 0026).
-- Last checked: 2026-10-18, macOS 27, Swift 6.4, Claude Code 2.1.302,
-  Codex CLI 0.163.0. Source checks are distinct from live model verification.
+- Applies to: Canvas terminal session links (ADR 0026) and their shell bridge
+  strategies (ADR 0028).
+- Last checked: 2026-10-19, macOS 27.0.1 (26A434), Apple Swift 6.4
+  (swiftlang-6.4.0.34.1), Claude Code 2.1.303, Codex CLI 0.163.0. Source checks are distinct from live model verification.
 
 ## Rules and verified provider interfaces
 
@@ -36,11 +37,12 @@ Sources (version rust-v0.163.0):
 
 ## Shell and resource ownership
 
-Each prepared terminal owns private startup files. zsh uses ZDOTDIR forwarding
-and reads the user's normal startup files, then installs the wrapper PATH.
-Bash ignores --rcfile in login mode, so the helper reads the normal login profile
-sequence through a private rc file. Unsupported shells keep ordinary launch
-behavior and report that bridge startup is unavailable. No user rc file is edited.
+Each prepared terminal owns private startup files. `CanvasShellBridgeStrategy`
+in `CanvasTerminalBootstrap.swift` selects the mechanism by shell basename.
+`supportsBridge(shellBasename:)` is true when the strategy is not
+`environmentOnly`, which means "wrapper-directory PATH order is guaranteed after
+the user's startup files". No user rc file is ever edited. See the per-shell
+table below and ADR 0028.
 
 The Codex supervisor uses a short private Unix socket directory, isolates the
 server process group from terminal Ctrl-C, and terminates the server when the
@@ -51,6 +53,135 @@ The broker stores only live capability state. Every send checks the terminal
 lifetime and current edge. Messages are bounded, not logged, and not saved with
 boards. Disconnected nodes cannot receive new messages. Restored edges start Paused
 and resume per link (see "Per-link states"). Generic app/file links grant no capture or filesystem capability.
+
+## Per-shell bridge strategies (verified 2026-10-19)
+
+Apple Swift 6.4 (swiftlang-6.4.0.34.1), macOS 27.0.1 (26A434). On `main`: format
+lint clean, build with 0 new warnings, parallel suite 250 + 2563 tests passed,
+`--no-parallel` (CI mode) 250 + 2563 passed, `./script/build_and_run.sh --verify`
+launched Rafu Lightning.
+
+| Shell | Mechanism |
+|---|---|
+| zsh | `ZDOTDIR` forwarding; user startup files run, then the wrapper PATH |
+| bash | `--noprofile --rcfile <private rc>`; the private rc runs the login files |
+| fish | `-l -i --init-command 'set -gx PATH $RAFU_CANVAS_WRAPPER_DIR $PATH'` |
+| sh, dash, ksh, mksh | argv `["-i"]` (no `-l`) plus `ENV=<private>/env.sh` |
+| tcsh, csh | argv `["-i"]`; `HOME` points at the private directory |
+| nu | login arguments plus `-e '$env.PATH = ($env.PATH \| prepend $env.RAFU_CANVAS_WRAPPER_DIR)'` |
+| xonsh | login arguments plus `-i`; `XONSHRC_DIR` gains a private `rc.d` |
+| elvish, any other basename | `environmentOnly`: PATH prepended in the spawn environment only |
+
+Every inline command is a static literal that reads environment variables at run
+time; the private files hold only static text. Paths reach the shell only through
+environment variables. The private directory is 0700 and its files 0600; cleanup
+is unchanged. Tests assert that no written file contains the capability token,
+the socket path, or base-environment values (fixture marker
+`/fixture/$(evil)`).
+
+Details that are not derivable from the code:
+
+- **fish**: `--init-command` runs after `config.fish` and `conf.d`, so it wins
+  over `fish_add_path`. Verified by hand with fish 4.0.2
+  (`/opt/homebrew/bin/fish`): `PATH[1]` was the wrapper directory with the
+  user's tide, fzf, and z plugins loaded and `fish_add_path` present.
+- **POSIX shells — the naive form fails.** `ENV=<private>` together with
+  `-l -i` does NOT work when the user's `~/.profile` sets `ENV`: the profile
+  runs first and overrides `ENV`, so the private file never runs. Proven for
+  `/bin/sh`, `/bin/dash`, and `/bin/ksh`. The implementation therefore drops
+  `-l`, carries the user's value in `RAFU_CANVAS_USER_HAD_ENV` and
+  `RAFU_CANVAS_USER_ENV`, and the private `env.sh` restores it, emulates the
+  login sequence (`/etc/profile`, `~/.profile`) when the catalog marks the
+  shell login, sources the user's `ENV` file (default `${ENV-}` for sh and
+  dash, `${ENV-$HOME/.kshrc}` for ksh, `${ENV-$HOME/.mkshrc}` for mksh, with
+  `~/` expansion and an `eval` of the user's own value only when it contains
+  `$` or a backtick, matching POSIX `ENV` expansion), and only then prepends
+  the wrapper directory.
+- **csh family**: `HOME` is the private directory and `RAFU_CANVAS_USER_HOME`
+  holds the real one. The private `.tcshrc` restores `HOME`, runs
+  `/etc/csh.login` (login variant), `~/.tcshrc` or `~/.cshrc`, `~/.login`
+  (login variant), then `setenv PATH "${RAFU_CANVAS_WRAPPER_DIR}:${PATH}"`.
+  Only `/etc/csh.cshrc` runs while `HOME` is still private; on macOS it sets
+  only the prompt. History loads from the real `HOME`.
+- **nu**: `-e` runs after `env.nu`, `config.nu`, `login.nu`, and autoload, then
+  the REPL. Source: nushell.sh/book/configuration.html "Launch Stages", fetched
+  2026-10-19 (the book cites 0.116.0). Not verified by execution; nu is not
+  installed.
+- **xonsh**: `XONSHRC_DIR` becomes the user's value, or the default
+  `/etc/xonsh/rc.d:<XDG_CONFIG_HOME or ~/.config>/xonsh/rc.d`, plus
+  `<private>/xonshrc.d`, which holds `zzzz-rafu-canvas.xsh` with
+  `$PATH.insert(0, $RAFU_CANVAS_WRAPPER_DIR)`. `rc.d` files load after all
+  `XONSHRC` files (xon.sh/envvars.html, xonsh 0.24.2 docs). Not verified by
+  execution; the lexicographic sort scope is unverified.
+- **elvish** has only `-rc`/`-norc`, and evaluating the user rc for this purpose
+  is undocumented, so it stays `environmentOnly`.
+
+macOS platform facts that shape the table:
+
+- `/bin/sh` is Apple's trampoline to `/private/var/select/sh`, which is bash
+  3.2.57 in POSIX mode. `shopt login_shell` is therefore false for bash-as-sh.
+- `/bin/ksh` is ksh93 93u+ (default `ENV` is `~/.kshrc`).
+- `/bin/csh` and `/bin/tcsh` are tcsh 6.21.00.
+- `/etc/profile` and `/etc/csh.login` run `path_helper`, which REORDERS PATH.
+  Environment-only PATH prepending therefore does not survive a login shell;
+  this is why `environmentOnly` carries a notice instead of a guarantee.
+
+Notices and residual limits:
+
+- `environmentOnly` shows a soft notice: "Agent links are on. If your startup
+  files change PATH, the claude and codex commands can start without Rafu."
+- A genuine failure (a missing CLI or socket only) shows "Agent links are not
+  available. Start a new terminal to try again." The old
+  `BootstrapError.unsupportedShell` case is removed.
+- `execName` on the bootstrap is `"-<basename>"` for nushell, xonsh, and
+  `environmentOnly` (they get login behaviour from argv0) and nil for the
+  others, which emulate login themselves. Used at
+  `WorkspaceTerminalController.swift` (~line 1266).
+- sh, dash, ksh, mksh, tcsh, and csh are not native login shells here: csh
+  `logout` fails with "Not a login shell", and tcsh `~/.cshdirs` is not
+  restored. A syntax error in a user startup file can stop the private file
+  before its PATH line (same exposure bash already had). mksh, nu, xonsh, and
+  elvish are unverified by execution.
+- `CanvasTerminalBootstrapTests` covers the strategy table, per-strategy argv
+  and environment, file contents and modes, and the no-leak rule, plus opt-in
+  integration tests that really ran `/bin/sh`, `/bin/dash`, `/bin/ksh`, and
+  `/bin/tcsh` against a fixture `HOME`. tcsh writes "no access to tty" and its
+  prompt to stdout, so that test greps for a marker line.
+
+## Host session variables must be scrubbed from bridge terminals
+
+Verified on 2026-10-19 on the toolchain above. Claude Code inside a card
+reported "Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION…"
+beside the development-channels notice, and channel pushes did not deliver
+replies although the tools worked. Cause: Rafu Lightning had itself been
+launched from inside a Claude Code session. `script/build_and_run.sh` uses
+`/usr/bin/open -n`, which passes the caller's environment, so the app carried
+11 host-session variables into the bridge environment.
+
+`TerminalChildEnvironment.scrubbed(_:)` removes an EXACT list: `CLAUDECODE`,
+`CLAUDE_PID`, `CLAUDE_EFFORT`, `CLAUDE_CODE_SESSION_ID`,
+`CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_EXECPATH`,
+`CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`,
+`CLAUDE_CODE_BRIDGE_SESSION_ID`, and `CLAUDE_CODE_SESSION_ATTENDED`. It is
+deliberately NOT a `CLAUDE_CODE_` prefix rule: user settings such as
+`CLAUDE_CODE_USE_BEDROCK` (for example through `launchctl setenv`), every
+`ANTHROPIC_*` variable, and `CLAUDE_CONFIG_DIR` must survive.
+
+Ordinary (non-bridge) terminals pass `environment: nil` to SwiftTerm, which
+builds a small fixed set (TERM, COLORTERM, LANG, plus LOGNAME/USER/DISPLAY/
+LC_TYPE/HOME when present). They never inherit the app environment, so they
+needed no scrub.
+
+Open: whether the `server:rafu • no MCP server configured with that name`
+warning is fully explained by these inherited variables is NOT yet confirmed by
+the user. See "Claude dynamic MCP warning in 2.1.302" for the separate false
+positive.
+
+Unrelated diagnostic worth one line so nobody debugs it inside Rafu: Codex
+reporting `Hook failed … exited with code 127` came from `~/.codex/hooks.json`
+entries that run Cider's missing helper
+(`~/Library/Application Support/Cider/Helpers/cider-events`). Exit 127 means
+"command not found", not a Rafu bridge fault.
 
 ## Per-link states (macOS redesign; macOS build verification pending)
 
