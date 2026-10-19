@@ -50,12 +50,13 @@ nonisolated enum WorkbenchTextHeightPolicy {
 
 /// Tabs are detached rounded cards that sit on the deck card's own tone
 /// (the shelf is `editorBackground`, never the frame colour). The selected
-/// tab is raised: an elevated fill, a hairline border on all four edges, and
-/// a soft shadow. An inactive tab has no fill at all, only secondary text, so
-/// the header row reads as part of the card instead of a strip of chips.
-/// Increase Contrast promotes the selected hairline to `borderStrong`; the
-/// light theme relies on that hairline because its elevated fill (white) is
-/// close to the card tone.
+/// tab is raised: the theme's `tabActiveBackground` fill (a step lighter than
+/// the card in Indigo, white in Khadi), a hairline border on all four edges,
+/// and its own soft shadow. An inactive tab has no fill at all, only
+/// secondary text, so the header row reads as part of the card instead of a
+/// strip of chips. Increase Contrast promotes the selected hairline to
+/// `borderStrong`; the light theme relies on that hairline and the shadow
+/// because its white fill is close to the card tone.
 nonisolated struct AttachedWorkbenchTabPresentation: Equatable, Sendable {
     let fill: WorkbenchPaletteRole
     let outline: WorkbenchPaletteRole
@@ -70,7 +71,7 @@ nonisolated struct AttachedWorkbenchTabPresentation: Equatable, Sendable {
             )
         }
         return Self(
-            fill: .elevatedBackground,
+            fill: .tabActiveBackground,
             outline: contrastIncreased ? .borderStrong : .borderSubtle,
             outlineEdges: [.top, .leading, .trailing, .bottom]
         )
@@ -135,6 +136,7 @@ struct WorkbenchDeckSurface<Content: View>: View {
                 .fill(theme.palette.editorBackground)
                 .shadow(
                     color: WorkbenchDeckShadowStyle.color(
+                        for: .deck,
                         isDark: theme.isDark,
                         contrastIncreased: colorSchemeContrast == .increased
                     ),
@@ -165,21 +167,37 @@ struct WorkbenchDeckSurface<Content: View>: View {
     }
 }
 
-/// Theme-aware shadow opacity for the raised workbench deck. Dark themes read
-/// a black shadow stronger, because it must stand out against an already-dark
-/// frame; light themes keep it faint, so it stays a soft depth cue rather than
-/// a dark halo around the card. Increase Contrast halves the opacity: that
-/// mode's accessibility signal is the already-promoted `borderStrong`
+/// Theme-aware shadow opacity for the workbench's only two shadows: the
+/// raised deck and the selected tab card. Dark themes read a black shadow
+/// stronger, because it must stand out against an already-dark frame; light
+/// themes keep it faint, so it stays a soft depth cue rather than a dark halo.
+/// The tab's shadow is tighter (`tabShadowRadius`) and so needs a higher
+/// opacity than the deck's to read at all. Increase Contrast halves both:
+/// that mode's accessibility signal is the already-promoted `borderStrong`
 /// hairline, so the shadow stays present but never competes with it as a
 /// second, blurrier boundary.
 nonisolated enum WorkbenchDeckShadowStyle {
-    static func opacity(isDark: Bool, contrastIncreased: Bool = false) -> Double {
-        let base = isDark ? 0.18 : 0.10
+    nonisolated enum Surface: Equatable, Sendable {
+        case deck
+        case tab
+    }
+
+    static func opacity(
+        for surface: Surface = .deck, isDark: Bool, contrastIncreased: Bool = false
+    ) -> Double {
+        let base: Double =
+            switch surface {
+            case .deck: isDark ? 0.30 : 0.10
+            case .tab: isDark ? 0.40 : 0.12
+            }
         return contrastIncreased ? base / 2 : base
     }
 
-    static func color(isDark: Bool, contrastIncreased: Bool = false) -> Color {
-        Color.black.opacity(opacity(isDark: isDark, contrastIncreased: contrastIncreased))
+    static func color(
+        for surface: Surface = .deck, isDark: Bool, contrastIncreased: Bool = false
+    ) -> Color {
+        Color.black.opacity(
+            opacity(for: surface, isDark: isDark, contrastIncreased: contrastIncreased))
     }
 }
 
@@ -271,6 +289,15 @@ struct AttachedWorkbenchTab<Content: View>: View {
             contrastIncreased: colorSchemeContrast == .increased
         )
         content
+            // One title style for every tab kind: weight, not only colour,
+            // marks the selected tab. An explicit font inside a tab (a pane
+            // count, a bell) still wins.
+            .font(
+                .system(
+                    size: RafuMetrics.tabLabelFontSize,
+                    weight: isSelected ? .semibold : .medium
+                )
+            )
             .foregroundStyle(
                 isSelected ? theme.palette.textPrimary : theme.palette.textSecondary
             )
@@ -290,6 +317,7 @@ struct AttachedWorkbenchTab<Content: View>: View {
                     .shadow(
                         color: isSelected
                             ? WorkbenchDeckShadowStyle.color(
+                                for: .tab,
                                 isDark: theme.isDark,
                                 contrastIncreased: colorSchemeContrast == .increased
                             ) : .clear,

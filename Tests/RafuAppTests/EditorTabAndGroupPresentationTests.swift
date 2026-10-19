@@ -46,17 +46,17 @@ struct EditorTabAndGroupPresentationTests {
         #expect(!source.contains("StitchedUnderline"))
     }
 
-    @Test("Selected tabs are a raised card: elevated fill, hairline border on all four edges")
+    @Test("Selected tabs are a raised card: active-tab fill, hairline border on all four edges")
     func attachedTabGeometryRemainsExact() {
         let selected = AttachedWorkbenchTabPresentation.resolve(isSelected: true)
 
-        #expect(selected.fill == .elevatedBackground)
+        #expect(selected.fill == .tabActiveBackground)
         #expect(selected.outline == .borderSubtle)
         #expect(selected.outlineEdges == [.top, .leading, .trailing, .bottom])
 
         let contrast = AttachedWorkbenchTabPresentation.resolve(
             isSelected: true, contrastIncreased: true)
-        #expect(contrast.fill == .elevatedBackground)
+        #expect(contrast.fill == .tabActiveBackground)
         #expect(contrast.outline == .borderStrong)
         #expect(contrast.outlineEdges == [.top, .leading, .trailing, .bottom])
 
@@ -68,7 +68,7 @@ struct EditorTabAndGroupPresentationTests {
                 == inactive)
     }
 
-    @Test("The full-width shelf frames the floating cards with a border beneath, no seam overlay")
+    @Test("The full-width shelf frames the floating cards; the card header has one hairline")
     func shelfFramesFloatingCards() throws {
         let source = try Self.editorCanvasSource()
         let shelf = try Self.section(
@@ -92,6 +92,21 @@ struct EditorTabAndGroupPresentationTests {
         #expect(!shelf.contains("tabBarBackground"))
         #expect(shelf.contains(".frame(height: WorkbenchTextHeightPolicy.tabShelfHeight("))
         #expect(!shelf.contains("minHeight:"))
+        // One hairline under the whole card header: the shelf's own hairline
+        // is drawn only when no breadcrumb (which has its own) follows.
+        #expect(shelf.contains("if showsBottomHairline {"))
+        let bar = try Self.section(
+            named: "private struct EditorGroupTabBar: View",
+            until: "private struct GitStandaloneBlameCanvas: View",
+            in: source
+        )
+        #expect(bar.contains("EditorTabShelf(showsBottomHairline: !breadcrumbFollows)"))
+
+        let breadcrumb = try Self.source("Sources/RafuApp/Views/EditorBreadcrumbView.swift")
+        #expect(breadcrumb.contains(".background(theme.palette.editorBackground)"))
+        #expect(!breadcrumb.contains("tabBarBackground"))
+        #expect(breadcrumb.contains(".frame(height: RafuMetrics.breadcrumbHeight)"))
+        #expect(breadcrumb.contains("Divider().overlay(theme.palette.borderSubtle)"))
     }
 
     @Test("The tab strip keeps the selected tab visible without animation")
@@ -110,8 +125,17 @@ struct EditorTabAndGroupPresentationTests {
         #expect(bar.contains(".onChange(of: session.selectedAuxiliaryTab(in: group.id))"))
         #expect(bar.contains("proxy.scrollTo(target, anchor: nil)"))
         #expect(!bar.contains("withAnimation"))
-        // The trailing fade matches the shelf's card tone.
+        // The trailing fade matches the shelf's card tone, and a mirrored
+        // leading fade shows only once the strip is scrolled.
         #expect(bar.contains("theme.palette.editorBackground.opacity(0)"))
+        #expect(bar.contains(".overlay(alignment: .leading) {"))
+        #expect(bar.contains("if isStripScrolledFromLeadingEdge {"))
+        #expect(bar.contains(".onScrollGeometryChange(for: Bool.self)"))
+        // No accent in the strip's controls: both menus draw a neutral tint,
+        // and only the overflow menu shows a chevron.
+        #expect(
+            bar.components(separatedBy: ".tint(theme.palette.textSecondary)").count - 1 == 2)
+        #expect(bar.components(separatedBy: ".menuIndicator(.hidden)").count - 1 == 2)
         #expect(!bar.contains("tabBarBackground"))
         #expect(bar.contains(".scrollIndicators(.never)"))
         #expect(bar.contains(".background(ScrollerHidingConfigurator())"))

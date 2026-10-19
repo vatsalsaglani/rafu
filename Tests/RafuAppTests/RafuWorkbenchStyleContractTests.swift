@@ -8,19 +8,31 @@ import Testing
 struct RafuWorkbenchStyleContractTests {
     @Test("Compact workbench metrics are semantic and exact")
     func compactMetrics() {
-        #expect(RafuMetrics.workbenchInset == 8)
+        // Design polish round 2: the inset grew 8 → 10 so the stronger deck
+        // shadow (radius 6 → 7, y 2 → 3) still fits inside the gutter.
+        #expect(RafuMetrics.workbenchInset == 10)
         #expect(RafuMetrics.editorGroupGapTarget == 4)
         #expect(RafuMetrics.radiusWorkbenchDeck == 12)
         #expect(RafuMetrics.radiusEditorGroup == 5)
-        // The shadow must stay inside the deck lane's 8 pt gutter, or the
+        #expect(RafuMetrics.deckShadowRadius == 7)
+        #expect(RafuMetrics.deckShadowY == 3)
+        // The shadow must stay inside the deck lane's 10 pt gutter, or the
         // lane would clip it.
         #expect(
             RafuMetrics.deckShadowRadius + RafuMetrics.deckShadowY <= RafuMetrics.workbenchInset)
         #expect(RafuMetrics.radiusWorkbenchTab == 10)
         #expect(RafuMetrics.tabShadowRadius == 3)
         #expect(RafuMetrics.tabShadowY == 1)
-        #expect(RafuMetrics.tabShelfBreathingRoom == 6)
-        #expect(RafuMetrics.tabShelfHeight == 40)
+        #expect(RafuMetrics.tabLabelFontSize == 12.5)
+        // Round 2 tightened the shelf (breathing room 6 → 5, floor 40 → 38)
+        // and grew the breadcrumb row beneath it (24 → 26).
+        #expect(RafuMetrics.tabShelfBreathingRoom == 5)
+        #expect(RafuMetrics.tabShelfHeight == 38)
+        #expect(
+            RafuMetrics.tabShelfHeight
+                == RafuMetrics.tabBarHeight + RafuMetrics.tabShelfBreathingRoom * 2)
+        #expect(RafuMetrics.breadcrumbHeight == 26)
+        #expect(RafuMetrics.breadcrumbHorizontalPadding == 12)
         #expect(RafuMetrics.radiusDenseSelection == 4)
         #expect(RafuMetrics.radiusDenseCard == 6)
         #expect(RafuMetrics.radiusWorkbenchField == 5)
@@ -80,6 +92,8 @@ struct RafuWorkbenchStyleContractTests {
         )
         #expect(tabSection.contains(".shadow("))
         #expect(tabSection.contains("WorkbenchDeckShadowStyle.color("))
+        #expect(tabSection.contains("for: .tab,"))
+        #expect(deckSection.contains("for: .deck,"))
         #expect(tabSection.contains("RafuMetrics.tabShadowRadius"))
         #expect(tabSection.contains("RafuMetrics.tabShadowY"))
 
@@ -87,20 +101,33 @@ struct RafuWorkbenchStyleContractTests {
         #expect(!windowSource.contains(".shadow("))
     }
 
-    @Test("Deck shadow opacity is theme-aware and Increase Contrast subdues it")
+    @Test("Deck and tab shadow opacities are theme-aware and Increase Contrast subdues them")
     func deckShadowOpacityIsThemeAware() {
-        let dark = WorkbenchDeckShadowStyle.opacity(isDark: true)
-        let light = WorkbenchDeckShadowStyle.opacity(isDark: false)
-        #expect(dark == 0.18)
+        // Design polish round 2: the deck's dark opacity rose 0.18 → 0.30 so
+        // the card lifts off the darker Indigo frame; the selected tab got
+        // its own, stronger value because its shadow is much tighter.
+        let dark = WorkbenchDeckShadowStyle.opacity(for: .deck, isDark: true)
+        let light = WorkbenchDeckShadowStyle.opacity(for: .deck, isDark: false)
+        #expect(dark == 0.30)
         #expect(light == 0.10)
         #expect(dark > light)
+        #expect(WorkbenchDeckShadowStyle.opacity(isDark: true) == dark)
 
-        #expect(
-            WorkbenchDeckShadowStyle.opacity(isDark: true, contrastIncreased: true) == dark / 2
-        )
-        #expect(
-            WorkbenchDeckShadowStyle.opacity(isDark: false, contrastIncreased: true) == light / 2
-        )
+        let tabDark = WorkbenchDeckShadowStyle.opacity(for: .tab, isDark: true)
+        let tabLight = WorkbenchDeckShadowStyle.opacity(for: .tab, isDark: false)
+        #expect(tabDark == 0.40)
+        #expect(tabLight == 0.12)
+        #expect(tabDark > tabLight)
+
+        for surface in [WorkbenchDeckShadowStyle.Surface.deck, .tab] {
+            for isDark in [true, false] {
+                #expect(
+                    WorkbenchDeckShadowStyle.opacity(
+                        for: surface, isDark: isDark, contrastIncreased: true)
+                        == WorkbenchDeckShadowStyle.opacity(for: surface, isDark: isDark) / 2
+                )
+            }
+        }
     }
 
     @Test("Corner and seam overlays cannot intercept input or accessibility")
@@ -124,12 +151,12 @@ struct RafuWorkbenchStyleContractTests {
         #expect(inactive.outlineEdges.isEmpty)
 
         let selected = AttachedWorkbenchTabPresentation.resolve(isSelected: true)
-        #expect(selected.fill == .elevatedBackground)
+        #expect(selected.fill == .tabActiveBackground)
         #expect(selected.outline == .borderSubtle)
         #expect(selected.outlineEdges == [.top, .leading, .trailing, .bottom])
 
         let source = try Self.workbenchStyleSource()
-        #expect(source.contains("case .elevatedBackground: elevatedBackground"))
+        #expect(source.contains("case .tabActiveBackground: tabActiveBackground"))
         let tabSection = try Self.section(
             of: source,
             from: "struct AttachedWorkbenchTab<Content: View>: View",
@@ -140,6 +167,9 @@ struct RafuWorkbenchStyleContractTests {
         #expect(tabSection.contains("contrastIncreased: colorSchemeContrast == .increased"))
         #expect(tabSection.contains("!isSelected && isHovering"))
         #expect(tabSection.contains("theme.palette.hover"))
+        // Weight marks the selected tab for every tab kind, not colour alone.
+        #expect(tabSection.contains("size: RafuMetrics.tabLabelFontSize"))
+        #expect(tabSection.contains("weight: isSelected ? .semibold : .medium"))
     }
 
     @Test("Text-bearing chrome uses scalable minimums instead of fixed clipping boxes")

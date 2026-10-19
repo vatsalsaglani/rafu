@@ -789,19 +789,24 @@ extension View {
 
 /// Full-width shelf the floating tab cards sit inside: the header row of the
 /// deck card. It is painted in the card's own tone (`editorBackground`), not
-/// the frame's `tabBarBackground`, so the card has no frame-coloured band at
-/// its top and the tabs read as part of it. It owns the breathing room around
-/// the cards and the one hairline border separating the row from the content
-/// beneath it. Its height is FIXED (still scaled with Larger Text through
-/// `WorkbenchTextHeightPolicy`): a `minHeight` let the horizontal scroll view
-/// grow the shelf by a scroller's height the moment the tabs overflowed.
+/// the frame's colour, so the card has no frame-coloured band at its top and
+/// the tabs read as part of it. It owns the breathing room around the cards.
+/// The card header has exactly ONE hairline: when a breadcrumb (or another
+/// header row with its own bottom hairline) follows, the shelf draws none and
+/// the two rows read as one header; otherwise the shelf draws the hairline
+/// that separates it from the content beneath. Its height is FIXED (still
+/// scaled with Larger Text through `WorkbenchTextHeightPolicy`): a
+/// `minHeight` let the horizontal scroll view grow the shelf by a scroller's
+/// height the moment the tabs overflowed.
 private struct EditorTabShelf<Content: View>: View {
+    let showsBottomHairline: Bool
     @ViewBuilder let content: Content
 
     @Environment(\.rafuTheme) private var theme
     @ScaledMetric(relativeTo: .body) private var scaledHeight = RafuMetrics.tabBarHeight
 
-    init(@ViewBuilder content: () -> Content) {
+    init(showsBottomHairline: Bool = true, @ViewBuilder content: () -> Content) {
+        self.showsBottomHairline = showsBottomHairline
         self.content = content()
     }
 
@@ -813,11 +818,13 @@ private struct EditorTabShelf<Content: View>: View {
             .frame(height: WorkbenchTextHeightPolicy.tabShelfHeight(forTabHeight: tabHeight))
             .background(theme.palette.editorBackground)
             .overlay(alignment: .bottom) {
-                Rectangle()
-                    .fill(theme.palette.borderSubtle)
-                    .frame(height: RafuMetrics.hairline)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
+                if showsBottomHairline {
+                    Rectangle()
+                        .fill(theme.palette.borderSubtle)
+                        .frame(height: RafuMetrics.hairline)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
             }
     }
 }
@@ -1168,13 +1175,16 @@ private struct EditorGroupTabBar: View {
     /// leading-aligned, so a short row starts at the strip's leading edge and
     /// its empty remainder stays hit-testable.
     @State private var stripViewportWidth: CGFloat = 0
+    /// Whether the strip is scrolled away from its leading edge, which is
+    /// the only time the leading fade shows.
+    @State private var isStripScrolledFromLeadingEdge = false
 
     let group: EditorGroupState
     let terminalIdentities: [UUID: EditorTerminalIdentityPresentation]
     @Bindable var session: WorkspaceSession
 
     var body: some View {
-        EditorTabShelf {
+        EditorTabShelf(showsBottomHairline: !breadcrumbFollows) {
             HStack(spacing: 0) {
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal) {
@@ -1212,6 +1222,13 @@ private struct EditorGroupTabBar: View {
                     // fade, because it scrolls within these margins.
                     .contentMargins(.horizontal, Self.stripMargin, for: .scrollContent)
                     .scrollIndicators(.never)
+                    // Only a scrolled strip shows the leading fade: at rest
+                    // the first tab sits fully in view and must not be dimmed.
+                    .onScrollGeometryChange(for: Bool.self) {
+                        $0.contentOffset.x + $0.contentInsets.leading > 0.5
+                    } action: { _, isScrolled in
+                        isStripScrolledFromLeadingEdge = isScrolled
+                    }
                     .onGeometryChange(for: CGFloat.self) {
                         $0.size.width
                     } action: {
@@ -1244,6 +1261,23 @@ private struct EditorGroupTabBar: View {
                     .frame(width: 16)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
+                }
+                // The mirrored leading fade: a tab scrolled past the leading
+                // edge fades out instead of being cut off flat.
+                .overlay(alignment: .leading) {
+                    if isStripScrolledFromLeadingEdge {
+                        LinearGradient(
+                            colors: [
+                                theme.palette.editorBackground,
+                                theme.palette.editorBackground.opacity(0),
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: 16)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                    }
                 }
                 .layoutPriority(0)
                 newTabMenu
@@ -1349,6 +1383,16 @@ private struct EditorGroupTabBar: View {
         }
     }
 
+    /// Whether the group shows a breadcrumb under this shelf: the same rule
+    /// the group body uses (the selected tab is a document, whether or not
+    /// an auxiliary tab is on top), so the header always has one hairline.
+    private var breadcrumbFollows: Bool {
+        guard let selectedTabID = group.selectedTabID,
+            let tab = group.tabs.first(where: { $0.id == selectedTabID })
+        else { return false }
+        return session.document(for: tab) != nil
+    }
+
     private var selectedDocument: EditorDocument? {
         guard session.selectedAuxiliaryTab(in: group.id) == nil,
             let selectedTabID = group.selectedTabID,
@@ -1391,8 +1435,14 @@ private struct EditorGroupTabBar: View {
             session.newUntitledDocument()
         }
         .menuStyle(.borderlessButton)
+        // The overflow menu's chevron sits beside this button, so a second
+        // arrow here would read as a pair. Press and hold opens the menu.
+        .menuIndicator(.hidden)
+        // A borderless menu draws its label in the tint (the gold accent
+        // by default); the strip's controls stay neutral.
+        .tint(theme.palette.textSecondary)
         .fixedSize()
-        .help("New Tab. Use the arrow for a terminal, Terminal Group, or Ensemble.")
+        .help("New File. Press and hold for a terminal, Terminal Group, or Ensemble.")
         .accessibilityLabel("New Tab")
     }
 
@@ -1486,6 +1536,7 @@ private struct EditorGroupTabBar: View {
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
+        .tint(theme.palette.textSecondary)
         .fixedSize()
         .padding(.trailing, 4)
         .help("Show all tabs")
@@ -1647,7 +1698,7 @@ private struct GitBlameTableHeader: View {
             column("Summary", width: nil)
         }
         .frame(height: 28)
-        .background(theme.palette.tabBarBackground)
+        .background(theme.palette.editorBackground)
         .overlay(alignment: .bottom) { Divider().overlay(theme.palette.borderSubtle) }
     }
 
@@ -2389,7 +2440,7 @@ struct GuardBannerView: View {
         .padding(.horizontal, 10)
         .frame(height: 32)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(theme.palette.tabBarBackground)
+        .background(theme.palette.editorBackground)
         .overlay(alignment: .bottom) { Divider().overlay(theme.palette.borderSubtle) }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(message) Enable Highlighting")

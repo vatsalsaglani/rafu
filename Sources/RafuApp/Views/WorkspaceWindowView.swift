@@ -50,11 +50,12 @@ struct WorkspaceWindowView: View {
         .background(CanvasWindowCloseGuard(session: session).frame(width: 0, height: 0))
         .modifier(CanvasPresentations(session: session))
         // Raised from 720, then from 760 when the HSplitView divider
-        // became the explicit `WorkbenchSplitHandle`: the left Activity
-        // Rail (40) + sidebar min (220) + the handle's hit area (10) +
-        // deck lane (editor min 472 + 16 pt inset) floor to 758; 770 keeps
-        // a small margin above it. See `workbenchContent`'s comment.
-        .frame(minWidth: 770, minHeight: 480)
+        // became the explicit `WorkbenchSplitHandle`, then to 774 when the
+        // deck inset grew to 10 pt: the left Activity Rail (40) + sidebar
+        // min (220) + the handle's hit area (10) + deck lane (editor min
+        // 472 + 20 pt inset) floor to 762; 774 keeps the same 12 pt margin
+        // above it. See `workbenchContent`'s comment.
+        .frame(minWidth: 774, minHeight: 480)
         .navigationTitle(session.windowTitle)
         .focusedSceneValue(\.workspaceSession, session)
         .onChange(of: session.terminal.terminalGroupRevision) { _, _ in
@@ -138,9 +139,9 @@ struct WorkspaceWindowView: View {
                     editorCanvas
                         // Resize floor: rail 40 + sidebar min 220 + the
                         // handle's 10 pt hit area + deck lane (this 472 +
-                        // the 8 pt inset on both sides below, 16) = 758.
+                        // the 10 pt inset on both sides below, 20) = 762.
                         // The window's own `minWidth` (below, in `body`)
-                        // is raised to 770 to clear it with a small margin.
+                        // is raised to 774 to clear it with a small margin.
                         .frame(minWidth: 472, minHeight: 220)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .layoutPriority(1)

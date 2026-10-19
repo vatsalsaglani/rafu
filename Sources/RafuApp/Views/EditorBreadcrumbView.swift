@@ -103,11 +103,11 @@ struct EditorBreadcrumbView: View {
     }
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 4) {
             ForEach(Array(currentSegments.enumerated()), id: \.element.id) { index, segment in
                 if index > 0 {
                     Image(systemName: "chevron.compact.right")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: 8, weight: .semibold))
                         .foregroundStyle(theme.palette.textMuted)
                         .accessibilityHidden(true)
                 }
@@ -116,14 +116,16 @@ struct EditorBreadcrumbView: View {
             Spacer(minLength: 0)
         }
         .font(.system(size: 11))
-        .padding(.horizontal, 10)
-        .frame(height: 24)
+        .padding(.horizontal, RafuMetrics.breadcrumbHorizontalPadding)
+        .frame(height: RafuMetrics.breadcrumbHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
         // The breadcrumb's empty trailing run is the primary "grab the top
         // of the window" surface now that `isMovable` is off (the tab strip
         // itself is a scroll view, which swallows background hits).
         .background(WindowDragHandle())
-        .background(theme.palette.tabBarBackground)
+        // The card's own tone: the row continues the tab shelf above it, and
+        // its bottom hairline is the header's only separator.
+        .background(theme.palette.editorBackground)
         .overlay(alignment: .bottom) { Divider().overlay(theme.palette.borderSubtle) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("File path")
@@ -136,8 +138,10 @@ struct EditorBreadcrumbView: View {
             let icon = FileIconProvider.fileIcon(named: segment.title)
             HStack(spacing: 4) {
                 FileIconView(icon: icon, size: 9)
+                // The current file is the row's one primary-tone segment.
                 Text(segment.title)
-                    .foregroundStyle(theme.palette.textSecondary)
+                    .fontWeight(.medium)
+                    .foregroundStyle(theme.palette.textPrimary)
                     .lineLimit(1)
             }
         case .collapsed:
@@ -171,7 +175,7 @@ private struct BreadcrumbSegmentButtonStyle: ButtonStyle {
             configuration.label
                 .lineLimit(1)
                 .foregroundStyle(
-                    isHovering ? theme.palette.textPrimary : theme.palette.textMuted
+                    isHovering ? theme.palette.textPrimary : theme.palette.textSecondary
                 )
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)

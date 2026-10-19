@@ -70,7 +70,8 @@ struct WorkbenchDeckPresentationTests {
             deckLane.range(of: ".background(theme.palette.appBackground)")
         )
 
-        #expect(RafuMetrics.workbenchInset == 8)
+        // Design polish round 2: 8 → 10 so the stronger deck shadow fits.
+        #expect(RafuMetrics.workbenchInset == 10)
         #expect(Self.occurrences(of: ".padding(", in: deckLane) == 1)
         #expect(padding.lowerBound < backing.lowerBound)
     }
