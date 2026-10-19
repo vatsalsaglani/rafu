@@ -518,7 +518,10 @@ private struct EditorGroupView: View {
                 let edge = EditorDropGeometry.target(at: location, in: size)
                 targeted.wrappedValue = false
                 hoveredEdge.wrappedValue = nil
-                guard let payload = session.activeEditorDrag ?? pasteboardPayload else {
+                // The pasteboard is this drag's own payload, read
+                // synchronously; the cache can be stale after a cancelled
+                // drag, so it is only the fallback.
+                guard let payload = pasteboardPayload ?? session.activeEditorDrag else {
                     return false
                 }
                 session.clearEditorDrag()
@@ -595,12 +598,13 @@ private struct EditorDropDelegate: DropDelegate {
     }
 
     func dropExited(info: DropInfo) {
+        DragDiag.note("editor(SwiftUI) exited")
         isTargeted = false
         hoveredEdge = nil
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        DragDiag.note("editor(SwiftUI) performDrop")
+        DragDiag.note("editor(SwiftUI) performDrop cached=\(session.activeEditorDrag != nil)")
         let resolvedEdge = edge(for: info.location)
         isTargeted = false
         hoveredEdge = nil
@@ -819,12 +823,25 @@ private struct EditorTabShelf<Content: View>: View {
     }
 }
 
+/// Every tab row's frame in the WHOLE shelf's coordinate space, which is
+/// also the drop target's, so a frame and a drop location compare directly
+/// at any scroll offset. Written from the strip's frame preference on every
+/// layout and scroll, read only by `TabStripReorderDropDelegate`. Not
+/// observed on purpose: a scroll moves every frame, and observing them would
+/// re-render the strip on every scroll frame.
+@MainActor
+private final class TabStripGeometry {
+    var tabFrames: [EditorTabID: CGRect] = [:]
+}
+
 /// The tab strip's own drop target: reorders a tab within `groupID` when
 /// dragged from this same strip, or moves it here at the hovered slot when
-/// dragged from a different group's strip. Scoped to `groupID` and layered
-/// on the tab strip itself so a drag never reaches the group's split/move
-/// delegate while hovering the strip (`EditorGroupView.body` scopes that
-/// delegate to the body below the tab bar for exactly this reason).
+/// dragged from a different group's strip. It covers the whole tab shelf
+/// (breathing room above and below the tabs, the empty bar past the last
+/// tab, and the trailing controls), so no point of the shelf is a dead zone
+/// where a release silently does nothing, and the shelf's bottom edge meets
+/// the group's own split/move target with no gap. `EditorGroupView.body`
+/// scopes that split/move delegate to the body below the tab bar.
 ///
 /// Registered for `.rafuEditorDrag` ONLY — never `.fileURL` — so a real
 /// Finder file dropped on the tab bar falls through untouched for whatever
@@ -834,9 +851,9 @@ private struct EditorTabShelf<Content: View>: View {
 private struct TabStripReorderDropDelegate: DropDelegate {
     let groupID: EditorGroupID
     let orderedTabIDs: [EditorTabID]
-    let tabFrames: [EditorTabID: CGRect]
+    let geometry: TabStripGeometry
     let reduceMotion: Bool
-    @Binding var hoveredInsertionIndex: Int?
+    @Binding var hoveredInsertion: TabStripInsertion?
     let session: WorkspaceSession
 
     /// Type presence only: never decode a provider while the drag hovers.
@@ -846,16 +863,16 @@ private struct TabStripReorderDropDelegate: DropDelegate {
 
     func dropEntered(info: DropInfo) {
         DragDiag.note("tab-strip entered valid=\(validateDrop(info: info))")
-        hoveredInsertionIndex = insertionIndex(for: info.location)
+        hoveredInsertion = insertion(at: info.location)
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        let index = insertionIndex(for: info.location)
-        if index != hoveredInsertionIndex {
+        let insertion = insertion(at: info.location)
+        if insertion != hoveredInsertion {
             if reduceMotion {
-                hoveredInsertionIndex = index
+                hoveredInsertion = insertion
             } else {
-                withAnimation(.spring(duration: 0.22)) { hoveredInsertionIndex = index }
+                withAnimation(.spring(duration: 0.22)) { hoveredInsertion = insertion }
             }
         }
         // Matches `EditorDropDelegate.dropUpdated`: `.copy` is the operation
@@ -866,14 +883,19 @@ private struct TabStripReorderDropDelegate: DropDelegate {
     }
 
     func dropExited(info: DropInfo) {
-        hoveredInsertionIndex = nil
+        DragDiag.note("tab-strip exited")
+        hoveredInsertion = nil
     }
 
+    /// Resolves the slot from this drop's own location; it never reads the
+    /// hover state, so a drop performs even when the last hover event came
+    /// from another target.
     func performDrop(info: DropInfo) -> Bool {
-        let index = insertionIndex(for: info.location)
-        hoveredInsertionIndex = nil
+        let index = insertion(at: info.location).index
+        hoveredInsertion = nil
         DragDiag.note(
             "tab-strip performDrop valid=\(validateDrop(info: info)) index=\(index) "
+                + "of=\(orderedTabIDs.count) framed=\(geometry.tabFrames.count) "
                 + "cached=\(session.activeEditorDrag != nil)")
 
         // Presence, not a provider: the same-window fast path below needs no
@@ -915,9 +937,9 @@ private struct TabStripReorderDropDelegate: DropDelegate {
         return true
     }
 
-    private func insertionIndex(for location: CGPoint) -> Int {
-        let frames = orderedTabIDs.compactMap { tabFrames[$0] }
-        return TabStripDrop.insertionIndex(forX: location.x, tabFrames: frames)
+    private func insertion(at location: CGPoint) -> TabStripInsertion {
+        TabStripDrop.insertion(
+            atX: location.x, orderedIDs: orderedTabIDs, frames: geometry.tabFrames)
     }
 }
 
@@ -1129,21 +1151,20 @@ private struct EmptyEditorView: View {
 }
 
 private struct EditorGroupTabBar: View {
-    /// Named coordinate space shared by every tab row's frame preference and
-    /// the reorder drop delegate's pointer location, so both agree on the
-    /// same origin regardless of horizontal scroll offset — the space is
-    /// anchored to the strip's own scrolled content, not the screen, so a
-    /// tab's captured frame and the drop pointer's `x` stay comparable even
-    /// mid-scroll.
+    /// Named coordinate space of the WHOLE shelf, shared by every tab row's
+    /// frame preference and the reorder drop delegate's pointer location.
+    /// The shelf is also the drop target, so a drop location and a tab frame
+    /// compare directly: the frames already include the strip's leading
+    /// inset, spacing, and current scroll offset.
     private static let coordinateSpaceName = "editorTabStrip"
 
     @Environment(\.rafuTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var tabFrames: [EditorTabID: CGRect] = [:]
-    @State private var hoveredInsertionIndex: Int?
-    /// Visible width of the scrolling strip. The drop target stretches to at
-    /// least this width so the empty part of the bar (and an empty group's
-    /// whole bar) accepts a dragged tab.
+    @State private var stripGeometry = TabStripGeometry()
+    @State private var hoveredInsertion: TabStripInsertion?
+    /// Visible width of the scrolling strip. The tab row stretches to at
+    /// least this width, leading-aligned, so a short row starts at the
+    /// strip's leading edge and its empty remainder stays hit-testable.
     @State private var stripViewportWidth: CGFloat = 0
 
     let group: EditorGroupState
@@ -1178,32 +1199,11 @@ private struct EditorGroupTabBar: View {
                             )
                         }
                     }
-                    .coordinateSpace(.named(Self.coordinateSpaceName))
                     // Forces the enclosing NSScrollView's legacy scroller off
                     // even when System Settings requests always-visible bars.
                     .background(ScrollerHidingConfigurator())
-                    .onPreferenceChange(TabStripFramePreferenceKey.self) { tabFrames = $0 }
-                    .overlay(alignment: .topLeading) { insertionIndicator }
-                    // The target covers the whole visible strip, not only the
-                    // tabs: dropping past the last tab appends, and an empty
-                    // group's bar still receives a tab. The leading alignment
-                    // keeps the content origin, so the tab frames above stay
-                    // valid for the drop location.
                     .frame(minWidth: stripViewportWidth, alignment: .leading)
                     .contentShape(Rectangle())
-                    // The structurally scoped reorder target remains below
-                    // the group's body split/move target.
-                    .onDrop(
-                        of: [.rafuEditorDrag],
-                        delegate: TabStripReorderDropDelegate(
-                            groupID: group.id,
-                            orderedTabIDs: group.tabs.map(\.id),
-                            tabFrames: tabFrames,
-                            reduceMotion: reduceMotion,
-                            hoveredInsertionIndex: $hoveredInsertionIndex,
-                            session: session
-                        )
-                    )
                 }
                 .scrollIndicators(.hidden)
                 .onGeometryChange(for: CGFloat.self) {
@@ -1248,6 +1248,28 @@ private struct EditorGroupTabBar: View {
                 }
             }
         }
+        // The reorder target is the WHOLE shelf, not the scrolling tab row:
+        // the row is only the middle 28 pt, and its breathing room and the
+        // trailing controls used to be a dead zone where a release did
+        // nothing. One SwiftUI target also keeps AppKit routing simple: it
+        // is the deepest registered view at every shelf point, because the
+        // controls and the scroll view under it register nothing.
+        .coordinateSpace(.named(Self.coordinateSpaceName))
+        .onPreferenceChange(TabStripFramePreferenceKey.self) { frames in
+            stripGeometry.tabFrames = frames
+        }
+        .overlay(alignment: .topLeading) { insertionIndicator }
+        .onDrop(
+            of: [.rafuEditorDrag],
+            delegate: TabStripReorderDropDelegate(
+                groupID: group.id,
+                orderedTabIDs: group.tabs.map(\.id),
+                geometry: stripGeometry,
+                reduceMotion: reduceMotion,
+                hoveredInsertion: $hoveredInsertion,
+                session: session
+            )
+        )
         // Read above the shelf's own bounds (not clipped — nothing in this
         // view tree clips, and this shelf is the first thing in its
         // editor group's VStack, so there is no later sibling to hide
@@ -1372,33 +1394,21 @@ private struct EditorGroupTabBar: View {
 
     /// A thin accent bar marking the slot a dragged tab would land in —
     /// SwiftUI's `.rafuEditorDrag` counterpart to `EditorSplitPreviewOverlay`.
-    /// Positioned from the ordered tab frames captured by
-    /// `TabStripFramePreferenceKey`; `nil` while nothing is hovering the
-    /// strip.
+    /// The delegate resolves its x (in the shelf's coordinate space) together
+    /// with the index, so the bar and the drop always agree. Spans the tab
+    /// row, not the shelf's breathing room; `nil` while nothing hovers.
     @ViewBuilder
     private var insertionIndicator: some View {
-        if let hoveredInsertionIndex {
-            let frames = group.tabs.compactMap { tabFrames[$0.id] }
-            let x = indicatorX(forInsertionIndex: hoveredInsertionIndex, tabFrames: frames)
+        if let x = hoveredInsertion?.indicatorX {
             Rectangle()
                 .fill(theme.palette.accent)
                 .frame(width: 2)
                 .frame(maxHeight: .infinity)
+                .padding(.vertical, RafuMetrics.tabShelfBreathingRoom)
                 .offset(x: x - 1)
+                .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
-    }
-
-    /// The x-coordinate (in the strip's named coordinate space) for the
-    /// insertion-indicator bar: flush with the leading edge of the first tab
-    /// when inserting at the start, flush with the trailing edge of the last
-    /// tab when inserting at the end, and centered in the gap between two
-    /// tabs otherwise.
-    private func indicatorX(forInsertionIndex index: Int, tabFrames: [CGRect]) -> CGFloat {
-        guard !tabFrames.isEmpty else { return 0 }
-        if index <= 0 { return tabFrames[0].minX }
-        if index >= tabFrames.count { return tabFrames[tabFrames.count - 1].maxX }
-        return (tabFrames[index - 1].maxX + tabFrames[index].minX) / 2
     }
 
     /// Discoverable overflow affordance: pinned OUTSIDE the horizontally

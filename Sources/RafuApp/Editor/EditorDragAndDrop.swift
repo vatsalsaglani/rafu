@@ -95,6 +95,42 @@ nonisolated enum TabStripDrop {
         let index = tabFrames.filter { $0.midX < x }.count
         return min(max(index, 0), tabFrames.count)
     }
+
+    /// The slot a tab dropped at `x` lands in, as an index into the group's
+    /// FULL tab order (`orderedIDs`), plus where to draw the insertion bar.
+    /// `frames` and `x` must share one coordinate space: the drop target's,
+    /// which already includes the strip's scroll offset, leading padding,
+    /// and inter-tab spacing. A tab with no frame (a row that renders
+    /// nothing) keeps its slot but never decides the index, so the index
+    /// can never drift from `orderedIDs` the way an index counted over the
+    /// rendered frames alone does.
+    static func insertion<ID: Hashable>(
+        atX x: CGFloat, orderedIDs: [ID], frames: [ID: CGRect]
+    ) -> TabStripInsertion {
+        var index = orderedIDs.count
+        for (offset, id) in orderedIDs.enumerated() {
+            guard let frame = frames[id], frame.midX >= x else { continue }
+            index = offset
+            break
+        }
+        let before = orderedIDs.prefix(index).reversed().lazy.compactMap { frames[$0] }.first
+        let after = orderedIDs.dropFirst(index).lazy.compactMap { frames[$0] }.first
+        let indicatorX: CGFloat? =
+            switch (before, after) {
+            case (let before?, let after?): (before.maxX + after.minX) / 2
+            case (let before?, nil): before.maxX
+            case (nil, let after?): after.minX
+            case (nil, nil): nil
+            }
+        return TabStripInsertion(index: index, indicatorX: indicatorX)
+    }
+}
+
+/// A resolved tab-strip drop slot. `indicatorX` is `nil` when no tab has a
+/// frame (an empty strip), so there is no bar to draw.
+nonisolated struct TabStripInsertion: Equatable, Sendable {
+    let index: Int
+    let indicatorX: CGFloat?
 }
 
 /// Handlers an editor group injects into its AppKit scroll view so drags over
@@ -171,6 +207,7 @@ final class EditorDropForwardingScrollView: NSScrollView {
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
+        DragDiag.note("editor(AppKit) exited")
         dropForwarding?.exited()
     }
 
@@ -186,7 +223,10 @@ final class EditorDropForwardingScrollView: NSScrollView {
             let payload = sender.draggingPasteboard
                 .data(forType: Self.dragType)
                 .flatMap { try? EditorDragPayload(data: $0) }
-            return dropForwarding.perform(topLeftLocation(sender), bounds.size, payload)
+            let performed = dropForwarding.perform(topLeftLocation(sender), bounds.size, payload)
+            DragDiag.note(
+                "editor(AppKit) perform decoded=\(payload != nil) performed=\(performed)")
+            return performed
         case .externalFiles:
             let urls =
                 (sender.draggingPasteboard.readObjects(
