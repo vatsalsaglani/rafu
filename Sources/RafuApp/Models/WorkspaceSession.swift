@@ -3811,9 +3811,33 @@ final class WorkspaceSession {
         }
     }
 
+    /// The document whose tab was clicked and that still waits to take focus.
+    /// Any later selection clears it, so a stale intent cannot fire for a
+    /// switch the user did not click.
+    @ObservationIgnored private weak var documentAwaitingClickFocus: EditorDocument?
+
+    /// Tab selection by a pointer click on the tab. Same as `selectEditorTab`,
+    /// and the newly visible editor also takes keyboard focus, so typing after
+    /// the click goes to the editor. Navigator reveals, the tab switcher, and
+    /// restoration call `selectEditorTab` and never move focus.
+    func selectEditorTabFromClick(_ tabID: EditorTabID, in groupID: EditorGroupID) {
+        let group = editorLayout.group(id: groupID)
+        let changesSelection = group?.selectedTabID != tabID
+        selectEditorTab(tabID, in: groupID)
+        guard changesSelection,
+            let tab = group?.tabs.first(where: { $0.id == tabID }),
+            let document = document(for: tab)
+        else { return }
+        document.focusEditorOnShow = true
+        documentAwaitingClickFocus = document
+    }
+
     func selectEditorTab(_ tabID: EditorTabID, in groupID: EditorGroupID) {
         guard let tab = editorLayout.group(id: groupID)?.tabs.first(where: { $0.id == tabID })
         else { return }
+        documentAwaitingClickFocus?.focusEditorOnShow = false
+        documentAwaitingClickFocus = nil
+        InteractionSignpost.beginTabSwitch()
         suspendAuxiliarySelection()
         editorLayout.select(tabID, in: groupID)
         switch tab.resource {

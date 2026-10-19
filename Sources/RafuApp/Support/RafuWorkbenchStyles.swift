@@ -173,12 +173,33 @@ private nonisolated struct AttachedTabOutlineShape: Shape {
     }
 }
 
+/// Makes the complete tab shape (padding, minimum width and height included)
+/// select the tab. Without it only the inner label button is hit-testable, so
+/// the padding around the label swallows clicks. Child buttons (the label and
+/// the close button) keep priority in their own areas, so "Close" never also
+/// selects. The inner label button stays the single accessibility element.
+private struct AttachedWorkbenchTabSelectTarget: ViewModifier {
+    let select: (() -> Void)?
+
+    func body(content: Content) -> some View {
+        if let select {
+            content
+                .contentShape(.rect)
+                .onTapGesture(perform: select)
+        } else {
+            content
+        }
+    }
+}
+
 /// Shared attached-cap chrome for document, terminal, Settings, and Ensemble
 /// canvases. Callers keep semantic label/dirty/exit content and may request
-/// the bounded document width without changing the selected geometry.
+/// the bounded document width without changing the selected geometry. Pass
+/// `select` so a click anywhere on the tab selects it.
 struct AttachedWorkbenchTab<Content: View>: View {
     let isSelected: Bool
     var usesDocumentWidth = false
+    var select: (() -> Void)?
     @ViewBuilder let content: Content
 
     @Environment(\.rafuTheme) private var theme
@@ -187,10 +208,12 @@ struct AttachedWorkbenchTab<Content: View>: View {
     init(
         isSelected: Bool,
         usesDocumentWidth: Bool = false,
+        select: (() -> Void)? = nil,
         @ViewBuilder content: () -> Content
     ) {
         self.isSelected = isSelected
         self.usesDocumentWidth = usesDocumentWidth
+        self.select = select
         self.content = content()
     }
 
@@ -229,6 +252,7 @@ struct AttachedWorkbenchTab<Content: View>: View {
                         .accessibilityHidden(true)
                 }
             }
+            .modifier(AttachedWorkbenchTabSelectTarget(select: select))
             .zIndex(isSelected ? 1 : 0)
             .accessibilityAddTraits(isSelected ? .isSelected : [])
     }

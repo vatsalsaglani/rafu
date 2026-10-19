@@ -8,7 +8,10 @@ struct CanvasEditorTabItem: View {
     let session: WorkspaceSession
 
     var body: some View {
-        AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true) {
+        AttachedWorkbenchTab(
+            isSelected: isSelected, usesDocumentWidth: true,
+            select: { session.selectEditorTab(tab.id, in: groupID) }
+        ) {
             HStack(spacing: 6) {
                 Image(systemName: "rectangle.3.group").accessibilityHidden(true)
                 Button(board.title) { session.selectEditorTab(tab.id, in: groupID) }

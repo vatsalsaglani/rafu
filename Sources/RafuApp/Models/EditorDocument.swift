@@ -93,6 +93,19 @@ final class EditorDocument: Identifiable {
     @ObservationIgnored
     var editorResources: CodeEditorView.EditorResources?
 
+    /// One-shot intent: the user clicked this document's tab, so the editor
+    /// takes keyboard focus when it becomes visible. Set only by
+    /// `WorkspaceSession.selectEditorTabFromClick`; consumed once by the
+    /// mount host. Navigator reveals and restoration never set it.
+    @ObservationIgnored
+    var focusEditorOnShow = false
+
+    /// Returns the pending focus intent and clears it.
+    func consumeFocusEditorOnShow() -> Bool {
+        defer { focusEditorOnShow = false }
+        return focusEditorOnShow
+    }
+
     /// Legacy one-shot seed for callers that supply a dirty snapshot before
     /// the first editor is made. Structural moves now retain TextKit itself.
     @ObservationIgnored

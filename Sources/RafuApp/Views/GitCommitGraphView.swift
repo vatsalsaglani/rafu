@@ -1,5 +1,30 @@
 import SwiftUI
 
+/// Caches the lane layout for the loaded commit window. The layout is O(n)
+/// and depends only on the commits (a commit ID fixes its parents), so a
+/// search keystroke, a selection change, or a theme change must not re-run it.
+nonisolated struct CommitGraphLayoutMemo: Equatable {
+    private(set) var commitIDs: [String] = []
+    private(set) var rowsByID: [String: GraphRow] = [:]
+    private(set) var laneCount = 1
+    /// How many times the layout ran. Tests use it to prove the cache hits.
+    private(set) var layoutRunCount = 0
+
+    /// Re-runs the layout only when the commit IDs differ from the cached ones.
+    @discardableResult
+    mutating func update(for commits: [GitCommitSummary]) -> Bool {
+        let ids = commits.map(\.id)
+        guard ids != commitIDs else { return false }
+        let rows = CommitGraphLayout.layout(commits)
+        commitIDs = ids
+        rowsByID = Dictionary(
+            rows.map { ($0.commitID, $0) }, uniquingKeysWith: { first, _ in first })
+        laneCount = CommitGraphLayout.laneCount(rows)
+        layoutRunCount += 1
+        return true
+    }
+}
+
 /// Bounded, editor-hosted commit graph for the History section (GX3): a lane
 /// canvas column, branch/tag chips, subject, and author/relative time,
 /// replacing the plain row rendering `GitInspectorView.historyView` used
@@ -26,6 +51,8 @@ struct GitCommitGraphView: View {
     let onLoadMore: () -> Void
 
     @State private var searchTerm = ""
+    /// Lane layout of `commits`, refreshed only when the commit IDs change.
+    @State private var layoutMemo = CommitGraphLayoutMemo()
 
     /// Filters the LOADED commits only — never a repository-wide scan (ADR
     /// 0013). The header label makes this explicit.
@@ -41,23 +68,19 @@ struct GitCommitGraphView: View {
     }
 
     var body: some View {
-        // Compute the lane layout once per render (not once per row): reading a
-        // computed `rowsByID` inside the ForEach would run the O(n) layout n
-        // times, and re-run on every search keystroke. AGENTS: no expensive
-        // work in `body` — hoist it here so it is built exactly once.
-        let rowsByID = Dictionary(
-            uniqueKeysWithValues: CommitGraphLayout.layout(commits).map { ($0.commitID, $0) })
+        // The lane layout is cached in `layoutMemo` (refreshed by `onChange`
+        // below), so a search keystroke never re-runs the O(n) layout.
+        // AGENTS: no expensive work in `body`.
+        let rowsByID = layoutMemo.rowsByID
+        let visibleCommits = filteredCommits
         // The lane column only needs to be as wide as the widest lane the
         // LOADED window actually uses, not a fixed `visibleLaneCap` column —
         // linear history collapses to a single narrow lane.
-        let laneCanvasWidth =
-            CGFloat(CommitGraphLayout.laneCount(Array(rowsByID.values)))
-            * GitCommitGraphRow.laneWidth
-            + 10
+        let laneCanvasWidth = CGFloat(layoutMemo.laneCount) * GitCommitGraphRow.laneWidth + 10
         return VStack(spacing: 0) {
             header
             Divider().overlay(theme.palette.borderSubtle)
-            if filteredCommits.isEmpty {
+            if visibleCommits.isEmpty {
                 ContentUnavailableView(
                     "No matching commits",
                     systemImage: "magnifyingglass",
@@ -66,7 +89,7 @@ struct GitCommitGraphView: View {
             } else {
                 List(selection: $selection) {
                     Section("Commits") {
-                        ForEach(filteredCommits) { commit in
+                        ForEach(visibleCommits) { commit in
                             GitCommitGraphRow(
                                 commit: commit,
                                 row: rowsByID[commit.id],
@@ -100,6 +123,9 @@ struct GitCommitGraphView: View {
                 .listStyle(.inset)
                 .scrollContentBackground(.hidden)
             }
+        }
+        .onChange(of: commits.map(\.id), initial: true) {
+            layoutMemo.update(for: commits)
         }
     }
 
