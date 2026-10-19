@@ -320,3 +320,65 @@ Claude Code session variables. Commits 0c6fbab, e253585, a521f8d. Owned paths:
   execution); re-check whether the `server:rafu` channel warning is fully
   explained by the inherited variables; the csh `logout` ("Not a login shell")
   and tcsh `~/.cshdirs` limitations of emulated login.
+
+## Status (2026-10-19, fourth increment)
+
+Usage ring cluster, agent status vocabulary, and the drag-and-drop repair plus
+drop/source previews. Commits 8262d4e, 6fe806e (usage rings and the restyle
+the user asked for); 9c6c095 (merge a257e8d, agent status); 3380c53 (drag/drop
+root-cause fixes); 5860a98, 2debd37, 5c72b84 (drop preview, drag preview,
+source ghost).
+
+- **Usage rings.** Settings ▸ Usage and the notch Usage section share
+  `UsageProviderCardView` → `UsageRingClusterView` over the new shared
+  primitive `Sources/RafuApp/Support/RafuProgressRing.swift`: up to three
+  concentric arcs, further windows legend-only, stable hue per ring index,
+  warnings never recolour an arc, one warning triangle per window.
+- **Agent status.** Seven states with a fixed precedence on agent terminal
+  cards, a header pill, and the `CanvasAgentSummaryBar` board rollup with jump
+  menus. Failed comes only from a reported hook/CLI failure, so a Codex card
+  can never show Failed. No cost, no sub-agent count, no tab badge; read/unread
+  is session-scoped.
+- **Drag and drop.** Files-tree drags no longer land in the text view;
+  dropping an already-open file selects its tab; a cancelled board drag no
+  longer poisons the rest of the drag; note cards no longer swallow board
+  drops; Terminals-panel rows can drag a parked group with the new
+  `.terminalGroup(id:)` payload; stopped cards no longer claim "Terminal view
+  is not attached"; placement labels have one precedence; an orphaned card
+  offers "Start Terminal Here". Drops and drag sources now preview: projected
+  ghost card, edge band, whole-board highlight, editor split overlay labels,
+  and a `RafuDragPreviewLabel` on all seven internal sources, with the source
+  row/tab dimmed in flight.
+- **New decision:**
+  [ADR 0029](../../decisions/0029-agent-status-vocabulary.md). **Amended:**
+  [ADR 0025](../../decisions/0025-workspace-canvas-and-app-previews.md)
+  Amendment 2 — the user decided that undo after moving a terminal onto a
+  board restores the tab in its source editor group (process keeps running),
+  superseding the same date's "undo removes only the card" clause.
+- **References updated:**
+  [`usage-rings-and-pace.md`](../../references/usage-rings-and-pace.md)
+  ("Activity-style ring cluster", the `Date.FormatStyle` time-zone nuance),
+  [`nonisolated-extension-isolation-trap.md`](../../references/nonisolated-extension-isolation-trap.md)
+  (addendum: a `static func` on a `View` struct needs `nonisolated` too),
+  [`agent-hooks-and-now-playing.md`](../../references/agent-hooks-and-now-playing.md)
+  ("Agent card status vocabulary"),
+  [`canvas-interaction.md`](../../references/canvas-interaction.md)
+  ("Agent status on the board", "Board drop previews, labels, and undo"),
+  [`drag-and-drop-custom-uttype.md`](../../references/drag-and-drop-custom-uttype.md)
+  ("Previews, hover fidelity, and drag end"),
+  [`agent-history.md`](../../references/agent-history.md).
+- **Gates on `main` at ba00643** (Apple Swift 6.4 (swiftlang-6.4.0.34.1),
+  macOS 27.0.1 (26A434)): format lint clean; build with 0 warnings, test
+  targets included; parallel suite 250 + 2631 tests passed; `--no-parallel`
+  (CI mode) 250 + 2631 passed; `./script/build_and_run.sh --verify` launched
+  Rafu Lightning.
+- **Known unverified:** whether the local `NSEvent` monitor sees `leftMouseUp`
+  during an `NSDraggingSession` nested event loop. If it does not, the source
+  dim lasts until the 12 s fallback; the designed fallback is a real
+  `NSDraggingSource` with `draggingSession(_:endedAt:operation:)`.
+- **Open manual checks, none done by a person yet:** a real-mouse drag of each
+  source onto each target; the source ghost clears on drop and on Escape;
+  undo and redo of a terminal move; every placement label; the notch ring
+  cluster in Indigo and Khadi, a 1–2 % window as a round-cap dot, and a
+  six-window Claude snapshot; the agent pills, the Reduce Motion static arc,
+  and the board summary bar jump menus.

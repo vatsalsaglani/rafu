@@ -152,8 +152,9 @@ section.)
 - **Terminal Group tab.** A one-pane Terminal Group tab dropped in the CENTRE
   zone calls `moveTerminalGroupToEnsemble`, which moves the LIVE terminal (no
   restart). The tab leaves the editor, the group is parked, and the card takes
-  the ADR 0025 presentation lease. Undo removes only the card; the group stays
-  live and parked, reachable from the Terminals list or Ctrl-Tab. Refusals,
+  the ADR 0025 presentation lease. **Superseded 2026-10-19 — see "Board drop
+  previews, labels, and undo" below: undo now restores the tab in its source
+  editor group, and the process keeps running.** Refusals,
   each with a message on the board: more than one pane; already on a board;
   board full; tab from another window. A drop in an EDGE band, or of a
   non-terminal tab, is forwarded to `handleEditorTabDrop` on the editor group
@@ -172,6 +173,80 @@ section.)
   board, from a second window, and onto a full board; drag a one-pane terminal
   tab to the centre; drag it to an edge (must split); drag a two-pane group
   (refusal message); undo after a move; drag a file tab onto the board.
+
+### Agent status on the board (2026-10-19)
+
+Commit 9c6c095. An agent terminal card carries a header pill with its status
+word, and the board bar `CanvasAgentSummaryBar` rolls the board up as
+"N agents · N working", with an amber "N needs you" and a red "N failed" that
+open jump menus routing through `focusCanvasCard`. Shell-only terminal cards
+show none of this. The seven states, their precedence, and the deliberate
+refusals (no cost, no sub-agent count, no tab badge) are
+[ADR 0029](../decisions/0029-agent-status-vocabulary.md); the engineering
+nuances are in
+[`agent-hooks-and-now-playing.md`](agent-hooks-and-now-playing.md), "Agent
+card status vocabulary". Counts never carry meaning by colour alone — the word
+is always present.
+
+### Board drop previews, labels, and undo (2026-10-19)
+
+Commits 3380c53 (fixes), 5860a98, 2debd37, 5c72b84 (previews). Verified on
+`main` at ba00643 (Apple Swift 6.4 (swiftlang-6.4.0.34.1), macOS 27.0.1
+(26A434)): format lint clean; build with 0 warnings, test targets included;
+parallel suite 250 + 2631 tests passed; `--no-parallel` (CI mode) 250 + 2631
+passed; `./script/build_and_run.sh --verify` launched Rafu Lightning. Real
+mouse drags were not driven by UI automation; the manual checks below are
+open. (The stale "File drops" wording in `CanvasScrollBridge.swift`'s header
+comment is still there; only this document was corrected.)
+
+**Preview contract.** The board's drop contract widened from a boolean
+`targeted` to `update(CanvasDropPreview?)` plus a preview closure. A pure
+`CanvasDropPreview` and `CanvasDropAction.resolve` decide what the preview
+says, using the same `decide`/geometry rules as the drop itself, so the
+preview cannot promise an outcome the drop refuses. The board then shows a
+projected ghost card, an edge band, or a whole-board highlight, with a label
+capsule. `CanvasBoardDropGeometry.defaultRect` / `defaultSize` are shared with
+`CanvasBoardState.add`, so the ghost sits exactly where the card lands.
+
+**Hover fidelity differs by path, deliberately.** On the AppKit
+`CanvasScrollBridge` path the preview is exact, because `NSPasteboard` can be
+decoded synchronously. On the SwiftUI delegate path there is no synchronous
+decode, so the preview uses type presence plus same-window hints
+(`activeEditorDrag`, the new `activeEnsembleDragHint`). The resulting labels
+are generic for a cross-window drag but never wrong. **Hover must not decode
+the provider on the SwiftUI path** — see
+[`drag-and-drop-custom-uttype.md`](drag-and-drop-custom-uttype.md).
+
+**New payload.** Terminals-panel group rows now drag
+`CanvasBoardDragPayload.terminalGroup(id:)` on the private ensemble-drag type,
+handled by `dropTerminalGroupOnCanvas`. This is what lets a **parked** group be
+dragged: a parked group has no tab id, so the `.tab` payload could not name it.
+
+**Undo restores the tab.** User decision 2026-10-19, recorded as Amendment 2 of
+[ADR 0025](../decisions/0025-workspace-canvas-and-app-previews.md): undo after
+moving a terminal onto a board restores the tab in its source editor group — or
+the focused group if that group is gone — and the process keeps running; redo
+re-parks it. Mechanism: `CanvasBoardState.undoRedoObserver`, one per board,
+attached lazily by `WorkspaceSession`, plus a session-only
+`movedTerminalCardSourceGroups` map that is never persisted (so after a
+relaunch undo falls back to the focused group). VoiceOver announces the move
+and the undo.
+
+**Placement labels, and why they are ordered.** The Ctrl-Tab switcher's
+placement text follows one precedence: canvas-owned ("On an Ensemble") beats
+not-running, which beats "Hidden · Running". The Terminals list uses "On an
+Ensemble" for the same state. An orphaned card — the group is gone after a
+reopen — shows "No terminal yet" and a "Start Terminal Here" action;
+`startTerminalHere` keeps the card's id and rect and starts no process.
+
+**"Terminal view is not attached" on a stopped card** was a decision-order
+bug: lease ownership was checked before running state. The order is now a pure
+`CanvasTerminalCardBlock.decide(isRunning:ownsLease:)`, and "Show Terminal"
+focuses (acquire + reveal) instead of taking the lease only.
+
+Open manual checks: a real-mouse drag of each source onto each target; the
+source ghost clears on drop and on Escape; undo and redo of a move; every
+placement label; the orphaned-card path after a reopen.
 
 ### Shell choice and card navigation (2026-10-19)
 

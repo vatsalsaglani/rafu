@@ -178,6 +178,9 @@ Agent History." The decoder refuses an id that
 `AgentHistoryResumeCommand.arguments(for:)` rejects. Details and manual checks:
 [`canvas-interaction.md`](canvas-interaction.md), "Board drops";
 [`drag-and-drop-custom-uttype.md`](drag-and-drop-custom-uttype.md).
+Since 2026-10-19 the row uses `.onDrag(_:preview:)` with a
+`RafuDragPreviewLabel` (icon + title) instead of the default view snapshot,
+and the row dims while its drag is in flight.
 
 ### Open Project Folder
 

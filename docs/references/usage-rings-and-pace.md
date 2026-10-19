@@ -96,6 +96,53 @@ The exhausted state still works without a known reset.
   the notch panel never activates the app). The Settings card's button runs
   the existing `UsageSettingsModel.connect` flow and then refreshes.
 
+### Activity-style ring cluster (2026-10-19)
+
+The notch Usage section and Settings ▸ Usage share one card
+(`UsageProviderCardView`) whose rings are drawn by `UsageRingClusterView` on
+the shared primitive `Sources/RafuApp/Support/RafuProgressRing.swift`
+(determinate, concentric, no sweep). The first restyle was rejected by the
+user as "ugly"; the rules below are the accepted second pass.
+
+- **Up to three concentric arcs**, outermost first: the 5h window, then the
+  weekly window, then the next window. Windows beyond the third are
+  legend-only rows — they are never drawn as arcs. `RafuProgressRing` has a
+  pure `nonisolated static func diameters` that implements the skip rule.
+- **Percent filtering happens upstream.** `UsageWindowPresentation.usedPercent`
+  drops invalid or out-of-range percentages, so the ring view never draws one.
+- **Stable hue per ring index**, not per state: `UsageCardInk.toneColors` =
+  accent, info, success (Indigo ≈ gold / blue / green; Khadi uses darker
+  equivalents). Hue separation between the three is 85–185°. A warning or
+  critical level never recolours an arc.
+- **Track** = the arc's own colour at 22 % opacity, 35 % under Increase
+  Contrast.
+- **Sizes**: compact 56 / 7 / 2 with diameters `[56, 38, 20]`; full 92 / 11 / 3
+  with diameters `[92, 64, 36]`.
+- **Centre text only when there is exactly one arc.** With two or three arcs a
+  centred number cannot be attributed to a ring.
+- **Legend** is one `Grid` with right-aligned monospaced percentages.
+- **Exactly one warning triangle per window**, on the legend row, tinted by
+  `warningTint(for:)`. Pace lines keep their text but pass
+  `showGlyph: false`, because `UsageRingLevel.level` already returns a warning
+  level whenever `pace.warning` is true — otherwise one window showed two
+  triangles.
+- **No hover popover.** Detail is a `.help` tooltip.
+
+This supplements, and does not replace, the colour-alone rule in
+"Presentation rules": meaning still arrives through the triangle glyph, the
+legend text, and VoiceOver, never through hue.
+
+### `Date.FormatStyle.timeZone(_:)` does not change the rendering zone
+
+`Date.FormatStyle.timeZone(_:)` configures the time-zone **name symbol**
+field (what "ZZZZ"-style output looks like); it does not re-render the date in
+that zone. To format an instant in a specific zone, set the property:
+
+```swift
+var style = Date.FormatStyle(date: .omitted, time: .shortened)
+style.timeZone = tz
+```
+
 ## Why it matters
 
 Exact percentages were available all along but invisible unless the person
@@ -132,12 +179,29 @@ Used/Remaining; enable Reduce Motion; check VoiceOver on a ring.
 - Code: `Usage/UsagePace.swift`, `Usage/Providers/ClaudeProvider.swift`,
   `Usage/UsageStores.swift`, `Usage/UsageRegistryReader.swift`,
   `Views/UsageRingView.swift`, `Views/UsageProviderCardView.swift`,
+  `Support/RafuProgressRing.swift`,
   `Views/NotchSectionViews.swift`, `Settings/UsageSettingsTab.swift`,
   `Settings/SettingsPaneNavigation.swift`.
 - ADR: [`../decisions/0017-usage-provider-trust-transition.md`](../decisions/0017-usage-provider-trust-transition.md)
   and [ADR 0027](../decisions/0027-connected-usage-refresh.md).
 - References: [`usage-provider-contract.md`](usage-provider-contract.md),
-  [`notch-companion.md`](notch-companion.md).
+  [`notch-companion.md`](notch-companion.md),
+  [`nonisolated-extension-isolation-trap.md`](nonisolated-extension-isolation-trap.md)
+  (the `static func` on a `View` struct case met by `RafuProgressRing`).
+
+## Ring-cluster verification, 2026-10-19
+
+On `main` at ba00643 (Apple Swift 6.4 (swiftlang-6.4.0.34.1), macOS 27.0.1
+(26A434)): format lint clean; build with 0 warnings, test targets included;
+parallel suite 250 + 2631 tests passed; `--no-parallel` (CI mode) 250 + 2631
+passed; `./script/build_and_run.sh --verify` launched Rafu Lightning.
+Commits 8262d4e and 6fe806e (the restyle).
+
+Open manual checks, none done by a person yet: legibility of the three hues in
+the notch under Indigo and under Khadi; a 1–2 % window still readable as a
+round-cap dot (this relies on Core Graphics round line caps and is not
+asserted by a test); a six-window Claude snapshot in the notch (three arcs
+plus three legend-only rows).
 
 ## Mac integration review, 2026-10-19
 

@@ -150,6 +150,56 @@ visibility).
   priority. See [`canvas-interaction.md`](canvas-interaction.md), "Board
   drops".
 
+## Previews, hover fidelity, and drag end (2026-10-19)
+
+Commits 3380c53, 5860a98, 2debd37, 5c72b84. Verified on `main` at ba00643
+(Apple Swift 6.4 (swiftlang-6.4.0.34.1), macOS 27.0.1 (26A434)): format lint
+clean; build with 0 warnings; parallel suite 250 + 2631 tests passed;
+`--no-parallel` (CI mode) 250 + 2631 passed; `./script/build_and_run.sh
+--verify` launched Rafu Lightning. Real mouse drags were not automated.
+
+- **There is no SwiftUI drag-end callback.** `.onDrag` gives you a start and
+  nothing else: no cancel, no completion. Anything a drag turns on must be
+  turned off by something outside SwiftUI's drag API. Rafu's source ghost uses
+  `WorkspaceSession.dragInFlight`, a token set inside each `.onDrag` closure
+  and cleared by a **local** `NSEvent` monitor for `leftMouseUp` and
+  `Escape`, with a 12 s fallback timer.
+- **A local monitor must always return the event.** Rafu's returns the event
+  unchanged in every branch, so it can never consume a click. A **global**
+  monitor cannot consume events but needs Accessibility permission, which is
+  the wrong trade for a cosmetic dim.
+- **UNVERIFIED:** whether a local monitor observes `leftMouseUp` while
+  `NSDraggingSession` runs its own nested event loop. If it does not, the
+  source dim persists until the 12 s fallback fires. The designed fallback, if
+  a manual pass shows that symptom, is a real `NSDraggingSource` implementing
+  `draggingSession(_:endedAt:operation:)` — which is the only API that
+  reliably reports drag end. Do not "fix" this by shortening the timer.
+- **`.onDrag(_:preview:)` is the preview path.** All seven internal drag
+  sources pass a `RafuDragPreviewLabel` (icon + title). Without an explicit
+  preview, AppKit snapshots the source view, which for a list row or a tab is
+  a wide, mostly-empty rectangle.
+- **Hover must not decode the provider on the SwiftUI path.** `.onDrop`'s
+  update callbacks have no synchronous decode, and an async decode per hover
+  frame is both slow and racy. Use type presence plus a same-window cached
+  hint (`activeEditorDrag`, `activeEnsembleDragHint`) and accept a generic
+  label for cross-window drags: generic but never wrong. Only the AppKit
+  bridge, which can read `NSPasteboard` synchronously, shows an exact preview.
+  The decode-at-drop-time rule above is unchanged.
+- **The deepest-registered-NSView rule bites more views than the scroll
+  view.** `RafuTextView` kept `NSTextView`'s default drag types including the
+  file URL, so a Files-tree drag (private editor-drag type **and** a file URL)
+  was routed to the text view, which forwarded only external files. It now
+  forwards every non-text kind through a pure, `nonisolated`
+  `RafuTextView.shouldForward`. Dropping an already-open file into the same
+  group now selects that file's existing tab instead of doing nothing.
+- **A note card's `NSTextView` was taking board drops** for the same reason.
+  Its drag types are now unregistered. Known cost: you can no longer drag
+  selected text to reposition it inside a note.
+- **Never cache a failed pasteboard decode per `draggingSequenceNumber`.**
+  `CanvasScrollBridge` cached a `nil` decode and then rejected the whole drag
+  for its remaining lifetime. Only successful decodes are cached now
+  (`canReuseCachedDecode`).
+
 ## AppKit subtree dead zone (2026-07-13 follow-up)
 
 SwiftUI `.onDrop` on the editor group only received drag events while the

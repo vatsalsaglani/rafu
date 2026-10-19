@@ -108,3 +108,19 @@ Related: the ADR 0023 amendment of the same date lets an Ensemble terminal card
 carry a chosen shell, persisted in the inert saved layout with no process
 restoration, and restricts every Ensemble key equivalent to the time a board is
 the selected tab.
+
+## Amendment 2 (2026-10-19): undo of a move restores the editor tab
+
+Supersedes the clause "Undo removes only the card" in Amendment 1 above. The
+user decided that undo must be a real undo of the move: undo after moving a
+terminal onto a board **restores the tab in its source editor group** (or, if
+that group no longer exists, in the focused group), and the process keeps
+running throughout. Redo parks it again. "Undo restores references and
+geometry, never live resource capability" still holds — no process is started
+or restarted; only the presentation lease and the tab's placement move.
+
+Mechanism: `CanvasBoardState.undoRedoObserver` (one per board, attached lazily
+by `WorkspaceSession`) plus a session-only
+`movedTerminalCardSourceGroups` map. The source-group map is never persisted,
+so after a relaunch an undo falls back to the focused group. VoiceOver
+announces both the move and the undo.

@@ -258,3 +258,38 @@ diff the file against the backup.
   Addendum 2, workstream X11
 - [`notch-companion.md`](notch-companion.md),
   [`linux-swift-verification.md`](linux-swift-verification.md)
+
+## Agent card status vocabulary (2026-10-19)
+
+The seven published states, their precedence, and every refusal (no cost, no
+sub-agent count, no tab badge, no persisted read/unread, Failed never from an
+exit code) are the decision in
+[ADR 0029](../decisions/0029-agent-status-vocabulary.md). The engineering
+facts worth repeating here:
+
+- **Stopped is derivable only because the runtime kind survives exit.**
+  `TerminalPaneSnapshot.runtimeKind` (`.directAgentTerminal`) is carried
+  through the live → exited transition by `TerminalGroupRuntime.withStatus`.
+  Without that, an exited pane would be indistinguishable from a shell pane
+  and no card could say Stopped. Do not drop `runtimeKind` when rebuilding a
+  snapshot for an exited pane.
+- **No new ticker was added.** `AgentActivityStore.now` already ticks every
+  30 s while sessions exist; elapsed-time and the 30-minute `inactive`
+  threshold both read it. Adding a faster timer for smoother elapsed text
+  would be new idle work.
+- **Marking read is funnel-based.** `WorkspaceTerminalController.clearAttention()`
+  calls `AgentActivityStore.markReplyRead`, which is why every focus path is
+  covered by one call site. The one gap it cannot cover — a reply arriving on
+  an already-focused card — is handled by an `onChange`.
+- **`AgentTrackedPhase.stateWord` now delegates to `AgentCardStatus.word`**
+  and is no longer used by Canvas. Treat it as the legacy spelling of the same
+  vocabulary; change both or neither.
+- Reduce Motion replaces the working spinner with a static three-quarter arc;
+  elapsed text is dropped when `card.rect.width × scale < 260`.
+
+Verified on `main` at ba00643 (Apple Swift 6.4 (swiftlang-6.4.0.34.1),
+macOS 27.0.1 (26A434)), commit 9c6c095 (merge a257e8d): format lint clean;
+build with 0 warnings; parallel suite 250 + 2631 tests passed;
+`--no-parallel` (CI mode) 250 + 2631 passed; `./script/build_and_run.sh
+--verify` launched Rafu Lightning. No person has checked the pills, the
+spinner, or the board summary bar on screen yet.

@@ -137,3 +137,13 @@ separate extension. Adding `nonisolated` to this pure method preserves its
 runtime behavior and makes its intended isolation explicit. The diagnostic is
 in `/tmp/rafu-repair-20261017/repair-tests-5.log`. Recheck with
 `./script/test.sh --filter hudFrameBelowNotch`.
+
+## Addendum, 2026-10-19: a `static func` in a `View` struct's primary body
+
+The primary body is not a cure on its own. A `static func` declared in the
+primary body of a `View` struct in `RafuApp` still inherits the target's
+default `MainActor` isolation, so a plain (nonisolated) test cannot call it
+until it is marked `nonisolated` — met by `RafuProgressRing`'s pure
+`static func diameters` (see
+[`usage-rings-and-pace.md`](usage-rings-and-pace.md)). The rule to apply: mark
+every pure static you intend to unit-test `nonisolated`, wherever it lives.
