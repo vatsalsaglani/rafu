@@ -248,38 +248,58 @@ struct RafuMascotArtwork: View {
     }
 }
 
-/// The animated mascot. Motion runs only while `visible` and never under
-/// Reduce Motion; either way the still pose of the mood is shown, which
+/// The animated mascot. Motion runs only while `\.rafuMotionAllowed` (the
+/// window is visible, the screen is unlocked and awake) and never under
+/// Reduce Motion; otherwise the still pose of the mood is shown, which
 /// matches `rafu-*-still.svg`. Motion is a chain of explicit animations in one
 /// task, so no timer runs and hiding the notch or changing mood cancels it.
+///
+/// The idle mood is the resting state of the strip, so it is cheap: the
+/// still pose with a discrete blink or glance every few seconds. It breathes
+/// only while the person engages with the strip (`engaged`), and the breath
+/// is 15 plain state writes a second, not an animation: an animation in
+/// flight re-renders the whole panel on every display frame (120 Hz on
+/// ProMotion).
 struct RafuMascotView: View {
     let state: RafuMascotState
-    let visible: Bool
+    /// The strip is hovered, expanded or pinned, or the mascot is in an open
+    /// panel. Changes only the idle mood.
+    var engaged = false
     var size: CGFloat = 22
     let claimBounce: (UUID) -> Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.rafuMotionAllowed) private var motionAllowed
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.rafuTheme) private var theme
     @State private var motion = RafuMascotMotion()
 
-    private var animates: Bool { visible && !reduceMotion }
+    private var animates: Bool { motionAllowed && !reduceMotion }
+
+    private var idleMotion: RafuMascotIdleMotion? {
+        state.mood == .idle ? RafuMascotIdleMotion.resolve(engaged: engaged) : nil
+    }
 
     var body: some View {
-        let breathing = animates && motion.breathing
+        let breath = RafuMascotIdleMotion.breathPose(phase: animates ? motion.breathPhase : 0)
         RafuMascotArtwork(
             mood: state.mood, colors: RafuMascotColors(theme: theme), size: size,
             outlined: contrast == .increased,
             blink: animates ? motion.blink : 1, gaze: animates ? motion.gaze : .zero,
-            sway: animates ? motion.sway : 0, spin: animates ? motion.spin : 0,
+            sway: animates ? motion.sway + breath.sway : 0, spin: animates ? motion.spin : 0,
             pulse: animates ? motion.pulse : 1, twinkle: animates ? motion.twinkle : 1
         )
-        .scaleEffect(x: breathing ? 1.015 : 1, y: breathing ? 0.985 : 1, anchor: .bottom)
+        .scaleEffect(
+            x: 1 + 0.015 * breath.inhale, y: 1 - 0.015 * breath.inhale, anchor: .bottom
+        )
         .offset(y: animates ? motion.lift * size / RafuMascotGeometry.designSize : 0)
         .help("Rafu · " + state.label)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Rafu")
         .accessibilityValue(state.label)
-        .task(id: MascotMotionKey(mood: state.mood, reply: state.replyID, enabled: animates)) {
+        .task(
+            id: MascotMotionKey(
+                mood: state.mood, reply: state.replyID, idle: idleMotion, enabled: animates)
+        ) {
             await animate()
         }
     }
@@ -305,25 +325,61 @@ struct RafuMascotView: View {
         }
     }
 
-    /// Slow breathing and a gentle antenna sway, with a blink every other
-    /// breath and a glance now and then.
+    /// Engaged: slow breathing and a gentle antenna sway, with a blink every
+    /// five seconds and a glance now and then. The breath is a plain state
+    /// write every `breathFrameInterval`; blinks and glances are short
+    /// animations. At rest: the still pose, with `stillCycle`'s beats.
     private func rest() async throws {
+        guard idleMotion == .breathing else {
+            try await restStill()
+            return
+        }
+        let clock = ContinuousClock()
+        let start = clock.now
         var beat = 0
+        var reopenAt: ContinuousClock.Instant?
+        var still = Transaction()
+        still.disablesAnimations = true
         while !Task.isCancelled {
-            let inhale = beat.isMultiple(of: 2)
-            withAnimation(.easeInOut(duration: 2.5)) {
-                motion.breathing = inhale
-                motion.sway = inhale ? 5 : -5
+            try await Task.sleep(
+                for: .seconds(RafuMascotIdleMotion.breathFrameInterval),
+                tolerance: .milliseconds(10))
+            let now = clock.now
+            let elapsed = (now - start) / .seconds(1)
+            withTransaction(still) {
+                motion.breathPhase = RafuMascotIdleMotion.breathPhase(elapsed: elapsed)
             }
-            try await Task.sleep(for: .milliseconds(2500))
-            beat += 1
+            if let reopen = reopenAt, now >= reopen {
+                withAnimation(.easeOut(duration: 0.14)) { motion.blink = 1 }
+                reopenAt = nil
+            }
+            let due = Int(elapsed / RafuMascotIdleMotion.engagedBeatSeconds)
+            guard due > beat else { continue }
+            beat = due
             switch beat % 6 {
             case 2: glance(CGSize(width: 9, height: -2))
             case 5: glance(CGSize(width: -8, height: 1))
             case 0, 3: glance(.zero)
             default: break
             }
-            if !beat.isMultiple(of: 2) { try await blinkOnce() }
+            if !beat.isMultiple(of: 2) {
+                withAnimation(.linear(duration: 0.08)) { motion.blink = 0.09 }
+                reopenAt = now + .milliseconds(100)
+            }
+        }
+    }
+
+    /// Nothing animates between beats, so the panel renders only while a
+    /// blink or glance runs.
+    private func restStill() async throws {
+        while !Task.isCancelled {
+            for beat in RafuMascotIdleMotion.stillCycle {
+                try await Task.sleep(for: beat.pause, tolerance: .milliseconds(250))
+                switch beat.action {
+                case .blink: try await blinkOnce()
+                case .glance(let offset): glance(offset)
+                }
+            }
         }
     }
 
@@ -407,23 +463,89 @@ private struct RafuMascotMotion {
     var spin: Double = 0
     var pulse: CGFloat = 1
     var twinkle: CGFloat = 1
-    var breathing = false
+    /// Engaged idle breathing, in radians; 0 is the still pose.
+    var breathPhase: Double = 0
 }
 
 private struct MascotMotionKey: Equatable {
     let mood: RafuMascotMood
     let reply: UUID?
+    /// `nil` for every mood but idle, so engagement never restarts them.
+    let idle: RafuMascotIdleMotion?
     let enabled: Bool
 }
 
+/// What the idle mood does. Pure, so the schedule is testable.
+nonisolated enum RafuMascotIdleMotion: Equatable, Sendable {
+    /// Slow breathing and antenna sway at 15 fps, only while the person
+    /// engages with the strip.
+    case breathing
+    /// The still pose with a discrete blink or glance every few seconds.
+    /// Nothing animates between beats.
+    case still
+
+    enum Action: Equatable, Sendable {
+        case blink
+        /// Eye offset in the 512-point design space; `.zero` looks back.
+        case glance(CGSize)
+    }
+
+    struct Beat: Equatable, Sendable {
+        /// The still time before the action.
+        let pause: Duration
+        let action: Action
+    }
+
+    /// The longest action in `stillCycle`, in seconds (a glance).
+    static let longestActionSeconds = 0.4
+
+    /// One cycle of the still schedule; it repeats. About 21 s with six
+    /// short actions, so the mascot animates under a tenth of the time.
+    static let stillCycle: [Beat] = [
+        Beat(pause: .seconds(5), action: .blink),
+        Beat(pause: .milliseconds(4500), action: .glance(CGSize(width: 9, height: -2))),
+        Beat(pause: .milliseconds(1400), action: .glance(.zero)),
+        Beat(pause: .milliseconds(5500), action: .blink),
+        Beat(pause: .seconds(4), action: .glance(CGSize(width: -8, height: 1))),
+        Beat(pause: .milliseconds(1400), action: .glance(.zero)),
+    ]
+
+    static func resolve(engaged: Bool) -> RafuMascotIdleMotion {
+        engaged ? .breathing : .still
+    }
+
+    /// One full breath, in seconds: in for half, out for half.
+    static let breathPeriod: TimeInterval = 5
+
+    /// Time between engaged blinks and glances, in seconds.
+    static let engagedBeatSeconds: Double = 2.5
+
+    /// The breathing frame interval: 15 fps is smooth for a 1.5 % scale and
+    /// a 5 degree sway, and an eighth of a 120 Hz display's frames.
+    static let breathFrameInterval: TimeInterval = 1.0 / 15
+
+    /// The breath phase, in radians, `elapsed` seconds after breathing began.
+    static func breathPhase(elapsed: Double) -> Double {
+        elapsed * 2 * .pi / breathPeriod
+    }
+
+    /// The pose for a breath phase: `inhale` from 0 (the still pose) to 1,
+    /// and an antenna sway from -5 to 5 degrees. Phase 0 is the still pose,
+    /// so breathing starts without a jump.
+    static func breathPose(phase: Double) -> (inhale: CGFloat, sway: Double) {
+        (CGFloat((1 - cos(phase)) / 2), 5 * sin(phase))
+    }
+}
+
 /// Three rising bars shown beside the mascot while music plays. Mounted only
-/// during playback; its timeline stops under Reduce Motion or when hidden.
+/// during playback; its timeline stops under Reduce Motion, when the window
+/// is hidden, or while the screen is locked or asleep.
 struct NotchPlaybackIndicator: View {
-    let motionActive: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.rafuMotionAllowed) private var motionAllowed
     @Environment(\.rafuTheme) private var theme
 
-    private var animating: Bool { motionActive && !reduceMotion }
+    private var animating: Bool { motionAllowed && !reduceMotion }
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 0.12, paused: !animating)) { context in

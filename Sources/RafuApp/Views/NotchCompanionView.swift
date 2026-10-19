@@ -69,6 +69,9 @@ struct NotchCompanionView: View {
             value: model.hoverState
         )
         .rafuTheme(theme)
+        // The strip stays ordered front behind a locked screen; this stops
+        // the mascot and the playback bars there.
+        .rafuMotionScope()
     }
 
     /// Always true black (terminal-notch-hud.md, "Resting": "housing-black
@@ -134,14 +137,14 @@ struct CompanionWingsView: View {
         HStack(spacing: RafuMetrics.space1) {
             if model.isMascotEnabled {
                 RafuMascotView(
-                    state: model.mascotState, visible: true, size: 20,
+                    state: model.mascotState, engaged: model.isStripExpanded, size: 20,
                     claimBounce: model.claimMascotBounce)
             } else {
                 RafuBrandMarkView()
                     .frame(width: 14, height: 14)
             }
             if showsPlaybackIndicator {
-                NotchPlaybackIndicator(motionActive: true)
+                NotchPlaybackIndicator()
             }
         }
         .padding(.leading, RafuMetrics.space2 - 2)

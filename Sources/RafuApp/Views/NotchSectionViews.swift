@@ -214,7 +214,7 @@ struct CompanionUpNextSectionView: View {
         if model.feedItems.isEmpty && waiting.isEmpty {
             VStack(spacing: RafuMetrics.space2) {
                 RafuMascotView(
-                    state: RafuMascotState.resolve(agents: []), visible: true, size: 44,
+                    state: RafuMascotState.resolve(agents: []), engaged: true, size: 44,
                     claimBounce: { _ in false })
                 Text("Nothing is waiting for you")
                     .font(.system(size: 12, weight: .semibold))
@@ -258,6 +258,7 @@ struct CompanionNowPlayingSectionView: View {
     let model: NotchCompanionModel
     @Environment(\.rafuTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.rafuMotionAllowed) private var motionAllowed
 
     private var player: NotchNowPlaying { model.nowPlaying }
     private var ink: NotchInk { NotchInk(theme: theme) }
@@ -352,14 +353,14 @@ struct CompanionNowPlayingSectionView: View {
         .accessibilityLabel(label)
     }
 
-    /// A calm wave while music plays; flat under Reduce Motion or when paused.
+    /// A calm wave while music plays; still under Reduce Motion, while the
+    /// panel is hidden or the screen is locked, and flat when paused.
     private var waveform: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30, paused: !player.playing || reduceMotion)) {
+        let moving = player.playing && !reduceMotion && motionAllowed
+        return TimelineView(.animation(minimumInterval: 1 / 30, paused: !moving)) {
             context in
             Canvas { drawing, size in
-                let time =
-                    player.playing && !reduceMotion
-                    ? context.date.timeIntervalSinceReferenceDate : 0
+                let time = moving ? context.date.timeIntervalSinceReferenceDate : 0
                 for layer in 0..<3 {
                     var path = Path()
                     let width = Double(size.width)

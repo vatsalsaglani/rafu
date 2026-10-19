@@ -27,6 +27,7 @@ struct WorkspaceSceneRoot: View {
             }
         }
         .rafuTheme(theme)
+        .rafuMotionScope()
         .preferredColorScheme(preferredColorScheme)
         .background(
             WindowAccessor { window in

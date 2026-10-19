@@ -80,6 +80,8 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         CanvasDiagramPanels.registerPaletteItems()  // X9 diagrams
         MemoryPressureMonitor.shared.start()
+        // Before any window or the notch strip appears: loops read it.
+        RafuMotionGate.shared.start()
         LauncherIPCServer.shared.start()
         // Registering the reply-capable notification category and
         // delegate never prompts for permission — safe unconditionally, at

@@ -23,11 +23,24 @@ nonisolated enum AgentCardStatusTint {
 struct AgentActivityGlyph: View {
     @Environment(\.rafuTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.rafuMotionAllowed) private var motionAllowed
     let status: AgentCardStatus
     /// Whether a `.working` glyph spins. Pass `false` for a dense row that
-    /// must stay still; Reduce Motion stops the spin regardless.
+    /// must stay still; Reduce Motion, a hidden window and a locked screen
+    /// stop the spin regardless.
     var animates = true
     @State private var isSpinning = false
+
+    /// Whether a `.working` arc spins. Pure, so the gate is testable.
+    nonisolated static func spins(animates: Bool, reduceMotion: Bool, motionAllowed: Bool)
+        -> Bool
+    {
+        animates && !reduceMotion && motionAllowed
+    }
+
+    private var spins: Bool {
+        Self.spins(animates: animates, reduceMotion: reduceMotion, motionAllowed: motionAllowed)
+    }
 
     var body: some View {
         Group {
@@ -42,22 +55,30 @@ struct AgentActivityGlyph: View {
         .accessibilityHidden(true)
     }
 
-    /// Reduce Motion keeps the arc static at its resting 3/4 sweep, as
-    /// `AICommitGeneratingBorder` does for its rotating border.
+    /// When it does not spin, the arc stays static at its resting 3/4 sweep,
+    /// as `AICommitGeneratingBorder` does for its rotating border. A spin
+    /// that stops is replaced by a non-animated write, which ends the
+    /// `repeatForever` animation.
     private var arc: some View {
         Circle()
             .trim(from: 0, to: 0.75)
             .stroke(color, style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
             .frame(width: 9, height: 9)
             .rotationEffect(.degrees(isSpinning ? 360 : 0))
-            .onAppear { startIfNeeded() }
-            .onDisappear { isSpinning = false }
+            .onAppear { setSpinning(spins) }
+            .onChange(of: spins) { _, spins in setSpinning(spins) }
+            .onDisappear { setSpinning(false) }
     }
 
-    private func startIfNeeded() {
-        guard animates, !reduceMotion else { return }
-        withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
-            isSpinning = true
+    private func setSpinning(_ spinning: Bool) {
+        if spinning {
+            withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
+                isSpinning = true
+            }
+        } else {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { isSpinning = false }
         }
     }
 

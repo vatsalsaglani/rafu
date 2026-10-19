@@ -7,9 +7,12 @@ import SwiftUI
 /// radius — the gradient's fill rotates in place, so the border's geometry
 /// never exceeds the composer's bounds. Respects Reduce Motion: when
 /// enabled, the border is shown as a static (non-rotating) gradient instead.
+/// The border is also static while the window is hidden or the screen is
+/// locked (`\.rafuMotionAllowed`).
 struct AICommitGeneratingBorder: ViewModifier {
     @Environment(\.rafuTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.rafuMotionAllowed) private var motionAllowed
 
     let isActive: Bool
     var cornerRadius: CGFloat = RafuMetrics.radiusPanel
@@ -25,22 +28,31 @@ struct AICommitGeneratingBorder: ViewModifier {
                         colors: Self.gradientColors(from: theme.palette),
                         center: .center
                     )
-                    .rotationEffect(.degrees(reduceMotion ? 0 : rotationDegrees))
+                    .rotationEffect(.degrees(rotates ? rotationDegrees : 0))
                     .mask(
                         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                             .strokeBorder(lineWidth: lineWidth)
                     )
                     .accessibilityHidden(true)
-                    .onAppear { startRotatingIfNeeded() }
-                    .onDisappear { rotationDegrees = 0 }
+                    .onAppear { setRotating(rotates) }
+                    .onChange(of: rotates) { _, rotates in setRotating(rotates) }
+                    .onDisappear { setRotating(false) }
                 }
             }
     }
 
-    private func startRotatingIfNeeded() {
-        guard !reduceMotion else { return }
-        withAnimation(.linear(duration: 2.6).repeatForever(autoreverses: false)) {
-            rotationDegrees = 360
+    private var rotates: Bool { !reduceMotion && motionAllowed }
+
+    /// A non-animated write ends the `repeatForever` rotation.
+    private func setRotating(_ rotating: Bool) {
+        if rotating {
+            withAnimation(.linear(duration: 2.6).repeatForever(autoreverses: false)) {
+                rotationDegrees = 360
+            }
+        } else {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { rotationDegrees = 0 }
         }
     }
 
