@@ -203,8 +203,40 @@ final class EditorDropForwardingScrollView: NSScrollView {
     /// ruler's trailing edge and drop the overlay inset, which makes x = 0
     /// the true home, sizes the wrapped text to the visible width, and
     /// removes the phantom horizontal overflow entirely.
+    ///
+    /// The clip view must be resized ONCE per tile, never twice in opposite
+    /// directions. `super.tile()` first resets the clip to full width, which
+    /// would widen the autoresizing text view by `ruleThickness`; narrowing
+    /// the clip afterwards narrows it back. Every text view width change
+    /// invalidates the whole contiguous layout (`widthTracksTextView`), so
+    /// background layout restarted from zero on every tile; on a long file
+    /// it never converged (each pass changed the document height, which
+    /// re-tiled the scroll view) and livelocked the main thread, and the
+    /// discarded layout collapsed the document height so scrolling snapped
+    /// back to the caret. Autoresizing is therefore suspended while tiling
+    /// and applied once, only if the final clip size actually changed.
     override func tile() {
+        // Our own `contentView.frame` write can re-enter `tile()` through
+        // `reflectScrolledClipView:`; a nested tile would fight this one.
+        guard !isTiling else { return }
+        isTiling = true
+        defer { isTiling = false }
+
+        let clip = contentView
+        let oldClipSize = clip.frame.size
+        let autoresizes = clip.autoresizesSubviews
+        clip.autoresizesSubviews = false
         super.tile()
+        retileRulerClassically()
+        clip.autoresizesSubviews = autoresizes
+        if autoresizes, clip.frame.size != oldClipSize {
+            clip.resizeSubviews(withOldSize: oldClipSize)
+        }
+    }
+
+    private var isTiling = false
+
+    private func retileRulerClassically() {
         guard rulersVisible, let ruler = verticalRulerView, ruler.superview === self else {
             return
         }
