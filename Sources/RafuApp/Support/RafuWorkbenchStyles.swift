@@ -7,6 +7,7 @@ nonisolated enum WorkbenchPaletteRole: Equatable, Sendable {
     case clear
     case editorBackground
     case tabActiveBackground
+    case chipBackground
     case borderSubtle
     case borderStrong
     case focusRing
@@ -36,28 +37,38 @@ nonisolated enum WorkbenchTextHeightPolicy {
     static func attachedTabCloseTarget(for scaledSize: CGFloat) -> CGFloat {
         min(max(scaledSize, 22), 28)
     }
+
+    /// The shelf around a floating tab card is taller than the card itself,
+    /// by `RafuMetrics.tabShelfBreathingRoom` on each side, with a floor of
+    /// `RafuMetrics.tabShelfHeight` — Larger Text still grows the shelf,
+    /// because `tabHeight` is itself a scaled value from `attachedTabHeight`.
+    static func tabShelfHeight(forTabHeight tabHeight: CGFloat) -> CGFloat {
+        max(tabHeight + RafuMetrics.tabShelfBreathingRoom * 2, RafuMetrics.tabShelfHeight)
+    }
 }
 
+/// Window redesign phase 4: tabs are detached rounded cards, not attached
+/// caps with an open bottom edge. The selected tab is raised — a filled
+/// card, a hairline border on all four edges, and a soft shadow; an inactive
+/// tab is a quiet fill with secondary text. There is no seam to mask because
+/// the tab no longer visually joins the content below it.
 nonisolated struct AttachedWorkbenchTabPresentation: Equatable, Sendable {
     let fill: WorkbenchPaletteRole
     let outline: WorkbenchPaletteRole
     let outlineEdges: Set<WorkbenchBorderEdge>
-    let masksBottomSeam: Bool
 
     static func resolve(isSelected: Bool) -> Self {
         guard isSelected else {
             return Self(
-                fill: .clear,
+                fill: .chipBackground,
                 outline: .clear,
-                outlineEdges: [],
-                masksBottomSeam: false
+                outlineEdges: []
             )
         }
         return Self(
             fill: .tabActiveBackground,
             outline: .borderStrong,
-            outlineEdges: [.top, .leading, .trailing],
-            masksBottomSeam: true
+            outlineEdges: [.top, .leading, .trailing, .bottom]
         )
     }
 }
@@ -168,51 +179,6 @@ nonisolated enum WorkbenchDeckShadowStyle {
     }
 }
 
-private nonisolated struct AttachedTabFillShape: Shape {
-    let radius: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + radius))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.minX + radius, y: rect.minY),
-            control: CGPoint(x: rect.minX, y: rect.minY)
-        )
-        path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.maxX, y: rect.minY + radius),
-            control: CGPoint(x: rect.maxX, y: rect.minY)
-        )
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        path.closeSubpath()
-        return path
-    }
-}
-
-/// An open-bottom outline: top and both sides are structural; the owning tab
-/// shelf keeps the full-width bottom seam.
-private nonisolated struct AttachedTabOutlineShape: Shape {
-    let radius: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + radius))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.minX + radius, y: rect.minY),
-            control: CGPoint(x: rect.minX, y: rect.minY)
-        )
-        path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.maxX, y: rect.minY + radius),
-            control: CGPoint(x: rect.maxX, y: rect.minY)
-        )
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        return path
-    }
-}
-
 /// Makes the complete tab shape (padding, minimum width and height included)
 /// select the tab. Without it only the inner label button is hit-testable, so
 /// the padding around the label swallows clicks. Child buttons (the label and
@@ -232,10 +198,11 @@ private struct AttachedWorkbenchTabSelectTarget: ViewModifier {
     }
 }
 
-/// Shared attached-cap chrome for document, terminal, Settings, and Ensemble
-/// canvases. Callers keep semantic label/dirty/exit content and may request
-/// the bounded document width without changing the selected geometry. Pass
-/// `select` so a click anywhere on the tab selects it.
+/// Shared detached tab-card chrome for document, terminal, Settings, and
+/// Ensemble canvases (window redesign phase 4). Callers keep semantic
+/// label/dirty/exit content and may request the bounded document width
+/// without changing the selected geometry. Pass `select` so a click
+/// anywhere on the tab selects it.
 struct AttachedWorkbenchTab<Content: View>: View {
     let isSelected: Bool
     var usesDocumentWidth = false
@@ -243,6 +210,7 @@ struct AttachedWorkbenchTab<Content: View>: View {
     @ViewBuilder let content: Content
 
     @Environment(\.rafuTheme) private var theme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @ScaledMetric(relativeTo: .body) private var scaledHeight = RafuMetrics.tabBarHeight
 
     init(
@@ -270,26 +238,30 @@ struct AttachedWorkbenchTab<Content: View>: View {
                 minHeight: WorkbenchTextHeightPolicy.attachedTabHeight(for: scaledHeight)
             )
             .background {
-                if presentation.fill == .tabActiveBackground {
-                    AttachedTabFillShape(radius: RafuMetrics.radiusAttachedTab)
-                        .fill(theme.palette.tabActiveBackground)
-                }
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusWorkbenchTab, style: .continuous)
+                    .fill(theme.palette.workbenchColor(for: presentation.fill))
+                    .shadow(
+                        color: isSelected
+                            ? WorkbenchDeckShadowStyle.color(
+                                isDark: theme.isDark,
+                                contrastIncreased: colorSchemeContrast == .increased
+                            ) : .clear,
+                        radius: isSelected ? RafuMetrics.tabShadowRadius : 0,
+                        x: 0,
+                        y: isSelected ? RafuMetrics.tabShadowY : 0
+                    )
             }
             .overlay {
-                if presentation.outline == .borderStrong {
-                    AttachedTabOutlineShape(radius: RafuMetrics.radiusAttachedTab)
-                        .stroke(theme.palette.borderStrong, lineWidth: RafuMetrics.hairline)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                }
-            }
-            .overlay(alignment: .bottom) {
-                if presentation.masksBottomSeam {
-                    Rectangle()
-                        .fill(theme.palette.tabActiveBackground)
-                        .frame(height: RafuMetrics.hairline)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
+                if presentation.outline != .clear {
+                    RoundedRectangle(
+                        cornerRadius: RafuMetrics.radiusWorkbenchTab, style: .continuous
+                    )
+                    .strokeBorder(
+                        theme.palette.workbenchColor(for: presentation.outline),
+                        lineWidth: RafuMetrics.hairline
+                    )
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
                 }
             }
             .modifier(AttachedWorkbenchTabSelectTarget(select: select))
@@ -506,6 +478,7 @@ extension RafuThemePalette {
         case .clear: .clear
         case .editorBackground: editorBackground
         case .tabActiveBackground: tabActiveBackground
+        case .chipBackground: chipBackground
         case .borderSubtle: borderSubtle
         case .borderStrong: borderStrong
         case .focusRing: focusRing

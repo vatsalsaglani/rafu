@@ -16,7 +16,11 @@ struct RafuWorkbenchStyleContractTests {
         // lane would clip it.
         #expect(
             RafuMetrics.deckShadowRadius + RafuMetrics.deckShadowY <= RafuMetrics.workbenchInset)
-        #expect(RafuMetrics.radiusAttachedTab == 4)
+        #expect(RafuMetrics.radiusWorkbenchTab == 10)
+        #expect(RafuMetrics.tabShadowRadius == 3)
+        #expect(RafuMetrics.tabShadowY == 1)
+        #expect(RafuMetrics.tabShelfBreathingRoom == 6)
+        #expect(RafuMetrics.tabShelfHeight == 40)
         #expect(RafuMetrics.radiusDenseSelection == 4)
         #expect(RafuMetrics.radiusDenseCard == 6)
         #expect(RafuMetrics.radiusWorkbenchField == 5)
@@ -43,11 +47,16 @@ struct RafuWorkbenchStyleContractTests {
     }
 
     @Test(
-        "The raised deck casts the window's only shadow, on its background shape, never on content"
+        "The raised deck and the selected tab cast the window's only two shadows, both through the shared theme-aware helper, never on content"
     )
     func deckIsTheOnlyShadowSource() throws {
         let workbenchSource = try Self.workbenchStyleSource()
-        #expect(Self.occurrences(of: ".shadow(", in: workbenchSource) == 1)
+        // Window redesign phase 4 adds exactly one more shadow: the selected
+        // tab card. Both go through `WorkbenchDeckShadowStyle`.
+        #expect(Self.occurrences(of: ".shadow(", in: workbenchSource) == 2)
+        #expect(
+            Self.occurrences(of: "WorkbenchDeckShadowStyle.color(", in: workbenchSource) == 2
+        )
 
         let deckSection = try Self.section(
             of: workbenchSource,
@@ -63,6 +72,16 @@ struct RafuWorkbenchStyleContractTests {
         let contentOverlay = try #require(deckSection.range(of: ".overlay {"))
         #expect(shapeFill.lowerBound < shadowCall.lowerBound)
         #expect(shadowCall.lowerBound < contentOverlay.lowerBound)
+
+        let tabSection = try Self.section(
+            of: workbenchSource,
+            from: "struct AttachedWorkbenchTab<Content: View>: View",
+            to: "/// What the trailing slot of an editor tab shows."
+        )
+        #expect(tabSection.contains(".shadow("))
+        #expect(tabSection.contains("WorkbenchDeckShadowStyle.color("))
+        #expect(tabSection.contains("RafuMetrics.tabShadowRadius"))
+        #expect(tabSection.contains("RafuMetrics.tabShadowY"))
 
         let windowSource = try Self.source("Sources/RafuApp/Views/WorkspaceWindowView.swift")
         #expect(!windowSource.contains(".shadow("))
@@ -97,19 +116,17 @@ struct RafuWorkbenchStyleContractTests {
         #expect(source.contains("FillStyle(eoFill: true)"))
     }
 
-    @Test("Selected attached tabs fill, outline three edges, and mask only the shelf seam")
+    @Test("Inactive tabs are a quiet fill; the selected tab is a fully outlined raised card")
     func attachedTabGeometry() {
         let inactive = AttachedWorkbenchTabPresentation.resolve(isSelected: false)
-        #expect(inactive.fill == .clear)
+        #expect(inactive.fill == .chipBackground)
+        #expect(inactive.outline == .clear)
         #expect(inactive.outlineEdges.isEmpty)
-        #expect(!inactive.masksBottomSeam)
 
         let selected = AttachedWorkbenchTabPresentation.resolve(isSelected: true)
         #expect(selected.fill == .tabActiveBackground)
         #expect(selected.outline == .borderStrong)
-        #expect(selected.outlineEdges == [.top, .leading, .trailing])
-        #expect(!selected.outlineEdges.contains(.bottom))
-        #expect(selected.masksBottomSeam)
+        #expect(selected.outlineEdges == [.top, .leading, .trailing, .bottom])
     }
 
     @Test("Text-bearing chrome uses scalable minimums instead of fixed clipping boxes")

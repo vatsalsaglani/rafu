@@ -44,19 +44,17 @@ struct EditorTabAndGroupPresentationTests {
         #expect(!source.contains("StitchedUnderline"))
     }
 
-    @Test("Selected tabs retain attached fill, top-side outline, and no bottom edge")
+    @Test("Selected tabs are a raised card: fill, hairline border on all four edges")
     func attachedTabGeometryRemainsExact() {
         let selected = AttachedWorkbenchTabPresentation.resolve(isSelected: true)
 
         #expect(selected.fill == .tabActiveBackground)
         #expect(selected.outline == .borderStrong)
-        #expect(selected.outlineEdges == [.top, .leading, .trailing])
-        #expect(!selected.outlineEdges.contains(.bottom))
-        #expect(selected.masksBottomSeam)
+        #expect(selected.outlineEdges == [.top, .leading, .trailing, .bottom])
     }
 
-    @Test("The full-width shelf owns an inert selected-cap seam overlay")
-    func shelfOwnsSelectedSeam() throws {
+    @Test("The full-width shelf frames the floating cards with a border beneath, no seam overlay")
+    func shelfFramesFloatingCards() throws {
         let source = try Self.editorCanvasSource()
         let shelf = try Self.section(
             named: "private struct EditorTabShelf<Content: View>",
@@ -64,12 +62,13 @@ struct EditorTabAndGroupPresentationTests {
             in: source
         )
 
-        #expect(shelf.contains("SelectedEditorTabBoundsPreferenceKey"))
-        #expect(shelf.contains(".overlayPreferenceValue("))
-        #expect(shelf.contains("theme.palette.tabActiveBackground"))
+        #expect(!shelf.contains("SelectedEditorTabBoundsPreferenceKey"))
+        #expect(!shelf.contains(".overlayPreferenceValue("))
+        #expect(shelf.contains("theme.palette.borderSubtle"))
         #expect(shelf.contains(".frame(height: RafuMetrics.hairline)"))
         #expect(shelf.contains(".allowsHitTesting(false)"))
         #expect(shelf.contains(".accessibilityHidden(true)"))
+        #expect(shelf.contains("WorkbenchTextHeightPolicy.tabShelfHeight(forTabHeight:"))
         #expect(!shelf.contains(".clipShape("))
         #expect(!shelf.contains(".mask("))
     }

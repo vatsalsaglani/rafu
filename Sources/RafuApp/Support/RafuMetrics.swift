@@ -26,12 +26,22 @@ nonisolated enum RafuMetrics {
     /// Soft shadow cast by the raised workbench deck onto the frame beneath
     /// it (frame + card redesign, phase 1). Radius + vertical offset stay
     /// inside `workbenchInset` so the deck lane's gutter never clips the
-    /// shadow. The user's full decision also shadows the selected tab; that
-    /// is deferred to the phase that redesigns tabs as detached rounded
-    /// cards, where the geometry this shadow would sit against is settled.
+    /// shadow. Window redesign phase 4 adds the second, lighter shadow this
+    /// comment deferred: the selected tab card below reuses
+    /// `WorkbenchDeckShadowStyle`'s theme-aware color with its own, smaller
+    /// radius/offset.
     static let deckShadowRadius: CGFloat = 6
     static let deckShadowY: CGFloat = 2
-    static let radiusAttachedTab: CGFloat = 4
+    /// Window redesign phase 4: tabs are detached rounded cards, not attached
+    /// caps.
+    static let radiusWorkbenchTab: CGFloat = 10
+    static let tabShadowRadius: CGFloat = 3
+    static let tabShadowY: CGFloat = 1
+    /// Breathing room above/below the floating tab card, each side, inside
+    /// its shelf.
+    static let tabShelfBreathingRoom: CGFloat = 6
+    /// Shelf floor: a 28 pt tab plus `tabShelfBreathingRoom` on both sides.
+    static let tabShelfHeight: CGFloat = 40
     static let radiusDenseSelection: CGFloat = 4
     static let radiusDenseCard: CGFloat = 6
     static let radiusWorkbenchField: CGFloat = 5

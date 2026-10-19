@@ -726,20 +726,11 @@ private struct TabStripFramePreferenceKey: PreferenceKey {
     }
 }
 
-/// The selected attached cap publishes its bounds to the shelf. Resolving the
-/// anchor at the shelf (rather than copying the drag-coordinate CGRect) keeps
-/// the seam mask aligned while the horizontal tab strip scrolls.
-private struct SelectedEditorTabBoundsPreferenceKey: PreferenceKey {
-    static var defaultValue: Anchor<CGRect>? = nil
-
-    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
-        value = nextValue() ?? value
-    }
-}
-
-/// Full-width owner of the tab/content seam. The selected cap contributes an
-/// anchor only; this shelf paints the one-point mask without changing either
-/// the cap's captured drag frame or the shelf's scaled layout height.
+/// Full-width shelf the floating tab cards sit inside. Window redesign phase
+/// 4: tabs are detached rounded cards, not attached caps, so there is no
+/// shared tab/content seam for this shelf to mask — it only owns the
+/// breathing room around the cards and the one hairline border separating
+/// the strip from the editor content beneath it.
 private struct EditorTabShelf<Content: View>: View {
     @ViewBuilder let content: Content
 
@@ -751,11 +742,13 @@ private struct EditorTabShelf<Content: View>: View {
     }
 
     var body: some View {
+        let tabHeight = WorkbenchTextHeightPolicy.attachedTabHeight(for: scaledHeight)
         content
+            .padding(.vertical, RafuMetrics.tabShelfBreathingRoom)
             .frame(
                 maxWidth: .infinity,
-                minHeight: WorkbenchTextHeightPolicy.attachedTabHeight(for: scaledHeight),
-                maxHeight: WorkbenchTextHeightPolicy.attachedTabHeight(for: scaledHeight)
+                minHeight: WorkbenchTextHeightPolicy.tabShelfHeight(forTabHeight: tabHeight),
+                alignment: .center
             )
             .background(theme.palette.tabBarBackground)
             .overlay(alignment: .bottom) {
@@ -764,25 +757,6 @@ private struct EditorTabShelf<Content: View>: View {
                     .frame(height: RafuMetrics.hairline)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
-            }
-            .overlayPreferenceValue(SelectedEditorTabBoundsPreferenceKey.self) { anchor in
-                GeometryReader { proxy in
-                    if let anchor {
-                        let selectedFrame = proxy[anchor]
-                        Rectangle()
-                            .fill(theme.palette.tabActiveBackground)
-                            .frame(
-                                width: selectedFrame.width,
-                                height: RafuMetrics.hairline
-                            )
-                            .position(
-                                x: selectedFrame.midX,
-                                y: proxy.size.height - (RafuMetrics.hairline / 2)
-                            )
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
-                    }
-                }
             }
     }
 }
@@ -1111,7 +1085,7 @@ private struct EditorGroupTabBar: View {
         EditorTabShelf {
             HStack(spacing: 0) {
                 ScrollView(.horizontal) {
-                    HStack(spacing: 0) {
+                    HStack(spacing: RafuMetrics.space1) {
                         ForEach(group.tabs) { tab in
                             tabRow(for: tab)
                                 .background {
@@ -1184,21 +1158,7 @@ private struct EditorGroupTabBar: View {
                     .accessibilityHidden(true)
                 }
                 .layoutPriority(0)
-                Button {
-                    session.editorLayout.focus(group.id)
-                    session.requestNewCanvas()
-                } label: {
-                    Image(systemName: "plus.rectangle.on.rectangle")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(theme.palette.textSecondary)
-                        .frame(width: 28, height: 28)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .fixedSize()
-                .help("New Ensemble")
-                .accessibilityLabel("New Ensemble")
-                .disabled(session.rootURL == nil)
+                newTabMenu
                 if let document = selectedDocument, document.supportsPresentationModes {
                     Divider().frame(height: 20)
                     MarkdownModeControl(
@@ -1227,6 +1187,45 @@ private struct EditorGroupTabBar: View {
             let tab = group.tabs.first(where: { $0.id == selectedTabID })
         else { return nil }
         return session.document(for: tab)
+    }
+
+    /// The strip's trailing "+": a direct click opens a new untitled file
+    /// (the same destination as ⌘N), and the attached chevron lists every
+    /// other canvas kind this group can host. Matches the split-button
+    /// convention already used by `WorkspaceTerminalsPanelView.newTerminalControl`.
+    private var newTabMenu: some View {
+        Menu {
+            Button("New File", systemImage: "doc.badge.plus") {
+                session.newUntitledDocument()
+            }
+            Button("New Terminal", systemImage: "terminal") {
+                session.editorLayout.focus(group.id)
+                session.newTerminalTab()
+            }
+            .disabled(session.isTerminalGroupModalInputBlocked)
+            Button("New Terminal Group", systemImage: "rectangle.3.group") {
+                session.editorLayout.focus(group.id)
+                session.newTerminalGroup()
+            }
+            .disabled(session.isTerminalGroupModalInputBlocked)
+            Button("New Ensemble", systemImage: "square.on.square.dashed") {
+                session.editorLayout.focus(group.id)
+                session.requestNewCanvas()
+            }
+            .disabled(session.rootURL == nil)
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(theme.palette.textSecondary)
+                .frame(width: 28, height: 28)
+                .contentShape(.rect)
+        } primaryAction: {
+            session.newUntitledDocument()
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("New Tab. Use the arrow for a terminal, Terminal Group, or Ensemble.")
+        .accessibilityLabel("New Tab")
     }
 
     @ViewBuilder
@@ -1462,10 +1461,6 @@ private struct GitStandaloneBlameCanvas: View {
                     .overlay(alignment: .top) {
                         StitchedAccentEdge(color: theme.palette.accent)
                     }
-                    .anchorPreference(
-                        key: SelectedEditorTabBoundsPreferenceKey.self,
-                        value: .bounds
-                    ) { $0 }
                     .help("Blame • \(fileName)")
                     .accessibilityLabel("Blame • \(fileName)")
                     Spacer()
@@ -1668,7 +1663,7 @@ private struct GitDiffTabItem: View {
         }
         .background {
             if isHovering && !isSelected {
-                RoundedRectangle(cornerRadius: RafuMetrics.radiusAttachedTab, style: .continuous)
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusWorkbenchTab, style: .continuous)
                     .fill(theme.palette.hover.opacity(0.6))
             }
         }
@@ -1677,10 +1672,6 @@ private struct GitDiffTabItem: View {
                 StitchedAccentEdge(color: theme.palette.accent)
             }
         }
-        .anchorPreference(
-            key: SelectedEditorTabBoundsPreferenceKey.self,
-            value: .bounds
-        ) { isSelected ? $0 : nil }
         .onHover { isHovering = $0 }
         .help(openDiff.title)
         .accessibilityElement(children: .contain)
@@ -2231,7 +2222,7 @@ private struct EditorTabItem: View {
         .fixedSize(horizontal: true, vertical: false)
         .background {
             if isHovering && !isSelected {
-                RoundedRectangle(cornerRadius: RafuMetrics.radiusAttachedTab, style: .continuous)
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusWorkbenchTab, style: .continuous)
                     .fill(theme.palette.hover.opacity(0.6))
             }
         }
@@ -2240,17 +2231,6 @@ private struct EditorTabItem: View {
                 StitchedAccentEdge(color: theme.palette.accent)
             }
         }
-        .overlay(alignment: .trailing) {
-            if !isSelected {
-                Divider()
-                    .frame(width: RafuMetrics.hairline, height: 18)
-                    .overlay(theme.palette.borderSubtle)
-            }
-        }
-        .anchorPreference(
-            key: SelectedEditorTabBoundsPreferenceKey.self,
-            value: .bounds
-        ) { isSelected ? $0 : nil }
         .onHover { isHovering = $0 }
         .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
         .onDrag(
@@ -2387,20 +2367,13 @@ private struct EditorTerminalTabItem: View {
         .fixedSize(horizontal: true, vertical: false)
         .background {
             if isHovering && !isSelected {
-                RoundedRectangle(cornerRadius: RafuMetrics.radiusAttachedTab, style: .continuous)
+                RoundedRectangle(cornerRadius: RafuMetrics.radiusWorkbenchTab, style: .continuous)
                     .fill(theme.palette.hover.opacity(0.6))
             }
         }
         .overlay(alignment: .top) {
             if isSelected {
                 StitchedAccentEdge(color: theme.palette.accent)
-            }
-        }
-        .overlay(alignment: .trailing) {
-            if !isSelected {
-                Divider()
-                    .frame(width: RafuMetrics.hairline, height: 18)
-                    .overlay(theme.palette.borderSubtle)
             }
         }
         .overlay(alignment: .leading) {
@@ -2413,10 +2386,6 @@ private struct EditorTerminalTabItem: View {
                     .accessibilityHidden(true)
             }
         }
-        .anchorPreference(
-            key: SelectedEditorTabBoundsPreferenceKey.self,
-            value: .bounds
-        ) { isSelected ? $0 : nil }
         .onHover { isHovering = $0 }
         .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
         .onDrag(
