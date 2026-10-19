@@ -26,7 +26,8 @@ pending).
   card body belongs to its content (terminal, web view, note, etc.). There is
   no footer.
 - **Background drag** pans. **Space + drag** pans even over cards, but only
-  while the board (not card content) has keyboard focus.
+  while the board (not card content) has keyboard focus. The **Hand** tool
+  pans the same way without Space (see "Hand tool and palette layering").
 - **Shift + drag** on empty board draws a marquee selection.
 - **Double-click:** on a header title it renames inline; on the header
   background it zooms to the card (animated); on empty board it opens the Add
@@ -86,7 +87,7 @@ pending).
 ### Pointer ownership, focus ring, and file drops (round 2, code-read only)
 
 - **One pan owner.** The grid's drag gesture is masked `.all` without Space and
-  `.subviews` with Space; the board's high-priority drag uses the opposite
+  `.subviews` with Space (or Hand); the board's high-priority drag uses the opposite
   masks. Exactly one pan/marquee gesture is enabled at a time. A new
   `startLocation` resets stale pan state, because SwiftUI may not call
   `onEnded` when a mask flips mid-drag.
@@ -333,6 +334,58 @@ reaching the shell instead of the board; `Control-Command` arrows and
 `Control-Command-]`/`[` moving focus from inside a terminal card; arrowing onto
 a note not entering Edit mode; save and reopen keeping the shell name;
 VoiceOver labels on the new items.
+
+### Hand tool and palette layering (2026-10-20)
+
+Applies to `WorkspaceCanvasView`, `CanvasToolPalette`,
+`CanvasWhiteboardCreationLayer` and `CanvasWhiteboardTool.swift`
+(`CanvasBoardPanRouting`, `CanvasBoardPan`). Last verified: Apple Swift 6.4,
+macOS 27.0.1, arm64, headless only (no live Lightning run).
+
+- **Hand is Space-drag, latched.** `CanvasBoardPanRouting.panOverridesCards`
+  is true while Space is down or the tool is Hand. Both pan masks read it, so
+  the board's high-priority background pan takes a drag over cards, and a
+  click (no movement) still reaches card chrome. Shift-drag does not start a
+  marquee in Hand. The creation layer is inert for Select, Hand and Image
+  (`drawsOnBoard`); Hand used to lay a full-board `DragGesture(minimumDistance:
+  0)` over every card, with a `panStart` that only `onEnded` cleared.
+- **The palette is outside every board gesture.** `boardTopOverlay` is an
+  `.overlay(alignment: .top)` applied after `.highPriorityGesture` and the
+  magnify gesture and before `.focusable()`, not a `boardLayers` ZStack child.
+  A palette click that moves 5 pt in Hand selects the tool and does not pan.
+  It stays inside `.focusable()` so `@Environment(\.isFocused)` still gates
+  the letter keys.
+- **Choosing a tool returns the keys to the board.** `choose` calls
+  `board.backToBoard()` when content is active, then `focusBoard()`. Before,
+  with a terminal or note active, Escape and V reached the card, and Hand could
+  not be left from the keyboard. A Hand pan that starts over a card also
+  focuses the board.
+- **A cancelled drag ends the pan.** Each background-drag attachment has its
+  own `@GestureState` (`gridDragIsLive`, `boardDragIsLive`); SwiftUI resets
+  them on end and on cancel. When neither is live, `endBackgroundDrag()` runs,
+  so `pan.isPanning` and the grab pointer cannot stay stuck when `onEnded` is
+  skipped. Two states, not one shared state: a Space mask flip hands a live
+  drag from one attachment to the other, and one shared state could reset
+  mid-drag and restart the pan (code-read, not observed). The board-wide pointer is
+  `grabIdle`/`grabActive` only in Hand.
+- **Root cause status.** The reported freeze (Hand selected; palette, Select
+  and keys do not respond; the process idle in its run loop) was NOT
+  reproduced headlessly. In an `NSHostingView` harness, palette clicks worked
+  in Hand before the fix too. The fix removes the Hand-only full-board
+  zero-distance gesture and fixes the proven keyboard defect. Confirm on a Mac:
+  Hand, pan over a live terminal card, then click Select, press Escape, press V.
+
+Headless gesture diagnostics: an `NSHostingView` in an offscreen borderless
+`NSWindow` takes synthetic `NSEvent.mouseEvent` events through
+`window.sendEvent(_:)`, and `RunLoop.main.run(until:)` lets SwiftUI update, so
+SwiftUI gestures can be driven from a test without moving the pointer. Do not
+override `canBecomeKey` there: the test process cannot activate, so AppKit
+treats every press as a first click and swallows it for views that refuse
+first mouse (the Hand pan did not move). Keyboard paths that check
+`window.isKeyWindow` cannot be driven this way. Do not commit such a harness;
+it needs a run-loop wait.
+
+Verification: `swift test --filter CanvasHandToolTests`.
 
 ### Z-order is array order
 

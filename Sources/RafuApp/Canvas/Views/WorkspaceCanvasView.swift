@@ -16,14 +16,21 @@ struct WorkspaceCanvasView: View {
     let session: WorkspaceSession
     @State private var connectionDrag = CanvasConnectionDrag()
     @State private var interaction = CanvasInteractionState()
-    @State private var panStart: CanvasViewport?
+    @State private var pan = CanvasBoardPan()
     @State private var magnifyStart: CanvasViewport?
     @State private var magnifyLastScale = 1.0
     @State private var marqueeStart: CGPoint?
     @State private var dragOrigin: CGPoint?
     @State private var presentationID = UUID()
     @State private var spaceIsDown = false
-    @State private var isPanning = false
+    /// True from a background drag's first change to its end OR cancel, one
+    /// per attachment (grid, board). SwiftUI resets gesture state on cancel
+    /// too (a mask flip, a view change), where `onEnded` never runs; when
+    /// neither is live the pan ends, so it never stays "active" with a stuck
+    /// grab pointer. Two states, so a mask flip that hands a live drag from
+    /// one attachment to the other does not end it.
+    @GestureState private var gridDragIsLive = false
+    @GestureState private var boardDragIsLive = false
     /// The board's hover drop preview: a tinted highlight and a one-line
     /// label for what a drop here would do. `nil` shows nothing.
     @State private var dropPreview: CanvasDropPreview?
@@ -133,10 +140,14 @@ struct WorkspaceCanvasView: View {
         return ZStack(alignment: .topLeading) {
             // Pan and marquee have one owner at a time: this grid gesture for
             // a plain drag, or the board's high-priority gesture while Space
-            // is held (see `boardChrome`). The masks never enable both.
+            // is held or the Hand tool is on (see `boardChrome`). The masks
+            // never enable both.
             grid
                 .contentShape(.rect)
-                .gesture(backgroundDrag, including: spaceIsDown ? .subviews : .all)
+                .gesture(
+                    backgroundDrag(live: $gridDragIsLive),
+                    including: panOverridesCards ? .subviews : .all
+                )
                 .onTapGesture {
                     board.backToBoard()
                     boardHasKeyboardFocus = true
@@ -149,7 +160,7 @@ struct WorkspaceCanvasView: View {
                         interaction.addPopoverAnchor = value.location
                     }
                 )
-                .pointerStyle(isPanning ? .grabActive : .grabIdle)
+                .pointerStyle(pan.isPanning ? .grabActive : .grabIdle)
             CanvasEdgeLayer(
                 board: board, session: session, focusBoard: { boardHasKeyboardFocus = true })
             ForEach(visibleCards(in: geometry.size)) { card in
@@ -209,8 +220,14 @@ struct WorkspaceCanvasView: View {
             if board.cards.isEmpty, !tipDismissed {
                 emptyBoardTip
             }
-            boardTopOverlay
+            // The tool palette is NOT a layer here: it is an overlay of the
+            // gesture-carrying board (`boardChrome`), so no board gesture
+            // (pan, Hand, drawing tool, magnify) can take a palette click.
         }
+        // Hand: grab over the whole board, cards included (nil otherwise).
+        .pointerStyle(
+            CanvasBoardPanRouting.pointer(tool: toolKind, isPanning: pan.isPanning)?.style
+        )
         .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         .coordinateSpace(name: CanvasConnectionCoordinateSpace.board)
         .onGeometryChange(for: CGSize.self) {
@@ -278,9 +295,13 @@ struct WorkspaceCanvasView: View {
                         boardID: board.id, session: session, dropPreview: $dropPreview)
                 )
             )
-            // Space-drag pans over cards too. Without Space this mask disables
-            // the gesture and leaves the grid's own pan gesture in charge.
-            .highPriorityGesture(backgroundDrag, including: spaceIsDown ? .all : .subviews)
+            // Space-drag and the Hand tool pan over cards too. Otherwise this
+            // mask disables the gesture and leaves the grid's own pan
+            // gesture in charge. A click (no movement) still reaches cards.
+            .highPriorityGesture(
+                backgroundDrag(live: $boardDragIsLive),
+                including: panOverridesCards ? .all : .subviews
+            )
             .gesture(
                 MagnifyGesture().onChanged { value in
                     if magnifyStart == nil {
@@ -300,6 +321,13 @@ struct WorkspaceCanvasView: View {
             )
             .overlay(alignment: .bottomTrailing) {
                 CanvasZoomCapsule(board: board).padding(12)
+            }
+            // Above every board layer and outside every board gesture, in
+            // every tool. Inside `.focusable()`, so the palette still reads
+            // the board's focus for its letter keys.
+            .overlay(alignment: .top) { boardTopOverlay }
+            .onChange(of: gridDragIsLive || boardDragIsLive) { _, live in
+                if !live { endBackgroundDrag() }
             }
             // The board takes keys, but it is a surface, not a control: the
             // system focus ring would outline the whole board (and spill over
@@ -408,7 +436,9 @@ struct WorkspaceCanvasView: View {
     /// palette at every board width, so they never overlap.
     private var boardTopOverlay: some View {
         VStack(spacing: CanvasBoardTopOverlayMetrics.spacing) {
-            CanvasToolPalette(board: board, session: session, tool: .forBoard(board.id))
+            CanvasToolPalette(
+                board: board, session: session, tool: .forBoard(board.id),
+                focusBoard: { boardHasKeyboardFocus = true })
             // A compact capsule over the board, not a full-width strip.
             if showsRestoredLinksNotice && pausedLinkCount > 0 {
                 pausedLinksNotice
@@ -691,55 +721,69 @@ struct WorkspaceCanvasView: View {
         .accessibilityHidden(true)
     }
 
-    /// Drag on the background pans. Shift-drag draws a marquee and selects live.
-    private var backgroundDrag: some Gesture {
-        DragGesture(minimumDistance: 3).onChanged { value in
-            // A new start point is a new drag. SwiftUI may not call onEnded
-            // when a gesture mask flips mid-drag (Space pressed or released);
-            // without this reset the next drag would pan from a stale start.
-            if dragOrigin != value.startLocation {
-                dragOrigin = value.startLocation
-                panStart = nil
-                marqueeStart = nil
-                interaction.marquee = nil
-            }
-            if panStart == nil && marqueeStart == nil {
-                if NSEvent.modifierFlags.contains(.shift) && !spaceIsDown {
-                    marqueeStart = value.startLocation
-                } else {
-                    panStart = board.viewport
-                    isPanning = true
+    private var toolKind: CanvasWhiteboardToolKind { CanvasWhiteboardTool.forBoard(board.id).kind }
+
+    /// Space held or the Hand tool on: the board's pan wins over cards.
+    private var panOverridesCards: Bool {
+        CanvasBoardPanRouting.panOverridesCards(spaceIsDown: spaceIsDown, tool: toolKind)
+    }
+
+    /// Drag on the background pans. Shift-drag draws a marquee and selects
+    /// live (not with the Hand tool, which only pans). `live` is this
+    /// attachment's gesture state (see `gridDragIsLive`).
+    private func backgroundDrag(live: GestureState<Bool>) -> some Gesture {
+        DragGesture(minimumDistance: 3)
+            .updating(live) { _, isLive, _ in isLive = true }
+            .onChanged { value in
+                // A new start point is a new drag. SwiftUI may not call onEnded
+                // when a gesture mask flips mid-drag (Space pressed or released);
+                // without this reset the next drag would pan from a stale start.
+                if dragOrigin != value.startLocation {
+                    dragOrigin = value.startLocation
+                    pan.end()
+                    marqueeStart = nil
+                    interaction.marquee = nil
+                }
+                if !pan.isPanning && marqueeStart == nil {
+                    if NSEvent.modifierFlags.contains(.shift) && !panOverridesCards {
+                        marqueeStart = value.startLocation
+                    } else {
+                        pan.begin(from: board.viewport)
+                        // A Hand pan that starts over a card keeps the keys
+                        // on the board, so Escape and V still leave Hand.
+                        if panOverridesCards { boardHasKeyboardFocus = true }
+                    }
+                }
+                if let start = marqueeStart {
+                    let marquee = CGRect(
+                        x: min(start.x, value.location.x), y: min(start.y, value.location.y),
+                        width: abs(start.x - value.location.x),
+                        height: abs(start.y - value.location.y))
+                    interaction.marquee = marquee
+                    let hits = Set(
+                        board.cards.filter { card in
+                            marquee.intersects(
+                                CGRect(
+                                    origin: project(CGPoint(x: card.rect.x, y: card.rect.y)),
+                                    size: CGSize(
+                                        width: card.rect.width * board.viewport.scale,
+                                        height: card.rect.height * board.viewport.scale)))
+                        }.map(\.id))
+                    if hits != board.selection { board.select(hits) }
+                } else if let next = pan.viewport(for: value.translation) {
+                    board.setViewport(next)
                 }
             }
-            if let start = marqueeStart {
-                let marquee = CGRect(
-                    x: min(start.x, value.location.x), y: min(start.y, value.location.y),
-                    width: abs(start.x - value.location.x), height: abs(start.y - value.location.y))
-                interaction.marquee = marquee
-                let hits = Set(
-                    board.cards.filter { card in
-                        marquee.intersects(
-                            CGRect(
-                                origin: project(CGPoint(x: card.rect.x, y: card.rect.y)),
-                                size: CGSize(
-                                    width: card.rect.width * board.viewport.scale,
-                                    height: card.rect.height * board.viewport.scale)))
-                    }.map(\.id))
-                if hits != board.selection { board.select(hits) }
-            } else if let start = panStart {
-                board.setViewport(
-                    .init(
-                        scale: start.scale,
-                        x: min(100_000, max(-100_000, start.x + value.translation.width)),
-                        y: min(100_000, max(-100_000, start.y + value.translation.height))))
-            }
-        }.onEnded { _ in
-            interaction.marquee = nil
-            marqueeStart = nil
-            panStart = nil
-            dragOrigin = nil
-            isPanning = false
-        }
+            .onEnded { _ in endBackgroundDrag() }
+    }
+
+    /// Ends a pan or marquee. Runs on mouse-up (`onEnded`), and also when
+    /// SwiftUI cancels the drag without `onEnded` (both drag states reset), so a pan and the grab pointer never stay stuck.
+    private func endBackgroundDrag() {
+        interaction.marquee = nil
+        marqueeStart = nil
+        pan.end()
+        dragOrigin = nil
     }
 
     private func project(_ point: CGPoint) -> CGPoint {

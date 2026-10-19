@@ -2,8 +2,10 @@ import AppKit
 import SwiftUI
 
 /// The Excalidraw-like drawing surface. It lies over the board's cards and
-/// takes pointer input only while a drawing tool is active; with Select it is
-/// inert, so the board and cards behave exactly as before.
+/// takes pointer input only while a drawing tool is active; with Select, Hand
+/// and Image it is inert, so the board and cards behave exactly as before.
+/// Hand pans through the board's own pan gesture (`CanvasBoardPanRouting`),
+/// so it never lays a press-capturing layer over the cards.
 ///
 /// Coordinates: gesture locations are in the board surface (the same space
 /// `viewportProject`/`unproject` use); samples are stored in board units. A
@@ -18,12 +20,11 @@ struct CanvasWhiteboardCreationLayer: View {
 
     /// Board-space samples of the gesture in progress (bounded).
     @State private var samples: [CGPoint] = []
-    @State private var panStart: CanvasViewport?
     /// Board point where a new text item is being typed.
     @State private var textDraft: CGPoint?
 
     var body: some View {
-        if tool.kind == .select || tool.kind == .image {
+        if !tool.kind.drawsOnBoard {
             Color.clear
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
@@ -49,7 +50,6 @@ struct CanvasWhiteboardCreationLayer: View {
 
     private var pointer: PointerStyle {
         switch tool.kind {
-        case .hand: panStart == nil ? .grabIdle : .grabActive
         case .text: .horizontalText
         default: .rectSelection
         }
@@ -60,13 +60,6 @@ struct CanvasWhiteboardCreationLayer: View {
     private var drag: some Gesture {
         DragGesture(minimumDistance: 0).onChanged { value in
             switch tool.kind {
-            case .hand:
-                if panStart == nil { panStart = board.viewport }
-                guard let start = panStart else { return }
-                var next = start
-                next.x = min(100_000, max(-100_000, start.x + Double(value.translation.width)))
-                next.y = min(100_000, max(-100_000, start.y + Double(value.translation.height)))
-                board.setViewport(next)
             case .pen:
                 let point = unproject(value.location)
                 if samples.isEmpty { samples = [unproject(value.startLocation)] }
@@ -80,7 +73,7 @@ struct CanvasWhiteboardCreationLayer: View {
                 }
             case .rectangle, .ellipse, .diamond, .arrow, .line:
                 samples = [unproject(value.startLocation), unproject(value.location)]
-            case .text, .mermaid, .select, .image:
+            case .text, .mermaid, .select, .hand, .image:
                 break
             }
         }
@@ -88,8 +81,6 @@ struct CanvasWhiteboardCreationLayer: View {
             let start = unproject(value.startLocation)
             let end = unproject(value.location)
             switch tool.kind {
-            case .hand:
-                panStart = nil
             case .pen:
                 commitStroke(.freehand, samples: samples)
             case .arrow:
@@ -102,7 +93,7 @@ struct CanvasWhiteboardCreationLayer: View {
                 textDraft = start
             case .mermaid:
                 commitMermaid(at: start)
-            case .select, .image:
+            case .select, .hand, .image:
                 break
             }
             if tool.kind != .text { samples = [] }
