@@ -100,11 +100,7 @@ struct CanvasScrollBridge: NSViewRepresentable {
         // MARK: Drops
 
         override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-            let operation = draggingUpdated(sender)
-            DragDiag.note(
-                "board(AppKit) entered accepted=\(!operation.isEmpty) "
-                    + "types=\(sender.draggingPasteboard.types?.count ?? 0)")
-            return operation
+            draggingUpdated(sender)
         }
 
         override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
@@ -128,7 +124,6 @@ struct CanvasScrollBridge: NSViewRepresentable {
         }
 
         override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-            DragDiag.note("board(AppKit) performDragOperation")
             drop?.update(nil)
             guard let drop, let content = droppedContent(sender), drop.accepts(content) else {
                 return false

@@ -192,9 +192,6 @@ final class EditorDropForwardingScrollView: NSScrollView {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        DragDiag.note(
-            "editor(AppKit) entered forwarding=\(dropForwarding != nil) "
-                + "text=\(dragKind(sender) == .text)")
         guard let dropForwarding, dragKind(sender) != .text else { return [] }
         dropForwarding.updated(topLeftLocation(sender), bounds.size)
         return .copy
@@ -207,7 +204,6 @@ final class EditorDropForwardingScrollView: NSScrollView {
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
-        DragDiag.note("editor(AppKit) exited")
         dropForwarding?.exited()
     }
 
@@ -216,17 +212,13 @@ final class EditorDropForwardingScrollView: NSScrollView {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        DragDiag.note("editor(AppKit) performDragOperation")
         guard let dropForwarding else { return false }
         switch dragKind(sender) {
         case .internalPayload:
             let payload = sender.draggingPasteboard
                 .data(forType: Self.dragType)
                 .flatMap { try? EditorDragPayload(data: $0) }
-            let performed = dropForwarding.perform(topLeftLocation(sender), bounds.size, payload)
-            DragDiag.note(
-                "editor(AppKit) perform decoded=\(payload != nil) performed=\(performed)")
-            return performed
+            return dropForwarding.perform(topLeftLocation(sender), bounds.size, payload)
         case .externalFiles:
             let urls =
                 (sender.draggingPasteboard.readObjects(

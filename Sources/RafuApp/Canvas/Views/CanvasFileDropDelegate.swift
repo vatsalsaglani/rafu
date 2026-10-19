@@ -33,12 +33,10 @@ struct CanvasFileDropDelegate: DropDelegate {
     var dropPreview: Binding<CanvasDropPreview?> = .constant(nil)
 
     func dropEntered(info: DropInfo) {
-        let valid = updatePreview(info: info)
-        DragDiag.note("board(SwiftUI) entered valid=\(valid) kind=\(hoverKind(info))")
+        updatePreview(info: info)
     }
 
     func dropExited(info: DropInfo) {
-        DragDiag.note("board(SwiftUI) exited")
         dropPreview.wrappedValue = nil
     }
 
@@ -60,7 +58,6 @@ struct CanvasFileDropDelegate: DropDelegate {
         let kind = hoverKind(info)
         let fileProviders = kind == .files ? info.itemProviders(for: [.fileURL]) : []
         let valid = accepts(kind, fileCount: fileProviders.count)
-        DragDiag.note("board(SwiftUI) performDrop valid=\(valid)")
         guard valid else { return false }
         let location = info.location
         let surface = surfaceSize

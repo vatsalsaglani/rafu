@@ -721,7 +721,6 @@ private struct TerminalGroupManagerRowView: View {
             // already on a board, board full) apply unchanged at drop time.
             .onDrag(
                 {
-                    DragDiag.note("source terminals-row onDrag")
                     session.beginDragSourceTracking(dragToken)
                     session.activeEnsembleDragHint = .terminalGroup
                     return CanvasBoardDragPayload(terminalGroupID: row.id).makeItemProvider()

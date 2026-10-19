@@ -573,9 +573,6 @@ private struct EditorDropDelegate: DropDelegate {
     }
 
     func dropEntered(info: DropInfo) {
-        DragDiag.note(
-            "editor(SwiftUI) entered valid=\(validateDrop(info: info)) "
-                + "canvasVisible=\(canvasIsVisible)")
         isTargeted = true
         hoveredEdge = edge(for: info.location)
     }
@@ -597,13 +594,11 @@ private struct EditorDropDelegate: DropDelegate {
     }
 
     func dropExited(info: DropInfo) {
-        DragDiag.note("editor(SwiftUI) exited")
         isTargeted = false
         hoveredEdge = nil
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        DragDiag.note("editor(SwiftUI) performDrop cached=\(session.activeEditorDrag != nil)")
         let resolvedEdge = edge(for: info.location)
         isTargeted = false
         hoveredEdge = nil
@@ -868,7 +863,6 @@ private struct TabStripReorderDropDelegate: DropDelegate {
     }
 
     func dropEntered(info: DropInfo) {
-        DragDiag.note("tab-strip entered valid=\(validateDrop(info: info))")
         hoveredInsertion = insertion(at: info.location)
     }
 
@@ -889,7 +883,6 @@ private struct TabStripReorderDropDelegate: DropDelegate {
     }
 
     func dropExited(info: DropInfo) {
-        DragDiag.note("tab-strip exited")
         hoveredInsertion = nil
     }
 
@@ -899,10 +892,6 @@ private struct TabStripReorderDropDelegate: DropDelegate {
     func performDrop(info: DropInfo) -> Bool {
         let index = insertion(at: info.location).index
         hoveredInsertion = nil
-        DragDiag.note(
-            "tab-strip performDrop valid=\(validateDrop(info: info)) index=\(index) "
-                + "of=\(orderedTabIDs.count) framed=\(geometry.tabFrames.count) "
-                + "cached=\(session.activeEditorDrag != nil)")
 
         // Presence, not a provider: the same-window fast path below needs no
         // provider at all, and reading one would receive a file promise.
@@ -1890,7 +1879,6 @@ private struct EditorTabItem: View {
         .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
         .onDrag(
             {
-                DragDiag.note("source tab onDrag")
                 session.beginDragSourceTracking(dragToken)
                 return session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString))
             },
@@ -2061,7 +2049,6 @@ private struct EditorTerminalTabItem: View {
         .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
         .onDrag(
             {
-                DragDiag.note("source tab onDrag")
                 session.beginDragSourceTracking(dragToken)
                 return session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString))
             },
@@ -2257,7 +2244,6 @@ private struct EditorTerminalGroupTabItem: View {
         .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
         .onDrag(
             {
-                DragDiag.note("source tab onDrag")
                 session.beginDragSourceTracking(dragToken)
                 return session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString))
             },

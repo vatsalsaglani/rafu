@@ -360,7 +360,6 @@ struct WorkspaceFileTreeItem: View {
             base
                 .onDrag(
                     {
-                        DragDiag.note("source folder-row onDrag")
                         session.beginDragSourceTracking(dragToken)
                         return NSItemProvider(object: node.url as NSURL)
                     },
@@ -377,7 +376,6 @@ struct WorkspaceFileTreeItem: View {
         } else {
             base.onDrag(
                 {
-                    DragDiag.note("source file-row onDrag")
                     session.beginDragSourceTracking(dragToken)
                     let provider = session.beginEditorDrag(.file(path: node.url.path))
                     provider.registerObject(node.url as NSURL, visibility: .all)
@@ -461,7 +459,6 @@ struct WorkspaceFileTreeItem: View {
     /// during editor navigation and reveal, so observing that value would
     /// create a second, unwanted editor-navigation action.
     func activateRow() {
-        DragDiag.note("click \(node.isDirectory ? "folder" : "file")-row activate")
         session.selectedTreePath = node.url.path
         if !node.isDirectory { session.open(node) }
     }
