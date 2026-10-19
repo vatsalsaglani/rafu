@@ -191,11 +191,17 @@ private struct UsageCardBody: View {
                 let summary = UsageCardPresentation.paceSummary(
                     snapshot, observedAt: card.observedAt, now: now)
             {
-                UsagePaceLine(text: summary.text, warning: summary.warning, compact: true, ink: ink)
-                    .help(
-                        summary.text
-                            + ". Estimated from the window's average so far; model limits are separate."
-                    )
+                // `showGlyph: false` — the summarised window's own legend
+                // row already shows one triangle (see `UsageRingClusterView`'s
+                // `UsageRingLegendRow` doc comment).
+                UsagePaceLine(
+                    text: summary.text, warning: summary.warning, compact: true, ink: ink,
+                    showGlyph: false
+                )
+                .help(
+                    summary.text
+                        + ". Estimated from the window's average so far; model limits are separate."
+                )
             }
             if !compact {
                 if cluster != nil {
@@ -231,17 +237,20 @@ private struct UsageCardBody: View {
     }
 }
 
-/// A pace note. A warning adds a glyph and the warning colour. Shared with
-/// `UsageRingClusterView`'s legend rows, so it is not `private`.
+/// A pace note. A warning keeps the warning colour and tint; the leading
+/// glyph is opt-out (`showGlyph`) because `UsageRingClusterView`'s legend
+/// row already shows ONE triangle for the same window — this line must not
+/// repeat it. Shared with that legend row, so it is not `private`.
 struct UsagePaceLine: View {
     let text: String
     let warning: Bool
     let compact: Bool
     let ink: UsageCardInk
+    var showGlyph: Bool = true
 
     var body: some View {
         HStack(spacing: 4) {
-            if warning {
+            if warning, showGlyph {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .accessibilityHidden(true)
             }

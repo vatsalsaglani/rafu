@@ -197,14 +197,6 @@ func spokenResetAbbreviatedDate() {
 @Test(
     "RafuProgressRing's ring diameters shrink inward and skip once a ring is too small for its cap")
 func progressRingDiameterSkipRule() {
-    // Full-size config (76/7/3): three rings all comfortably fit.
-    let full = RafuProgressRing.diameters(count: 3, size: 76, lineWidth: 7, gap: 3)
-    #expect(full == [76, 56, 36])
-
-    // Compact-size config (38/3/1.5): three rings all fit too.
-    let compact = RafuProgressRing.diameters(count: 3, size: 38, lineWidth: 3, gap: 1.5)
-    #expect(compact == [38, 29, 20])
-
     // A deliberately crowded configuration: ring 0 (20) fits; ring 1
     // (20 - 2*6 = 8) is under `lineWidth * 2` (12) and skipped; ring 2
     // (20 - 2*2*6 = -4) is negative and skipped too.
@@ -212,4 +204,31 @@ func progressRingDiameterSkipRule() {
     #expect(crowded == [20, nil, nil])
 
     #expect(RafuProgressRing.diameters(count: 0, size: 76, lineWidth: 7, gap: 3).isEmpty)
+}
+
+@Test(
+    "UsageRingClusterView's actual compact (56/7/2) and full (92/11/3) configs still fit all three rings"
+)
+func progressRingDiameterRealSizesFitThreeRings() {
+    let compact = RafuProgressRing.diameters(count: 3, size: 56, lineWidth: 7, gap: 2)
+    #expect(compact == [56, 38, 20])
+
+    let full = RafuProgressRing.diameters(count: 3, size: 92, lineWidth: 11, gap: 3)
+    #expect(full == [92, 64, 36])
+}
+
+// MARK: - UsageCardInk hue stability
+
+@Test(
+    "A ring's hue is stable across levels — color(for:) never changes with UsageRingLevel; warningTint(for:) carries the separate warning/critical signal"
+)
+@MainActor
+func inkColorIsStableAcrossLevelsAndWarningTintIsSeparate() {
+    let theme = RafuThemeCatalog.indigo
+    let ink = UsageCardInk.settings(theme: theme)
+    #expect(ink.color(for: .primary) == theme.palette.accent)
+    #expect(ink.color(for: .secondary) == theme.palette.info)
+    #expect(ink.color(for: .tertiary) == theme.palette.success)
+    #expect(ink.warningTint(for: .warning) == theme.palette.warning)
+    #expect(ink.warningTint(for: .critical) == theme.palette.error)
 }

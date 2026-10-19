@@ -2,8 +2,9 @@ import Foundation
 
 /// The colour slot a ring/legend row occupies in a cluster — an ordinal,
 /// never a `Color` itself, so this type stays UI-agnostic and
-/// headless-testable. `UsageCardInk.color(for:level:)` resolves it against
-/// the active theme (Settings) or `NotchInk` (the notch).
+/// headless-testable. `UsageCardInk.color(for:)` resolves it against the
+/// active theme (Settings) or `NotchInk` (the notch) as a STABLE hue —
+/// never recoloured by `UsageRingLevel`.
 nonisolated enum UsageRingTone: Equatable, Sendable {
     case primary, secondary, tertiary
 }
