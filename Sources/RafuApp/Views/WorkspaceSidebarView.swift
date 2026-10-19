@@ -347,10 +347,26 @@ struct WorkspaceFileTreeItem: View {
                     TapGesture().onEnded { activateRow() }
                 )
         } else {
-            Button(action: activateRow) {
-                rowLabel
-            }
-            .buttonStyle(.plain)
+            // Not a `Button`: its press tracking competes with the row's
+            // `.onDrag` lift gesture for the same mouse-down, and a Button
+            // fires on any mouse-up it still owns, so a failed drag reads
+            // as a click that opens the file. Directory rows and
+            // Terminals-panel rows already use plain gestures. One tap
+            // handler (no `count: 2` sibling, so no double-click delay)
+            // keeps single-click opening; the modifiers below restore what
+            // `Button` gave for free: Full Keyboard Access focus
+            // (activation-only, so a click never moves focus), Return/Space,
+            // and one VoiceOver button element with a default action.
+            rowLabel
+                .onTapGesture(perform: activateRow)
+                .focusable(interactions: .activate)
+                .onKeyPress(keys: [.return, .space]) { _ in
+                    activateRow()
+                    return .handled
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { activateRow() }
         }
     }
 

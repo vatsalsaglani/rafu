@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// Identifies one of this window's own drag sources (a file row, a tab, an
 /// Agent History row, or a Terminals-panel Terminal Group row) for the
@@ -37,5 +37,46 @@ nonisolated enum RafuDragSourceLifecycle {
         -> RafuDragSourceToken?
     {
         end(token, clearing: current)
+    }
+
+    /// What an app event seen while a drag is in flight means for it.
+    enum Signal: Equatable, Sendable {
+        case ended
+        case cancelled
+    }
+
+    /// The pure rule behind the drag-end monitor. A left mouse-up ends the
+    /// drag and Escape (key code 53) cancels it. A mouse-move or a new left
+    /// mouse-down ALSO ends it: each can only arrive while no button is
+    /// held, so no drag can still be in flight. Those two exist because
+    /// AppKit's asynchronous, gesture-based drag session (what SwiftUI's
+    /// `.onDrag` starts on macOS 26+) consumes the drag's own mouse-up, so a
+    /// local monitor never sees it; without them the source ghost stayed
+    /// dimmed until the 12 s fallback.
+    static func signal(for type: NSEvent.EventType, keyCode: UInt16) -> Signal? {
+        switch type {
+        case .leftMouseUp, .leftMouseDown, .mouseMoved: .ended
+        case .keyDown where keyCode == 53: .cancelled
+        default: nil
+        }
+    }
+}
+
+/// When a drag source's `.onDrag` closure may write OBSERVED state. SwiftUI
+/// calls that closure while its drag-lift gesture is still building the
+/// `NSDraggingSession`. `WorkspaceSession.dragInFlight` is read by every
+/// source row and tab (for the dimmed source ghost), so a synchronous write
+/// there invalidates those views in the middle of drag initiation. The
+/// ghost is cosmetic, so the write moves to a later main-queue turn, after
+/// the session exists. `@ObservationIgnored` caches that a drop reads
+/// synchronously (`activeEditorDrag`, `activeEnsembleDragHint`) stay
+/// synchronous at the call site; they invalidate nothing.
+enum RafuDragSourceStart {
+    typealias Scheduler = @MainActor (@escaping @MainActor () -> Void) -> Void
+
+    /// The production scheduler: the next turn of the main queue, which
+    /// AppKit also services while a drag is tracking.
+    static let nextMainTurn: Scheduler = { work in
+        DispatchQueue.main.async { MainActor.assumeIsolated { work() } }
     }
 }

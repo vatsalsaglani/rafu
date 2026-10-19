@@ -290,30 +290,38 @@ private struct AgentHistorySessionRow: View {
     @State private var dragToken = RafuDragSourceToken()
 
     var body: some View {
-        Button(action: open) {
-            HStack(alignment: .top, spacing: 7) {
-                AgentIconView(cli: summary.provider.cli, size: 14)
-                    .padding(.top, 1)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(summary.title)
-                        .font(.callout)
-                        .foregroundStyle(theme.palette.textPrimary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                    AgentHistorySessionMetadata(summary: summary)
-                }
-                Spacer(minLength: 0)
+        // Not a `Button`, for the same reason as a Files-tree file row
+        // (`WorkspaceFileTreeItem.interactiveRow`): the `.onDrag` lift
+        // gesture must be the row's only press owner. One tap handler keeps
+        // single-click opening; focus, Return/Space, and the VoiceOver
+        // button element are restored below.
+        HStack(alignment: .top, spacing: 7) {
+            AgentIconView(cli: summary.provider.cli, size: 14)
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(summary.title)
+                    .font(.callout)
+                    .foregroundStyle(theme.palette.textPrimary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                AgentHistorySessionMetadata(summary: summary)
             }
-            .padding(.vertical, 3)
-            .padding(.horizontal, 4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: RafuMetrics.radiusDenseSelection, style: .continuous)
-                    .fill(isOpen ? theme.palette.selection : Color.clear)
-            )
-            .contentShape(.rect)
+            Spacer(minLength: 0)
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, 3)
+        .padding(.horizontal, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: RafuMetrics.radiusDenseSelection, style: .continuous)
+                .fill(isOpen ? theme.palette.selection : Color.clear)
+        )
+        .contentShape(.rect)
+        .onTapGesture(perform: open)
+        .focusable(interactions: .activate)
+        .onKeyPress(keys: [.return, .space]) { _ in
+            open()
+            return .handled
+        }
         .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
         // Drag a row onto an Ensemble to resume the session there. The
         // payload holds only the provider and the session id.
@@ -332,8 +340,9 @@ private struct AgentHistorySessionRow: View {
         )
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
-        .accessibilityAddTraits(isOpen ? .isSelected : [])
+        .accessibilityAddTraits(isOpen ? [.isButton, .isSelected] : .isButton)
         .accessibilityHint("Opens the transcript in a tab")
+        .accessibilityAction { open() }
     }
 
     private var accessibilityText: String {
