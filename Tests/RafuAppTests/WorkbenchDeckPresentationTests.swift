@@ -113,7 +113,9 @@ struct WorkbenchDeckPresentationTests {
 
         #expect(source.contains(".background(theme.palette.sidebarBackground)"))
         #expect(source.contains(".listStyle(.plain)"))
-        #expect(source.contains(".environment(\\.defaultMinListRowHeight, 24)"))
+        #expect(
+            source.contains(".environment(\\.defaultMinListRowHeight, FileTreeMetrics.rowHeight)"))
+        #expect(FileTreeMetrics.rowHeight == 26)
         #expect(source.contains("ForEach(session.loadedChildren[\"\"] ?? [], id: \\.id)"))
         #expect(source.contains(".dropDestination(for: URL.self)"))
         #expect(source.contains(".onCopyCommand"))

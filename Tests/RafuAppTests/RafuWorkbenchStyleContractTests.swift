@@ -407,13 +407,16 @@ struct RafuWorkbenchStyleContractTests {
         let railEnd = try #require(railTail.range(of: "struct RafuProminentButtonStyle"))
         let railSource = String(railTail[..<railEnd.lowerBound])
         #expect(!railSource.contains(".animation("))
-        // Selected is a filled rounded square: no hairline, no side bar.
-        #expect(!railSource.contains("strokeBorder"))
+        // Selected is a filled rounded tile with a borderSubtle hairline (so
+        // it reads in Khadi); there is still no accent side bar.
+        #expect(railSource.contains("if isSelected {"))
+        #expect(railSource.contains(".strokeBorder(theme.palette.borderSubtle, lineWidth: 1)"))
+        #expect(!railSource.contains("palette.accent"))
         #expect(!railSource.contains(".frame(width: 2, height: 16)"))
         #expect(railSource.contains("cornerRadius: RafuMetrics.radiusField"))
         #expect(!railSource.contains("radiusDenseSelection"))
         #expect(railSource.contains("return theme.palette.selection"))
-        #expect(railSource.contains(".font(.system(size: 14, weight: .medium))"))
+        #expect(railSource.contains(".font(.system(size: 15, weight: .regular))"))
     }
 
     @Test("The sidebar seam draws nothing at rest and a grab bar only on hover or drag")
