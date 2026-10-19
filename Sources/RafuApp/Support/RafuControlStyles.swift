@@ -92,8 +92,8 @@ struct RafuIconButtonStyle: ButtonStyle {
 }
 
 /// Compact activity-rail button: the selected destination is a filled
-/// rounded square (`selection`), hover is a quieter `hover` wash, and there
-/// is no hairline border and no accent side bar. Selection, hover, press,
+/// rounded tile (`selection` with a `borderSubtle` hairline), hover is a
+/// quieter `hover` wash, and there is no accent side bar. Selection, hover, press,
 /// disabled, inactive-window, badge, tooltip, and accessibility states
 /// remain separate and theme-owned. `deckFacingEdge` is kept for callers
 /// (and a possible right-hand rail); it no longer draws anything.
@@ -126,12 +126,20 @@ struct RafuRailButtonStyle: ButtonStyle {
         var body: some View {
             configuration.label
                 .labelStyle(.iconOnly)
-                .font(.system(size: 14, weight: .medium))
+                .font(.system(size: 15, weight: .regular))
                 .foregroundStyle(foreground)
                 .frame(width: 30, height: 30)
                 .background {
                     RoundedRectangle(cornerRadius: RafuMetrics.radiusField, style: .continuous)
                         .fill(background)
+                }
+                .overlay {
+                    // A hairline makes the selected fill read as a tile in
+                    // light themes, where `selection` sits close to the rail.
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: RafuMetrics.radiusField, style: .continuous)
+                            .strokeBorder(theme.palette.borderSubtle, lineWidth: 1)
+                    }
                 }
                 .overlay(alignment: .topTrailing) {
                     if let badge, badge > 0 {

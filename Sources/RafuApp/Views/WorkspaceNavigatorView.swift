@@ -46,7 +46,10 @@ struct WorkspaceActivityRail: View {
     @Environment(\.rafuTheme) private var theme
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
+            // 4 pt plus the stack's 6 pt spacing: a 10 pt gap to the modes.
+            RafuRailAppTile()
+                .padding(.bottom, 4)
             ForEach(WorkspaceNavigatorMode.allCases, id: \.self) { mode in
                 railButton(mode)
             }
@@ -54,7 +57,7 @@ struct WorkspaceActivityRail: View {
         }
         // The rail starts below the titlebar row (`WindowTitlebarRow`) so
         // the traffic lights and sidebar toggle stay clear above it.
-        .padding(.top, 8)
+        .padding(.top, 10)
         .frame(width: 40)
         .frame(maxHeight: .infinity)
         .fixedSize(horizontal: true, vertical: false)
@@ -95,6 +98,33 @@ struct WorkspaceActivityRail: View {
                 button
             }
         }
+    }
+}
+
+/// The app's own icon as a 28 pt rounded tile at the top of the rail, 10 pt
+/// above the first mode button. It is identity only: not a control, and
+/// hidden from VoiceOver. The bundle icon is drawn full bleed (the seam
+/// artwork has no transparent margin), so the radius-8 clip is the tile
+/// edge; the Lightning variant shows its own seam colour.
+struct RafuRailAppTile: View {
+    static let size: CGFloat = 28
+    static let cornerRadius: CGFloat = 8
+
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        Image(nsImage: NSApplication.shared.applicationIconImage)
+            .resizable()
+            .interpolation(.high)
+            .aspectRatio(contentMode: .fill)
+            .frame(width: Self.size, height: Self.size)
+            .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                    .strokeBorder(theme.palette.borderSubtle, lineWidth: 1)
+            )
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 

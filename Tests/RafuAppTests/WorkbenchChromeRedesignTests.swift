@@ -400,7 +400,7 @@ struct WorkbenchChromeRedesignTests {
     @Test("Files header leads with the workspace name and offers Filter Files")
     func filesHeader() throws {
         let source = try Self.source("Sources/RafuApp/Views/WorkspaceSidebarView.swift")
-        #expect(source.contains("\"Filter Files\", systemImage: \"line.3.horizontal.decrease\""))
+        #expect(source.contains("\"Filter Files\", systemImage: \"magnifyingglass\""))
         #expect(source.contains(".font(.system(size: 13, weight: .semibold))"))
         #expect(!source.contains("Button(\"Search Workspace\""))
     }
