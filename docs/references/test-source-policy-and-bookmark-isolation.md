@@ -193,13 +193,27 @@ and a retry makes the wait unbounded. Check:
 `swift test --filter CanvasBridgeIPCTests`, then `./script/test.sh`. Separate hang cause for the whole suite:
 [`test-keychain-isolation.md`](test-keychain-isolation.md).
 
-**Open item, 2026-10-20 — a second time-sensitive test.**
-`LanguageServerManagerTests`, "A server that stays alive past the stability
-threshold restarts its crash count fresh", failed **once** in `--no-parallel`
-while an `xctrace` profiling run was loading the machine. It passed alone
-(`swift test --filter`) and passed on a plain rerun. By the AGENTS.md triage
-table that is scheduler starvation under load, not a bug — but the test asserts
-on a wall-clock stability threshold, so it is the same class of defect as the
-`CanvasBridgeIPCTests` deadline above and is **worth fixing** rather than
-tolerating. It is not fixed as of `716370a`. The fix shape is the same one that
-worked for the bridge: inject the threshold instead of racing a real clock.
+**Fixed 2026-10-20 (`LanguageServerManagerTests`, "A server that stays alive
+past the stability threshold restarts its crash count fresh").** It failed
+once in `--no-parallel` while an `xctrace` run loaded the machine, and passed
+alone. The time dependency: `LanguageServerManager` measured crash uptime
+with the real `ContinuousClock`, from `finishStart` to `handleTermination`.
+The test used an 80 ms `stabilityThreshold` and needed crashes 1 and 2 to be
+"fast". Under load the path from `terminate()` through the supervision task
+and the actor hop took more than 80 ms, so crash 2 counted as stable and
+reset the count to 1 instead of 2. The test also read
+`collector.statuses.last`, which fire-and-forget `pushStatus` tasks can
+reorder, and slept 120 ms of real time for the stable crash.
+
+The fix: `LanguageServerManager.init` takes
+`now: @Sendable () -> ContinuousClock.Instant` (default
+`ContinuousClock.now`). Crash uptime and backoff deadlines read it; the idle
+timer and the watchdog still sleep on the real clock. The test injects a
+`Mutex`-backed clock that it advances by hand: 0 s for a fast crash, the full
+30 s threshold for the stable crash, and each backoff delay before a
+restart. It reads the status sink as an `AsyncStream` and waits for the next
+`.backingOff` status, with a one-minute `.timeLimit`. The assertions are
+unchanged (counts 1, 2, then 1), and the test now also checks that a restart
+is declined until the injected backoff deadline passes. It has no sleeps.
+Check: `swift test --filter stableUptimeResetsCrashCount`, then
+`./script/test.sh` and `./script/test.sh --no-parallel`.

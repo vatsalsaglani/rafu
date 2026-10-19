@@ -48,7 +48,8 @@ actor LanguageServerManager {
             pid: pid_t?,
             registryID: UUID,
             consecutiveCrashes: Int,
-            rssCeilingBytes: UInt64
+            rssCeilingBytes: UInt64,
+            startInstant: ContinuousClock.Instant
         ) {
             self.languageID = languageID
             self.serverName = serverName
@@ -57,7 +58,7 @@ actor LanguageServerManager {
             self.registryID = registryID
             self.rssCeilingBytes = rssCeilingBytes
             self.consecutiveCrashes = consecutiveCrashes
-            self.startInstant = .now
+            self.startInstant = startInstant
         }
     }
 
@@ -76,6 +77,11 @@ actor LanguageServerManager {
     private let bounds: LanguageServerLifecycleBounds
     private let statusSink: @Sendable @MainActor (LanguageServerStatus) -> Void
     private let snapshotProvider: @Sendable (String) async -> [DocumentSnapshot]
+    /// The clock for crash uptime (`bounds.stabilityThreshold`) and backoff
+    /// deadlines. Tests inject a clock they advance by hand, so machine load
+    /// cannot turn a fast crash into a stable one. The idle timer and the
+    /// watchdog sleep on the real clock.
+    private let now: @Sendable () -> ContinuousClock.Instant
 
     private var rootURI: String?
     private var servers: [String: ManagedServer] = [:]
@@ -97,7 +103,8 @@ actor LanguageServerManager {
         registry: ProcessResourceRegistry = ProcessResourceRegistry(),
         bounds: LanguageServerLifecycleBounds = LanguageServerLifecycleBounds(),
         statusSink: @escaping @Sendable @MainActor (LanguageServerStatus) -> Void = { _ in },
-        snapshotProvider: @escaping @Sendable (String) async -> [DocumentSnapshot] = { _ in [] }
+        snapshotProvider: @escaping @Sendable (String) async -> [DocumentSnapshot] = { _ in [] },
+        now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock.now }
     ) {
         self.resolver = resolver
         self.spawner = spawner
@@ -105,6 +112,7 @@ actor LanguageServerManager {
         self.bounds = bounds
         self.statusSink = statusSink
         self.snapshotProvider = snapshotProvider
+        self.now = now
     }
 
     // MARK: - Workspace lifecycle
@@ -159,7 +167,7 @@ actor LanguageServerManager {
             case .dead:
                 return nil
             case .backingOff:
-                guard let deadline = crash.backoffDeadline, ContinuousClock.now >= deadline else {
+                guard let deadline = crash.backoffDeadline, now() >= deadline else {
                     return nil
                 }
             default:
@@ -227,7 +235,8 @@ actor LanguageServerManager {
             pid: spawned.pid,
             registryID: registryID,
             consecutiveCrashes: consecutiveCrashes,
-            rssCeilingBytes: resolved.rssCeilingBytes ?? bounds.defaultRSSCeilingBytes
+            rssCeilingBytes: resolved.rssCeilingBytes ?? bounds.defaultRSSCeilingBytes,
+            startInstant: now()
         )
         let openURIs = openURIsByLanguage[languageID] ?? []
         managed.openURIs = openURIs
@@ -342,7 +351,7 @@ actor LanguageServerManager {
     private func handleTermination(languageID: String, registryID: UUID) async {
         guard let current = servers[languageID], current.registryID == registryID else { return }
 
-        let uptime = ContinuousClock.now - current.startInstant
+        let uptime = now() - current.startInstant
         let crashes: Int
         if uptime >= bounds.stabilityThreshold {
             // Alive long enough to count as stable: this death starts a
@@ -360,7 +369,7 @@ actor LanguageServerManager {
 
     private func recordCrash(languageID: String, serverName: String, consecutiveCrashes: Int) {
         if let delay = bounds.backoff.delay(afterConsecutiveCrashes: consecutiveCrashes) {
-            let deadline = ContinuousClock.now.advanced(by: delay)
+            let deadline = now().advanced(by: delay)
             crashState[languageID] = CrashState(
                 consecutiveCrashes: consecutiveCrashes, phase: .backingOff,
                 backoffDeadline: deadline)

@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 
 @testable import RafuApp
@@ -484,52 +485,88 @@ func fastCrashesEscalateToManualRestart() async {
     await manager.deactivate()
 }
 
-@Test("A server that stays alive past the stability threshold restarts its crash count fresh")
+/// A `ContinuousClock` reading that moves only when the test advances it.
+/// `LanguageServerManager` reads crash uptime and backoff deadlines from it,
+/// so a "fast" crash stays fast however long the machine takes to deliver it.
+private final class ManualInstantSource: Sendable {
+    private let current = Mutex(ContinuousClock.now)
+
+    func now() -> ContinuousClock.Instant {
+        current.withLock { $0 }
+    }
+
+    func advance(by duration: Duration) {
+        current.withLock { $0 = $0.advanced(by: duration) }
+    }
+}
+
+/// Returns the next pushed status with `phase`, skipping every other one.
+/// `pushStatus` delivers through fire-and-forget tasks, so this reads the
+/// sink's own stream instead of sampling the newest status.
+private func nextStatus(
+    _ phase: LanguageServerStatus.Phase,
+    from statuses: inout AsyncStream<LanguageServerStatus>.Iterator
+) async -> LanguageServerStatus? {
+    while let status = await statuses.next() {
+        if status.phase == phase { return status }
+    }
+    return nil
+}
+
+@Test(
+    "A server that stays alive past the stability threshold restarts its crash count fresh",
+    .timeLimit(.minutes(1)))
 func stableUptimeResetsCrashCount() async {
     let spawner = TestLanguageServerSpawner()
     let resolver = TestLanguageServerResolver(entries: [
         "rust": makeResolvedServer(languageID: "rust")
     ])
-    let collector = StatusCollector()
+    let clock = ManualInstantSource()
+    let (statuses, statusContinuation) = AsyncStream.makeStream(
+        of: LanguageServerStatus.self, bufferingPolicy: .unbounded)
+    var statusIterator = statuses.makeAsyncIterator()
+    // Uptime and backoff come only from `clock`. The idle timer and the
+    // watchdog use the real clock, so their bounds are far past this test.
+    let stabilityThreshold = Duration.seconds(30)
     let bounds = LanguageServerLifecycleBounds(
-        idleTimeout: .seconds(5), stabilityThreshold: .milliseconds(80),
-        backoff: RestartBackoffPolicy(
-            schedule: [.milliseconds(20), .milliseconds(40), .milliseconds(60)]),
-        sampleInterval: .seconds(5)
+        idleTimeout: .seconds(3_600), stabilityThreshold: stabilityThreshold,
+        backoff: RestartBackoffPolicy(schedule: [.seconds(1), .seconds(5), .seconds(30)]),
+        sampleInterval: .seconds(3_600)
     )
     let manager = LanguageServerManager(
         resolver: resolver, spawner: spawner, bounds: bounds,
-        statusSink: { status in collector.record(status) }
+        statusSink: { status in statusContinuation.yield(status) },
+        now: { clock.now() }
     )
     await manager.activate(rootURI: "file:///workspace")
 
-    // Crash 1: fast, right after start.
-    _ = await waitForSession(manager: manager, languageID: "rust")
-    var handles = await spawner.handles(serverName: "rust")
-    await handles.last?.terminate()
-    var backedOff = await waitUntil { await collector.statuses.last?.phase == .backingOff }
-    #expect(backedOff)
-    #expect(await collector.statuses.last?.consecutiveCrashes == 1)
+    // Crash 1: fast — no time passes between start and death.
+    #expect(await manager.ensureSession(languageID: "rust") != nil)
+    await spawner.handles(serverName: "rust").last?.terminate()
+    let first = await nextStatus(.backingOff, from: &statusIterator)
+    #expect(first?.consecutiveCrashes == 1)
+
+    // The backoff deadline is on the same clock: no restart until it passes.
+    #expect(await manager.ensureSession(languageID: "rust") == nil)
+    clock.advance(by: .seconds(1))
 
     // Crash 2: also fast — escalates to crash count 2.
-    _ = await waitForSession(manager: manager, languageID: "rust")
-    handles = await spawner.handles(serverName: "rust")
-    await handles.last?.terminate()
-    backedOff = await waitUntil { await collector.statuses.last?.phase == .backingOff }
-    #expect(backedOff)
-    #expect(await collector.statuses.last?.consecutiveCrashes == 2)
+    #expect(await manager.ensureSession(languageID: "rust") != nil)
+    await spawner.handles(serverName: "rust").last?.terminate()
+    let second = await nextStatus(.backingOff, from: &statusIterator)
+    #expect(second?.consecutiveCrashes == 2)
+    clock.advance(by: .seconds(5))
 
     // Crash 3: this time the server survives past `stabilityThreshold`
     // before dying — the crash count must reset to 1, not escalate to 3.
-    _ = await waitForSession(manager: manager, languageID: "rust")
-    try? await Task.sleep(for: .milliseconds(120))
-    handles = await spawner.handles(serverName: "rust")
-    await handles.last?.terminate()
-    backedOff = await waitUntil { await collector.statuses.last?.phase == .backingOff }
-    #expect(backedOff)
-    #expect(await collector.statuses.last?.consecutiveCrashes == 1)
+    #expect(await manager.ensureSession(languageID: "rust") != nil)
+    clock.advance(by: stabilityThreshold)
+    await spawner.handles(serverName: "rust").last?.terminate()
+    let third = await nextStatus(.backingOff, from: &statusIterator)
+    #expect(third?.consecutiveCrashes == 1)
 
     await manager.deactivate()
+    statusContinuation.finish()
 }
 
 // MARK: - RSS ceiling watchdog
