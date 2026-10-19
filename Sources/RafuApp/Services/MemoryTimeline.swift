@@ -158,8 +158,8 @@ nonisolated enum MemoryTimelinePolicy {
 /// readings annotated with what the app had just finished doing.
 ///
 /// **Honesty contract.** macOS exposes no per-subsystem breakdown of a
-/// task's own resident size — `mach_task_basic_info` is one number for the
-/// whole process. So this type NEVER claims "opening that diff cost 18 MB."
+/// task's own memory — `phys_footprint` from `TASK_VM_INFO` is one number
+/// for the whole process. So this type NEVER claims "opening that diff cost 18 MB."
 /// It records "resident memory moved +18 MB across the interval that ended
 /// when the diff finished opening," which is a correlation the user can act
 /// on. Allocator slack, framework caches, and lazy deallocation all land in
@@ -200,9 +200,12 @@ final class MemoryTimeline {
     private var lastResident: UInt64?
 
     /// Injectable so tests drive the ring with scripted readings instead of
-    /// this process's real, unrepeatable resident size.
+    /// this process's real, unrepeatable memory. Reads `phys_footprint`, the
+    /// figure the status bar and Activity Monitor show (resident size only
+    /// when the kernel does not report the footprint), so the timeline and
+    /// the status bar agree.
     @ObservationIgnored
-    var sampleResident: () -> UInt64? = { ProcessMemorySampler().sample()?.residentBytes }
+    var sampleResident: () -> UInt64? = { ProcessMemorySampler().sample()?.displayBytes }
 
     /// Internal (not `private`) so tests build their own instance — hermetic
     /// under parallel runs, unlike mutating `.shared`.

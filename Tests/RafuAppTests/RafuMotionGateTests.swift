@@ -115,3 +115,38 @@ func agentGlyphSpinGate() {
     #expect(!AgentActivityGlyph.spins(animates: true, reduceMotion: true, motionAllowed: true))
     #expect(!AgentActivityGlyph.spins(animates: true, reduceMotion: false, motionAllowed: false))
 }
+
+// MARK: - Mascot working motion and playback bars
+
+@Test("RafuMascotWorkingMotion.pose: time 0 is still, one turn per period, a bounded bob")
+func mascotWorkingPose() {
+    let rest = RafuMascotWorkingMotion.pose(elapsed: 0)
+    #expect(rest.spin == 0)
+    #expect(rest.sway == 0)
+    let half = RafuMascotWorkingMotion.pose(elapsed: RafuMascotWorkingMotion.spinPeriod / 2)
+    #expect(abs(half.spin - 180) < 0.000_1)
+    #expect(abs(half.sway - RafuMascotWorkingMotion.swayAmplitude) < 0.000_1)
+    for step in 0..<200 {
+        let pose = RafuMascotWorkingMotion.pose(elapsed: Double(step) * 0.173)
+        #expect(pose.spin >= 0 && pose.spin < 360)
+        #expect(pose.sway >= 0 && pose.sway <= RafuMascotWorkingMotion.swayAmplitude)
+    }
+    // A blink after every third bob, never at the start.
+    #expect(!RafuMascotWorkingMotion.blinks(onBeat: 0))
+    #expect(RafuMascotWorkingMotion.blinks(onBeat: 3))
+    #expect(!RafuMascotWorkingMotion.blinks(onBeat: 4))
+    #expect(RafuMascotWorkingMotion.beat(elapsed: RafuMascotWorkingMotion.bobPeriod * 3.5) == 3)
+    // At most 20 writes a second, not one per display frame.
+    #expect(RafuMascotWorkingMotion.frameInterval >= 1.0 / 20)
+}
+
+@Test("NotchPlaybackIndicator: bars stay in the frame and move at most 8 times a second")
+func playbackIndicatorBars() {
+    for step in 0..<200 {
+        for bar in 0..<3 {
+            let height = NotchPlaybackIndicator.barHeight(bar: bar, time: Double(step) * 0.07)
+            #expect(height >= 3 && height <= 10)
+        }
+    }
+    #expect(NotchPlaybackIndicator.frameInterval >= 1.0 / 8)
+}

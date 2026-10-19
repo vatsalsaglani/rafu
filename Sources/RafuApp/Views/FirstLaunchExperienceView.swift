@@ -21,6 +21,7 @@ struct FirstLaunchExperienceView: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.rafuMotionAllowed) private var motionAllowed
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.rafuTheme) private var theme
 
@@ -57,6 +58,7 @@ struct FirstLaunchExperienceView: View {
             reduceMotion ? .easeInOut(duration: 0.15) : .easeInOut(duration: 0.8),
             value: model.stepIndex
         )
+        .onChange(of: glowBreathes) { updateGlowPulse() }
         .task(id: model.stepIndex) {
             await loadStageAssets()
             startAmbientMotion()
@@ -172,17 +174,29 @@ struct FirstLaunchExperienceView: View {
     /// glow. Both skipped entirely under Reduce Motion.
     private func startAmbientMotion() {
         kenBurnsScale = 1
-        glowPulse = 1
+        updateGlowPulse()
         guard !reduceMotion else { return }
-        if !step.usesStill {
-            withAnimation(.easeInOut(duration: 4).repeatForever(autoreverses: true)) {
-                glowPulse = 1.08
-            }
-        } else if stageImage != nil {
+        if step.usesStill, stageImage != nil {
             let duration = step.dwell?.timeInterval ?? 14
             withAnimation(.linear(duration: duration)) {
                 kenBurnsScale = 1.06
             }
+        }
+    }
+
+    /// The glow breathes on gradient scenes only, and never under Reduce
+    /// Motion, in a hidden window or behind a locked screen.
+    private var glowBreathes: Bool { !step.usesStill && !reduceMotion && motionAllowed }
+
+    /// Starts the glow's `repeatForever` pulse, or ends it with a
+    /// non-animated write: only that write stops a running `repeatForever`.
+    private func updateGlowPulse() {
+        var still = Transaction()
+        still.disablesAnimations = true
+        withTransaction(still) { glowPulse = 1 }
+        guard glowBreathes else { return }
+        withAnimation(.easeInOut(duration: 4).repeatForever(autoreverses: true)) {
+            glowPulse = 1.08
         }
     }
 

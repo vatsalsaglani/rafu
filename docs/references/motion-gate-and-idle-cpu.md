@@ -29,7 +29,8 @@ lock screen, so the app kept animating a screen nobody could see.
 
 Per-window occlusion is combined with that and published as
 `\.rafuMotionAllowed` in the environment. Gated surfaces: the spinner, the
-commit border, the playback bars, the waveform, and the mascot.
+commit border, the playback bars, the waveform, the mascot, and the
+onboarding glow.
 
 ### Rules that fell out of the fix
 
@@ -77,13 +78,41 @@ xctrace record --template 'SwiftUI' --attach 'Rafu Lightning' --output /tmp/rafu
 Read `RootDisplayList` update counts from the SwiftUI template. Lock the screen
 for the locked measurement; do not infer it from an occluded window.
 
-## Known leftovers (not fixed in 716370a)
+## Leftovers fixed after 716370a
 
-- The working-mood indicator still spins at 120 Hz.
-- `NotchPlaybackIndicator` keeps a `TimelineView` running while music plays.
-- The onboarding glow is ungated.
-- Settings windows default to motion-allowed.
-- The memory timeline still records `resident_size`, not `phys_footprint`.
+Measured on a Debug build with the screen locked and a temporary bypass that
+forced `\.rafuMotionAllowed` to `true` on the one view under test (the bypass
+was never committed). `top -l 50 -s 1`, mean of the last 25 samples:
+
+| Surface | Before | After |
+|---|---|---|
+| Mascot, working mood | 9.6 % CPU, 13.8 idle wake-ups/s | 2.0 % CPU, 0 idle wake-ups/s |
+| `NotchPlaybackIndicator` | 7.2 % CPU | 0.9 % CPU |
+| No bypass (gate closed) | 0.0 % | 0.0 % |
+
+- **Working mood.** The trail spin and the antenna bob were chained
+  `withAnimation` legs, so the panel rendered every display frame. They are
+  now plain state writes at 20 Hz (`RafuMascotWorkingMotion`), from a
+  `Task.sleep` loop in the mascot's `.task(id:)`, which already restarts on
+  `\.rafuMotionAllowed` and Reduce Motion. Only the blink after every third
+  bob is a short animation.
+- **Playback bars.** The `TimelineView` is gone. A `.task(id: animating)` loop
+  writes the time at 8 Hz with animations disabled.
+- **Settings and other windows.** `Settings`, the Workspaces window, the
+  Ensemble icon-library panel and the diagram sheet now apply
+  `rafuMotionScope()`. The environment default stays `true`; an `@Entry`
+  default cannot read the main-actor gate and would not update. A new window
+  root, or a new `NSHostingView` or `NSHostingController` that is a window's
+  content, must apply the scope itself.
+- **Onboarding glow.** The `repeatForever` pulse now restarts on a change of
+  `\.rafuMotionAllowed` or Reduce Motion, and stops with a non-animated write.
+  The Ken Burns drift is a finite animation and is not gated.
+- **Memory timeline.** `MemoryTimeline` reads `phys_footprint` through
+  `ProcessMemorySample.displayBytes`, the same figure as the status bar. The
+  entry field is still named `residentBytes`.
+
+## Known leftovers
+
 - `LauncherIPCServer`'s accept loop runs on the cooperative pool.
 
 ## Related code, ADRs, and phases
@@ -93,4 +122,4 @@ for the locked measurement; do not infer it from an occluded window.
 - [`notch-companion.md`](notch-companion.md),
   [`memory-attribution-and-timeline.md`](memory-attribution-and-timeline.md),
   [`memory-caps-and-pressure.md`](memory-caps-and-pressure.md)
-- Commits on `main`: 5a0e873, 716370a.
+- Commits on `main`: 5a0e873, 716370a, and the follow-up motion commit.

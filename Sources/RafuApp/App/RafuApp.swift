@@ -27,12 +27,14 @@ struct RafuApplication: App {
         // command is the one menu path.
         Window("Workspaces", id: WorkspacesWindow.id) {
             WorkspacesWindowView()
+                .rafuMotionScope()
         }
         .defaultSize(width: 560, height: 480)
         .commandsRemoved()
 
         Settings {
             RafuSettingsView()
+                .rafuMotionScope()
         }
         .defaultSize(
             width: SettingsPresentationLayout.windowWidth,

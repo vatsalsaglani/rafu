@@ -120,7 +120,9 @@ extension EnvironmentValues {
 
 extension View {
     /// Sets `\.rafuMotionAllowed` for this window's content from the window's
-    /// occlusion state and `RafuMotionGate`. Apply once at each window root.
+    /// occlusion state and `RafuMotionGate`. Apply once at each window root:
+    /// every scene, and every `NSHostingView` or `NSHostingController` that
+    /// is a window's content. A root without it reads the default, `true`.
     func rafuMotionScope() -> some View {
         modifier(RafuMotionScope())
     }

@@ -134,7 +134,8 @@ enum CanvasDiagramPanels {
         panel.hidesOnDeactivate = true
         panel.contentView = NSHostingView(
             rootView: CanvasIconLibraryView(target: libraryTarget)
-                .rafuTheme(RafuThemeCatalog.resolvedForCurrentAppearance()))
+                .rafuTheme(RafuThemeCatalog.resolvedForCurrentAppearance())
+                .rafuMotionScope())
         panel.center()
         libraryPanel = panel
         panel.makeKeyAndOrderFront(nil)
@@ -194,7 +195,8 @@ enum CanvasDiagramPanels {
         }
         sheet.contentViewController = NSHostingController(
             rootView: content(dismiss)
-                .rafuTheme(RafuThemeCatalog.resolvedForCurrentAppearance()))
+                .rafuTheme(RafuThemeCatalog.resolvedForCurrentAppearance())
+                .rafuMotionScope())
         parent.beginSheet(sheet)
     }
 }

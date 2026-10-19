@@ -251,15 +251,17 @@ struct RafuMascotArtwork: View {
 /// The animated mascot. Motion runs only while `\.rafuMotionAllowed` (the
 /// window is visible, the screen is unlocked and awake) and never under
 /// Reduce Motion; otherwise the still pose of the mood is shown, which
-/// matches `rafu-*-still.svg`. Motion is a chain of explicit animations in one
-/// task, so no timer runs and hiding the notch or changing mood cancels it.
+/// matches `rafu-*-still.svg`. Motion runs in one task, so no timer runs and
+/// hiding the notch or changing mood cancels it.
 ///
 /// The idle mood is the resting state of the strip, so it is cheap: the
 /// still pose with a discrete blink or glance every few seconds. It breathes
 /// only while the person engages with the strip (`engaged`), and the breath
 /// is 15 plain state writes a second, not an animation: an animation in
 /// flight re-renders the whole panel on every display frame (120 Hz on
-/// ProMotion).
+/// ProMotion). The working mood's spin and antenna bob are plain writes at
+/// 20 a second for the same reason. Only short blinks, glances and hops are
+/// animations.
 struct RafuMascotView: View {
     let state: RafuMascotState
     /// The strip is hovered, expanded or pinned, or the mascot is in an open
@@ -384,26 +386,37 @@ struct RafuMascotView: View {
     }
 
     /// Focused eyes (the pose), an antenna that bobs, and a thread trail that
-    /// circles the loop.
+    /// circles the loop. The spin and the bob are plain state writes every
+    /// `RafuMascotWorkingMotion.frameInterval`; the blink every third bob is
+    /// a short animation.
     private func work() async throws {
+        let clock = ContinuousClock()
+        let start = clock.now
         var beat = 0
+        var reopenAt: ContinuousClock.Instant?
+        var still = Transaction()
+        still.disablesAnimations = true
         while !Task.isCancelled {
-            if motion.spin >= 3600 {
-                // A whole number of turns looks the same; keep the value small.
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) { motion.spin = 0 }
+            try await Task.sleep(
+                for: .seconds(RafuMascotWorkingMotion.frameInterval),
+                tolerance: .milliseconds(10))
+            let now = clock.now
+            let elapsed = (now - start) / .seconds(1)
+            let pose = RafuMascotWorkingMotion.pose(elapsed: elapsed)
+            withTransaction(still) {
+                motion.spin = pose.spin
+                motion.sway = pose.sway
             }
-            withAnimation(.linear(duration: 1.4)) { motion.spin += 360 }
-            withAnimation(.easeInOut(duration: 0.7)) { motion.sway = 12 }
-            try await Task.sleep(for: .milliseconds(700))
-            withAnimation(.easeInOut(duration: 0.7)) { motion.sway = 0 }
-            beat += 1
-            if beat.isMultiple(of: 3) {
-                try await blinkOnce()
-                try await Task.sleep(for: .milliseconds(600))
-            } else {
-                try await Task.sleep(for: .milliseconds(700))
+            if let reopen = reopenAt, now >= reopen {
+                withAnimation(.easeOut(duration: 0.14)) { motion.blink = 1 }
+                reopenAt = nil
+            }
+            let due = RafuMascotWorkingMotion.beat(elapsed: elapsed)
+            guard due > beat else { continue }
+            beat = due
+            if RafuMascotWorkingMotion.blinks(onBeat: beat) {
+                withAnimation(.linear(duration: 0.08)) { motion.blink = 0.09 }
+                reopenAt = now + .milliseconds(100)
             }
         }
     }
@@ -537,33 +550,97 @@ nonisolated enum RafuMascotIdleMotion: Equatable, Sendable {
     }
 }
 
+/// The working mood's moving parts. Pure, so the schedule is testable.
+nonisolated enum RafuMascotWorkingMotion {
+    /// The frame interval: 20 writes a second turn the trail about 13
+    /// degrees a step, and that is a sixth of a 120 Hz display's frames.
+    static let frameInterval: TimeInterval = 1.0 / 20
+
+    /// One turn of the thread trail, in seconds.
+    static let spinPeriod: TimeInterval = 1.4
+
+    /// One bob of the antenna (out and back), in seconds.
+    static let bobPeriod: TimeInterval = 1.4
+
+    /// The largest antenna sway, in degrees.
+    static let swayAmplitude: Double = 12
+
+    /// The pose `elapsed` seconds into the working mood: the spin in degrees
+    /// (0 up to, not including, 360) and an eased sway from 0 to
+    /// `swayAmplitude` and back. Time 0 is the still pose.
+    static func pose(elapsed: Double) -> (spin: Double, sway: Double) {
+        let turns = elapsed / spinPeriod
+        let spin = (turns - turns.rounded(.down)) * 360
+        let sway = swayAmplitude * (1 - cos(elapsed * 2 * .pi / bobPeriod)) / 2
+        return (spin, sway)
+    }
+
+    /// The number of whole bobs `elapsed` seconds in.
+    static func beat(elapsed: Double) -> Int { Int(elapsed / bobPeriod) }
+
+    /// The mascot blinks after every third bob.
+    static func blinks(onBeat beat: Int) -> Bool { beat > 0 && beat.isMultiple(of: 3) }
+}
+
 /// Three rising bars shown beside the mascot while music plays. Mounted only
-/// during playback; its timeline stops under Reduce Motion, when the window
+/// during playback; the bars hold still under Reduce Motion, when the window
 /// is hidden, or while the screen is locked or asleep.
+///
+/// The bars move by a plain state write every `frameInterval`, not a
+/// `TimelineView`: in the notch panel's `NSHostingView` a `TimelineView`
+/// re-rendered about 240 times a second with any schedule.
 struct NotchPlaybackIndicator: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.rafuMotionAllowed) private var motionAllowed
     @Environment(\.rafuTheme) private var theme
+    @State private var time: TimeInterval = 0
+
+    /// 8 writes a second.
+    static let frameInterval: TimeInterval = 1.0 / 8
 
     private var animating: Bool { motionAllowed && !reduceMotion }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 0.12, paused: !animating)) { context in
-            Canvas { drawing, size in
-                let time = animating ? context.date.timeIntervalSinceReferenceDate : 0
-                for bar in 0..<3 {
-                    let phase = Double(bar) * 1.7
-                    let height = 3.0 + (sin(time * 7 + phase) + 1) * 3.5
-                    let rect = CGRect(
-                        x: Double(bar) * 3.5, y: (size.height - height) / 2, width: 2,
-                        height: height)
-                    drawing.fill(
-                        Path(roundedRect: rect, cornerRadius: 1), with: .color(theme.palette.accent)
-                    )
-                }
+        let time = animating ? time : 0
+        Canvas { drawing, size in
+            for bar in 0..<3 {
+                let height = Self.barHeight(bar: bar, time: time)
+                let rect = CGRect(
+                    x: Double(bar) * 3.5, y: (size.height - height) / 2, width: 2,
+                    height: height)
+                drawing.fill(
+                    Path(roundedRect: rect, cornerRadius: 1), with: .color(theme.palette.accent)
+                )
             }
         }
         .frame(width: 10, height: 12)
         .accessibilityLabel("Music playing")
+        .task(id: animating) {
+            await run()
+        }
+    }
+
+    /// One bar's height in points, from 3 to 10, `time` seconds in.
+    nonisolated static func barHeight(bar: Int, time: TimeInterval) -> Double {
+        3.0 + (sin(time * 7 + Double(bar) * 1.7) + 1) * 3.5
+    }
+
+    private func run() async {
+        var still = Transaction()
+        still.disablesAnimations = true
+        withTransaction(still) { time = 0 }
+        guard animating else { return }
+        let clock = ContinuousClock()
+        let start = clock.now
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(
+                    for: .seconds(Self.frameInterval), tolerance: .milliseconds(20))
+            } catch {
+                return
+            }
+            let elapsed = (clock.now - start) / .seconds(1)
+            withTransaction(still) { time = elapsed }
+        }
     }
 }
