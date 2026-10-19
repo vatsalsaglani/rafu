@@ -33,6 +33,12 @@ public struct LauncherIPCClient: Sendable {
 
     private let connector: Connector
 
+    /// Per-call `SO_RCVTIMEO`/`SO_SNDTIMEO` bound for a Canvas bridge
+    /// (`_canvas-mcp`) exchange. The app answers it on the main actor, which
+    /// can be busy for longer than the launcher's two-second default, so a
+    /// bridge client uses this bound, not the default.
+    public static let canvasBridgeTimeoutSeconds = 20
+
     public init(socketURL: URL = LauncherIPCSocketPath.resolve(), timeoutSeconds: Int = 2) {
         connector = {
             try Self.connect(to: socketURL, timeoutSeconds: max(1, min(30, timeoutSeconds)))
@@ -127,6 +133,9 @@ public struct LauncherIPCClient: Sendable {
         }
     }
 
+    /// The socket is blocking. `read` returns -1 with `EAGAIN` only when the
+    /// `SO_RCVTIMEO` bound expires with no reply, so that error is the
+    /// deadline and is not retried.
     private static func readResponse(from fileDescriptor: Int32) throws -> LauncherIPCResponse {
         var decoder = LauncherIPCFrameDecoder()
         var storage = [UInt8](repeating: 0, count: 4_096)

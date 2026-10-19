@@ -173,5 +173,22 @@ under machine load. `CanvasBridgeIPCTests` showed the same `EAGAIN` again on
 2026-10-19 during the Ensemble shell-choice and card-navigation work, under the
 implementor's parallel load and with no code change in that area; it passed
 alone, so it stays row two. A test that repeats this across rounds is
-time-sensitive, not broken. Separate hang cause for the whole suite:
+time-sensitive, not broken.
+
+**Fixed 2026-10-20 (`CanvasBridgeIPCTests`).** The `EAGAIN` was not a
+non-blocking read. The client socket is blocking. On Darwin, `read` returns -1
+with `EAGAIN` (35) when the `SO_RCVTIMEO` bound expires with no data. The test
+made its client with the launcher default, `timeoutSeconds: 2`. The server
+sends the reply only after two tasks on the shared cooperative pool (connection
+registration and the connection task) and the `@MainActor` handler run. Under
+parallel load the pool and the main actor are busy with other tests for more
+than 2 s, so the read deadline expired first. A temporary test that held the
+main actor for 3 s got the same `.systemCall(name: "read", code: 35)` with the
+2 s client and a correct reply with the 20 s client. Under full parallel load
+the test then took 7.9 s and 8.9 s and passed. The production `_canvas-mcp` client uses 20 s. The
+test now uses the same bound through
+`LauncherIPCClient.canvasBridgeTimeoutSeconds`. Do not retry `EAGAIN` in
+`LauncherIPCClient.readResponse`: on this blocking socket it is the deadline,
+and a retry makes the wait unbounded. Check:
+`swift test --filter CanvasBridgeIPCTests`, then `./script/test.sh`. Separate hang cause for the whole suite:
 [`test-keychain-isolation.md`](test-keychain-isolation.md).

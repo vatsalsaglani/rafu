@@ -64,7 +64,9 @@ if commandArguments.first == "_canvas-mcp", commandArguments.count == 2 {
     let environment = ProcessInfo.processInfo.environment
     guard let token = environment["RAFU_CANVAS_TOKEN"], let path = environment["RAFU_CANVAS_SOCKET"]
     else { exit(EX_USAGE) }
-    let client = LauncherIPCClient(socketURL: URL(fileURLWithPath: path), timeoutSeconds: 20)
+    let client = LauncherIPCClient(
+        socketURL: URL(fileURLWithPath: path),
+        timeoutSeconds: LauncherIPCClient.canvasBridgeTimeoutSeconds)
     CanvasBridgeMCPServer.run(token: token, provider: commandArguments[1]) { request in
         let response = try client.exchange(
             LauncherIPCEnvelope(kind: .canvasBridge, canvasBridge: request))
