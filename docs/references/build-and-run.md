@@ -157,6 +157,13 @@ theme-JSON check.
    icon as current evidence.
 4. Use `--logs` or `--telemetry` for startup/runtime behavior and `--debug` for a symbolized crash.
 5. Do not add an ad hoc second run script.
+6. If a running app is unresponsive, run `sample <pid> 5 -file <out.txt>` and
+   read the main-thread call graph before changing code. A process in state R
+   at about 50% CPU with idle `mach_msg` slices between bursts is a livelock,
+   not a deadlock. Worked example:
+   [`editor-gutter-ruler-tiling.md`](editor-gutter-ruler-tiling.md), "Feedback
+   loop". Silent `swift test` with 0% CPU: see
+   [`test-keychain-isolation.md`](test-keychain-isolation.md).
 
 ## Related material
 
@@ -215,6 +222,14 @@ Lightning state.
   `ConformanceIsolation`. These value types only calculate paths from a
   `CGFloat` and a rectangle; explicitly mark the types `nonisolated`.
   Do not weaken concurrency checking for the target.
+- **The component can disappear (2026-10-19):** on macOS 27.0.1 (26A434),
+  `xcodebuild -showComponent MetalToolchain -json` reported the component as
+  uninstalled although this note records it installed on 2026-10-17. The first
+  build failed in `CompileMetalFile` for `Shaders.metal` (the missing
+  `Shaders.dia` message is secondary). `xcodebuild -downloadComponent
+  MetalToolchain` reinstalled 27A266a (about 839 MB). Cause not established;
+  an OS update is a possible reason. After an OS or Xcode update, check the
+  component before diagnosing a Metal build failure as a source bug.
 - **Verification commands:** `xcodebuild -showComponent MetalToolchain -json`,
   `xcrun metal --version`, `./script/build_and_run.sh --verify`, and
   `./script/test.sh`.
@@ -264,3 +279,13 @@ Verify with `./script/build_and_run.sh --verify` and
 `NotchSystemMediaTests.systemMediaBundleLayout` checks the runtime resource paths.
 See [agent hooks and Now Playing](agent-hooks-and-now-playing.md) and
 [the Ensemble phase](../plans/phases/ensemble-canvas.md).
+
+### Stop the Now Playing helper with the app (2026-10-19)
+
+The Lightning `mediaremote-adapter.pl` helper (started through
+`/usr/bin/perl`) was left running with parent pid 1 after a worktree's
+Lightning app was stopped by its pid. Stopping only the app pid does not stop
+the helper. After stopping a worktree's Lightning app, also find and stop that
+Lightning's `mediaremote-adapter.pl` process (match its full path under the
+worktree's `dist/Rafu Lightning.app`, never a bare name that could match the
+release app's helper). Cause of the orphaning was not investigated.

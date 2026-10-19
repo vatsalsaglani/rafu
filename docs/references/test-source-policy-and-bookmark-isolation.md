@@ -153,3 +153,21 @@ The isolated test passed in 0.030 seconds. The test file already documents socke
 work starving under parallel load. No assertion or timeout was changed. Evidence:
 `final-parallel.log` and `status-isolation.log` in the same evidence directory.
 Check the serial result before classifying this as load-related timing.
+
+## Known load-sensitive tests (2026-10-19)
+
+Three full parallel suites ran at once in separate worktrees. Two tests failed
+under that load only:
+
+- `GeminiCLIAdapterTests`, "A successful bounded probe caches its absolute URL
+  for pure invocation".
+- `CanvasBridgeIPCTests`, "A typed bridge request reaches the handler...",
+  which read `EAGAIN` (code 35) after about 10 s.
+
+Both passed when run alone and passed in serial mode. By the AGENTS.md triage
+table this is row two (passes alone, passes serial): scheduler starvation. It
+is not a failure and not a clean pass; change nothing. Do not run several full
+suites at once to save time. Together with `EnsembleEndToEndTests.statusEndToEnd`
+above, these are the tests to suspect first when a parallel run fails only
+under machine load. Separate hang cause for the whole suite:
+[`test-keychain-isolation.md`](test-keychain-isolation.md).

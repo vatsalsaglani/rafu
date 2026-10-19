@@ -105,6 +105,18 @@ the 28 pt row that replaced the hover cluster:
   stored property would make the synthesized memberwise init private on
   Swift 6.3 (the source comment states this; it was not compiled here).
 
+## `applyChrome` is idempotent (2026-10-19)
+
+`applyChrome(to:)` in `FlatWindowChrome.swift` runs on every tab switch (one
+immediate pass plus three delayed ones). It assigns `isMovable`,
+`.fullSizeContentView`, `titlebarAppearsTransparent`, `titleVisibility`,
+`titlebarSeparatorStyle`, and `backgroundColor` only when the value differs
+from the window's live value, because each AppKit setter can invalidate the
+titlebar or the window. The result is the same as before; a repeated pass does
+no work. Keep any new window write behind the same comparison. Context and the
+other tab-click causes: [`swiftui-macos-click-latency.md`](swiftui-macos-click-latency.md).
+macOS 27.0.1 (26A434), 2026-10-19; not measured, so no latency gain is claimed.
+
 ## Why it matters
 
 The pre-merge look (empty dark strip above the sidebar) read as dated
