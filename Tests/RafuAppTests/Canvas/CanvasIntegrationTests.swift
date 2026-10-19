@@ -159,6 +159,46 @@ struct CanvasIntegrationTests {
         other.teardownTerminalGroups()
     }
 
+    @Test(
+        "Start Terminal Here replaces an orphaned card's content in place, starting nothing")
+    func startTerminalHereReplacesOrphanedCard() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let session = makeSession(
+            CanvasPersistenceStore(directory: folder.appending(path: "state")))
+        session.descriptor = WorkspaceDescriptor(
+            displayName: "Test", location: .local(.init(path: folder.path)))
+        #expect(await session.canvas.configure(root: folder))
+        let board = try #require(await session.canvas.create(title: "Task"))
+        session.presentCanvasBoard(board)
+
+        // A card referencing a Terminal Group that no longer exists — e.g. a
+        // saved board reopened with ADR 0025 inert restore.
+        let missingGroupID = TerminalGroupID()
+        try board.add(
+            title: "Orphan", content: .terminal(groupID: missingGroupID),
+            center: CGPoint(x: 10, y: 10))
+        let orphan = try #require(board.cards.first)
+        #expect(session.terminal.terminalGroup(missingGroupID) == nil)
+
+        session.startTerminalHere(orphan.id, on: board.id)
+
+        #expect(board.cards.count == 1)
+        let replaced = try #require(board.cards.first)
+        #expect(replaced.id == orphan.id)
+        #expect(replaced.rect == orphan.rect)
+        guard case .terminal(let newGroupID) = replaced.content else {
+            Issue.record("Expected a replaced terminal card")
+            return
+        }
+        #expect(newGroupID != missingGroupID)
+        let group = try #require(session.terminal.terminalGroup(newGroupID))
+        #expect(group.panes.count == 1)
+        #expect(group.panes.first?.status == .stopped)
+        #expect(session.terminal.sessions.isEmpty)
+    }
+
     @Test("Late teardown of an old native mount cannot detach a transferred terminal")
     func nativeMountTransfer() {
         let old = NativeContentMount(frame: NSRect(x: 0, y: 0, width: 640, height: 400))

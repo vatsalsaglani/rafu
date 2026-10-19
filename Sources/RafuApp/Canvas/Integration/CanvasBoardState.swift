@@ -53,6 +53,13 @@ final class CanvasBoardState: Identifiable {
     @ObservationIgnored var revokeSessionLinks: (([UUID]) -> Void)?
     @ObservationIgnored var stopLiveContent: (@MainActor () -> Void)?
     @ObservationIgnored var saveTask: Task<Bool, Never>?
+    /// Fires after `performUndo()`/`performRedo()` swaps `document`, naming
+    /// the cards that disappeared and the cards that (re)appeared, matched by
+    /// id. `WorkspaceSession` uses this to restore or re-park a moved
+    /// Terminal Group's editor tab (ADR 0025's 2026-10-19 amendment). A
+    /// plain callback, not board state.
+    @ObservationIgnored var undoRedoObserver:
+        ((_ removed: [CanvasCard], _ added: [CanvasCard]) -> Void)?
     @ObservationIgnored private var undo: [CanvasDocument] = []
     @ObservationIgnored private var redo: [CanvasDocument] = []
     @ObservationIgnored private var gestureStart: CanvasDocument?
@@ -372,11 +379,13 @@ final class CanvasBoardState: Identifiable {
         previous.revision = document.revision
         previous.agentControl = document.agentControl
         revokeChangedLinks(replacing: previous)
+        let before = document.cards
         document = previous
         selection.formIntersection(Set(document.cards.map(\.id)))
         focusedCardID = nil
         markDirty()
         requestSave?()
+        notifyUndoRedo(before: before, after: document.cards)
     }
 
     func performRedo() {
@@ -386,11 +395,23 @@ final class CanvasBoardState: Identifiable {
         next.revision = document.revision
         next.agentControl = document.agentControl
         revokeChangedLinks(replacing: next)
+        let before = document.cards
         document = next
         selection.formIntersection(Set(document.cards.map(\.id)))
         focusedCardID = nil
         markDirty()
         requestSave?()
+        notifyUndoRedo(before: before, after: document.cards)
+    }
+
+    private func notifyUndoRedo(before: [CanvasCard], after: [CanvasCard]) {
+        guard let undoRedoObserver else { return }
+        let beforeIDs = Set(before.map(\.id))
+        let afterIDs = Set(after.map(\.id))
+        let removed = before.filter { !afterIDs.contains($0.id) }
+        let added = after.filter { !beforeIDs.contains($0.id) }
+        guard !removed.isEmpty || !added.isEmpty else { return }
+        undoRedoObserver(removed, added)
     }
 
     private func revokeChangedLinks(replacing next: CanvasDocument) {

@@ -42,10 +42,28 @@ nonisolated struct EditorTerminalGroupSwitcherPresentation: Equatable, Sendable 
     let title: String
     let detail: String
 
-    init(name: String, paneCount: Int, focusedPaneName: String, attentionCount: Int, isParked: Bool)
-    {
+    /// Placement precedence: a canvas-owned group (on an Ensemble board)
+    /// always reads "On an Ensemble", regardless of parked or running state.
+    /// Otherwise a group with no running pane reads "Not running" whether or
+    /// not it is parked — a parked tab's pane can simply never have been
+    /// started. A running, parked group reads "Hidden · Running" (it has a
+    /// live process but no visible host). A running, un-parked group keeps
+    /// the plain "Terminal Group" placement.
+    init(
+        name: String, paneCount: Int, focusedPaneName: String, attentionCount: Int,
+        isParked: Bool, isRunning: Bool, isCanvasOwned: Bool
+    ) {
         title = name
-        let placement = isParked ? "Not running" : "Terminal Group"
+        let placement: String
+        if isCanvasOwned {
+            placement = "On an Ensemble"
+        } else if !isRunning {
+            placement = "Not running"
+        } else if isParked {
+            placement = "Hidden · Running"
+        } else {
+            placement = "Terminal Group"
+        }
         let attention = attentionCount == 0 ? "" : " · \(attentionCount) need attention"
         let panes = paneCount == 1 ? "1 pane" : "\(paneCount) panes"
         detail = "\(placement) · \(panes) · Focused: \(focusedPaneName)\(attention)"

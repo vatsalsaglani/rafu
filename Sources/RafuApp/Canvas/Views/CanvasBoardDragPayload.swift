@@ -5,9 +5,10 @@ import RafuCore
 import UniformTypeIdentifiers
 
 extension UTType {
-    /// Private drag type for items that become Ensemble cards on drop: today,
-    /// an Agent History row. It is NOT the editor-tab type (`rafuEditorDrag`),
-    /// so editor groups and text views never see it.
+    /// Private drag type for items that become Ensemble cards on drop: an
+    /// Agent History row, or a Terminals-panel Terminal Group row. It is NOT
+    /// the editor-tab type (`rafuEditorDrag`), so editor groups and text
+    /// views never see it.
     ///
     /// `conformingTo: .data` is set here AND the identifier is declared in the
     /// app's Info.plist (`UTExportedTypeDeclarations`, see
@@ -23,6 +24,11 @@ extension UTType {
 /// text or file representation, so a drop anywhere else pastes nothing.
 nonisolated enum CanvasBoardDragPayload: Codable, Equatable, Sendable {
     case agentSession(provider: AgentHistoryProvider, sessionID: String)
+    /// A Terminals-panel Terminal Group row, by id only. Unlike the editor's
+    /// own Terminal Group tab drag (which carries an `EditorTabID` over
+    /// `rafuEditorDrag`), a panel row can name a PARKED group that has no
+    /// editor tab at all, so it needs the group id directly.
+    case terminalGroup(id: TerminalGroupID)
 
     /// A drag item is tiny. Anything larger is not from Rafu.
     static let maximumEncodedBytes = 16 * 1_024
@@ -32,11 +38,23 @@ nonisolated enum CanvasBoardDragPayload: Codable, Equatable, Sendable {
         case unsafeIdentifier
     }
 
-    /// The history session this payload names.
-    var sessionKey: AgentHistorySessionKey {
+    /// The history session this payload names, or `nil` for a
+    /// `.terminalGroup` payload.
+    var sessionKey: AgentHistorySessionKey? {
         switch self {
         case .agentSession(let provider, let sessionID):
             AgentHistorySessionKey(provider: provider, sessionID: sessionID)
+        case .terminalGroup:
+            nil
+        }
+    }
+
+    /// The Terminal Group id this payload names, or `nil` for an
+    /// `.agentSession` payload.
+    var terminalGroupID: TerminalGroupID? {
+        switch self {
+        case .terminalGroup(let id): id
+        case .agentSession: nil
         }
     }
 
@@ -44,17 +62,25 @@ nonisolated enum CanvasBoardDragPayload: Codable, Equatable, Sendable {
         self = .agentSession(provider: key.provider, sessionID: key.sessionID)
     }
 
+    init(terminalGroupID: TerminalGroupID) {
+        self = .terminalGroup(id: terminalGroupID)
+    }
+
     func encodedData() throws -> Data {
         try JSONEncoder().encode(self)
     }
 
-    /// Decodes bounded data and refuses an id that Rafu would not type into
-    /// a shell (`AgentHistoryResumeCommand.arguments` is `nil` for it).
+    /// Decodes bounded data and, for an Agent History session, refuses an id
+    /// Rafu would not type into a shell (`AgentHistoryResumeCommand.arguments`
+    /// is `nil` for it). A `.terminalGroup` id is only ever a locally
+    /// generated `UUID`, so it needs no such content check.
     init(data: Data) throws {
         guard data.count <= Self.maximumEncodedBytes else { throw DecodeError.tooLarge }
         let value = try JSONDecoder().decode(Self.self, from: data)
-        guard AgentHistoryResumeCommand.arguments(for: value.sessionKey) != nil else {
-            throw DecodeError.unsafeIdentifier
+        if let sessionKey = value.sessionKey {
+            guard AgentHistoryResumeCommand.arguments(for: sessionKey) != nil else {
+                throw DecodeError.unsafeIdentifier
+            }
         }
         self = value
     }
@@ -104,6 +130,8 @@ nonisolated enum CanvasBoardDropContent: Equatable, Sendable {
     case agentSession(AgentHistorySessionKey)
     /// An editor tab, by its identifier string.
     case tab(String)
+    /// A Terminals-panel Terminal Group row, by id.
+    case terminalGroup(TerminalGroupID)
 }
 
 /// What a tab dropped on a board becomes.

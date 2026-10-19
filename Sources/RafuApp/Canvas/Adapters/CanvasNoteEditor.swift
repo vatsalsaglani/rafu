@@ -225,6 +225,19 @@ final class CanvasNoteBuffer: NSObject, NSTextViewDelegate {
         textView.textContainerInset = NSSize(width: 16, height: 16)
         textView.font = .systemFont(ofSize: 13)
         textView.delegate = self
+        // `NSTextView` registers AppKit's default drag-destination types,
+        // including file URLs — the same "deepest registered NSView wins"
+        // rule documented on `RafuTextView`. A note card's text view sits
+        // deeper in the view hierarchy than `CanvasScrollBridge.Host` (which
+        // spans the whole board), so without this it would silently steal a
+        // Files-tree/Finder/tab/Agent-History drag dropped over a note's
+        // body instead of letting the board handle it. Notes have no
+        // drag-to-insert-a-file feature, so unregistering is the simpler fix
+        // over forwarding (see the `RafuTextView` pattern); the cost is
+        // losing the ability to drag-reposition SELECTED text within the
+        // note body, which is a minor convenience, not a feature this app
+        // otherwise relies on.
+        textView.unregisterDraggedTypes()
         scrollView.hasVerticalScroller = true
         scrollView.documentView = textView
         model.buffer = self

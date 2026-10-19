@@ -180,8 +180,8 @@ func reorderOrMoveEditorTabHandlesSameGroupAndCrossGroup() throws {
 }
 
 @MainActor
-@Test("handleEditorTabDrop with a nil edge moves the tab and is a no-op within the same group")
-func handleEditorTabDropNilEdgeMovesOrNoOps() throws {
+@Test("handleEditorTabDrop with a nil edge moves the tab and reselects it within the same group")
+func handleEditorTabDropNilEdgeMovesOrReselects() throws {
     let firstTab = EditorTabState(resource: .file(URL(fileURLWithPath: "/tmp/first.swift")))
     let secondTab = EditorTabState(resource: .file(URL(fileURLWithPath: "/tmp/second.swift")))
     let firstGroup = EditorGroupState(tabs: [firstTab])
@@ -200,7 +200,7 @@ func handleEditorTabDropNilEdgeMovesOrNoOps() throws {
     let session = WorkspaceSession()
     session.editorLayout = layout
 
-    // Same-group drop with a nil edge is a no-op.
+    // Same-group drop with a nil edge is a no-op on the tab order.
     session.handleEditorTabDrop(firstTab.id.rawValue.uuidString, on: firstGroup.id, edge: nil)
     #expect(session.editorLayout.group(id: firstGroup.id)?.tabs.map(\.id) == [firstTab.id])
 
@@ -209,6 +209,27 @@ func handleEditorTabDropNilEdgeMovesOrNoOps() throws {
     layout = session.editorLayout
     #expect(layout.groupIDs == [secondGroup.id])
     #expect(layout.group(id: secondGroup.id)?.tabs.map(\.id) == [secondTab.id, firstTab.id])
+
+    // Dropping a tab already selected in its own group, which now has a
+    // SIBLING tab selected, selects the dropped tab instead of doing
+    // nothing (fixes "drop a file already open in the group" no-op).
+    session.editorLayout.select(secondTab.id, in: secondGroup.id)
+    #expect(session.editorLayout.group(id: secondGroup.id)?.selectedTabID == secondTab.id)
+    session.handleEditorTabDrop(firstTab.id.rawValue.uuidString, on: secondGroup.id, edge: nil)
+    #expect(session.editorLayout.group(id: secondGroup.id)?.selectedTabID == firstTab.id)
+    #expect(
+        session.editorLayout.group(id: secondGroup.id)?.tabs.map(\.id) == [
+            secondTab.id, firstTab.id,
+        ])
+}
+
+// MARK: - Editor text view drag forwarding (RafuTextView.shouldForward)
+
+@Test("RafuTextView forwards every non-text drag kind, never plain in-editor text")
+func rafuTextViewForwardsNonTextDragKinds() {
+    #expect(RafuTextView.shouldForward(.internalPayload))
+    #expect(RafuTextView.shouldForward(.externalFiles))
+    #expect(!RafuTextView.shouldForward(.text))
 }
 
 // MARK: - Finder file drop classification (EditorDragKind)

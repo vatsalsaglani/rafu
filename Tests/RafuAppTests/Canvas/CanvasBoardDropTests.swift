@@ -134,6 +134,30 @@ struct CanvasBoardDragPayloadTests {
                 try EditorDragPayload.file(path: "relative.swift").encodedData()) == nil)
     }
 
+    @Test("A terminal-group payload round-trips and names no Agent History session")
+    func terminalGroupPayloadRoundTrip() async throws {
+        let groupID = TerminalGroupID()
+        let payload = CanvasBoardDragPayload(terminalGroupID: groupID)
+        let data = try payload.encodedData()
+        #expect(try CanvasBoardDragPayload(data: data) == payload)
+        #expect(CanvasBoardDragPayload.decode(data) == payload)
+        #expect(payload.terminalGroupID == groupID)
+        #expect(payload.sessionKey == nil)
+
+        let provider = payload.makeItemProvider()
+        #expect(provider.registeredTypeIdentifiers == [UTType.rafuEnsembleDrag.identifier])
+        let loaded: Data = try await withCheckedThrowingContinuation { continuation in
+            _ = provider.loadDataRepresentation(for: .rafuEnsembleDrag) { data, error in
+                if let data {
+                    continuation.resume(returning: data)
+                } else {
+                    continuation.resume(throwing: error ?? CancellationError())
+                }
+            }
+        }
+        #expect(CanvasBoardDragPayload.decode(loaded) == payload)
+    }
+
     @Test("A tab moves to the board only from the centre zone and only for a terminal")
     func tabRoutingTable() {
         let edges: [EditorSplitEdge] = [.leading, .trailing, .top, .bottom]
@@ -149,6 +173,49 @@ struct CanvasBoardDragPayloadTests {
                 CanvasBoardTabDrop.decide(edge: edge, isTerminalGroupTab: false)
                     == .forwardToGroup(edge))
         }
+    }
+
+    @Test("The board's drop-decode cache only reuses a SUCCESSFUL decode")
+    @MainActor
+    func dropDecodeCacheOnlyReusesSuccess() {
+        typealias Host = CanvasScrollBridge.Host
+        let content = CanvasBoardDropContent.tab(UUID().uuidString)
+
+        // A fresh sequence number never reuses the cache, decoded or not.
+        #expect(
+            !Host.canReuseCachedDecode(
+                requestSequence: 2, cachedSequence: 1, cachedContent: content))
+        #expect(
+            !Host.canReuseCachedDecode(
+                requestSequence: 2, cachedSequence: 1, cachedContent: nil))
+
+        // The SAME sequence number reuses a successful decode...
+        #expect(
+            Host.canReuseCachedDecode(
+                requestSequence: 1, cachedSequence: 1, cachedContent: content))
+        // ...but never a cached nil (a transient decode failure), so a later
+        // call in the same drag session gets a chance to decode again.
+        #expect(
+            !Host.canReuseCachedDecode(
+                requestSequence: 1, cachedSequence: 1, cachedContent: nil))
+        #expect(
+            !Host.canReuseCachedDecode(
+                requestSequence: 1, cachedSequence: nil, cachedContent: nil))
+    }
+
+    @Test("A terminal card's block follows pane-running state first, then lease ownership")
+    func terminalCardBlockDecidesRunningBeforeLease() {
+        // Stopped: always the Start Shell block, regardless of lease.
+        #expect(
+            CanvasTerminalCardBlock.decide(isRunning: false, ownsLease: false) == .notRunning)
+        #expect(
+            CanvasTerminalCardBlock.decide(isRunning: false, ownsLease: true) == .notRunning)
+        // Running and this card holds the lease: the live terminal view.
+        #expect(CanvasTerminalCardBlock.decide(isRunning: true, ownsLease: true) == .live)
+        // Running but the lease is held elsewhere (or resources are
+        // unavailable): "not attached", never confused with "not running".
+        #expect(
+            CanvasTerminalCardBlock.decide(isRunning: true, ownsLease: false) == .notAttached)
     }
 }
 
@@ -306,11 +373,15 @@ struct CanvasBoardDropSessionTests {
         #expect(session.parkedTerminalGroupIDs.contains(groupID))
         #expect(session.terminal.terminalGroup(groupID)?.panes.first?.status == .stopped)
 
-        // Undo removes only the card. The group stays live and parked.
+        // Undo removes the card AND returns the group to an editor tab (the
+        // user's 2026-10-19 decision amending the move amendment): the
+        // process keeps running, but the group is no longer parked.
+        // `undoAfterMoveRestoresTabAndRedoReparks` covers this in detail.
         board.performUndo()
         #expect(board.cards.isEmpty)
         #expect(session.terminal.terminalGroup(groupID) != nil)
-        #expect(session.parkedTerminalGroupIDs.contains(groupID))
+        #expect(!session.parkedTerminalGroupIDs.contains(groupID))
+        #expect(tabID(of: groupID, in: session) != nil)
     }
 
     @Test("A terminal that cannot move is refused with a message and its tab stays")
@@ -440,5 +511,72 @@ struct CanvasBoardDropSessionTests {
         #expect(board.cards.map(\.content) == [.terminal(groupID: groupID)])
         #expect(tabID(of: groupID, in: session) == nil)
         #expect(session.selectedCanvas === board)
+    }
+
+    // MARK: Terminals-panel row dropped directly on the board
+
+    @Test("A panel-dropped Terminal Group moves onto the board, by id alone")
+    func panelDropMovesTerminal() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = makeSession(root: root)
+        let board = try await makeBoard(session, root: root)
+        let groupID = try openStoppedGroup(session)
+
+        let handled = session.dropTerminalGroupOnCanvas(
+            groupID, boardID: board.id, at: CGPoint(x: 500, y: 400))
+
+        #expect(handled)
+        let card = try #require(board.cards.first)
+        #expect(card.content == .terminal(groupID: groupID))
+        #expect(tabID(of: groupID, in: session) == nil)
+        #expect(session.selectedCanvas === board)
+    }
+
+    @Test("A panel-dropped multi-pane group keeps the existing refusal message")
+    func panelDropRefusesMultiplePanes() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = makeSession(root: root)
+        let board = try await makeBoard(session, root: root)
+        let multi = try openStoppedGroup(session, panes: 2)
+
+        let handled = session.dropTerminalGroupOnCanvas(
+            multi, boardID: board.id, at: CGPoint(x: 500, y: 400))
+
+        #expect(handled)
+        #expect(board.errorMessage == "Only a terminal with one pane can move to an Ensemble.")
+        #expect(board.cards.isEmpty)
+        #expect(tabID(of: multi, in: session) != nil)
+    }
+
+    // MARK: Undo returns the group to its tab; redo re-parks it
+
+    @Test("Undo after a move restores the tab to its source editor group; redo re-parks it")
+    func undoAfterMoveRestoresTabAndRedoReparks() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = makeSession(root: root)
+        let board = try await makeBoard(session, root: root)
+        let groupID = try openStoppedGroup(session)
+        let tab = try #require(tabID(of: groupID, in: session))
+        let sourceGroupID = try #require(session.editorLayout.group(containing: tab)?.id)
+
+        #expect(
+            session.moveTerminalGroupToEnsemble(
+                groupID, board: board, center: CGPoint(x: 500, y: 400)))
+        #expect(tabID(of: groupID, in: session) == nil)
+
+        board.performUndo()
+        #expect(board.cards.isEmpty)
+        let restoredTab = try #require(tabID(of: groupID, in: session))
+        #expect(session.editorLayout.group(containing: restoredTab)?.id == sourceGroupID)
+        #expect(!session.parkedTerminalGroupIDs.contains(groupID))
+        #expect(session.terminal.terminalGroup(groupID) != nil)
+
+        board.performRedo()
+        #expect(board.cards.map(\.content) == [.terminal(groupID: groupID)])
+        #expect(tabID(of: groupID, in: session) == nil)
+        #expect(session.parkedTerminalGroupIDs.contains(groupID))
     }
 }

@@ -46,6 +46,35 @@ struct TerminalGroupManagerHierarchyTests {
     }
 
     @MainActor
+    @Test("A canvas-owned group row is marked, independent of its parked state")
+    func hierarchyRowsMarkCanvasOwnedGroups() throws {
+        let manager = WorkspaceTerminalManager()
+        let profile = TerminalPaneLaunchProfile(shell: .preferredShell, startingFolder: .root)
+        let shell = TerminalShell(path: "/bin/zsh", name: "zsh", isDefault: true)
+        let onBoard = try manager.createLiveGroup(
+            instantiation: .ordinaryShell(
+                startingDirectory: "/tmp/fixtures", shell: shell, profile: profile))
+        let plain = try manager.createLiveGroup(
+            instantiation: .ordinaryShell(
+                startingDirectory: "/tmp/fixtures", shell: shell, profile: profile))
+
+        let rows = TerminalsPanelModel.hierarchyRows(
+            groups: manager.terminalGroups,
+            presentedGroupIDs: [plain.id],
+            currentGroupID: nil,
+            controllers: manager.sessions, presentedLegacySessionIDs: [],
+            currentLegacySessionID: nil, workspaceRoot: "/tmp/fixtures",
+            canvasOwnedGroupIDs: [onBoard.id])
+        let groups = rows.compactMap { row -> TerminalsPanelModel.TerminalGroupRow? in
+            guard case .group(let group) = row else { return nil }
+            return group
+        }
+
+        #expect(try #require(groups.first { $0.id == onBoard.id }).isCanvasOwned)
+        #expect(!(try #require(groups.first { $0.id == plain.id }).isCanvasOwned))
+    }
+
+    @MainActor
     @Test("Revealing and focusing one pane restores one outer group tab")
     func revealAndFocusPaneDoesNotDuplicateGroupTab() throws {
         let session = WorkspaceSession()

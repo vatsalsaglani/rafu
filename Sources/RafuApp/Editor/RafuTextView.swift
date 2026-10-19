@@ -88,20 +88,28 @@ final class RafuTextView: NSTextView {
 
     /// This view keeps AppKit's DEFAULT `acceptableDragTypes` (file/URL
     /// types included), so it is the deepest registered `NSView` under the
-    /// pointer for a Finder file drag — the same "deepest registered
-    /// destination wins" rule that requires `EditorDropForwardingScrollView`
-    /// to register for `.rafuEditorDrag` separately. Finder usually also
-    /// advertises a `public.utf8-plain-text` string representation of the
-    /// dropped path(s), which would otherwise win as an ordinary text-view
-    /// paste of the raw path. These overrides classify the drag first and
-    /// forward an `.externalFiles` drag to the enclosing
-    /// `EditorDropForwardingScrollView`'s existing Finder-drop handling;
-    /// everything else — a `.rafuEditorDrag` payload (never actually
-    /// reaches this view; it isn't registered for that type) and ordinary
-    /// in-editor text selection drag — falls through to `super` unchanged.
+    /// pointer for a Finder file drag AND for a Files-navigator row drag
+    /// (which carries both `.rafuEditorDrag` and a file URL) — the same
+    /// "deepest registered destination wins" rule that requires
+    /// `EditorDropForwardingScrollView` to register for `.rafuEditorDrag`
+    /// separately. Finder usually also advertises a `public.utf8-plain-text`
+    /// string representation of the dropped path(s), which would otherwise
+    /// win as an ordinary text-view paste of the raw path. These overrides
+    /// classify the drag first and forward anything that is NOT plain
+    /// in-editor text — `.externalFiles` and `.internalPayload` alike — to
+    /// the enclosing `EditorDropForwardingScrollView`, which already handles
+    /// both kinds (`EditorDropForwardingScrollView.performDragOperation`).
+    /// Only ordinary in-editor text selection drag falls through to `super`
+    /// unchanged.
     private func draggingKind(_ sender: NSDraggingInfo) -> EditorDragKind {
         let identifiers = Set((sender.draggingPasteboard.types ?? []).map(\.rawValue))
         return EditorDragKind.classify(typeIdentifiers: identifiers)
+    }
+
+    /// Forwarding rule as a pure predicate, so `EditorDragClassificationTests`
+    /// can cover it without a live `NSDraggingInfo`.
+    static func shouldForward(_ kind: EditorDragKind) -> Bool {
+        kind != .text
     }
 
     private var forwardingScrollView: EditorDropForwardingScrollView? {
@@ -109,21 +117,21 @@ final class RafuTextView: NSTextView {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        if draggingKind(sender) == .externalFiles, let forwardingScrollView {
+        if Self.shouldForward(draggingKind(sender)), let forwardingScrollView {
             return forwardingScrollView.draggingEntered(sender)
         }
         return super.draggingEntered(sender)
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        if draggingKind(sender) == .externalFiles, let forwardingScrollView {
+        if Self.shouldForward(draggingKind(sender)), let forwardingScrollView {
             return forwardingScrollView.draggingUpdated(sender)
         }
         return super.draggingUpdated(sender)
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
-        if let sender, draggingKind(sender) == .externalFiles, let forwardingScrollView {
+        if let sender, Self.shouldForward(draggingKind(sender)), let forwardingScrollView {
             forwardingScrollView.draggingExited(sender)
             return
         }
@@ -131,14 +139,14 @@ final class RafuTextView: NSTextView {
     }
 
     override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        if draggingKind(sender) == .externalFiles, let forwardingScrollView {
+        if Self.shouldForward(draggingKind(sender)), let forwardingScrollView {
             return forwardingScrollView.prepareForDragOperation(sender)
         }
         return super.prepareForDragOperation(sender)
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        if draggingKind(sender) == .externalFiles, let forwardingScrollView {
+        if Self.shouldForward(draggingKind(sender)), let forwardingScrollView {
             return forwardingScrollView.performDragOperation(sender)
         }
         return super.performDragOperation(sender)

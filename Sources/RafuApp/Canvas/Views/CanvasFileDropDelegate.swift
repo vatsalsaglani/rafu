@@ -4,7 +4,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The SwiftUI half of the board's drop target. Over a visible board, the
-/// board owns EVERY drag: files, Agent History rows, and editor tabs. Type
+/// board owns EVERY drag: files, Agent History rows, Terminals-panel
+/// Terminal Group rows, and editor tabs. Type
 /// priority is `rafuEnsembleDrag` > `rafuEditorDrag` > `fileURL`, and the
 /// proposal is an explicit `.copy`. AppKit can route the same drag to
 /// `CanvasScrollBridge` instead (see `CanvasBoardDropTarget`); both halves
@@ -63,9 +64,17 @@ struct CanvasFileDropDelegate: DropDelegate {
                         "Rafu could not read what was dropped."
                     return
                 }
-                CanvasFileDrop.perform(
-                    .agentSession(payload.sessionKey), at: location, surface: surface,
-                    boardID: boardID, session: session)
+                switch payload {
+                case .agentSession:
+                    guard let sessionKey = payload.sessionKey else { return }
+                    CanvasFileDrop.perform(
+                        .agentSession(sessionKey), at: location, surface: surface,
+                        boardID: boardID, session: session)
+                case .terminalGroup(let id):
+                    CanvasFileDrop.perform(
+                        .terminalGroup(id), at: location, surface: surface,
+                        boardID: boardID, session: session)
+                }
             }
             _ = provider.loadDataRepresentation(for: .rafuEnsembleDrag) { data, _ in
                 let payload = data.flatMap(CanvasBoardDragPayload.decode)
@@ -125,10 +134,21 @@ enum CanvasFileDrop {
         return CanvasDroppedFileKind.fits(count: count, existing: board.cards.count)
     }
 
-    /// A workspace is open and the board exists. A full board is refused at
-    /// drop time with a message, as for any resume.
-    static func acceptsAgentSession(boardID: CanvasID, session: WorkspaceSession) -> Bool {
+    /// A workspace is open and the board exists — the shared precondition
+    /// for every drag carrying the private `rafuEnsembleDrag` type (an Agent
+    /// History row or a Terminals-panel Terminal Group row). Each carries
+    /// ids only; a full board, "already on an Ensemble", or "more than one
+    /// pane" is refused at drop time with a message, as for any resume.
+    static func acceptsEnsembleDragPayload(boardID: CanvasID, session: WorkspaceSession) -> Bool {
         session.rootURL != nil && session.canvas.boards[boardID] != nil
+    }
+
+    static func acceptsAgentSession(boardID: CanvasID, session: WorkspaceSession) -> Bool {
+        acceptsEnsembleDragPayload(boardID: boardID, session: session)
+    }
+
+    static func acceptsTerminalGroupDrag(boardID: CanvasID, session: WorkspaceSession) -> Bool {
+        acceptsEnsembleDragPayload(boardID: boardID, session: session)
     }
 
     /// The board exists. Whether the tab moves onto it or splits the editor
@@ -147,6 +167,8 @@ enum CanvasFileDrop {
             acceptsAgentSession(boardID: boardID, session: session)
         case .tab:
             acceptsTab(boardID: boardID, session: session)
+        case .terminalGroup:
+            acceptsTerminalGroupDrag(boardID: boardID, session: session)
         }
     }
 
@@ -168,6 +190,8 @@ enum CanvasFileDrop {
         case .tab(let id):
             return session.dropEditorTabOnCanvas(
                 id, boardID: boardID, at: location, surface: surface)
+        case .terminalGroup(let id):
+            return session.dropTerminalGroupOnCanvas(id, boardID: boardID, at: location)
         }
     }
 

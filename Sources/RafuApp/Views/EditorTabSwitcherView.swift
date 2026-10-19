@@ -274,7 +274,9 @@ struct EditorTabSwitcherOverlay: View {
                 paneCount: group.panes.count,
                 focusedPaneName: focusedName,
                 attentionCount: attention,
-                isParked: !session.presentedTerminalGroupIDs.contains(groupID))
+                isParked: !session.presentedTerminalGroupIDs.contains(groupID),
+                isRunning: group.panes.contains { $0.status == .live },
+                isCanvasOwned: session.canvasTerminalOwners[groupID] != nil)
             return Presentation(
                 title: presentation.title,
                 detail: presentation.detail,

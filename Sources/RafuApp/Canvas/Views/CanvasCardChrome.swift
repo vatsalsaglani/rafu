@@ -121,7 +121,7 @@ struct CanvasCardCommands {
         switch card.content {
         case .terminal(let groupID):
             guard let pane = session.terminal.terminalGroup(groupID)?.panes.first else {
-                return "Unavailable"
+                return "No terminal yet"
             }
             if let status = agentCardStatus(pane: pane) { return status.word }
             var code: Int32?

@@ -163,6 +163,12 @@ final class WorkspaceSession {
     var canvasTerminalOwners: [TerminalGroupID: CanvasID] = [:]
     @ObservationIgnored var canvasResources: [CanvasID: CanvasBoardResources] = [:]
     @ObservationIgnored var pendingCanvasTerminalRemoval: (CanvasID, CanvasCardID, TerminalGroupID)?
+    /// The editor group a Terminal Group's tab was dragged out of, recorded
+    /// by `moveTerminalGroupToEnsemble` so an undo of that move's board card
+    /// can return the group to the SAME editor group (ADR 0025's 2026-10-19
+    /// amendment). Not persisted: it only matters within the window's live
+    /// undo/redo history.
+    @ObservationIgnored var movedTerminalCardSourceGroups: [TerminalGroupID: EditorGroupID] = [:]
 
     /// Window-scoped, non-persisted Ctrl-Tab selection. The overlay previews
     /// this value and commits its destination only when Control is released.
@@ -1544,7 +1550,13 @@ final class WorkspaceSession {
         } catch { presentTerminalGroupError(error.localizedDescription) }
     }
 
-    func revealTerminalGroup(_ groupID: TerminalGroupID) {
+    /// Reveals a parked group as an editor tab. `preferredGroupID` picks the
+    /// editor group a FRESH tab is inserted into, when the group has none
+    /// yet and `preferredGroupID` still exists in the layout — used to
+    /// return a Terminal Group to the editor group it was dragged out of
+    /// (ADR 0025's 2026-10-19 amendment); `nil` (every other caller) keeps
+    /// the original "insert into the focused group" behavior.
+    func revealTerminalGroup(_ groupID: TerminalGroupID, preferredGroupID: EditorGroupID? = nil) {
         guard terminal.terminalGroup(groupID) != nil else { return }
         do { _ = try terminal.perform(.revealGroup(groupID)) } catch {
             presentTerminalGroupError(error.localizedDescription)
@@ -1558,9 +1570,12 @@ final class WorkspaceSession {
         {
             editorLayout.select(tab.id, in: editorGroupID)
         } else {
+            let targetGroupID =
+                preferredGroupID.flatMap { editorLayout.group(id: $0) != nil ? $0 : nil }
+                ?? editorLayout.focusedGroupID
             let tab = EditorTabState(resource: .terminalGroup(groupID: groupID))
-            editorLayout.insert(tab, in: editorLayout.focusedGroupID)
-            editorLayout.select(tab.id, in: editorLayout.focusedGroupID)
+            editorLayout.insert(tab, in: targetGroupID)
+            editorLayout.select(tab.id, in: targetGroupID)
         }
         selectedDocumentID = nil
         selectedTreePath = nil
@@ -3945,7 +3960,13 @@ final class WorkspaceSession {
         let tabID = EditorTabID(rawValue: uuid)
         guard editorLayout.group(containing: tabID) != nil else { return }
         guard let edge else {
-            guard editorLayout.group(containing: tabID)?.id != groupID else { return }
+            guard editorLayout.group(containing: tabID)?.id != groupID else {
+                // Dropping a tab already in this group (nil edge, no split):
+                // select it instead of silently doing nothing, mirroring an
+                // ordinary tab-bar click.
+                selectEditorTab(tabID, in: groupID)
+                return
+            }
             moveEditorTab(tabID, to: groupID)
             return
         }

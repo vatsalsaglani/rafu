@@ -366,6 +366,11 @@ nonisolated enum TerminalsPanelModel {
         let isCurrent: Bool
         let isSaved: Bool
         let hasRestartablePane: Bool
+        /// Whether this group's card currently lives on an Ensemble board
+        /// (`WorkspaceSession.canvasTerminalOwners`). Takes precedence over
+        /// the plain "Hidden" label: the group is not merely parked, it has
+        /// moved to a different visible surface.
+        var isCanvasOwned: Bool = false
         /// Automatic name ("zsh — api") for a group the user never named.
         /// `nil` when the stored `name` is user-chosen.
         var automaticName: String? = nil
@@ -424,7 +429,8 @@ nonisolated enum TerminalsPanelModel {
         controllers: [WorkspaceTerminalController],
         presentedLegacySessionIDs: Set<UUID>,
         currentLegacySessionID: UUID?,
-        workspaceRoot: String?
+        workspaceRoot: String?,
+        canvasOwnedGroupIDs: Set<TerminalGroupID> = []
     ) -> [HierarchyRow] {
         let controllerByID = Dictionary(uniqueKeysWithValues: controllers.map { ($0.id, $0) })
         let groupedSessionIDs = Set(groups.flatMap(\.panes).compactMap(\.sessionID))
@@ -490,6 +496,7 @@ nonisolated enum TerminalsPanelModel {
                         && $0.startAvailability == .available
                         && $0.launchProfile != nil
                 },
+                isCanvasOwned: canvasOwnedGroupIDs.contains(group.id),
                 automaticName: automaticName,
                 sessionColor: groupColor)
             return [.group(groupRow)] + panes.map(HierarchyRow.pane)

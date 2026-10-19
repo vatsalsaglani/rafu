@@ -1,5 +1,22 @@
 import SwiftUI
 
+/// Which block a terminal card's body shows, derived purely from whether the
+/// pane is running (a live controller exists) and whether THIS card holds
+/// the ADR 0025 presentation lease. A stopped pane has nothing to attach to
+/// at all, so it is always `.notRunning` regardless of lease state — never
+/// `.notAttached`, which is reserved for a RUNNING pane whose view is on a
+/// different surface (or resources are momentarily unavailable).
+nonisolated enum CanvasTerminalCardBlock: Equatable, Sendable {
+    case live
+    case notAttached
+    case notRunning
+
+    static func decide(isRunning: Bool, ownsLease: Bool) -> CanvasTerminalCardBlock {
+        guard isRunning else { return .notRunning }
+        return ownsLease ? .live : .notAttached
+    }
+}
+
 /// A Canvas terminal is one native terminal surface. The existing terminal
 /// manager remains the runtime owner; no second PTY or process model is added.
 struct CanvasTerminalCard: View {
@@ -19,10 +36,16 @@ struct CanvasTerminalCard: View {
                 if pane.status == .exited, pane.runtimeKind == .ordinaryShell {
                     exitedStrip(pane, id: id)
                 }
-                if session.canvasTerminalOwners[id] == board.id,
-                    session.canvasResources[board.id]?.canPresent(owner: presentationID) == true
+                let controller = session.terminal.terminalController(for: pane.id)
+                let ownsLease =
+                    session.canvasTerminalOwners[id] == board.id
+                    && session.canvasResources[board.id]?.canPresent(owner: presentationID)
+                        == true
+                switch CanvasTerminalCardBlock.decide(
+                    isRunning: controller != nil, ownsLease: ownsLease)
                 {
-                    if let controller = session.terminal.terminalController(for: pane.id) {
+                case .live:
+                    if let controller {
                         TerminalHostView(
                             controller: controller, theme: theme, paneID: pane.id,
                             isFocusedPane: active,
@@ -39,14 +62,14 @@ struct CanvasTerminalCard: View {
                                     && session?.canvasResources[board.id]?.canPresent(
                                         owner: presentationID) == true
                             })
-                    } else {
-                        notRunningBlock(pane, id: id)
                     }
-                } else {
+                case .notAttached:
                     VStack(spacing: 8) {
                         Text("Terminal view is not attached.").font(.caption)
-                        Button("Show Terminal") { acquire(id) }
+                        Button("Show Terminal") { focus(id) }
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                case .notRunning:
+                    notRunningBlock(pane, id: id)
                 }
             }
             .onChange(
@@ -66,8 +89,22 @@ struct CanvasTerminalCard: View {
                 session.canvasTerminalOwners[id] = nil
             }
         } else {
-            Text("Terminal unavailable. Add another terminal.")
-                .font(.caption).frame(maxWidth: .infinity, maxHeight: .infinity)
+            // The referenced Terminal Group no longer exists (e.g. a saved
+            // board reopened with ADR 0025 inert restore, before any process
+            // started). Offer to create a fresh stopped group for this same
+            // card — same id and frame — rather than a dead end.
+            VStack(spacing: 10) {
+                Image(systemName: "apple.terminal")
+                    .font(.system(size: 28)).foregroundStyle(theme.palette.textSecondary)
+                    .accessibilityHidden(true)
+                Text("No terminal yet").font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(theme.palette.textPrimary)
+                Button("Start Terminal Here") { session.startTerminalHere(card.id, on: board.id) }
+                    .buttonStyle(RafuProminentButtonStyle())
+                    .help("Create a terminal for this card. Nothing runs until you start it.")
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -178,6 +215,38 @@ extension WorkspaceSession {
             try board.add(title: snapshot.name.rawValue, content: .terminal(groupID: snapshot.id))
         }
     }
+    /// Creates a fresh stopped ordinary-shell Terminal Group for a card whose
+    /// previously referenced group no longer exists, keeping the card's `id`
+    /// and `rect` (so its position is preserved) and only replacing its
+    /// content and title. Mirrors `addCanvasStoppedTerminal`'s record
+    /// construction, but updates the existing card in place instead of
+    /// adding a new one. No process starts until the card's Start Shell.
+    func startTerminalHere(_ cardID: CanvasCardID, on boardID: CanvasID) {
+        guard let board = canvas.boards[boardID],
+            let name = TerminalGroupName("Terminal")
+        else { return }
+        performCanvasEdit(board) {
+            let paneID = SavedTerminalPaneID()
+            let pane = try SavedTerminalPaneRecord(
+                id: paneID, explicitUserName: nil, themeColor: nil,
+                kind: .ordinaryShell,
+                launchProfile: newOrdinaryShellLaunchProfile(shell: nil))
+            let record = try SavedTerminalGroupRecord(
+                id: SavedTerminalGroupID(), name: name,
+                root: .pane(paneID), focusedPaneID: paneID, panes: [pane])
+            let snapshot = try terminal.insertStoppedSavedGroup(record)
+            _ = try terminal.perform(.detachDeletedSavedLayout(record.id))
+            _ = try terminal.perform(.parkGroup(snapshot.id))
+            try board.edit { document in
+                guard let index = document.cards.firstIndex(where: { $0.id == cardID }) else {
+                    throw CanvasError.invalidDocument
+                }
+                document.cards[index].content = .terminal(groupID: snapshot.id)
+                document.cards[index].title = snapshot.name.rawValue
+            }
+        }
+    }
+
     func closeCanvasTerminalCard(_ id: CanvasID) {
         guard let board = canvas.boards[id], board.selection.count == 1,
             let card = board.cards.first(where: { board.selection.contains($0.id) }),
@@ -193,6 +262,7 @@ extension WorkspaceSession {
             terminal.terminalGroup(groupID) == nil
         else { return }
         pendingCanvasTerminalRemoval = nil
+        movedTerminalCardSourceGroups.removeValue(forKey: groupID)
         guard let board = canvas.boards[id] else { return }
         board.selection = [cardID]
         removeCanvasCards(id)

@@ -92,7 +92,8 @@ struct WorkspaceTerminalsPanelView: View {
             controllers: session.terminal.sessions,
             presentedLegacySessionIDs: session.presentedTerminalSessionIDs,
             currentLegacySessionID: session.currentTerminalSessionID,
-            workspaceRoot: session.rootURL?.path
+            workspaceRoot: session.rootURL?.path,
+            canvasOwnedGroupIDs: Set(session.canvasTerminalOwners.keys)
         )
         let managerItemCount = rows.count { $0.isManagerItem }
         VStack(spacing: 0) {
@@ -582,7 +583,12 @@ private struct TerminalGroupManagerRowView: View {
                             .lineLimit(1)
                             .truncationMode(.tail)
                     }
-                    if row.isParked {
+                    if row.isCanvasOwned {
+                        Image(systemName: "rectangle.3.group")
+                            .font(.system(size: 9))
+                            .foregroundStyle(theme.palette.textMuted)
+                            .accessibilityLabel("On an Ensemble")
+                    } else if row.isParked {
                         Image(systemName: "eye.slash")
                             .font(.system(size: 9))
                             .foregroundStyle(theme.palette.textMuted)
@@ -630,6 +636,13 @@ private struct TerminalGroupManagerRowView: View {
         .background(theme.palette.cardBackground)
         .clipShape(.rect(cornerRadius: RafuMetrics.radiusDenseCard))
         .contentShape(.rect)
+        // Carries only the group's id over the private `rafuEnsembleDrag`
+        // type, exactly like an Agent History row — never a title, path, or
+        // transcript. Dropped on an Ensemble board centre, a one-pane group
+        // (running or stopped) moves there with `moveTerminalGroupToEnsemble`
+        // (lease, keeps running); the existing refusals (more than one pane,
+        // already on a board, board full) apply unchanged at drop time.
+        .onDrag { CanvasBoardDragPayload(terminalGroupID: row.id).makeItemProvider() }
         .onTapGesture(perform: reveal)
         .focusable()
         .onKeyPress(.return) {
@@ -646,7 +659,11 @@ private struct TerminalGroupManagerRowView: View {
         var values = [TerminalNaming.paneCountLabel(row.paneCount), row.stateLabel]
         if row.livePaneCount > 0 { values.append("\(row.livePaneCount) live") }
         if row.isCurrent { values.append("Current") }
-        if row.isParked { values.append("Hidden") }
+        if row.isCanvasOwned {
+            values.append("On an Ensemble")
+        } else if row.isParked {
+            values.append("Hidden")
+        }
         if row.isSaved { values.append("Saved") } else { values.append("Unsaved") }
         if row.attentionCount > 0 {
             values.append(TerminalNaming.attentionLabel(row.attentionCount))

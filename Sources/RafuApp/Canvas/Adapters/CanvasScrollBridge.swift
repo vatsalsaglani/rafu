@@ -6,8 +6,9 @@ import UniformTypeIdentifiers
 /// registered `NSView` under the pointer. Over the board, that can be a hidden
 /// editor view of the same group (mounted below the Canvas overlay) instead of
 /// SwiftUI's `.onDrop`, so this bridge view accepts the drop itself. Over a
-/// visible board it owns every drag: files, Agent History rows, and editor
-/// tabs. See `docs/references/canvas-interaction.md`, "File drops".
+/// visible board it owns every drag: files, Agent History rows,
+/// Terminals-panel Terminal Group rows, and editor tabs. See
+/// `docs/references/canvas-interaction.md`, "File drops".
 struct CanvasBoardDropTarget {
     /// Whether the board takes this decoded drag. False rejects the drag.
     let accepts: (CanvasBoardDropContent) -> Bool
@@ -133,19 +134,28 @@ struct CanvasScrollBridge: NSViewRepresentable {
         }
 
         /// What this drag carries, classified and decoded once per drag
-        /// session. Priority: Agent History row, then the private editor
-        /// payload (a Files-tree file or an editor tab), then Finder file
-        /// URLs. Plain text or anything unreadable gives nil, which rejects
-        /// the drag.
+        /// session. Priority: Agent History row or Terminal Group row (both
+        /// `rafuEnsembleDrag`), then the private editor payload (a
+        /// Files-tree file or an editor tab), then Finder file URLs. Plain
+        /// text or anything unreadable gives nil, which rejects the drag.
         private func droppedContent(_ sender: NSDraggingInfo) -> CanvasBoardDropContent? {
-            if dropSequence == sender.draggingSequenceNumber { return dropContent }
+            if Self.canReuseCachedDecode(
+                requestSequence: sender.draggingSequenceNumber, cachedSequence: dropSequence,
+                cachedContent: dropContent)
+            {
+                return dropContent
+            }
             let pasteboard = sender.draggingPasteboard
             let types = Set((pasteboard.types ?? []).map(\.rawValue))
             var content: CanvasBoardDropContent?
             if types.contains(UTType.rafuEnsembleDrag.identifier) {
-                content = pasteboard.data(forType: Self.ensembleDragType)
+                let payload = pasteboard.data(forType: Self.ensembleDragType)
                     .flatMap(CanvasBoardDragPayload.decode)
-                    .map { .agentSession($0.sessionKey) }
+                if let sessionKey = payload?.sessionKey {
+                    content = .agentSession(sessionKey)
+                } else if let groupID = payload?.terminalGroupID {
+                    content = .terminalGroup(groupID)
+                }
             } else {
                 switch EditorDragKind.classify(typeIdentifiers: types) {
                 case .internalPayload:
@@ -163,9 +173,27 @@ struct CanvasScrollBridge: NSViewRepresentable {
                     break
                 }
             }
-            dropSequence = sender.draggingSequenceNumber
-            dropContent = content
+            // Only a SUCCESSFUL decode is cached. A nil decode can be a
+            // transient `pasteboard.data(forType:)` miss during
+            // `draggingEntered`; caching it would reject the whole drag
+            // session even though `draggingUpdated`/`performDragOperation`
+            // would have decoded it correctly a moment later.
+            if content != nil {
+                dropSequence = sender.draggingSequenceNumber
+                dropContent = content
+            }
             return content
+        }
+
+        /// Pure caching rule for `droppedContent`: whether a previously
+        /// decoded `cachedContent` for `cachedSequence` may be reused for
+        /// `requestSequence` instead of re-reading the pasteboard. A cached
+        /// `nil` is never reused, so a failed decode is retried on every
+        /// subsequent call within the same drag session.
+        static func canReuseCachedDecode(
+            requestSequence: Int, cachedSequence: Int?, cachedContent: CanvasBoardDropContent?
+        ) -> Bool {
+            cachedSequence == requestSequence && cachedContent != nil
         }
 
         // MARK: Scroll, zoom and visibility

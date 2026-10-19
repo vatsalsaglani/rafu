@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import SwiftUI
 
 /// Moving an open Terminal Group onto an Ensemble board, and routing a tab
 /// that is dropped on a visible board. The move is an explicit user action
@@ -46,7 +47,8 @@ extension WorkspaceSession {
         _ groupID: TerminalGroupID, board: CanvasBoardState, center: CGPoint?
     ) -> Bool {
         guard let group = terminal.terminalGroup(groupID),
-            editorLayout.tab(matching: .terminalGroup(groupID: groupID)) != nil
+            let tab = editorLayout.tab(matching: .terminalGroup(groupID: groupID)),
+            let sourceGroupID = editorLayout.group(containing: tab.id)?.id
         else {
             board.errorMessage = "Drag a terminal onto an Ensemble in its own window."
             return false
@@ -83,7 +85,46 @@ extension WorkspaceSession {
         }
         board.focus(cardID)
         board.revealCard(cardID)
+        movedTerminalCardSourceGroups[groupID] = sourceGroupID
+        observeCanvasTerminalUndoRedo(board)
+        AccessibilityNotification.Announcement("Terminal moved to Ensemble").post()
         return true
+    }
+
+    /// Wires `board.undoRedoObserver` once per board (idempotent), so an
+    /// undo that removes a moved Terminal Group's card returns it to its
+    /// source editor group, and a redo re-parks it. Attached lazily, the
+    /// first time a move lands on this board, rather than at board creation,
+    /// because only `WorkspaceSession` (not `WorkspaceCanvasStore`) knows
+    /// about editor groups and terminals.
+    private func observeCanvasTerminalUndoRedo(_ board: CanvasBoardState) {
+        guard board.undoRedoObserver == nil else { return }
+        board.undoRedoObserver = { [weak self, weak board] removed, added in
+            guard let self, let board else { return }
+            self.handleCanvasTerminalUndoRedo(board: board, removed: removed, added: added)
+        }
+    }
+
+    private func handleCanvasTerminalUndoRedo(
+        board: CanvasBoardState, removed: [CanvasCard], added: [CanvasCard]
+    ) {
+        for card in removed {
+            guard case .terminal(let groupID) = card.content,
+                let sourceGroupID = movedTerminalCardSourceGroups[groupID]
+            else { continue }
+            revealTerminalGroup(groupID, preferredGroupID: sourceGroupID)
+            AccessibilityNotification.Announcement("Terminal moved back to its tab").post()
+        }
+        for card in added {
+            guard case .terminal(let groupID) = card.content,
+                movedTerminalCardSourceGroups[groupID] != nil,
+                terminal.terminalGroup(groupID) != nil
+            else { continue }
+            hideTerminalGroup(groupID)
+            guard parkedTerminalGroupIDs.contains(groupID) else { continue }
+            board.focus(card.id)
+            board.revealCard(card.id)
+        }
     }
 
     /// A tab dropped on a visible board (shared by the SwiftUI delegate and
@@ -121,5 +162,24 @@ extension WorkspaceSession {
             handleEditorTabDrop(value, on: groupID, edge: edge)
             return true
         }
+    }
+
+    /// A Terminal Group dropped from the Terminals panel (`rafuEnsembleDrag`,
+    /// `CanvasBoardDragPayload.terminalGroup`), named by id rather than an
+    /// `EditorTabID` — unlike a dragged editor tab, a PARKED group has no tab
+    /// to name. Always lands in the centre (a panel row carries no edge
+    /// geometry); the same one-pane/not-already-on-a-board/board-capacity
+    /// refusals as any other move apply. The drop is always handled once the
+    /// board exists: the return value is `false` only when it is gone.
+    @discardableResult
+    func dropTerminalGroupOnCanvas(
+        _ groupID: TerminalGroupID, boardID: CanvasID, at point: CGPoint
+    ) -> Bool {
+        guard let board = canvas.boards[boardID] else { return false }
+        let center = CanvasBoardDropGeometry.boardPoint(point, viewport: board.viewport)
+        if moveTerminalGroupToEnsemble(groupID, board: board, center: center) {
+            presentCanvasBoard(board)
+        }
+        return true
     }
 }

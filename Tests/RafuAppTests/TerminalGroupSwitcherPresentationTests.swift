@@ -9,15 +9,37 @@ struct TerminalGroupSwitcherPresentationTests {
     func groupSwitcherPresentationIncludesRequiredDetail() {
         let presentation = EditorTerminalGroupSwitcherPresentation(
             name: "Build", paneCount: 3, focusedPaneName: "Server", attentionCount: 2,
-            isParked: true)
+            isParked: true, isRunning: false, isCanvasOwned: false)
         #expect(presentation.title == "Build")
         #expect(
             presentation.detail == "Not running · 3 panes · Focused: Server · 2 need attention")
 
         let single = EditorTerminalGroupSwitcherPresentation(
             name: "Solo", paneCount: 1, focusedPaneName: "Shell", attentionCount: 0,
-            isParked: false)
+            isParked: false, isRunning: true, isCanvasOwned: false)
         #expect(single.detail == "Terminal Group · 1 pane · Focused: Shell")
+    }
+
+    @Test("Placement precedence: canvas-owned, then not-running, then hidden-but-running")
+    func groupSwitcherPresentationPlacementPrecedence() {
+        // Canvas-owned wins even over a parked, non-running group.
+        let onEnsemble = EditorTerminalGroupSwitcherPresentation(
+            name: "Build", paneCount: 1, focusedPaneName: "Shell", attentionCount: 0,
+            isParked: true, isRunning: false, isCanvasOwned: true)
+        #expect(onEnsemble.detail == "On an Ensemble · 1 pane · Focused: Shell")
+
+        // A parked, running group is "Hidden · Running", not "Not running".
+        let hiddenRunning = EditorTerminalGroupSwitcherPresentation(
+            name: "Build", paneCount: 1, focusedPaneName: "Shell", attentionCount: 0,
+            isParked: true, isRunning: true, isCanvasOwned: false)
+        #expect(hiddenRunning.detail == "Hidden · Running · 1 pane · Focused: Shell")
+
+        // A visible but never-started pane is "Not running", not "Terminal
+        // Group" — not-running takes precedence over the parked check.
+        let visibleNotRunning = EditorTerminalGroupSwitcherPresentation(
+            name: "Build", paneCount: 1, focusedPaneName: "Shell", attentionCount: 0,
+            isParked: false, isRunning: false, isCanvasOwned: false)
+        #expect(visibleNotRunning.detail == "Not running · 1 pane · Focused: Shell")
     }
 
     @MainActor
