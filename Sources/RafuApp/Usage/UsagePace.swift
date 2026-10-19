@@ -254,6 +254,39 @@ nonisolated enum UsageWindowPresentation {
             ? "↻ " + UsagePace.durationLabel(reset.timeIntervalSince(now)) : "Reset due"
     }
 
+    /// The VoiceOver form of a reset time — a full sentence fragment rather
+    /// than `resetLabel`'s terse countdown, because a spoken "two hours ten
+    /// minutes" is harder to parse by ear than a clock time, a weekday, or
+    /// a date: `"resets 4:20 PM"` the same day, `"resets Friday"` within
+    /// the next week, `"resets Jul 31, 2026"` further out, `"reset due"` at
+    /// or after `now`, and `"reset time unknown"` with no reset at all.
+    /// `calendar`/`locale` are explicit so a test can pin both.
+    static func spokenReset(
+        for window: UsageWindow, now: Date, calendar: Calendar = .current, locale: Locale = .current
+    ) -> String {
+        guard let reset = window.resetsAt else { return "reset time unknown" }
+        if reset <= now { return "reset due" }
+        // `Date.FormatStyle.timeZone(_:)` sets the TIME-ZONE-NAME component
+        // ("GMT+5"), not the style's rendering zone — that one is the
+        // `timeZone` PROPERTY, set after construction, every call below.
+        if calendar.isDate(reset, inSameDayAs: now) {
+            var style = Date.FormatStyle(date: .omitted, time: .shortened).locale(locale)
+            style.timeZone = calendar.timeZone
+            return "resets " + reset.formatted(style)
+        }
+        let startOfToday = calendar.startOfDay(for: now)
+        let startOfReset = calendar.startOfDay(for: reset)
+        let days = calendar.dateComponents([.day], from: startOfToday, to: startOfReset).day
+        if let days, (1...7).contains(days) {
+            var style = Date.FormatStyle().weekday(.wide).locale(locale)
+            style.timeZone = calendar.timeZone
+            return "resets " + reset.formatted(style)
+        }
+        var style = Date.FormatStyle(date: .abbreviated, time: .omitted).locale(locale)
+        style.timeZone = calendar.timeZone
+        return "resets " + reset.formatted(style)
+    }
+
     /// `"Average 4.25% of this limit per hour"` — at most two decimals, no
     /// trailing zeros, independent of the locale.
     static func hourlyAverageText(_ hourly: Double) -> String {
@@ -309,9 +342,6 @@ nonisolated struct UsageProviderCardModel: Equatable, Sendable {
 
 /// The card's derived lines. Pure, so each rule has a test.
 nonisolated enum UsageCardPresentation {
-    /// Rings per provider in the notch's compact card.
-    static let compactRingCap = 3
-
     /// Windows that can draw a ring (they carry a valid percentage).
     static func ringWindows(_ snapshot: UsageSnapshot, cap: Int? = nil) -> [UsageWindow] {
         let windows = snapshot.windows.filter { UsageWindowPresentation.usedPercent($0) != nil }
