@@ -31,23 +31,6 @@ struct WorkspaceUtilityPanelView: View {
     }
 }
 
-/// Structural leading edge of the Files surface, not an activity rail (see
-/// ADR 0003: every navigator mode lives on the right). It is a window-move
-/// surface, present only while Files is expanded; a collapsed sidebar
-/// removes it entirely rather than leaving an empty strip. The sidebar
-/// toggle lives in `WindowTitlebarRow` above it, and the window remains
-/// draggable from that row while collapsed.
-struct WorkspaceSidebarRail: View {
-    @Environment(\.rafuTheme) private var theme
-
-    var body: some View {
-        WindowDragHandle()
-            .frame(width: 40)
-            .frame(maxHeight: .infinity)
-            .background(theme.palette.sidebarBackground)
-    }
-}
-
 /// Slim icon rail pinned to the window's right edge. Toggles the utility panel.
 struct WorkspaceUtilityRail: View {
     @Bindable var session: WorkspaceSession

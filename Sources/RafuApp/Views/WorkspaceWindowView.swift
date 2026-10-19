@@ -104,55 +104,48 @@ struct WorkspaceWindowView: View {
             // AppKit-backed `HSplitView` keeps the sidebar an ordinary flush
             // pane while preserving drag-to-resize; ⌘B and the toolbar toggle
             // both drive `session.isSidebarCollapsed`.
-            HStack(spacing: 0) {
-                // Structural chrome for the Files surface. It disappears
-                // with Files: a collapsed sidebar must not leave an empty
-                // rail (and hairline) at the window edge. The sidebar
-                // toggle and traffic lights stay in `WindowTitlebarRow`
-                // above regardless of this state.
+            // No left rail: per ADR 0003, the left side hosts only the
+            // Files tree, and an empty structural strip here wasted 40 pt
+            // beside it in both the expanded and collapsed states. The
+            // sidebar toggle and traffic lights stay in `WindowTitlebarRow`
+            // above regardless of this state.
+            HSplitView {
                 if !session.isSidebarCollapsed {
-                    WorkspaceSidebarRail()
-                    Divider().overlay(theme.palette.borderSubtle)
+                    WorkspaceSidebarView(session: session)
+                        .frame(minWidth: 200, idealWidth: 260, maxWidth: 420)
+                        .frame(maxHeight: .infinity)
                 }
-                HSplitView {
-                    if !session.isSidebarCollapsed {
-                        WorkspaceSidebarView(session: session)
-                            .frame(minWidth: 200, idealWidth: 260, maxWidth: 420)
-                            .frame(maxHeight: .infinity)
-                    }
-                    HStack(spacing: 0) {
-                        // HSplitView is AppKit-backed and collapses to its
-                        // children's ideal size unless every level is forced
-                        // to fill; keep the explicit max frames and layout
-                        // priority. Issue #4: the terminal presents as an
-                        // editor tab inside `editorCanvas` now, not a
-                        // separate docked panel here.
-                        WorkbenchDeckSurface {
-                            HSplitView {
-                                editorCanvas
-                                    .frame(minWidth: 480, minHeight: 220)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                    .layoutPriority(1)
-                                if session.descriptor != nil, session.navigatorMode != .files {
-                                    WorkspaceUtilityPanelView(session: session)
-                                        .frame(minWidth: 300, idealWidth: 340, maxWidth: 520)
-                                        .frame(maxHeight: .infinity)
-                                }
+                HStack(spacing: 0) {
+                    // HSplitView is AppKit-backed and collapses to its
+                    // children's ideal size unless every level is forced
+                    // to fill; keep the explicit max frames and layout
+                    // priority. Issue #4: the terminal presents as an
+                    // editor tab inside `editorCanvas` now, not a separate
+                    // docked panel here.
+                    WorkbenchDeckSurface {
+                        HSplitView {
+                            editorCanvas
+                                .frame(minWidth: 480, minHeight: 220)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .layoutPriority(1)
+                            if session.descriptor != nil, session.navigatorMode != .files {
+                                WorkspaceUtilityPanelView(session: session)
+                                    .frame(minWidth: 300, idealWidth: 340, maxWidth: 520)
+                                    .frame(maxHeight: .infinity)
                             }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .layoutPriority(1)
                         }
-                        .padding(RafuMetrics.workbenchInset)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(theme.palette.appBackground)
                         .layoutPriority(1)
-                        Divider().overlay(theme.palette.borderSubtle)
-                        WorkspaceUtilityRail(session: session)
                     }
+                    .padding(RafuMetrics.workbenchInset)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(theme.palette.appBackground)
                     .layoutPriority(1)
+                    Divider().overlay(theme.palette.borderSubtle)
+                    WorkspaceUtilityRail(session: session)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .layoutPriority(1)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 

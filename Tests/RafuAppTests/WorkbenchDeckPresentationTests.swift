@@ -26,7 +26,7 @@ struct WorkbenchDeckPresentationTests {
         #expect(deckLane.contains("WorkspaceUtilityPanelView(session: session)"))
     }
 
-    @Test("Files, both rails, and status remain outside the deck")
+    @Test("Files, the utility rail, and status remain outside the deck")
     func structuralPlaneStaysOutsideDeck() throws {
         let source = try Self.source("Sources/RafuApp/Views/WorkspaceWindowView.swift")
         let windowContent = try Self.section(
@@ -35,7 +35,6 @@ struct WorkbenchDeckPresentationTests {
             through: "private var editorCanvas: some View"
         )
         let deck = try #require(windowContent.range(of: "WorkbenchDeckSurface {"))
-        let sidebarRail = try #require(windowContent.range(of: "WorkspaceSidebarRail()"))
         let files = try #require(windowContent.range(of: "WorkspaceSidebarView(session: session)"))
         let utilityRail = try #require(
             windowContent.range(of: "WorkspaceUtilityRail(session: session)")
@@ -44,7 +43,6 @@ struct WorkbenchDeckPresentationTests {
             windowContent.range(of: "WorkspaceStatusBar(session: session)")
         )
 
-        #expect(sidebarRail.lowerBound < deck.lowerBound)
         #expect(files.lowerBound < deck.lowerBound)
         #expect(utilityRail.lowerBound > deck.lowerBound)
         #expect(status.lowerBound > deck.lowerBound)
@@ -113,26 +111,15 @@ struct WorkbenchDeckPresentationTests {
         #expect(!source.contains("WorkbenchDeckSurface"))
     }
 
-    @Test("A collapsed sidebar removes the rail and its hairline together")
-    func collapsedSidebarRemovesRailAndDividerTogether() throws {
+    @Test("There is no left rail beside the Files sidebar, expanded or collapsed")
+    func noLeftRailBesideFilesSidebar() throws {
         let source = try Self.source("Sources/RafuApp/Views/WorkspaceWindowView.swift")
 
-        #expect(Self.occurrences(of: "if !session.isSidebarCollapsed", in: source) == 2)
-
-        _ = try Self.section(
-            in: source,
-            from: "if !session.isSidebarCollapsed {",
-            through: "WorkspaceSidebarRail()"
-        )
-
-        let gated = try Self.section(
-            in: source,
-            from: "if !session.isSidebarCollapsed {",
-            through: "Divider().overlay(theme.palette.borderSubtle)"
-        )
-
-        #expect(gated.contains("WorkspaceSidebarRail()"))
-        #expect(gated.contains("Divider().overlay(theme.palette.borderSubtle)"))
+        #expect(!source.contains("WorkspaceSidebarRail"))
+        // The Files pane is the only thing gated on sidebar collapse state
+        // in this file; the sidebar toggle itself lives in
+        // `WindowTitlebarRow`, not here.
+        #expect(Self.occurrences(of: "if !session.isSidebarCollapsed", in: source) == 1)
     }
 
     private static func occurrences(of needle: String, in source: String) -> Int {
