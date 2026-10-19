@@ -108,7 +108,7 @@ final class RafuTextView: NSTextView {
 
     /// Forwarding rule as a pure predicate, so `EditorDragClassificationTests`
     /// can cover it without a live `NSDraggingInfo`.
-    static func shouldForward(_ kind: EditorDragKind) -> Bool {
+    nonisolated static func shouldForward(_ kind: EditorDragKind) -> Bool {
         kind != .text
     }
 

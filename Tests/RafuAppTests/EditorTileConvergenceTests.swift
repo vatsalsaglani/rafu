@@ -15,6 +15,7 @@ import Testing
 struct EditorTileConvergenceTests {
     /// Records the width on every `frameDidChangeNotification`. Selector-based
     /// so no non-`Sendable` value crosses a `@Sendable` closure.
+    @MainActor
     private final class FrameWidthRecorder: NSObject {
         private(set) var widths: [CGFloat] = []
         private let view: NSView
