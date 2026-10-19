@@ -2144,10 +2144,8 @@ private struct EditorTabItem: View {
 
     var body: some View {
         let icon = FileIconProvider.fileIcon(named: document.displayName)
-        AttachedWorkbenchTab(
-            isSelected: isSelected, usesDocumentWidth: true,
-            select: { session.selectEditorTabFromClick(tabID, in: groupID) }
-        ) {
+        let selectTab = { session.selectEditorTabFromClick(tabID, in: groupID) }
+        AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true, select: selectTab) {
             HStack(spacing: 6) {
                 Button {
                     session.selectEditorTabFromClick(tabID, in: groupID)
@@ -2266,10 +2264,8 @@ private struct EditorTerminalTabItem: View {
 
     var body: some View {
         let title = TerminalSessionPresentation.tabLabel(controller.presentedTitle)
-        AttachedWorkbenchTab(
-            isSelected: isSelected, usesDocumentWidth: true,
-            select: { session.selectEditorTab(tabID, in: groupID) }
-        ) {
+        let selectTab = { session.selectEditorTab(tabID, in: groupID) }
+        AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true, select: selectTab) {
             HStack(spacing: 6) {
                 Button {
                     session.selectEditorTab(tabID, in: groupID)
@@ -2442,10 +2438,8 @@ private struct EditorTerminalGroupTabItem: View {
     var body: some View {
         let agent = focusedAgent
         let title = agent?.title ?? snapshot.name.rawValue
-        AttachedWorkbenchTab(
-            isSelected: isSelected, usesDocumentWidth: true,
-            select: { selectOrRename(title: title) }
-        ) {
+        let selectTab = { selectOrRename(title: title) }
+        AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true, select: selectTab) {
             HStack(spacing: 6) {
                 if let agent {
                     AgentIconView(cli: agent.cli, size: 13)

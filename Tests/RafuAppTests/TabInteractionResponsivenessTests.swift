@@ -245,4 +245,25 @@ struct TabInteractionResponsivenessTests {
         #expect(memo.layoutRunCount == 2)
         #expect(memo.rowsByID.count == 4)
     }
+
+    @Test("The first layout request already returns lanes and reuses them afterwards")
+    func layoutCacheSeedsSynchronously() {
+        let commits = [
+            commit("c", parents: ["b"]), commit("b", parents: ["a"]), commit("a", parents: []),
+        ]
+        let cache = CommitGraphLayoutCache()
+
+        let first = cache.layout(for: commits)
+        #expect(first.rowsByID.count == 3)
+        #expect(cache.layoutRunCount == 1)
+
+        // Selection-only and search-only passes hand in the same commits.
+        _ = cache.layout(for: commits)
+        _ = cache.layout(for: commits)
+        #expect(cache.layoutRunCount == 1)
+
+        let more = cache.layout(for: commits + [commit("z", parents: [])])
+        #expect(more.rowsByID.count == 4)
+        #expect(cache.layoutRunCount == 2)
+    }
 }

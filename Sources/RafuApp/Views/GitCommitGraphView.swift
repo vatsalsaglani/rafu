@@ -25,6 +25,22 @@ nonisolated struct CommitGraphLayoutMemo: Equatable {
     }
 }
 
+/// Holds the memo outside SwiftUI observation. `body` asks it for the layout of
+/// the current commits, so the very first frame already has lanes (no empty
+/// first pass), and a selection or search pass reuses the cached rows. The
+/// layout runs only when the commit IDs differ. Mutating this reference during
+/// `body` invalidates nothing, because nothing observes it.
+final class CommitGraphLayoutCache {
+    private var memo = CommitGraphLayoutMemo()
+
+    var layoutRunCount: Int { memo.layoutRunCount }
+
+    func layout(for commits: [GitCommitSummary]) -> CommitGraphLayoutMemo {
+        memo.update(for: commits)
+        return memo
+    }
+}
+
 /// Bounded, editor-hosted commit graph for the History section (GX3): a lane
 /// canvas column, branch/tag chips, subject, and author/relative time,
 /// replacing the plain row rendering `GitInspectorView.historyView` used
@@ -51,8 +67,8 @@ struct GitCommitGraphView: View {
     let onLoadMore: () -> Void
 
     @State private var searchTerm = ""
-    /// Lane layout of `commits`, refreshed only when the commit IDs change.
-    @State private var layoutMemo = CommitGraphLayoutMemo()
+    /// Lane layout of `commits`, recomputed only when the commit IDs change.
+    @State private var layoutCache = CommitGraphLayoutCache()
 
     /// Filters the LOADED commits only — never a repository-wide scan (ADR
     /// 0013). The header label makes this explicit.
@@ -68,9 +84,11 @@ struct GitCommitGraphView: View {
     }
 
     var body: some View {
-        // The lane layout is cached in `layoutMemo` (refreshed by `onChange`
-        // below), so a search keystroke never re-runs the O(n) layout.
+        // The lane layout is cached (see `CommitGraphLayoutCache`): computed
+        // synchronously when the commit IDs change, so the first frame has
+        // lanes, and reused by search and selection passes.
         // AGENTS: no expensive work in `body`.
+        let layoutMemo = layoutCache.layout(for: commits)
         let rowsByID = layoutMemo.rowsByID
         let visibleCommits = filteredCommits
         // The lane column only needs to be as wide as the widest lane the
@@ -123,9 +141,6 @@ struct GitCommitGraphView: View {
                 .listStyle(.inset)
                 .scrollContentBackground(.hidden)
             }
-        }
-        .onChange(of: commits.map(\.id), initial: true) {
-            layoutMemo.update(for: commits)
         }
     }
 
