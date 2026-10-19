@@ -605,7 +605,7 @@ private struct EditorDropDelegate: DropDelegate {
         isTargeted = false
         hoveredEdge = nil
 
-        guard info.itemProviders(for: [.rafuEditorDrag]).first != nil else {
+        guard info.hasItemsConforming(to: [.rafuEditorDrag]) else {
             // External file drag (Finder or another app): open the files at
             // the hovered edge, same as the text view's AppKit forwarding.
             return performExternalFileDrop(info: info, edge: resolvedEdge)
@@ -839,7 +839,13 @@ private struct TabStripReorderDropDelegate: DropDelegate {
     @Binding var hoveredInsertionIndex: Int?
     let session: WorkspaceSession
 
+    /// Type presence only: never decode a provider while the drag hovers.
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [.rafuEditorDrag])
+    }
+
     func dropEntered(info: DropInfo) {
+        DragDiag.note("tab-strip entered valid=\(validateDrop(info: info))")
         hoveredInsertionIndex = insertionIndex(for: info.location)
     }
 
@@ -866,8 +872,13 @@ private struct TabStripReorderDropDelegate: DropDelegate {
     func performDrop(info: DropInfo) -> Bool {
         let index = insertionIndex(for: info.location)
         hoveredInsertionIndex = nil
+        DragDiag.note(
+            "tab-strip performDrop valid=\(validateDrop(info: info)) index=\(index) "
+                + "cached=\(session.activeEditorDrag != nil)")
 
-        guard info.itemProviders(for: [.rafuEditorDrag]).first != nil else { return false }
+        // Presence, not a provider: the same-window fast path below needs no
+        // provider at all, and reading one would receive a file promise.
+        guard validateDrop(info: info) else { return false }
 
         // Same-process fast path, mirroring `EditorDropDelegate.performDrop`.
         if let payload = session.activeEditorDrag {
@@ -2321,6 +2332,7 @@ private struct EditorTabItem: View {
         .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
         .onDrag(
             {
+                DragDiag.note("source tab onDrag")
                 session.beginDragSourceTracking(dragToken)
                 return session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString))
             },
@@ -2511,6 +2523,7 @@ private struct EditorTerminalTabItem: View {
         .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
         .onDrag(
             {
+                DragDiag.note("source tab onDrag")
                 session.beginDragSourceTracking(dragToken)
                 return session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString))
             },
@@ -2709,6 +2722,7 @@ private struct EditorTerminalGroupTabItem: View {
         .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
         .onDrag(
             {
+                DragDiag.note("source tab onDrag")
                 session.beginDragSourceTracking(dragToken)
                 return session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString))
             },

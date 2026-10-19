@@ -198,12 +198,12 @@ cat >"$INFO_PLIST" <<PLIST
   <array>
     <dict>
       <key>UTTypeIdentifier</key>
-      <string>dev.vatsalsaglani.rafu.editor-drag</string>
+      <string>dev.vatsalsaglani.rafu.editor-drag-v2</string>
       <key>UTTypeDescription</key>
       <string>Rafu editor drag item</string>
       <key>UTTypeConformsTo</key>
       <array>
-        <string>public.data</string>
+        <string>public.item</string>
       </array>
     </dict>
     <dict>
@@ -242,12 +242,12 @@ cat >"$INFO_PLIST" <<PLIST
     </dict>
     <dict>
       <key>UTTypeIdentifier</key>
-      <string>dev.vatsalsaglani.rafu.ensemble-drag</string>
+      <string>dev.vatsalsaglani.rafu.ensemble-drag-v2</string>
       <key>UTTypeDescription</key>
       <string>Rafu Ensemble drag item</string>
       <key>UTTypeConformsTo</key>
       <array>
-        <string>public.data</string>
+        <string>public.item</string>
       </array>
     </dict>
   </array>
@@ -292,8 +292,11 @@ test "$(plutil -extract CFBundleIconFile raw "$INFO_PLIST")" = "$APP_ICON_NAME"
 # Keep the Info.plist-declared drag UTI identifier in lockstep with
 # `UTType.rafuEditorDrag` in EditorDragAndDrop.swift — a mismatch silently
 # breaks the SwiftUI drag pasteboard bridge (see
-# docs/references/drag-and-drop-custom-uttype.md).
-test "$(plutil -extract UTExportedTypeDeclarations.0.UTTypeIdentifier raw "$INFO_PLIST")" = "dev.vatsalsaglani.rafu.editor-drag"
+# docs/references/drag-and-drop-custom-uttype.md). Both private drag types
+# conform to public.item, NOT public.data: SwiftUI writes a public.data drag
+# type as a file promise.
+test "$(plutil -extract UTExportedTypeDeclarations.0.UTTypeIdentifier raw "$INFO_PLIST")" = "dev.vatsalsaglani.rafu.editor-drag-v2"
+test "$(plutil -extract UTExportedTypeDeclarations.0.UTTypeConformsTo.0 raw "$INFO_PLIST")" = "public.item"
 # Keep the Ensemble file type in lockstep with `UTType.rafuEnsemble` and
 # `CanvasEnsembleFile.typeIdentifier` (CanvasEnsembleFileActions.swift).
 test "$(plutil -extract UTExportedTypeDeclarations.1.UTTypeIdentifier raw "$INFO_PLIST")" = "dev.rafu.ensemble"
@@ -302,8 +305,10 @@ test "$(plutil -extract UTExportedTypeDeclarations.1.UTTypeIdentifier raw "$INFO
 test "$(plutil -extract UTExportedTypeDeclarations.2.UTTypeIdentifier raw "$INFO_PLIST")" = "dev.rafu.workspace"
 # Keep the Ensemble drag type (Agent History row to board) in lockstep with
 # `UTType.rafuEnsembleDrag` in CanvasBoardDragPayload.swift. Like the editor
-# drag type, it must conform to public.data or the drag bridge drops it.
-test "$(plutil -extract UTExportedTypeDeclarations.3.UTTypeIdentifier raw "$INFO_PLIST")" = "dev.vatsalsaglani.rafu.ensemble-drag"
+# drag type, it must be declared (or the drag bridge drops it) and conform to
+# public.item (not public.data, which SwiftUI turns into a file promise).
+test "$(plutil -extract UTExportedTypeDeclarations.3.UTTypeIdentifier raw "$INFO_PLIST")" = "dev.vatsalsaglani.rafu.ensemble-drag-v2"
+test "$(plutil -extract UTExportedTypeDeclarations.3.UTTypeConformsTo.0 raw "$INFO_PLIST")" = "public.item"
 test -f "$APP_RESOURCES/Themes/indigo.json"
 test -f "$APP_RESOURCES/Themes/khadi.json"
 test -f "$APP_RESOURCES/Themes/dracula.json"

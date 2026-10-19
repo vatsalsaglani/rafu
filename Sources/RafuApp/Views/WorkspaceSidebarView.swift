@@ -320,7 +320,6 @@ struct WorkspaceFileTreeItem: View {
                         return NSItemProvider(object: node.url as NSURL)
                     },
                     preview: {
-                        let _ = DragDiag.note("preview folder-row built")
                         RafuDragPreviewLabel(icon: FileIconView(icon: icon), title: name)
                     }
                 )
@@ -340,7 +339,6 @@ struct WorkspaceFileTreeItem: View {
                     return provider
                 },
                 preview: {
-                    let _ = DragDiag.note("preview file-row built")
                     RafuDragPreviewLabel(icon: FileIconView(icon: icon), title: name)
                 }
             )

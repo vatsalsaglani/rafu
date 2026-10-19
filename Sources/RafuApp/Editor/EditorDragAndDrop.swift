@@ -9,15 +9,20 @@ extension UTType {
     /// this one type so `RafuTextView` refuses them and `EditorDropDelegate`
     /// can dispatch on the decoded payload.
     ///
-    /// `conformingTo: .data` is set explicitly on the initializer AND the
+    /// `conformingTo: .item` is set explicitly on the initializer AND the
     /// identifier is declared in the app's Info.plist
-    /// (`UTExportedTypeDeclarations`, see `script/build_and_run.sh`). Without
-    /// the Info.plist declaration `conforms(to: .data)` is false for a type
-    /// created only with `UTType(exportedAs:)`, which silently breaks the
-    /// SwiftUI → AppKit drag pasteboard bridge. See
+    /// (`UTExportedTypeDeclarations`, see `script/build_and_run.sh`). An
+    /// undeclared type conforms to nothing and the SwiftUI → AppKit drag
+    /// bridge drops it. It conforms to `public.item`, NOT `public.data`:
+    /// SwiftUI's `.onDrag` writes a `public.data` type as a FILE PROMISE,
+    /// which Finder, the Files tree, and a promise-receiving drop target can
+    /// all consume as a file, and which raises if a hover reads providers.
+    /// `public.item` puts the raw payload on the drag pasteboard, nothing
+    /// else. The `-v2` suffix keeps it clear of the old `public.data`
+    /// declaration still registered by older bundles. See
     /// `docs/references/drag-and-drop-custom-uttype.md`.
     nonisolated static let rafuEditorDrag = UTType(
-        exportedAs: "dev.vatsalsaglani.rafu.editor-drag", conformingTo: .data)
+        exportedAs: "dev.vatsalsaglani.rafu.editor-drag-v2", conformingTo: .item)
 }
 
 /// A drag payload originating from either an editor tab or a sidebar file

@@ -10,13 +10,14 @@ extension UTType {
     /// the editor-tab type (`rafuEditorDrag`), so editor groups and text
     /// views never see it.
     ///
-    /// `conformingTo: .data` is set here AND the identifier is declared in the
+    /// `conformingTo: .item` is set here AND the identifier is declared in the
     /// app's Info.plist (`UTExportedTypeDeclarations`, see
-    /// `script/build_and_run.sh`). A private type that does not conform to
-    /// `public.data` is silently dropped by the SwiftUI drag bridge. See
-    /// `docs/references/drag-and-drop-custom-uttype.md`.
+    /// `script/build_and_run.sh`). An undeclared private type is silently
+    /// dropped by the SwiftUI drag bridge. Like `rafuEditorDrag`, it conforms
+    /// to `public.item`, not `public.data`, so SwiftUI does not write it as a
+    /// file promise. See `docs/references/drag-and-drop-custom-uttype.md`.
     nonisolated static let rafuEnsembleDrag = UTType(
-        exportedAs: "dev.vatsalsaglani.rafu.ensemble-drag", conformingTo: .data)
+        exportedAs: "dev.vatsalsaglani.rafu.ensemble-drag-v2", conformingTo: .item)
 }
 
 /// The payload of a drag that ends on an Ensemble board. It carries

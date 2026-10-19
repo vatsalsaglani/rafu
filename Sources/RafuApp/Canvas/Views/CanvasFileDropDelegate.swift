@@ -13,9 +13,10 @@ import UniformTypeIdentifiers
 ///
 /// While the drag hovers (`validateDrop`, `dropEntered`, `dropUpdated`),
 /// this delegate reads type presence only (`DropInfo.hasItemsConforming`)
-/// and NEVER calls `DropInfo.itemProviders(for:)`. SwiftUI writes every
-/// Rafu private drag (both private types conform to `public.data`) with a
-/// file promise. Building item providers for it outside
+/// and NEVER calls `DropInfo.itemProviders(for:)`. SwiftUI writes any drag
+/// type that conforms to `public.data` with a file promise (Rafu's private
+/// types now conform to `public.item` to avoid it, but a stale or external
+/// drag can still carry one). Building item providers for it outside
 /// `performDragOperation` makes `NSFilePromiseReceiver` raise
 /// `NSInternalInconsistencyException`. AppKit catches it, cancels the
 /// drag, and the unwind leaves the window's SwiftUI input dead: no tab,

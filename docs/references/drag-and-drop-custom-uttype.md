@@ -218,3 +218,33 @@ location + bounds) into the same overlay state and session drop handlers via
 `EditorDropForwarding` closures injected by `EditorGroupView`. Additionally,
 the SwiftUI `EditorDropDelegate.dropUpdated` now sets `isTargeted = true`
 itself — enter/exit pairing is unreliable when bodies re-evaluate mid-drag.
+
+## `-v2` identifiers conform to `public.item` (2026-10-20)
+
+Both private drag types are now `dev.vatsalsaglani.rafu.editor-drag-v2` and
+`dev.vatsalsaglani.rafu.ensemble-drag-v2`, declared in the staged Info.plist
+with `UTTypeConformsTo` `public.item` (not `public.data`). This supersedes the
+"must conform to `public.data`" rule above: that rule is true only for an
+UNDECLARED type, which conforms to nothing. A DECLARED `public.item` type
+crosses the SwiftUI bridge intact.
+
+Evidence (offscreen harness app with its own declared types, in-process
+`NSApp.postEvent` only, `NSCoreDragManager` drag-tracking entry points
+replaced so no session tracked the real mouse; Swift 6.4, macOS 27.0.1
+26A434): a SwiftUI `.onDrag` provider with a declared `public.item` type
+puts exactly that type on the drag pasteboard (plus `public.file-url` when a
+file URL is registered), no `NSFilePromiseItemMetaData` and no
+`promised-file-url`. SwiftUI `.onDrop` destinations validate, enter, and
+perform; `itemProviders(for:)` returns the type and
+`loadDataRepresentation` returns the payload, with no exception. The same
+harness with a declared `public.data` type writes eleven promise types next
+to the private type, and `itemProviders(for:)` raises in
+`receivePromisedFilesAtDestination` outside a real drop.
+
+Why: with the promise, a tab drag dropped on the tab strip received the
+promise and did not reorder (user report, 52c02bc), and any promise-accepting
+destination (Finder, the Files tree's `dropDestination(for: URL.self)`) can
+materialize a tab drag as a JSON file. The new identifiers keep the old
+`public.data` declarations still registered by older bundles out of the way.
+`script/build_and_run.sh` asserts each identifier and its `public.item`
+conformance. Regression: `EditorTabDragDropTests`.

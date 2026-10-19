@@ -11,28 +11,44 @@ struct CanvasBoardDragPayloadTests {
     private let payload = CanvasBoardDragPayload.agentSession(
         provider: .claudeCode, sessionID: "abc-123_x.y")
 
-    @Test("The private type has a fixed name that the staged Info.plist declares as public.data")
+    @Test("The private type has a fixed name that the staged Info.plist declares as public.item")
     func typeIdentity() throws {
-        #expect(UTType.rafuEnsembleDrag.identifier == "dev.vatsalsaglani.rafu.ensemble-drag")
+        #expect(UTType.rafuEnsembleDrag.identifier == "dev.vatsalsaglani.rafu.ensemble-drag-v2")
+        #expect(UTType.rafuEditorDrag.identifier == "dev.vatsalsaglani.rafu.editor-drag-v2")
         #expect(UTType.rafuEnsembleDrag != UTType.rafuEditorDrag)
-        // A test process has no Info.plist, so `conforms(to: .data)` cannot be
-        // checked here. The staging script writes the declaration and asserts
-        // it after every stage; this guards that both stay in lockstep.
+        // A test process has no Info.plist, so the system declaration cannot
+        // be checked here. The private types conform to public.item, never
+        // public.data: SwiftUI writes a public.data drag type as a file
+        // promise (docs/references/swiftui-drop-hover-file-promise.md). The
+        // staging script writes the declaration and asserts it after every
+        // stage; this guards that both stay in lockstep.
         let script = try Self.source("script/build_and_run.sh")
         #expect(
             script.contains(
                 """
-                      <string>dev.vatsalsaglani.rafu.ensemble-drag</string>
+                      <string>dev.vatsalsaglani.rafu.ensemble-drag-v2</string>
                       <key>UTTypeDescription</key>
                       <string>Rafu Ensemble drag item</string>
                       <key>UTTypeConformsTo</key>
                       <array>
-                        <string>public.data</string>
+                        <string>public.item</string>
                       </array>
                 """))
         #expect(
             script.contains(
-                "UTExportedTypeDeclarations.3.UTTypeIdentifier raw \"$INFO_PLIST\")\" = \"dev.vatsalsaglani.rafu.ensemble-drag\""
+                """
+                      <string>dev.vatsalsaglani.rafu.editor-drag-v2</string>
+                      <key>UTTypeDescription</key>
+                      <string>Rafu editor drag item</string>
+                      <key>UTTypeConformsTo</key>
+                      <array>
+                        <string>public.item</string>
+                      </array>
+                """))
+        #expect(!script.contains("<string>public.data</string>"))
+        #expect(
+            script.contains(
+                "UTExportedTypeDeclarations.3.UTTypeIdentifier raw \"$INFO_PLIST\")\" = \"dev.vatsalsaglani.rafu.ensemble-drag-v2\""
             ))
     }
 

@@ -59,6 +59,7 @@ struct CanvasEditorTabItem: View {
         .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
         .onDrag(
             {
+                DragDiag.note("source ensemble-tab onDrag")
                 session.beginDragSourceTracking(dragToken)
                 return session.beginEditorDrag(.tab(id: tab.id.rawValue.uuidString))
             },

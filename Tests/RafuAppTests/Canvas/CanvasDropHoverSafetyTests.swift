@@ -3,9 +3,10 @@ import Testing
 
 @testable import RafuApp
 
-/// Regression for the "no tab is clickable after a drag" wedge. A Rafu
-/// private drag (both private types conform to `public.data`) is written by
-/// SwiftUI's `.onDrag` with a file promise. `DropInfo.itemProviders(for:)`
+/// Regression for the "no tab is clickable after a drag" wedge. A drag type
+/// that conforms to `public.data` is written by SwiftUI's `.onDrag` with a
+/// file promise (Rafu's private types conform to `public.item` since the
+/// `-v2` identifiers, but a stale or external drag can still carry one). `DropInfo.itemProviders(for:)`
 /// called while the drag only hovers makes `NSFilePromiseReceiver` raise
 /// `NSInternalInconsistencyException`; AppKit catches it and cancels the
 /// drag, and the unwind leaves the window's SwiftUI input dead. Hover code

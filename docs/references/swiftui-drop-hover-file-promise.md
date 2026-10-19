@@ -47,6 +47,11 @@ the temporary `DragDiag` line in `dropEntered`) called
 (`NSFilePromiseReceiver.m:300`) also appears at 2026-10-19 23:20:18 in an
 earlier session.
 
+Update (2026-10-20): Rafu's private types are now the `-v2` identifiers and
+conform to `public.item`, so SwiftUI writes no promise for them (see
+[`drag-and-drop-custom-uttype.md`](drag-and-drop-custom-uttype.md)). The
+hover rule stays: a stale or external drag can still carry a promise.
+
 ## Reproduction and evidence
 
 - Live wedged app: `/usr/bin/log show --predicate 'process == "RafuLightning"'`
