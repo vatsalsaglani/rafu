@@ -1600,7 +1600,7 @@ private struct GitDiffTabItem: View {
     let close: () -> Void
 
     var body: some View {
-        AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true) {
+        AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true, select: select) {
             HStack(spacing: 6) {
                 Button(action: select) {
                     HStack(spacing: 6) {
@@ -2144,10 +2144,11 @@ private struct EditorTabItem: View {
 
     var body: some View {
         let icon = FileIconProvider.fileIcon(named: document.displayName)
-        AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true) {
+        let selectTab = { session.selectEditorTabFromClick(tabID, in: groupID) }
+        AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true, select: selectTab) {
             HStack(spacing: 6) {
                 Button {
-                    session.selectEditorTab(tabID, in: groupID)
+                    session.selectEditorTabFromClick(tabID, in: groupID)
                 } label: {
                     HStack(spacing: 6) {
                         FileIconView(icon: icon, size: 13)
@@ -2263,7 +2264,8 @@ private struct EditorTerminalTabItem: View {
 
     var body: some View {
         let title = TerminalSessionPresentation.tabLabel(controller.presentedTitle)
-        AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true) {
+        let selectTab = { session.selectEditorTab(tabID, in: groupID) }
+        AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true, select: selectTab) {
             HStack(spacing: 6) {
                 Button {
                     session.selectEditorTab(tabID, in: groupID)
@@ -2436,7 +2438,8 @@ private struct EditorTerminalGroupTabItem: View {
     var body: some View {
         let agent = focusedAgent
         let title = agent?.title ?? snapshot.name.rawValue
-        AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true) {
+        let selectTab = { selectOrRename(title: title) }
+        AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true, select: selectTab) {
             HStack(spacing: 6) {
                 if let agent {
                     AgentIconView(cli: agent.cli, size: 13)
@@ -2458,9 +2461,10 @@ private struct EditorTerminalGroupTabItem: View {
                         .onExitCommand(perform: cancelRename)
                 } else {
                     Button {
-                        session.selectEditorTab(tabID, in: groupID)
+                        selectOrRename(title: title)
                     } label: {
                         Text(title).lineLimit(1).truncationMode(.middle)
+                            .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Terminal Group \(title)")
@@ -2504,18 +2508,9 @@ private struct EditorTerminalGroupTabItem: View {
         }
         .fixedSize(horizontal: true, vertical: false)
         .onHover { isHovering = $0 }
-        .onTapGesture(count: 2) {
-            renameText = title
-            isRenaming = true
-            renameFieldFocused = true
-        }
         .onDrag { session.beginEditorDrag(.tab(id: tabID.rawValue.uuidString)) }
         .contextMenu {
-            Button("Rename", systemImage: "pencil") {
-                renameText = title
-                isRenaming = true
-                renameFieldFocused = true
-            }
+            Button("Rename", systemImage: "pencil") { beginRename(title: title) }
             Divider()
             Button("Split Left", systemImage: "rectangle.split.2x1") {
                 session.splitEditorTab(tabID, at: .leading)
@@ -2531,6 +2526,20 @@ private struct EditorTerminalGroupTabItem: View {
             Button("Close") { session.requestTerminalGroupClose(snapshot.id) }
         }
         .accessibilityElement(children: .contain)
+    }
+
+    /// One click handler for the whole tab: select at once, and rename on the
+    /// second click of a double-click. A separate `onTapGesture(count: 2)`
+    /// would delay every single click by the double-click interval.
+    private func selectOrRename(title: String) {
+        session.selectEditorTab(tabID, in: groupID)
+        if TabClickIntent.current() == .selectAndRename { beginRename(title: title) }
+    }
+
+    private func beginRename(title: String) {
+        renameText = title
+        isRenaming = true
+        renameFieldFocused = true
     }
 
     private func commitRename() {

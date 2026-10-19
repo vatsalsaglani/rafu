@@ -29,7 +29,7 @@ struct AuxiliaryEditorTabItem: View {
     let close: () -> Void
 
     var body: some View {
-        AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true) {
+        AttachedWorkbenchTab(isSelected: isSelected, usesDocumentWidth: true, select: select) {
             HStack(spacing: 6) {
                 Button(action: select) {
                     Label(tab.title, systemImage: tab.symbol)
