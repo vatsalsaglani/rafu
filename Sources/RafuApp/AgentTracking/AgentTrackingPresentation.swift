@@ -64,12 +64,16 @@ nonisolated enum AgentTrackedPhase {
     }
 
     /// The Ensemble terminal node header word, or `nil` to keep "Running".
+    /// Sources the words `AgentCardStatus` also shows, so the notch and
+    /// the canvas card header can never read differently for the same
+    /// state.
     static func stateWord(phase: NotchAgentPhase?, session: TrackedAgentSession?) -> String? {
         guard let phase, let session else { return nil }
         switch phase {
-        case .working: return "Working"
+        case .working: return AgentCardStatus.working.word
         case .needsYou:
-            return session.state == .waitingForPermission ? "Needs approval" : "Needs input"
+            return session.state == .waitingForPermission
+                ? AgentCardStatus.needsYou(.approval).word : AgentCardStatus.needsYou(.input).word
         case .replyReady: return "Reply ready"
         case .idle: return "Waiting"
         case .stopped: return nil

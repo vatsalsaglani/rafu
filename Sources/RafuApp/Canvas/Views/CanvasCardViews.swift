@@ -32,6 +32,9 @@ struct CanvasCardShell: View {
 
     private let cornerRadius: CGFloat = 8
     private let headerHeight: CGFloat = 32
+    /// Below this on-screen header width, the agent status pill drops its
+    /// elapsed-time suffix first, before the title itself has to truncate.
+    private static let minimumAgentElapsedWidth: Double = 260
 
     private var commands: CanvasCardCommands {
         CanvasCardCommands(card: card, board: board, session: session)
@@ -62,6 +65,9 @@ struct CanvasCardShell: View {
             .onHover { inside in hoverChanged(inside) }
             .onDisappear { hideTask?.cancel() }
             .modifier(cardAccessibility(selected: selected))
+            .onChange(of: commands.agentCardStatus) { _, newStatus in
+                markReadIfAlreadyLookingAt(newStatus, contentFocused: contentFocused)
+            }
     }
 
     /// A whiteboard item (shape, stroke, text) has no header or card surface:
@@ -86,7 +92,17 @@ struct CanvasCardShell: View {
     private func cardAccessibility(selected: Bool) -> CanvasCardAccessibility {
         CanvasCardAccessibility(
             card: card, board: board, session: session, label: accessibilityTitle,
-            value: headerState ?? "", isSelected: selected)
+            value: accessibilityValue, isSelected: selected)
+    }
+
+    /// An agent card speaks its full status sentence ("Done, unread, 4
+    /// minutes ago"); every other card keeps its plain state word.
+    private var accessibilityValue: String {
+        guard let status = commands.agentCardStatus else { return headerState ?? "" }
+        let elapsed = commands.agentCardStatusDate.map {
+            AgentActivityStore.shared.now.timeIntervalSince($0)
+        }
+        return status.accessibilityValue(elapsed: elapsed ?? 0)
     }
 
     /// The card kinds this shell draws itself. Every other kind (the
@@ -196,7 +212,14 @@ struct CanvasCardShell: View {
                     .lineLimit(face == .silhouette ? 2 : 1)
             }
             if face == .summary {
-                if let state = headerState {
+                if let status = commands.agentCardStatus {
+                    HStack(spacing: 4) {
+                        AgentActivityGlyph(status: status)
+                        Text(status.word)
+                            .font(.system(size: detailSize, weight: .medium))
+                            .foregroundStyle(theme.palette.textSecondary).lineLimit(1)
+                    }
+                } else if let state = headerState {
                     Text(state)
                         .font(.system(size: detailSize, weight: .medium))
                         .foregroundStyle(theme.palette.textSecondary).lineLimit(1)
@@ -243,6 +266,7 @@ struct CanvasCardShell: View {
         let titleSize = max(
             12,
             CanvasZoomMetrics.minimumTitleScreenPoints / max(scale, CanvasZoomMetrics.minimumScale))
+        let agentStatus = commands.agentCardStatus
         return HStack(spacing: 7) {
             kindGlyph(size: 12)
                 .frame(width: 16, height: 16)
@@ -252,6 +276,7 @@ struct CanvasCardShell: View {
             } else {
                 Text(displayTitle)
                     .font(.system(size: titleSize, weight: .semibold))
+                    .fontWeight(agentStatus?.readsTitleBold == true ? .bold : nil)
                     .foregroundStyle(theme.palette.textPrimary)
                     .lineLimit(1)
                     .onGeometryChange(for: CGRect.self) {
@@ -260,7 +285,10 @@ struct CanvasCardShell: View {
                         titleFrame = $0
                     }
             }
-            if let state = headerState {
+            if let agentStatus {
+                AgentStatusPill(
+                    status: agentStatus, elapsed: agentElapsedLabel(for: agentStatus, scale: scale))
+            } else if let state = headerState {
                 if case .note = card.content, state != "Editing" {
                     CanvasHeaderBadge(text: state)
                 } else {
@@ -446,6 +474,32 @@ struct CanvasCardShell: View {
     private var terminalReportedTitle: String? { terminalPane?.reportedTitle?.rawValue }
 
     private var headerState: String? { commands.stateWord }
+
+    /// A card already focused and open (its content has keyboard focus)
+    /// counts as "looked at" the moment its reply turns `doneUnread` —
+    /// there is no separate focus event to clear it, unlike a card that
+    /// gets focused afterward (`WorkspaceTerminalController.clearAttention`
+    /// covers that path).
+    private func markReadIfAlreadyLookingAt(_ status: AgentCardStatus?, contentFocused: Bool) {
+        guard status == .doneUnread, contentFocused,
+            case .terminal(let groupID) = card.content,
+            let pane = session.terminal.terminalGroup(groupID)?.panes.first,
+            let controller = session.terminal.terminalController(for: pane.id)
+        else { return }
+        AgentActivityStore.shared.markReplyRead(for: controller)
+    }
+
+    /// The header pill's relative-time suffix, or `nil` to hide it: no
+    /// underlying session date (`.stopped`, or every non-agent state), or
+    /// the card's on-screen header width is under
+    /// `minimumAgentElapsedWidth` — the suffix collapses before the title
+    /// has to truncate.
+    private func agentElapsedLabel(for status: AgentCardStatus, scale: Double) -> String? {
+        guard let date = commands.agentCardStatusDate,
+            card.rect.width * scale >= Self.minimumAgentElapsedWidth
+        else { return nil }
+        return AgentCardElapsed.label(since: date, now: AgentActivityStore.shared.now)
+    }
 
     private var isDirtyFile: Bool {
         guard case .file(let path) = card.content else { return false }

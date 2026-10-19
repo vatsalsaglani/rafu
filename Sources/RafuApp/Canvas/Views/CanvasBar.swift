@@ -12,6 +12,7 @@ struct CanvasBar: View {
             nameMenu
             Spacer(minLength: 8)
             CanvasLinkStatusItem(board: board)
+            CanvasAgentSummaryBar(board: board, session: session)
             CanvasModeControl(board: board)
             CanvasAddCardMenu(board: board, session: session)
             arrangeMenu
