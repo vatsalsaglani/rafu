@@ -92,6 +92,73 @@ struct CanvasLayoutMathTests {
         #expect(CanvasLayoutMath.neighbour(of: left, in: [], forward: true) == nil)
     }
 
+    @Test("Directional neighbour picks the nearest card strictly beyond the current one")
+    func directionalNeighbourGrid() {
+        // A 2x2 grid: top-left, top-right, bottom-left, bottom-right.
+        let topLeft = CanvasCard(title: "TL", rect: rect(0, 0), content: .note(snapshot: ""))
+        let topRight = CanvasCard(title: "TR", rect: rect(300, 0), content: .note(snapshot: ""))
+        let bottomLeft = CanvasCard(title: "BL", rect: rect(0, 300), content: .note(snapshot: ""))
+        let bottomRight = CanvasCard(
+            title: "BR", rect: rect(300, 300), content: .note(snapshot: ""))
+        let cards = [topLeft, topRight, bottomLeft, bottomRight]
+
+        #expect(
+            CanvasLayoutMath.directionalNeighbour(of: topLeft.id, in: cards, direction: .right)
+                == topRight.id)
+        #expect(
+            CanvasLayoutMath.directionalNeighbour(of: topLeft.id, in: cards, direction: .down)
+                == bottomLeft.id)
+        #expect(
+            CanvasLayoutMath.directionalNeighbour(of: bottomRight.id, in: cards, direction: .up)
+                == topRight.id)
+        #expect(
+            CanvasLayoutMath.directionalNeighbour(of: bottomRight.id, in: cards, direction: .left)
+                == bottomLeft.id)
+    }
+
+    @Test("Directional neighbour never wraps: the rightmost card has no card to its right")
+    func directionalNeighbourDoesNotWrap() {
+        let left = CanvasCard(title: "L", rect: rect(0, 0), content: .note(snapshot: ""))
+        let right = CanvasCard(title: "R", rect: rect(300, 0), content: .note(snapshot: ""))
+        let cards = [left, right]
+
+        #expect(
+            CanvasLayoutMath.directionalNeighbour(of: right.id, in: cards, direction: .right) == nil
+        )
+        #expect(
+            CanvasLayoutMath.directionalNeighbour(of: left.id, in: cards, direction: .left) == nil)
+    }
+
+    @Test("A candidate overlapping the current card on the cross axis wins over one that doesn't")
+    func directionalNeighbourPrefersCrossAxisOverlap() {
+        let current = CanvasCard(
+            title: "Current", rect: rect(0, 0, 100, 100), content: .note(snapshot: ""))
+        // Same row as `current` (overlaps vertically): should win even though farther.
+        let aligned = CanvasCard(
+            title: "Aligned", rect: rect(500, 0, 100, 100), content: .note(snapshot: ""))
+        // Closer in raw distance, but offset far enough vertically to not overlap `current`.
+        let offset = CanvasCard(
+            title: "Offset", rect: rect(150, 400, 100, 100), content: .note(snapshot: ""))
+        let cards = [current, aligned, offset]
+
+        #expect(
+            CanvasLayoutMath.directionalNeighbour(of: current.id, in: cards, direction: .right)
+                == aligned.id)
+    }
+
+    @Test("Directional neighbour returns nil with no current card or an unknown one")
+    func directionalNeighbourNilCurrent() {
+        let card = CanvasCard(title: "Only", rect: rect(0, 0), content: .note(snapshot: ""))
+        #expect(
+            CanvasLayoutMath.directionalNeighbour(of: nil, in: [card], direction: .right) == nil)
+        #expect(
+            CanvasLayoutMath.directionalNeighbour(of: CanvasCardID(), in: [card], direction: .right)
+                == nil)
+        #expect(
+            CanvasLayoutMath.directionalNeighbour(of: card.id, in: [card], direction: .right) == nil
+        )
+    }
+
     @Test("Bring to Front and Send to Back keep relative order")
     func zOrder() {
         let cards = (0..<4).map {
