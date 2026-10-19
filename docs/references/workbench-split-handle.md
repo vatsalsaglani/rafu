@@ -65,6 +65,17 @@ with a 10 pt handle layout width.
    changes. Note that Search and Source Control carry an inner `minWidth` of
    300 pt, so selecting those sections can push the sidebar wider than 220.
 
+### 2026-10-20 update: no idle seam, and the minimum is 774 pt
+
+- **The idle seam is removed.** The handle draws nothing at rest; the grab bar
+  appears on hover only. A permanently visible 10 pt seam read as a third
+  structural edge next to the rail and the deck.
+- The window minimum moved 770 → **774 pt**:
+  40 + 220 + 10 + 472 + 20 = 762 plus margin (the deck inset went 8 → 10 pt).
+  The arithmetic rule above is unchanged — redo the sum on any width change.
+
+Recorded in [ADR 0031](../decisions/0031-card-header-tabs-and-themed-chrome.md).
+
 ## Why it matters
 
 The obvious implementation — an `NSSplitView` with a collapsible subview — is

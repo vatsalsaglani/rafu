@@ -128,6 +128,22 @@ log stream --info --style compact \
   --predicate 'subsystem == "dev.vatsalsaglani.rafu" AND category == "Interaction"'
 ```
 
+### A `Button` label also swallows `.onDrag` (2026-10-20)
+
+The same "the label owns the mouse-down" mechanism has a second symptom. **A
+`Button(action:)` with `.buttonStyle(.plain)` inside a view carrying `.onDrag`
+prevents the drag from ever starting** — no error, no cursor change.
+
+So the rule is now stronger than "prefer one handler": **tab labels and sidebar
+row labels are plain content, never a `Button`.** Clicks go through the single
+`TabClickIntent` handler described above; the drag is free to begin anywhere on
+the tab.
+
+Landed in `f425b3c` (Files and History rows) and `bfb1710` (editor tab labels).
+Verified with real `CGEvent`s on `bfb1710`: dragging from a tab's title and from
+its icon both reorder, and a plain click still selects. Drag-side details are in
+[`drag-and-drop-custom-uttype.md`](drag-and-drop-custom-uttype.md).
+
 ## Why it matters
 
 Each cause alone makes tabs feel unresponsive, and they stack. The

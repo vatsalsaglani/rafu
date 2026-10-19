@@ -470,6 +470,51 @@ Not implemented, with the stated reason:
 - Real arrow-key menu shortcuts (titles show hints instead).
 - "Show Message Log..." (no message log exists).
 
+## 2026-10-20: one Add palette, no List mode, no ⋯ overflow
+
+Verified on `main` at 716370a (Apple Swift 6.4 (swiftlang-6.4.0.34.1),
+macOS 27.0.1 (26A434)). This supersedes the List-mode and overflow-menu
+statements above.
+
+### List mode is gone
+
+The board has one presentation. `⌃⌘1` and `⌃⌘2` are **freed** — do not treat
+them as taken. The accessible path that List mode used to serve is now a
+VoiceOver **"Cards" rotor** built with `accessibilityRotorEntry`; its `prepare:`
+closure selects the card **and** reveals it, which is required because a rotor
+destination off-viewport is otherwise unreachable.
+
+### One Add palette
+
+`CanvasAddPopover` is the single add surface, reached three ways: the bar's `+`
+(which passes `boardPoint: nil`), a double-click on empty board (which passes
+the point), and type-ahead. It presents a `LazyVGrid` of tiles including a
+Service Icon tile, plus shell chips carrying their `⌃⌥n` hints. Navigation is a
+pure value type, `CanvasAddPaletteNavigation`, so key handling is testable
+without a board.
+
+### The ⋯ overflow menu is retired
+
+Its contents were redistributed rather than dropped: Export is its own button,
+the link controls moved into the link popover as a `RafuSegmentedPicker`,
+**Select All Cards** moved to the menu bar, and the Icon Library is reached
+through the palette.
+
+### Card title: one `Text`, with a separate `▾` menu
+
+The title is a single `Text` with a `TabClickIntent` double-click rename, and
+the card menu is a separate borderless SwiftUI `Menu`. **A borderless `Menu`
+opens on mouse-down, so a double-click on the menu label is impossible** — the
+rename gesture cannot live on the menu. The user accepted that split.
+
+### Terminal Group cards
+
+No accordion and no `expandedGroupIDs`: a Terminal Group card shows its panes as
+chips in a flow `Layout`, with an `AgentStatusPill`, a hover/focus `⋯` backed by
+the context menu, and a Start Agent card row.
+
+`CanvasBoardState.ensembleSymbol` is `circle.hexagongrid`.
+
 ## Why it matters
 
 Canvas mixes gesture-driven custom views with native responders (terminal, web,

@@ -382,3 +382,43 @@ source ghost).
   cluster in Indigo and Khadi, a 1–2 % window as a round-cap dot, and a
   six-window Claude snapshot; the agent pills, the Reduce Motion static arc,
   and the board summary bar jump menus.
+
+## Status (2026-10-20, fifth increment)
+
+The Ensemble bar and Terminal Group cards, merged as b107a66 (47420d5,
+d1c160a, 40d5c72).
+
+- **List mode removed.** The board has one presentation. `⌃⌘1` and `⌃⌘2` are
+  free again. Its accessible purpose is served by a VoiceOver **"Cards" rotor**
+  via `accessibilityRotorEntry`, whose `prepare:` both selects and reveals the
+  card — a rotor destination off-viewport is otherwise unreachable.
+- **One Add palette.** `CanvasAddPopover` serves the bar `+` (`boardPoint` nil),
+  the empty-board double-click, and type-ahead: a `LazyVGrid` of tiles with a
+  Service Icon tile and shell chips carrying `⌃⌥n` hints, over the pure
+  `CanvasAddPaletteNavigation`.
+- **The `⋯` overflow menu is retired**, contents redistributed: Export is its
+  own button, the link controls moved into the link popover as a
+  `RafuSegmentedPicker`, Select All Cards moved to the menu bar, and the Icon
+  Library is reached through the palette.
+- **Card title** is one `Text` with a `TabClickIntent` double-click rename plus
+  a separate `▾` `Menu`. A borderless SwiftUI `Menu` opens on mouse-down, so a
+  double-click on a menu label is impossible; the user accepted keeping them
+  separate.
+- **Terminal Group cards** lost the accordion and `expandedGroupIDs`: pane chips
+  in a flow `Layout`, an `AgentStatusPill`, a hover/focus `⋯` backed by the
+  context menu, and a Start Agent card row.
+  `CanvasBoardState.ensembleSymbol` is `circle.hexagongrid`.
+- **References updated:**
+  [`canvas-interaction.md`](../../references/canvas-interaction.md)
+  ("2026-10-20: one Add palette, no List mode, no ⋯ overflow"). No ADR was
+  needed: this is a presentation narrowing inside the accepted board contract.
+- **Gates on `main` at 716370a** (Apple Swift 6.4 (swiftlang-6.4.0.34.1),
+  macOS 27.0.1 (26A434)): format lint clean; build OK; parallel suite
+  250 + 2719 tests passed; `--no-parallel` (CI mode) 250 + 2719 passed;
+  `./script/build_and_run.sh --verify` launched Rafu Lightning.
+- **Open manual checks, none done by a person yet:** the VoiceOver Cards rotor
+  reaching an off-viewport card; the Add palette from all three entry points
+  and its type-ahead; every redistributed `⋯` item; inline rename next to the
+  `▾` menu; a Terminal Group card's pane chips with enough panes to wrap, the
+  status pill, and Start Agent; the `circle.hexagongrid` icon in Indigo and
+  Khadi.

@@ -56,6 +56,62 @@ New and updated documentation:
 [`swiftui-macos-click-latency.md`](../../references/swiftui-macos-click-latency.md),
 [`ui-design-language.md`](../../references/ui-design-language.md).
 
+**Three further design rounds landed on `main` (2026-10-20).** The user reviewed
+the ADR 0030 result and directed three more rounds, which supersede several of
+its explicit values. Recorded in
+[ADR 0031](../../decisions/0031-card-header-tabs-and-themed-chrome.md).
+
+| Increment | Commit | Delivered |
+|---|---|---|
+| WP-A | bfb1710 | Card-header tabs: selected = `tabActiveBackground` + `borderSubtle` hairline (`borderStrong` under Increase Contrast), semibold 12.5 pt, inactive unfilled, `StitchedAccentEdge` removed; tab labels became plain content so a drag starts anywhere on the tab |
+| Round 2 | 349d66f, f094e46 | Fixed 38 pt shelf painted `tabBarBackground` (Indigo `#151A24`, Khadi `#F4F0E6`; unset now falls back to `editorBackground`); one header hairline; card-tone 26 pt breadcrumb; grey leading/trailing fades with `ScrollViewReader` reveal; `ScrollerHidingConfigurator` for the ~15 pt a horizontal `ScrollView` reserves |
+| Round 3 | 3fcc1aa | Deck radius 12 / inset 10 with stronger shadows; Indigo frame `#0C0F15` and `borderStrong` `#6A748D`; window `minWidth` 774; idle sidebar seam removed; rail selection fill + `RafuRailAppTile`; flat Files-tree rows via `RafuFileTreeDisclosureStyle` + `FileTreeMetrics` and indent guides; sidebar header filter + `plus` menu; `EditorThemedScroller` |
+
+Also on `main` in this window: the Git diff became an auxiliary tab (cbef2fe),
+the Ensemble bar and Terminal Group cards were rebuilt (b107a66), the drag
+regressions were fixed (f425b3c, 52c02bc, 527cbea, 6ce4dd7, bfb1710, 79d8950),
+and the idle-CPU motion gate landed (5a0e873, 716370a).
+
+Gates on `main` at 716370a (Apple Swift 6.4 (swiftlang-6.4.0.34.1),
+macOS 27.0.1 (26A434)): `./script/format.sh --lint` clean; build OK; parallel
+suite 250 + 2719 tests passed; `./script/test.sh --no-parallel` (the CI gate)
+250 + 2719 passed; `./script/build_and_run.sh --verify` launched Rafu Lightning.
+
+Manual pointer tests done by the coordinator with real `CGEvent`s, on bfb1710:
+a drag from a tab's title and from its icon both reorder, and a click selects.
+The screen has been locked since, so the later visuals were checked only by
+window screenshots and a Fable review.
+
+Manual checks still open:
+
+- **Round 3's visuals in both themes** (light and dark × Indigo and Khadi, plus
+  an imported theme) — not screenshot-checked yet.
+- Files-tree indent guides with a folder expanded, including the strong segment
+  beside the selected child, its keyboard (Return/Space/←/→), and VoiceOver
+  expanded/collapsed.
+- The Khadi rail tile (`RafuRailAppTile` on `tabActiveBackground`).
+- An idle CPU measurement with a **visible** window (the locked-screen numbers
+  are recorded; the visible-window figure is an estimate).
+- A scroll pass with "Show scroll bars: Always" for `EditorThemedScroller` and
+  the fixed shelf.
+- Increase Contrast: tab hairline promotion plus both halved shadows.
+- The 774 pt minimum window.
+
+New and updated documentation for these rounds:
+[ADR 0031](../../decisions/0031-card-header-tabs-and-themed-chrome.md) (new),
+[`list-custom-disclosure-group-style.md`](../../references/list-custom-disclosure-group-style.md)
+(new),
+[`motion-gate-and-idle-cpu.md`](../../references/motion-gate-and-idle-cpu.md)
+(new),
+[`ui-design-language.md`](../../references/ui-design-language.md),
+[`workbench-split-handle.md`](../../references/workbench-split-handle.md),
+[`swiftui-macos-click-latency.md`](../../references/swiftui-macos-click-latency.md),
+[`scrollview-legacy-scroller-always-setting.md`](../../references/scrollview-legacy-scroller-always-setting.md),
+[`editor-canvas-routing.md`](../../references/editor-canvas-routing.md),
+[`drag-and-drop-custom-uttype.md`](../../references/drag-and-drop-custom-uttype.md),
+[`swiftui-drop-hover-file-promise.md`](../../references/swiftui-drop-hover-file-promise.md),
+[`test-source-policy-and-bookmark-isolation.md`](../../references/test-source-policy-and-bookmark-isolation.md).
+
 Parallel execution is specified by
 [`workbench-presentation-upgrade/README.md`](workbench-presentation-upgrade/README.md):
 one serial shared foundation, six file-disjoint worktrees from its exact commit,

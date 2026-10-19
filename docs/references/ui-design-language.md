@@ -111,6 +111,38 @@ and implemented, this note describes the verified current UI.
   - Reduce Transparency → drop every `.opacity()` wash to solid token color.
   - Increase Contrast → `borderStrong` replaces `borderSubtle` on interactive boundaries.
 
+### Workbench chrome values current as of 2026-10-20 (ADR 0031)
+
+These supersede the ADR 0030 values that earlier sections of this note
+describe. The authority is
+[ADR 0031](../decisions/0031-card-header-tabs-and-themed-chrome.md).
+
+| Surface | Value |
+|---|---|
+| Deck | radius 12, inset 10; shadow 0.30 dark / 0.10 light, radius 7, y 3 |
+| Selected tab | `tabActiveBackground` (Indigo `#222A38`, Khadi `#FFFFFF`) + `borderSubtle` hairline (`borderStrong` under Increase Contrast); semibold 12.5 pt; shadow 0.40 dark / 0.18 light, radius 4 |
+| Inactive tab | **Unfilled** — no `chipBackground`, no outline; medium 12.5 pt |
+| Tab accent edge | None. `StitchedAccentEdge` is removed |
+| Tab shelf | Fixed 38 pt (5 pt breathing), painted `tabBarBackground`: Indigo `#151A24` (= card), Khadi `#F4F0E6` (one step below the card `#FAF7F0`). An unset `tabBarBackground` falls back to `editorBackground` |
+| Header hairline | Exactly one. The shelf hairline is hidden when a breadcrumb follows |
+| Breadcrumb | Card tone, 26 pt tall, 12 pt padding |
+| Shelf overflow | Leading fade only while scrolled; 28 pt trailing fade with an 8 pt gap before `+` / `⌄`. Both grey — never accent. `ScrollViewReader` reveals the selected tab |
+| Indigo frame | `#0C0F15` for `appBackground`, `sidebarBackground`, `statusBarBackground`; `borderStrong` `#6A748D` (3:1 gate) |
+| Window minimum | 774 pt (40 + 220 + 10 + 472 + 20 = 762 + margin) |
+| Sidebar seam | None at rest; grab bar on hover only |
+| Activity Rail | Selection fill + `borderSubtle` hairline, 15 pt glyph, 6 pt spacing, 10 pt top inset; `RafuRailAppTile` draws `RafuSeamGlyph` natively on a `tabActiveBackground` tile, non-interactive and `accessibilityHidden` |
+| Files tree | `RafuFileTreeDisclosureStyle` + `FileTreeMetrics` (row 26, indent 14, selection radius 6); indent guides with a strong segment beside the selected child |
+| Sidebar header | `magnifyingglass` filter + one `plus` menu (New File…, New Folder…, Add Folder to Workspace…) |
+| Scrollers | `EditorThemedScroller` — theme track and knob, `isCompatibleWithOverlayScrollers` overridden, `scrollerStyle` never written |
+| Ensemble symbol | `circle.hexagongrid` everywhere |
+
+Increase Contrast now does three things in the workbench: promotes the tab
+hairline to `borderStrong`, halves the deck shadow, and halves the tab shadow.
+
+**Not yet verified by a person:** round 3's visuals were checked only by window
+screenshots and a Fable review; the screen has been locked since, so no
+light/dark × Indigo/Khadi pass has been done on them.
+
 ## Why it matters
 
 The flat, modern, layered language unifies Rafu's visual identity across fifty+ surfaces without forcing a monolithic design system or theme-JSON bloat. All six bundled themes (Indigo, Khadi, and four AI-generated) and future user themes decode identically by leveraging optional `ui` keys with derived fallbacks. The shared components (chip, field, header row, sheet header) ensure consistent rhythm, touch targets, and accessibility (via standard controls + explicit focus rings). The geometry in RafuMetrics is product identity, not theme identity — it anchors every corner radius and spacing decision.

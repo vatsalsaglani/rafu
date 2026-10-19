@@ -42,7 +42,8 @@ commands (Ctrl-Tab) still work, which makes it look like a hit-testing bug.
 
 Production hit (pid 40811, 2026-10-20 00:11:56): a Terminals-panel row
 dragged onto an Ensemble board. `CanvasFileDropDelegate.validateDrop` (and
-the temporary `DragDiag` line in `dropEntered`) called
+the temporary `DragDiag` line in `dropEntered` — that instrumentation was
+removed in 79d8950) called
 `itemProviders(for: [.rafuEnsembleDrag])`; the same assertion
 (`NSFilePromiseReceiver.m:300`) also appears at 2026-10-19 23:20:18 in an
 earlier session.

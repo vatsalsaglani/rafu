@@ -192,3 +192,14 @@ test now uses the same bound through
 and a retry makes the wait unbounded. Check:
 `swift test --filter CanvasBridgeIPCTests`, then `./script/test.sh`. Separate hang cause for the whole suite:
 [`test-keychain-isolation.md`](test-keychain-isolation.md).
+
+**Open item, 2026-10-20 — a second time-sensitive test.**
+`LanguageServerManagerTests`, "A server that stays alive past the stability
+threshold restarts its crash count fresh", failed **once** in `--no-parallel`
+while an `xctrace` profiling run was loading the machine. It passed alone
+(`swift test --filter`) and passed on a plain rerun. By the AGENTS.md triage
+table that is scheduler starvation under load, not a bug — but the test asserts
+on a wall-clock stability threshold, so it is the same class of defect as the
+`CanvasBridgeIPCTests` deadline above and is **worth fixing** rather than
+tolerating. It is not fixed as of `716370a`. The fix shape is the same one that
+worked for the bridge: inject the threshold instead of racing a real clock.

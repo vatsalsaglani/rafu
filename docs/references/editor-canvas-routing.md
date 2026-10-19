@@ -86,6 +86,29 @@ Related code: `Models/WorkspaceAuxiliaryTabs.swift`, `Views/AuxiliaryEditorTab.s
 `Views/EditorCanvasView.swift`, and `Models/WorkspaceSession.swift`. Related scope:
 `docs/plans/phases/editor-performance-repair.md`, UX-01, UX-02, and ADR 0018.
 
+## 2026-10-20: the Git diff is an auxiliary tab, not a tabless canvas
+
+The standalone Git diff joined the auxiliary-tab family above. This supersedes
+resolver rule 4 and the "opening any file dismisses it" clause for diffs.
+
+- `WorkspaceAuxiliaryTab` gains `.gitDiff(GitDiffTabReference)`. There is **one**
+  diff tab per window; opening another diff replaces its reference.
+- `isGitDiffSelected` is the route input. `layoutRoute` maps
+  `.standaloneDiff` → `.editor`, so the diff renders inside the layout tree with
+  its group's file shelf intact, exactly like Settings and Ensemble.
+- **The route input is the selected tab, not the existence of a diff.** This is
+  the whole point of the change: a diff can stay open while a file is selected.
+  Reading "a diff exists" would re-create the old hijack.
+- Opening Settings hides the diff tab but **keeps** it; it is not closed.
+- Closing the diff tab returns to the diff's own group's selected tab.
+- `gitOpenDiff`'s `didSet` removes the tab when the diff is cleared, so the
+  tab cannot outlive its reference.
+- `GitStandaloneDiffCanvas` is deleted. `GitSideBySideDiffView` now lives in
+  `Views/GitDiffCanvasView.swift`.
+
+In the exclusivity table below, `showSettings` no longer *closes* an open Git
+diff — it hides the diff tab and keeps it. The blame clear is unchanged.
+
 ## Rule
 
 `EditorCanvasView.body` renders exactly one canvas, chosen by a single pure
@@ -112,7 +135,7 @@ chain it replaced; it is behaviour, not taste.
 | 1 | `.welcome` | `descriptor == nil && !settingsVisible` | No workspace at all. A welcome window hosting Settings is the deliberate exception; with no window at all, ⌘, routes to the native Settings scene before this resolver is involved. |
 | 2 | `.empty` | No editor tab and none of the **seven** tabless canvases open | A workspace with nothing to render. All eight conditions (tab + seven canvases) are load-bearing; each one alone takes the route out of `.empty`. |
 | 3 | `.blame` | `gitOpenBlame != nil && selectedDocument != nil` | Blame outranks every other canvas, and is the only one that survives a selected document — it *is* about that document, and titles itself with its name. |
-| 4 | `.standaloneDiff` | `gitOpenDiff != nil && selectedDocumentID == nil` | A tabless canvas: opening any file dismisses it. |
+| 4 | `.standaloneDiff` | `gitOpenDiff != nil && isGitDiffSelected` | **Superseded 2026-10-20** — see the auxiliary-tab section above. `layoutRoute` maps this case to `.editor`; the diff is a tab, and a selected document no longer dismisses it. The historical condition was `selectedDocumentID == nil`. |
 | 5 | `.graph` | `conductorGraphVisible && selectedDocumentID == nil` | Same rule. Checked **before** run detail. |
 | 6 | `.runDetail` | `conductorRunCanvasID != nil && selectedDocumentID == nil` | Same rule. |
 | 7 | `.ensembleStart` | `ensembleStartCanvasVisible && selectedDocumentID == nil` | Same rule. Defensive ordering preserves the pre-UX-01 graph/run precedence. |
@@ -161,7 +184,7 @@ are ever active at once**, because each activator clears the others:
 | `showConductorGraph` | `conductorGraphVisible` | run detail + both creation canvases + Settings |
 | `showEnsembleStart` | `ensembleStartCanvasVisible` | graph + run detail + New Run + Settings |
 | `showEnsembleNewRun` | `ensembleNewRunCanvasVisible` | graph + run detail + New Ensemble + Settings |
-| `showSettings` | `settingsVisible` | graph + run detail + both creation canvases, and any open Git diff/blame |
+| `showSettings` | `settingsVisible` | graph + run detail + both creation canvases, and any open blame; since 2026-10-20 it **hides but keeps** the Git diff tab |
 | `revealTerminalSession` | — | all five canvases |
 
 The consequence is worth stating, because it was already misread once: the

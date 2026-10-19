@@ -263,9 +263,48 @@ routing. Verified on Swift 6.4, macOS 27.0.1 (26A434), with a hosted
 AppKit editor never overlap, but the strip target covered only the 28 pt
 tab row. The 6 pt breathing room above and below the row and the trailing
 controls had NO destination, so a release there ended the drag with no
-`performDrop` anywhere (user DragDiag log, 01:44:53, pid 57929). The whole
+`performDrop` anywhere (user `DragDiag` log, 01:44:53, pid 57929; `DragDiag`
+was temporary instrumentation and was removed in 79d8950). The whole
 shelf is now the target, and tab frames are read in the shelf's coordinate
 space, so the index includes scroll offset and spacing. The index counts
 slots in the group's full tab order, not rendered frames. Regression:
 `EditorTabStripDropRoutingTests` (5 of its 7 hosted tests fail on the old
 strip).
+
+## A `Button` label swallows `.onDrag` (2026-10-20)
+
+**A `Button(action:)` with `.buttonStyle(.plain)` placed inside a view that
+carries `.onDrag` owns the mouse-down, so the drag never starts.** The row looks
+draggable, the cursor does nothing, and there is no error. This was the actual
+cause of "Files and History rows cannot be dragged".
+
+The fix is structural, not a modifier: **the label is plain content**, and the
+click is handled explicitly (see
+[`swiftui-macos-click-latency.md`](swiftui-macos-click-latency.md) for the
+`TabClickIntent` single-handler pattern).
+
+- `f425b3c` — Files and History rows: the `Button` around the label is gone.
+  Drag-source tracking is deferred so it does not run on mouse-down.
+- `bfb1710` — editor tab labels became plain content for the same reason, so a
+  tab drag now starts anywhere on the tab, not only on the small non-button
+  margin. Confirmed with real `CGEvent`s: a drag from the tab's title and from
+  its icon both reorder, and a plain click still selects.
+
+**An async drag session consumes the mouse-up.** The source ghost therefore
+ends on *whichever comes first* of mouse-up, the first pointer move, or Escape.
+Waiting for mouse-up alone leaves the ghost on screen after the drag.
+
+### Never decode providers during hover
+
+`52c02bc` fixed a hard failure, not a cosmetic one. SwiftUI's `.onDrag` wrote
+`public.data` types as **file promises**, so reading item providers during hover
+raised inside `NSFilePromiseReceiver`; the drag was cancelled *and* the window's
+whole SwiftUI input went dead. Read only `hasItemsConforming(to:)` while
+hovering. Full account in
+[`swiftui-drop-hover-file-promise.md`](swiftui-drop-hover-file-promise.md); the
+`-v2` identifiers that conform to `public.item` (527cbea) are what stopped the
+promise registration at the source.
+
+LaunchServices caches type declarations: after changing a `UTType` identifier,
+stale declarations from an older bundle can still be resolved, so a
+mis-registering build may appear to survive the fix.

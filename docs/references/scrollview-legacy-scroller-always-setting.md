@@ -41,6 +41,27 @@ placement resolved `enclosingScrollView` correctly on the synchronous call
 already; the async reapply is a defensive backstop for the first-attach
 race, not something observed to be strictly required for the tab strip.
 
+### A horizontal `ScrollView` reserves space even with overlay scrollers (2026-10-20)
+
+Measured while making the tab shelf a fixed band: a horizontal `ScrollView`
+reserves roughly **15 pt** for its scroller *even when overlay scrollers are
+active*. A shelf sized to its content therefore grew as soon as the tabs
+overflowed, pushing the whole editor down.
+
+The fix is both halves together: give the shelf a **fixed height** (38 pt, per
+[ADR 0031](../decisions/0031-card-header-tabs-and-themed-chrome.md)) **and**
+attach the `ScrollerHidingConfigurator`. Height alone clips; the configurator
+alone still reserves the space.
+
+### Theme a scroller; never force `scrollerStyle`
+
+`EditorThemedScroller` is an `NSScroller` subclass that overrides
+`isCompatibleWithOverlayScrollers` and draws a theme-coloured track and knob
+style. It **never writes `scrollerStyle`**, because that setting is the user's
+system-wide "Show scroll bars" preference and overriding it changes behaviour
+the user asked for. Overriding the compatibility flag on the subclass is what
+makes a themed scroller coexist with overlay scrolling.
+
 ## Why it matters
 
 The bug reproduces only when a real Mac's system-wide scroll-bar preference
