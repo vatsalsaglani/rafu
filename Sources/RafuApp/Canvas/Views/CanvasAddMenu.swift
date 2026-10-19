@@ -53,7 +53,84 @@ enum CanvasAddKind: CaseIterable, Identifiable {
     }
 }
 
-/// Grouped items: [Note, Terminal] [File…, Image…] [Web App…, Mac App…].
+/// One row the Add menu or the Add popover can create: a fixed card kind, or
+/// (on a machine with more than one shell) a specific shell's terminal
+/// (terminal-manager.md T-C; review C19, 7.4).
+enum CanvasAddItem: Equatable, Identifiable {
+    case kind(CanvasAddKind)
+    case terminalShell(TerminalShell)
+
+    var id: String {
+        switch self {
+        case .kind(let kind): "kind.\(kind.rawID)"
+        case .terminalShell(let shell): "shell:\(shell.path)"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .kind(let kind): kind.symbol
+        case .terminalShell: "apple.terminal"
+        }
+    }
+
+    /// `shells` is the full catalog, needed only to de-duplicate a shell
+    /// row's name against another shell of the same name
+    /// (`TerminalNaming.shellMenuTitle`); a kind row ignores it.
+    func title(amongShells shells: [TerminalShell]) -> String {
+        switch self {
+        case .kind(let kind): kind.title
+        case .terminalShell(let shell):
+            "Terminal — " + TerminalNaming.shellMenuTitle(for: shell, among: shells)
+        }
+    }
+
+    /// Every row the Add popover offers: the fixed kinds, then one row per
+    /// shell — but only when the machine has more than one shell. A single
+    /// shell has nothing to choose between, so the plain "Terminal" kind
+    /// stays the only terminal row.
+    static func all(shells: [TerminalShell]) -> [CanvasAddItem] {
+        CanvasAddKind.allCases.map(CanvasAddItem.kind)
+            + (shells.count >= 2 ? shells.map(CanvasAddItem.terminalShell) : [])
+    }
+
+    /// The rows whose title contains `query` (case-insensitive), in
+    /// `all(shells:)` order. An empty query matches every row.
+    static func matches(_ query: String, shells: [TerminalShell]) -> [CanvasAddItem] {
+        let items = all(shells: shells)
+        let text = query.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return items }
+        return items.filter { $0.title(amongShells: shells).localizedCaseInsensitiveContains(text) }
+    }
+
+    /// Adds the card, same placement rule as `CanvasAddKind.perform`.
+    @MainActor
+    func perform(on board: CanvasBoardState, session: WorkspaceSession, center: CGPoint? = nil) {
+        switch self {
+        case .kind(let kind): kind.perform(on: board, session: session, center: center)
+        case .terminalShell(let shell):
+            board.creationCenter = center
+            session.addCanvasStoppedTerminal(board.id, shell: shell)
+        }
+    }
+}
+
+extension CanvasAddKind {
+    /// A stable string for `CanvasAddItem.id`. `CanvasAddKind.id` is `Self`
+    /// itself (no raw value), so this gives it one.
+    fileprivate var rawID: String {
+        switch self {
+        case .note: "note"
+        case .terminal: "terminal"
+        case .file: "file"
+        case .image: "image"
+        case .webApp: "webApp"
+        case .macApp: "macApp"
+        }
+    }
+}
+
+/// Grouped items: [Note, Terminal (with Shell)] [File…, Image…] [Web App…, Mac App…].
 struct CanvasAddMenuItems: View {
     let board: CanvasBoardState
     let session: WorkspaceSession
@@ -61,6 +138,16 @@ struct CanvasAddMenuItems: View {
     var body: some View {
         item(.note)
         item(.terminal)
+        let shells = session.availableTerminalShells
+        if shells.count >= 2 {
+            Menu("Terminal with Shell") {
+                ForEach(shells) { shell in
+                    Button(TerminalNaming.shellMenuTitle(for: shell, among: shells)) {
+                        session.addCanvasStoppedTerminal(board.id, shell: shell)
+                    }
+                }
+            }
+        }
         Divider()
         item(.file)
         item(.image)
@@ -112,19 +199,21 @@ struct CanvasAddPopover: View {
     let dismiss: () -> Void
     @State private var query = ""
     @State private var highlighted = 0
-    @State private var hovered: CanvasAddKind?
+    @State private var hovered: CanvasAddItem?
     @FocusState private var queryFocused: Bool
 
+    private var shells: [TerminalShell] { session.availableTerminalShells }
+
     var body: some View {
-        let kinds = CanvasAddKind.matches(query)
-        let current = kinds.indices.contains(highlighted) ? kinds[highlighted] : nil
+        let items = CanvasAddItem.matches(query, shells: shells)
+        let current = items.indices.contains(highlighted) ? items[highlighted] : nil
         VStack(alignment: .leading, spacing: 4) {
-            searchField(kinds)
+            searchField(items)
             Divider().padding(.vertical, 2)
-            ForEach(kinds) { kind in
-                row(kind, isHighlighted: kind == current)
+            ForEach(items) { item in
+                row(item, isHighlighted: item == current)
             }
-            if kinds.isEmpty {
+            if items.isEmpty {
                 Text("No matching card type")
                     .font(.system(size: 12))
                     .foregroundStyle(theme.palette.textSecondary)
@@ -138,7 +227,7 @@ struct CanvasAddPopover: View {
         .onExitCommand { dismiss() }
     }
 
-    private func searchField(_ matches: [CanvasAddKind]) -> some View {
+    private func searchField(_ matches: [CanvasAddItem]) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
@@ -168,19 +257,20 @@ struct CanvasAddPopover: View {
         )
     }
 
-    /// One card type. The highlighted row (Return target) uses the selection
+    /// One row. The highlighted row (Return target) uses the selection
     /// fill; hover uses the lighter hover fill. No gold.
-    private func row(_ kind: CanvasAddKind, isHighlighted: Bool) -> some View {
-        Button {
-            choose(kind)
+    private func row(_ item: CanvasAddItem, isHighlighted: Bool) -> some View {
+        let title = item.title(amongShells: shells)
+        return Button {
+            choose(item)
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: kind.symbol)
+                Image(systemName: item.symbol)
                     .font(.system(size: 12))
                     .foregroundStyle(theme.palette.textSecondary)
                     .frame(width: 18)
                     .accessibilityHidden(true)
-                Text(kind.title)
+                Text(title)
                     .font(.system(size: 13))
                     .foregroundStyle(theme.palette.textPrimary)
                 Spacer(minLength: 4)
@@ -195,28 +285,43 @@ struct CanvasAddPopover: View {
             .frame(height: 26)
             .background(
                 RoundedRectangle(cornerRadius: RafuMetrics.radiusDenseSelection)
-                    .fill(rowFill(kind, isHighlighted: isHighlighted))
+                    .fill(rowFill(item, isHighlighted: isHighlighted))
             )
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .onHover { inside in
             if inside {
-                hovered = kind
-            } else if hovered == kind {
+                hovered = item
+            } else if hovered == item {
                 hovered = nil
             }
         }
-        .accessibilityLabel(kind.title)
+        .accessibilityLabel(title)
+        .modifier(CanvasAddItemShellHint(item: item))
     }
 
-    private func rowFill(_ kind: CanvasAddKind, isHighlighted: Bool) -> Color {
+    private func rowFill(_ item: CanvasAddItem, isHighlighted: Bool) -> Color {
         if isHighlighted { return theme.palette.selection }
-        return hovered == kind ? theme.palette.hover : Color.clear
+        return hovered == item ? theme.palette.hover : Color.clear
     }
 
-    private func choose(_ kind: CanvasAddKind) {
+    private func choose(_ item: CanvasAddItem) {
         dismiss()
-        kind.perform(on: board, session: session, center: boardPoint)
+        item.perform(on: board, session: session, center: boardPoint)
+    }
+}
+
+/// A shell row gets an accessibility hint explaining what makes it different
+/// from the plain "Terminal" row; every other row is unchanged.
+private struct CanvasAddItemShellHint: ViewModifier {
+    let item: CanvasAddItem
+
+    func body(content: Content) -> some View {
+        if case .terminalShell = item {
+            content.accessibilityHint("Add a terminal that runs this shell")
+        } else {
+            content
+        }
     }
 }

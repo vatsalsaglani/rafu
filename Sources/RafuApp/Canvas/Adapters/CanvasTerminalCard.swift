@@ -155,7 +155,11 @@ struct CanvasTerminalCard: View {
 }
 
 extension WorkspaceSession {
-    func addCanvasStoppedTerminal(_ id: CanvasID) {
+    /// Adds one stopped terminal card. With `shell` the card's one pane
+    /// starts with that shell (and `shell` becomes the recorded preferred
+    /// shell, same as choosing a shell for a new Terminal Group); `nil` keeps
+    /// the preferred shell, same as every existing caller.
+    func addCanvasStoppedTerminal(_ id: CanvasID, shell: TerminalShell? = nil) {
         guard let board = canvas.boards[id], board.cards.count < CanvasLimits.cards,
             let name = TerminalGroupName("Terminal")
         else { return }
@@ -164,7 +168,7 @@ extension WorkspaceSession {
             let pane = try SavedTerminalPaneRecord(
                 id: paneID, explicitUserName: nil, themeColor: nil,
                 kind: .ordinaryShell,
-                launchProfile: .init(shell: .preferredShell, startingFolder: .root))
+                launchProfile: newOrdinaryShellLaunchProfile(shell: shell))
             let record = try SavedTerminalGroupRecord(
                 id: SavedTerminalGroupID(), name: name,
                 root: .pane(paneID), focusedPaneID: paneID, panes: [pane])

@@ -1157,6 +1157,20 @@ final class WorkspaceSession {
         }
     }
 
+    /// The launch profile for a new one-pane ordinary shell at the workspace
+    /// root (an Ensemble terminal card, terminal-manager.md T-C). A supplied
+    /// shell is also recorded as the preferred shell, mirroring
+    /// `newTerminalGroup(shell:)` above: the shell choice persists the same
+    /// way whether the shell was picked for an editor Terminal Group or an
+    /// Ensemble card.
+    func newOrdinaryShellLaunchProfile(shell: TerminalShell?) -> TerminalPaneLaunchProfile {
+        if let shell { preferredShellStore.record(shell) }
+        let resolved = shell ?? preferredTerminalShell()
+        return TerminalPaneLaunchProfile(
+            shell: TerminalPaneShellChoice(approvedShellPath: resolved.path) ?? .preferredShell,
+            startingFolder: .root)
+    }
+
     /// Source-compatible entry point that creates a one-pane Terminal Group.
     func newTerminalTab(shell: TerminalShell? = nil) {
         newTerminalGroup(shell: shell)

@@ -276,6 +276,9 @@ struct CanvasShortcutsSheet: View {
         ("⌫", "Remove the selection from the Ensemble. Files are never deleted"),
         ("⌘9, ⌥⌘9, ⌘0", "Zoom to fit, zoom to selection, actual size"),
         ("⌥⌘L", "Connect two selected cards"),
+        ("⌃⌥1…⌃⌥9", "Add a terminal with that shell (when the machine has more than one)"),
+        ("⌃⌘←↑→↓", "Focus the card in that direction"),
+        ("⌃⌘], ⌃⌘[", "Focus the next or previous card"),
     ]
 
     var body: some View {

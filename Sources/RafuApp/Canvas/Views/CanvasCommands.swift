@@ -16,8 +16,11 @@ struct CanvasCommands: Commands {
         CommandMenu("Ensemble") {
             if let board, let session {
                 Menu("Add to Ensemble") { CanvasAddMenuItems(board: board, session: session) }
+                terminalShellShortcutItems(board: board, session: session)
                 // X9 diagrams
                 CanvasDiagramMenuItems(board: board, session: session, showsShortcut: true)
+                Divider()
+                cardNavigationItems(board: board, session: session)
             }
             Divider()
             Button("Board") {
@@ -134,5 +137,78 @@ struct CanvasCommands: Commands {
             Button("Ensemble Shortcuts") { session?.canvasDialog = .shortcuts }
                 .disabled(session == nil)
         }
+    }
+
+    /// ⌃⌥1…⌃⌥9: one shortcut per discovered-shell catalog position (1 = the
+    /// default shell), so every shell has its own key without opening the
+    /// nested "Terminal with Shell" menu. Exists only while an Ensemble
+    /// board is the focused tab (this is inside the `if let board, session`
+    /// block above), so the key is never a live app-wide equivalent
+    /// otherwise. With exactly one shell there is nothing to choose between,
+    /// so ⌃⌥1 instead adds a plain terminal.
+    @ViewBuilder
+    private func terminalShellShortcutItems(board: CanvasBoardState, session: WorkspaceSession)
+        -> some View
+    {
+        let shells = session.availableTerminalShells
+        if shells.count >= 2 {
+            ForEach(Array(shells.prefix(9).enumerated()), id: \.element.id) { offset, shell in
+                Button(
+                    "Terminal — \(TerminalNaming.shellMenuTitle(for: shell, among: shells))"
+                ) {
+                    session.addCanvasStoppedTerminal(board.id, shell: shell)
+                }
+                .keyboardShortcut(CanvasNavigationShortcuts.shellShortcut(forPosition: offset + 1))
+            }
+        } else {
+            Button("Add Terminal") { session.addCanvasStoppedTerminal(board.id) }
+                .keyboardShortcut(CanvasNavigationShortcuts.shellShortcut(forPosition: 1))
+        }
+    }
+
+    /// ⌃⌘←↑→↓ move focus to the spatially adjacent card; ⌃⌘] and ⌃⌘[ move to
+    /// the next/previous card in reading order. All six live only while an
+    /// Ensemble board is focused (the surrounding `if let board, session`),
+    /// and the four directional ones additionally stay disabled whenever
+    /// "Focus Terminal Pane" in that same direction is enabled — the two
+    /// features share ⌃⌘←↑→↓ by design, but a canvas terminal card is always
+    /// one pane (`moveTerminalGroupToEnsemble` only accepts a one-pane
+    /// group), so pane-direction focus can never actually be enabled while
+    /// an Ensemble board is the focused tab. The guard exists for safety if
+    /// that invariant ever changes.
+    @ViewBuilder
+    private func cardNavigationItems(board: CanvasBoardState, session: WorkspaceSession)
+        -> some View
+    {
+        let keys = CanvasNavigationShortcuts.cardNavigation
+        Button("Focus Card Left") { session.focusCanvasCard(direction: .left) }
+            .keyboardShortcut(keys[0])
+            .disabled(directionalFocusUnavailable(.left, session: session))
+        Button("Focus Card Right") { session.focusCanvasCard(direction: .right) }
+            .keyboardShortcut(keys[1])
+            .disabled(directionalFocusUnavailable(.right, session: session))
+        Button("Focus Card Up") { session.focusCanvasCard(direction: .up) }
+            .keyboardShortcut(keys[2])
+            .disabled(directionalFocusUnavailable(.up, session: session))
+        Button("Focus Card Down") { session.focusCanvasCard(direction: .down) }
+            .keyboardShortcut(keys[3])
+            .disabled(directionalFocusUnavailable(.down, session: session))
+        Button("Focus Next Card") { session.focusNextCanvasCard(forward: true) }
+            .keyboardShortcut(keys[4])
+        Button("Focus Previous Card") { session.focusNextCanvasCard(forward: false) }
+            .keyboardShortcut(keys[5])
+    }
+
+    private func directionalFocusUnavailable(
+        _ direction: CanvasCardDirection, session: WorkspaceSession
+    ) -> Bool {
+        let paneDirection: TerminalPaneFocusDirection
+        switch direction {
+        case .left: paneDirection = .left
+        case .right: paneDirection = .right
+        case .up: paneDirection = .up
+        case .down: paneDirection = .down
+        }
+        return session.terminalGroupPresentationAvailability(.focus(paneDirection)).isEnabled
     }
 }

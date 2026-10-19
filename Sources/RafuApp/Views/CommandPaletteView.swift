@@ -1226,7 +1226,64 @@ struct CommandPaletteView: View {
                     dismiss()
                     session.requestCanvasConnection(board.id)
                 },
+                .init(
+                    title: "Ensemble: Focus Card Left", symbolName: "arrow.left",
+                    keywords: ["card", "navigate", "focus"]
+                ) {
+                    dismiss()
+                    session.focusCanvasCard(direction: .left)
+                },
+                .init(
+                    title: "Ensemble: Focus Card Right", symbolName: "arrow.right",
+                    keywords: ["card", "navigate", "focus"]
+                ) {
+                    dismiss()
+                    session.focusCanvasCard(direction: .right)
+                },
+                .init(
+                    title: "Ensemble: Focus Card Up", symbolName: "arrow.up",
+                    keywords: ["card", "navigate", "focus"]
+                ) {
+                    dismiss()
+                    session.focusCanvasCard(direction: .up)
+                },
+                .init(
+                    title: "Ensemble: Focus Card Down", symbolName: "arrow.down",
+                    keywords: ["card", "navigate", "focus"]
+                ) {
+                    dismiss()
+                    session.focusCanvasCard(direction: .down)
+                },
+                .init(
+                    title: "Ensemble: Focus Next Card", symbolName: "arrow.forward.to.line",
+                    keywords: ["card", "navigate", "focus", "tab"]
+                ) {
+                    dismiss()
+                    session.focusNextCanvasCard(forward: true)
+                },
+                .init(
+                    title: "Ensemble: Focus Previous Card", symbolName: "arrow.backward.to.line",
+                    keywords: ["card", "navigate", "focus", "tab"]
+                ) {
+                    dismiss()
+                    session.focusNextCanvasCard(forward: false)
+                },
             ])
+            let shells = session.availableTerminalShells
+            if shells.count >= 2 {
+                commands.append(
+                    contentsOf: shells.map { shell in
+                        .init(
+                            title:
+                                "Ensemble: Add Terminal — \(TerminalNaming.shellMenuTitle(for: shell, among: shells))",
+                            symbolName: "terminal",
+                            keywords: ["card", "shell", "terminal"]
+                        ) {
+                            dismiss()
+                            session.addCanvasStoppedTerminal(board.id, shell: shell)
+                        }
+                    })
+            }
         }
         if let summary = session.visibleAgentSessionSummary {
             commands.append(contentsOf: agentSessionResumeCommands(summary))

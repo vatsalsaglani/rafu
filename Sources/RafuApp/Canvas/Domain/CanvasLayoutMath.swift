@@ -29,6 +29,12 @@ nonisolated enum CanvasAlignment: CaseIterable, Sendable {
     }
 }
 
+/// A spatial direction for Ensemble card navigation (not reading order; see
+/// `CanvasLayoutMath.directionalNeighbour`).
+nonisolated enum CanvasCardDirection: CaseIterable, Sendable {
+    case left, right, up, down
+}
+
 nonisolated enum CanvasDistribution: CaseIterable, Sendable {
     case horizontal, vertical
 
@@ -186,6 +192,62 @@ nonisolated enum CanvasLayoutMath {
         }
         let next = forward ? index + 1 : index - 1
         return order[(next + order.count) % order.count]
+    }
+
+    // MARK: Directional navigation
+
+    /// The card spatially left/right/up/down of `current` (Ensemble card
+    /// navigation shortcuts). With no `current` card, returns `nil` — unlike
+    /// `neighbour`, there is no reading-order fallback.
+    static func directionalNeighbour(
+        of current: CanvasCardID?, in cards: [CanvasCard], direction: CanvasCardDirection
+    ) -> CanvasCardID? {
+        guard let current, let currentCard = cards.first(where: { $0.id == current })
+        else { return nil }
+
+        func centre(_ card: CanvasCard) -> CGPoint {
+            CGPoint(x: card.rect.x + card.rect.width / 2, y: card.rect.y + card.rect.height / 2)
+        }
+        let currentCentre = centre(currentCard)
+
+        /// Strictly beyond `current`'s centre on the primary axis — no wrap,
+        /// so a card exactly level with `current` on that axis never counts.
+        func isBeyond(_ card: CanvasCard) -> Bool {
+            let other = centre(card)
+            switch direction {
+            case .left: return other.x < currentCentre.x
+            case .right: return other.x > currentCentre.x
+            case .up: return other.y < currentCentre.y
+            case .down: return other.y > currentCentre.y
+            }
+        }
+
+        /// Overlap with `current` on the cross axis — a left/right move
+        /// compares vertical extents, an up/down move compares horizontal
+        /// extents.
+        func overlapsCrossAxis(_ card: CanvasCard) -> Bool {
+            switch direction {
+            case .left, .right:
+                return card.rect.y < currentCard.rect.y + currentCard.rect.height
+                    && card.rect.y + card.rect.height > currentCard.rect.y
+            case .up, .down:
+                return card.rect.x < currentCard.rect.x + currentCard.rect.width
+                    && card.rect.x + card.rect.width > currentCard.rect.x
+            }
+        }
+
+        let candidates = cards.filter { $0.id != current && isBeyond($0) }
+        guard !candidates.isEmpty else { return nil }
+        let overlapping = candidates.filter(overlapsCrossAxis)
+        let pool = overlapping.isEmpty ? candidates : overlapping
+
+        func distance(_ card: CanvasCard) -> Double {
+            let other = centre(card)
+            let dx = other.x - currentCentre.x
+            let dy = other.y - currentCentre.y
+            return (dx * dx + dy * dy).squareRoot()
+        }
+        return pool.min { distance($0) < distance($1) }?.id
     }
 
     // MARK: Z-order
