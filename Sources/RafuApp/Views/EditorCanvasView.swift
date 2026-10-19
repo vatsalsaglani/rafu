@@ -571,6 +571,9 @@ private struct EditorDropDelegate: DropDelegate {
     }
 
     func dropEntered(info: DropInfo) {
+        DragDiag.note(
+            "editor(SwiftUI) entered valid=\(validateDrop(info: info)) "
+                + "canvasVisible=\(canvasIsVisible)")
         isTargeted = true
         hoveredEdge = edge(for: info.location)
     }
@@ -597,6 +600,7 @@ private struct EditorDropDelegate: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
+        DragDiag.note("editor(SwiftUI) performDrop")
         let resolvedEdge = edge(for: info.location)
         isTargeted = false
         hoveredEdge = nil

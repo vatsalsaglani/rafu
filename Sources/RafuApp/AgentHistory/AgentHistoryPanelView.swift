@@ -327,6 +327,7 @@ private struct AgentHistorySessionRow: View {
         // payload holds only the provider and the session id.
         .onDrag(
             {
+                DragDiag.note("source history-row onDrag")
                 session.beginDragSourceTracking(dragToken)
                 session.activeEnsembleDragHint = .agentSession
                 return CanvasBoardDragPayload.agentSession(

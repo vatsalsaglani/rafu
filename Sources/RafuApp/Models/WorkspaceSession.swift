@@ -4022,11 +4022,13 @@ final class WorkspaceSession {
         _ token: RafuDragSourceToken,
         schedule: RafuDragSourceStart.Scheduler = RafuDragSourceStart.nextMainTurn
     ) -> RafuDragSourceToken {
+        DragDiag.note("tracking scheduled (any source, tabs included)")
         schedule { [weak self] in self?.startDragSourceTracking(token) }
         return token
     }
 
     private func startDragSourceTracking(_ token: RafuDragSourceToken) {
+        DragDiag.note("tracking started")
         dragInFlight = RafuDragSourceLifecycle.begin(token)
         var monitor: Any?
         func stopWatching() {
@@ -4040,6 +4042,7 @@ final class WorkspaceSession {
             let keyCode = event.type == .keyDown ? event.keyCode : 0
             switch RafuDragSourceLifecycle.signal(for: event.type, keyCode: keyCode) {
             case .ended?:
+                DragDiag.note("tracking ended")
                 dragInFlight = RafuDragSourceLifecycle.end(token, clearing: dragInFlight)
                 stopWatching()
             case .cancelled?:
