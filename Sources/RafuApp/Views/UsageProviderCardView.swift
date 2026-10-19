@@ -168,13 +168,12 @@ private struct UsageCardBody: View {
     private var snapshot: UsageSnapshot { card.snapshot }
 
     var body: some View {
-        let rings = UsageCardPresentation.ringWindows(
-            snapshot, cap: compact ? UsageCardPresentation.compactRingCap : nil)
+        let cluster = UsageRingClusterBuilder.make(
+            snapshot: snapshot, observedAt: card.observedAt, mode: mode, displayName: displayName,
+            now: now)
         VStack(alignment: .leading, spacing: compact ? 5 : 10) {
-            if !rings.isEmpty {
-                UsageRingGrid(
-                    windows: rings, observedAt: card.observedAt, displayName: displayName,
-                    mode: mode, compact: compact, ink: ink, now: now)
+            if let cluster {
+                UsageRingClusterView(cluster: cluster, ink: ink, compact: compact)
             }
             if let tokenLine = UsageCardPresentation.tokenLine(snapshot) {
                 Text(tokenLine)
@@ -188,7 +187,7 @@ private struct UsageCardBody: View {
                     .font(.system(size: compact ? 10.5 : 12, design: .monospaced))
                     .foregroundStyle(ink.secondary)
             }
-            if compact, !rings.isEmpty,
+            if compact, cluster != nil,
                 let summary = UsageCardPresentation.paceSummary(
                     snapshot, observedAt: card.observedAt, now: now)
             {
@@ -199,7 +198,7 @@ private struct UsageCardBody: View {
                     )
             }
             if !compact {
-                if !rings.isEmpty {
+                if cluster != nil {
                     Text(
                         "Estimates use each window's average so far and assume the same pace until reset. Model limits are separate; they are not extra capacity."
                     )
@@ -232,109 +231,9 @@ private struct UsageCardBody: View {
     }
 }
 
-/// Up to three rings in a row (compact) or an adaptive grid (full).
-private struct UsageRingGrid: View {
-    let windows: [UsageWindow]
-    let observedAt: Date?
-    let displayName: String
-    let mode: UsageDisplayMode
-    let compact: Bool
-    let ink: UsageCardInk
-    let now: Date
-
-    var body: some View {
-        if compact {
-            HStack(alignment: .center, spacing: 6) {
-                ForEach(Array(windows.enumerated()), id: \.offset) { _, window in
-                    cell(window)
-                }
-            }
-        } else {
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 220), alignment: .topLeading)],
-                alignment: .leading, spacing: 14
-            ) {
-                ForEach(Array(windows.enumerated()), id: \.offset) { _, window in
-                    cell(window)
-                }
-            }
-        }
-    }
-
-    private func cell(_ window: UsageWindow) -> some View {
-        UsageRingCell(
-            window: window,
-            pace: UsagePace.estimate(window: window, observedAt: observedAt, now: now),
-            displayName: displayName, mode: mode, compact: compact, ink: ink, now: now)
-    }
-}
-
-/// One window: ring, short label, mode (full only), reset countdown, and —
-/// in the full card — the pace note and hourly average.
-private struct UsageRingCell: View {
-    let window: UsageWindow
-    let pace: UsagePace
-    let displayName: String
-    let mode: UsageDisplayMode
-    let compact: Bool
-    let ink: UsageCardInk
-    let now: Date
-
-    var body: some View {
-        let title = UsageWindowPresentation.title(for: window)
-        let percent = mode.percent(for: window)
-        let level = UsageRingLevel.level(
-            usedPercent: UsageWindowPresentation.usedPercent(window), pace: pace)
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: compact ? 7 : 12) {
-                UsageRing(
-                    percent: percent, level: level, size: compact ? 36 : 58,
-                    label: "\(displayName) \(title) \(mode.word)", ink: ink)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(UsageWindowPresentation.shortLabel(for: window))
-                        .font(compact ? .system(size: 10, weight: .medium) : .headline)
-                        .foregroundStyle(ink.primary)
-                        .lineLimit(1)
-                    if !compact {
-                        Text(mode.title)
-                            .font(.caption)
-                            .foregroundStyle(ink.secondary)
-                    }
-                    Text(UsageWindowPresentation.resetLabel(for: window, now: now))
-                        .font(.system(size: compact ? 9 : 11))
-                        .foregroundStyle(ink.secondary)
-                        .monospacedDigit()
-                        .lineLimit(compact ? 1 : 2)
-                }
-            }
-            if !compact {
-                UsagePaceLine(text: pace.note, warning: pace.warning, compact: false, ink: ink)
-                if let hourly = pace.hourlyPercent {
-                    Text(UsageWindowPresentation.hourlyAverageText(hourly))
-                        .font(.caption2)
-                        .foregroundStyle(ink.secondary)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .help(helpText(title: title, percent: percent))
-    }
-
-    private func helpText(title: String, percent: Double?) -> String {
-        let value =
-            UsageRingLevel.fraction(percent: percent).map {
-                "\(Int(($0 * 100).rounded()))% \(mode.word)"
-            } ?? "Not reported by this connection"
-        let reset =
-            window.resetsAt.map {
-                "Resets " + $0.formatted(date: .abbreviated, time: .shortened)
-            } ?? "Reset not reported"
-        return "\(title): \(value). \(reset). \(pace.note)"
-    }
-}
-
-/// A pace note. A warning adds a glyph and the warning colour.
-private struct UsagePaceLine: View {
+/// A pace note. A warning adds a glyph and the warning colour. Shared with
+/// `UsageRingClusterView`'s legend rows, so it is not `private`.
+struct UsagePaceLine: View {
     let text: String
     let warning: Bool
     let compact: Bool
