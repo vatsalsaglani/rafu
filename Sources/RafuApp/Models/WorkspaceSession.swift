@@ -478,15 +478,27 @@ final class WorkspaceSession {
         closeAuxiliaryTab(.settings)
     }
 
-    /// Drives `WorkspaceWindowView`'s `NavigationSplitView` column
-    /// visibility — the ⌘B Files/Search/Source Control sidebar toggle
-    /// (issue #14). ADR 0002's "one system sidebar toggle" stays true: this
-    /// is a keyboard path to the SAME visibility the split view's own
-    /// built-in toolbar toggle controls, not a second affordance.
-    var isSidebarCollapsed = false
+    /// Drives whether `WorkspaceWindowView`'s left sidebar pane is shown
+    /// beside the Activity Rail — the ⌘B Files/Search/Source Control sidebar
+    /// toggle (issue #14). ADR 0002's "one system sidebar toggle" stays
+    /// true: this is a keyboard path to the SAME visibility
+    /// `WindowTitlebarRow`'s toggle and `WorkbenchSplitHandle`'s
+    /// collapse-by-drag both drive, not a second affordance.
+    var isSidebarCollapsed = false {
+        didSet { persistWorkspaceState() }
+    }
 
     func toggleSidebar() {
         isSidebarCollapsed.toggle()
+    }
+
+    /// The sidebar pane's width while expanded, in points. Restored and
+    /// saved per window; `WorkbenchSplitHandle` is the only interactive
+    /// writer besides restoration. Clamp with
+    /// `WorkbenchSidebarResize.clamp(_:)` before using it for layout — this
+    /// raw value is not re-clamped on every window resize.
+    var sidebarWidth: Double = 300 {
+        didSet { persistWorkspaceState() }
     }
 
     @ObservationIgnored
@@ -5559,6 +5571,8 @@ final class WorkspaceSession {
                 terminalGroupStoreError = terminalGroupRestorationError
             }
             navigatorMode = restored.navigatorMode
+            sidebarWidth = restored.sidebarWidth
+            isSidebarCollapsed = restored.isSidebarCollapsed
             workspaceSearch.loadHistory(for: resolved.url)
             resetFileTreeState()
             startFileWatcher()
@@ -5720,6 +5734,8 @@ final class WorkspaceSession {
         let additionalRootURLs = additionalRootTrees.map(\.url)
         let workspaceFilePath = workspaceFileURL?.path
         let navigatorMode = navigatorMode
+        let sidebarWidth = sidebarWidth
+        let isSidebarCollapsed = isSidebarCollapsed
         let canvasIDs = canvas.savedIDs
         let terminalGroupRestoration = terminalGroupWorkspaceRestoration()
         let restorableEditorLayout = editorLayoutForWorkspaceRestoration()
@@ -5746,7 +5762,8 @@ final class WorkspaceSession {
                         navigatorMode: navigatorMode,
                         editorLayout: EditorLayoutRestoration(layout: restorableEditorLayout),
                         terminalGroupRestoration: terminalGroupRestoration, canvasIDs: canvasIDs,
-                        additionalRoots: additionalRoots, workspaceFilePath: workspaceFilePath
+                        additionalRoots: additionalRoots, workspaceFilePath: workspaceFilePath,
+                        sidebarWidth: sidebarWidth, isSidebarCollapsed: isSidebarCollapsed
                     )
                 )
             } catch {

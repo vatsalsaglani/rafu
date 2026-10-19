@@ -49,10 +49,12 @@ struct WorkspaceWindowView: View {
         )
         .background(CanvasWindowCloseGuard(session: session).frame(width: 0, height: 0))
         .modifier(CanvasPresentations(session: session))
-        // Raised from 720: the left Activity Rail (40) + sidebar min (220)
-        // + deck lane (editor min 472 + 16 pt inset) floor to 748; 760
-        // keeps a small margin above it. See `workbenchContent`'s comment.
-        .frame(minWidth: 760, minHeight: 480)
+        // Raised from 720, then from 760 when the HSplitView divider
+        // became the explicit `WorkbenchSplitHandle`: the left Activity
+        // Rail (40) + sidebar min (220) + the handle's hit area (10) +
+        // deck lane (editor min 472 + 16 pt inset) floor to 758; 770 keeps
+        // a small margin above it. See `workbenchContent`'s comment.
+        .frame(minWidth: 770, minHeight: 480)
         .navigationTitle(session.windowTitle)
         .focusedSceneValue(\.workspaceSession, session)
         .onChange(of: session.terminal.terminalGroupRevision) { _, _ in
@@ -103,10 +105,17 @@ struct WorkspaceWindowView: View {
             // Issue: flat sidebar. `NavigationSplitView` on macOS 26 floats
             // the sidebar as an inset, rounded Liquid Glass card whenever the
             // window is key — visible elevation, shadow, and margins that
-            // contradict the flat chrome the user asked for (ADR 0012). An
-            // AppKit-backed `HSplitView` keeps the sidebar an ordinary flush
-            // pane while preserving drag-to-resize; ⌘B and the toolbar toggle
-            // both drive `session.isSidebarCollapsed`.
+            // contradict the flat chrome the user asked for (ADR 0012).
+            // `HSplitView` (AppKit-backed) avoided that, but reports no
+            // divider callbacks and cannot collapse by drag — so the
+            // boundary is now an explicit `WorkbenchSplitHandle` between two
+            // ordinary HStack children, both driven by plain session state
+            // (`sidebarWidth`, `isSidebarCollapsed`) instead of a second
+            // AppKit split bridge. A second hosting view here would
+            // re-derive the window's titlebar safe area on its own schedule
+            // (flat-window-chrome-titlebar-merge.md rule 2), so this stays
+            // pure SwiftUI. ⌘B, the titlebar toggle, and the handle's own
+            // drag-to-collapse all drive `session.isSidebarCollapsed`.
             // One left Activity Rail (user decision 2026-10-19, superseding
             // ADR 0003's right-rail placement): it hosts every navigator
             // mode and is never gated on `isSidebarCollapsed` — only the
@@ -114,38 +123,32 @@ struct WorkspaceWindowView: View {
             // utility panel.
             HStack(spacing: 0) {
                 WorkspaceActivityRail(session: session)
-                HSplitView {
-                    if !session.isSidebarCollapsed {
-                        WorkspaceSidebarPanelView(session: session)
-                            // Grown from the old Files-only (200/260/420) to
-                            // fit Search and Source Control, which were
-                            // authored for the former 300–520 right panel.
-                            .frame(minWidth: 220, idealWidth: 300, maxWidth: 560)
-                            .frame(maxHeight: .infinity)
-                    }
-                    // HSplitView is AppKit-backed and collapses to its
-                    // children's ideal size unless every level is forced
-                    // to fill; keep the explicit max frames and layout
-                    // priority. Issue #4: the terminal presents as an
-                    // editor tab inside `editorCanvas` now, not a separate
-                    // docked panel here.
-                    WorkbenchDeckSurface {
-                        editorCanvas
-                            // Resize floor: rail 40 + sidebar min 220 +
-                            // deck lane (this 472 + the 8 pt inset on both
-                            // sides below, 16) = 748. The window's own
-                            // `minWidth` (below, in `body`) is raised to
-                            // 760 to clear it with a small margin.
-                            .frame(minWidth: 472, minHeight: 220)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .layoutPriority(1)
-                    }
-                    .padding(RafuMetrics.workbenchInset)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(theme.palette.appBackground)
-                    .layoutPriority(1)
+                if !session.isSidebarCollapsed {
+                    WorkspaceSidebarPanelView(session: session)
+                        .frame(width: WorkbenchSidebarResize.clamp(session.sidebarWidth))
+                        .frame(maxHeight: .infinity)
                 }
+                // Present even while collapsed, right after the rail, so a
+                // drag outward from the collapsed edge can reopen the
+                // sidebar (see `WorkbenchSplitHandle`).
+                WorkbenchSplitHandle(session: session)
+                // Issue #4: the terminal presents as an editor tab inside
+                // `editorCanvas` now, not a separate docked panel here.
+                WorkbenchDeckSurface {
+                    editorCanvas
+                        // Resize floor: rail 40 + sidebar min 220 + the
+                        // handle's 10 pt hit area + deck lane (this 472 +
+                        // the 8 pt inset on both sides below, 16) = 758.
+                        // The window's own `minWidth` (below, in `body`)
+                        // is raised to 770 to clear it with a small margin.
+                        .frame(minWidth: 472, minHeight: 220)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .layoutPriority(1)
+                }
+                .padding(RafuMetrics.workbenchInset)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(theme.palette.appBackground)
+                .layoutPriority(1)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 

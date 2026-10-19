@@ -27,6 +27,13 @@ nonisolated struct RestorableWorkspace: Codable, Sendable {
     let additionalRoots: [RestorableWorkspaceRoot]
     /// The `.rafuworkspace` file the window was bound to, if any.
     let workspaceFilePath: String?
+    /// The left sidebar pane's width while expanded, in points. Optional on
+    /// decode: a record saved before the window redesign's phase 3 has
+    /// none, and falls back to `WorkbenchSidebarResize.idealWidth` (300).
+    let sidebarWidth: Double
+    /// Optional on decode for the same reason; an older record without this
+    /// field restores expanded.
+    let isSidebarCollapsed: Bool
 
     init(
         bookmark: Data,
@@ -38,7 +45,9 @@ nonisolated struct RestorableWorkspace: Codable, Sendable {
         terminalGroupRestoration: TerminalGroupWorkspaceRestoration? = nil,
         canvasIDs: [CanvasID] = [],
         additionalRoots: [RestorableWorkspaceRoot] = [],
-        workspaceFilePath: String? = nil
+        workspaceFilePath: String? = nil,
+        sidebarWidth: Double = 300,
+        isSidebarCollapsed: Bool = false
     ) {
         self.additionalRoots = Array(additionalRoots.prefix(16))
         self.workspaceFilePath = workspaceFilePath
@@ -51,6 +60,8 @@ nonisolated struct RestorableWorkspace: Codable, Sendable {
         self.editorLayout = editorLayout
         self.terminalGroupRestoration = terminalGroupRestoration
         terminalGroupRestorationDiagnostics = []
+        self.sidebarWidth = sidebarWidth
+        self.isSidebarCollapsed = isSidebarCollapsed
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -64,6 +75,8 @@ nonisolated struct RestorableWorkspace: Codable, Sendable {
         case canvasIDs
         case additionalRoots
         case workspaceFilePath
+        case sidebarWidth
+        case isSidebarCollapsed
     }
 
     init(from decoder: any Decoder) throws {
@@ -81,6 +94,10 @@ nonisolated struct RestorableWorkspace: Codable, Sendable {
         additionalRoots = Array((roots ?? []).prefix(16))
         workspaceFilePath = try? container.decodeIfPresent(
             String.self, forKey: .workspaceFilePath)
+        sidebarWidth =
+            (try? container.decodeIfPresent(Double.self, forKey: .sidebarWidth)) ?? 300
+        isSidebarCollapsed =
+            (try? container.decodeIfPresent(Bool.self, forKey: .isSidebarCollapsed)) ?? false
 
         if let list = try? container.nestedUnkeyedContainer(forKey: .canvasIDs),
             (list.count ?? Int.max) <= CanvasLimits.boards
@@ -125,6 +142,8 @@ nonisolated struct RestorableWorkspace: Codable, Sendable {
             try container.encode(additionalRoots, forKey: .additionalRoots)
         }
         try container.encodeIfPresent(workspaceFilePath, forKey: .workspaceFilePath)
+        try container.encode(sidebarWidth, forKey: .sidebarWidth)
+        try container.encode(isSidebarCollapsed, forKey: .isSidebarCollapsed)
     }
 }
 

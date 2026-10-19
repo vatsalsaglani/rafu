@@ -75,7 +75,6 @@ struct WorkspaceSidebarView: View {
             }
         }
         .background(theme.palette.sidebarBackground)
-        .navigationSplitViewColumnWidth(min: 190, ideal: 250, max: 380)
         .alert("Rename File", isPresented: renameBinding) {
             TextField("Name", text: $renameText)
             Button("Cancel", role: .cancel) { renameNode = nil }

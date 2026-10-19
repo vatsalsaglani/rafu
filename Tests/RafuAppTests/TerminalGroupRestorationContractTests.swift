@@ -103,6 +103,41 @@ func oldRestorableWorkspacePayloadDecodes() throws {
     #expect(decoded.terminalGroupRestorationDiagnostics == [.missingTerminalGroupField])
 }
 
+@Test("An old record with no sidebar fields decodes with the expanded default width")
+func oldRestorableWorkspacePayloadDecodesSidebarDefaults() throws {
+    // `restorableWorkspaceJSON()` encodes with the current code, which
+    // always writes these two fields; strip them to simulate a genuinely
+    // old payload saved before the window redesign's phase 3.
+    var json = try restorableWorkspaceJSON()
+    json.removeValue(forKey: "sidebarWidth")
+    json.removeValue(forKey: "isSidebarCollapsed")
+    let data = try JSONSerialization.data(withJSONObject: json)
+
+    let decoded = try JSONDecoder().decode(RestorableWorkspace.self, from: data)
+
+    #expect(decoded.sidebarWidth == 300)
+    #expect(decoded.isSidebarCollapsed == false)
+}
+
+@Test("A collapsed, custom-width sidebar round-trips through save and load")
+func sidebarWidthAndCollapseStateRoundTrip() throws {
+    let workspace = RestorableWorkspace(
+        bookmark: Data([1, 2, 3]),
+        rootPath: "/workspace/root",
+        openRelativePaths: [],
+        selectedRelativePath: nil,
+        navigatorMode: .files,
+        editorLayout: nil,
+        sidebarWidth: 412,
+        isSidebarCollapsed: true
+    )
+    let data = try JSONEncoder().encode(workspace)
+    let decoded = try JSONDecoder().decode(RestorableWorkspace.self, from: data)
+
+    #expect(decoded.sidebarWidth == 412)
+    #expect(decoded.isSidebarCollapsed == true)
+}
+
 @Test("Malformed and unsupported Terminal Group fields preserve file workspace data")
 func malformedAndUnsupportedTerminalGroupFieldsAreIsolated() throws {
     var malformed = try restorableWorkspaceJSON()

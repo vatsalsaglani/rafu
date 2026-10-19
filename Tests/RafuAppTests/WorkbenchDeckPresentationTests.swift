@@ -20,10 +20,12 @@ struct WorkbenchDeckPresentationTests {
         )
 
         #expect(Self.occurrences(of: "WorkbenchDeckSurface {", in: windowContent) == 1)
-        // One HSplitView, between the left sidebar pane and the deck lane.
-        // The deck itself no longer owns an inner split: there is no right
-        // panel for it to host.
-        #expect(Self.occurrences(of: "HSplitView {", in: windowContent) == 1)
+        // No outer HSplitView: `WorkbenchSplitHandle` is the explicit
+        // boundary between the left sidebar pane and the deck lane, inside
+        // a plain HStack. The deck itself still owns no inner split: there
+        // is no right panel for it to host.
+        #expect(!windowContent.contains("HSplitView {"))
+        #expect(windowContent.contains("WorkbenchSplitHandle(session: session)"))
         #expect(deckLane.contains("editorCanvas"))
         #expect(!deckLane.contains("WorkspaceUtilityPanelView"))
     }
@@ -82,13 +84,19 @@ struct WorkbenchDeckPresentationTests {
             through: "private var editorCanvas: some View"
         )
 
-        // Grown from the Files-only (200/260/420) to fit Search and Source
-        // Control, which were authored for the former 300-520 right panel.
+        // The sidebar's width is explicit session state clamped by
+        // `WorkbenchSidebarResize` (min 220, ideal 300, max 560 — grown from
+        // the Files-only 200/260/420 to fit Search and Source Control,
+        // which were authored for the former 300-520 right panel), not a
+        // split view's own min/ideal/max frame triplet.
         #expect(
             windowContent.contains(
-                ".frame(minWidth: 220, idealWidth: 300, maxWidth: 560)"
+                ".frame(width: WorkbenchSidebarResize.clamp(session.sidebarWidth))"
             )
         )
+        #expect(WorkbenchSidebarResize.minimumWidth == 220)
+        #expect(WorkbenchSidebarResize.idealWidth == 300)
+        #expect(WorkbenchSidebarResize.maximumWidth == 560)
         #expect(windowContent.contains(".frame(minWidth: 472, minHeight: 220)"))
         #expect(!windowContent.contains("WorkspaceUtilityPanelView"))
         #expect(Self.occurrences(of: ".layoutPriority(1)", in: windowContent) >= 2)
@@ -124,8 +132,9 @@ struct WorkbenchDeckPresentationTests {
         let rail = try Self.source("Sources/RafuApp/Views/WorkspaceNavigatorView.swift")
 
         #expect(windowContent.contains("WorkspaceActivityRail(session: session)"))
-        // The rail is a sibling of the HSplitView, not inside it, and is
-        // never gated on `isSidebarCollapsed` — only the sidebar pane is.
+        // The rail is a sibling of the sidebar pane and `WorkbenchSplitHandle`
+        // in the explicit HStack, and is never gated on `isSidebarCollapsed`
+        // — only the sidebar pane is.
         #expect(Self.occurrences(of: "if !session.isSidebarCollapsed", in: windowContent) == 1)
         let railBody = try Self.section(
             in: rail,
