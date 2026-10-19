@@ -73,10 +73,13 @@ nonisolated struct EditorColorSet: Equatable, Sendable {
     let background: String
     let foreground: String
     let cursor: String
+    /// Picks the scroller knob style (light knob on a dark theme).
+    let isDark: Bool
 
     init(theme: RafuTheme) {
         background = theme.editor.background
         foreground = theme.editor.foreground
         cursor = theme.editor.cursor
+        isDark = theme.isDark
     }
 }

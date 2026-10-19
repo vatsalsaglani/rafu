@@ -39,7 +39,10 @@ nonisolated enum RafuMetrics {
     /// Window redesign phase 4: tabs are detached rounded cards, not attached
     /// caps.
     static let radiusWorkbenchTab: CGFloat = 10
-    static let tabShadowRadius: CGFloat = 3
+    /// Design polish round 3: 3 → 4, so the selected tab lifts off the
+    /// Khadi shelf. Radius + `tabShadowY` stays within
+    /// `tabShelfBreathingRoom`, so the shelf never clips it.
+    static let tabShadowRadius: CGFloat = 4
     static let tabShadowY: CGFloat = 1
     /// Tab title size: 12.5 pt, semibold when selected and medium otherwise,
     /// for every tab kind (set once in `AttachedWorkbenchTab`).

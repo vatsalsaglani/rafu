@@ -86,10 +86,11 @@ struct EditorTabAndGroupPresentationTests {
         #expect(shelf.contains("WorkbenchTextHeightPolicy.tabShelfHeight(forTabHeight:"))
         #expect(!shelf.contains(".clipShape("))
         #expect(!shelf.contains(".mask("))
-        // The shelf is the deck card's header row, in the card's own tone,
-        // and a fixed height so an overflowing strip cannot grow it.
-        #expect(shelf.contains(".background(theme.palette.editorBackground)"))
-        #expect(!shelf.contains("tabBarBackground"))
+        // The shelf is the deck card's header row in its own tone
+        // (`tabBarBackground`: the card tone in Indigo, one step below it in
+        // Khadi), and a fixed height so an overflowing strip cannot grow it.
+        #expect(shelf.contains(".background(theme.palette.tabBarBackground)"))
+        #expect(!shelf.contains(".background(theme.palette.editorBackground)"))
         #expect(shelf.contains(".frame(height: WorkbenchTextHeightPolicy.tabShelfHeight("))
         #expect(!shelf.contains("minHeight:"))
         // One hairline under the whole card header: the shelf's own hairline
@@ -125,9 +126,11 @@ struct EditorTabAndGroupPresentationTests {
         #expect(bar.contains(".onChange(of: session.selectedAuxiliaryTab(in: group.id))"))
         #expect(bar.contains("proxy.scrollTo(target, anchor: nil)"))
         #expect(!bar.contains("withAnimation"))
-        // The trailing fade matches the shelf's card tone, and a mirrored
-        // leading fade shows only once the strip is scrolled.
-        #expect(bar.contains("theme.palette.editorBackground.opacity(0)"))
+        // Both fades match the shelf's own tone, and the mirrored leading
+        // fade shows only once the strip is scrolled.
+        #expect(
+            bar.components(separatedBy: "theme.palette.tabBarBackground.opacity(0)").count - 1 == 2)
+        #expect(!bar.contains("theme.palette.editorBackground.opacity(0)"))
         #expect(bar.contains(".overlay(alignment: .leading) {"))
         #expect(bar.contains("if isStripScrolledFromLeadingEdge {"))
         #expect(bar.contains(".onScrollGeometryChange(for: Bool.self)"))
@@ -136,8 +139,19 @@ struct EditorTabAndGroupPresentationTests {
         #expect(
             bar.components(separatedBy: ".tint(theme.palette.textSecondary)").count - 1 == 2)
         #expect(bar.components(separatedBy: ".menuIndicator(.hidden)").count - 1 == 2)
-        #expect(!bar.contains("tabBarBackground"))
         #expect(bar.contains(".scrollIndicators(.never)"))
+        // Design polish round 3: a 28 pt trailing fade that is also the
+        // row's trailing inset (a strip scrolled to its end leaves the last
+        // tab clear of it), then 8 pt before the fixed "+" so the controls
+        // never sit on a faded tab.
+        #expect(bar.contains("private static let trailingFadeWidth: CGFloat = 28"))
+        #expect(bar.contains(".frame(width: Self.trailingFadeWidth)"))
+        #expect(
+            bar.contains(".contentMargins(.trailing, Self.trailingFadeWidth, for: .scrollContent)"))
+        #expect(bar.contains("$0 - Self.stripMargin - Self.trailingFadeWidth"))
+        let gap = try #require(bar.range(of: ".padding(.trailing, RafuMetrics.space2)"))
+        let plus = try #require(bar.range(of: "                newTabMenu\n"))
+        #expect(gap.lowerBound < plus.lowerBound)
         #expect(bar.contains(".background(ScrollerHidingConfigurator())"))
 
         let configurator = try Self.source(

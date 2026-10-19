@@ -811,7 +811,10 @@ private struct EditorTabShelf<Content: View>: View {
             .padding(.vertical, RafuMetrics.tabShelfBreathingRoom)
             .frame(maxWidth: .infinity, alignment: .center)
             .frame(height: WorkbenchTextHeightPolicy.tabShelfHeight(forTabHeight: tabHeight))
-            .background(theme.palette.editorBackground)
+            // The shelf's own tone: the card tone in Indigo, one step below
+            // it in Khadi, so the white selected tab and the breadcrumb row
+            // under the shelf both stand apart from it.
+            .background(theme.palette.tabBarBackground)
             .overlay(alignment: .bottom) {
                 if showsBottomHairline {
                     Rectangle()
@@ -1152,8 +1155,12 @@ private struct EditorGroupTabBar: View {
     /// compare directly: the frames already include the strip's leading
     /// inset, spacing, and current scroll offset.
     private static let coordinateSpaceName = "editorTabStrip"
-    /// Inset of the tab row inside the scrolling strip, each side.
+    /// Leading inset of the tab row inside the scrolling strip.
     private static let stripMargin: CGFloat = RafuMetrics.space2
+    /// Width of the trailing fade, and the row's trailing inset: a strip
+    /// scrolled to its end, or a tab revealed by `scrollTo`, sits fully
+    /// clear of the fade.
+    private static let trailingFadeWidth: CGFloat = 28
 
     @Environment(\.rafuTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1209,7 +1216,8 @@ private struct EditorGroupTabBar: View {
                     // The first tab never touches the card's edge, and
                     // `scrollTo` keeps a revealed tab clear of the trailing
                     // fade, because it scrolls within these margins.
-                    .contentMargins(.horizontal, Self.stripMargin, for: .scrollContent)
+                    .contentMargins(.leading, Self.stripMargin, for: .scrollContent)
+                    .contentMargins(.trailing, Self.trailingFadeWidth, for: .scrollContent)
                     .scrollIndicators(.never)
                     // Only a scrolled strip shows the leading fade: at rest
                     // the first tab sits fully in view and must not be dimmed.
@@ -1222,7 +1230,8 @@ private struct EditorGroupTabBar: View {
                         $0.size.width
                     } action: {
                         // The row fills the strip inside its content margins.
-                        stripViewportWidth = max(0, $0 - Self.stripMargin * 2)
+                        stripViewportWidth = max(
+                            0, $0 - Self.stripMargin - Self.trailingFadeWidth)
                     }
                     // Keep the selected tab visible: a newly opened tab is
                     // appended past the trailing edge once the row overflows,
@@ -1236,18 +1245,19 @@ private struct EditorGroupTabBar: View {
                     }
                     .onChange(of: group.tabs.count) { revealSelectedTab(with: proxy) }
                 }
-                // Tabs scroll under a trailing fade, so the fixed controls
-                // below never overlap (or clip) a tab or its close button.
+                // Tabs scroll under a trailing fade in the shelf's own tone,
+                // so the fixed controls below never overlap (or clip) a tab
+                // or its close button.
                 .overlay(alignment: .trailing) {
                     LinearGradient(
                         colors: [
-                            theme.palette.editorBackground.opacity(0),
-                            theme.palette.editorBackground,
+                            theme.palette.tabBarBackground.opacity(0),
+                            theme.palette.tabBarBackground,
                         ],
                         startPoint: .leading,
                         endPoint: .trailing
                     )
-                    .frame(width: 16)
+                    .frame(width: Self.trailingFadeWidth)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
                 }
@@ -1257,8 +1267,8 @@ private struct EditorGroupTabBar: View {
                     if isStripScrolledFromLeadingEdge {
                         LinearGradient(
                             colors: [
-                                theme.palette.editorBackground,
-                                theme.palette.editorBackground.opacity(0),
+                                theme.palette.tabBarBackground,
+                                theme.palette.tabBarBackground.opacity(0),
                             ],
                             startPoint: .leading,
                             endPoint: .trailing
@@ -1268,6 +1278,8 @@ private struct EditorGroupTabBar: View {
                         .accessibilityHidden(true)
                     }
                 }
+                // Breathing room between the faded strip and the fixed "+".
+                .padding(.trailing, RafuMetrics.space2)
                 .layoutPriority(0)
                 newTabMenu
                 if let document = selectedDocument, document.supportsPresentationModes {

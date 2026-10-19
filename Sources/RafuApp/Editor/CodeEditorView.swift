@@ -129,6 +129,10 @@ struct CodeEditorView: NSViewRepresentable {
         defer { EditorResources.signposter.endInterval("EditorCreate", interval) }
         let scrollView = EditorDropForwardingScrollView()
         scrollView.dropForwarding = dropForwarding
+        // Themed before the `has…Scroller` flags, so the scroll view adopts
+        // them instead of creating stock scrollers whose legacy track would
+        // paint a grey band down the card's edge.
+        EditorThemedScroller.install(in: scrollView)
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true
         scrollView.autohidesScrollers = true
@@ -731,6 +735,8 @@ struct CodeEditorView: NSViewRepresentable {
             appliedEditorColors = colors
             let background = NSColor(rafuHex: colors.background)
             scrollView.backgroundColor = background
+            EditorThemedScroller.apply(
+                to: scrollView, background: background, isDark: colors.isDark)
             textView.backgroundColor = background
             textView.textColor = NSColor(rafuHex: colors.foreground)
             textView.insertionPointColor = NSColor(rafuHex: colors.cursor)

@@ -21,8 +21,14 @@ struct RafuWorkbenchStyleContractTests {
         #expect(
             RafuMetrics.deckShadowRadius + RafuMetrics.deckShadowY <= RafuMetrics.workbenchInset)
         #expect(RafuMetrics.radiusWorkbenchTab == 10)
-        #expect(RafuMetrics.tabShadowRadius == 3)
+        // Round 3 widened the selected tab's shadow (3 → 4) so it lifts off
+        // the Khadi shelf; it must still fit inside the shelf's breathing
+        // room above and below the tab.
+        #expect(RafuMetrics.tabShadowRadius == 4)
         #expect(RafuMetrics.tabShadowY == 1)
+        #expect(
+            RafuMetrics.tabShadowRadius + RafuMetrics.tabShadowY
+                <= RafuMetrics.tabShelfBreathingRoom)
         #expect(RafuMetrics.tabLabelFontSize == 12.5)
         // Round 2 tightened the shelf (breathing room 6 → 5, floor 40 → 38)
         // and grew the breadcrumb row beneath it (24 → 26).
@@ -105,7 +111,9 @@ struct RafuWorkbenchStyleContractTests {
     func deckShadowOpacityIsThemeAware() {
         // Design polish round 2: the deck's dark opacity rose 0.18 → 0.30 so
         // the card lifts off the darker Indigo frame; the selected tab got
-        // its own, stronger value because its shadow is much tighter.
+        // its own, stronger value because its shadow is much tighter. Round 3
+        // raised the light tab value 0.12 → 0.18: the white tab is only a
+        // step above the Khadi shelf, so the shadow carries the lift.
         let dark = WorkbenchDeckShadowStyle.opacity(for: .deck, isDark: true)
         let light = WorkbenchDeckShadowStyle.opacity(for: .deck, isDark: false)
         #expect(dark == 0.30)
@@ -116,7 +124,7 @@ struct RafuWorkbenchStyleContractTests {
         let tabDark = WorkbenchDeckShadowStyle.opacity(for: .tab, isDark: true)
         let tabLight = WorkbenchDeckShadowStyle.opacity(for: .tab, isDark: false)
         #expect(tabDark == 0.40)
-        #expect(tabLight == 0.12)
+        #expect(tabLight == 0.18)
         #expect(tabDark > tabLight)
 
         for surface in [WorkbenchDeckShadowStyle.Surface.deck, .tab] {
@@ -128,6 +136,28 @@ struct RafuWorkbenchStyleContractTests {
                 )
             }
         }
+    }
+
+    @Test("The deck strokes its edge hairline in every theme, light ones included")
+    func deckStrokesLightThemeHairline() throws {
+        let source = try Self.workbenchStyleSource()
+        let deckSection = try Self.section(
+            of: source,
+            from: "struct WorkbenchDeckSurface<Content: View>",
+            to: "enum WorkbenchDeckShadowStyle"
+        )
+        // A light theme's shadow is faint, so the hairline is its card edge:
+        // it is never gated on the theme being dark.
+        #expect(!deckSection.contains("isDark ?"))
+        #expect(!deckSection.contains("if theme.isDark"))
+        #expect(deckSection.contains(".strokeBorder("))
+        #expect(deckSection.contains(": theme.palette.borderSubtle,"))
+        #expect(deckSection.contains("lineWidth: RafuMetrics.hairline"))
+        // The hairline sits in the overlay, after the corner wedges, so it
+        // draws above the AppKit editor and its scroller.
+        let wedges = try #require(deckSection.range(of: "CornerCutoutOverlay("))
+        let hairline = try #require(deckSection.range(of: ".strokeBorder("))
+        #expect(wedges.lowerBound < hairline.lowerBound)
     }
 
     @Test("Corner and seam overlays cannot intercept input or accessibility")

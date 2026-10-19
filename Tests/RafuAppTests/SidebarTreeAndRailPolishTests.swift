@@ -86,15 +86,25 @@ struct SidebarTreeAndRailPolishTests {
         #expect(!source.contains("List(selection: $"))
     }
 
-    @Test("The rail opens with a hidden, non-interactive 28 pt app tile")
+    @Test("The rail opens with a hidden, non-interactive 28 pt themed app tile")
     func railAppTile() throws {
         #expect(RafuRailAppTile.size == 28)
         #expect(RafuRailAppTile.cornerRadius == 8)
+        #expect(RafuRailAppTile.glyphSize == 16)
         let source = try Self.source("Sources/RafuApp/Views/WorkspaceNavigatorView.swift")
         let tile = try Self.section(
             of: source, from: "struct RafuRailAppTile: View",
             to: "struct WorkspaceSearchNavigatorView")
-        #expect(tile.contains("NSApplication.shared.applicationIconImage"))
+        // Design polish round 3: a theme-coloured tile (selected-tab fill,
+        // hairline) holding the seam glyph in textPrimary, not the dark
+        // bundle icon, so it belongs to both the Khadi and Indigo frames.
+        #expect(!tile.contains("applicationIconImage"))
+        #expect(tile.contains(".fill(theme.palette.tabActiveBackground)"))
+        #expect(tile.contains(".strokeBorder(theme.palette.borderSubtle, lineWidth: 1)"))
+        #expect(tile.contains("RafuSeamGlyph.Panes()"))
+        #expect(tile.contains("RafuSeamGlyph.Thread()"))
+        #expect(tile.contains("theme.palette.textPrimary"))
+        #expect(!tile.contains(".clipShape("))
         #expect(tile.contains(".accessibilityHidden(true)"))
         #expect(tile.contains(".allowsHitTesting(false)"))
         #expect(!tile.contains("Button("))
@@ -106,6 +116,25 @@ struct SidebarTreeAndRailPolishTests {
         #expect(tileCall.lowerBound < modes.lowerBound)
         #expect(rail.contains("VStack(spacing: 6)"))
         #expect(rail.contains(".padding(.top, 10)"))
+        // Clicks on the tile fall through to the rail's window-drag handle.
+        let railBody = try Self.section(
+            of: source, from: "struct WorkspaceActivityRail: View", to: "struct RafuRailAppTile")
+        #expect(railBody.contains(".background(WindowDragHandle())"))
+    }
+
+    @Test("The seam glyph keeps the app icon's proportions centred in its box")
+    func seamGlyphGeometry() {
+        let rect = CGRect(x: 0, y: 0, width: 16, height: 16)
+        let panes = RafuSeamGlyph.Panes().path(in: rect).boundingRect
+        // 320 × 307 scaled to a 16 pt width, centred vertically.
+        #expect(abs(panes.width - 16) < 0.01)
+        #expect(abs(panes.height - 16 * 307 / 320) < 0.01)
+        #expect(abs(panes.midX - 8) < 0.01)
+        #expect(abs(panes.midY - 8) < 0.01)
+        let thread = RafuSeamGlyph.Thread().path(in: rect).boundingRect
+        #expect(rect.contains(thread))
+        #expect(thread.minX > panes.minX)
+        #expect(thread.maxX < panes.maxX)
     }
 
     @Test("The Files header puts the three creation actions in one neutral plus menu")

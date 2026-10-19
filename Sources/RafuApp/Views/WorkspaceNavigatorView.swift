@@ -101,30 +101,86 @@ struct WorkspaceActivityRail: View {
     }
 }
 
-/// The app's own icon as a 28 pt rounded tile at the top of the rail, 10 pt
-/// above the first mode button. It is identity only: not a control, and
-/// hidden from VoiceOver. The bundle icon is drawn full bleed (the seam
-/// artwork has no transparent margin), so the radius-8 clip is the tile
-/// edge; the Lightning variant shows its own seam colour.
+/// Rafu's identity tile at the top of the rail, 10 pt above the first mode
+/// button: a 28 pt rounded tile in the selected-tab fill with a hairline,
+/// holding the app icon's "seam" glyph (two panes stitched by one thread)
+/// drawn natively in `textPrimary`. Drawn in theme colours rather than as
+/// the bundle icon, so it belongs to both frames: the dark icon was the only
+/// dark object on the Khadi frame and almost vanished on the Indigo one.
+/// It is identity only: not a control, hidden from VoiceOver, and it lets
+/// clicks fall through to the rail's window-drag handle.
 struct RafuRailAppTile: View {
     static let size: CGFloat = 28
     static let cornerRadius: CGFloat = 8
+    static let glyphSize: CGFloat = 16
 
     @Environment(\.rafuTheme) private var theme
 
     var body: some View {
-        Image(nsImage: NSApplication.shared.applicationIconImage)
-            .resizable()
-            .interpolation(.high)
-            .aspectRatio(contentMode: .fill)
-            .frame(width: Self.size, height: Self.size)
-            .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
+        RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+            .fill(theme.palette.tabActiveBackground)
             .overlay(
                 RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
                     .strokeBorder(theme.palette.borderSubtle, lineWidth: 1)
             )
+            .overlay {
+                ZStack {
+                    RafuSeamGlyph.Panes()
+                        .fill(theme.palette.textPrimary.opacity(0.2))
+                    RafuSeamGlyph.Thread()
+                        .stroke(
+                            theme.palette.textPrimary,
+                            style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+                        )
+                }
+                .frame(width: Self.glyphSize, height: Self.glyphSize)
+            }
+            .frame(width: Self.size, height: Self.size)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
+    }
+}
+
+/// The "seam" mark from `Resources/AppIcon/rafu-icon-seam.svg` as two
+/// single-colour shapes: the two rounded panes and the zigzag thread that
+/// joins them. Coordinates are the SVG's (a 320 × 307 box inside its
+/// 512 canvas), scaled to fit and centred in the given rect.
+nonisolated enum RafuSeamGlyph {
+    private static let box = CGRect(x: 96, y: 102, width: 320, height: 307)
+    private static let threadPoints: [CGPoint] = [
+        CGPoint(x: 218, y: 137), CGPoint(x: 294, y: 178), CGPoint(x: 218, y: 219),
+        CGPoint(x: 294, y: 260), CGPoint(x: 218, y: 301), CGPoint(x: 294, y: 342),
+        CGPoint(x: 218, y: 376),
+    ]
+
+    /// Maps an SVG point into `rect`, keeping the mark's aspect ratio.
+    static func transform(for rect: CGRect) -> CGAffineTransform {
+        let scale = min(rect.width / box.width, rect.height / box.height)
+        let x = rect.midX - box.midX * scale
+        let y = rect.midY - box.midY * scale
+        return CGAffineTransform(a: scale, b: 0, c: 0, d: scale, tx: x, ty: y)
+    }
+
+    nonisolated struct Panes: Shape {
+        func path(in rect: CGRect) -> Path {
+            var path = Path()
+            for paneX in [96.0, 273.0] {
+                path.addRoundedRect(
+                    in: CGRect(x: paneX, y: 102, width: 143, height: 307),
+                    cornerSize: CGSize(width: 27, height: 27),
+                    style: .continuous
+                )
+            }
+            return path.applying(RafuSeamGlyph.transform(for: rect))
+        }
+    }
+
+    nonisolated struct Thread: Shape {
+        func path(in rect: CGRect) -> Path {
+            var path = Path()
+            path.addLines(RafuSeamGlyph.threadPoints)
+            return path.applying(RafuSeamGlyph.transform(for: rect))
+        }
     }
 }
 
