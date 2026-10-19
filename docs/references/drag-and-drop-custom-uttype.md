@@ -248,3 +248,24 @@ materialize a tab drag as a JSON file. The new identifiers keep the old
 `public.data` declarations still registered by older bundles out of the way.
 `script/build_and_run.sh` asserts each identifier and its `public.item`
 conformance. Regression: `EditorTabDragDropTests`.
+
+## Tab strip vs AppKit editor routing (2026-10-20)
+
+Each SwiftUI `.onDrop` is its own `_PlatformDraggingDestinationView`
+(registered for `public.data`/`public.item`), sized to the modified view.
+AppKit picks the destination with `-[NSWindow _findDragTargetFrom:]`, which
+walks `-[NSView _hitTest:dragTypes:]` from the frame view: topmost subview
+first, deepest registered view wins, ancestor frames clip, and the private
+type matches `public.item` by its declared conformance. A test can call
+`_findDragTargetFrom:` with a synthetic `NSDraggingInfo` to get the real
+routing. Verified on Swift 6.4, macOS 27.0.1 (26A434), with a hosted
+`EditorCanvasView` and a hosted `WorkspaceWindowView`: the strip and the
+AppKit editor never overlap, but the strip target covered only the 28 pt
+tab row. The 6 pt breathing room above and below the row and the trailing
+controls had NO destination, so a release there ended the drag with no
+`performDrop` anywhere (user DragDiag log, 01:44:53, pid 57929). The whole
+shelf is now the target, and tab frames are read in the shelf's coordinate
+space, so the index includes scroll offset and spacing. The index counts
+slots in the group's full tab order, not rendered frames. Regression:
+`EditorTabStripDropRoutingTests` (5 of its 7 hosted tests fail on the old
+strip).
