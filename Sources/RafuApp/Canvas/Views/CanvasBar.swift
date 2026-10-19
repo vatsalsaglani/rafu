@@ -1,7 +1,10 @@
 import SwiftUI
 
-/// The one 36 pt Canvas bar (review C1, C2, C14, C17): the canvas name as a
-/// pull-down, the link status, Add, Arrange and the overflow.
+/// The one 36 pt Ensemble bar: the name (double-click renames) with its
+/// pull-down, the link status, the agent summary, Add, Arrange and Export.
+/// There is no overflow menu: every action it held is in the name menu, the
+/// link popover, the Add palette, a card's context menu, or the menu bar's
+/// Ensemble menu.
 struct CanvasBar: View {
     @Environment(\.rafuTheme) private var theme
     let board: CanvasBoardState
@@ -9,24 +12,57 @@ struct CanvasBar: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            nameMenu
+            nameArea
             Spacer(minLength: 8)
             CanvasLinkStatusItem(board: board)
             CanvasAgentSummaryBar(board: board, session: session)
             CanvasAddCardMenu(board: board, session: session)
             arrangeMenu
-            overflowMenu
+            exportButton
         }
         .padding(.horizontal, 12)
         .frame(height: 36)
         .task { await session.prepareCanvasLibrary() }
     }
 
+    /// The title and, beside it, the name menu. They are two controls
+    /// because a pull-down opens on mouse-down, so a double-click on a menu
+    /// label can never reach a tap handler.
+    private var nameArea: some View {
+        HStack(spacing: 2) {
+            title
+            nameMenu
+        }
+    }
+
+    /// One tap handler, never a second count-2 tap gesture beside it (that
+    /// holds every click for the double-click interval; see
+    /// docs/references/swiftui-macos-click-latency.md). A single click does
+    /// nothing; the second click of a double-click renames.
+    private var title: some View {
+        Text(board.title)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(theme.palette.textPrimary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .contentShape(.rect)
+            .onTapGesture {
+                if TabClickIntent.current() == .selectAndRename { rename() }
+            }
+            .help("Double-click to rename")
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Ensemble \(board.title)")
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityAction(named: "Rename") { rename() }
+    }
+
+    private func rename() {
+        session.canvasDialog = .renameBoard(board.id)
+    }
+
     private var nameMenu: some View {
         Menu {
-            Button("Rename…", systemImage: "pencil") {
-                session.canvasDialog = .renameBoard(board.id)
-            }
+            Button("Rename…", systemImage: "pencil") { rename() }
             Button("Duplicate Ensemble", systemImage: "plus.square.on.square") {
                 session.saveCanvasCopy(board.id)
             }
@@ -38,22 +74,33 @@ struct CanvasBar: View {
             Divider()
             Button("Close Ensemble", systemImage: "xmark") { session.closeCanvas(board.id) }
         } label: {
-            HStack(spacing: 4) {
-                Text(board.title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(theme.palette.textPrimary)
-                    .lineLimit(1)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(theme.palette.textSecondary)
-            }
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(theme.palette.textSecondary)
+                .frame(width: 18, height: 22)
+                .contentShape(.rect)
         }
         .menuStyle(.borderlessButton)
         .tint(theme.palette.textSecondary)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Ensemble name and actions")
-        .accessibilityLabel("Ensemble \(board.title)")
+        .help("Ensemble actions: rename, duplicate, open, close")
+        .accessibilityLabel("Ensemble actions")
+    }
+
+    /// The same action and disabled rule as the menu bar's Export….
+    private var exportButton: some View {
+        Button {
+            CanvasDiagramPanels.showExport(
+                board: board, session: session,
+                target: board.selection.isEmpty ? .board : .selection)
+        } label: {
+            Label("Export Ensemble…", systemImage: "square.and.arrow.up")
+        }
+        .buttonStyle(RafuIconButtonStyle(size: 24, iconSize: 13))
+        .disabled(board.cards.isEmpty || session.rootURL == nil)
+        .help("Export Ensemble…")
+        .accessibilityLabel("Export Ensemble…")
     }
 
     private var recentCanvases: [CanvasSummary] {
@@ -108,50 +155,6 @@ struct CanvasBar: View {
             session.performCanvasEdit(board) { try board.align(alignment) }
         }
         .disabled(board.selection.count < 2)
-    }
-
-    private var overflowMenu: some View {
-        Menu {
-            Button("Rename…", systemImage: "pencil") {
-                session.canvasDialog = .renameBoard(board.id)
-            }
-            Button("Duplicate Ensemble", systemImage: "plus.square.on.square") {
-                session.saveCanvasCopy(board.id)
-            }
-            Divider()
-            Button("Select All  ⌘A") { board.select(Set(board.cards.map(\.id))) }
-                .disabled(board.cards.isEmpty)
-            Divider()
-            Picker("Show Links", selection: linkVisibility) {
-                ForEach(CanvasLinkVisibility.allCases, id: \.self) { Text($0.title).tag($0) }
-            }
-            Button("Pause All Links", systemImage: "pause.circle") {
-                CanvasLiveBridge.shared.pauseAll(in: board)
-            }
-            .disabled(!board.connections.contains { $0.behavior == .session })
-            Button("Resume All Links", systemImage: "play.circle") {
-                CanvasLiveBridge.shared.resumeAll(in: board)
-            }
-            .disabled(!board.connections.contains { $0.behavior == .session })
-            CanvasDiagramMenuItems(board: board, session: session)  // X9 diagrams
-            Divider()
-            Button("Close Ensemble", systemImage: "xmark") { session.closeCanvas(board.id) }
-        } label: {
-            Image(systemName: "ellipsis.circle")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(theme.palette.textSecondary)
-                .frame(width: 24, height: 24)
-        }
-        .menuStyle(.borderlessButton)
-        .tint(theme.palette.textSecondary)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("More Ensemble actions")
-        .accessibilityLabel("Ensemble actions")
-    }
-
-    private var linkVisibility: Binding<CanvasLinkVisibility> {
-        Binding(get: { board.linkVisibility }, set: { board.linkVisibility = $0 })
     }
 }
 

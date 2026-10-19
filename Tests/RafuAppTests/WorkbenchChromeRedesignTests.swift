@@ -407,10 +407,11 @@ struct WorkbenchChromeRedesignTests {
 
     @Test("Native secondary menus explicitly override the inherited gold tint")
     func nativeMenusAreNeutral() throws {
+        // CanvasAddMenu.swift is not scanned: the bar's "+" is now a button
+        // that opens the Add palette, so that file has no pull-down left.
         for path in [
             "Sources/RafuApp/Views/GitInspectorView.swift",
             "Sources/RafuApp/Canvas/Views/CanvasBar.swift",
-            "Sources/RafuApp/Canvas/Views/CanvasAddMenu.swift",
         ] {
             let source = try Self.source(path)
             let menus = source.components(separatedBy: ".menuStyle(.borderlessButton)").dropFirst()

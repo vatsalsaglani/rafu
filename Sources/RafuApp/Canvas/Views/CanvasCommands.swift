@@ -113,6 +113,10 @@ struct CanvasCommands: Commands {
             Divider()
             Button("Undo Ensemble Layout") { board?.performUndo() }.disabled(board?.canUndo != true)
             Button("Redo Ensemble Layout") { board?.performRedo() }.disabled(board?.canRedo != true)
+            Button("Select All Cards") {
+                if let board { board.select(Set(board.cards.map(\.id))) }
+            }
+            .disabled(board?.cards.isEmpty != false)
             Button("Close Selected Cards") { session?.closeSelectedCanvasNodes() }
                 .keyboardShortcut("w", modifiers: [.command, .shift])
                 .disabled(session?.canCloseSelectedCanvasNodes != true)

@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// The compact link status in the Canvas bar (review 7.6, Global control):
-/// "⇄ 1 live · 0 paused". It opens a popover with one row per message link and
-/// a Pause or Resume toggle for each, plus Pause All Links and Resume All.
+/// "⇄ 1 live · 0 paused". It opens a popover with the Show Links choice, one
+/// row per message link with a Pause or Resume toggle, plus Pause All Links
+/// and Resume All. The menu bar's Ensemble menu keeps the same three actions.
 /// The link part draws nothing when the board has no message links; the
 /// Agent control chip beside it is always shown.
 struct CanvasLinkStatusItem: View {
@@ -64,6 +65,18 @@ private struct CanvasLinkStatusPopover: View {
         let pausedCount = links.count { states[$0.id]?.kind == .paused }
         VStack(alignment: .leading, spacing: 10) {
             Text("Message links").font(.headline)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Show Links")
+                    .font(.caption)
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .accessibilityHidden(true)
+                RafuSegmentedPicker(
+                    items: CanvasLinkVisibility.allCases, selection: linkVisibility,
+                    fillsWidth: true
+                ) { $0.title }
+                .help("Which links the board draws")
+                .accessibilityLabel("Show Links")
+            }
             if links.isEmpty {
                 Text("No message links on this Ensemble.").foregroundStyle(.secondary)
             }
@@ -87,7 +100,12 @@ private struct CanvasLinkStatusPopover: View {
         .frame(width: 360, alignment: .leading)
     }
 
+    private var linkVisibility: Binding<CanvasLinkVisibility> {
+        Binding(get: { board.linkVisibility }, set: { board.linkVisibility = $0 })
+    }
+
     private func title(of id: CanvasCardID) -> String {
+
         board.cards.first { $0.id == id }?.title ?? "Card"
     }
 

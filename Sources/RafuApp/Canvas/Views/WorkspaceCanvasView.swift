@@ -262,7 +262,7 @@ struct WorkspaceCanvasView: View {
             ) {
                 CanvasAddPopover(
                     board: board, session: session,
-                    boardPoint: interaction.addPopoverBoardPoint ?? .zero,
+                    boardPoint: interaction.addPopoverBoardPoint,
                     dismiss: { interaction.addPopoverAnchor = nil })
             }
             .onDrop(
