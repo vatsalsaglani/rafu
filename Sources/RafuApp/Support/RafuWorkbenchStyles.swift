@@ -48,8 +48,9 @@ nonisolated enum WorkbenchTextHeightPolicy {
     }
 }
 
-/// Tabs are detached rounded cards that sit on the deck card's own tone
-/// (the shelf is `editorBackground`, never the frame colour). The selected
+/// Tabs are detached rounded cards that sit on the tab shelf
+/// (`tabBarBackground`: the card tone in Indigo, one step below it in Khadi,
+/// never the frame colour). The selected
 /// tab is raised: the theme's `tabActiveBackground` fill (a step lighter than
 /// the card in Indigo, white in Khadi), a hairline border on all four edges,
 /// and its own soft shadow. An inactive tab has no fill at all, only
@@ -151,6 +152,11 @@ struct WorkbenchDeckSurface<Content: View>: View {
                     radius: RafuMetrics.radiusWorkbenchDeck,
                     surrounding: theme.palette.appBackground
                 )
+                // The card's edge hairline, in every theme. A light theme's
+                // shadow is faint, so this hairline is what separates the
+                // card from the frame there; a dark theme reads mostly from
+                // its shadow. SwiftUI composites it (and the corner wedges)
+                // above the AppKit editor and its scroller.
                 RoundedRectangle(
                     cornerRadius: RafuMetrics.radiusWorkbenchDeck,
                     style: .continuous
@@ -172,7 +178,9 @@ struct WorkbenchDeckSurface<Content: View>: View {
 /// stronger, because it must stand out against an already-dark frame; light
 /// themes keep it faint, so it stays a soft depth cue rather than a dark halo.
 /// The tab's shadow is tighter (`tabShadowRadius`) and so needs a higher
-/// opacity than the deck's to read at all. Increase Contrast halves both:
+/// opacity than the deck's to read at all; in a light theme it is the
+/// selected tab's main lift, because the white fill is only a step above
+/// the shelf (design polish round 3 raised it 0.12 → 0.18). Increase Contrast halves both:
 /// that mode's accessibility signal is the already-promoted `borderStrong`
 /// hairline, so the shadow stays present but never competes with it as a
 /// second, blurrier boundary.
@@ -188,7 +196,7 @@ nonisolated enum WorkbenchDeckShadowStyle {
         let base: Double =
             switch surface {
             case .deck: isDark ? 0.30 : 0.10
-            case .tab: isDark ? 0.40 : 0.12
+            case .tab: isDark ? 0.40 : 0.18
             }
         return contrastIncreased ? base / 2 : base
     }

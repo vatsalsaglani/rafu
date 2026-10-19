@@ -215,6 +215,22 @@ func legacyRequiredKeysRemainSufficient() throws {
     #expect(sameColor(theme.palette.tabActiveBackground, theme.palette.editorBackground))
     #expect(sameColor(theme.palette.cardBackground, theme.palette.elevatedBackground))
     #expect(sameColor(theme.palette.fieldBackground, theme.palette.appBackground))
+    // The tab shelf sits inside the deck card, so an unset shelf takes the
+    // card tone, never the frame colour.
+    #expect(sameColor(theme.palette.tabBarBackground, theme.palette.editorBackground))
+}
+
+@Test("Khadi's tab shelf is one step below its card; Indigo's shelf is the card tone")
+@MainActor
+func tabShelfTones() {
+    // Design polish round 3: the white selected tab needs a shelf it can
+    // lift off, and the band separates the header from the breadcrumb/body.
+    let khadi = RafuThemeCatalog.khadi.palette
+    #expect(sameColor(khadi.tabBarBackground, Color(rafuHex: "#F4F0E6")))
+    #expect(sameColor(khadi.editorBackground, Color(rafuHex: "#FAF7F0")))
+    #expect(sameColor(khadi.tabActiveBackground, Color(rafuHex: "#FFFFFF")))
+    let indigo = RafuThemeCatalog.indigo.palette
+    #expect(sameColor(indigo.tabBarBackground, indigo.editorBackground))
 }
 
 @Test("Bundled primary and essential secondary text meet 4.5 to 1 on immediate surfaces")

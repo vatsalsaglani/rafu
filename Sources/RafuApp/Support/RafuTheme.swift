@@ -248,7 +248,9 @@ nonisolated struct RafuTheme: Decodable, Sendable {
             editorBackground: color(ui.editorBackground),
             elevatedBackground: color(ui.elevatedBackground),
             statusBarBackground: color(ui.statusBarBackground, fallback: ui.appBackground),
-            tabBarBackground: color(ui.tabBarBackground, fallback: ui.appBackground),
+            // The tab shelf sits inside the deck card, so a theme that does
+            // not set it gets the card tone, never the frame colour.
+            tabBarBackground: color(ui.tabBarBackground, fallback: ui.editorBackground),
             tabActiveBackground: color(ui.tabActiveBackground, fallback: ui.editorBackground),
             selection: color(ui.selection),
             hover: color(ui.hover, fallback: ui.selection),
