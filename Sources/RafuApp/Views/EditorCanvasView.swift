@@ -2523,6 +2523,10 @@ private struct EditorTerminalGroupTabItem: View {
             Button("Split Right", systemImage: "rectangle.split.2x1") {
                 session.splitEditorTab(tabID, at: .trailing)
             }
+            Button("Move to Ensemble", systemImage: "square.on.square.dashed") {
+                session.moveTerminalGroupToCurrentEnsemble(snapshot.id)
+            }
+            .disabled(!session.canMoveTerminalGroupToEnsemble(snapshot.id))
             Divider()
             Button("Close") { session.requestTerminalGroupClose(snapshot.id) }
         }

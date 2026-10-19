@@ -60,7 +60,9 @@ struct TitlebarRowSourceTests {
         #expect(canvas.contains("canvasIsVisible: selectedCanvas != nil"))
         #expect(canvas.contains("EditorDropRouting.groupAccepts("))
         let boardDrop = try Self.source("Sources/RafuApp/Canvas/Views/CanvasFileDropDelegate.swift")
-        #expect(boardDrop.contains("EditorDropRouting.canvasAccepts(session.activeEditorDrag)"))
+        // The board owns every drag over it and forwards tab edges to the group.
+        #expect(boardDrop.contains("case .tab? = session.activeEditorDrag"))
+        #expect(boardDrop.contains("session.dropEditorTabOnCanvas("))
     }
 
     @Test("Agent marks reach editor tabs, the Terminals panel, the palette, and the status bar")

@@ -237,6 +237,13 @@ private struct AgentHistorySessionList: View {
         .contextMenu {
             AgentHistorySessionMenuItems(session: session, summary: summary, includesOpen: true)
         }
+        // Drag a row onto an Ensemble to resume the session there. The
+        // payload holds only the provider and the session id.
+        .onDrag {
+            CanvasBoardDragPayload.agentSession(
+                provider: summary.key.provider, sessionID: summary.key.sessionID
+            ).makeItemProvider()
+        }
     }
 
     private func expansion(for id: String) -> Binding<Bool> {

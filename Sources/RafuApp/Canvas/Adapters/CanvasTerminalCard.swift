@@ -155,14 +155,6 @@ struct CanvasTerminalCard: View {
 }
 
 extension WorkspaceSession {
-    func addCanvasTerminal(_ id: TerminalGroupID, to boardID: CanvasID) {
-        guard let board = canvas.boards[boardID], let group = terminal.terminalGroup(id) else {
-            return
-        }
-        performCanvasEdit(board) {
-            try board.add(title: group.name.rawValue, content: .terminal(groupID: id))
-        }
-    }
     func addCanvasStoppedTerminal(_ id: CanvasID) {
         guard let board = canvas.boards[id], board.cards.count < CanvasLimits.cards,
             let name = TerminalGroupName("Terminal")

@@ -1,16 +1,20 @@
 import AppKit
+import RafuCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Match the editor's private-file precedence and explicit copy proposal.
-/// URL Transferable negotiation alone does not cover every sidebar provider.
-///
-/// This is the SwiftUI half of the board's drop target. AppKit can route the
-/// same drag to `CanvasScrollBridge` instead (see `CanvasBoardDropTarget`);
-/// both halves share `CanvasFileDrop`, so a drop is handled once either way.
+/// The SwiftUI half of the board's drop target. Over a visible board, the
+/// board owns EVERY drag: files, Agent History rows, and editor tabs. Type
+/// priority is `rafuEnsembleDrag` > `rafuEditorDrag` > `fileURL`, and the
+/// proposal is an explicit `.copy`. AppKit can route the same drag to
+/// `CanvasScrollBridge` instead (see `CanvasBoardDropTarget`); both halves
+/// share `CanvasFileDrop`, so a drop is handled once either way.
 struct CanvasFileDropDelegate: DropDelegate {
     let boardID: CanvasID
     let session: WorkspaceSession
+    /// The board surface, in the same space as `DropInfo.location`. The edge
+    /// bands of a dropped tab are measured against it.
+    var surfaceSize: CGSize = .zero
     /// Drives the dashed drop outline on the board (review 7.4).
     var isTargeted: Binding<Bool> = .constant(false)
 
@@ -23,10 +27,15 @@ struct CanvasFileDropDelegate: DropDelegate {
     }
 
     func validateDrop(info: DropInfo) -> Bool {
+        if !info.itemProviders(for: [.rafuEnsembleDrag]).isEmpty {
+            return CanvasFileDrop.acceptsAgentSession(boardID: boardID, session: session)
+        }
         if !info.itemProviders(for: [.rafuEditorDrag]).isEmpty {
-            // A dragged editor TAB belongs to the editor group's edge-split
-            // target, not to the board (`EditorDropRouting`).
-            guard EditorDropRouting.canvasAccepts(session.activeEditorDrag) else { return false }
+            // The session cache only hints at the kind. An editor tab is
+            // handled by the board even when no file would fit on it.
+            if case .tab? = session.activeEditorDrag {
+                return CanvasFileDrop.acceptsTab(boardID: boardID, session: session)
+            }
             return CanvasFileDrop.accepts(count: 1, boardID: boardID, session: session)
         }
         let count = info.itemProviders(for: [.fileURL]).count
@@ -43,15 +52,50 @@ struct CanvasFileDropDelegate: DropDelegate {
         isTargeted.wrappedValue = false
         guard validateDrop(info: info) else { return false }
         let location = info.location
+        let surface = surfaceSize
+        if let provider = info.itemProviders(for: [.rafuEnsembleDrag]).first {
+            // `action` closes over only a `@MainActor` class and the board id,
+            // so it is safe to hand to the off-actor load handler.
+            let action: @MainActor @Sendable (CanvasBoardDragPayload?) -> Void = {
+                [session, boardID] payload in
+                guard let payload else {
+                    session.canvas.boards[boardID]?.errorMessage =
+                        "Rafu could not read what was dropped."
+                    return
+                }
+                CanvasFileDrop.perform(
+                    .agentSession(payload.sessionKey), at: location, surface: surface,
+                    boardID: boardID, session: session)
+            }
+            _ = provider.loadDataRepresentation(for: .rafuEnsembleDrag) { data, _ in
+                let payload = data.flatMap(CanvasBoardDragPayload.decode)
+                Task { @MainActor in action(payload) }
+            }
+            return true
+        }
         if let provider = info.itemProviders(for: [.rafuEditorDrag]).first {
             // A cancelled or cross-window drag can leave a stale session cache.
-            // Only the incoming provider identifies this drop.
+            // Only the incoming provider identifies this drop, so it is
+            // always decoded: a file path or a tab id.
             let collector = CanvasFileDropCollector(
                 count: 1, boardID: boardID, location: location, session: session,
                 clearsEditorDrag: true)
+            let action: @MainActor @Sendable (CanvasBoardDropContent?) -> Void = {
+                [session, boardID] content in
+                switch content {
+                case .tab(let id)?:
+                    CanvasFileDrop.perform(
+                        .tab(id), at: location, surface: surface, boardID: boardID,
+                        session: session)
+                case .files(let urls, _)?:
+                    collector.receive(urls.first, at: 0)
+                default:
+                    collector.receive(nil, at: 0)
+                }
+            }
             _ = provider.loadDataRepresentation(for: .rafuEditorDrag) { data, _ in
-                let url = data.flatMap(CanvasFileDropDecoder.privateURL)
-                Task { @MainActor in collector.receive(url, at: 0) }
+                let content = data.flatMap(CanvasFileDropDecoder.editorContent)
+                Task { @MainActor in action(content) }
             }
             return true
         }
@@ -81,6 +125,52 @@ enum CanvasFileDrop {
         return CanvasDroppedFileKind.fits(count: count, existing: board.cards.count)
     }
 
+    /// A workspace is open and the board exists. A full board is refused at
+    /// drop time with a message, as for any resume.
+    static func acceptsAgentSession(boardID: CanvasID, session: WorkspaceSession) -> Bool {
+        session.rootURL != nil && session.canvas.boards[boardID] != nil
+    }
+
+    /// The board exists. Whether the tab moves onto it or splits the editor
+    /// group is decided at drop time (`CanvasBoardTabDrop`).
+    static func acceptsTab(boardID: CanvasID, session: WorkspaceSession) -> Bool {
+        session.canvas.boards[boardID] != nil
+    }
+
+    static func accepts(
+        _ content: CanvasBoardDropContent, boardID: CanvasID, session: WorkspaceSession
+    ) -> Bool {
+        switch content {
+        case .files(let urls, _):
+            accepts(count: urls.count, boardID: boardID, session: session)
+        case .agentSession:
+            acceptsAgentSession(boardID: boardID, session: session)
+        case .tab:
+            acceptsTab(boardID: boardID, session: session)
+        }
+    }
+
+    /// Handles one decoded drop at `location` (board view space, top-left
+    /// origin) on a surface of size `surface`.
+    @discardableResult
+    static func perform(
+        _ content: CanvasBoardDropContent, at location: CGPoint, surface: CGSize,
+        boardID: CanvasID, session: WorkspaceSession
+    ) -> Bool {
+        guard accepts(content, boardID: boardID, session: session) else { return false }
+        switch content {
+        case .files(let urls, let fromFilesTree):
+            return perform(
+                urls, fromFilesTree: fromFilesTree, boardID: boardID, at: location,
+                session: session)
+        case .agentSession(let key):
+            return session.dropAgentSessionOnCanvas(key, boardID: boardID, at: location)
+        case .tab(let id):
+            return session.dropEditorTabOnCanvas(
+                id, boardID: boardID, at: location, surface: surface)
+        }
+    }
+
     /// Adds the dropped files as cards at `location` (board view space).
     /// Folders are ignored; files outside the workspace reject the batch.
     @discardableResult
@@ -101,18 +191,17 @@ enum CanvasFileDrop {
         boardID: CanvasID, session: WorkspaceSession, isTargeted: Binding<Bool>
     ) -> CanvasBoardDropTarget {
         CanvasBoardDropTarget(
-            accepts: { [weak session] count in
+            accepts: { [weak session] content in
                 guard let session else { return false }
-                return accepts(count: count, boardID: boardID, session: session)
+                return accepts(content, boardID: boardID, session: session)
             },
             targeted: { value in
                 if isTargeted.wrappedValue != value { isTargeted.wrappedValue = value }
             },
-            perform: { [weak session] urls, fromFilesTree, point in
+            perform: { [weak session] content, point, surface in
                 guard let session else { return false }
                 return perform(
-                    urls, fromFilesTree: fromFilesTree, boardID: boardID, at: point,
-                    session: session)
+                    content, at: point, surface: surface, boardID: boardID, session: session)
             })
     }
 }
@@ -154,6 +243,20 @@ nonisolated enum CanvasFileDropDecoder {
             return nil
         }
         return url(for: payload)
+    }
+
+    /// What an editor-drag payload carries for the board: a file from the
+    /// Files tree, or an editor tab (by a valid UUID string).
+    static func editorContent(_ data: Data) -> CanvasBoardDropContent? {
+        guard data.count <= 16 * 1_024, let payload = try? EditorDragPayload(data: data) else {
+            return nil
+        }
+        switch payload {
+        case .file:
+            return url(for: payload).map { .files([$0], fromFilesTree: true) }
+        case .tab(let id):
+            return UUID(uuidString: id) == nil ? nil : .tab(id)
+        }
     }
 
     static func externalURL(_ data: Data) -> URL? {
