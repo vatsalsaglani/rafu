@@ -36,9 +36,13 @@ extension WorkspaceSession {
 
     // MARK: Resume in Ensemble
 
-    /// Adds a terminal node that resumes `summary` to this window's current
-    /// Ensemble. With no Ensemble open, asks to create one first.
-    func resumeAgentSessionInEnsemble(_ summary: AgentHistorySessionSummary) {
+    /// Adds a terminal node that resumes `summary` to `target`, else to this
+    /// window's current Ensemble, centred on `center` (board units) when
+    /// given. With no Ensemble open, asks to create one first.
+    func resumeAgentSessionInEnsemble(
+        _ summary: AgentHistorySessionSummary, on target: CanvasBoardState? = nil,
+        center: CGPoint? = nil
+    ) {
         guard AgentHistoryResumeCommand.arguments(for: summary.key) != nil else {
             presentAgentHistoryMessage("This session id cannot be resumed safely.")
             return
@@ -55,8 +59,8 @@ extension WorkspaceSession {
             )
             return
         }
-        if let board = agentResumeEnsembleBoard {
-            startAgentResumeNode(plan, on: board)
+        if let board = target ?? agentResumeEnsembleBoard {
+            startAgentResumeNode(plan, on: board, center: center)
         } else {
             agentEnsembleResumeAwaitingConfirmation = plan
         }
@@ -97,11 +101,34 @@ extension WorkspaceSession {
         }
     }
 
+    /// A history row dropped on a board (shared by the SwiftUI delegate and
+    /// the AppKit bridge). The summary comes from the app-wide index, so a row
+    /// dragged from another window works. `point` is in the board view's
+    /// top-left space; `nil` places the card as a normal add does. The drop is
+    /// handled once either way: a refusal puts a message on the board.
+    @discardableResult
+    func dropAgentSessionOnCanvas(
+        _ key: AgentHistorySessionKey, boardID: CanvasID, at point: CGPoint?
+    ) -> Bool {
+        guard let board = canvas.boards[boardID] else { return false }
+        guard let summary = AgentHistoryStore.shared.index.sessions.first(where: { $0.key == key })
+        else {
+            board.errorMessage = "This session is no longer in Agent History."
+            return true
+        }
+        let center = point.map { CanvasBoardDropGeometry.boardPoint($0, viewport: board.viewport) }
+        resumeAgentSessionInEnsemble(summary, on: board, center: center)
+        return true
+    }
+
     /// Shows `board`, adds the node, starts its shell, then types the resume
     /// line once the shell process runs.
-    func startAgentResumeNode(_ plan: AgentHistoryEnsembleResumePlan, on board: CanvasBoardState) {
+    func startAgentResumeNode(
+        _ plan: AgentHistoryEnsembleResumePlan, on board: CanvasBoardState,
+        center: CGPoint? = nil
+    ) {
         presentCanvasBoard(board)
-        guard let cardID = addAgentResumeNode(plan, to: board),
+        guard let cardID = addAgentResumeNode(plan, to: board, center: center),
             let card = board.cards.first(where: { $0.id == cardID }),
             case .terminal(let groupID) = card.content
         else { return }
@@ -136,7 +163,8 @@ extension WorkspaceSession {
     /// board edit. Returns the new card, or `nil` when the board is full.
     @discardableResult
     func addAgentResumeNode(
-        _ plan: AgentHistoryEnsembleResumePlan, to board: CanvasBoardState
+        _ plan: AgentHistoryEnsembleResumePlan, to board: CanvasBoardState,
+        center: CGPoint? = nil
     ) -> CanvasCardID? {
         guard board.cards.count < CanvasLimits.cards else {
             presentAgentHistoryMessage("This Ensemble is full. Remove a card, then try again.")
@@ -157,7 +185,9 @@ extension WorkspaceSession {
             let snapshot = try terminal.insertStoppedSavedGroup(record)
             _ = try terminal.perform(.detachDeletedSavedLayout(record.id))
             _ = try terminal.perform(.parkGroup(snapshot.id))
-            try board.add(title: snapshot.name.rawValue, content: .terminal(groupID: snapshot.id))
+            try board.add(
+                title: snapshot.name.rawValue, content: .terminal(groupID: snapshot.id),
+                center: center)
             cardID =
                 board.cards.first(where: { $0.content == .terminal(groupID: snapshot.id) })?
                 .id
