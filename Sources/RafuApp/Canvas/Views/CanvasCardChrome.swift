@@ -123,11 +123,7 @@ struct CanvasCardCommands {
             guard let pane = session.terminal.terminalGroup(groupID)?.panes.first else {
                 return "Unavailable"
             }
-            if let word = AgentActivityStore.shared.stateWord(
-                for: session.terminal.terminalController(for: pane.id))
-            {
-                return word
-            }
+            if let status = agentCardStatus(pane: pane) { return status.word }
             var code: Int32?
             if case .exited(let reported)? = session.terminal.terminalController(for: pane.id)?
                 .status
@@ -146,6 +142,55 @@ struct CanvasCardCommands {
         default:
             return nil
         }
+    }
+
+    /// The agent status for this card's terminal pane, or `nil` to keep the
+    /// plain terminal-state text in `stateWord` — an ordinary shell no
+    /// session has ever matched, every other card kind, or a pane whose
+    /// live status maps to nothing here.
+    var agentCardStatus: AgentCardStatus? {
+        guard case .terminal(let groupID) = card.content,
+            let pane = session.terminal.terminalGroup(groupID)?.panes.first
+        else { return nil }
+        return agentCardStatus(pane: pane)
+    }
+
+    /// The date `agentCardStatus`'s underlying session last changed, for the
+    /// elapsed label and accessibility text. `nil` without a matched
+    /// session — including `.stopped`, which is not time-relevant.
+    var agentCardStatusDate: Date? {
+        guard case .terminal(let groupID) = card.content,
+            let pane = session.terminal.terminalGroup(groupID)?.panes.first,
+            let controller = session.terminal.terminalController(for: pane.id)
+        else { return nil }
+        return AgentActivityStore.shared.trackedSession(for: controller)?.updatedAt
+    }
+
+    private func agentCardStatus(pane: TerminalPaneSnapshot) -> AgentCardStatus? {
+        Self.agentCardStatus(pane: pane, in: session)
+    }
+
+    /// Resolves one pane's agent status from the live store. Shared by the
+    /// card header, the Canvas List row, and the bar's agent summary so
+    /// they can never disagree about one terminal.
+    static func agentCardStatus(pane: TerminalPaneSnapshot, in session: WorkspaceSession)
+        -> AgentCardStatus?
+    {
+        let store = AgentActivityStore.shared
+        let controller = session.terminal.terminalController(for: pane.id)
+        let tracked = controller.flatMap(store.trackedSession(for:))
+        let ranAgent: Bool
+        if case .directAgentTerminal = pane.runtimeKind {
+            ranAgent = true
+        } else {
+            ranAgent = false
+        }
+        guard tracked != nil || ranAgent else { return nil }
+        let terminalStatus = controller?.status ?? .exited(code: nil)
+        let isAcknowledged = controller.map(store.isReplyAcknowledged(for:)) ?? true
+        return AgentCardStatus.resolve(
+            session: tracked, terminalStatus: terminalStatus, paneStatus: pane.status,
+            ranAgent: ranAgent, isReplyAcknowledged: isAcknowledged, now: store.now)
     }
 
     func load() {

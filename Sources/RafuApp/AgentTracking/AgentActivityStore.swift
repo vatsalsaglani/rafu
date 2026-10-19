@@ -23,6 +23,8 @@ final class AgentActivityStore {
     static let clockInterval: Duration = .seconds(30)
     /// Bounds one drain call; the next spool change or tick continues.
     static let maximumPassesPerDrain = 8
+    /// The acknowledged-reply set never grows past this many entries.
+    static let maximumAcknowledgedReplies = 256
 
     /// Sessions that need the person first, then the most recent.
     private(set) var sessions: [TrackedAgentSession] = []
@@ -30,9 +32,15 @@ final class AgentActivityStore {
     /// reply, stale work) recompute.
     private(set) var now = Date()
     private(set) var connectedProviders: Set<AgentHookProvider>
+    /// Bumped only when `markReplyRead` actually acknowledges a reply, so an
+    /// Ensemble card's `.onChange` has something to key off without ticking
+    /// on every no-op call (every tab-selection sync calls `markReplyRead`).
+    private(set) var acknowledgedRevision = 0
 
     let paths: AgentTrackingPaths
     @ObservationIgnored private var ledger = AgentSessionLedger()
+    @ObservationIgnored private var acknowledgedReplies: Set<UUID> = []
+    @ObservationIgnored private var acknowledgedReplyOrder: [UUID] = []
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private var watcher: (any DispatchSourceFileSystemObject)?
     @ObservationIgnored private var clock: Task<Void, Never>?
@@ -171,6 +179,44 @@ final class AgentActivityStore {
             sessions,
             terminals: controllers.filter(\.hasLiveProcess).map(Self.candidate),
             appProcessID: appProcessID)
+    }
+
+    // MARK: - Reply acknowledgement
+
+    /// Marks `controller`'s current reply read: a `doneUnread` card becomes
+    /// `done`. Called on every focus funnel, including every tab-selection
+    /// sync, so it is a cheap no-op without a matched session, without a
+    /// reply on it, or when that reply is already acknowledged — none of
+    /// those paths touch `acknowledgedRevision`.
+    func markReplyRead(for controller: WorkspaceTerminalController) {
+        guard let replyEventID = trackedSession(for: controller)?.replyEventID else { return }
+        markReplyRead(replyEventID: replyEventID)
+    }
+
+    /// Whether `controller`'s current reply (if it has one) was read. `true`
+    /// without a matched session or without a reply: there is nothing to
+    /// hide a `doneUnread` behind.
+    func isReplyAcknowledged(for controller: WorkspaceTerminalController) -> Bool {
+        guard let replyEventID = trackedSession(for: controller)?.replyEventID else { return true }
+        return isReplyAcknowledged(replyEventID: replyEventID)
+    }
+
+    /// The pure FIFO/revision core, callable without a controller so it
+    /// stays testable on its own.
+    func markReplyRead(replyEventID: UUID) {
+        guard !acknowledgedReplies.contains(replyEventID) else { return }
+        acknowledgedReplies.insert(replyEventID)
+        acknowledgedReplyOrder.append(replyEventID)
+        if acknowledgedReplyOrder.count > Self.maximumAcknowledgedReplies {
+            let overflow = acknowledgedReplyOrder.count - Self.maximumAcknowledgedReplies
+            for old in acknowledgedReplyOrder.prefix(overflow) { acknowledgedReplies.remove(old) }
+            acknowledgedReplyOrder.removeFirst(overflow)
+        }
+        acknowledgedRevision += 1
+    }
+
+    func isReplyAcknowledged(replyEventID: UUID) -> Bool {
+        acknowledgedReplies.contains(replyEventID)
     }
 
     static func candidate(_ controller: WorkspaceTerminalController) -> AgentTerminalCandidate {

@@ -1149,10 +1149,17 @@ final class WorkspaceTerminalController: Identifiable {
     /// `WorkspaceSession.selectEditorTab` and `synchronizeSelectionFromLayout`
     /// call this on their `.terminal` branch, and `revealTerminalSession`
     /// calls it directly since it mutates `editorLayout`/`terminal
-    /// .selectedID` without going through either. A no-op outside `.bell`.
-    /// A real `.bell` → `.running` transition fires `onAttentionCleared` so
-    /// the notch HUD dismisses (terminal-notch-hud.md).
+    /// .selectedID` without going through either. This is also every
+    /// focus-funnel's one path to "the person looked at this terminal",
+    /// including an Ensemble card (`CanvasTerminalCard.focus` reaches here
+    /// through `session.focusTerminalPane`) — so it marks the matched
+    /// session's reply read first, a cheap no-op without one, before the
+    /// `.bell`-only guard below: a `doneUnread` card should clear even when
+    /// the terminal's own bell never fired. A real `.bell` → `.running`
+    /// transition then fires `onAttentionCleared` so the notch HUD
+    /// dismisses (terminal-notch-hud.md).
     func clearAttention() {
+        AgentActivityStore.shared.markReplyRead(for: self)
         guard status == .bell else { return }
         status = .running
         onAttentionCleared?(id)

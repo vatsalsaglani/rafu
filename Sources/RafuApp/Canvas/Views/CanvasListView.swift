@@ -58,10 +58,7 @@ struct CanvasListView: View {
             }
             .width(min: 40, ideal: 50, max: 80)
             TableColumn("State") { card in
-                Text(
-                    CanvasCardCommands(card: card, board: board, session: session).stateWord ?? ""
-                )
-                .foregroundStyle(theme.palette.textSecondary)
+                stateCell(card)
             }
             .width(min: 80, ideal: 110, max: 180)
         }
@@ -96,6 +93,29 @@ struct CanvasListView: View {
         board.select(ids)
         board.showsList = false
         if let id = ids.first { board.revealCard(id) }
+    }
+
+    /// The State column's content: for an agent card, the glyph (never
+    /// animated in this dense list), its word, and its relative time; every
+    /// other card keeps the plain state word.
+    @ViewBuilder
+    private func stateCell(_ card: CanvasCard) -> some View {
+        let commands = CanvasCardCommands(card: card, board: board, session: session)
+        if let status = commands.agentCardStatus {
+            HStack(spacing: 4) {
+                AgentActivityGlyph(status: status, animates: false)
+                Text(agentStateText(status: status, date: commands.agentCardStatusDate))
+            }
+            .foregroundStyle(theme.palette.textSecondary)
+        } else {
+            Text(commands.stateWord ?? "").foregroundStyle(theme.palette.textSecondary)
+        }
+    }
+
+    private func agentStateText(status: AgentCardStatus, date: Date?) -> String {
+        guard let date else { return status.word }
+        return
+            "\(status.word) · \(AgentCardElapsed.label(since: date, now: AgentActivityStore.shared.now))"
     }
 
     private func linkCount(_ card: CanvasCard) -> Int {

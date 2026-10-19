@@ -49,6 +49,33 @@ struct AgentActivityStoreTests {
         store.stop()
     }
 
+    @Test(
+        "markReplyRead is a cheap no-op without a matching reply; a real read bumps the revision once"
+    )
+    func markReplyReadRevision() {
+        let (store, suite) = makeStore()
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let before = store.acknowledgedRevision
+        let unknown = UUID()
+        #expect(!store.isReplyAcknowledged(replyEventID: unknown))
+        store.markReplyRead(replyEventID: unknown)
+        #expect(store.acknowledgedRevision == before + 1)
+        #expect(store.isReplyAcknowledged(replyEventID: unknown))
+        // Reading the same reply again changes nothing.
+        store.markReplyRead(replyEventID: unknown)
+        #expect(store.acknowledgedRevision == before + 1)
+    }
+
+    @Test("The acknowledged-reply set is a bounded FIFO, capped at 256")
+    func acknowledgedReplyFIFOCap() {
+        let (store, suite) = makeStore()
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let ids = (0..<(AgentActivityStore.maximumAcknowledgedReplies + 1)).map { _ in UUID() }
+        for id in ids { store.markReplyRead(replyEventID: id) }
+        #expect(!store.isReplyAcknowledged(replyEventID: ids[0]))
+        for id in ids.dropFirst() { #expect(store.isReplyAcknowledged(replyEventID: id)) }
+    }
+
     @Test("Connected providers persist in the injected defaults")
     func connectedProviders() {
         let (store, suite) = makeStore()
