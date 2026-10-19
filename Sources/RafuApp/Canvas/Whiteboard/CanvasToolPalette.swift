@@ -41,6 +41,9 @@ struct CanvasToolPalette: View {
     let board: CanvasBoardState
     let session: WorkspaceSession
     let tool: CanvasWhiteboardTool
+    /// Gives the board keyboard focus. Choosing a tool calls it, so Escape
+    /// and the tool letters work next even when card content had the keys.
+    var focusBoard: () -> Void = {}
 
     private(set) static var extraItems: [CanvasToolPaletteItem] = []
 
@@ -176,26 +179,26 @@ struct CanvasToolPalette: View {
         }
         tool.kind = kind
         if kind != .select { board.selection = [] }
+        // A tool acts on the board, so the keys come back to it: with a
+        // terminal or note still active, Escape and V went to that card and
+        // the Hand tool could not be left from the keyboard.
+        if board.contentIsActive { board.backToBoard() }
+        focusBoard()
     }
 
     /// Returns true when the key was used.
     private func handle(_ key: CanvasToolKey) -> Bool {
-        switch key {
-        case .escape:
-            guard tool.kind != .select else { return false }
-            tool.kind = .select
+        if let kind = CanvasWhiteboardToolKind.resolve(key, from: tool.kind) {
+            choose(kind)
             return true
-        case .character(let character):
-            if let kind = CanvasWhiteboardToolKind.matching(key: character) {
-                choose(kind)
-                return true
-            }
-            if let item = Self.extraItems.first(where: { $0.key == character }) {
-                item.perform(board, session)
-                return true
-            }
-            return false
         }
+        if case .character(let character) = key,
+            let item = Self.extraItems.first(where: { $0.key == character })
+        {
+            item.perform(board, session)
+            return true
+        }
+        return false
     }
 }
 

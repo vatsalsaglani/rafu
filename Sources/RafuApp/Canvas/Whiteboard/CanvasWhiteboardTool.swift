@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftUI
 
 /// The tools of the Excalidraw-like palette. `key` is the single-letter
 /// shortcut, active only while the board itself has keyboard focus.
@@ -64,6 +65,29 @@ enum CanvasWhiteboardToolKind: String, CaseIterable, Identifiable, Sendable {
 
     /// Image is an action (it opens a panel), not a mode that stays selected.
     var isMode: Bool { self != .image }
+
+    /// Whether the creation layer covers the board for this tool. Select,
+    /// Hand and Image do not. Hand pans through the board's own pan gesture
+    /// (the Space-drag route), so no full-board layer lies over the cards,
+    /// and a press never starts a zero-distance gesture that can outlive
+    /// its mouse-up. See `CanvasBoardPanRouting`.
+    var drawsOnBoard: Bool {
+        switch self {
+        case .select, .hand, .image: false
+        default: true
+        }
+    }
+
+    /// The built-in tool a palette key selects from `current`, or nil when
+    /// the key is not a tool key. Escape returns any other tool to Select.
+    static func resolve(_ key: CanvasToolKey, from current: CanvasWhiteboardToolKind)
+        -> CanvasWhiteboardToolKind?
+    {
+        switch key {
+        case .escape: current == .select ? nil : .select
+        case .character(let character): matching(key: character)
+        }
+    }
 
     var shapeKind: CanvasShapeKind? {
         switch self {
@@ -131,6 +155,57 @@ final class CanvasWhiteboardTool {
         while order.count > 32 { tools[order.removeFirst()] = nil }
         return tool
     }
+}
+
+/// Who owns a board drag. The Hand tool latches the Space-drag route: the
+/// board's high-priority background pan takes the drag over cards, so a
+/// click (no movement) still reaches card chrome and the palette, and a
+/// drag pans. Pure, so the routing is testable without a window.
+enum CanvasBoardPanRouting {
+    /// True while the board's pan must win over cards.
+    static func panOverridesCards(spaceIsDown: Bool, tool: CanvasWhiteboardToolKind) -> Bool {
+        spaceIsDown || tool == .hand
+    }
+
+    /// `start` moved by a drag `translation`, clamped like every pan.
+    static func panned(_ start: CanvasViewport, by translation: CGSize) -> CanvasViewport {
+        CanvasViewport(
+            scale: start.scale,
+            x: min(100_000, max(-100_000, start.x + Double(translation.width))),
+            y: min(100_000, max(-100_000, start.y + Double(translation.height))))
+    }
+
+    /// The board-wide grab pointer of the Hand tool.
+    enum Pointer: Equatable {
+        case grabIdle, grabActive
+
+        var style: PointerStyle { self == .grabIdle ? .grabIdle : .grabActive }
+    }
+
+    /// The board-wide pointer: grab while the Hand tool is on, otherwise
+    /// nil (each layer keeps its own pointer).
+    static func pointer(tool: CanvasWhiteboardToolKind, isPanning: Bool) -> Pointer? {
+        guard tool == .hand else { return nil }
+        return isPanning ? .grabActive : .grabIdle
+    }
+}
+
+/// One background pan: the viewport it started from. `end()` runs on
+/// mouse-up and on a cancelled drag, so `isPanning` never outlives the
+/// press.
+struct CanvasBoardPan: Equatable {
+    private(set) var start: CanvasViewport?
+
+    var isPanning: Bool { start != nil }
+
+    mutating func begin(from viewport: CanvasViewport) { start = viewport }
+
+    /// The viewport for a drag `translation`, or nil when no pan is live.
+    func viewport(for translation: CGSize) -> CanvasViewport? {
+        start.map { CanvasBoardPanRouting.panned($0, by: translation) }
+    }
+
+    mutating func end() { start = nil }
 }
 
 /// Asks a whiteboard or Mermaid card to enter its editor. Card commands and
