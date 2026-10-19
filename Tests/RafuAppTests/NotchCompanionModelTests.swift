@@ -311,6 +311,9 @@ func isSearchFieldVisibleWithActiveQueryBelowThreshold() {
 @Test("escapePressed: clears searchQuery and disengages search alongside collapsing to resting")
 func escapePressedClearsSearchQuery() {
     let model = NotchCompanionModel()
+    // `clicked()` pins the panel, which refreshes usage: without a fixture
+    // reader that reads the real Keychain and blocks on its access prompt.
+    model.usageReader = fixtureReader(descriptors: [])
     model.clicked()
     #expect(model.hoverState == .pinned)
     model.setSearchQuery("raf")
@@ -371,7 +374,12 @@ private func fixtureReader(descriptors: [UsageProviderDescriptor]) -> UsageRegis
                 now: now, readFile: { _ in nil }, http: .noop, credential: { _ in nil },
                 cookieHeader: { _ in nil })
         },
-        isEnabled: { _ in true }
+        isEnabled: { _ in true },
+        // The production defaults read the real Keychain, which blocks the
+        // test process on an access prompt on any Mac where Rafu has stored
+        // usage credentials.
+        resolveCredentials: { _, _ in [:] },
+        hasNetworkConsent: { _ in false }
     )
 }
 
@@ -484,6 +492,7 @@ func peekContentHeightIsFixed() async {
 @Test("isPanelOpen: pinned always; peeking only with hover-to-open on; resting never")
 func isPanelOpenFollowsHoverPolicy() {
     let model = NotchCompanionModel()
+    model.usageReader = fixtureReader(descriptors: [])  // see escapePressedClearsSearchQuery
     #expect(model.isPanelOpen == false)
     model.clicked()
     #expect(model.hoverState == .pinned)
