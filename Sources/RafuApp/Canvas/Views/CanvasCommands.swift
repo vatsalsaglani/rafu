@@ -23,19 +23,6 @@ struct CanvasCommands: Commands {
                 cardNavigationItems(board: board, session: session)
             }
             Divider()
-            Button("Board") {
-                board?.backToBoard()
-                board?.showsList = false
-            }
-            .keyboardShortcut("1", modifiers: [.control, .command])
-            .disabled(board == nil)
-            Button("List") {
-                board?.backToBoard()
-                board?.showsList = true
-            }
-            .keyboardShortcut("2", modifiers: [.control, .command])
-            .disabled(board == nil)
-            Divider()
             Button("Zoom to Fit") { board?.fitAll() }
                 .keyboardShortcut("9", modifiers: .command)
                 .disabled(board == nil)
@@ -126,6 +113,10 @@ struct CanvasCommands: Commands {
             Divider()
             Button("Undo Ensemble Layout") { board?.performUndo() }.disabled(board?.canUndo != true)
             Button("Redo Ensemble Layout") { board?.performRedo() }.disabled(board?.canRedo != true)
+            Button("Select All Cards") {
+                if let board { board.select(Set(board.cards.map(\.id))) }
+            }
+            .disabled(board?.cards.isEmpty != false)
             Button("Close Selected Cards") { session?.closeSelectedCanvasNodes() }
                 .keyboardShortcut("w", modifiers: [.command, .shift])
                 .disabled(session?.canCloseSelectedCanvasNodes != true)

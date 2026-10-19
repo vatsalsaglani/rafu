@@ -1212,14 +1212,6 @@ struct CommandPaletteView: View {
                     board.zoom(1 / 1.2)
                 },
                 .init(
-                    title: "Ensemble: Show List", symbolName: "list.bullet",
-                    keywords: ["cards", "connections"]
-                ) {
-                    dismiss()
-                    board.backToBoard()
-                    board.showsList = true
-                },
-                .init(
                     title: "Ensemble: Connect Selected Cards…",
                     symbolName: "point.3.connected.trianglepath.dotted", keywords: ["relationship"]
                 ) {

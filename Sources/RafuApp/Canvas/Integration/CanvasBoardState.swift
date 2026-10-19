@@ -24,6 +24,10 @@ enum CanvasLinkVisibility: String, CaseIterable, Sendable {
 @Observable
 @MainActor
 final class CanvasBoardState: Identifiable {
+    /// The one SF Symbol that stands for an Ensemble wherever the board
+    /// needs an identity glyph (the empty-board tip, tabs, launchers).
+    nonisolated static let ensembleSymbol = "circle.hexagongrid"
+
     let id: CanvasID
     @ObservationIgnored private var document: CanvasDocument
     private(set) var changeStamp: UInt64 = 0
@@ -33,7 +37,6 @@ final class CanvasBoardState: Identifiable {
     var selection: Set<CanvasCardID> = []
     var focusedCardID: CanvasCardID?
     var contentIsActive = false
-    var showsList = false
     var visibleSize: CGSize = .zero
     var connectingFrom: CanvasCardID?
     /// View state, not saved: the "Show Links" choice (review 7.6).
@@ -354,7 +357,6 @@ final class CanvasBoardState: Identifiable {
 
     func focus(_ id: CanvasCardID) {
         guard cards.contains(where: { $0.id == id }) else { return }
-        showsList = false
         selection = [id]
         focusedCardID = id
         contentIsActive = true

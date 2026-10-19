@@ -407,10 +407,11 @@ struct WorkbenchChromeRedesignTests {
 
     @Test("Native secondary menus explicitly override the inherited gold tint")
     func nativeMenusAreNeutral() throws {
+        // CanvasAddMenu.swift is not scanned: the bar's "+" is now a button
+        // that opens the Add palette, so that file has no pull-down left.
         for path in [
             "Sources/RafuApp/Views/GitInspectorView.swift",
             "Sources/RafuApp/Canvas/Views/CanvasBar.swift",
-            "Sources/RafuApp/Canvas/Views/CanvasAddMenu.swift",
         ] {
             let source = try Self.source(path)
             let menus = source.components(separatedBy: ".menuStyle(.borderlessButton)").dropFirst()
@@ -464,11 +465,12 @@ struct WorkbenchChromeRedesignTests {
         #expect(stack.lowerBound < palette.lowerBound)
         #expect(palette.lowerBound < notice.lowerBound)
         #expect(overlay.contains("if showsRestoredLinksNotice && pausedLinkCount > 0"))
-        // The board surface shows the palette only through this stack, and
-        // the list (no palette) keeps its own notice.
+        // The board surface shows the palette only through this stack: one
+        // construction, so the split yields two pieces. The List view and
+        // its separate top notice are gone.
         #expect(source.components(separatedBy: "CanvasToolPalette(").count == 2)
-        #expect(
-            source.contains("if board.showsList, showsRestoredLinksNotice, pausedLinkCount > 0"))
+        #expect(!source.contains("board.showsList"))
+
         // The palette no longer places itself, so it cannot overlap.
         let paletteFile = try Self.source(
             "Sources/RafuApp/Canvas/Whiteboard/CanvasToolPalette.swift")

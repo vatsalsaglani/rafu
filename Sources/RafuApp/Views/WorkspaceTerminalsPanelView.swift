@@ -71,9 +71,6 @@ struct WorkspaceTerminalsPanelView: View {
     /// Bumped by the launcher's explicit "Check Again": the probe spawns real
     /// CLIs, so it runs once per `.task` identity and never per render.
     @State private var agentProbeToken = 0
-    /// Expansion is local presentation state, keyed by immutable group IDs.
-    /// A manager refresh therefore cannot collapse an unrelated group.
-    @State private var expandedGroupIDs: Set<TerminalGroupID> = []
     @State private var renamingGroupID: TerminalGroupID?
     @State private var groupRenameText = ""
     @State private var renamingPaneID: TerminalPaneID?
@@ -246,18 +243,26 @@ struct WorkspaceTerminalsPanelView: View {
         }
     }
 
+    /// One card per group (its panes become chips inside it) and one row per
+    /// legacy session. `.pane` rows render nothing on their own.
     private func hierarchyList(_ rows: [TerminalsPanelModel.HierarchyRow]) -> some View {
-        ScrollView {
+        // Grouped ONCE per render, never per card inside the `ForEach`.
+        var panesByGroup: [TerminalGroupID: [TerminalsPanelModel.TerminalPaneRow]] = [:]
+        for case .pane(let pane) in rows { panesByGroup[pane.groupID, default: []].append(pane) }
+        let cardRows = rows.filter(\.isManagerItem)
+        return ScrollView {
             LazyVStack(spacing: 6) {
-                ForEach(rows) { row in
+                ForEach(cardRows) { row in
                     switch row {
                     case .group(let group):
                         TerminalGroupManagerRowView(
                             row: group,
-                            isExpanded: expandedGroupIDs.contains(group.id),
+                            panes: panesByGroup[group.id] ?? [],
                             isRenaming: renamingGroupID == group.id,
                             renameText: $groupRenameText,
-                            toggle: { toggleExpansion(group.id) },
+                            renamingPaneID: renamingPaneID,
+                            paneRenameText: $paneRenameText,
+                            paneActions: paneActions,
                             reveal: { session.revealTerminalGroup(group.id) },
                             hide: { session.hideTerminalGroup(group.id) },
                             beginRename: { beginGroupRename(group) },
@@ -273,28 +278,9 @@ struct WorkspaceTerminalsPanelView: View {
                             close: { session.requestTerminalGroupClose(group.id) },
                             session: session
                         )
-                    case .pane(let pane):
-                        if expandedGroupIDs.contains(pane.groupID) {
-                            TerminalGroupPaneRowView(
-                                row: pane,
-                                isRenaming: renamingPaneID == pane.id,
-                                renameText: $paneRenameText,
-                                revealAndFocus: {
-                                    session.revealTerminalGroup(pane.groupID)
-                                    session.focusTerminalPane(pane.id, in: pane.groupID)
-                                },
-                                close: { session.closeTerminalPane(pane.id) },
-                                start: pane.canStart ? { session.startTerminalPane(pane.id) } : nil,
-                                restart: pane.canRestart
-                                    ? { session.restartTerminalPane(pane.id) } : nil,
-                                beginRename: { beginPaneRename(pane.id, pane.name) },
-                                commitRename: { commitPaneRename(pane.id) },
-                                cancelRename: cancelPaneRename,
-                                setColor: { color in
-                                    session.setTerminalPaneColor(pane.id, color)
-                                }
-                            )
-                        }
+                    case .pane:
+                        // Drawn as a chip inside its group's card.
+                        EmptyView()
                     case .legacy(let legacy, let isCurrent):
                         TerminalSessionRowView(
                             row: legacy,
@@ -318,12 +304,22 @@ struct WorkspaceTerminalsPanelView: View {
         }
     }
 
-    private func toggleExpansion(_ groupID: TerminalGroupID) {
-        if expandedGroupIDs.contains(groupID) {
-            expandedGroupIDs.remove(groupID)
-        } else {
-            expandedGroupIDs.insert(groupID)
-        }
+    /// Every pane action names its exact pane; rename state stays on the
+    /// panel (`renamingPaneID`, `paneRenameText`).
+    private var paneActions: TerminalPaneActions {
+        TerminalPaneActions(
+            revealAndFocus: { pane in
+                session.revealTerminalGroup(pane.groupID)
+                session.focusTerminalPane(pane.id, in: pane.groupID)
+            },
+            close: { pane in session.closeTerminalPane(pane.id) },
+            start: { pane in session.startTerminalPane(pane.id) },
+            restart: { pane in session.restartTerminalPane(pane.id) },
+            beginRename: { pane in beginPaneRename(pane.id, pane.name) },
+            commitRename: { pane in commitPaneRename(pane.id) },
+            cancelRename: cancelPaneRename,
+            setColor: { pane, color in session.setTerminalPaneColor(pane.id, color) }
+        )
     }
 
     private func beginGroupRename(_ group: TerminalsPanelModel.TerminalGroupRow) {
@@ -400,45 +396,75 @@ private struct AgentStartMenuView: View {
     @Environment(\.rafuTheme) private var theme
     @State private var isPresented = false
 
+    @State private var isHovering = false
+
+    /// A full-width card row in the same shape as a group card: a well with
+    /// the launcher glyph, "Start Agent" over the probe line, and a chevron.
     var body: some View {
-        VStack(alignment: .leading, spacing: RafuMetrics.space1) {
-            HStack(spacing: RafuMetrics.space2) {
-                Button {
-                    isPresented = true
-                } label: {
+        Button {
+            isPresented = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "terminal.badge")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .frame(width: 26, height: 26)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(theme.palette.chipBackground)
+                    )
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Start Agent")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(theme.palette.textPrimary)
                     HStack(spacing: RafuMetrics.space1) {
-                        Image(systemName: "terminal.badge")
-                            .accessibilityHidden(true)
-                        Text("Start Agent")
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 9, weight: .semibold))
-                            .accessibilityHidden(true)
+                        if isProbing {
+                            ProgressView()
+                                .controlSize(.small)
+                                .scaleEffect(0.5)
+                                .frame(width: 10, height: 10)
+                                .accessibilityHidden(true)
+                        }
+                        Text(statusLine)
+                            .font(.caption2)
+                            .foregroundStyle(theme.palette.textMuted)
+                            .lineLimit(1)
                     }
                 }
-                .buttonStyle(RafuSecondaryButtonStyle(compact: true))
-                .help("Choose an agent CLI to start in a new terminal")
-                .accessibilityLabel("Start Agent")
-                .popover(isPresented: $isPresented, arrowEdge: .bottom) {
-                    menu
-                }
-                Spacer(minLength: 0)
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .accessibilityHidden(true)
             }
-            if isProbing {
-                HStack(spacing: RafuMetrics.space1) {
-                    ProgressView()
-                        .controlSize(.small)
-                        .scaleEffect(0.6)
-                        .frame(width: 12, height: 12)
-                        .accessibilityHidden(true)
-                    Text(AgentLauncherModel.checkingLine(agentCount: rows.count))
-                        .font(.caption)
-                        .foregroundStyle(theme.palette.textSecondary)
-                }
-            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isHovering ? theme.palette.hover : theme.palette.cardBackground)
+            )
+            .contentShape(.rect(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help("Choose an agent CLI to start in a new terminal")
+        .accessibilityLabel("Start Agent")
+        .accessibilityValue(statusLine)
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            menu
         }
         .padding(.horizontal, RafuMetrics.utilityBodyInset)
         .padding(.vertical, RafuMetrics.space2)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// "Checking 7 agents…" while probing, then how many are ready.
+    private var statusLine: String {
+        if isProbing { return AgentLauncherModel.checkingLine(agentCount: rows.count) }
+        let ready = rows.count { $0.isLaunchable }
+        return ready == 0 ? "No agent CLI found" : "\(ready) ready"
     }
 
     private var menu: some View {
@@ -538,14 +564,34 @@ private struct AgentLauncherMenuRow: View {
     }
 }
 
-/// One outer Terminal Group row. The group owns the actions that affect the
-/// complete saved/runtime tree; individual panes only expose pane actions.
+/// The pane-level actions a group card hands to its pane chips (and, for a
+/// one-pane group, merges into its own menu). Each closure names the exact
+/// pane; the panel owns the rename state.
+private struct TerminalPaneActions {
+    let revealAndFocus: (TerminalsPanelModel.TerminalPaneRow) -> Void
+    let close: (TerminalsPanelModel.TerminalPaneRow) -> Void
+    let start: (TerminalsPanelModel.TerminalPaneRow) -> Void
+    let restart: (TerminalsPanelModel.TerminalPaneRow) -> Void
+    let beginRename: (TerminalsPanelModel.TerminalPaneRow) -> Void
+    let commitRename: (TerminalsPanelModel.TerminalPaneRow) -> Void
+    let cancelRename: () -> Void
+    let setColor: (TerminalsPanelModel.TerminalPaneRow, TerminalPaneThemeColor?) -> Void
+}
+
+/// One Terminal Group as a compact horizontal card: drag grip on hover, an
+/// identity well (the focused pane's agent mark, else a terminal glyph),
+/// the name over a one-line subtitle, a status pill, and a hover ⋯ menu. A
+/// group with more than one pane lists its panes as chips on a second line;
+/// there is no accordion. The whole card is the drag source.
 private struct TerminalGroupManagerRowView: View {
     let row: TerminalsPanelModel.TerminalGroupRow
-    let isExpanded: Bool
+    /// This group's panes, in pane order (`TerminalsPanelModel.hierarchyRows`).
+    let panes: [TerminalsPanelModel.TerminalPaneRow]
     let isRenaming: Bool
     @Binding var renameText: String
-    let toggle: () -> Void
+    let renamingPaneID: TerminalPaneID?
+    @Binding var paneRenameText: String
+    let paneActions: TerminalPaneActions
     let reveal: () -> Void
     let hide: () -> Void
     let beginRename: () -> Void
@@ -555,129 +601,307 @@ private struct TerminalGroupManagerRowView: View {
     let updateSavedLayout: (() -> Void)?
     let startAll: (() -> Void)?
     let close: () -> Void
-    /// Needed only to mark this row's drag in flight (the dimmed source
-    /// ghost) and its kind (same-window hover-label hint). Never read to
-    /// decide what a drop does.
+    /// Reads the focused pane's agent identity and status, and marks this
+    /// card's drag in flight (the dimmed source ghost) and its kind
+    /// (same-window hover-label hint). Never read to decide what a drop does.
     let session: WorkspaceSession
 
     @Environment(\.rafuTheme) private var theme
+    @FocusState private var isFocused: Bool
+    @State private var isHovering = false
+    @ScaledMetric(relativeTo: .body) private var scaledMinimumHeight: CGFloat = 48
     /// This row's own identity for the dimmed source ghost while it is
     /// being dragged — stable for the row's lifetime, compared against
     /// `session.dragInFlight`.
     @State private var dragToken = RafuDragSourceToken()
 
+    private static let radius: CGFloat = 8
+
     var body: some View {
-        HStack(spacing: RafuMetrics.space2) {
-            Button(action: toggle) {
-                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .frame(width: 16, height: 16)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(
-                isExpanded ? "Collapse \(row.displayName)" : "Expand \(row.displayName)")
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 5) {
-                    if isRenaming {
-                        TextField("Group name", text: $renameText)
-                            .textFieldStyle(.plain)
-                            .font(.caption.weight(.medium))
-                            .onSubmit(commitRename)
-                            .onExitCommand(perform: cancelRename)
-                    } else {
-                        if let color = row.sessionColor {
-                            TerminalColorDot(color: theme.palette.color(for: color))
-                        }
-                        Text(row.displayName)
-                            .fontWeight(row.isCurrent ? .semibold : .medium)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-                    if row.isCanvasOwned {
-                        Image(systemName: "rectangle.3.group")
-                            .font(.system(size: 9))
-                            .foregroundStyle(theme.palette.textMuted)
-                            .accessibilityLabel("On an Ensemble")
-                    } else if row.isParked {
-                        Image(systemName: "eye.slash")
-                            .font(.system(size: 9))
-                            .foregroundStyle(theme.palette.textMuted)
-                            .accessibilityLabel("Hidden")
-                    }
-                    if row.isSaved { Image(systemName: "bookmark.fill").accessibilityHidden(true) }
-                }
-                .font(.caption)
-                Text(row.summary)
-                    .font(.caption2)
-                    .foregroundStyle(theme.palette.textMuted)
-            }
-            Spacer(minLength: 0)
-            Menu {
-                Button("Rename…", action: beginRename)
-                if let saveLayout { Button("Save Layout…", action: saveLayout) }
-                if let updateSavedLayout {
-                    Button("Update Saved Layout", action: updateSavedLayout)
-                }
-                if let startAll {
-                    Button("Start All Panes", action: startAll)
-                        .help(
-                            "Starts every pane that can be restarted: "
-                                + "stopped panes and exited shells.")
-                }
-                Divider()
-                Button("Reveal", action: reveal)
-                if !row.isParked { Button("Hide Group", action: hide) }
-                Divider()
-                Button("Close Group", role: .destructive, action: close)
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(theme.palette.textSecondary)
-                    .frame(width: 22, height: 22)
-                    .contentShape(.rect)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Actions for \(row.displayName)")
-            .accessibilityLabel("Actions for \(row.displayName)")
+        let focused = focusedPane
+        let focusedStatus = focused.flatMap {
+            CanvasCardCommands.agentCardStatus(pane: $0, in: session)
         }
-        .padding(RafuMetrics.space2)
-        .background(theme.palette.cardBackground)
-        .clipShape(.rect(cornerRadius: RafuMetrics.radiusDenseCard))
-        .contentShape(.rect)
-        .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
-        // Carries only the group's id over the private `rafuEnsembleDrag`
-        // type, exactly like an Agent History row — never a title, path, or
-        // transcript. Dropped on an Ensemble board centre, a one-pane group
-        // (running or stopped) moves there with `moveTerminalGroupToEnsemble`
-        // (lease, keeps running); the existing refusals (more than one pane,
-        // already on a board, board full) apply unchanged at drop time.
-        .onDrag(
-            {
-                DragDiag.note("source terminals-row onDrag")
-                session.beginDragSourceTracking(dragToken)
-                session.activeEnsembleDragHint = .terminalGroup
-                return CanvasBoardDragPayload(terminalGroupID: row.id).makeItemProvider()
-            },
-            preview: {
-                RafuDragPreviewLabel(
-                    icon: Image(systemName: "rectangle.3.group"), title: row.displayName)
+        surface(content(focused: focused, agentStatus: focusedStatus))
+            // One tap handler (docs/references/swiftui-macos-click-latency.md):
+            // reveal at once; the second click of a double-click also renames.
+            .onTapGesture {
+                reveal()
+                if TabClickIntent.current() == .selectAndRename { beginRename() }
             }
-        )
-        .onTapGesture(perform: reveal)
-        .focusable()
-        .onKeyPress(.return) {
-            reveal()
-            return .handled
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Terminal Group, \(row.displayName)")
-        .accessibilityValue(accessibilityValue)
-        .accessibilityAction(named: "Reveal") { reveal() }
+            .focusable()
+            .focused($isFocused)
+            .onKeyPress(.return) {
+                reveal()
+                return .handled
+            }
+            .onHover { isHovering = $0 }
+            // The ⋯ menu is hover- and focus-revealed; the same items are
+            // here, so nothing is reachable only by hovering.
+            .contextMenu { actions }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Terminal Group, \(row.displayName)")
+            .accessibilityValue(accessibilityValue(focusedStatus))
+            .accessibilityAction(named: "Reveal") { reveal() }
+            .accessibilityAction(named: "Close Group") { close() }
     }
 
-    private var accessibilityValue: String {
+    private func content(focused: TerminalPaneSnapshot?, agentStatus: AgentCardStatus?)
+        -> some View
+    {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(theme.palette.textMuted)
+                    .frame(width: 10)
+                    .opacity(isHovering ? 1 : 0)
+                    .accessibilityHidden(true)
+                identityWell(focused)
+                VStack(alignment: .leading, spacing: 2) {
+                    titleLine
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(theme.palette.textMuted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: 4)
+                statusPill(agentStatus)
+                actionsMenu
+            }
+            if panes.count > 1 { paneChips }
+        }
+    }
+
+    private var paneChips: some View {
+        TerminalPaneChipFlow(spacing: 4) {
+            ForEach(panes) { pane in
+                TerminalPaneChipView(
+                    row: pane,
+                    agentStatus: paneAgentStatus(for: pane),
+                    isRenaming: renamingPaneID == pane.id,
+                    renameText: $paneRenameText,
+                    actions: paneActions
+                )
+            }
+        }
+        // Under the title, past the grip and the identity well.
+        .padding(.leading, 10 + 8 + 26 + 8)
+    }
+
+    /// Geometry, fill, the shared manager-row border, and the drag source.
+    private func surface(_ content: some View) -> some View {
+        content
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(
+                maxWidth: .infinity,
+                minHeight: WorkbenchTextHeightPolicy.minimumHeight(
+                    base: 48, scaledHeight: scaledMinimumHeight),
+                alignment: .leading
+            )
+            .contentShape(.rect)
+            .rafuTerminalSurfaceBorder(
+                context: .managerRow(
+                    isCurrent: row.isCurrent, needsAttention: row.attentionCount > 0),
+                identityColor: row.sessionColor.map { theme.palette.color(for: $0) },
+                radius: Self.radius
+            )
+            .background(
+                RoundedRectangle(cornerRadius: Self.radius, style: .continuous)
+                    .fill(isHovering ? theme.palette.hover : theme.palette.cardBackground)
+            )
+            .opacity(session.dragInFlight == dragToken ? 0.4 : 1)
+            // Carries only the group's id over the private `rafuEnsembleDrag`
+            // type, exactly like an Agent History row — never a title, path, or
+            // transcript. Dropped on an Ensemble board centre, a one-pane group
+            // (running or stopped) moves there with `moveTerminalGroupToEnsemble`
+            // (lease, keeps running); the existing refusals (more than one pane,
+            // already on a board, board full) apply unchanged at drop time.
+            .onDrag(
+                {
+                    DragDiag.note("source terminals-row onDrag")
+                    session.beginDragSourceTracking(dragToken)
+                    session.activeEnsembleDragHint = .terminalGroup
+                    return CanvasBoardDragPayload(terminalGroupID: row.id).makeItemProvider()
+                },
+                preview: {
+                    RafuDragPreviewLabel(
+                        icon: Image(systemName: "rectangle.3.group"), title: row.displayName)
+                }
+            )
+    }
+
+    // MARK: Parts
+
+    private var titleLine: some View {
+        HStack(spacing: 5) {
+            if isRenaming {
+                TextField("Group name", text: $renameText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13, weight: .medium))
+                    .onSubmit(commitRename)
+                    .onExitCommand(perform: cancelRename)
+            } else {
+                if let color = row.sessionColor {
+                    TerminalColorDot(color: theme.palette.color(for: color))
+                }
+                Text(row.displayName)
+                    .font(.system(size: 13, weight: row.isCurrent ? .semibold : .medium))
+                    .foregroundStyle(theme.palette.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            if row.isCanvasOwned {
+                Image(systemName: "rectangle.3.group")
+                    .font(.system(size: 9))
+                    .foregroundStyle(theme.palette.textMuted)
+                    .accessibilityLabel("On an Ensemble")
+            } else if row.isParked {
+                Image(systemName: "eye.slash")
+                    .font(.system(size: 9))
+                    .foregroundStyle(theme.palette.textMuted)
+                    .accessibilityLabel("Hidden")
+            }
+            if row.isSaved {
+                Image(systemName: "bookmark.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(theme.palette.textMuted)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    /// The focused pane's agent mark, else the terminal glyph.
+    private func identityWell(_ pane: TerminalPaneSnapshot?) -> some View {
+        Group {
+            if let provider = pane.flatMap({ session.terminal.terminalController(for: $0.id) })?
+                .resolvedAgentProvider
+            {
+                AgentIconView(cli: provider, size: 16)
+            } else {
+                Image(systemName: "terminal")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(theme.palette.textSecondary)
+            }
+        }
+        .frame(width: 26, height: 26)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(theme.palette.chipBackground)
+        )
+        .accessibilityHidden(true)
+    }
+
+    /// The agent pill when the focused pane runs an agent, else the group
+    /// state word. Attention adds a bell and a word, never colour alone.
+    @ViewBuilder
+    private func statusPill(_ agentStatus: AgentCardStatus?) -> some View {
+        if let agentStatus {
+            AgentStatusPill(status: agentStatus, elapsed: nil)
+        } else {
+            RafuChip(text: row.stateLabel)
+        }
+        if row.attentionCount > 0 {
+            HStack(spacing: 3) {
+                Image(systemName: "bell.fill")
+                    .font(.system(size: 9))
+                    .accessibilityHidden(true)
+                Text("Needs attention")
+            }
+            .font(.system(size: 10.5, weight: .medium))
+            .foregroundStyle(theme.palette.warning)
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(theme.palette.warning.opacity(0.14)))
+            .fixedSize()
+            .accessibilityHidden(true)
+        }
+    }
+
+    private var actionsMenu: some View {
+        Menu {
+            actions
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(theme.palette.textSecondary)
+                .frame(width: 22, height: 22)
+                .contentShape(.rect)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .opacity(isHovering || isFocused ? 1 : 0)
+        .help("Actions for \(row.displayName)")
+        .accessibilityLabel("Actions for \(row.displayName)")
+    }
+
+    /// The group's items; a one-pane group also offers its pane's shell and
+    /// colour items, since it shows no pane chip.
+    @ViewBuilder
+    private var actions: some View {
+        Button("Rename…", action: beginRename)
+        if let saveLayout { Button("Save Layout…", action: saveLayout) }
+        if let updateSavedLayout {
+            Button("Update Saved Layout", action: updateSavedLayout)
+        }
+        if let startAll {
+            Button("Start All Panes", action: startAll)
+                .help(
+                    "Starts every pane that can be restarted: "
+                        + "stopped panes and exited shells.")
+        }
+        if panes.count == 1, let pane = panes.first {
+            Divider()
+            TerminalPaneMenuItems(row: pane, actions: paneActions, includesPaneIdentity: false)
+        }
+        Divider()
+        Button("Reveal", action: reveal)
+        if !row.isParked { Button("Hide Group", action: hide) }
+        Divider()
+        Button("Close Group", role: .destructive, action: close)
+    }
+
+    // MARK: Derived
+
+    private var focusedPane: TerminalPaneSnapshot? {
+        guard let group = session.terminal.terminalGroup(row.id) else { return nil }
+        return group.panes.first { $0.id == group.focusedPaneID } ?? group.panes.first
+    }
+
+    private func paneAgentStatus(for pane: TerminalsPanelModel.TerminalPaneRow) -> AgentCardStatus?
+    {
+        guard
+            let snapshot = session.terminal.terminalGroup(row.id)?.panes.first(where: {
+                $0.id == pane.id
+            })
+        else { return nil }
+        return CanvasCardCommands.agentCardStatus(pane: snapshot, in: session)
+    }
+
+    /// One pane: the shell and its folder ("zsh · ~/src/api"), which the
+    /// automatic name only shortens. More panes: the pane count and the
+    /// group state word.
+    private var subtitle: String {
+        if panes.count == 1, let pane = panes.first {
+            let folder =
+                pane.folder.hasPrefix("/")
+                ? (pane.folder as NSString).abbreviatingWithTildeInPath
+                : TerminalNaming.folderName(
+                    path: pane.folder, workspaceRoot: session.rootURL?.path) ?? ""
+            return TerminalNaming.subtitle([pane.providerOrShell, folder])
+        }
+        return TerminalNaming.subtitle([
+            TerminalNaming.paneCountLabel(row.paneCount), row.stateLabel,
+        ])
+    }
+
+    private func accessibilityValue(_ agentStatus: AgentCardStatus?) -> String {
         var values = [TerminalNaming.paneCountLabel(row.paneCount), row.stateLabel]
+        if let agentStatus { values.append(agentStatus.word) }
         if row.livePaneCount > 0 { values.append("\(row.livePaneCount) live") }
         if row.isCurrent { values.append("Current") }
         if row.isCanvasOwned {
@@ -694,100 +918,138 @@ private struct TerminalGroupManagerRowView: View {
     }
 }
 
-private struct TerminalGroupPaneRowView: View {
+/// A pane's menu items, shared by its chip's ⋯ menu, its chip's context
+/// menu, and (without the identity items) a one-pane group card's menu.
+private struct TerminalPaneMenuItems: View {
     let row: TerminalsPanelModel.TerminalPaneRow
-    let isRenaming: Bool
-    @Binding var renameText: String
-    let revealAndFocus: () -> Void
-    let close: () -> Void
-    let start: (() -> Void)?
-    let restart: (() -> Void)?
-    let beginRename: (() -> Void)?
-    let commitRename: (() -> Void)?
-    let cancelRename: () -> Void
-    let setColor: (TerminalPaneThemeColor?) -> Void
+    let actions: TerminalPaneActions
+    /// Reveal and Focus, Rename… and Close Pane. A one-pane group card
+    /// leaves them out: its own Reveal, Rename… and Close Group cover them.
+    var includesPaneIdentity = true
 
     @Environment(\.rafuTheme) private var theme
 
     var body: some View {
-        HStack(spacing: RafuMetrics.space2) {
-            Image(systemName: statusSymbol).frame(width: 16).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                if isRenaming {
-                    TextField("Pane name", text: $renameText)
-                        .textFieldStyle(.plain)
-                        .font(.caption.weight(.medium))
-                        .onSubmit { commitRename?() }
-                        .onExitCommand(perform: cancelRename)
-                } else {
-                    HStack(spacing: 5) {
+        if row.canStart { Button("Start Shell") { actions.start(row) } }
+        if row.canRestart { Button("Restart Shell") { actions.restart(row) } }
+        if includesPaneIdentity {
+            Button("Reveal and Focus") { actions.revealAndFocus(row) }
+            Button("Rename…") { actions.beginRename(row) }
+        }
+        Menu("Color") {
+            ForEach(TerminalPaneThemeColor.presets, id: \.self) { color in
+                Button {
+                    actions.setColor(row, color)
+                } label: {
+                    Label {
+                        Text(color.displayName)
+                    } icon: {
+                        Image(systemName: "circle.fill")
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(theme.palette.swatch(for: color))
+                    }
+                }
+            }
+            Divider()
+            Button("No Color") { actions.setColor(row, nil) }
+        }
+        if includesPaneIdentity {
+            Button("Close Pane", role: .destructive) { actions.close(row) }
+        }
+    }
+}
+
+/// One pane of a multi-pane group as a capsule chip: a status glyph (a
+/// spinner while its agent works), the colour dot and the name. Clicking
+/// reveals the group and focuses the pane. The hover ⋯ and the context menu
+/// carry the pane's menu; renaming swaps the name for a field.
+private struct TerminalPaneChipView: View {
+    let row: TerminalsPanelModel.TerminalPaneRow
+    let agentStatus: AgentCardStatus?
+    let isRenaming: Bool
+    @Binding var renameText: String
+    let actions: TerminalPaneActions
+
+    @Environment(\.rafuTheme) private var theme
+    @State private var isHovering = false
+    @FocusState private var isRenameFieldFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 2) {
+            if isRenaming {
+                TextField("Pane name", text: $renameText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11, weight: .medium))
+                    .frame(minWidth: 60, maxWidth: 140)
+                    .focused($isRenameFieldFocused)
+                    .onAppear { isRenameFieldFocused = true }
+                    .onSubmit { actions.commitRename(row) }
+                    .onExitCommand(perform: actions.cancelRename)
+            } else {
+                Button {
+                    actions.revealAndFocus(row)
+                } label: {
+                    HStack(spacing: 4) {
+                        statusGlyph
                         if let color = row.sessionColor {
                             TerminalColorDot(color: theme.palette.color(for: color))
                         }
                         Text(row.name)
-                            .font(.caption.weight(row.isFocused ? .semibold : .regular))
+                            .font(.system(size: 11, weight: row.isFocused ? .semibold : .regular))
+                            .foregroundStyle(theme.palette.textPrimary)
                             .lineLimit(1)
-                            .truncationMode(.tail)
+                            .truncationMode(.middle)
                     }
+                    .contentShape(.rect)
                 }
-                Text(row.subtitle)
-                    .font(.caption2)
-                    .foregroundStyle(theme.palette.textMuted)
-                    .lineLimit(1)
+                .buttonStyle(.plain)
+                .accessibilityLabel("Pane, \(row.name)")
+                .accessibilityValue(accessibilityValue)
+                .accessibilityAddTraits(row.isFocused ? .isSelected : [])
             }
-            Spacer(minLength: 0)
             Menu {
-                if let start { Button("Start Shell", action: start) }
-                if let restart { Button("Restart Shell", action: restart) }
-                Button("Reveal and Focus", action: revealAndFocus)
-                if let beginRename {
-                    Button("Rename…", action: beginRename)
-                    Menu("Color") {
-                        ForEach(TerminalPaneThemeColor.presets, id: \.self) { color in
-                            Button {
-                                setColor(color)
-                            } label: {
-                                Label {
-                                    Text(color.displayName)
-                                } icon: {
-                                    Image(systemName: "circle.fill")
-                                        .symbolRenderingMode(.palette)
-                                        .foregroundStyle(theme.palette.swatch(for: color))
-                                }
-                            }
-                        }
-                        Divider()
-                        Button("No Color") { setColor(nil) }
-                    }
-                }
-                Button("Close Pane", role: .destructive, action: close)
+                TerminalPaneMenuItems(row: row, actions: actions)
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(theme.palette.textSecondary)
-                    .frame(width: 22, height: 22)
+                    .frame(width: 14, height: 18)
                     .contentShape(.rect)
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .opacity(isHovering ? 1 : 0)
             .help("Actions for \(row.name)")
             .accessibilityLabel("Actions for \(row.name)")
         }
-        .padding(.leading, RafuMetrics.space4)
-        .padding(.trailing, RafuMetrics.space2)
-        .padding(.vertical, RafuMetrics.space1)
-        .contentShape(.rect)
-        .onTapGesture(perform: revealAndFocus)
-        .focusable()
-        .onKeyPress(.return) {
-            revealAndFocus()
-            return .handled
+        .padding(.leading, 8)
+        .padding(.trailing, 2)
+        .frame(height: 22)
+        .background(
+            Capsule().fill(isHovering ? theme.palette.hover : theme.palette.chipBackground)
+        )
+        .overlay(
+            Capsule().strokeBorder(
+                row.isFocused ? theme.palette.borderStrong : Color.clear, lineWidth: 1)
+        )
+        .onHover { isHovering = $0 }
+        .contextMenu { TerminalPaneMenuItems(row: row, actions: actions) }
+        .help(row.subtitle)
+    }
+
+    @ViewBuilder
+    private var statusGlyph: some View {
+        if let agentStatus {
+            AgentActivityGlyph(status: agentStatus)
+        } else {
+            Image(systemName: statusSymbol)
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(
+                    row.status == .live ? theme.palette.accent : theme.palette.textMuted
+                )
+                .accessibilityHidden(true)
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Terminal pane, \(row.name)")
-        .accessibilityValue(accessibilityValue)
-        .accessibilityAction(named: "Reveal and Focus") { revealAndFocus() }
     }
 
     private var statusSymbol: String {
@@ -802,12 +1064,69 @@ private struct TerminalGroupPaneRowView: View {
 
     private var accessibilityValue: String {
         var values = [row.providerOrShell, row.detail]
+        if let agentStatus { values.append(agentStatus.word) }
         if row.folder != "." { values.append(row.folder) }
         if let colorName = row.colorName { values.append("Color \(colorName)") }
         if row.isFocused { values.append("Focused") }
         if row.hasAttention { values.append("Needs attention") }
         if let message = row.unavailableMessage { values.append(message) }
         return values.joined(separator: ", ")
+    }
+}
+
+/// Lays chips out left to right and wraps to a new line when the next one
+/// does not fit — the narrow sidebar never scrolls sideways.
+private struct TerminalPaneChipFlow: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(width: proposal.width ?? .infinity, subviews: subviews)
+        let width = rows.map(\.width).max() ?? 0
+        let height = rows.map(\.height).reduce(0, +) + spacing * CGFloat(max(rows.count - 1, 0))
+        return CGSize(width: proposal.width ?? width, height: height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        var y = bounds.minY
+        for row in arrange(width: bounds.width, subviews: subviews) {
+            var x = bounds.minX
+            for (index, size) in zip(row.indices, row.sizes) {
+                subviews[index].place(
+                    at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + spacing
+        }
+    }
+
+    private struct Row {
+        var indices: [Int] = []
+        var sizes: [CGSize] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    private func arrange(width: CGFloat, subviews: Subviews) -> [Row] {
+        var rows: [Row] = []
+        var current = Row()
+        for index in subviews.indices {
+            var size = subviews[index].sizeThatFits(.unspecified)
+            size.width = min(size.width, width)
+            let needed = current.indices.isEmpty ? size.width : current.width + spacing + size.width
+            if needed > width, !current.indices.isEmpty {
+                rows.append(current)
+                current = Row()
+            }
+            current.width =
+                current.indices.isEmpty ? size.width : current.width + spacing + size.width
+            current.height = max(current.height, size.height)
+            current.indices.append(index)
+            current.sizes.append(size)
+        }
+        if !current.indices.isEmpty { rows.append(current) }
+        return rows
     }
 }
 
@@ -1082,9 +1401,8 @@ private struct TerminalSessionRowView: View {
         }
     }
 
-    private var rowRadius: CGFloat {
-        isCurrent ? RafuMetrics.radiusDenseSelection : RafuMetrics.radiusDenseCard
-    }
+    /// One radius for every terminal card, current or not.
+    private var rowRadius: CGFloat { 8 }
 
     private var identityColor: Color? {
         row.sessionColor.map { theme.palette.color(for: $0) }

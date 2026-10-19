@@ -1,8 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// Diagram items for the Canvas bar overflow menu and the Canvas menu:
-/// Icon Library…, Convert to Frame, Export…, Import Icon Pack….
+/// Diagram items for the menu bar's Ensemble menu: Icon Library…, Convert to
+/// Frame, Export…, Import Icon Pack…. The Ensemble bar has no overflow menu;
+/// it offers Export as a button and the icon library as an Add palette tile.
 struct CanvasDiagramMenuItems: View {
     let board: CanvasBoardState
     let session: WorkspaceSession
