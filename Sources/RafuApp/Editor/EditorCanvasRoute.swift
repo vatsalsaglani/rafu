@@ -100,7 +100,9 @@ extension EditorCanvasRoute.Inputs {
             hasDescriptor: session.descriptor != nil,
             hasAnyEditorTabs: session.hasAnyEditorTabs,
             hasGitOpenBlame: session.gitOpenBlame != nil,
-            hasGitOpenDiff: session.gitOpenDiff != nil,
+            // An open diff counts only while its tab is selected. A hidden
+            // diff tab must not hold a selected terminal out of `.editor`.
+            hasGitOpenDiff: session.selectedAuxiliaryTab?.isGitDiff == true,
             settingsVisible: session.settingsVisible,
             hasSelectedDocument: session.selectedDocument != nil,
             hasSelectedDocumentID: session.selectedDocumentID != nil

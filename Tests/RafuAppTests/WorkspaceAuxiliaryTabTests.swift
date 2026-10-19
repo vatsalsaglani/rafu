@@ -143,6 +143,154 @@ struct WorkspaceAuxiliaryTabTests {
         }
     }
 
+    private func openDiff(_ path: String, scope: GitDiffScope = .workingTree) -> GitOpenDiff {
+        GitOpenDiff(
+            title: "Diff • \((path as NSString).lastPathComponent)",
+            subtitle: path,
+            diff: GitFileDiff(
+                path: path, originalPath: nil, isBinary: false, hunks: [], rawPatch: ""),
+            identity: "Working Tree:\(path)",
+            scope: scope)
+    }
+
+    @Test("A Git diff joins the file shelf and Cmd-W returns to the group's file")
+    func gitDiffSharesTheFileShelf() async throws {
+        try await withWorkspace { session in
+            session.newUntitledDocument()
+            session.newUntitledDocument()
+            session.newUntitledDocument()
+            let selected = try #require(session.selectedDocument)
+            let groupID = session.editorLayout.focusedGroupID
+            let fileTabs = try #require(session.editorLayout.group(id: groupID)?.tabs)
+            let fileTabID = try #require(session.editorLayout.group(id: groupID)?.selectedTabID)
+            #expect(fileTabs.count == 3)
+
+            let diff = openDiff("Sources/App.swift")
+            let diffTab = WorkspaceAuxiliaryTab.gitDiff(GitDiffTabReference(diff))
+            session.presentGitDiff(diff)
+            #expect(session.editorLayout.group(id: groupID)?.tabs == fileTabs)
+            #expect(session.editorLayout.group(id: groupID)?.selectedTabID == fileTabID)
+            #expect(session.auxiliaryTabs(in: groupID) == [diffTab])
+            #expect(session.selectedAuxiliaryTab(in: groupID) == diffTab)
+            #expect(session.selectedDocumentID == nil)
+            #expect(EditorCanvasRoute.resolve(.init(session: session)) == .standaloneDiff)
+            #expect(session.windowTitle.hasPrefix(diff.title))
+            #expect(session.openDocuments.count == 3)
+
+            // Selecting a file hides the diff; it keeps the diff and its tab.
+            session.selectEditorTab(fileTabID, in: groupID)
+            #expect(session.selectedAuxiliaryTab == nil)
+            #expect(session.selectedDocument === selected)
+            #expect(session.gitOpenDiff?.id == diff.id)
+            #expect(session.auxiliaryTabs == [diffTab])
+            #expect(EditorCanvasRoute.resolve(.init(session: session)) == .editor)
+
+            session.selectAuxiliaryTab(diffTab)
+            #expect(session.selectedAuxiliaryTab == diffTab)
+            session.requestCloseActiveTab()
+            #expect(session.gitOpenDiff == nil)
+            #expect(session.auxiliaryTabs.isEmpty)
+            #expect(!session.isGitDiffSelected)
+            #expect(session.selectedDocument === selected)
+            #expect(session.editorLayout.group(id: groupID)?.tabs == fileTabs)
+            #expect(session.pendingCloseDocument == nil)
+        }
+    }
+
+    @Test("A Git diff tab closes back to its own split's selection")
+    func gitDiffCloseReturnsToItsGroup() async throws {
+        try await withWorkspace { session in
+            session.newUntitledDocument()
+            let firstDocument = try #require(session.selectedDocument)
+            let firstGroup = session.editorLayout.focusedGroupID
+            let firstTab = try #require(session.editorLayout.group(id: firstGroup)?.selectedTabID)
+            session.newUntitledDocument()
+            let secondTab = try #require(session.editorLayout.group(id: firstGroup)?.selectedTabID)
+            session.splitEditorTab(secondTab, at: .trailing)
+            let secondGroup = session.editorLayout.focusedGroupID
+            session.selectEditorTab(firstTab, in: firstGroup)
+            let diff = openDiff("README.md")
+            let diffTab = WorkspaceAuxiliaryTab.gitDiff(GitDiffTabReference(diff))
+            session.presentGitDiff(diff)
+            #expect(session.auxiliaryTabs(in: firstGroup) == [diffTab])
+            #expect(session.auxiliaryTabs(in: secondGroup).isEmpty)
+            session.selectEditorTab(secondTab, in: secondGroup)
+            session.selectAuxiliaryTab(diffTab)
+            #expect(session.editorLayout.focusedGroupID == firstGroup)
+            session.closeAuxiliaryTab(diffTab)
+            #expect(session.selectedDocument === firstDocument)
+            #expect(session.editorLayout.focusedGroupID == firstGroup)
+            #expect(session.editorLayout.group(id: secondGroup)?.selectedTabID == secondTab)
+            #expect(session.gitOpenDiff == nil)
+            #expect(session.auxiliaryTabs.isEmpty)
+        }
+    }
+
+    @Test("One diff tab per window; a reload or Settings keeps it")
+    func gitDiffReplacementAndPeers() async throws {
+        try await withWorkspace { session in
+            session.newUntitledDocument()
+            let first = openDiff("a.swift")
+            let second = openDiff("b.swift")
+            session.presentGitDiff(first)
+            session.presentGitDiff(second)
+            #expect(session.auxiliaryTabs == [.gitDiff(GitDiffTabReference(second))])
+            #expect(session.auxiliaryTabGroups.count == 1)
+            // A hunk reload keeps the identity and therefore the same tab.
+            session.gitOpenDiff = openDiff("b.swift")
+            #expect(session.auxiliaryTabs == [.gitDiff(GitDiffTabReference(second))])
+            #expect(session.selectedAuxiliaryTab == .gitDiff(GitDiffTabReference(second)))
+
+            session.showSettings()
+            #expect(session.selectedAuxiliaryTab == .settings)
+            #expect(session.gitOpenDiff?.id == second.id)
+            #expect(session.auxiliaryTabs.contains(.gitDiff(GitDiffTabReference(second))))
+            session.selectAuxiliaryTab(.gitDiff(GitDiffTabReference(second)))
+            #expect(session.selectedAuxiliaryTab == .gitDiff(GitDiffTabReference(second)))
+            #expect(!session.settingsVisible)
+            #expect(session.auxiliaryTabs.contains(.settings))
+
+            // Every other path that drops the diff also drops its tab.
+            session.gitOpenDiff = nil
+            #expect(session.auxiliaryTabs == [.settings])
+            #expect(!session.isGitDiffSelected)
+        }
+    }
+
+    @Test("A Git diff tab never enters the restorable layout")
+    func gitDiffTabIsEphemeral() async throws {
+        try await withWorkspace { session in
+            session.newUntitledDocument()
+            let before = try JSONEncoder().encode(
+                EditorLayoutRestoration(layout: session.editorLayout))
+            session.presentGitDiff(openDiff("README.md"))
+            let after = try JSONEncoder().encode(
+                EditorLayoutRestoration(layout: session.editorLayout))
+            let beforeObject = try JSONSerialization.jsonObject(with: before) as? NSDictionary
+            let afterObject = try JSONSerialization.jsonObject(with: after) as? NSDictionary
+            #expect(beforeObject == afterObject)
+            #expect(
+                session.editorLayout.group(id: session.editorLayout.focusedGroupID)?.tabs.count == 1
+            )
+        }
+    }
+
+    @Test("The editor canvas keeps the layout tree for a diff")
+    func diffNeverReplacesTheLayoutTree() throws {
+        var directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        while !FileManager.default.fileExists(
+            atPath: directory.appending(path: "Package.swift").path)
+        {
+            try #require(directory.path != "/")
+            directory = directory.deletingLastPathComponent()
+        }
+        let source = try String(
+            contentsOf: directory.appending(path: "Sources/RafuApp/Views/EditorCanvasView.swift"),
+            encoding: .utf8)
+        #expect(!source.contains("GitStandaloneDiffCanvas"))
+        #expect(source.contains("case .settings, .standaloneDiff:\n            return .editor"))
+    }
+
     @Test("Hidden auxiliary focus belongs only to its own native subtree")
     func auxiliaryResponderOwnership() {
         let host = NSView()

@@ -15,6 +15,10 @@ struct AuxiliaryEditorTabContent: View {
                     model: session.agentHistory.transcripts[reference.key],
                     session: session,
                     isActive: session.selectedAuxiliaryTab == tab)
+            case .gitDiff:
+                if let openDiff = session.gitOpenDiff {
+                    GitSideBySideDiffView(openDiff: openDiff, session: session)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

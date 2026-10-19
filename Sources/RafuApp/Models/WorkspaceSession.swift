@@ -214,7 +214,14 @@ final class WorkspaceSession {
     var gitHistoryCommitChanges: [GitCommitFileChange] = []
     var isGitHistoryDetailLoading = false
     var gitInspectorSection: GitInspectorSection = .changes
-    var gitOpenDiff: GitOpenDiff?
+    /// The window's one open diff. It shows as a `.gitDiff` auxiliary tab;
+    /// clearing it by any path also removes that tab.
+    var gitOpenDiff: GitOpenDiff? {
+        didSet { if gitOpenDiff == nil { discardGitDiffAuxiliaryTabs() } }
+    }
+    /// Whether the diff tab, not a file or terminal tab, is selected. Like
+    /// `settingsVisible`, it is suspended (not cleared) by other selections.
+    var isGitDiffSelected = false
     var gitMergeState: GitMergeState?
     var gitStashes: [GitStashEntry] = []
     var gitWorktrees: [GitWorktree] = []
@@ -462,11 +469,9 @@ final class WorkspaceSession {
     var auxiliaryTabGroups: [WorkspaceAuxiliaryTab: EditorGroupID] = [:]
 
     func showSettings() {
-        closeBlame()
-        if gitOpenDiff != nil {
-            closeGitDiff()
-        }
-        // Settings and an Agent Session tab are peers: hide the other one.
+        // An open diff only hides; its tab stays on the shelf.
+        prepareAuxiliarySelection()
+        // Settings, Agent Session, and diff tabs are peers: hide the others.
         suspendAuxiliarySelection()
         settingsVisible = true
         selectedDocumentID = nil
@@ -2524,7 +2529,7 @@ final class WorkspaceSession {
     }
 
     var windowTitle: String {
-        if selectedDocumentID == nil, let gitOpenDiff {
+        if selectedAuxiliaryTab?.isGitDiff == true, let gitOpenDiff {
             return
                 "\(gitOpenDiff.title) — \(descriptor?.displayName ?? RafuBuildInformation.appName)"
         }
@@ -4430,14 +4435,14 @@ final class WorkspaceSession {
                 at: rootURL
             )
             let scopeTitle = scope == .staged ? "Staged" : "Working Tree"
-            gitOpenDiff = GitOpenDiff(
-                title: "Diff • \((change.path as NSString).lastPathComponent)",
-                subtitle: "\(change.path) • \(scopeTitle)",
-                diff: diff,
-                identity: "\(scopeTitle):\(change.path)",
-                scope: scope
-            )
-            selectedDocumentID = nil
+            presentGitDiff(
+                GitOpenDiff(
+                    title: "Diff • \((change.path as NSString).lastPathComponent)",
+                    subtitle: "\(change.path) • \(scopeTitle)",
+                    diff: diff,
+                    identity: "\(scopeTitle):\(change.path)",
+                    scope: scope
+                ))
             selectedTreePath = rootURL.appending(path: change.path).path
             MemoryTimeline.shared.note(
                 .diffOpened, detail: (change.path as NSString).lastPathComponent,
@@ -4479,14 +4484,14 @@ final class WorkspaceSession {
                 GitDiffRequest(path: change.path, scope: .commit(revision)),
                 at: rootURL
             )
-            gitOpenDiff = GitOpenDiff(
-                title: "Diff • \((change.path as NSString).lastPathComponent)",
-                subtitle: "\(change.path) • \(String(revision.prefix(8)))",
-                diff: diff,
-                identity: "\(revision):\(change.path)",
-                scope: .commit(revision)
-            )
-            selectedDocumentID = nil
+            presentGitDiff(
+                GitOpenDiff(
+                    title: "Diff • \((change.path as NSString).lastPathComponent)",
+                    subtitle: "\(change.path) • \(String(revision.prefix(8)))",
+                    diff: diff,
+                    identity: "\(revision):\(change.path)",
+                    scope: .commit(revision)
+                ))
             selectedTreePath = rootURL.appending(path: change.path).path
             MemoryTimeline.shared.note(
                 .diffOpened, detail: (change.path as NSString).lastPathComponent,
@@ -4498,20 +4503,17 @@ final class WorkspaceSession {
         }
     }
 
-    func selectGitDiff() {
-        guard gitOpenDiff != nil else { return }
-        selectedDocumentID = nil
-    }
-
+    /// Closes the diff tab and, when it was selected, returns to its own
+    /// group's selected tab (never an unrelated last-opened file).
     func closeGitDiff() {
-        let wasSelected = selectedDocumentID == nil
+        if let tab = gitDiffAuxiliaryTab {
+            closeAuxiliaryTab(tab)
+            return
+        }
         if gitOpenDiff != nil {
             MemoryTimeline.shared.note(.diffClosed, source: memoryTimelineSource)
         }
         gitOpenDiff = nil
-        if wasSelected, let fallback = openDocuments.last {
-            select(fallback)
-        }
     }
 
     // MARK: - Hunk staging

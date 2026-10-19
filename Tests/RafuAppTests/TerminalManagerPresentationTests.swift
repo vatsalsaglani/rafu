@@ -116,19 +116,27 @@ func nonEditorCanvasesSuppressCurrentTerminal() throws {
     let controller = try #require(session.terminal.sessions.first)
     #expect(session.currentTerminalSessionID == controller.id)
 
-    session.gitOpenDiff = GitOpenDiff(
-        title: "Diff",
-        subtitle: "",
-        diff: GitFileDiff(
-            path: "README.md",
-            originalPath: nil,
-            isBinary: false,
-            hunks: [],
-            rawPatch: ""
-        ),
-        identity: "working:README.md",
-        scope: .workingTree
-    )
+    session.presentGitDiff(
+        GitOpenDiff(
+            title: "Diff",
+            subtitle: "",
+            diff: GitFileDiff(
+                path: "README.md",
+                originalPath: nil,
+                isBinary: false,
+                hunks: [],
+                rawPatch: ""
+            ),
+            identity: "working:README.md",
+            scope: .workingTree
+        ))
+    #expect(session.currentTerminalSessionID == nil)
+    // A hidden diff tab returns the terminal to its current row.
+    let terminalTab = try #require(
+        session.editorLayout.group(id: session.editorLayout.focusedGroupID)?.selectedTabID)
+    session.selectEditorTab(terminalTab, in: session.editorLayout.focusedGroupID)
+    #expect(session.currentTerminalSessionID == controller.id)
+    session.selectAuxiliaryTab(try #require(session.gitDiffAuxiliaryTab))
     #expect(session.currentTerminalSessionID == nil)
 
     session.gitOpenDiff = nil
