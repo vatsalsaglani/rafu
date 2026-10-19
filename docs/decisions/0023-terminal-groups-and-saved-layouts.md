@@ -146,6 +146,32 @@ leaves unavailable Agent Terminal and Ensemble placeholders unchanged.
   window close, and app quit end all live sessions owned by that window. One
   window cannot read or mutate another window’s groups.
 
+## Amendment (2026-10-19): chosen shells on Ensemble terminal cards, and board-only key equivalents
+
+The user asked to pick the shell when creating a terminal on an Ensemble board,
+to give each shell its own shortcut, and to add shortcuts for moving between
+cards. Two durable points follow.
+
+- **An Ensemble terminal card may carry a chosen shell.** The board uses the
+  same `TerminalShellCatalog` discovery and the same approved ordinary-shell
+  profile as a Terminal Group pane; a supplied shell is recorded as the
+  preferred shell. The concrete approved shell path travels in the card's
+  launch profile and is persisted in the board's inert saved layout
+  (`TerminalPaneShellChoice.approvedShellPath` inside
+  `canvasTerminalRestoration`). This stays inside the saved-data allowance
+  above: an approved ordinary-shell profile only. **No process is restored.**
+  The path is revalidated on restore; a shell that is missing makes the pane
+  unavailable, with no silent fallback to another shell.
+- **Every Ensemble key equivalent exists only while an Ensemble board is the
+  selected tab.** A menu key equivalent is consumed app-wide before the first
+  responder, so a permanently installed Ensemble shortcut would be taken away
+  from every embedded shell. The new shortcuts are therefore declared inside
+  `CanvasCommands`' existing `if let board, let session { … }` block, so both the
+  menu items and their key equivalents only exist on a board. `Command-1` to
+  `Command-9` stay unassigned for future tab selection.
+
+Detail and the full key map: `docs/references/canvas-interaction.md`.
+
 ## Superseded guidance
 
 This ADR supersedes only these earlier statements:

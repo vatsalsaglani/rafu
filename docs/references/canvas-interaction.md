@@ -173,6 +173,92 @@ section.)
   tab to the centre; drag it to an edge (must split); drag a two-pane group
   (refusal message); undo after a move; drag a file tab onto the board.
 
+### Shell choice and card navigation (2026-10-19)
+
+Verified on `main` by lint, build, and the full suite in both modes
+(Apple Swift 6.4 (swiftlang-6.4.0.34.1), macOS 27.0.1 (26A434)): parallel
+250 + 2545 tests passed, `--no-parallel` 250 + 2545 passed,
+`./script/build_and_run.sh --verify` passed. Keys were not driven by UI
+automation; the manual checks at the end are still open.
+
+The user asked to choose the shell when adding an Ensemble terminal, to give
+each shell its own shortcut, and for shortcuts to move between cards.
+
+**Add surfaces.** `CanvasAddItem` (`CanvasAddMenu.swift`) lists the card kinds
+plus one row per discovered shell, but only when the machine has two or more
+shells. Titles come from `TerminalNaming.shellMenuTitle`. The Add popover's
+type-ahead covers the shell rows as well ("fish" finds the fish row; "term"
+matches both the terminal kind and the shell rows). The same shells appear as a
+"Terminal with Shell" submenu in the board menu, the board's pull-down, and
+Ensemble > Add to Ensemble, and as palette commands
+"Ensemble: Add Terminal — <shell>". A card created with a chosen shell shows
+the shell basename in its not-running block instead of "Default shell", because
+the profile now stores the concrete approved path even when no shell was passed.
+
+**New keys.**
+
+- `Control-Option-1` … `Control-Option-9`: add a Terminal with the shell at
+  that position in the catalog (1 is the default shell). With only one shell,
+  `Control-Option-1` is plain Add Terminal.
+- `Control-Command-Left/Right/Up/Down`: Focus Card Left/Right/Up/Down.
+- `Control-Command-]` / `Control-Command-[`: Focus Next/Previous Card, in the
+  existing reading order, wrapping.
+- `Command-1` … `Command-9` are deliberately left free for future tab
+  selection.
+
+Shortcut data lives in `CanvasNavigationShortcuts.swift`, the items in
+`CanvasCommands.swift`.
+
+**Gating rule: declare an Ensemble key equivalent only inside the
+board-and-session block.** A menu key equivalent is consumed app-wide before
+the first responder reaches it (`RafuAppCommands.swift:303-308`), so a
+permanently installed Ensemble key would be lost to every embedded shell. Every
+new key is declared inside `CanvasCommands`' existing
+`if let board, let session { … }` block, so the menu item *and* its key
+equivalent exist only while an Ensemble board is the selected tab. This
+existence gating was chosen over the optional
+`.keyboardShortcut(KeyboardShortcut?)` overload because it is the file's proven
+idiom. Follow it for any further Ensemble key.
+
+**Shared-key nuance (one open question).** `Control-Command-arrow` is also
+"Focus Terminal Pane" in `RafuAppCommands` (lines 468-483). On a board the card
+items are `.disabled` whenever pane focus in the same direction is enabled.
+Pane focus is never enabled on a board, because an Ensemble terminal card
+always has exactly one pane (splits are refused on a board, and
+`moveTerminalGroupToEnsemble` accepts a one-pane group only). **UNVERIFIED:**
+that AppKit routes `Control-Command-arrow` to the enabled card item when a
+disabled pane item with the same key equivalent exists in an earlier menu. This
+needs a check on a Mac by hand.
+
+**Ordering is geometry, not creation or z-order.** Direction keys compare card
+centres and prefer a target that overlaps on the other axis; there is no wrap.
+Creation order is invisible to the user and z-order changes with Bring to
+Front, so neither can order navigation.
+
+**Focus rule.** `focusCanvasCard(_:in:)`
+(`Canvas/Integration/CanvasBoardNavigation.swift`) always reveals the target
+card. A terminal card is entered through `board.focus`, and
+`CanvasTerminalCard`'s `onChange(of: active)` is what makes SwiftTerm the first
+responder — that step is not duplicated. Any other card kind is only selected,
+so arrowing onto a note does not enter Edit mode. `focusedCardID` is updated so
+repeated direction keys continue from the current card (`leaveContent` never
+clears `focusedCardID`). Navigation is silent when there is no target.
+
+**Deferred on purpose:** a shell parameter on the MCP `terminal_create` tool
+(it is a consent surface; ADR 0021 and ADR 0025), per-shell shortcuts for
+editor Terminal Groups, and numbered card focus.
+
+Tests: `CanvasAddItemTests`, `CanvasBoardNavigationTests`,
+`CanvasNavigationShortcutsTests`, `WorkspaceSessionShellLaunchProfileTests`,
+and extended `CanvasLayoutMathTests`.
+
+Manual checks still open: the shell submenu and the `Control-Option` keys on a
+Mac with two or more shells; `Control-Option-2` inside an editor Terminal Group
+reaching the shell instead of the board; `Control-Command` arrows and
+`Control-Command-]`/`[` moving focus from inside a terminal card; arrowing onto
+a note not entering Edit mode; save and reopen keeping the shell name;
+VoiceOver labels on the new items.
+
 ### Z-order is array order
 
 Stacking order is `board.cards` array order: the last card is on top.

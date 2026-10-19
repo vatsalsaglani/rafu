@@ -81,7 +81,8 @@ icon-button treatment with WP-00's `RafuRailButtonStyle`:
 - retain the existing sidebar-collapse motion and Reduce Motion behavior;
 - add no decorative selection animation;
 - keep `WorkspaceSidebarRail` itself as a drag-handle column with no button
-  style.
+  style. **Superseded 2026-10-19:** that rail was removed; the window drags from
+  the titlebar row and the Files header only (ADR 0012 amendment).
 
 Selected state must remain recognizable by close-fit shape, boundary, stronger
 foreground, and deck-facing inset bar without hue.

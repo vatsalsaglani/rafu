@@ -238,3 +238,45 @@ exit 0 always, bounded input, private spool directory 0700, files 0600).
   row and of a terminal tab (centre versus edge band); whether tab edge-split
   under a visible board was broken since bc795ec and is now fixed; Close never
   selecting a tab.
+
+## Status (2026-10-19, second increment)
+
+Shell choice and card navigation on the board, plus the left-rail removal in the
+workbench shell. Owned paths: `Sources/RafuApp/Canvas/` (`CanvasAddMenu.swift`,
+`CanvasCommands.swift`, new `CanvasNavigationShortcuts.swift`, new
+`Canvas/Integration/CanvasBoardNavigation.swift`),
+`Sources/RafuApp/Workspace/WorkspaceSession.swift`,
+`Sources/RafuApp/Views/WorkspaceWindowView.swift`,
+`Sources/RafuApp/Views/WorkspaceNavigatorView.swift`, and the matching tests.
+
+- Adding a terminal to an Ensemble can now choose a shell (Add popover rows with
+  type-ahead, a "Terminal with Shell" submenu, palette commands) and the choice
+  persists in the inert saved layout with no process restoration.
+- New board-only keys: `Control-Option-1…9` add a terminal with that shell,
+  `Control-Command` arrows move card focus spatially, `Control-Command-]`/`[`
+  move in reading order. `Command-1…9` stay free.
+- The empty left rail beside the Files sidebar is removed in both sidebar
+  states.
+- References: [`canvas-interaction.md`](../../references/canvas-interaction.md)
+  "Shell choice and card navigation",
+  [`terminal-signals-and-shell-catalog.md`](../../references/terminal-signals-and-shell-catalog.md)
+  "The Ensemble board shares this catalog",
+  [`flat-window-chrome-titlebar-merge.md`](../../references/flat-window-chrome-titlebar-merge.md)
+  "No left rail"; the ADR 0023 and ADR 0012 amendments of the same date.
+- Verification on `main` (Apple Swift 6.4 (swiftlang-6.4.0.34.1), macOS 27.0.1
+  (26A434)): format lint clean; build with 0 new warnings; parallel suite
+  250 + 2545 tests passed; `--no-parallel` (CI mode) 250 + 2545 passed;
+  `./script/build_and_run.sh --verify` passed for Rafu Lightning.
+- Deferred: a shell parameter on the MCP `terminal_create` tool (consent
+  surface, ADR 0021 and ADR 0025); per-shell shortcuts for editor Terminal
+  Groups; numbered card focus. Known gap:
+  `WorkspaceSession.preferredShellStore` is not injectable.
+- Open manual checks (none done by a person yet): the shell submenu and
+  `Control-Option` keys on a Mac with two or more shells; `Control-Option-2`
+  inside an editor Terminal Group reaching the shell; `Control-Command` arrows
+  and `Control-Command-]`/`[` from inside a terminal card; whether AppKit routes
+  `Control-Command-arrow` to the enabled card item while a disabled pane item
+  carries the same key equivalent; arrowing onto a note not entering Edit mode;
+  save and reopen keeping the shell name; VoiceOver labels; the window's left
+  edge in both sidebar states in light, dark, and Increase Contrast; a second
+  window.

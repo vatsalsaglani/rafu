@@ -103,3 +103,8 @@ user action, no new process allowance, no change to saved-board restoration. A
 dropped Agent History row creates the existing resume card (existing
 Resume in Ensemble rules). Detail: `docs/references/canvas-interaction.md`,
 "Board drops".
+
+Related: the ADR 0023 amendment of the same date lets an Ensemble terminal card
+carry a chosen shell, persisted in the inert saved layout with no process
+restoration, and restricts every Ensemble key equivalent to the time a board is
+the selected tab.

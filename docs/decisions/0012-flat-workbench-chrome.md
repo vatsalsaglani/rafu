@@ -170,6 +170,22 @@ cannot draw into the titlebar zone, had to sit below it and cost ~56pt of
 vertical chrome). ⌘B continues to drive the same state. No other consequence
 of this ADR changes.
 
+## Amendment (2026-10-19): the left rail is removed
+
+The user asked for the empty ~40 pt strip on the window's left edge to go, in
+both sidebar states. `WorkspaceSidebarRail` and its divider are deleted, so the
+Files pane (expanded) or the workbench deck (collapsed) now starts at the
+window's left edge. The paragraph above that places the single sidebar toggle in
+a left rail is superseded: the toggle lives in `WindowTitlebarRow`, which the
+macOS redesign already added, and ADR 0002's single-toggle rule still holds.
+
+No left icon rail replaces the removed one, because ADR 0003 puts every
+navigator mode on the right rail; the left side hosts Files only, so such a rail
+would hold one icon duplicating that toggle. Window dragging no longer has a
+left-edge surface: it comes from the titlebar row's drag surface and from the
+Files sidebar header's background. Nothing else in this ADR changes.
+Detail: `docs/references/flat-window-chrome-titlebar-merge.md`, "No left rail".
+
 ## Related plan, reference, and implementation paths
 
 - Plan: [`ui-flat-modern-refresh.md`](../plans/phases/ui-flat-modern-refresh.md)

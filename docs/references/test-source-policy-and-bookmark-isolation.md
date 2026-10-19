@@ -169,5 +169,9 @@ table this is row two (passes alone, passes serial): scheduler starvation. It
 is not a failure and not a clean pass; change nothing. Do not run several full
 suites at once to save time. Together with `EnsembleEndToEndTests.statusEndToEnd`
 above, these are the tests to suspect first when a parallel run fails only
-under machine load. Separate hang cause for the whole suite:
+under machine load. `CanvasBridgeIPCTests` showed the same `EAGAIN` again on
+2026-10-19 during the Ensemble shell-choice and card-navigation work, under the
+implementor's parallel load and with no code change in that area; it passed
+alone, so it stays row two. A test that repeats this across rounds is
+time-sensitive, not broken. Separate hang cause for the whole suite:
 [`test-keychain-isolation.md`](test-keychain-isolation.md).

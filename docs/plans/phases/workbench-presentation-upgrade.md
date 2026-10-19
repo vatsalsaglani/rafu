@@ -401,6 +401,12 @@ focus, caret movement, or typing. Existing short hover feedback may remain.
    its rounded border stroke. This visually exposes the corner while leaving
    TextKit, SwiftTerm, splitters, responder routing, and hit regions
    geometrically untouched.
+   **Superseded 2026-10-19:** `WorkspaceSidebarRail` no longer exists. Every
+   mention of a left rail in this document (including the layout sketch above)
+   is historical; the Files pane or the deck now meets the window's left edge.
+   See the ADR 0012 amendment and
+   [`flat-window-chrome-titlebar-merge.md`](../../references/flat-window-chrome-titlebar-merge.md),
+   "No left rail".
 4. Keep `WorkspaceSidebarRail`, `WorkspaceSidebarView`,
    `WorkspaceUtilityRail`, and `WorkspaceStatusBar` edge-attached. They form the
    rear structural plane; do not turn them into separate cards.

@@ -94,6 +94,41 @@ cannot post user notifications on current macOS even with bundle
 identity — `script/build_and_run.sh` now ad-hoc signs the staged bundle so
 notification posting works under the canonical launch/verify script.
 
+## The Ensemble board shares this catalog (2026-10-19)
+
+Apple Swift 6.4 (swiftlang-6.4.0.34.1), macOS 27.0.1 (26A434), verified on
+`main` by lint, build, and the full suite in both modes (parallel 250 + 2545
+tests passed, `--no-parallel` 250 + 2545 passed) plus
+`./script/build_and_run.sh --verify`.
+
+- Shell discovery is one catalog for the whole app. An Ensemble terminal card
+  reads it through `WorkspaceSession.availableTerminalShells` (cached per
+  session), the same property the editor Terminal Groups use. The Ensemble path
+  used to hard-code `.preferredShell`; it now goes through
+  `WorkspaceSession.newOrdinaryShellLaunchProfile(shell:)` (next to
+  `newTerminalGroup`), which `addCanvasStoppedTerminal(_:shell:)` calls. A
+  supplied shell is recorded as the preferred shell, as
+  `newTerminalGroup(shell:)` already did.
+- **The concrete approved shell path travels in the launch profile, even when
+  no shell was chosen.** With no shell, the profile stores the resolved path of
+  the preferred shell rather than an empty "default" marker, so a new card's
+  not-running block can show the shell basename instead of "Default shell".
+- The choice persists in the board's inert saved layout
+  (`TerminalPaneShellChoice.approvedShellPath` inside
+  `canvasTerminalRestoration`). No process is restored. The path is revalidated
+  on restore; a shell that is no longer present makes the pane unavailable, and
+  Rafu never silently substitutes another shell. See the ADR 0023 amendment of
+  the same date.
+- **Known gap: `WorkspaceSession.preferredShellStore` is not injectable.** It
+  always uses `UserDefaults.standard`, so a test that passes a concrete shell
+  writes `preferredShellPath` into the test process's own defaults domain. The
+  new tests work around it with fake paths under `/opt/rafu-fixture-shells/`,
+  which self-clear on the next catalog read because the path is not executable.
+  Make the store injectable before writing a test that depends on the stored
+  value surviving.
+- `Sources/RafuApp/Views/TerminalShellPickerView.swift` is built and tested but
+  has no call site. Check whether it fits before adding another shell picker.
+
 ## Why it matters
 
 The bell-forwarding gap is invisible from the delegate protocol surface —
@@ -147,4 +182,8 @@ loops.
 - Plan: [`terminal-manager.md`](../plans/phases/terminal-manager.md)
 - ADRs: [`0004-embedded-terminal.md`](../decisions/0004-embedded-terminal.md)
   (amended), [`0014-terminal-as-editor-tab.md`](../decisions/0014-terminal-as-editor-tab.md)
-  (amended), [`0016-terminal-attention-notifications.md`](../decisions/0016-terminal-attention-notifications.md)
+  (amended), [`0016-terminal-attention-notifications.md`](../decisions/0016-terminal-attention-notifications.md),
+  [`0023-terminal-groups-and-saved-layouts.md`](../decisions/0023-terminal-groups-and-saved-layouts.md)
+  (2026-10-19 amendment: chosen shells on Ensemble terminal cards)
+- Ensemble side: [`canvas-interaction.md`](canvas-interaction.md), "Shell choice
+  and card navigation"
