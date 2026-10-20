@@ -72,6 +72,10 @@ extension WorkspaceSession {
         }
         var cardID: CanvasCardID?
         performCanvasEdit(board) {
+            // The card stores the group name, automatic or not. A pane the
+            // user named shows by that name through
+            // `TerminalNaming.resolvedGroupTitle`, on the card and on the tab
+            // an undo restores, so the stored name never has to change.
             try board.add(title: group.name.rawValue, content: content, center: center)
             cardID = board.cards.first(where: { $0.content == content })?.id
         }

@@ -272,7 +272,8 @@ struct CanvasCardShell: View {
                 .frame(width: 16, height: 16)
             if board.renamingCardID == card.id {
                 CanvasCardRenameField(
-                    card: card, board: board, session: session, fontSize: titleSize)
+                    card: card, board: board, session: session, fontSize: titleSize,
+                    shownTitle: terminalPane == nil ? nil : displayTitle)
             } else {
                 Text(displayTitle)
                     .font(.system(size: titleSize, weight: .semibold))
@@ -432,17 +433,24 @@ struct CanvasCardShell: View {
     // MARK: Header state
 
     /// The card title. A terminal node that still has its automatic title
-    /// ("Terminal") and runs an agent shows the agent's task title, or its
+    /// ("Terminal", "Terminal Group 1") shows the name the user gave its pane;
+    /// with no pane name and an agent running, the agent's task title, or its
     /// name ("Claude Code"), beside the agent's mark. A renamed node keeps
-    /// its name.
+    /// its name (`TerminalNaming.resolvedGroupTitle`).
     private var displayTitle: String {
-        if TerminalNaming.isAutomaticGroupName(card.title), let cli = agentCLI {
-            let controller = terminalPane.flatMap {
-                session.terminal.terminalController(for: $0.id)
+        if case .terminal = card.content, TerminalNaming.isAutomaticGroupName(card.title) {
+            var agentTitle: String?
+            if let cli = agentCLI {
+                let controller = terminalPane.flatMap {
+                    session.terminal.terminalController(for: $0.id)
+                }
+                agentTitle = TerminalSessionPresentation.agentTitle(
+                    reportedTitle: controller?.reportedTitle ?? terminalReportedTitle,
+                    provider: cli, shellName: controller?.shellDisplayName)
             }
-            return TerminalSessionPresentation.agentTitle(
-                reportedTitle: controller?.reportedTitle ?? terminalReportedTitle, provider: cli,
-                shellName: controller?.shellDisplayName)
+            return TerminalNaming.resolvedGroupTitle(
+                storedName: card.title, paneUserName: terminalPane?.explicitUserName?.rawValue,
+                agentTitle: agentTitle)
         }
         return CanvasCardPresentation.displayTitle(title: card.title, content: card.content)
     }

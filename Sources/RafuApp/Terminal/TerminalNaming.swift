@@ -20,6 +20,39 @@ nonisolated enum TerminalNaming {
         return !rest.isEmpty && rest.allSatisfy { $0.isASCII && $0.isNumber }
     }
 
+    /// The title a Terminal Group shows on its editor tab, its Ensemble card
+    /// and in the tab switcher. A name the user gave the group (or the card)
+    /// wins. An automatic name ("Terminal Group 1", "Terminal") carries no
+    /// information, so it gives way to the name the user gave the pane, then
+    /// to the agent's title. Otherwise the stored name stays. The stored name
+    /// itself never changes here.
+    static func resolvedGroupTitle(
+        storedName: String, paneUserName: String?, agentTitle: String?
+    ) -> String {
+        guard isAutomaticGroupName(storedName) else { return storedName }
+        if let pane = paneUserName?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !pane.isEmpty
+        {
+            return pane
+        }
+        if let agent = agentTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !agent.isEmpty
+        {
+            return agent
+        }
+        return storedName
+    }
+
+    /// `resolvedGroupTitle` for a live group: the focused pane supplies the
+    /// pane name (an Ensemble card's group has exactly one pane).
+    static func resolvedGroupTitle(_ group: TerminalGroupSnapshot, agentTitle: String?) -> String {
+        resolvedGroupTitle(
+            storedName: group.name.rawValue,
+            paneUserName: group.panes.first { $0.id == group.focusedPaneID }?
+                .explicitUserName?.rawValue,
+            agentTitle: agentTitle)
+    }
+
     /// The last folder component to show in a name. A nil, empty, or "."
     /// path means the workspace root, so the root's own folder name is used.
     static func folderName(

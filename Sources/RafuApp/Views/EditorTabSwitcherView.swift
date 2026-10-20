@@ -270,7 +270,7 @@ struct EditorTabSwitcherOverlay: View {
                 return TerminalSessionPresentation.needsAttention(controller.status)
             }
             let presentation = EditorTerminalGroupSwitcherPresentation(
-                name: group.name.rawValue,
+                name: TerminalNaming.resolvedGroupTitle(group, agentTitle: nil),
                 paneCount: group.panes.count,
                 focusedPaneName: focusedName,
                 attentionCount: attention,

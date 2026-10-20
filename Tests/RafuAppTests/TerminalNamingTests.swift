@@ -19,6 +19,36 @@ struct TerminalNamingTests {
         #expect(!TerminalNaming.isAutomaticGroupName(""))
     }
 
+    @Test("A group title resolves user group name, then pane name, then agent title")
+    func resolvedGroupTitles() {
+        typealias N = TerminalNaming
+        // A name the user gave the group always wins.
+        #expect(
+            N.resolvedGroupTitle(storedName: "Build", paneUserName: "ONe", agentTitle: "Claude")
+                == "Build")
+        // An automatic name gives way to the pane's user name first.
+        #expect(
+            N.resolvedGroupTitle(
+                storedName: "Terminal Group 1", paneUserName: "ONe", agentTitle: "Claude Code")
+                == "ONe")
+        #expect(
+            N.resolvedGroupTitle(storedName: "Terminal", paneUserName: " ONe ", agentTitle: nil)
+                == "ONe")
+        // Then to the agent title.
+        #expect(
+            N.resolvedGroupTitle(
+                storedName: "Terminal Group 1", paneUserName: nil, agentTitle: "Claude Code")
+                == "Claude Code")
+        #expect(
+            N.resolvedGroupTitle(
+                storedName: "Terminal Group 1", paneUserName: "  ", agentTitle: "Codex")
+                == "Codex")
+        // Otherwise the stored name stays.
+        #expect(
+            N.resolvedGroupTitle(storedName: "Terminal Group 1", paneUserName: nil, agentTitle: "")
+                == "Terminal Group 1")
+    }
+
     @Test("Folder names come from the working directory, then the workspace root")
     func folderNames() {
         let root = "/Users/me/code/fixtures"

@@ -325,6 +325,10 @@ struct CanvasCardRenameField: View {
     let board: CanvasBoardState
     let session: WorkspaceSession
     let fontSize: Double
+    /// The title the header shows, when it differs from the stored title (a
+    /// terminal card with an automatic name shows its pane's name). The field
+    /// starts with it, and saving it unchanged changes nothing.
+    var shownTitle: String?
     @State private var text = ""
     @FocusState private var focused: Bool
 
@@ -349,7 +353,7 @@ struct CanvasCardRenameField: View {
                 return .handled
             }
             .onAppear {
-                text = card.title
+                text = shownTitle ?? card.title
                 focused = true
             }
             .onChange(of: focused) { _, isFocused in
@@ -362,6 +366,11 @@ struct CanvasCardRenameField: View {
 
     private func commit() {
         board.renamingCardID = nil
+        if let shownTitle,
+            text.trimmingCharacters(in: .whitespacesAndNewlines) == shownTitle
+        {
+            return
+        }
         guard let name = CanvasInlineRename.committedTitle(draft: text, current: card.title)
         else { return }
         session.performCanvasEdit(board) {

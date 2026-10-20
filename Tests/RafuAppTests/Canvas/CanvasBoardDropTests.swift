@@ -276,7 +276,9 @@ struct CanvasBoardDropSessionTests {
 
     /// An inert stopped Terminal Group with a tab in the focused editor group.
     /// Nothing starts a process.
-    private func openStoppedGroup(_ session: WorkspaceSession, panes: Int = 1) throws
+    private func openStoppedGroup(
+        _ session: WorkspaceSession, panes: Int = 1, name: String = "Build"
+    ) throws
         -> TerminalGroupID
     {
         let profile = TerminalPaneLaunchProfile(shell: .preferredShell, startingFolder: .root)
@@ -293,7 +295,7 @@ struct CanvasBoardDropSessionTests {
                 id: SavedTerminalGroupSplitID(), axis: .columns, fraction: 0.5,
                 first: .pane(ids[0]), second: .pane(ids[1]))
         let record = try SavedTerminalGroupRecord(
-            id: SavedTerminalGroupID(), name: try #require(TerminalGroupName("Build")),
+            id: SavedTerminalGroupID(), name: try #require(TerminalGroupName(name)),
             root: root, focusedPaneID: ids[0], panes: records)
         let snapshot = try session.terminal.insertStoppedSavedGroup(record)
         _ = try session.terminal.perform(.detachDeletedSavedLayout(record.id))
@@ -567,6 +569,36 @@ struct CanvasBoardDropSessionTests {
     }
 
     // MARK: Undo returns the group to its tab; redo re-parks it
+
+    @Test("A pane the user named keeps that name on the card and on the tab undo restores")
+    func namedPaneKeepsItsNameOnTheBoard() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = makeSession(root: root)
+        let board = try await makeBoard(session, root: root)
+        let groupID = try openStoppedGroup(session, name: "Terminal Group 1")
+        let paneID = try #require(session.terminal.terminalGroup(groupID)?.panes.first?.id)
+        session.renameTerminalPane(paneID, to: "ONe")
+        let named = try #require(session.terminal.terminalGroup(groupID))
+        #expect(TerminalNaming.resolvedGroupTitle(named, agentTitle: nil) == "ONe")
+
+        #expect(
+            session.moveTerminalGroupToEnsemble(
+                groupID, board: board, center: CGPoint(x: 500, y: 400)))
+        let card = try #require(board.cards.first)
+        // The card stores the automatic group name; it shows the pane's name.
+        #expect(card.title == "Terminal Group 1")
+        let pane = try #require(session.terminal.terminalGroup(groupID)?.panes.first)
+        #expect(
+            TerminalNaming.resolvedGroupTitle(
+                storedName: card.title, paneUserName: pane.explicitUserName?.rawValue,
+                agentTitle: nil) == "ONe")
+
+        board.performUndo()
+        #expect(tabID(of: groupID, in: session) != nil)
+        let restored = try #require(session.terminal.terminalGroup(groupID))
+        #expect(TerminalNaming.resolvedGroupTitle(restored, agentTitle: nil) == "ONe")
+    }
 
     @Test("Undo after a move restores the tab to its source editor group; redo re-parks it")
     func undoAfterMoveRestoresTabAndRedoReparks() async throws {

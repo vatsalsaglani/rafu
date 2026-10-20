@@ -2172,7 +2172,9 @@ private struct EditorTerminalGroupTabItem: View {
 
     var body: some View {
         let agent = focusedAgent
-        let title = agent?.title ?? snapshot.name.rawValue
+        // An automatic group name gives way to the focused pane's user name,
+        // then to the agent title, as on the group's Ensemble card.
+        let title = TerminalNaming.resolvedGroupTitle(snapshot, agentTitle: agent?.title)
         let selectTab = { selectOrRename(title: title) }
         let activity = focusedPaneActivity
         let activityKind = EditorTabActivityKind.from(activity.status)
