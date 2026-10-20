@@ -115,7 +115,7 @@ user as "ugly"; the rules below are the accepted second pass.
   equivalents). Hue separation between the three is 85–185°. A warning or
   critical level never recolours an arc.
 - **Track** = the arc's own colour at 22 % opacity, 35 % under Increase
-  Contrast.
+  Contrast (Color mode; for Monochrome, see "Ring colors" below).
 - **Sizes**: compact 56 / 7 / 2 with diameters `[56, 38, 20]`; full 92 / 11 / 3
   with diameters `[92, 64, 36]`.
 - **Centre text only when there is exactly one arc.** With two or three arcs a
@@ -131,6 +131,46 @@ user as "ugly"; the rules below are the accepted second pass.
 This supplements, and does not replace, the colour-alone rule in
 "Presentation rules": meaning still arrives through the triangle glyph, the
 legend text, and VoiceOver, never through hue.
+
+### Ring colors: Color or Monochrome (2026-10-21)
+
+Settings ▸ Usage ▸ Display has a second row, **Ring colors**, with the same
+themed segmented control as "Rings show". There is no toggle in the notch.
+
+- `UsageRingPalette` (`.color`, `.monochrome`) is next to `UsageDisplayMode`
+  in `UsagePace.swift`. It persists in `UsageRingPaletteStore`
+  (`usageRingPalette` key, suite-name idiom; an unset or unknown value is
+  `.color`). It lives on `NotchCompanionModel` (`usageRingPalette`,
+  `setUsageRingPalette`) so the notch and Settings change together.
+- The mode changes only how `UsageCardInk` resolves a tone.
+  `UsageRingTone`, `UsageRingCluster`, and `UsageRingLevel` do not change.
+  `UsageCardInk.notch` and `.settings` take `palette:` and
+  `increasedContrast:`. Each call site reads
+  `@Environment(\.colorSchemeContrast)`.
+- **Color** (the default) does not change: accent, info, success, and each
+  ring tints its own track (`trackColor == nil`).
+- **Monochrome**: every tone is the ink's `primary` text color (the notch's
+  `NotchInk.primary`, `Color.primary` in Settings) at opacities
+  **1.0 / 0.62 / 0.38**, outermost first. Each step is about 0.25 to 0.4, so
+  three nested rings stay separate on the dark notch and in a light or dark
+  Settings form. All rings share one track at **0.14**. The track is set
+  through `RafuProgressRing.Arc.track`. A per-ring tint at 22 % would make
+  the inner track about 0.08, which is almost invisible. The track is
+  always fainter than the faintest ring, so an unfilled track never looks
+  like a fill.
+- **Increase Contrast** in monochrome: **1.0 / 0.78 / 0.58**, track
+  **0.24**. The order stays the same.
+- The legend dot uses the same `color(for:)` as its ring arc, so in
+  monochrome each row still matches its ring by shade.
+- The warning triangle and the warning or critical pace text keep
+  `palette.warning` and `palette.error` in both modes. They show meaning, not
+  decoration.
+
+Tests: `UsageRingClusterTests` (`inkColorPaletteIsUnchanged`,
+`inkMonochromeUsesOneInkAtDescendingOpacity`, which compares the RGB and
+opacity of each resolved `Color.Resolved`; `inkMonochromeKeepsWarningTints`,
+`inkMonochromeIncreasedContrast`, `inkLegendSwatchMatchesRing`) and
+`UsagePaceTests.usageRingPaletteStoreRoundTrip`.
 
 ### `Date.FormatStyle.timeZone(_:)` does not change the rendering zone
 

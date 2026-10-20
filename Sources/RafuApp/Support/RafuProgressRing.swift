@@ -15,6 +15,10 @@ struct RafuProgressRing: View {
         /// `0...1`, already clamped by the caller.
         let fraction: Double?
         let color: Color
+        /// A finished track colour that replaces the tinted track, or
+        /// `nil` for `color` at `trackOpacity`. Monochrome usage rings pass
+        /// one shared neutral (`UsageCardInk.trackColor`).
+        var track: Color? = nil
     }
 
     /// Outermost first.
@@ -53,7 +57,7 @@ struct RafuProgressRing: View {
 
     private func ring(_ arc: Arc, diameter: CGFloat) -> some View {
         ZStack {
-            Circle().stroke(arc.color.opacity(trackOpacity), lineWidth: lineWidth)
+            Circle().stroke(arc.track ?? arc.color.opacity(trackOpacity), lineWidth: lineWidth)
             if let fraction = arc.fraction {
                 Circle()
                     .trim(from: 0, to: CGFloat(fraction))

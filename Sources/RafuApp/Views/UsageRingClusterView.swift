@@ -34,7 +34,8 @@ struct UsageRingClusterView: View {
     private var ring: some View {
         RafuProgressRing(
             arcs: cluster.arcs.map { arc in
-                RafuProgressRing.Arc(fraction: arc.fraction, color: ink.color(for: arc.tone))
+                RafuProgressRing.Arc(
+                    fraction: arc.fraction, color: ink.color(for: arc.tone), track: ink.trackColor)
             },
             size: ringSize, lineWidth: lineWidth, gap: gap
         )
@@ -62,8 +63,8 @@ struct UsageRingClusterView: View {
     }
 }
 
-/// One legend row, inside the cluster's shared `Grid`: a stable-hue
-/// swatch, the short label, the right-aligned percent, the reset
+/// One legend row, inside the cluster's shared `Grid`: a swatch in its
+/// ring's exact colour (hue or monochrome shade), the short label, the right-aligned percent, the reset
 /// countdown, and — full only — the pace note and hourly average as
 /// column-spanning rows beneath it. ONE warning signal per window: the
 /// trailing triangle here is the only glyph; `UsagePaceLine` below (full)

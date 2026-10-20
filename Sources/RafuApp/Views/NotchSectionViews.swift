@@ -476,6 +476,7 @@ struct CompanionUsageCardView: View {
     let providerID: UsageProviderID
     let openUsageSettings: @MainActor () -> Void
     @Environment(\.rafuTheme) private var theme
+    @Environment(\.colorSchemeContrast) private var contrast
 
     init(
         model: NotchCompanionModel, providerID: UsageProviderID,
@@ -493,6 +494,10 @@ struct CompanionUsageCardView: View {
             displayName: descriptor?.displayName ?? providerID.rawValue,
             authPattern: descriptor?.authPattern ?? .unavailable,
             mode: model.usageDisplayMode, isRefreshing: model.isUsageRefreshing,
-            compact: true, ink: .notch(theme: theme), connect: openUsageSettings)
+            compact: true,
+            ink: .notch(
+                theme: theme, palette: model.usageRingPalette,
+                increasedContrast: contrast == .increased),
+            connect: openUsageSettings)
     }
 }

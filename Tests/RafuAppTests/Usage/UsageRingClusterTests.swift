@@ -232,3 +232,110 @@ func inkColorIsStableAcrossLevelsAndWarningTintIsSeparate() {
     #expect(ink.warningTint(for: .warning) == theme.palette.warning)
     #expect(ink.warningTint(for: .critical) == theme.palette.error)
 }
+
+// MARK: - UsageRingPalette ink resolution
+
+@MainActor
+private func resolved(_ color: Color) -> Color.Resolved {
+    color.resolve(in: EnvironmentValues())
+}
+
+@Test("Color mode is the default and keeps the accent/info/success hues and tinted tracks")
+@MainActor
+func inkColorPaletteIsUnchanged() {
+    for theme in [RafuThemeCatalog.indigo, RafuThemeCatalog.khadi] {
+        let inks = [
+            UsageCardInk.settings(theme: theme),
+            UsageCardInk.settings(theme: theme, palette: .color),
+            UsageCardInk.notch(theme: theme),
+            UsageCardInk.notch(theme: theme, palette: .color),
+        ]
+        for ink in inks {
+            #expect(
+                ink.toneColors == [theme.palette.accent, theme.palette.info, theme.palette.success])
+            #expect(ink.trackColor == nil)
+        }
+    }
+}
+
+@Test(
+    "Monochrome resolves every tone to the ink's primary colour at descending opacity, outermost brightest, with one fainter shared track"
+)
+@MainActor
+func inkMonochromeUsesOneInkAtDescendingOpacity() throws {
+    let opacities = UsageCardInk.monochromeOpacities(increasedContrast: false)
+    #expect(opacities == [1.0, 0.62, 0.38])
+    let tones: [UsageRingTone] = [.primary, .secondary, .tertiary]
+    for theme in [RafuThemeCatalog.indigo, RafuThemeCatalog.khadi] {
+        let inks = [
+            UsageCardInk.settings(theme: theme, palette: .monochrome),
+            UsageCardInk.notch(theme: theme, palette: .monochrome),
+        ]
+        for ink in inks {
+            #expect(tones.map { ink.color(for: $0) } == opacities.map { ink.primary.opacity($0) })
+
+            let base = resolved(ink.primary)
+            let shades = tones.map { resolved(ink.color(for: $0)) }
+            for shade in shades {
+                // One hue: only the opacity differs from the primary ink.
+                #expect(shade.red == base.red)
+                #expect(shade.green == base.green)
+                #expect(shade.blue == base.blue)
+            }
+            #expect(shades[0].opacity > shades[1].opacity)
+            #expect(shades[1].opacity > shades[2].opacity)
+
+            let track = try #require(ink.trackColor.map { resolved($0) })
+            #expect(track.red == base.red)
+            #expect(track.opacity < shades[2].opacity)
+        }
+    }
+}
+
+@Test("Monochrome keeps the warning and critical colours, which carry meaning")
+@MainActor
+func inkMonochromeKeepsWarningTints() {
+    let theme = RafuThemeCatalog.indigo
+    let inks = [
+        UsageCardInk.settings(theme: theme, palette: .monochrome),
+        UsageCardInk.notch(theme: theme, palette: .monochrome, increasedContrast: true),
+    ]
+    for ink in inks {
+        #expect(ink.warningTint(for: .warning) == theme.palette.warning)
+        #expect(ink.warningTint(for: .critical) == theme.palette.error)
+    }
+}
+
+@Test("Increase Contrast lifts the fainter monochrome rings and track but keeps their order")
+@MainActor
+func inkMonochromeIncreasedContrast() {
+    let standard = UsageCardInk.monochromeOpacities(increasedContrast: false)
+    let increased = UsageCardInk.monochromeOpacities(increasedContrast: true)
+    #expect(increased.count == standard.count)
+    #expect(increased[0] == standard[0])
+    #expect(increased[1] > standard[1])
+    #expect(increased[2] > standard[2])
+    #expect(increased[0] > increased[1] && increased[1] > increased[2])
+    let standardTrack = UsageCardInk.monochromeTrackOpacity(increasedContrast: false)
+    let increasedTrack = UsageCardInk.monochromeTrackOpacity(increasedContrast: true)
+    #expect(increasedTrack > standardTrack)
+    #expect(increasedTrack < increased[2])
+
+    let ink = UsageCardInk.settings(
+        theme: RafuThemeCatalog.indigo, palette: .monochrome, increasedContrast: true)
+    #expect(ink.color(for: .tertiary) == Color.primary.opacity(increased[2]))
+}
+
+@Test("A legend swatch and its ring read the same colour in both palettes")
+@MainActor
+func inkLegendSwatchMatchesRing() {
+    let tones: [UsageRingTone] = [.primary, .secondary, .tertiary]
+    for palette in UsageRingPalette.allCases {
+        let ink = UsageCardInk.notch(theme: RafuThemeCatalog.khadi, palette: palette)
+        // The ring arc and the legend dot both draw `color(for:)`
+        // (`UsageRingClusterView`); it must be the tone's own entry.
+        for (index, tone) in tones.enumerated() {
+            #expect(ink.color(for: tone) == ink.toneColors[index])
+        }
+    }
+}

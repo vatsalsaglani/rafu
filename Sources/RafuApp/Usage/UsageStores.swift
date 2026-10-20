@@ -122,6 +122,32 @@ nonisolated struct UsageDisplayModeStore: Sendable {
     }
 }
 
+/// Whether usage rings use one hue per ring or one neutral ink. Same
+/// suite-name idiom as `UsageDisplayModeStore`; an unset or unknown value is
+/// `.color`.
+nonisolated struct UsageRingPaletteStore: Sendable {
+    static let defaultsKey = "usageRingPalette"
+
+    private let suiteName: String?
+
+    init(suiteName: String? = nil) {
+        self.suiteName = suiteName
+    }
+
+    private var defaults: UserDefaults {
+        suiteName.flatMap(UserDefaults.init(suiteName:)) ?? .standard
+    }
+
+    func palette() -> UsageRingPalette {
+        defaults.string(forKey: Self.defaultsKey).flatMap(UsageRingPalette.init(rawValue:))
+            ?? .color
+    }
+
+    func setPalette(_ palette: UsageRingPalette) {
+        defaults.set(palette.rawValue, forKey: Self.defaultsKey)
+    }
+}
+
 /// Failure modes for `UsageCredentialStore`, deliberately as bare as
 /// `AIProviderError.keychainFailure`'s shape but scoped to this store (the
 /// AI domain's error type is not reused here — usage credentials are a

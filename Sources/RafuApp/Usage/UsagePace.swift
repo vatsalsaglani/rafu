@@ -31,6 +31,26 @@ nonisolated enum UsageDisplayMode: String, CaseIterable, Codable, Sendable {
     }
 }
 
+/// How usage rings and their legend swatches are coloured. Persisted by
+/// `UsageRingPaletteStore`. Presentation only: neither mode changes which
+/// window a ring is (`UsageRingTone`) or how urgent it is
+/// (`UsageRingLevel`) — `UsageCardInk` resolves tones per mode, and the
+/// warning/critical glyph and text keep their colours in both.
+nonisolated enum UsageRingPalette: String, CaseIterable, Codable, Sendable {
+    /// One stable theme hue per ring (accent, info, success).
+    case color
+    /// One neutral ink per ring at stepped opacities, outermost brightest.
+    case monochrome
+
+    /// The picker title: "Color" or "Monochrome".
+    var title: String {
+        switch self {
+        case .color: "Color"
+        case .monochrome: "Monochrome"
+        }
+    }
+}
+
 /// Whether a window's current pace lasts until its reset. The estimate
 /// assumes the average rate so far continues until the reset time.
 nonisolated struct UsagePace: Equatable, Sendable {

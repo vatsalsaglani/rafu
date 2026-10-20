@@ -305,6 +305,20 @@ func usageDisplayModeStoreRoundTrip() {
     #expect(UsageDisplayModeStore(suiteName: suite).mode() == .remaining)
 }
 
+@Test("The ring palette persists in its store, defaults to Color, and ignores unknown values")
+func usageRingPaletteStoreRoundTrip() {
+    let suite = TestDefaultsSuite.name("UsageRingPaletteStoreTests")
+    defer { TestDefaultsSuite.remove(suite) }
+    let store = UsageRingPaletteStore(suiteName: suite)
+    #expect(store.palette() == .color)
+    store.setPalette(.monochrome)
+    #expect(UsageRingPaletteStore(suiteName: suite).palette() == .monochrome)
+    UserDefaults(suiteName: suite)?.set("sepia", forKey: UsageRingPaletteStore.defaultsKey)
+    #expect(UsageRingPaletteStore(suiteName: suite).palette() == .color)
+    #expect(UsageRingPalette.color.title == "Color")
+    #expect(UsageRingPalette.monochrome.title == "Monochrome")
+}
+
 @Test("Ring fractions clamp to 0...1 and reject non-finite values")
 func usageRingFractionClamping() {
     #expect(UsageRingLevel.fraction(percent: 50) == 0.5)

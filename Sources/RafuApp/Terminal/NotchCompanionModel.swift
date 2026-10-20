@@ -147,6 +147,10 @@ final class NotchCompanionModel: NSObject {
     private(set) var usageDisplayMode: UsageDisplayMode = UsageDisplayModeStore().mode()
     @ObservationIgnored
     var usageDisplayModeStore = UsageDisplayModeStore()
+    /// Color/Monochrome for every usage ring (Settings ▸ Usage).
+    private(set) var usageRingPalette: UsageRingPalette = UsageRingPaletteStore().palette()
+    @ObservationIgnored
+    var usageRingPaletteStore = UsageRingPaletteStore()
     /// The user's front-line ordering (agent-usage-providers.md: "up to 4
     /// tiles the user picks and orders in Settings"). Not a test seam —
     /// every headless test either asserts `usageSnapshots` directly or
@@ -872,6 +876,12 @@ final class NotchCompanionModel: NSObject {
         guard mode != usageDisplayMode else { return }
         usageDisplayMode = mode
         usageDisplayModeStore.setMode(mode)
+    }
+
+    func setUsageRingPalette(_ palette: UsageRingPalette) {
+        guard palette != usageRingPalette else { return }
+        usageRingPalette = palette
+        usageRingPaletteStore.setPalette(palette)
     }
 
     /// Everything one provider card needs, derived from the last refresh.

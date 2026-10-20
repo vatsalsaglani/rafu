@@ -40,7 +40,8 @@ struct UsageSettingsSection: View {
     }
 }
 
-/// Used or Remaining for every usage ring, in Settings and in the notch.
+/// Used or Remaining, and Color or Monochrome, for every usage ring, in
+/// Settings and in the notch.
 private struct UsageDisplayModeSection: View {
     let companion: NotchCompanionModel
 
@@ -57,11 +58,22 @@ private struct UsageDisplayModeSection: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel("Rings show used or remaining usage")
             }
+            LabeledContent("Ring colors") {
+                RafuSegmentedPicker(
+                    items: UsageRingPalette.allCases,
+                    selection: Binding(
+                        get: { companion.usageRingPalette },
+                        set: { companion.setUsageRingPalette($0) }),
+                    title: { $0.title }
+                )
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Usage ring colors")
+            }
         } header: {
             Text("Display")
         } footer: {
             Text(
-                "Rings show the share of each limit that is used or still remaining. Warnings follow the used share in both modes."
+                "Rings show the share of each limit that is used or still remaining. Warnings follow the used share in both modes. Monochrome draws every ring in one ink at different strengths; warning symbols and text keep their colors."
             )
         }
     }
@@ -662,6 +674,7 @@ private struct UsageProviderRow: View {
     let model: UsageSettingsModel
     let companion: NotchCompanionModel
     @Environment(\.rafuTheme) private var theme
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -692,7 +705,10 @@ private struct UsageProviderRow: View {
                     card: card, providerID: row.id, displayName: row.displayName,
                     authPattern: row.authPattern, mode: companion.usageDisplayMode,
                     isRefreshing: companion.isUsageRefreshing, compact: false,
-                    ink: .settings(theme: theme), connect: cardConnectAction)
+                    ink: .settings(
+                        theme: theme, palette: companion.usageRingPalette,
+                        increasedContrast: contrast == .increased),
+                    connect: cardConnectAction)
             }
 
             if showsDisclosureInline {
