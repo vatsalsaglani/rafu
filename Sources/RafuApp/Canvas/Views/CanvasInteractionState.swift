@@ -25,7 +25,9 @@ final class CanvasInteractionState {
         guideKeys = Set(next.map(\.key))
         if next.isEmpty {
             clearGuides()
-        } else {
+        } else if guides != next {
+            // Observation notifies on every write; a held snap repeats the
+            // same guides on many drag frames.
             guides = next
         }
     }

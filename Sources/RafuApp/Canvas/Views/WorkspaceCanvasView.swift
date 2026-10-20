@@ -200,11 +200,10 @@ struct WorkspaceCanvasView: View {
                         if connectionDrag.source == source { connectionDrag.reset() }
                     }
                 )
-                .frame(width: card.rect.width, height: card.rect.height)
-                .scaleEffect(board.viewport.scale, anchor: .topLeading)
-                .offset(
-                    x: card.rect.x * board.viewport.scale + board.viewport.x,
-                    y: card.rect.y * board.viewport.scale + board.viewport.y
+                .modifier(
+                    CanvasCardPlacement(
+                        id: card.id, rect: card.rect, viewport: board.viewport,
+                        live: board.liveGeometry)
                 )
                 .transition(cardTransition)
                 .accessibilityRotorEntry(id: card.id, in: cardRotorNamespace)
@@ -214,9 +213,9 @@ struct WorkspaceCanvasView: View {
             CanvasWhiteboardCreationLayer(
                 board: board, tool: .forBoard(board.id), viewportProject: project,
                 unproject: unproject)
-            ForEach(interaction.guides, id: \.key) { guide in
-                guideLine(guide)
-            }
+            // Its own view: guides change on many drag frames, and only this
+            // layer reads them, so the board body does not re-run with them.
+            CanvasSnapGuideLayer(interaction: interaction, viewport: board.viewport)
             if let marquee = interaction.marquee {
                 Rectangle().stroke(theme.palette.accent, lineWidth: 1)
                     .background(theme.palette.accent.opacity(0.08))
@@ -567,22 +566,6 @@ struct WorkspaceCanvasView: View {
         }
     }
 
-    private func guideLine(_ guide: CanvasSnapGuide) -> some View {
-        let scale = board.viewport.scale
-        let isVertical = guide.axis == .vertical
-        let origin = project(
-            isVertical
-                ? CGPoint(x: guide.position, y: guide.start)
-                : CGPoint(x: guide.start, y: guide.position))
-        let length = (guide.end - guide.start) * scale
-        return Rectangle()
-            .fill(theme.palette.accent)
-            .frame(width: isVertical ? 1 : length, height: isVertical ? length : 1)
-            .offset(x: origin.x - (isVertical ? 0.5 : 0), y: origin.y - (isVertical ? 0 : 0.5))
-            .transition(.opacity)
-            .allowsHitTesting(false).accessibilityHidden(true)
-    }
-
     /// The board's hover drop preview: a ghost card, an edge split band, or a
     /// generic board highlight, each with its one-line label. `.card`'s rect
     /// is board-space; it is projected through the viewport here (`project`)
@@ -844,6 +827,60 @@ struct WorkspaceCanvasView: View {
     ) {
         board.setViewport(
             CanvasZoomMetrics.viewport(scaling: start, to: scale, in: size, anchor: anchor))
+    }
+}
+
+/// Places one card on the board: its size, the zoom and its position. It
+/// reads the live rect of a move or resize (`CanvasLiveGeometry`), so a drag
+/// frame re-runs this small modifier for each card. It never re-runs the
+/// card's own body or the board's: a modifier's `content` is not re-evaluated
+/// when only the modifier body runs.
+private struct CanvasCardPlacement: ViewModifier {
+    let id: CanvasCardID
+    let rect: CanvasRect
+    let viewport: CanvasViewport
+    let live: CanvasLiveGeometry
+
+    func body(content: Content) -> some View {
+        let shown = live.rect(for: id) ?? rect
+        content
+            .frame(width: shown.width, height: shown.height)
+            .scaleEffect(viewport.scale, anchor: .topLeading)
+            .offset(
+                x: shown.x * viewport.scale + viewport.x,
+                y: shown.y * viewport.scale + viewport.y
+            )
+    }
+}
+
+/// The snap guides of a card drag, drawn in board-surface points.
+private struct CanvasSnapGuideLayer: View {
+    @Environment(\.rafuTheme) private var theme
+    let interaction: CanvasInteractionState
+    let viewport: CanvasViewport
+
+    var body: some View {
+        ForEach(interaction.guides, id: \.key) { guide in
+            guideLine(guide)
+        }
+    }
+
+    private func guideLine(_ guide: CanvasSnapGuide) -> some View {
+        let scale = viewport.scale
+        let isVertical = guide.axis == .vertical
+        let point =
+            isVertical
+            ? CGPoint(x: guide.position, y: guide.start)
+            : CGPoint(x: guide.start, y: guide.position)
+        let origin = CGPoint(
+            x: point.x * scale + viewport.x, y: point.y * scale + viewport.y)
+        let length = (guide.end - guide.start) * scale
+        return Rectangle()
+            .fill(theme.palette.accent)
+            .frame(width: isVertical ? 1 : length, height: isVertical ? length : 1)
+            .offset(x: origin.x - (isVertical ? 0.5 : 0), y: origin.y - (isVertical ? 0 : 0.5))
+            .transition(.opacity)
+            .allowsHitTesting(false).accessibilityHidden(true)
     }
 }
 

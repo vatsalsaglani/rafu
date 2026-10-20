@@ -44,13 +44,19 @@ enum CanvasEdgeScene {
         }
         guard !connections.isEmpty else { return [] }
 
+        // A card in a move or resize shows its live rect, so its edges follow
+        // it on every frame. Read only past the guard: a board without edges
+        // does not re-run for drag frames.
+        let live = board.liveGeometry.rects
         var rects: [CanvasCardID: CGRect] = [:]
         var titles: [CanvasCardID: String] = [:]
         // Frames sit behind their members: no edge bends around one, and no
         // label has to keep clear of one.
         var frames: Set<CanvasCardID> = []
         var obstacles: [CGRect] = []
-        for card in board.cards {
+        for stored in board.cards {
+            var card = stored
+            if let shown = live[card.id] { card.rect = shown }
             let rect = CanvasConnectionDrag.screenRect(of: card, viewport: viewport)
             rects[card.id] = rect
             titles[card.id] = card.title

@@ -73,6 +73,10 @@ final class CanvasBoardState: Identifiable {
     @ObservationIgnored private var undo: [CanvasDocument] = []
     @ObservationIgnored private var redo: [CanvasDocument] = []
     @ObservationIgnored private var gestureStart: CanvasDocument?
+    /// The rects a move or resize shows before it commits. A separate
+    /// observable, so a drag frame does not invalidate every view that reads
+    /// `cards`, `viewport` or `changeStamp` (every card's body).
+    let liveGeometry = CanvasLiveGeometry()
 
     init(document: CanvasDocument) {
         id = document.id
@@ -275,6 +279,51 @@ final class CanvasBoardState: Identifiable {
         markDirty()
     }
 
+    /// Shows `rects` for a move or resize in progress without editing the
+    /// document. Frames refit around moved members exactly as the commit
+    /// will (`normalizeFrames` against the stored document), so a frame
+    /// still grows while a member is dragged. An invalid rect keeps the
+    /// card's last live rect, as `setRects` keeps the last stored one.
+    func showLiveRects(_ rects: [CanvasCardID: CanvasRect]) {
+        var value = document
+        var changed = false
+        for index in value.cards.indices {
+            let id = value.cards[index].id
+            guard let requested = rects[id] else { continue }
+            guard let rect = requested.isValid ? requested : liveGeometry.rect(for: id),
+                value.cards[index].rect != rect
+            else { continue }
+            value.cards[index].rect = rect
+            changed = true
+        }
+        guard changed else {
+            liveGeometry.clear()
+            return
+        }
+        Self.normalizeFrames(&value, previous: document)
+        var stored: [CanvasCardID: CanvasRect] = [:]
+        for card in document.cards { stored[card.id] = card.rect }
+        var live: [CanvasCardID: CanvasRect] = [:]
+        for card in value.cards where stored[card.id] != card.rect {
+            live[card.id] = card.rect
+        }
+        liveGeometry.set(live)
+    }
+
+    /// The rect a card shows now: its live rect during a move or resize,
+    /// otherwise its stored rect.
+    func shownRect(of id: CanvasCardID) -> CanvasRect? {
+        liveGeometry.rect(for: id) ?? document.cards.first { $0.id == id }?.rect
+    }
+
+    /// Ends the live phase: writes `rects` in one step (the surrounding
+    /// gesture still owns the undo step) and drops the live rects in the
+    /// same turn, so the cards never show a stale position in between.
+    func commitLiveRects(_ rects: [CanvasCardID: CanvasRect]) {
+        setRects(rects)
+        liveGeometry.clear()
+    }
+
     /// The single choke point for derived frame bounds: every edit, gesture
     /// step and raise passes through it, inside the same undo step. Members
     /// follow a frame that moved on its own, each frame then fits its members,
@@ -298,6 +347,9 @@ final class CanvasBoardState: Identifiable {
     }
 
     func endGesture() {
+        // A gesture never leaves live rects behind, even one that ended
+        // without its commit (the card went away mid-drag).
+        liveGeometry.clear()
         if let original = gestureStart, original != document {
             remember(original, in: &undo)
             redo.removeAll()

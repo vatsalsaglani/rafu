@@ -213,6 +213,9 @@ struct CanvasConnectionPorts: View {
     /// Pass the board zoom to keep ports at 8, 12 and 20 screen points when the
     /// card is scaled. The default of 1 draws them in card points.
     var viewportScale: Double = 1
+    /// Reports whether the pointer is over any port. The card keeps the ports
+    /// mounted while it is, because a port reaches past the card's edge.
+    var portHoverChanged: (Bool) -> Void = { _ in }
     @State private var hoveredSide: CanvasPortSide?
 
     var body: some View {
@@ -229,8 +232,10 @@ struct CanvasConnectionPorts: View {
                         setHover: { inside in
                             if inside {
                                 hoveredSide = side
+                                portHoverChanged(true)
                             } else if hoveredSide == side {
                                 hoveredSide = nil
+                                portHoverChanged(false)
                             }
                         },
                         connect: connect, changed: changed, ended: ended, cancelled: cancelled

@@ -29,6 +29,8 @@ struct CanvasCardShell: View {
     @State private var frozenBodySize: CGSize?
     @State private var resizeHapticPlayed = false
     @State private var titleFrame = CGRect.zero
+    @State private var isDraggingPort = false
+    @State private var isPortHovered = false
 
     private let cornerRadius: CGFloat = 8
     private let headerHeight: CGFloat = 32
@@ -63,7 +65,7 @@ struct CanvasCardShell: View {
             .overlay { resizeOverlay(face, scale: scale, selected: selected) }
             .overlay { portsOverlay(scale: scale) }
             .onHover { inside in hoverChanged(inside) }
-            .onDisappear { hideTask?.cancel() }
+            .onDisappear { disappeared() }
             .modifier(cardAccessibility(selected: selected))
             .onChange(of: commands.agentCardStatus) { _, newStatus in
                 markReadIfAlreadyLookingAt(newStatus, contentFocused: contentFocused)
@@ -85,8 +87,19 @@ struct CanvasCardShell: View {
             .overlay { resizeZones(scale: scale, selected: selected) }
             .overlay { portsOverlay(scale: scale) }
             .onHover { inside in hoverChanged(inside) }
-            .onDisappear { hideTask?.cancel() }
+            .onDisappear { disappeared() }
             .modifier(cardAccessibility(selected: selected))
+    }
+
+    /// A card culled or removed mid-gesture still commits what it showed, so
+    /// no live rect is left behind and the gesture stays one undo step.
+    private func disappeared() {
+        hideTask?.cancel()
+        if !moveOrigins.isEmpty {
+            isPressed = false
+            finishMove()
+        }
+        if resizeStart != nil { resizeEnded() }
     }
 
     private func cardAccessibility(selected: Bool) -> CanvasCardAccessibility {
@@ -143,12 +156,15 @@ struct CanvasCardShell: View {
         }
     }
 
-    /// No zones on a frame: its size is derived from its members.
+    /// No zones on a frame: its size is derived from its members. The eight
+    /// zones exist only on the hovered, selected or resizing card, so the
+    /// pointer does not hit-test them on every other card of the board.
     @ViewBuilder
     private func resizeZones(scale: Double, selected: Bool) -> some View {
-        if !card.content.hasDerivedSize {
+        if !card.content.hasDerivedSize, isHovering || selected || resizeStart != nil {
+            let rect = shownRect
             CanvasResizeZones(
-                size: CGSize(width: card.rect.width, height: card.rect.height),
+                size: CGSize(width: rect.width, height: rect.height),
                 scale: scale, showsHandles: selected,
                 changed: { edges, value in resizeChanged(edges, value) },
                 ended: { resizeEnded() })
@@ -157,17 +173,42 @@ struct CanvasCardShell: View {
 
     /// Ports appear only while the pointer is over the card (and stay while a
     /// port is dragged). Keyboard and VoiceOver users connect through the
-    /// Connect action and the "Connect To" menu instead.
+    /// Connect action and the "Connect To" menu instead. They are mounted
+    /// only then (or while a port itself is hovered, since a port reaches
+    /// past the card's edge), so a board of cards does not hit-test four port
+    /// dots per card on every pointer move.
+    @ViewBuilder
     private func portsOverlay(scale: Double) -> some View {
-        CanvasConnectionPorts(
-            title: card.title,
-            isVisible: isHovering,
-            connect: { session.canvasDialog = .connection(board.id, card.id, nil) },
-            changed: { updateConnectionDrag(card.id, $0) },
-            ended: { finishConnectionDrag(card.id, $0) },
-            cancelled: { cancelConnectionDrag(card.id) },
-            viewportScale: scale
-        )
+        if isHovering || isDraggingPort || isPortHovered {
+            CanvasConnectionPorts(
+                title: card.title,
+                isVisible: isHovering,
+                connect: { session.canvasDialog = .connection(board.id, card.id, nil) },
+                changed: {
+                    if !isDraggingPort { isDraggingPort = true }
+                    updateConnectionDrag(card.id, $0)
+                },
+                ended: {
+                    isDraggingPort = false
+                    finishConnectionDrag(card.id, $0)
+                },
+                cancelled: {
+                    isDraggingPort = false
+                    cancelConnectionDrag(card.id)
+                },
+                viewportScale: scale,
+                portHoverChanged: { inside in
+                    if isPortHovered != inside { isPortHovered = inside }
+                }
+            )
+        }
+    }
+
+    /// The rect this card shows: the live rect while this card resizes (only
+    /// then does its body read the live geometry), otherwise the stored rect.
+    private var shownRect: CanvasRect {
+        guard resizeStart != nil else { return card.rect }
+        return board.liveGeometry.rect(for: card.id) ?? card.rect
     }
 
     // MARK: Faces
@@ -184,8 +225,9 @@ struct CanvasCardShell: View {
     /// start size and scales, so the PTY sees one size change on mouse-up.
     @ViewBuilder private var sizedBody: some View {
         if let frozen = frozenBodySize {
-            let width = CGFloat(card.rect.width)
-            let height = max(1, CGFloat(card.rect.height) - headerHeight - 1)
+            let rect = shownRect
+            let width = CGFloat(rect.width)
+            let height = max(1, CGFloat(rect.height) - headerHeight - 1)
             cardBody
                 .frame(width: frozen.width, height: frozen.height)
                 .scaleEffect(
@@ -369,8 +411,10 @@ struct CanvasCardShell: View {
         // Two quiet layers: a contact hairline and a soft ambient shadow.
         let rest: [(Double, CGFloat, CGFloat)] =
             dark ? [(0.26, 1, 0.5), (0.16, 8, 4)] : [(0.06, 1, 0.5), (0.06, 8, 4)]
+        // While lifted, one blurred shadow: the contact hairline drops to a
+        // clear, unblurred no-op, so a drag pays for one blur pass, not two.
         let dragged: [(Double, CGFloat, CGFloat)] =
-            dark ? [(0.28, 2, 1), (0.26, 14, 10)] : [(0.08, 2, 1), (0.12, 14, 10)]
+            dark ? [(0, 0, 0), (0.30, 14, 10)] : [(0, 0, 0), (0.14, 14, 10)]
         let values = isLifted ? dragged : rest
         return shape.fill(theme.palette.elevatedBackground)
             .shadow(color: Color.black.opacity(values[0].0), radius: values[0].1, y: values[0].2)
@@ -644,6 +688,8 @@ struct CanvasCardShell: View {
         var dy = Double(translation.height) / scale
         let ids = Set(moveOrigins.keys)
         let frames = moveOrigins.values.map(\.cgRect)
+        var nextSnappedX = false
+        var nextSnappedY = false
         if let first = frames.first, !NSEvent.modifierFlags.contains(.command) {
             let union = frames.dropFirst().reduce(first) { $0.union($1) }
             // Frame edges follow their members, so they are no snap targets.
@@ -655,15 +701,17 @@ struct CanvasCardShell: View {
                 scale: scale)
             dx += snap.dx
             dy += snap.dy
-            snappedX = snap.snappedX
-            snappedY = snap.snappedY
+            nextSnappedX = snap.snappedX
+            nextSnappedY = snap.snappedY
             interaction.show(guides: snap.guides)
         } else {
-            snappedX = false
-            snappedY = false
             interaction.show(guides: [])
         }
+        // Written only on a change: a state write per frame is work too.
+        if snappedX != nextSnappedX { snappedX = nextSnappedX }
+        if snappedY != nextSnappedY { snappedY = nextSnappedY }
         // One batch, so the frame refit sees the whole group moved at once.
+        // Live only: nothing is stored, saved or undoable until release.
         var rects: [CanvasCardID: CanvasRect] = [:]
         for (id, origin) in moveOrigins {
             var rect = origin
@@ -671,19 +719,20 @@ struct CanvasCardShell: View {
             rect.y = min(50_000, max(-50_000, origin.y + dy))
             rects[id] = rect
         }
-        board.setRects(rects)
+        board.showLiveRects(rects)
     }
 
     private func finishMove() {
         // Off a guide the card lands on the 8 pt grid; on a guide it stays exact.
+        // One commit for the whole drag: one undo step, one save.
         var rects: [CanvasCardID: CanvasRect] = [:]
         for card in board.cards where moveOrigins[card.id] != nil {
-            var rect = card.rect
+            var rect = board.liveGeometry.rect(for: card.id) ?? card.rect
             if !snappedX { rect.x = (rect.x / 8).rounded() * 8 }
             if !snappedY { rect.y = (rect.y / 8).rounded() * 8 }
             rects[card.id] = rect
         }
-        board.setRects(rects)
+        board.commitLiveRects(rects)
         board.endGesture()
         interaction.clearGuides(fade: true)
         CanvasMotion.animate(RafuMotion.setDown) { isLifted = false }
@@ -719,7 +768,7 @@ struct CanvasCardShell: View {
             minimum: card.content.minimumSize,
             aspect: card.content.keepsAspect ? start.width / start.height : nil,
             allowsResistance: !reduceMotion)
-        board.setRect(outcome.rect, for: card.id)
+        board.showLiveRects([card.id: outcome.rect])
         if outcome.reachedMinimum, !resizeHapticPlayed {
             resizeHapticPlayed = true
             RafuHaptics.alignment(channel: "resize")
@@ -727,7 +776,8 @@ struct CanvasCardShell: View {
     }
 
     private func resizeEnded() {
-        if let rect = board.cards.first(where: { $0.id == card.id })?.rect {
+        if let rect = board.shownRect(of: card.id) {
+            board.commitLiveRects([card.id: rect])
             let clamped = CanvasLayoutMath.clampedToMinimum(
                 rect, minimum: card.content.minimumSize)
             if clamped != rect {
