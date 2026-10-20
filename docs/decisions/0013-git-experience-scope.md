@@ -151,6 +151,65 @@ mode, not a change to GX1's caret-line ghost text, the blame-hover/hunk-peek
 cards (GX2), or the commit-graph (GX3); both blame modes remain read-only
 and never fetch or poll.
 
+**Amendment (2026-10-20, user request "make history look like the GitLens
+Graph"):** the user said UI work need not keep to earlier ADR rules. GX3
+and GD3 change as follows; the bounded, explicit data rules do not change.
+
+- **Rows.** One 22 pt line per commit: lane canvas (12 pt per lane),
+  subject, dimmed author, up to three ref pills plus "+n", relative time.
+  This replaces the two-line G10 row. The checked-out commit
+  (`GitSnapshot.headOID`) has an `accent` 10% row tint, a semibold subject,
+  an outer accent ring on its node, and "current" in its VoiceOver label.
+- **Continuous rails.** `GraphRow` now records `passingLanes` (lanes that
+  pass straight through the row), `hasIncomingRail`/`hasOutgoingRail` (the
+  own lane continues up/down), and `isMerge`. Before this, only edges that
+  touched a row were drawn, so the rails between a branch and its merge
+  were broken. Connectors are cubic curves that leave and arrive
+  vertically. A merge node is a ring with a transparent center; other nodes
+  are filled. A later parent that another lane already waits for joins that
+  lane (no duplicate lane). The rails continue through the expanded commit
+  row (`GraphRow.lanesBelow`). While the search field filters the list, the
+  rails are hidden, because a filtered list skips rows.
+- **GD3, superseded:** lane colors are derived from the theme accent by hue
+  rotation (8 lanes) so adjacent lanes are distinguishable; themes may later
+  override with an explicit `graphLanes` array. The hues skip ±30° around
+  the accent (gold in Indigo and Khadi stays reserved for focus, selection,
+  and HEAD), and neighbouring lanes are about 130° apart. Saturation and
+  brightness follow `gitModified`, clamped, so light and dark themes keep
+  their own weight (`CommitGraphPalette`). This is the only derived (not
+  token) color in the graph.
+- **Ref pills.** History reads `--decorate=full`, so `GitRefLabels.labels`
+  can type each ref: current branch (`arrow.right.circle.fill`, accent),
+  local branch (`target`), remote branch (`cloud`), tag (`tag`). A remote's
+  symbolic `origin/HEAD` is not shown. `GitRefLabels.chips` gives the same
+  output as before for both full and short decorations. The pill name stays
+  `textPrimary` for contrast; the icon, fill, and border use the lane color.
+- **Hover card.** `GitCommitHoverCard` opens as a SwiftUI `.popover` on the
+  hovered row after 450 ms. Only one row's popover is presented. It closes
+  when the pointer leaves the row and the card (220 ms grace), on scroll, on
+  a selection change, and on disappear. It shows author and email, "3 days
+  ago (16 October 2026 at 12:12)", the full message, "N files changed, X
+  insertions(+), Y deletions(-)" (`gitAdded`/`gitDeleted`, words carry the
+  meaning), all ref pills, the short hash with Copy, and "Open on GitHub"
+  only for a `github.com` remote. No avatar and no network request.
+- **Data.** `GitCommitDetailStore` is view-owned `@State`, never session
+  state: LRU of 200 commits per (root, commit), one in-flight load per
+  commit, cancelled when the pointer leaves first. One load is one
+  `git show --format=%B%x00 --numstat -z --diff-merges=first-parent <hex-id>`
+  process (8 MiB bound). The GitHub page comes from one `git remote get-url`
+  per (root, remote) through the pure `GitHubRemoteURL`, which keeps only
+  owner and repository, so a credential in an HTTPS remote never reaches the
+  browser or the store.
+- **Merge commits** list files, open diffs, and count lines against their
+  first parent (`--diff-merges=first-parent` on `diff-tree` and `show`).
+  Before, a merge row expanded to "no file changes".
+- **Expanded row and keyboard.** The selected commit expands to a meta line
+  (short hash + Copy, author, date), the message body and totals, and one
+  22 pt row per file (icon, name, dimmed folder, trailing status letter).
+  Arrow-key selection now loads the newly selected commit, as a click does.
+- **Header** is one row: search (loaded commits only), branch and upstream
+  chips, Fetch.
+
 **Merge note:** the integration owner should change this ADR from Proposed
 to Accepted only when merging the lane and append its row to the shared
 decision index.

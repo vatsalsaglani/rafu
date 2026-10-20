@@ -33,6 +33,32 @@ nonisolated struct GraphRow: Equatable, Sendable {
     /// row, folded into one overflow indicator. Zero when concurrency never
     /// exceeded the cap.
     let overflowLaneCount: Int
+    /// Lanes (clamped, ascending, without duplicates) that run straight
+    /// through this row from top to bottom: their commit is further down.
+    /// Without these the rails between a branch and its merge are broken.
+    let passingLanes: [Int]
+    /// The commit has more than one parent. The canvas draws it as a ring.
+    let isMerge: Bool
+    /// The commit's own lane continues from the row above (a child commit
+    /// in the same lane points at this commit).
+    let hasIncomingRail: Bool
+    /// The commit's own lane continues to the row below (its first parent
+    /// is loaded). A first parent outside the window is a stub instead.
+    let hasOutgoingRail: Bool
+
+    /// Lanes drawn at the bottom edge of this row: the pass-through lanes,
+    /// the targets of the outgoing edges, and the own lane when it
+    /// continues. An inline row inserted under this row (the expanded
+    /// commit detail) draws these lanes as straight rails, so the graph
+    /// stays continuous through it. Open stubs are excluded.
+    var lanesBelow: [Int] {
+        var lanes = Set(passingLanes)
+        for edge in outgoingEdges where edge.fromLane != edge.toLane {
+            lanes.insert(edge.toLane)
+        }
+        if hasOutgoingRail { lanes.insert(laneIndex) }
+        return lanes.sorted()
+    }
 }
 
 /// Pure lane-assignment layout for the bounded commit graph (GX3). Input is
@@ -74,6 +100,10 @@ nonisolated enum CommitGraphLayout {
             let arrivingLanes = laneExpectations.indices.filter {
                 laneExpectations[$0] == commit.id
             }
+            // Lanes waiting for a commit further down pass straight through.
+            let passingLanes = laneExpectations.indices.filter {
+                laneExpectations[$0] != nil && laneExpectations[$0] != commit.id
+            }
             let laneIndex = arrivingLanes.first ?? firstFreeLaneIndex()
             for lane in arrivingLanes { laneExpectations[lane] = nil }
 
@@ -88,7 +118,16 @@ nonisolated enum CommitGraphLayout {
                     openStubs.append(parentID)
                     continue
                 }
-                let targetLane = parentOffset == 0 ? laneIndex : firstFreeLaneIndex()
+                // A later parent that another lane already waits for joins
+                // that lane instead of opening a duplicate one.
+                let targetLane: Int
+                if parentOffset == 0 {
+                    targetLane = laneIndex
+                } else if let existing = laneExpectations.firstIndex(of: parentID) {
+                    targetLane = existing
+                } else {
+                    targetLane = firstFreeLaneIndex()
+                }
                 laneExpectations[targetLane] = parentID
                 if targetLane != laneIndex {
                     outgoingEdges.append(
@@ -107,16 +146,25 @@ nonisolated enum CommitGraphLayout {
 
             let activeLaneCount = laneExpectations.filter { $0 != nil }.count
             let overflow = max(0, activeLaneCount - visibleLaneCap)
+            let firstParentLoaded = commit.parentIDs.first.map(idsInWindow.contains) ?? false
+            let clampedLane = clampLane(laneIndex)
+            let clampedPassing = Array(
+                Set(passingLanes.map(clampLane)).subtracting([clampedLane])
+            ).sorted()
 
             rows.append(
                 GraphRow(
                     commitID: commit.id,
-                    laneIndex: clampLane(laneIndex),
+                    laneIndex: clampedLane,
                     incomingEdges: incomingEdges,
                     outgoingEdges: outgoingEdges,
                     colorIndex: laneIndex,
                     openStubParentIDs: openStubs,
-                    overflowLaneCount: overflow
+                    overflowLaneCount: overflow,
+                    passingLanes: clampedPassing,
+                    isMerge: commit.parentIDs.count > 1,
+                    hasIncomingRail: !arrivingLanes.isEmpty,
+                    hasOutgoingRail: firstParentLoaded
                 )
             )
         }

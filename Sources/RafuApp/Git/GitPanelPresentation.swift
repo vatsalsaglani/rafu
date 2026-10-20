@@ -185,25 +185,133 @@ nonisolated enum GitCommitCaption {
     }
 }
 
-/// Turns raw `%D` decorations ("HEAD -> main", "origin/main", "tag: v1") into
-/// plain chip labels (G10): no ASCII arrow, tags without the "tag: " prefix,
-/// HEAD first, duplicates removed.
+/// One typed ref on a commit, for the History graph's pills.
+nonisolated struct GitRefLabel: Hashable, Sendable {
+    enum Kind: Hashable, Sendable {
+        /// The checked-out branch ("HEAD -> refs/heads/main" names "main"),
+        /// or a detached "HEAD".
+        case head
+        case local
+        case remote
+        case tag
+    }
+
+    let kind: Kind
+    let name: String
+}
+
+/// Turns raw `%D` decorations into labels. History reads them with
+/// `--decorate=full` ("HEAD -> refs/heads/main", "refs/remotes/origin/main",
+/// "tag: refs/tags/v1"); the short form ("HEAD -> main", "origin/main",
+/// "tag: v1") is still accepted.
 nonisolated enum GitRefLabels {
+    private static let localPrefix = "refs/heads/"
+    private static let remotePrefix = "refs/remotes/"
+    private static let tagPrefix = "refs/tags/"
+
+    /// Plain chip labels (G10): no ASCII arrow, no "tag: " or "refs/..."
+    /// prefix, HEAD first, duplicates removed. Full and short decorations
+    /// give the same output.
     static func chips(from decorations: [String]) -> [String] {
         var labels: [String] = []
         for decoration in decorations {
             let trimmed = decoration.trimmingCharacters(in: .whitespaces)
             if let range = trimmed.range(of: "HEAD -> ") {
                 labels.append("HEAD")
-                labels.append(String(trimmed[range.upperBound...]))
+                labels.append(shortName(String(trimmed[range.upperBound...])))
             } else if trimmed.hasPrefix("tag: ") {
-                labels.append(String(trimmed.dropFirst("tag: ".count)))
+                labels.append(shortName(String(trimmed.dropFirst("tag: ".count))))
             } else if !trimmed.isEmpty {
-                labels.append(trimmed)
+                labels.append(shortName(trimmed))
             }
         }
         var seen = Set<String>()
         return labels.filter { seen.insert($0).inserted }
+    }
+
+    /// Typed labels for the graph pills, in display order: HEAD first, then
+    /// local branches, remote branches, and tags, each in Git's order.
+    /// "HEAD -> x" becomes one `.head` label named "x". A remote's symbolic
+    /// HEAD ("origin/HEAD") is dropped: it only repeats the remote default
+    /// branch. Duplicates are removed.
+    static func labels(from decorations: [String]) -> [GitRefLabel] {
+        var labels: [GitRefLabel] = []
+        for decoration in decorations {
+            let trimmed = decoration.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+            if let range = trimmed.range(of: "HEAD -> ") {
+                labels.append(
+                    GitRefLabel(kind: .head, name: shortName(String(trimmed[range.upperBound...]))))
+            } else if trimmed == "HEAD" {
+                labels.append(GitRefLabel(kind: .head, name: "HEAD"))
+            } else if trimmed.hasPrefix("tag: ") {
+                labels.append(
+                    GitRefLabel(
+                        kind: .tag, name: shortName(String(trimmed.dropFirst("tag: ".count)))))
+            } else if trimmed.hasPrefix(remotePrefix) {
+                let name = String(trimmed.dropFirst(remotePrefix.count))
+                guard !name.hasSuffix("/HEAD") else { continue }
+                labels.append(GitRefLabel(kind: .remote, name: name))
+            } else if trimmed.hasPrefix(tagPrefix) {
+                labels.append(
+                    GitRefLabel(kind: .tag, name: String(trimmed.dropFirst(tagPrefix.count))))
+            } else {
+                // `refs/heads/x`, or a short-form name with no prefix.
+                labels.append(GitRefLabel(kind: .local, name: shortName(trimmed)))
+            }
+        }
+        var seen = Set<GitRefLabel>()
+        let unique = labels.filter { seen.insert($0).inserted }
+        func rank(_ kind: GitRefLabel.Kind) -> Int {
+            switch kind {
+            case .head: 0
+            case .local: 1
+            case .remote: 2
+            case .tag: 3
+            }
+        }
+        // `enumerated` keeps the sort stable inside one kind.
+        return unique.enumerated()
+            .sorted { (rank($0.element.kind), $0.offset) < (rank($1.element.kind), $1.offset) }
+            .map(\.element)
+    }
+
+    private static func shortName(_ ref: String) -> String {
+        for prefix in [localPrefix, remotePrefix, tagPrefix] where ref.hasPrefix(prefix) {
+            return String(ref.dropFirst(prefix.count))
+        }
+        return ref
+    }
+}
+
+/// The stats line of the History hover card, phrased like Git's own
+/// summary: "2 files changed, 5 insertions(+), 1 deletion(-)".
+nonisolated enum GitCommitStatsPresentation {
+    static func filesText(_ count: Int) -> String {
+        count == 1 ? "1 file changed" : "\(count) files changed"
+    }
+
+    static func insertionsText(_ count: Int) -> String {
+        count == 1 ? "1 insertion(+)" : "\(count) insertions(+)"
+    }
+
+    static func deletionsText(_ count: Int) -> String {
+        count == 1 ? "1 deletion(-)" : "\(count) deletions(-)"
+    }
+
+    static func summary(for detail: GitCommitDetail) -> String {
+        [
+            filesText(detail.filesChanged), insertionsText(detail.insertions),
+            deletionsText(detail.deletions),
+        ].joined(separator: ", ")
+    }
+
+    /// The message without its first line (the subject the card already
+    /// shows as its title), with surrounding blank lines removed.
+    static func bodyWithoutSubject(_ body: String) -> String {
+        guard let newline = body.firstIndex(of: "\n") else { return "" }
+        return String(body[body.index(after: newline)...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

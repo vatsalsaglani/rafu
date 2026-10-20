@@ -137,6 +137,56 @@ struct GitPanelPresentationTests {
         #expect(GitRefLabels.chips(from: []).isEmpty)
     }
 
+    @Test("Full decorations give the same chips as short ones")
+    func refChipsFromFullDecorations() {
+        let chips = GitRefLabels.chips(from: [
+            "HEAD -> refs/heads/main", "refs/remotes/origin/main", "tag: refs/tags/v1.0",
+            "refs/remotes/origin/HEAD",
+        ])
+        #expect(chips == ["HEAD", "main", "origin/main", "v1.0", "origin/HEAD"])
+    }
+
+    @Test("Typed ref labels classify head, local, remote, and tag refs in display order")
+    func typedRefLabels() {
+        let labels = GitRefLabels.labels(from: [
+            "tag: refs/tags/v1.0", "refs/remotes/origin/main", "HEAD -> refs/heads/main",
+            "refs/heads/feature/x", "refs/remotes/origin/HEAD", "refs/heads/feature/x", "",
+        ])
+        #expect(
+            labels == [
+                GitRefLabel(kind: .head, name: "main"),
+                GitRefLabel(kind: .local, name: "feature/x"),
+                GitRefLabel(kind: .remote, name: "origin/main"),
+                GitRefLabel(kind: .tag, name: "v1.0"),
+            ])
+        #expect(GitRefLabels.labels(from: ["HEAD"]) == [GitRefLabel(kind: .head, name: "HEAD")])
+        // Short decorations still parse; an unprefixed name is a local branch.
+        #expect(
+            GitRefLabels.labels(from: ["HEAD -> main", "tag: v2"]) == [
+                GitRefLabel(kind: .head, name: "main"), GitRefLabel(kind: .tag, name: "v2"),
+            ])
+        #expect(GitRefLabels.labels(from: []).isEmpty)
+    }
+
+    @Test("Commit stats read like Git's summary, with singular forms")
+    func commitStatsText() {
+        let detail = GitCommitDetail(body: "", filesChanged: 2, insertions: 5, deletions: 1)
+        #expect(
+            GitCommitStatsPresentation.summary(for: detail)
+                == "2 files changed, 5 insertions(+), 1 deletion(-)")
+        #expect(GitCommitStatsPresentation.filesText(1) == "1 file changed")
+        #expect(GitCommitStatsPresentation.insertionsText(1) == "1 insertion(+)")
+        #expect(GitCommitStatsPresentation.deletionsText(0) == "0 deletions(-)")
+    }
+
+    @Test("The card body drops the subject line and surrounding blank lines")
+    func bodyWithoutSubject() {
+        #expect(GitCommitStatsPresentation.bodyWithoutSubject("Subject") == "")
+        #expect(
+            GitCommitStatsPresentation.bodyWithoutSubject("Subject\n\nLine 1\nLine 2\n")
+                == "Line 1\nLine 2")
+    }
+
     @Test("A full hash splits by character count with no hyphen and rejoins exactly")
     func hashLines() {
         let hash = "8be02b5fd3f3fc02a1b2c3d4e5f60718293a4b5c"

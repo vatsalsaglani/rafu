@@ -809,6 +809,8 @@ struct GitInspectorView: View {
                     lastFetchedAt: session.gitLastFetchedAt,
                     hasMore: session.gitHistoryPage?.hasMore ?? false,
                     isBusy: session.isGitBusy,
+                    rootURL: session.gitRootURL,
+                    headOID: session.gitSnapshot?.headOID,
                     selection: $session.gitSelectedHistoryCommitID,
                     detailChanges: session.gitHistoryCommitChanges,
                     isDetailLoading: session.isGitHistoryDetailLoading,

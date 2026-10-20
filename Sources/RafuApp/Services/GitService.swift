@@ -72,7 +72,9 @@ nonisolated struct GitService: Sendable {
             let objectID = try await resolveCommit(revision, at: repositoryRoot)
             arguments = [
                 "show", "--format=", "--no-ext-diff", "--no-color", "--find-renames", "--unified=3",
-                objectID, "--", request.path,
+                // A merge diffs against its first parent, like the file
+                // list (`commitChanges`) and the stats (`commitDetail`).
+                "--diff-merges=first-parent", objectID, "--", request.path,
             ]
         case .between(let base, let head):
             let baseID = try await resolveCommit(base, at: repositoryRoot)
@@ -119,7 +121,9 @@ nonisolated struct GitService: Sendable {
         let format = "%H%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%D%x00"
         let output = try await checkedRun(
             [
-                "log", "--date=iso-strict", "--decorate=short", "--max-count=\(limit)",
+                // Full ref names let the graph tell local branches, remote
+                // branches, and tags apart (`GitRefLabels.labels`).
+                "log", "--date=iso-strict", "--decorate=full", "--max-count=\(limit)",
                 "--skip=\(offset)", "--format=\(format)",
             ],
             at: repositoryRoot,
@@ -139,12 +143,73 @@ nonisolated struct GitService: Sendable {
         let output = try await checkedRun(
             [
                 "diff-tree", "--root", "--no-commit-id", "--name-status", "-r", "-z", "-M",
-                objectID,
+                "--diff-merges=first-parent", objectID,
             ],
             at: repositoryRoot,
             maximumOutputBytes: 16 * 1_024 * 1_024
         )
         return GitCommitFilesParser.parse(output.standardOutput)
+    }
+
+    /// The full message and line totals of one commit, for the History hover
+    /// card: ONE bounded process, `git show --format=%B%x00 --numstat -z`.
+    /// The ID must be a hexadecimal object ID (as `history` returns), so it
+    /// can never read as an option and needs no `rev-parse` round trip.
+    /// A merge is counted against its first parent, matching
+    /// `commitChanges`. Binary files count as changed files with no lines.
+    @concurrent
+    func commitDetail(_ objectID: String, at rootURL: URL) async throws -> GitCommitDetail {
+        guard (7...64).contains(objectID.count), objectID.allSatisfy(\.isHexDigit) else {
+            throw GitServiceError.invalidRevision(objectID)
+        }
+        let output = try await checkedRun(
+            [
+                "show", "--format=%B%x00", "--numstat", "-z", "--no-ext-diff", "--no-color", "-M",
+                "--diff-merges=first-parent", objectID,
+            ],
+            at: rootURL,
+            maximumOutputBytes: 8 * 1_024 * 1_024
+        )
+        return Self.parseCommitDetail(output.standardOutput)
+    }
+
+    /// Splits `git show --format=%B%x00 --numstat -z` output at the first NUL:
+    /// the message before it, the numstat records after it. Git separates
+    /// the two with extra NUL and newline bytes, which are skipped.
+    static func parseCommitDetail(_ data: Data) -> GitCommitDetail {
+        let separator = data.firstIndex(of: 0) ?? data.endIndex
+        let body = String(decoding: data[data.startIndex..<separator], as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        var statsStart = separator
+        while statsStart < data.endIndex, data[statsStart] == 0 || data[statsStart] == 0x0A {
+            statsStart = data.index(after: statsStart)
+        }
+        let stats = GitNumstatParser.parse(Data(data[statsStart...]))
+        var insertions = 0
+        var deletions = 0
+        for stat in stats.values {
+            insertions += stat.added ?? 0
+            deletions += stat.deleted ?? 0
+        }
+        return GitCommitDetail(
+            body: body, filesChanged: stats.count, insertions: insertions, deletions: deletions)
+    }
+
+    /// The fetch URL of one remote, or nil when the remote (or the
+    /// repository) does not exist. One process. The URL may hold
+    /// credentials: callers must not log or display it (`GitHubRemoteURL`
+    /// keeps only the owner and repository).
+    @concurrent
+    func remoteURL(name: String, at rootURL: URL) async throws -> String? {
+        guard !name.isEmpty, !name.hasPrefix("-") else { throw GitServiceError.invalidRemote(name) }
+        let output = try await runner.run(
+            arguments: ["remote", "get-url", name],
+            at: rootURL,
+            maximumOutputBytes: 64 * 1_024
+        )
+        guard output.terminationStatus == 0 else { return nil }
+        let url = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return url.isEmpty ? nil : url
     }
 
     @concurrent

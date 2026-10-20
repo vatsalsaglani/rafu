@@ -216,6 +216,9 @@ channel (VoiceOver label + name tint for added/untracked/deleted).
 - Header: search field for loaded commits (subject/author/sha substring match, explicitly labeled "in loaded commits" to set expectation — no repo-wide scan). Branch breadcrumb (current branch display). Fetch button with last-fetch relative time (explicit user action only — never automatic fetch).
 - **Pagination note:** History pagination did NOT exist as a separate loading concept before GX3. `loadMoreHistory()` was added during this increment to progressively load commit pages, allowing graph layout to compute incrementally per loaded window without blocking the UI.
 
+The row anatomy and lane colors above were replaced on 2026-10-20; see
+"GitLens-style history graph" below.
+
 **Worktree porcelain parsing** (GX4):
 - Source: `git worktree list --porcelain` (one worktree per line, fields space-separated).
 - Model: pure `GitWorktree { path, headOID, branch, isCurrent, isLocked, isPrunable }` (fixture-tested). Paths are absolute (`/path/to/worktree`); `isCurrent` is true for the active worktree only.
@@ -228,3 +231,80 @@ channel (VoiceOver label + name tint for added/untracked/deleted).
 - Graph layout computed per loaded page; edges to unloaded parents drawn as open stubs (no projection or prediction).
 - Explicit pagination boundaries: search field clearly states "in loaded commits"; fetch button visible in header so user can load more explicitly.
 - Memory bounded: lazy loading prevents a 10k-commit repo from parsing all commits upfront.
+
+## GitLens-style history graph (2026-10-20)
+
+- Applies to: `CommitGraphLayout`, `GitCommitGraphView`, `GitCommitHoverCard`,
+  `GitCommitDetailStore`, `GitService.commitDetail`/`remoteURL`,
+  `GitHubRemoteURL`, `CommitGraphPalette`.
+- Last verified: Swift 6.2, `/usr/bin/git` 2.54.0 (Apple Git-157), macOS 27,
+  2026-10-20. Visual behavior (popover focus, row spacing) is NOT verified by
+  a launch; see "Open questions".
+
+### Observed behavior
+
+- **`git show --format=%B%x00 --numstat -z` byte layout.** Git writes the
+  message, the `%x00`, then its own NUL terminator and a newline before the
+  first numstat record: `msg\n\0\0\n2\t1\tf.txt\0`. A merge under the
+  default `--cc` writes `\0\0\0` with no newline. Split at the FIRST NUL and
+  skip every following `0x00`/`0x0A` byte before `GitNumstatParser`, or the
+  first record parses as `"\n2"` and is counted as binary.
+- **Merges print no files by default.** `git diff-tree -r <merge>` prints
+  nothing, and `git show <merge> -- <path>` prints a combined diff (or
+  nothing) that `UnifiedDiffParser` cannot read. Add
+  `--diff-merges=first-parent` (Git 2.31+) to `diff-tree`, `show` (diff),
+  and the stats `show`, so all three agree.
+- **`--decorate=full`** makes `%D` read `HEAD -> refs/heads/main,
+  refs/remotes/origin/main, tag: refs/tags/v1`. A detached HEAD is the bare
+  word `HEAD`. Strip the prefixes for display; never compare a full name to
+  a short branch name without stripping.
+- **Pass-through lanes.** A lane-assignment layout that records only edges
+  touching a row cannot draw a continuous graph. Each row must also carry
+  the lanes waiting for a commit further down (`passingLanes`) and whether
+  its own lane continues up and down. Invariant, tested in
+  `railsAreContinuousBetweenRows`: the lanes at a row's bottom
+  (`lanesBelow`) equal the lanes at the next row's top.
+- **Hollow merge ring in `Canvas`.** Fill the ring's disk with a copy of the
+  context whose `blendMode = .clear` before stroking the ring. That erases
+  the rails under the center, so the ring is hollow on any list background,
+  with no guessed background color.
+- **Hover popover on `List` rows.** One `.popover(isPresented:)` per row is
+  fine when every binding reads one `@State hoverCardID`: only that row is
+  presented, and the content closure runs only while presented. Close it on
+  `onScrollPhaseChange` (macOS 15) when the phase is not `.idle`, or the
+  card stays behind while its row scrolls away. Give the card its own
+  `onHover` and a short dismissal grace (220 ms), or the card closes while
+  the pointer travels into it to press Copy.
+- **Keyboard selection in `List(selection:)`** changes the binding without
+  the row's `onTapGesture`. If loading is tied to the tap, arrow keys expand
+  the new row with the previous commit's files. Load from
+  `onChange(of: selection)` too, and remember the ID the tap already asked
+  for so one click loads once.
+- **Remote URLs can hold credentials** (`https://user:token@github.com/...`).
+  `GitCommitDetailStore` keeps only the page derived by `GitHubRemoteURL`
+  (owner and repository); the raw string is dropped in the loading task.
+
+### Open questions (coordinator visual check)
+
+- A SwiftUI popover can become the key window, so arrow keys may go to the
+  card while it is open. The repository's tab preview avoids `.popover` for
+  that reason (see `swiftui-macos-click-latency.md`). If this happens, move
+  the card to an `NSPopover` that does not take key, or close it on key
+  input.
+- `List(.inset)` must place rows with no vertical gap, or the rails show
+  breaks between 22 pt rows.
+
+### Verification
+
+`swift test --filter "CommitGraph|GitHubRemoteURL|GitCommitDetailStore|GitPanelPresentation|GitService"`.
+The layout test `layoutScalesToThousandsOfCommits` lays out 5,000 synthetic
+commits under a 2 s bound (a debug build takes milliseconds).
+
+### Related
+
+ADR 0013 amendment 2026-10-20; `Sources/RafuApp/Git/CommitGraphLayout.swift`,
+`Sources/RafuApp/Views/GitCommitGraphView.swift`,
+`Sources/RafuApp/Views/GitCommitHoverCard.swift`,
+`Sources/RafuApp/Views/CommitGraphPalette.swift`,
+`Sources/RafuApp/Git/GitCommitDetailStore.swift`,
+`Sources/RafuApp/Git/GitHubRemoteURL.swift`.

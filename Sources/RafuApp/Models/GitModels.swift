@@ -237,6 +237,17 @@ nonisolated struct GitCommitFileChange: Identifiable, Hashable, Sendable {
     var id: String { path }
 }
 
+/// The hover-card facts for one commit (History graph): the full message and
+/// the line totals against the first parent. Loaded on demand by
+/// `GitService.commitDetail(_:at:)`, one bounded process per commit.
+nonisolated struct GitCommitDetail: Hashable, Sendable {
+    /// The full commit message (`%B`), trailing newlines removed.
+    let body: String
+    let filesChanged: Int
+    let insertions: Int
+    let deletions: Int
+}
+
 nonisolated enum GitBranchKind: String, Hashable, Sendable {
     case local
     case remote

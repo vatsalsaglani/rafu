@@ -453,6 +453,132 @@ struct GitServiceTests {
             #expect(!blame.lines[1].isBoundary)
         }
     }
+
+    @Test("Commit detail reads the full message and line totals in one show process")
+    func commitDetailReadsBodyAndTotals() async throws {
+        try await withRepository { root in
+            try write("a\nb\n", to: root.appending(path: "f.txt"))
+            try runGit(["add", "."], at: root)
+            try runGit(["commit", "-m", "Root"], at: root)
+            try write("a\nc\nd\n", to: root.appending(path: "f.txt"))
+            try Data([0, 1, 2]).write(to: root.appending(path: "bin.dat"))
+            try FileManager.default.createDirectory(
+                at: root.appending(path: "sub"), withIntermediateDirectories: true)
+            try write("x\n", to: root.appending(path: "sub/g.txt"))
+            try runGit(["add", "."], at: root)
+            try runGit(["commit", "-m", "Second subject\n\nBody line 1\nBody line 2"], at: root)
+
+            let service = GitService()
+            let history = try await service.history(at: root, limit: 10)
+            let second = try #require(history.commits.first)
+            let detail = try await service.commitDetail(second.id, at: root)
+            #expect(detail.body == "Second subject\n\nBody line 1\nBody line 2")
+            // f.txt +2 -1, sub/g.txt +1, bin.dat binary (counts as a file).
+            #expect(detail.filesChanged == 3)
+            #expect(detail.insertions == 3)
+            #expect(detail.deletions == 1)
+
+            let rootCommit = try #require(history.commits.last)
+            let rootDetail = try await service.commitDetail(rootCommit.id, at: root)
+            #expect(rootDetail.body == "Root")
+            #expect(rootDetail.filesChanged == 1)
+            #expect(rootDetail.insertions == 2)
+
+            await #expect(throws: GitServiceError.self) {
+                _ = try await service.commitDetail("--help", at: root)
+            }
+        }
+    }
+
+    @Test("A merge commit's files and totals are read against its first parent")
+    func mergeCommitUsesFirstParent() async throws {
+        try await withRepository { root in
+            try write("base\n", to: root.appending(path: "base.txt"))
+            try runGit(["add", "."], at: root)
+            try runGit(["commit", "-m", "Base"], at: root)
+            try runGit(["checkout", "-b", "side"], at: root)
+            try write("side\n", to: root.appending(path: "side.txt"))
+            try runGit(["add", "."], at: root)
+            try runGit(["commit", "-m", "Side"], at: root)
+            try runGit(["checkout", "main"], at: root)
+            try write("main\n", to: root.appending(path: "main.txt"))
+            try runGit(["add", "."], at: root)
+            try runGit(["commit", "-m", "Main"], at: root)
+            try runGit(["merge", "--no-ff", "--no-edit", "side"], at: root)
+
+            let service = GitService()
+            let history = try await service.history(at: root, limit: 10)
+            let merge = try #require(history.commits.first)
+            #expect(merge.parentIDs.count == 2)
+            let changes = try await service.commitChanges(merge.id, at: root)
+            #expect(changes.map(\.path) == ["side.txt"])
+            let detail = try await service.commitDetail(merge.id, at: root)
+            #expect(detail.filesChanged == 1)
+            #expect(detail.insertions == 1)
+            let diff = try await service.diff(
+                GitDiffRequest(path: "side.txt", scope: .commit(merge.id)), at: root)
+            #expect(diff.rows.count == 1)
+        }
+    }
+
+    @Test("History decorations are full ref names that the graph can classify")
+    func historyDecorationsAreFull() async throws {
+        try await withRepository { root in
+            try write("a\n", to: root.appending(path: "a.txt"))
+            try runGit(["add", "."], at: root)
+            try runGit(["commit", "-m", "One"], at: root)
+            try runGit(["tag", "v1"], at: root)
+            try runGit(["branch", "feature"], at: root)
+
+            let history = try await GitService().history(at: root, limit: 10)
+            let commit = try #require(history.commits.first)
+            let labels = GitRefLabels.labels(from: commit.decorations)
+            #expect(labels.first == GitRefLabel(kind: .head, name: "main"))
+            #expect(labels.contains(GitRefLabel(kind: .local, name: "feature")))
+            #expect(labels.contains(GitRefLabel(kind: .tag, name: "v1")))
+            #expect(
+                Set(GitRefLabels.chips(from: commit.decorations)) == [
+                    "HEAD", "main", "feature", "v1",
+                ])
+        }
+    }
+
+    @Test("The remote URL is read after a remote is added, and is nil before")
+    func remoteURLAfterRemoteAdd() async throws {
+        try await withRepository { root in
+            let service = GitService()
+            #expect(try await service.remoteURL(name: "origin", at: root) == nil)
+            try runGit(["remote", "add", "origin", "git@github.com:octo/rafu.git"], at: root)
+            #expect(
+                try await service.remoteURL(name: "origin", at: root)
+                    == "git@github.com:octo/rafu.git")
+            await #expect(throws: GitServiceError.self) {
+                _ = try await service.remoteURL(name: "-v", at: root)
+            }
+        }
+    }
+
+    @Test("Commit detail parsing skips Git's separator bytes and keys renames by the new path")
+    func parseCommitDetailOutput() {
+        var data = Data("rename\n".utf8)
+        data.append(contentsOf: [0, 0, 0x0A])
+        data.append(Data("0\t0\t".utf8))
+        data.append(0)
+        data.append(Data("f.txt".utf8))
+        data.append(0)
+        data.append(Data("h.txt".utf8))
+        data.append(0)
+        data.append(Data("-\t-\tbin.dat".utf8))
+        data.append(0)
+        let detail = GitService.parseCommitDetail(data)
+        #expect(detail.body == "rename")
+        #expect(detail.filesChanged == 2)
+        #expect(detail.insertions == 0)
+        #expect(detail.deletions == 0)
+
+        let empty = GitService.parseCommitDetail(Data())
+        #expect(empty == GitCommitDetail(body: "", filesChanged: 0, insertions: 0, deletions: 0))
+    }
 }
 
 private func withRepository(
