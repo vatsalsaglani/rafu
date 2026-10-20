@@ -134,6 +134,7 @@ describe. The authority is
 | Activity Rail | Selection fill + `borderSubtle` hairline, 15 pt glyph, 6 pt spacing, 10 pt top inset; `RafuRailAppTile` draws `RafuSeamGlyph` natively on a `tabActiveBackground` tile, non-interactive and `accessibilityHidden` |
 | Files tree | `RafuFileTreeDisclosureStyle` + `FileTreeMetrics` (row 26, indent 14, selection radius 6, 16 pt icon slot, 4 pt icon-to-name gap, trailing row inset 8); indent guides with a strong segment beside the selected child |
 | Sidebar header | `magnifyingglass` filter + one `plus` menu (New File…, New Folder…, Add Folder to Workspace…); 19 pt top padding so the title centre aligns with the tab labels' centre |
+| Navigator panel headers | Every rail panel (Files, Search, Source Control, Terminals, History) places its header with `rafuNavigatorHeaderPlacement(rowHeight:)`: title centre 31 pt below the pane top (`RafuMetrics.navigatorHeaderTitleCenterY`), on the tab labels' line. `RafuUtilityPanelHeader` applies it itself (14 pt sidebar-tone strip above its 34 pt band). Never a hand-tuned `.padding(.top, …)`; `NavigatorPanelHeaderPlacementTests` enforces it |
 | Scrollers | Editor: `EditorThemedScroller` — theme track and knob, `isCompatibleWithOverlayScrollers` overridden, `scrollerStyle` never written. Files `List`: `OverlayScrollerConfigurator` forces overlay style on that one scroll view (round 4) |
 | Ensemble symbol | `circle.hexagongrid` everywhere |
 

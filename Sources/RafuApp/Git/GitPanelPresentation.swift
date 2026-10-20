@@ -315,6 +315,127 @@ nonisolated enum GitCommitStatsPresentation {
     }
 }
 
+/// Joins the hard line breaks of a commit body so it wraps to the width of
+/// the hover card and the expanded row. Commit bodies are usually wrapped at
+/// 72 columns; shown in a proportional font at another width, those breaks
+/// make every paragraph ragged.
+///
+/// Rules, in order:
+/// - A blank line ends a paragraph. Runs of blank lines become one.
+/// - A fenced code block (a line that starts with three backticks or
+///   tildes, through the closing fence) is kept line for line.
+/// - A line that starts with a list marker ("- ", "* ", "• ", or digits
+///   followed by "." or ")" and a space) starts a new line.
+/// - An indented line continues the list item above it when it is indented
+///   by one to four spaces (a wrapped list item). Any other indented line
+///   (indented code, a tab) is kept as it is.
+/// - Consecutive lines shaped like Git trailers ("Token: value", such as
+///   "Co-Authored-By: …") stay on their own lines.
+/// - Any other line joins the line above it with one space.
+nonisolated enum GitCommitMessageReflow {
+    static func reflow(_ text: String) -> String {
+        enum Open {
+            /// The last output line cannot take a joined line.
+            case none
+            case prose
+            case listItem
+        }
+
+        let lines = text.replacingOccurrences(of: "\r\n", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: false)
+        var output: [String] = []
+        var open = Open.none
+        var inFence = false
+        var previousWasTrailer = false
+
+        func join(_ content: Substring) {
+            output[output.count - 1] += " " + content
+        }
+
+        for rawLine in lines {
+            let line = trimmingTrailingWhitespace(rawLine)
+            let content = line.drop(while: { $0 == " " || $0 == "\t" })
+            let isTrailer = isTrailerLine(content)
+            defer { previousWasTrailer = isTrailer && !inFence }
+
+            if inFence {
+                output.append(String(line))
+                if isFenceLine(content) { inFence = false }
+                continue
+            }
+            if isFenceLine(content) {
+                output.append(String(line))
+                inFence = true
+                open = .none
+                continue
+            }
+            if content.isEmpty {
+                if let last = output.last, !last.isEmpty { output.append("") }
+                open = .none
+                continue
+            }
+            if isListMarkerLine(content) {
+                output.append(String(line))
+                open = .listItem
+                continue
+            }
+            let indent = line.count - content.count
+            if indent > 0 {
+                let isSpaceIndent = !line.prefix(indent).contains("\t")
+                if open == .listItem, isSpaceIndent, indent <= 4 {
+                    join(content)
+                } else {
+                    output.append(String(line))
+                    open = .none
+                }
+                continue
+            }
+            if open != .none, !(isTrailer && previousWasTrailer) {
+                join(content)
+            } else {
+                output.append(String(line))
+                open = .prose
+            }
+        }
+        while output.last?.isEmpty == true { output.removeLast() }
+        while output.first?.isEmpty == true { output.removeFirst() }
+        return output.joined(separator: "\n")
+    }
+
+    private static func trimmingTrailingWhitespace(_ line: Substring) -> Substring {
+        var end = line.endIndex
+        while end > line.startIndex {
+            let previous = line.index(before: end)
+            guard line[previous] == " " || line[previous] == "\t" else { break }
+            end = previous
+        }
+        return line[..<end]
+    }
+
+    private static func isFenceLine(_ content: Substring) -> Bool {
+        content.hasPrefix("```") || content.hasPrefix("~~~")
+    }
+
+    private static func isListMarkerLine(_ content: Substring) -> Bool {
+        if ["- ", "* ", "• "].contains(where: { content.hasPrefix($0) }) { return true }
+        let digits = content.prefix(while: { $0.isASCII && $0.isNumber })
+        guard !digits.isEmpty else { return false }
+        let rest = content.dropFirst(digits.count)
+        return rest.hasPrefix(". ") || rest.hasPrefix(") ")
+    }
+
+    /// "Token: value", where the token is a letter followed by letters,
+    /// digits, or hyphens (Git's trailer shape).
+    private static func isTrailerLine(_ content: Substring) -> Bool {
+        guard let colon = content.firstIndex(of: ":"), colon > content.startIndex,
+            content[content.index(after: colon)...].hasPrefix(" ")
+        else { return false }
+        let token = content[..<colon]
+        guard let first = token.first, first.isLetter, first.isASCII else { return false }
+        return token.allSatisfy { ($0.isASCII && ($0.isLetter || $0.isNumber)) || $0 == "-" }
+    }
+}
+
 /// Splits a full object ID into fixed-width lines (G11). Breaking by
 /// character count, with no hyphen glyph, keeps a copied or read hash exact.
 nonisolated enum GitHashDisplay {

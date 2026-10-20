@@ -246,6 +246,20 @@ nonisolated struct GitCommitDetail: Hashable, Sendable {
     let filesChanged: Int
     let insertions: Int
     let deletions: Int
+    /// The message without its subject, reflowed for a proportional,
+    /// wrapping text view (`GitCommitMessageReflow`). Computed once here,
+    /// off the main actor, so the hover card and the expanded row do no
+    /// text work in `body`.
+    let displayBody: String
+
+    init(body: String, filesChanged: Int, insertions: Int, deletions: Int) {
+        self.body = body
+        self.filesChanged = filesChanged
+        self.insertions = insertions
+        self.deletions = deletions
+        displayBody = GitCommitMessageReflow.reflow(
+            GitCommitStatsPresentation.bodyWithoutSubject(body))
+    }
 }
 
 nonisolated enum GitBranchKind: String, Hashable, Sendable {

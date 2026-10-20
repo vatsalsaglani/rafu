@@ -54,14 +54,28 @@ final class CommitGraphLayoutCache {
 }
 
 /// Layout constants shared by the graph rows and the expanded commit row.
-enum GitCommitGraphMetrics {
+nonisolated enum GitCommitGraphMetrics {
     static let rowHeight: CGFloat = 22
     static let laneWidth: CGFloat = 12
-    static let laneCanvasPadding: CGFloat = 8
-    static let rowInsets = EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 6)
+    /// The first lane's centre from the canvas's leading edge. The HEAD
+    /// ring (radius 5.5, 1.5 pt stroke) then starts 1.75 pt inside it.
+    static let firstLaneCenter: CGFloat = 8
+    /// Room right of the last lane's centre: the HEAD ring's radius plus
+    /// half its stroke, rounded up. Nothing wider is reserved.
+    static let laneTrailingPadding: CGFloat = 7
+    /// Leading 6 pt: with `firstLaneCenter`, the outer edge of the first
+    /// node's ring sits about 8 pt inside the row's selection pill.
+    static let rowInsets = EdgeInsets(top: 0, leading: 6, bottom: 0, trailing: 6)
 
     static func laneX(_ lane: Int) -> CGFloat {
-        CGFloat(lane) * laneWidth + laneWidth / 2 + 2
+        CGFloat(lane) * laneWidth + firstLaneCenter
+    }
+
+    /// The lane column's width for `laneCount` lanes: up to the last lane's
+    /// node plus its ring, so the subject starts right after the widest
+    /// lane the loaded rows use (never the 8-lane cap's width).
+    static func laneCanvasWidth(laneCount: Int) -> CGFloat {
+        laneX(max(1, laneCount) - 1) + laneTrailingPadding
     }
 }
 
@@ -75,7 +89,7 @@ struct GitCommitGraphView: View {
     @Environment(\.rafuTheme) private var theme
 
     let commits: [GitCommitSummary]
-    let currentBranch: String?
+    /// Only names the remote for "Open on GitHub"; not shown in the header.
     let upstream: String?
     let lastFetchedAt: Date?
     let hasMore: Bool
@@ -145,10 +159,11 @@ struct GitCommitGraphView: View {
         // A filtered list skips commits, so its rails would not connect.
         let showsRails = trimmedSearch.isEmpty
         // The lane column is only as wide as the widest lane the LOADED
-        // window uses; linear history collapses to a single narrow lane.
-        let laneCanvasWidth =
-            CGFloat(layoutMemo.laneCount) * GitCommitGraphMetrics.laneWidth
-            + GitCommitGraphMetrics.laneCanvasPadding
+        // window uses (recomputed when a page loads); linear history
+        // collapses to a single narrow lane. One width for every row keeps
+        // the rails aligned.
+        let laneCanvasWidth = GitCommitGraphMetrics.laneCanvasWidth(
+            laneCount: layoutMemo.laneCount)
         return VStack(spacing: 0) {
             header
             Divider().overlay(theme.palette.borderSubtle)
@@ -237,8 +252,10 @@ struct GitCommitGraphView: View {
 
     // MARK: Header
 
-    /// One 28 pt row: search (loaded commits only), branch and upstream
-    /// chips, Fetch.
+    /// One 28 pt row: search (loaded commits only) and Fetch. The branch and
+    /// upstream are not repeated here: the repository row above the tabs
+    /// (branch menu and sync state) already shows both, and in a narrow
+    /// sidebar the search field squeezed a branch chip to an empty capsule.
     private var header: some View {
         HStack(spacing: RafuMetrics.space2) {
             HStack(spacing: RafuMetrics.space2) {
@@ -252,14 +269,6 @@ struct GitCommitGraphView: View {
             }
             .rafuField()
             .layoutPriority(1)
-            if let currentBranch {
-                RafuChip(text: currentBranch, foreground: theme.palette.textPrimary)
-                    .help("Current branch")
-            }
-            if let upstream {
-                RafuChip(text: upstream)
-                    .help("Upstream branch")
-            }
             Button("Fetch", systemImage: "arrow.clockwise") { onFetch() }
                 .buttonStyle(RafuIconButtonStyle(size: 22, iconSize: 11))
                 .disabled(isBusy)
@@ -401,12 +410,10 @@ private struct GitCommitGraphRow: View {
     /// per-row width would misalign the rails between rows.
     let laneCanvasWidth: CGFloat
 
-    private static let visibleRefs = 3
-
     var body: some View {
         let refs = GitRefLabels.labels(from: commit.decorations)
         let laneColor = laneColors[(row?.laneIndex ?? 0) % laneColors.count]
-        HStack(spacing: 6) {
+        HStack(spacing: GitCommitRowPlan.spacing) {
             GitCommitLaneCanvas(
                 row: row,
                 laneColors: laneColors,
@@ -414,37 +421,36 @@ private struct GitCommitGraphRow: View {
                 showsRails: showsRails
             )
             .frame(width: laneCanvasWidth, height: GitCommitGraphMetrics.rowHeight)
-            Text(commit.subject)
-                .font(.system(size: 12.5, weight: isHead ? .semibold : .regular))
-                .foregroundStyle(theme.palette.textPrimary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .layoutPriority(1)
-            Text(commit.authorName)
-                .font(.system(size: 11.5))
-                .foregroundStyle(theme.palette.textMuted)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Spacer(minLength: 4)
-            if !refs.isEmpty {
-                HStack(spacing: 3) {
-                    ForEach(refs.prefix(Self.visibleRefs), id: \.self) { ref in
-                        GitRefPill(label: ref, laneColor: laneColor)
-                    }
-                    if refs.count > Self.visibleRefs {
-                        Text("+\(refs.count - Self.visibleRefs)")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(theme.palette.textSecondary)
-                            .fixedSize()
+            // Subject, author, ref pills, and time share the rest of the row
+            // by `GitCommitRowPlan`: the subject keeps its floor, the pills
+            // step down (full, short, icon only, "+n"), and the author shows
+            // only with room for it. Every pill density is a subview; the
+            // layout gives the unused ones zero width.
+            GitCommitRowLayout {
+                Text(commit.subject)
+                    .font(.system(size: 12.5, weight: isHead ? .semibold : .regular))
+                    .foregroundStyle(theme.palette.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .commitRowSlot(.subject)
+                Text(commit.authorName)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(theme.palette.textMuted)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .commitRowSlot(.author)
+                if !refs.isEmpty {
+                    ForEach(GitRefPillDensity.allCases, id: \.self) { density in
+                        GitRefPillGroup(refs: refs, density: density, laneColor: laneColor)
+                            .commitRowSlot(.pills(density))
                     }
                 }
-                .layoutPriority(2)
+                Text(GitRelativeTime.label(for: commit.authoredAt))
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(theme.palette.textMuted)
+                    .lineLimit(1)
+                    .commitRowSlot(.time)
             }
-            Text(GitRelativeTime.label(for: commit.authoredAt))
-                .font(.system(size: 11).monospacedDigit())
-                .foregroundStyle(theme.palette.textMuted)
-                .lineLimit(1)
-                .fixedSize()
         }
         .frame(height: GitCommitGraphMetrics.rowHeight)
         .accessibilityElement(children: .ignore)
@@ -459,6 +465,213 @@ private struct GitCommitGraphRow: View {
         if row?.isMerge == true { parts.append("merge commit") }
         parts += refs.map { GitRefPill.kindTitle(for: $0.kind) + " " + $0.name }
         return parts.joined(separator: ", ")
+    }
+}
+
+/// How a history row's text column divides its width (ADR 0013 amendment,
+/// round 5). The subject always wins: it keeps a floor before anything
+/// else gets room. The ref pills come next and step down in density until
+/// they fit; they are never squeezed below their own width. The subject
+/// then takes what is left, and the author shows only when there is room
+/// for it. Pure, so the order is tested without a view.
+nonisolated struct GitCommitRowPlan: Equatable, Sendable {
+    /// Gap between the slots, and between the lane canvas and the subject.
+    static let spacing: CGFloat = 6
+    /// The subject's floor is this, or `subjectShare` of the text column
+    /// when that is wider. A shorter subject needs only its own width.
+    static let minimumSubjectWidth: CGFloat = 90
+    static let subjectShare: CGFloat = 0.4
+    /// The author shows with this much room, or room for the whole name;
+    /// never as a one-letter fragment. The hover card and VoiceOver keep it.
+    static let minimumAuthorWidth: CGFloat = 60
+
+    var subjectWidth: CGFloat
+    /// `nil` hides the author.
+    var authorWidth: CGFloat?
+    /// Index into the `pills` widths given to `make` (densest last); `nil`
+    /// hides the pills.
+    var pillLevel: Int?
+    var pillWidth: CGFloat
+    var timeWidth: CGFloat
+
+    /// - Parameters:
+    ///   - width: the whole text column, time included.
+    ///   - subject, author, time: each slot's ideal (untruncated) width.
+    ///   - pills: the pill strip's ideal width at each density, in the
+    ///     order they are tried; empty when the commit has no refs.
+    static func make(
+        width: CGFloat, subject: CGFloat, author: CGFloat, pills: [CGFloat], time: CGFloat
+    ) -> GitCommitRowPlan {
+        let text = max(0, width - time - spacing)
+        let subjectFloor = min(subject, max(minimumSubjectWidth, text * subjectShare))
+        let pillRoom = text - subjectFloor - spacing
+        let pillLevel = pills.firstIndex { $0 <= pillRoom }
+        let pillWidth = pillLevel.map { pills[$0] } ?? 0
+        let afterPills = pillLevel == nil ? text : text - pillWidth - spacing
+        let subjectWidth = max(0, min(subject, afterPills))
+        let authorRoom = afterPills - subjectWidth - spacing
+        let showsAuthor = author > 0 && authorRoom >= min(author, minimumAuthorWidth)
+        return GitCommitRowPlan(
+            subjectWidth: subjectWidth,
+            authorWidth: showsAuthor ? min(author, authorRoom) : nil,
+            pillLevel: pillLevel,
+            pillWidth: pillWidth,
+            timeWidth: time
+        )
+    }
+}
+
+/// One subview of `GitCommitRowLayout`.
+nonisolated enum GitCommitRowSlot: Hashable, Sendable {
+    case subject
+    case author
+    case pills(GitRefPillDensity)
+    case time
+}
+
+private nonisolated struct GitCommitRowSlotKey: LayoutValueKey {
+    static let defaultValue = GitCommitRowSlot.subject
+}
+
+extension View {
+    /// Marks a `GitCommitRowLayout` subview. The flexible, clipped frame
+    /// lets the layout hide a slot by proposing zero width; a bare `Text`
+    /// proposed zero width can still draw an ellipsis.
+    fileprivate func commitRowSlot(_ slot: GitCommitRowSlot) -> some View {
+        frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            .clipped()
+            .layoutValue(key: GitCommitRowSlotKey.self, value: slot)
+    }
+}
+
+/// Places a history row's subject, author, ref pills, and time by
+/// `GitCommitRowPlan`. Each subview's ideal width is measured once into
+/// the cache (no `GeometryReader`, no second pass). Every pill density is a
+/// subview; the ones the plan does not choose get zero width.
+private struct GitCommitRowLayout: Layout {
+    struct Cache {
+        var slots: [GitCommitRowSlot] = []
+        var idealWidths: [CGFloat] = []
+        var height: CGFloat = 0
+    }
+
+    func makeCache(subviews: Subviews) -> Cache {
+        var cache = Cache()
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            cache.slots.append(subview[GitCommitRowSlotKey.self])
+            cache.idealWidths.append(size.width)
+            cache.height = max(cache.height, size.height)
+        }
+        return cache
+    }
+
+    func updateCache(_ cache: inout Cache, subviews: Subviews) {
+        cache = makeCache(subviews: subviews)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache)
+        -> CGSize
+    {
+        if let width = proposal.width, width.isFinite {
+            return CGSize(width: width, height: cache.height)
+        }
+        let full = plan(width: .infinity, cache: cache)
+        let gaps = CGFloat(full.pillLevel == nil ? 1 : 2) * GitCommitRowPlan.spacing
+        let ideal =
+            full.subjectWidth + (full.authorWidth.map { $0 + GitCommitRowPlan.spacing } ?? 0)
+            + full.pillWidth + full.timeWidth + gaps
+        return CGSize(width: ideal, height: cache.height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache
+    ) {
+        let spacing = GitCommitRowPlan.spacing
+        let plan = plan(width: bounds.width, cache: cache)
+        let chosenDensity = plan.pillLevel.map { pillDensities(cache)[$0] }
+        let textEnd = bounds.maxX - plan.timeWidth - spacing
+        for index in subviews.indices {
+            let x: CGFloat
+            let width: CGFloat?
+            switch cache.slots[index] {
+            case .subject:
+                (x, width) = (bounds.minX, plan.subjectWidth)
+            case .author:
+                (x, width) = (bounds.minX + plan.subjectWidth + spacing, plan.authorWidth)
+            case .pills(let density):
+                (x, width) = (
+                    textEnd - plan.pillWidth, density == chosenDensity ? plan.pillWidth : nil
+                )
+            case .time:
+                (x, width) = (bounds.maxX - plan.timeWidth, plan.timeWidth)
+            }
+            subviews[index].place(
+                at: CGPoint(x: x, y: bounds.midY), anchor: .leading,
+                proposal: ProposedViewSize(width: width ?? 0, height: bounds.height))
+        }
+    }
+
+    private func pillDensities(_ cache: Cache) -> [GitRefPillDensity] {
+        cache.slots.compactMap { slot in
+            if case .pills(let density) = slot { density } else { nil }
+        }
+    }
+
+    private func plan(width: CGFloat, cache: Cache) -> GitCommitRowPlan {
+        func idealWidth(_ slot: GitCommitRowSlot) -> CGFloat {
+            cache.slots.firstIndex(of: slot).map { cache.idealWidths[$0] } ?? 0
+        }
+        return GitCommitRowPlan.make(
+            width: width,
+            subject: idealWidth(.subject),
+            author: idealWidth(.author),
+            pills: pillDensities(cache).map { idealWidth(.pills($0)) },
+            time: idealWidth(.time)
+        )
+    }
+}
+
+/// A row's ref pills at one density: up to three pills plus "+n" for the
+/// rest, or (`counter`) a single "+n" capsule for every ref. Each pill and
+/// the counter keep the full ref name in their tooltip; the row's
+/// VoiceOver label lists every ref.
+private struct GitRefPillGroup: View {
+    @Environment(\.rafuTheme) private var theme
+    let refs: [GitRefLabel]
+    let density: GitRefPillDensity
+    let laneColor: Color
+
+    private static let visibleRefs = 3
+
+    var body: some View {
+        if density == .counter {
+            Text("+\(refs.count)")
+                .font(.system(size: 10.5, weight: .medium).monospacedDigit())
+                .foregroundStyle(theme.palette.textPrimary)
+                .padding(.horizontal, 5)
+                .frame(height: 16)
+                .background(Capsule().fill(laneColor.opacity(0.16)))
+                .overlay(
+                    Capsule().strokeBorder(laneColor.opacity(0.45), lineWidth: RafuMetrics.hairline)
+                )
+                .fixedSize()
+                .help(
+                    refs.map { GitRefPill.kindTitle(for: $0.kind) + " " + $0.name }
+                        .joined(separator: "\n"))
+        } else {
+            HStack(spacing: 3) {
+                ForEach(refs.prefix(Self.visibleRefs), id: \.self) { ref in
+                    GitRefPill(label: ref, laneColor: laneColor, density: density)
+                }
+                if refs.count > Self.visibleRefs {
+                    Text("+\(refs.count - Self.visibleRefs)")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(theme.palette.textSecondary)
+                        .fixedSize()
+                }
+            }
+        }
     }
 }
 
@@ -640,9 +853,8 @@ private struct GitCommitInlineDetail: View {
             VStack(alignment: .leading, spacing: 4) {
                 metaLine
                 if case .loaded(let loaded) = detail {
-                    let rest = GitCommitStatsPresentation.bodyWithoutSubject(loaded.body)
-                    if !rest.isEmpty {
-                        Text(rest)
+                    if !loaded.displayBody.isEmpty {
+                        Text(loaded.displayBody)
                             .font(.system(size: 11.5))
                             .foregroundStyle(theme.palette.textSecondary)
                             .lineLimit(Self.maximumBodyLines)

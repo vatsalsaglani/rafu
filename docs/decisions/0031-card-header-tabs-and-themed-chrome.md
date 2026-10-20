@@ -170,6 +170,20 @@ holds.
   fragment of the next tab beside `+`). The Files header's top padding is
   10 → **19 pt**, so its title centre aligns with the tab labels'
   centre (12 pt inset + half the 38 pt shelf = 31 pt).
+- **One header line for every navigator panel (round 5, 2026-10-20).** Only
+  the Files header got the 19 pt above; Search, Source Control, Terminals,
+  and History (all `RafuUtilityPanelHeader`) still sat about 14 pt higher.
+  Now one metric, `RafuMetrics.navigatorHeaderTitleCenterY`
+  (`workbenchInset` + `tabShelfHeight` / 2 = 31 pt), and one modifier,
+  `View.rafuNavigatorHeaderPlacement(rowHeight:)`, place every rail panel's
+  header: the Files header calls it with its 24 pt row (19 pt above), and
+  `RafuUtilityPanelHeader` calls it with its own band height (34 pt, or the
+  Larger Text height; 14 pt above). The space goes **above** the elevated
+  band, in the sidebar tone, and is a window-move surface, so the band reads
+  as a strip level with the tab shelf rather than a taller block.
+  `NavigatorPanelHeaderPlacementTests` maps every `WorkspaceNavigatorMode` to
+  its panel source (an exhaustive switch, so a new rail mode must join the
+  check) and fails if a panel aligns its header by hand.
 
 ## Alternatives considered
 

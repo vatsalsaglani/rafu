@@ -946,8 +946,27 @@ struct EditorGroupSurface<Content: View>: View {
     }
 }
 
+extension View {
+    /// Places a navigator panel header so its title's centre sits on the
+    /// editor tab labels' centre line (`RafuMetrics.navigatorHeaderTitleCenterY`).
+    /// Every rail panel's header uses this — the Files header directly,
+    /// the others through `RafuUtilityPanelHeader` — and a contract test
+    /// checks it. The space above the header is a window-move surface, like
+    /// the titlebar row it extends.
+    func rafuNavigatorHeaderPlacement(rowHeight: CGFloat) -> some View {
+        let inset = RafuMetrics.navigatorHeaderTopInset(rowHeight: rowHeight)
+        return padding(.top, inset)
+            .background(alignment: .top) {
+                WindowDragHandle().frame(height: inset)
+            }
+    }
+}
+
 /// Shared one-row panel header. The supplied context and action builders are
 /// stored as values so the header remains a normal SwiftUI diffing boundary.
+/// Every user is a navigator (rail) panel, so the header places itself with
+/// `rafuNavigatorHeaderPlacement(rowHeight:)`: its band starts below a
+/// short strip of the sidebar tone, with the title on the tab labels' line.
 struct RafuUtilityPanelHeader<Context: View, Actions: View>: View {
     let icon: String
     let title: String
@@ -977,6 +996,10 @@ struct RafuUtilityPanelHeader<Context: View, Actions: View>: View {
     }
 
     var body: some View {
+        let rowHeight = WorkbenchTextHeightPolicy.minimumHeight(
+            base: RafuMetrics.sectionHeaderHeight,
+            scaledHeight: scaledMinimumHeight
+        )
         HStack(spacing: RafuMetrics.space2) {
             // 13 pt glyph in the secondary tone, then the title: the same
             // icon size as every other chrome glyph.
@@ -1003,12 +1026,7 @@ struct RafuUtilityPanelHeader<Context: View, Actions: View>: View {
             .help(closeAccessibilityLabel)
         }
         .padding(.horizontal, RafuMetrics.utilityBodyInset)
-        .frame(
-            minHeight: WorkbenchTextHeightPolicy.minimumHeight(
-                base: RafuMetrics.sectionHeaderHeight,
-                scaledHeight: scaledMinimumHeight
-            )
-        )
+        .frame(minHeight: rowHeight)
         .background(theme.palette.elevatedBackground)
         .overlay(alignment: .bottom) {
             Rectangle()
@@ -1017,6 +1035,7 @@ struct RafuUtilityPanelHeader<Context: View, Actions: View>: View {
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
+        .rafuNavigatorHeaderPlacement(rowHeight: rowHeight)
         .accessibilityElement(children: .contain)
     }
 }

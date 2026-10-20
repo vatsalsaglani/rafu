@@ -59,6 +59,19 @@ nonisolated enum RafuMetrics {
     /// 6 pt inset, the 12 pt padding puts the first crumb's text in line
     /// with the first tab card's content (strip margin 8 + tab padding 8).
     static let breadcrumbHeight: CGFloat = 26
+    /// Every navigator panel header (Files, Search, Source Control,
+    /// Terminals, History) puts its title's centre this far below the
+    /// sidebar pane's top: the deck card's inset plus half its tab shelf,
+    /// which is where the editor tab labels' centre sits. Applied only
+    /// through `View.rafuNavigatorHeaderPlacement(rowHeight:)` (ADR 0031
+    /// §g, round 5), so the headers cannot drift apart again.
+    static let navigatorHeaderTitleCenterY: CGFloat = workbenchInset + tabShelfHeight / 2
+
+    /// The space above a navigator header row of `rowHeight` that puts the
+    /// row's centre on `navigatorHeaderTitleCenterY`.
+    static func navigatorHeaderTopInset(rowHeight: CGFloat) -> CGFloat {
+        max(0, navigatorHeaderTitleCenterY - rowHeight / 2)
+    }
     static let breadcrumbHorizontalPadding: CGFloat = 12
     static let radiusDenseSelection: CGFloat = 4
     static let radiusDenseCard: CGFloat = 6

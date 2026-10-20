@@ -284,6 +284,35 @@ The row anatomy and lane colors above were replaced on 2026-10-20; see
   `GitCommitDetailStore` keeps only the page derived by `GitHubRemoteURL`
   (owner and repository); the raw string is dropped in the loading task.
 
+### Round 5: narrow rows (2026-10-20, Swift 6.4, macOS 27.0.1)
+
+- **An `HStack` with `layoutPriority` cannot express "subject floor, then
+  pills, then subject".** In a ~300 pt sidebar the old row (subject
+  priority 1, pills priority 2) hid the subject entirely on rows with refs
+  and squeezed pills to "f…es"; the author showed as one letter. The fix is
+  a pure plan (`GitCommitRowPlan`) applied by a custom `Layout`
+  (`GitCommitRowLayout`) that measures each subview's ideal width once in
+  `makeCache` (ADR 0013 round 5 lists the order).
+- **Hiding a `Layout` subview.** A layout cannot remove a subview, so every
+  pill density is a subview and the unused ones are placed with a zero-width
+  proposal. Each slot is wrapped in `.frame(minWidth: 0, maxWidth:
+  .infinity, alignment: .leading).clipped()` so a zero proposal draws
+  nothing and an exact proposal truncates as usual; the frame's ideal size
+  is still the child's ideal, so `sizeThatFits(.unspecified)` measures the
+  real width. Built and unit-tested (the plan) only; the rendering is not
+  yet confirmed by a launch.
+- **`LayoutValueKey` under default `MainActor` isolation.** In `RafuApp` a
+  plain `private struct …: LayoutValueKey` gets a main-actor-isolated
+  conformance, and reading `subview[Key.self]` inside `Layout` methods fails
+  to compile: "main actor-isolated conformance of '…' to 'LayoutValueKey'
+  cannot be used in nonisolated context". Declare the key `nonisolated
+  struct`. (Related: `nonisolated-extension-isolation-trap.md`.)
+- **Commit bodies are hard-wrapped at ~72 columns.** Shown in a proportional
+  font at another width they wrap raggedly. `GitCommitMessageReflow` joins
+  lines within a paragraph and keeps list items, fenced/indented code, and
+  trailer blocks; `GitCommitDetail.displayBody` runs it once when the
+  detail loads, so no view body reflows text.
+
 ### Open questions (coordinator visual check)
 
 - A SwiftUI popover can become the key window, so arrow keys may go to the
@@ -296,7 +325,7 @@ The row anatomy and lane colors above were replaced on 2026-10-20; see
 
 ### Verification
 
-`swift test --filter "CommitGraph|GitHubRemoteURL|GitCommitDetailStore|GitPanelPresentation|GitService"`.
+`swift test --filter "CommitGraph|GitCommitGraphRowPlan|GitHubRemoteURL|GitCommitDetailStore|GitPanelPresentation|GitService"`.
 The layout test `layoutScalesToThousandsOfCommits` lays out 5,000 synthetic
 commits under a 2 s bound (a debug build takes milliseconds).
 

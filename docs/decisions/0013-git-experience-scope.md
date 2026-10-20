@@ -210,6 +210,42 @@ and GD3 change as follows; the bounded, explicit data rules do not change.
 - **Header** is one row: search (loaded commits only), branch and upstream
   chips, Fetch.
 
+**Amendment (2026-10-20, round 5 — live check in a ~300 pt sidebar):**
+
+- **Width degradation rule.** The subject always wins. A row's text column
+  is divided by the pure `GitCommitRowPlan`, applied by the custom
+  `GitCommitRowLayout` (ideal widths measured once into the layout cache; no
+  `GeometryReader`, no per-row second pass):
+  1. Time keeps its own width at the trailing edge.
+  2. The subject gets a floor first: 90 pt, or 40% of the text column when
+     wider (a shorter subject needs only its own width).
+  3. The ref pills get the room left after that floor, tried in order:
+     full pills (≤ 120 pt each, middle truncation), short pills (≤ 70 pt),
+     icon-only pills (tooltip and VoiceOver keep the full name), one "+n"
+     capsule for every ref, then no pills. A pill is never squeezed below
+     its own width (the live check showed pills squeezed to "f…es").
+  4. The subject takes what is left, up to its full width.
+  5. The author shows only with ≥ 60 pt for it (or room for the whole
+     name); it is never a one-letter fragment. The hover card and the row's
+     VoiceOver label always keep it.
+- **Lane column** is `laneX(laneCount − 1)` + 7 pt (the HEAD ring plus
+  half its stroke), where `laneCount` is the widest lane any LOADED row
+  uses, recomputed when a page loads; the 8-lane cap is never reserved. One
+  width for every row keeps the rails aligned, so a page whose lower rows
+  use five lanes is five lanes wide everywhere. The row's leading inset is
+  6 pt, so the first node's ring sits about 8 pt inside the selection pill.
+- **Header** is search and Fetch only. The branch and upstream chips are
+  removed: the repository row above the tabs already shows both, and in a
+  narrow sidebar the search field squeezed the branch chip to an empty
+  capsule.
+- **Message reflow.** The hover card and the expanded row show
+  `GitCommitDetail.displayBody`: the body without its subject, reflowed by
+  the pure `GitCommitMessageReflow` (computed once with the detail, off the
+  main actor). Hard-wrapped lines in a paragraph join; a blank line splits
+  paragraphs; list items ("- ", "* ", "• ", "1. ", "1) ") start new lines and
+  absorb their 1–4-space-indented continuation lines; fenced code, other
+  indented lines, and consecutive Git trailer lines stay line for line.
+
 **Merge note:** the integration owner should change this ADR from Proposed
 to Accepted only when merging the lane and append its row to the shared
 decision index.

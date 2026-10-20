@@ -76,9 +76,8 @@ struct GitCommitHoverCard: View {
                 .foregroundStyle(theme.palette.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             if case .loaded(let loaded) = detail {
-                let rest = GitCommitStatsPresentation.bodyWithoutSubject(loaded.body)
-                if !rest.isEmpty {
-                    Text(rest)
+                if !loaded.displayBody.isEmpty {
+                    Text(loaded.displayBody)
                         .font(.system(size: 11.5))
                         .foregroundStyle(theme.palette.textSecondary)
                         .lineLimit(Self.maximumBodyLines)
@@ -177,13 +176,14 @@ nonisolated enum GitCommitDateText {
 /// branch), then the name. The icon and tint use the commit's lane color;
 /// the checked-out branch uses the accent. The name stays in `textPrimary`
 /// so it keeps full contrast on every theme. Long names truncate in the
-/// middle.
+/// middle. In a narrow history row the pill steps down (`density`): a
+/// shorter name, then the icon alone; the tooltip and VoiceOver label keep
+/// the full name at every density.
 struct GitRefPill: View {
     @Environment(\.rafuTheme) private var theme
     let label: GitRefLabel
     let laneColor: Color
-
-    static let maximumWidth: CGFloat = 120
+    var density: GitRefPillDensity = .full
 
     var body: some View {
         let tint = label.kind == .head ? theme.palette.accent : laneColor
@@ -192,15 +192,17 @@ struct GitRefPill: View {
                 .font(.system(size: 8.5, weight: .semibold))
                 .foregroundStyle(tint)
                 .accessibilityHidden(true)
-            Text(label.name)
-                .font(.system(size: 10.5, weight: label.kind == .head ? .semibold : .medium))
-                .foregroundStyle(theme.palette.textPrimary)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            if density != .iconOnly {
+                Text(label.name)
+                    .font(.system(size: 10.5, weight: label.kind == .head ? .semibold : .medium))
+                    .foregroundStyle(theme.palette.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
         }
-        .padding(.horizontal, 5)
+        .padding(.horizontal, density == .iconOnly ? 4 : 5)
         .frame(height: 16)
-        .frame(maxWidth: Self.maximumWidth)
+        .frame(maxWidth: density.maximumPillWidth)
         .background(Capsule().fill(tint.opacity(0.16)))
         .overlay(Capsule().strokeBorder(tint.opacity(0.45), lineWidth: RafuMetrics.hairline))
         .help(Self.kindTitle(for: label.kind) + " " + label.name)
@@ -223,6 +225,29 @@ struct GitRefPill: View {
         case .local: "Branch"
         case .remote: "Remote branch"
         case .tag: "Tag"
+        }
+    }
+}
+
+/// How much of a ref pill a history row shows, in the order the row tries
+/// them as its width shrinks (ADR 0013 amendment, round 5).
+nonisolated enum GitRefPillDensity: CaseIterable, Hashable, Sendable {
+    /// Icon and name, up to 120 pt, the name truncated in the middle.
+    case full
+    /// Icon and name, up to 70 pt.
+    case short
+    /// The kind icon alone.
+    case iconOnly
+    /// No pills: one "+n" capsule counting every ref.
+    case counter
+
+    /// The widest a single pill may be at this density; `nil` lets the
+    /// pill take its own width (the icon alone).
+    var maximumPillWidth: CGFloat? {
+        switch self {
+        case .full: 120
+        case .short: 70
+        case .iconOnly, .counter: nil
         }
     }
 }

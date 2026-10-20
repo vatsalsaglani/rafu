@@ -805,7 +805,6 @@ struct GitInspectorView: View {
                 // commit's details expand directly under its row.
                 GitCommitGraphView(
                     commits: commits,
-                    currentBranch: session.gitBranchSnapshot?.currentBranch,
                     upstream: session.gitBranchSnapshot?.upstream,
                     lastFetchedAt: session.gitLastFetchedAt,
                     hasMore: session.gitHistoryPage?.hasMore ?? false,

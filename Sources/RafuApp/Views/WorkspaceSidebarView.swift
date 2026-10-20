@@ -11,6 +11,9 @@ struct WorkspaceSidebarView: View {
 
     @Environment(\.rafuTheme) private var theme
 
+    /// The Files header row: the 24 pt icon buttons set its height.
+    static let headerRowHeight: CGFloat = 24
+
     var body: some View {
         VStack(spacing: 0) {
             sidebarHeader
@@ -118,11 +121,10 @@ struct WorkspaceSidebarView: View {
             newItemMenu
         }
         .padding(.horizontal, 10)
-        // The header sits directly below the titlebar row, level with the
-        // deck card's top edge. The tab labels' centre is the card's 12 pt
-        // inset plus half the 38 pt tab shelf (31 pt); 19 pt above plus half
-        // of this 24 pt row puts the title's centre on the same line.
-        .padding(.top, 19)
+        // The header sits directly below the titlebar row. The shared
+        // placement puts this 24 pt row's centre on the editor tab labels'
+        // centre (19 pt above it), like every other navigator panel header.
+        .rafuNavigatorHeaderPlacement(rowHeight: Self.headerRowHeight)
         .padding(.bottom, 8)
         // The header's empty leading run doubles as a window-move surface
         // (`isMovable` is off; see WindowDragHandle). The icon buttons above

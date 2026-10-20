@@ -187,6 +187,98 @@ struct GitPanelPresentationTests {
                 == "Line 1\nLine 2")
     }
 
+    // MARK: Commit message reflow (history round 5)
+
+    @Test("Hard-wrapped lines join within a paragraph; a blank line splits paragraphs")
+    func reflowJoinsParagraphLines() {
+        let body = """
+            This module uploads raw runtime evidence to S3 as soon as it
+            is written, so a separate worker can build overlays.
+
+
+            Second paragraph
+            continues here.
+            """
+        #expect(
+            GitCommitMessageReflow.reflow(body)
+                == "This module uploads raw runtime evidence to S3 as soon as it is written,"
+                + " so a separate worker can build overlays.\n\nSecond paragraph continues here.")
+    }
+
+    @Test("List items start new lines; a wrapped item's indented line joins it")
+    func reflowKeepsListItems() {
+        let body = """
+            Changes:
+            - Deck depth: inset 12, shadow 0.55 dark,
+              and a 1 pt inner top highlight.
+            - Corner wedges repaint the frame.
+            * Star item
+            • Bullet item
+            1. First
+            12) Twelfth
+            """
+        #expect(
+            GitCommitMessageReflow.reflow(body)
+                == """
+                Changes:
+                - Deck depth: inset 12, shadow 0.55 dark, and a 1 pt inner top highlight.
+                - Corner wedges repaint the frame.
+                * Star item
+                • Bullet item
+                1. First
+                12) Twelfth
+                """)
+    }
+
+    @Test("Fenced and indented code stay line for line")
+    func reflowKeepsCode() {
+        let fenced = "Run this:\n```\nlet a = 1\n  let b = 2\n\n```\nAfter the fence\nwraps."
+        #expect(
+            GitCommitMessageReflow.reflow(fenced)
+                == "Run this:\n```\nlet a = 1\n  let b = 2\n\n```\nAfter the fence wraps.")
+
+        let indented = "Commands:\n\n    swift build\n    swift test\nnext\n\tTabbed line"
+        #expect(
+            GitCommitMessageReflow.reflow(indented)
+                == "Commands:\n\n    swift build\n    swift test\nnext\n\tTabbed line")
+    }
+
+    @Test("Trailer lines stay on their own lines; a colon in prose still joins")
+    func reflowKeepsTrailers() {
+        let body = """
+            Note: the rewrite keeps
+            the old order.
+
+            Co-Authored-By: Someone <someone@example.com>
+            Claude-Session: https://example.com/session
+            """
+        #expect(
+            GitCommitMessageReflow.reflow(body)
+                == """
+                Note: the rewrite keeps the old order.
+
+                Co-Authored-By: Someone <someone@example.com>
+                Claude-Session: https://example.com/session
+                """)
+    }
+
+    @Test("CRLF, trailing spaces, and outer blank lines are normalized")
+    func reflowNormalizesWhitespace() {
+        #expect(GitCommitMessageReflow.reflow("\r\nOne  \r\ntwo\r\n\r\n") == "One two")
+        #expect(GitCommitMessageReflow.reflow("") == "")
+    }
+
+    @Test("A commit detail carries its reflowed body without the subject")
+    func detailDisplayBody() {
+        let detail = GitCommitDetail(
+            body: "Subject line\n\nFirst wrapped\nline.\n\n- item", filesChanged: 1,
+            insertions: 1, deletions: 0)
+        #expect(detail.displayBody == "First wrapped line.\n\n- item")
+        #expect(
+            GitCommitDetail(body: "Only a subject", filesChanged: 0, insertions: 0, deletions: 0)
+                .displayBody == "")
+    }
+
     @Test("A full hash splits by character count with no hyphen and rejoins exactly")
     func hashLines() {
         let hash = "8be02b5fd3f3fc02a1b2c3d4e5f60718293a4b5c"
