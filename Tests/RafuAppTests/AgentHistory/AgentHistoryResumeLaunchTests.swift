@@ -127,7 +127,7 @@ struct AgentHistoryResumeInEnsembleTests {
     private func makeSession(root: URL) -> WorkspaceSession {
         let session = WorkspaceSession(
             restorationStore: WorkspaceRestorationStore(
-                defaultsSuiteName: "dev.rafu.agent-resume-tests.\(UUID())",
+                defaultsSuiteName: TestDefaultsSuite.name("dev.rafu.agent-resume-tests"),
                 bookmarkMaker: { _ in throw CancellationError() }),
             closeSaveTracker: WorkspaceCloseSaveTracker(),
             canvasStore: WorkspaceCanvasStore(

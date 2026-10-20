@@ -60,7 +60,7 @@ private func installAttentionRig(
     surface: TerminalAttentionSurface,
     authorized: Bool = true
 ) -> (notifier: SpyTerminalAttentionNotifier, hud: SpyNotchHUD, suiteName: String) {
-    let suiteName = "TerminalAttentionTests.\(UUID().uuidString)"
+    let suiteName = TestDefaultsSuite.name("TerminalAttentionTests")
     let store = TerminalAttentionSurfaceStore(suiteName: suiteName)
     store.setSurface(surface)
     session.terminalAttentionSurfaceStore = store
@@ -347,7 +347,7 @@ func notifyIfNeededPostsForBellingAuthorizedSession() async throws {
     controller.noteBell()
 
     let rig = installAttentionRig(on: session, surface: .both, authorized: true)
-    defer { UserDefaults(suiteName: rig.suiteName)?.removePersistentDomain(forName: rig.suiteName) }
+    defer { TestDefaultsSuite.remove(rig.suiteName) }
 
     session.notifyIfNeeded(for: controller)
 
@@ -376,7 +376,7 @@ func notifyIfNeededPostsNothingWhenNotRaised() async throws {
     // test above); here the session simply was never `noteBell()`'d.
 
     let rig = installAttentionRig(on: session, surface: .both, authorized: true)
-    defer { UserDefaults(suiteName: rig.suiteName)?.removePersistentDomain(forName: rig.suiteName) }
+    defer { TestDefaultsSuite.remove(rig.suiteName) }
 
     session.notifyIfNeeded(for: controller)
 
@@ -395,7 +395,7 @@ func notifyIfNeededPostsNothingWhenPreferenceOff() async throws {
     controller.noteBell()
 
     let rig = installAttentionRig(on: session, surface: .none, authorized: true)
-    defer { UserDefaults(suiteName: rig.suiteName)?.removePersistentDomain(forName: rig.suiteName) }
+    defer { TestDefaultsSuite.remove(rig.suiteName) }
 
     session.notifyIfNeeded(for: controller)
 
@@ -416,7 +416,7 @@ func notifyIfNeededPostsNothingWhenUnauthorized() async throws {
     controller.noteBell()
 
     let rig = installAttentionRig(on: session, surface: .both, authorized: false)
-    defer { UserDefaults(suiteName: rig.suiteName)?.removePersistentDomain(forName: rig.suiteName) }
+    defer { TestDefaultsSuite.remove(rig.suiteName) }
 
     session.notifyIfNeeded(for: controller)
 
@@ -439,7 +439,7 @@ func notifyIfNeededHUDOnlySurface() async throws {
     controller.noteBell()
 
     let rig = installAttentionRig(on: session, surface: .hud, authorized: true)
-    defer { UserDefaults(suiteName: rig.suiteName)?.removePersistentDomain(forName: rig.suiteName) }
+    defer { TestDefaultsSuite.remove(rig.suiteName) }
 
     session.notifyIfNeeded(for: controller)
 
@@ -459,7 +459,7 @@ func notifyIfNeededNotificationOnlySurface() async throws {
     controller.noteBell()
 
     let rig = installAttentionRig(on: session, surface: .notification, authorized: true)
-    defer { UserDefaults(suiteName: rig.suiteName)?.removePersistentDomain(forName: rig.suiteName) }
+    defer { TestDefaultsSuite.remove(rig.suiteName) }
 
     session.notifyIfNeeded(for: controller)
 

@@ -257,7 +257,7 @@ struct CanvasNodeInteractionTests {
     private func fixture(_ root: URL) async throws -> (WorkspaceSession, CanvasBoardState) {
         let session = WorkspaceSession(
             restorationStore: WorkspaceRestorationStore(
-                defaultsSuiteName: "dev.rafu.canvas-node-tests.\(UUID())",
+                defaultsSuiteName: TestDefaultsSuite.name("dev.rafu.canvas-node-tests"),
                 bookmarkMaker: { _ in throw CancellationError() }),
             closeSaveTracker: WorkspaceCloseSaveTracker(),
             canvasStore: WorkspaceCanvasStore(

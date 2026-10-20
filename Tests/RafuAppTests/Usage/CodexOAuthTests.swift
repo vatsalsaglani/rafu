@@ -194,8 +194,8 @@ func codexOAuthResolvesConfiguredHome() {
 @Test("Codex Connect never consults Claude Code Keychain", arguments: CodexFileCondition.allCases)
 func codexConnectorNeverReadsClaudeKeychain(condition: CodexFileCondition) async {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
-    let suite = "CodexConnectorTests.\(UUID().uuidString)"
-    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    let suite = TestDefaultsSuite.name("CodexConnectorTests")
+    defer { TestDefaultsSuite.remove(suite) }
     let consent = UsageNetworkConsentStore(suiteName: suite)
     let credentialStore = UsageCredentialStore(servicePrefix: "test.codex.\(UUID().uuidString)")
     let keychainReads = CodexSynchronousCounter()

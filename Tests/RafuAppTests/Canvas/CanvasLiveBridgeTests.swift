@@ -26,7 +26,7 @@ private struct CanvasLiveBridgeFixture {
     init() throws {
         let session = WorkspaceSession(
             restorationStore: WorkspaceRestorationStore(
-                defaultsSuiteName: "dev.rafu.canvas-bridge-tests.\(UUID())",
+                defaultsSuiteName: TestDefaultsSuite.name("dev.rafu.canvas-bridge-tests"),
                 bookmarkMaker: { _ in throw CancellationError() }),
             closeSaveTracker: WorkspaceCloseSaveTracker())
         let board = CanvasBoardState(document: CanvasDocument(title: "Bridge test"))

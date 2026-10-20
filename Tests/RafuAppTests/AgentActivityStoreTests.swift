@@ -24,7 +24,7 @@ private func session(
 @Suite("Agent activity store")
 struct AgentActivityStoreTests {
     private func makeStore() -> (AgentActivityStore, String) {
-        let suite = "dev.rafu.tests.agent-activity.\(UUID().uuidString)"
+        let suite = TestDefaultsSuite.name("dev.rafu.tests.agent-activity")
         let root = FileManager.default.temporaryDirectory
             .appending(path: "rafu-activity-\(UUID().uuidString)/AgentTracking")
         let store = AgentActivityStore(
@@ -36,7 +36,7 @@ struct AgentActivityStoreTests {
     @Test("Applied events become sessions; a later drain expires ended ones")
     func applyAndExpire() {
         let (store, suite) = makeStore()
-        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        defer { TestDefaultsSuite.remove(suite) }
         store.apply(
             [hookEvent("UserPromptSubmit", at: 1), hookEvent("PermissionRequest", at: 2)],
             at: Date(timeIntervalSince1970: 3))
@@ -54,7 +54,7 @@ struct AgentActivityStoreTests {
     )
     func markReplyReadRevision() {
         let (store, suite) = makeStore()
-        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        defer { TestDefaultsSuite.remove(suite) }
         let before = store.acknowledgedRevision
         let unknown = UUID()
         #expect(!store.isReplyAcknowledged(replyEventID: unknown))
@@ -69,7 +69,7 @@ struct AgentActivityStoreTests {
     @Test("The acknowledged-reply set is a bounded FIFO, capped at 256")
     func acknowledgedReplyFIFOCap() {
         let (store, suite) = makeStore()
-        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        defer { TestDefaultsSuite.remove(suite) }
         let ids = (0..<(AgentActivityStore.maximumAcknowledgedReplies + 1)).map { _ in UUID() }
         for id in ids { store.markReplyRead(replyEventID: id) }
         #expect(!store.isReplyAcknowledged(replyEventID: ids[0]))
@@ -79,7 +79,7 @@ struct AgentActivityStoreTests {
     @Test("Connected providers persist in the injected defaults")
     func connectedProviders() {
         let (store, suite) = makeStore()
-        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        defer { TestDefaultsSuite.remove(suite) }
         store.setConnected(.codex, true)
         store.setConnected(.claude, true)
         store.setConnected(.claude, false)
@@ -93,7 +93,7 @@ struct AgentActivityStoreTests {
     func drainSpool() async throws {
         let (store, suite) = makeStore()
         defer {
-            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+            TestDefaultsSuite.remove(suite)
             try? FileManager.default.removeItem(at: store.paths.root.deletingLastPathComponent())
         }
         try AgentHookSpool.write(
@@ -110,7 +110,7 @@ struct AgentActivityStoreTests {
         let (store, suite) = makeStore()
         defer {
             store.stop()
-            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+            TestDefaultsSuite.remove(suite)
             try? FileManager.default.removeItem(at: store.paths.root.deletingLastPathComponent())
         }
         let descriptor = try #require(await AgentActivityIO.openSpool(store.paths.spool))

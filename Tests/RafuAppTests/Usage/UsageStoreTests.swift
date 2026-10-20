@@ -13,12 +13,12 @@ import Testing
 /// that suite up afterward so no state leaks between tests.
 
 private func isolatedSuiteName() -> String {
-    "UsageStoreTests.\(UUID().uuidString)"
+    TestDefaultsSuite.name("UsageStoreTests")
 }
 
 private func withIsolatedSuite<T>(_ body: (String) -> T) -> T {
     let name = isolatedSuiteName()
-    defer { UserDefaults().removePersistentDomain(forName: name) }
+    defer { TestDefaultsSuite.remove(name) }
     return body(name)
 }
 
@@ -328,7 +328,7 @@ private actor SettingsConnectionGate {
 func settingsModelConnectStateAndDuplicateGuard() async throws {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
     let suite = isolatedSuiteName()
-    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    defer { TestDefaultsSuite.remove(suite) }
     let gate = SettingsConnectionGate()
     let credentialStore = UsageCredentialStore(servicePrefix: "test.settings.\(UUID().uuidString)")
     let connector = UsageOAuthConnector(
@@ -364,7 +364,7 @@ func settingsModelConnectStateAndDuplicateGuard() async throws {
 @Test("UsageSettingsModel maps a fixed connector failure into failed state")
 func settingsModelFailedTransition() async {
     let suite = isolatedSuiteName()
-    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    defer { TestDefaultsSuite.remove(suite) }
     let connector = UsageOAuthConnector(
         credentialLoader: { _, _ in .failed(.credentialAccessDenied) },
         credentialStore: UsageCredentialStore(
@@ -417,7 +417,7 @@ func rosterConnectAffordances() {
 @Test("A provider with no connect affordance never reaches the credential loader")
 func connectorRejectsUnconnectableProvider() async {
     let suite = isolatedSuiteName()
-    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    defer { TestDefaultsSuite.remove(suite) }
     let consent = UsageNetworkConsentStore(suiteName: suite)
     let connector = UsageOAuthConnector(
         credentialLoader: { _, _ in
@@ -438,7 +438,7 @@ func connectorRejectsUnconnectableProvider() async {
     arguments: [true, false])
 func connectorLocalSessionOutcome(sessionPresent: Bool) async {
     let suite = isolatedSuiteName()
-    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    defer { TestDefaultsSuite.remove(suite) }
     let consent = UsageNetworkConsentStore(suiteName: suite)
     let connector = UsageOAuthConnector(
         credentialLoader: { _, _ in
@@ -476,7 +476,7 @@ func localSessionProbeContextIsOffline() async {
 @Test("UsageSettingsModel routes Cursor's Connect through its local-session affordance")
 func settingsModelCursorConnectUsesLocalSession() async {
     let suite = isolatedSuiteName()
-    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    defer { TestDefaultsSuite.remove(suite) }
     let connector = UsageOAuthConnector(
         credentialLoader: { _, _ in
             Issue.record("Cursor's Connect must not look for a Rafu-readable credential file")
@@ -500,7 +500,7 @@ func settingsModelCursorConnectUsesLocalSession() async {
 @Test("An unavailable provider is never handed to the connector at all")
 func settingsModelUnavailableProviderCannotConnect() async {
     let suite = isolatedSuiteName()
-    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    defer { TestDefaultsSuite.remove(suite) }
     let connector = UsageOAuthConnector(
         credentialLoader: { _, _ in
             Issue.record("An unavailable provider must not reach the connector's loader")

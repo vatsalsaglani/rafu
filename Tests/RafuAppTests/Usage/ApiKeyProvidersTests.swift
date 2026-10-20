@@ -320,8 +320,8 @@ func qwenFixtureMapsCodingPlanWindows() async throws {
 
 @Test("Qwen region helper and preference preserve exact intl and China endpoint metadata")
 func qwenRegionPreferenceRoundTrips() throws {
-    let suite = "ApiKeyProvidersTests.QwenRegion.\(UUID().uuidString)"
-    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    let suite = TestDefaultsSuite.name("ApiKeyProvidersTests.QwenRegion")
+    defer { TestDefaultsSuite.remove(suite) }
 
     #expect(QwenRegionPreference.load(suiteName: suite) == .international)
     QwenRegionPreference.save(.chinaMainland, suiteName: suite)

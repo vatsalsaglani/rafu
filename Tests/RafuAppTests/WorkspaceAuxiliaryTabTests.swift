@@ -10,14 +10,15 @@ struct WorkspaceAuxiliaryTabTests {
     private func withWorkspace(
         _ body: (WorkspaceSession) async throws -> Void
     ) async throws {
-        let suite = "dev.rafu.auxiliary-tabs.\(UUID().uuidString)"
+        let suite = TestDefaultsSuite.name("dev.rafu.auxiliary-tabs")
         let store = WorkspaceRestorationStore(
             defaultsSuiteName: suite, bookmarkMaker: { _ in Data([1]) })
         let session = WorkspaceSession(restorationStore: store)
         session.descriptor = WorkspaceDescriptor(
             displayName: "Auxiliary tabs",
-            location: .local(LocalWorkspaceReference(path: "/tmp/\(suite)")))
-        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+            location: .local(
+                LocalWorkspaceReference(path: "/tmp/rafu-workspace-\(UUID().uuidString)")))
+        defer { TestDefaultsSuite.remove(suite) }
         do {
             try await body(session)
         } catch {

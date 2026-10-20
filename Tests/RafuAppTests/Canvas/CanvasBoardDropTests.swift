@@ -248,7 +248,7 @@ struct CanvasBoardDropSessionTests {
     private func makeSession(root: URL) -> WorkspaceSession {
         let session = WorkspaceSession(
             restorationStore: WorkspaceRestorationStore(
-                defaultsSuiteName: "dev.rafu.board-drop-tests.\(UUID())",
+                defaultsSuiteName: TestDefaultsSuite.name("dev.rafu.board-drop-tests"),
                 bookmarkMaker: { _ in throw CancellationError() }),
             closeSaveTracker: WorkspaceCloseSaveTracker(),
             canvasStore: WorkspaceCanvasStore(

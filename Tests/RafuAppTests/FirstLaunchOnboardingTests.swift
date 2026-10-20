@@ -19,8 +19,8 @@ struct FirstLaunchOnboardingTests {
 
     @Test("OnboardingCompletionStore round-trips completion against an injected suite")
     func completionStoreRoundTrips() {
-        let suiteName = "FirstLaunchOnboardingTests.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+        let suiteName = TestDefaultsSuite.name("FirstLaunchOnboardingTests")
+        defer { TestDefaultsSuite.remove(suiteName) }
         let store = OnboardingCompletionStore(suiteName: suiteName)
 
         #expect(store.hasCompleted == false)
@@ -30,8 +30,8 @@ struct FirstLaunchOnboardingTests {
 
     @Test("OnboardingCompletionStore.reset re-arms a completed store")
     func completionStoreResets() {
-        let suiteName = "FirstLaunchOnboardingTests.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+        let suiteName = TestDefaultsSuite.name("FirstLaunchOnboardingTests")
+        defer { TestDefaultsSuite.remove(suiteName) }
         let store = OnboardingCompletionStore(suiteName: suiteName)
         store.markCompleted()
         #expect(store.hasCompleted == true)
@@ -110,8 +110,8 @@ struct FirstLaunchOnboardingTests {
     @MainActor
     @Test("offerOnFirstLaunch presents the intro at step 0 for a fresh store")
     func offerPresentsForFreshStore() {
-        let suiteName = "FirstLaunchOnboardingTests.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+        let suiteName = TestDefaultsSuite.name("FirstLaunchOnboardingTests")
+        defer { TestDefaultsSuite.remove(suiteName) }
         let model = FirstLaunchExperienceModel(
             store: OnboardingCompletionStore(suiteName: suiteName))
         let session = WorkspaceSession()
@@ -126,8 +126,8 @@ struct FirstLaunchOnboardingTests {
     @MainActor
     @Test("offerOnFirstLaunch is a no-op when the store already reports completion")
     func offerIsNoOpWhenAlreadyCompleted() {
-        let suiteName = "FirstLaunchOnboardingTests.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+        let suiteName = TestDefaultsSuite.name("FirstLaunchOnboardingTests")
+        defer { TestDefaultsSuite.remove(suiteName) }
         let store = OnboardingCompletionStore(suiteName: suiteName)
         store.markCompleted()
         let model = FirstLaunchExperienceModel(store: store)
@@ -141,8 +141,8 @@ struct FirstLaunchOnboardingTests {
     @MainActor
     @Test("advance() walks every step and finish() marks completion past the last one")
     func advanceWalksAllStepsThenFinishes() {
-        let suiteName = "FirstLaunchOnboardingTests.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+        let suiteName = TestDefaultsSuite.name("FirstLaunchOnboardingTests")
+        defer { TestDefaultsSuite.remove(suiteName) }
         let store = OnboardingCompletionStore(suiteName: suiteName)
         let model = FirstLaunchExperienceModel(store: store)
         let session = WorkspaceSession()
@@ -164,8 +164,8 @@ struct FirstLaunchOnboardingTests {
     @MainActor
     @Test("skip() from step 0 marks the store complete and dismisses")
     func skipFromFirstStepCompletes() {
-        let suiteName = "FirstLaunchOnboardingTests.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+        let suiteName = TestDefaultsSuite.name("FirstLaunchOnboardingTests")
+        defer { TestDefaultsSuite.remove(suiteName) }
         let store = OnboardingCompletionStore(suiteName: suiteName)
         let model = FirstLaunchExperienceModel(store: store)
         let session = WorkspaceSession()
@@ -180,8 +180,8 @@ struct FirstLaunchOnboardingTests {
     @MainActor
     @Test("back() clamps at step 0 and never goes negative")
     func backClampsAtZero() {
-        let suiteName = "FirstLaunchOnboardingTests.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+        let suiteName = TestDefaultsSuite.name("FirstLaunchOnboardingTests")
+        defer { TestDefaultsSuite.remove(suiteName) }
         let model = FirstLaunchExperienceModel(
             store: OnboardingCompletionStore(suiteName: suiteName))
         let session = WorkspaceSession()
@@ -196,8 +196,8 @@ struct FirstLaunchOnboardingTests {
     @MainActor
     @Test("hosts(_:) is true only for the session passed to offerOnFirstLaunch")
     func hostsOnlyMatchesTheOfferedSession() {
-        let suiteName = "FirstLaunchOnboardingTests.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+        let suiteName = TestDefaultsSuite.name("FirstLaunchOnboardingTests")
+        defer { TestDefaultsSuite.remove(suiteName) }
         let model = FirstLaunchExperienceModel(
             store: OnboardingCompletionStore(suiteName: suiteName))
         let hosted = WorkspaceSession()
@@ -212,8 +212,8 @@ struct FirstLaunchOnboardingTests {
     @MainActor
     @Test("relinquishHost dismisses without marking completion")
     func relinquishDoesNotComplete() {
-        let suiteName = "FirstLaunchOnboardingTests.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+        let suiteName = TestDefaultsSuite.name("FirstLaunchOnboardingTests")
+        defer { TestDefaultsSuite.remove(suiteName) }
         let store = OnboardingCompletionStore(suiteName: suiteName)
         let model = FirstLaunchExperienceModel(store: store)
         let session = WorkspaceSession()
@@ -229,8 +229,8 @@ struct FirstLaunchOnboardingTests {
     @MainActor
     @Test("replay ignores prior completion")
     func replayIgnoresCompletion() {
-        let suiteName = "FirstLaunchOnboardingTests.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+        let suiteName = TestDefaultsSuite.name("FirstLaunchOnboardingTests")
+        defer { TestDefaultsSuite.remove(suiteName) }
         let store = OnboardingCompletionStore(suiteName: suiteName)
         store.markCompleted()
         let model = FirstLaunchExperienceModel(store: store)

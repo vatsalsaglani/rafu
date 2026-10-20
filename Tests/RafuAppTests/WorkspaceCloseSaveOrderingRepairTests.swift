@@ -12,8 +12,8 @@ struct WorkspaceCloseSaveOrderingRepairTests {
         "Quit drains a closed window's delayed bookmark on a separate store actor",
         .timeLimit(.minutes(1)))
     func closedWindowCannotOverwriteQuitState() async throws {
-        let suite = "dev.rafu.close-order-repair.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let suite = TestDefaultsSuite.name("dev.rafu.close-order-repair")
+        defer { TestDefaultsSuite.remove(suite) }
         let entered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let released = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let draining = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
@@ -62,8 +62,8 @@ struct WorkspaceCloseSaveOrderingRepairTests {
         "Quit cancels a new close during the key save and releases its barrier after reply",
         .timeLimit(.minutes(1)))
     func lateCloseCannotEscapeFinalSave() async throws {
-        let suite = "dev.rafu.close-order-repair.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let suite = TestDefaultsSuite.name("dev.rafu.close-order-repair")
+        defer { TestDefaultsSuite.remove(suite) }
         let entered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let released = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         defer {

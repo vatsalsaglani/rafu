@@ -25,8 +25,8 @@ func sectionSelection() {
 
 @Test("NotchDisplayPreferenceStore: defaults, then round-trips, in an isolated suite")
 func displayPreferencesRoundTrip() {
-    let suite = "dev.rafu.tests.notch-display.\(UUID().uuidString)"
-    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    let suite = TestDefaultsSuite.name("dev.rafu.tests.notch-display")
+    defer { TestDefaultsSuite.remove(suite) }
     let store = NotchDisplayPreferenceStore(suiteName: suite)
 
     #expect(store.visibleSections() == NotchSection.allCases)

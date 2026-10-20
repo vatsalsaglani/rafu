@@ -472,7 +472,7 @@ private struct MultiRootFixture {
     private let suite: String
 
     init() throws {
-        suite = "dev.rafu.multi-root.\(UUID().uuidString)"
+        suite = TestDefaultsSuite.name("dev.rafu.multi-root")
         base = FileManager.default.temporaryDirectory.appending(
             path: "rafu-multi-root-\(UUID().uuidString)", directoryHint: .isDirectory)
         primary = base.appending(path: "app", directoryHint: .isDirectory)
@@ -493,7 +493,7 @@ private struct MultiRootFixture {
     func remove() {
         session.tearDownAdditionalRoots()
         session.descriptor = nil
-        UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+        TestDefaultsSuite.remove(suite)
         try? FileManager.default.removeItem(at: base)
     }
 }

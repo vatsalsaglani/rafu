@@ -115,8 +115,8 @@ func commandWClosesSinglePaneGroup() throws {
 @MainActor
 @Test("Do not ask again skips later pane warnings but not group warnings")
 func runningPaneCloseWarningCanBeSuppressed() throws {
-    let suiteName = "RafuTerminalPaneClosePreferenceTests.\(UUID().uuidString)"
-    defer { UserDefaults.standard.removePersistentDomain(forName: suiteName) }
+    let suiteName = TestDefaultsSuite.name("RafuTerminalPaneClosePreferenceTests")
+    defer { TestDefaultsSuite.remove(suiteName) }
 
     let (firstSession, firstRoot) = try makeCloseWorkspace(preferenceSuiteName: suiteName)
     defer { try? FileManager.default.removeItem(at: firstRoot) }

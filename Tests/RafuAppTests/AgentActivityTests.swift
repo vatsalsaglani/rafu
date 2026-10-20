@@ -100,9 +100,9 @@ struct TitlebarDoubleClickActionTests {
 
     @Test("Reading from a defaults suite follows the stored string")
     func readsDefaults() throws {
-        let suiteName = "TitlebarDoubleClickActionTests-\(UUID().uuidString)"
+        let suiteName = TestDefaultsSuite.name("TitlebarDoubleClickActionTests")
         let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defer { TestDefaultsSuite.remove(suiteName) }
         #expect(TitlebarDoubleClickAction.current(defaults: defaults) == .zoom)
         defaults.set("Minimize", forKey: "AppleActionOnDoubleClick")
         #expect(TitlebarDoubleClickAction.current(defaults: defaults) == .minimize)

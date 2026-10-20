@@ -13,12 +13,12 @@ import Testing
 /// defaults.
 
 private func isolatedSuiteName() -> String {
-    "rafu.tests.\(UUID().uuidString)"
+    TestDefaultsSuite.name("rafu.tests")
 }
 
 private func withIsolatedSuite<T>(_ body: (String) throws -> T) rethrows -> T {
     let name = isolatedSuiteName()
-    defer { UserDefaults().removePersistentDomain(forName: name) }
+    defer { TestDefaultsSuite.remove(name) }
     return try body(name)
 }
 
@@ -31,7 +31,7 @@ private func withIsolatedSuiteAsync<T>(
     _ body: (String) async throws -> T
 ) async rethrows -> T {
     let name = isolatedSuiteName()
-    defer { UserDefaults().removePersistentDomain(forName: name) }
+    defer { TestDefaultsSuite.remove(name) }
     return try await body(name)
 }
 

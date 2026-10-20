@@ -292,8 +292,8 @@ func surfacesArbitrationTable() {
 
 @Test("Store: a completely fresh suite migrates to .both and writes the new key")
 func storeMigratesAbsentToBoth() throws {
-    let suiteName = "NotchHUDCoreTests.\(UUID().uuidString)"
-    defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+    let suiteName = TestDefaultsSuite.name("NotchHUDCoreTests")
+    defer { TestDefaultsSuite.remove(suiteName) }
     let store = TerminalAttentionSurfaceStore(suiteName: suiteName)
 
     #expect(store.surface() == .both)
@@ -307,8 +307,8 @@ func storeMigratesAbsentToBoth() throws {
 )
 func storeMigratesLegacyBoolean() throws {
     for (legacy, expected) in [(true, TerminalAttentionSurface.both), (false, .none)] {
-        let suiteName = "NotchHUDCoreTests.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+        let suiteName = TestDefaultsSuite.name("NotchHUDCoreTests")
+        defer { TestDefaultsSuite.remove(suiteName) }
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defaults.set(legacy, forKey: TerminalAttentionSurfaceStore.legacyEnabledKey)
 
@@ -323,8 +323,8 @@ func storeMigratesLegacyBoolean() throws {
 
 @Test("Store: an existing new-key value wins over a stale legacy boolean")
 func storeNewKeyWinsOverLegacy() throws {
-    let suiteName = "NotchHUDCoreTests.\(UUID().uuidString)"
-    defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+    let suiteName = TestDefaultsSuite.name("NotchHUDCoreTests")
+    defer { TestDefaultsSuite.remove(suiteName) }
     let defaults = try #require(UserDefaults(suiteName: suiteName))
     defaults.set(
         TerminalAttentionSurface.hud.rawValue, forKey: TerminalAttentionSurfaceStore.defaultsKey)
@@ -336,8 +336,8 @@ func storeNewKeyWinsOverLegacy() throws {
 
 @Test("Store: all four raw values round-trip")
 func storeRoundTripsAllSurfaces() {
-    let suiteName = "NotchHUDCoreTests.\(UUID().uuidString)"
-    defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+    let suiteName = TestDefaultsSuite.name("NotchHUDCoreTests")
+    defer { TestDefaultsSuite.remove(suiteName) }
     let store = TerminalAttentionSurfaceStore(suiteName: suiteName)
 
     for surface in TerminalAttentionSurface.allCases {

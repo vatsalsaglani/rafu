@@ -218,8 +218,8 @@ func focusEditorNoOpAfterUnregister() {
 @MainActor
 @Test("NotchCompanionPreferenceStore: defaults to enabled when the key has never been written")
 func preferenceStoreDefaultsEnabled() {
-    let suiteName = "NotchCompanionModelTests.\(UUID().uuidString)"
-    defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+    let suiteName = TestDefaultsSuite.name("NotchCompanionModelTests")
+    defer { TestDefaultsSuite.remove(suiteName) }
     let store = NotchCompanionPreferenceStore(suiteName: suiteName)
     #expect(store.isEnabled() == true)
 }
@@ -227,8 +227,8 @@ func preferenceStoreDefaultsEnabled() {
 @MainActor
 @Test("NotchCompanionPreferenceStore: setEnabled persists and round-trips")
 func preferenceStoreRoundTrips() {
-    let suiteName = "NotchCompanionModelTests.\(UUID().uuidString)"
-    defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+    let suiteName = TestDefaultsSuite.name("NotchCompanionModelTests")
+    defer { TestDefaultsSuite.remove(suiteName) }
     let store = NotchCompanionPreferenceStore(suiteName: suiteName)
     store.setEnabled(false)
     #expect(store.isEnabled() == false)

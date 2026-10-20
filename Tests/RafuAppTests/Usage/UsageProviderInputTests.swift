@@ -102,14 +102,14 @@ private func inputClient(_ fixture: UsageInputFixture) -> UsageProviderInputClie
 }
 
 private func isolatedUsageInputSuite() -> String {
-    "UsageProviderInputTests.\(UUID().uuidString)"
+    TestDefaultsSuite.name("UsageProviderInputTests")
 }
 
 @MainActor
 @Test("Usage Settings exposes secure-key controls for six providers and browser import for three")
 func usageSettingsAuthPatternRoster() {
     let suite = isolatedUsageInputSuite()
-    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    defer { TestDefaultsSuite.remove(suite) }
     let model = UsageSettingsModel(
         descriptors: UsageProviderRegistry.all,
         enableStore: UsageEnableStore(suiteName: suite),
@@ -153,7 +153,7 @@ func cookieImportCatalogIsBounded() throws {
 @Test("API-key Test stores the trimmed key, runs one injected fetch, and reports success")
 func apiKeyTestStoresAndFetches() async {
     let suite = isolatedUsageInputSuite()
-    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    defer { TestDefaultsSuite.remove(suite) }
     let fixture = UsageInputFixture(apiKeyTestResult: .succeeded(identity: nil))
     let model = UsageSettingsModel(
         descriptors: [ClineProvider.descriptor],
@@ -206,7 +206,7 @@ func apiKeyTestServicePerformsOneFetch() async throws {
 @Test("API-key Test refuses an empty field when no Rafu Keychain item exists")
 func apiKeyTestRequiresCredential() async {
     let suite = isolatedUsageInputSuite()
-    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    defer { TestDefaultsSuite.remove(suite) }
     let fixture = UsageInputFixture(apiKeyTestResult: .succeeded(identity: nil))
     let model = UsageSettingsModel(
         descriptors: [ClineProvider.descriptor],
@@ -224,7 +224,7 @@ func apiKeyTestRequiresCredential() async {
 @Test("API-key input rejects control characters before Keychain or network use")
 func apiKeyInputRejectsControlCharacters() async {
     let suite = isolatedUsageInputSuite()
-    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    defer { TestDefaultsSuite.remove(suite) }
     let fixture = UsageInputFixture(apiKeyTestResult: .succeeded(identity: nil))
     let model = UsageSettingsModel(
         descriptors: [ClineProvider.descriptor],
@@ -243,7 +243,7 @@ func apiKeyInputRejectsControlCharacters() async {
 @Test("Cookie import preserves Safari Full Disk Access as a typed Settings state")
 func cookieImportSurfacesFullDiskAccessGuidance() async {
     let suite = isolatedUsageInputSuite()
-    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    defer { TestDefaultsSuite.remove(suite) }
     let fixture = UsageInputFixture(cookieImportResult: .needsFullDiskAccess)
     let model = UsageSettingsModel(
         descriptors: [GrokBuildProvider.descriptor],
@@ -262,7 +262,7 @@ func cookieImportSurfacesFullDiskAccessGuidance() async {
 @Test("Successful cookie import and explicit removal update only redacted presence state")
 func cookieImportAndRemovalRoundTrip() async {
     let suite = isolatedUsageInputSuite()
-    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    defer { TestDefaultsSuite.remove(suite) }
     let fixture = UsageInputFixture(cookieImportResult: .imported(browser: .firefox))
     let model = UsageSettingsModel(
         descriptors: [FactoryDroidProvider.descriptor],

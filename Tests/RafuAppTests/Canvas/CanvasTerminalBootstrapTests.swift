@@ -468,7 +468,7 @@ struct CanvasTerminalBootstrapTests {
     @Test @MainActor func staleViewDoesNotInstallBridgeOrStartTerminal() async throws {
         let session = WorkspaceSession(
             restorationStore: WorkspaceRestorationStore(
-                defaultsSuiteName: "dev.rafu.canvas-startup-tests.\(UUID())",
+                defaultsSuiteName: TestDefaultsSuite.name("dev.rafu.canvas-startup-tests"),
                 bookmarkMaker: { _ in throw CancellationError() }),
             closeSaveTracker: WorkspaceCloseSaveTracker())
         let board = CanvasBoardState(document: CanvasDocument(title: "Startup lifecycle"))

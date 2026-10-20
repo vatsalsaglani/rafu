@@ -54,8 +54,8 @@ private func makePlayer(suite: String, media: FakeSystemMedia) -> NotchNowPlayin
 struct NotchSystemMediaTests {
     @Test("Start uses the adapter by default and shows what it streams")
     func streamsSystemMedia() {
-        let suite = "dev.rafu.tests.system-media.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let suite = TestDefaultsSuite.name("dev.rafu.tests.system-media")
+        defer { TestDefaultsSuite.remove(suite) }
         let media = FakeSystemMedia()
         let player = makePlayer(suite: suite, media: media)
         player.start()
@@ -77,8 +77,8 @@ struct NotchSystemMediaTests {
 
     @Test("Transport commands go to the adapter")
     func commands() {
-        let suite = "dev.rafu.tests.system-media.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let suite = TestDefaultsSuite.name("dev.rafu.tests.system-media")
+        defer { TestDefaultsSuite.remove(suite) }
         let media = FakeSystemMedia()
         let player = makePlayer(suite: suite, media: media)
         player.start()
@@ -91,8 +91,8 @@ struct NotchSystemMediaTests {
 
     @Test("A failed adapter falls back to Music and Spotify for the run")
     func fallbackOnFailure() {
-        let suite = "dev.rafu.tests.system-media.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let suite = TestDefaultsSuite.name("dev.rafu.tests.system-media")
+        defer { TestDefaultsSuite.remove(suite) }
         let media = FakeSystemMedia()
         let player = makePlayer(suite: suite, media: media)
         player.start()
@@ -108,8 +108,8 @@ struct NotchSystemMediaTests {
 
     @Test("Turning the setting off, or a missing adapter, uses the public path")
     func preferenceAndAvailability() {
-        let suite = "dev.rafu.tests.system-media.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let suite = TestDefaultsSuite.name("dev.rafu.tests.system-media")
+        defer { TestDefaultsSuite.remove(suite) }
         NotchDisplayPreferenceStore(suiteName: suite).setUsesSystemNowPlaying(false)
         let media = FakeSystemMedia()
         let player = makePlayer(suite: suite, media: media)
@@ -118,8 +118,8 @@ struct NotchSystemMediaTests {
         #expect(media.starts == 0)
         player.stop()
 
-        let otherSuite = "dev.rafu.tests.system-media.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: otherSuite)?.removePersistentDomain(forName: otherSuite) }
+        let otherSuite = TestDefaultsSuite.name("dev.rafu.tests.system-media")
+        defer { TestDefaultsSuite.remove(otherSuite) }
         let missing = FakeSystemMedia()
         missing.isAvailable = false
         let fallback = makePlayer(suite: otherSuite, media: missing)
@@ -130,8 +130,8 @@ struct NotchSystemMediaTests {
 
     @Test("The setting defaults to on")
     func defaultOn() {
-        let suite = "dev.rafu.tests.system-media.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let suite = TestDefaultsSuite.name("dev.rafu.tests.system-media")
+        defer { TestDefaultsSuite.remove(suite) }
         #expect(NotchDisplayPreferenceStore(suiteName: suite).usesSystemNowPlaying())
     }
 }

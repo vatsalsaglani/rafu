@@ -101,8 +101,8 @@ func agentTerminalPrependsOffPathExecutableDirectory() throws {
 @MainActor
 @Test("Options distinguish absent, unauthenticated, unknown-auth, and ready CLIs with reasons")
 func agentTerminalOptionsGatingMatrix() async throws {
-    let suite = "AgentTerminalTests.\(UUID().uuidString)"
-    defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+    let suite = TestDefaultsSuite.name("AgentTerminalTests")
+    defer { TestDefaultsSuite.remove(suite) }
     let defaults = ConductorDefaultModelStore(suiteName: suite)
     defaults.setDefaultModel("gpt-test", for: .cline)
 

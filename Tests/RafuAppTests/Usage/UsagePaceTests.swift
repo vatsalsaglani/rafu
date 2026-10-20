@@ -297,8 +297,8 @@ func usageDisplayModeMapping() {
 
 @Test("The display mode persists in its store and defaults to Used")
 func usageDisplayModeStoreRoundTrip() {
-    let suite = "UsageDisplayModeStoreTests.\(UUID().uuidString)"
-    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    let suite = TestDefaultsSuite.name("UsageDisplayModeStoreTests")
+    defer { TestDefaultsSuite.remove(suite) }
     let store = UsageDisplayModeStore(suiteName: suite)
     #expect(store.mode() == .used)
     store.setMode(.remaining)

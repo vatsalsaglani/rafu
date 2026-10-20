@@ -83,7 +83,7 @@ struct TabInteractionResponsivenessTests {
     // MARK: Editor focus on click selection
 
     private func makeSession() -> WorkspaceSession {
-        let suite = "dev.rafu.tab-interaction.\(UUID().uuidString)"
+        let suite = TestDefaultsSuite.name("dev.rafu.tab-interaction")
         let store = WorkspaceRestorationStore(
             defaultsSuiteName: suite, bookmarkMaker: { _ in Data([1]) })
         return WorkspaceSession(restorationStore: store)

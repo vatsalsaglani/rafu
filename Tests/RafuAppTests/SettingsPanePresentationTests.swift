@@ -97,8 +97,8 @@ struct SettingsPanePresentationTests {
     @MainActor
     @Test("UsageSettingsModel applies a List.onMove drag and persists the order")
     func modelAppliesDrag() throws {
-        let suite = "SettingsPaneTests.\(UUID().uuidString)"
-        defer { UserDefaults().removePersistentDomain(forName: suite) }
+        let suite = TestDefaultsSuite.name("SettingsPaneTests")
+        defer { TestDefaultsSuite.remove(suite) }
         let stripStore = UsageStripOrderStore(suiteName: suite)
         stripStore.setOrder([.claude, .codex, .cursor])
         let model = UsageSettingsModel(

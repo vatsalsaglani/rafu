@@ -148,8 +148,8 @@ func aiCommitScopeIncludesBothSidesOfPartialStage() {
 
 @Test("Provider store persists the explicitly selected configuration without secrets")
 func aiProviderStorePersistsSelection() async throws {
-    let suiteName = "RafuAIProviderTests.\(UUID().uuidString)"
-    defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+    let suiteName = TestDefaultsSuite.name("RafuAIProviderTests")
+    defer { TestDefaultsSuite.remove(suiteName) }
     let store = UserDefaultsAIProviderConfigurationStore(suiteName: suiteName)
     let provider = AIProviderConfiguration(
         name: "Test Provider",

@@ -139,7 +139,7 @@ struct CanvasBoardNavigationTests {
     private func fixture(_ root: URL) async throws -> (WorkspaceSession, CanvasBoardState) {
         let session = WorkspaceSession(
             restorationStore: WorkspaceRestorationStore(
-                defaultsSuiteName: "dev.rafu.canvas-board-navigation-tests.\(UUID())",
+                defaultsSuiteName: TestDefaultsSuite.name("dev.rafu.canvas-board-navigation-tests"),
                 bookmarkMaker: { _ in throw CancellationError() }),
             closeSaveTracker: WorkspaceCloseSaveTracker(),
             canvasStore: WorkspaceCanvasStore(

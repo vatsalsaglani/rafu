@@ -96,9 +96,9 @@ struct ThemeAppearancePreferenceTests {
 
     @Test("The pair is read from defaults, with defaults for unset keys")
     func pairReadsFromDefaults() throws {
-        let suite = "RafuThemePairTests.\(UUID().uuidString)"
+        let suite = TestDefaultsSuite.name("RafuThemePairTests")
         let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { TestDefaultsSuite.remove(suite) }
 
         #expect(
             ThemeAppearancePreference.pairIdentifier(defaults: defaults, systemIsDark: false)
@@ -120,9 +120,9 @@ struct ThemeAppearancePreferenceTests {
     @MainActor
     @Test("The System theme resolves through the stored pair for the system scheme")
     func systemThemeResolvesThroughPair() throws {
-        let suite = "RafuThemePairTests.\(UUID().uuidString)"
+        let suite = TestDefaultsSuite.name("RafuThemePairTests")
         let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { TestDefaultsSuite.remove(suite) }
 
         #expect(
             RafuThemeCatalog.systemPairTheme(systemScheme: .light, defaults: defaults).name

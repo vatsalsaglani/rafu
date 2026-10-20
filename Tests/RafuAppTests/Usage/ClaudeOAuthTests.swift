@@ -164,8 +164,8 @@ func claudeCredentialParserProducesMinimalEnvelope() throws {
 @Test("Claude Connect accepts a valid CLI file without reading Claude Code Keychain")
 func claudeConnectorValidFileNeverReadsKeychain() async throws {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
-    let suite = "ClaudeConnectorTests.\(UUID().uuidString)"
-    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    let suite = TestDefaultsSuite.name("ClaudeConnectorTests")
+    defer { TestDefaultsSuite.remove(suite) }
     let consent = UsageNetworkConsentStore(suiteName: suite)
     let credentialStore = UsageCredentialStore(servicePrefix: "test.claude.\(UUID().uuidString)")
     let keychainReads = ClaudeSynchronousCounter()
@@ -194,8 +194,8 @@ func claudeConnectorValidFileNeverReadsKeychain() async throws {
     arguments: ClaudeInvalidFile.allCases)
 func claudeConnectorFallsBackToKeychainExactlyOnce(condition: ClaudeInvalidFile) async throws {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
-    let suite = "ClaudeConnectorTests.\(UUID().uuidString)"
-    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    let suite = TestDefaultsSuite.name("ClaudeConnectorTests")
+    defer { TestDefaultsSuite.remove(suite) }
     let consent = UsageNetworkConsentStore(suiteName: suite)
     let credentialStore = UsageCredentialStore(servicePrefix: "test.claude.\(UUID().uuidString)")
     let keychainReads = ClaudeSynchronousCounter()
@@ -221,8 +221,8 @@ func claudeConnectorFallsBackToKeychainExactlyOnce(condition: ClaudeInvalidFile)
 @Test("A failed Claude Connect leaves neither network consent nor transient credentials")
 func claudeConnectorFailureLeavesNoAuthority() async {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
-    let suite = "ClaudeConnectorTests.\(UUID().uuidString)"
-    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    let suite = TestDefaultsSuite.name("ClaudeConnectorTests")
+    defer { TestDefaultsSuite.remove(suite) }
     let consent = UsageNetworkConsentStore(suiteName: suite)
     let credentialStore = UsageCredentialStore(servicePrefix: "test.claude.\(UUID().uuidString)")
     let preexisting = claudeEnvelope(
@@ -243,8 +243,8 @@ func claudeConnectorFailureLeavesNoAuthority() async {
 
 @Test("Claude Connect reports Keychain denial as a fixed redacted issue")
 func claudeConnectorRedactsKeychainDenial() async {
-    let suite = "ClaudeConnectorTests.\(UUID().uuidString)"
-    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    let suite = TestDefaultsSuite.name("ClaudeConnectorTests")
+    defer { TestDefaultsSuite.remove(suite) }
     let consent = UsageNetworkConsentStore(suiteName: suite)
     let connector = UsageOAuthConnector(
         credentialFileReader: { _ in nil },
@@ -261,8 +261,8 @@ func claudeConnectorRedactsKeychainDenial() async {
 @Test("Claude Disconnect clears transient authority without disabling local usage")
 func claudeDisconnectPreservesEnablement() async {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
-    let suite = "ClaudeConnectorTests.\(UUID().uuidString)"
-    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    let suite = TestDefaultsSuite.name("ClaudeConnectorTests")
+    defer { TestDefaultsSuite.remove(suite) }
     let consent = UsageNetworkConsentStore(suiteName: suite)
     let enable = UsageEnableStore(suiteName: suite)
     let credentialStore = UsageCredentialStore(servicePrefix: "test.claude.\(UUID().uuidString)")

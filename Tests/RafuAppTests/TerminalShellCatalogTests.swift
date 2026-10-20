@@ -185,8 +185,8 @@ struct TerminalShellCatalogTests {
     /// the same pattern).
     @Test("PreferredShellStore round-trips a recorded shell against an injected suite")
     func preferredShellStoreRoundTrips() {
-        let suiteName = "TerminalShellCatalogTests.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+        let suiteName = TestDefaultsSuite.name("TerminalShellCatalogTests")
+        defer { TestDefaultsSuite.remove(suiteName) }
         let store = PreferredShellStore(suiteName: suiteName)
         let fish = TerminalShell(path: "/opt/homebrew/bin/fish", name: "fish", isDefault: false)
         let zsh = TerminalShell(path: "/bin/zsh", name: "Default (zsh)", isDefault: true)
@@ -198,9 +198,9 @@ struct TerminalShellCatalogTests {
 
     @Test("A stale preferred shell resolves to nil and clears the stored value")
     func stalePreferredShellResolvesToNilAndClears() throws {
-        let suiteName = "TerminalShellCatalogTests.\(UUID().uuidString)"
+        let suiteName = TestDefaultsSuite.name("TerminalShellCatalogTests")
         let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defer { TestDefaultsSuite.remove(suiteName) }
         let store = PreferredShellStore(suiteName: suiteName)
         let uninstalled = TerminalShell(path: "/opt/homebrew/bin/nu", name: "nu", isDefault: false)
         let zsh = TerminalShell(path: "/bin/zsh", name: "Default (zsh)", isDefault: true)
@@ -214,8 +214,8 @@ struct TerminalShellCatalogTests {
 
     @Test("No stored preference resolves to nil without touching the store")
     func noStoredPreferenceResolvesToNil() {
-        let suiteName = "TerminalShellCatalogTests.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+        let suiteName = TestDefaultsSuite.name("TerminalShellCatalogTests")
+        defer { TestDefaultsSuite.remove(suiteName) }
         let store = PreferredShellStore(suiteName: suiteName)
         let zsh = TerminalShell(path: "/bin/zsh", name: "Default (zsh)", isDefault: true)
 

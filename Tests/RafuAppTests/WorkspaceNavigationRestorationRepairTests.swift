@@ -314,7 +314,7 @@ private struct RepairFixture {
     var fileURL: URL { rootURL.appending(path: "file.swift") }
 
     init(text: String) throws {
-        suite = "dev.rafu.navigation-repair.\(UUID().uuidString)"
+        suite = TestDefaultsSuite.name("dev.rafu.navigation-repair")
         rootURL = FileManager.default.temporaryDirectory.appending(path: suite)
         store = WorkspaceRestorationStore(
             defaultsSuiteName: suite, bookmarkMaker: { _ in Data([1]) })
@@ -333,6 +333,6 @@ private struct RepairFixture {
 
     func remove() {
         try? FileManager.default.removeItem(at: rootURL)
-        UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+        TestDefaultsSuite.remove(suite)
     }
 }

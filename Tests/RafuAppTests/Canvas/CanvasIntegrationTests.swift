@@ -381,10 +381,10 @@ struct CanvasIntegrationTests {
     @Test("Parking Canvas groups during teardown cannot cancel the captured workspace save")
     func teardownKeepsCloseSave() async throws {
         let folder = URL.temporaryDirectory.appending(path: UUID().uuidString)
-        let suite = "dev.rafu.canvas-close-test.\(UUID())"
+        let suite = TestDefaultsSuite.name("dev.rafu.canvas-close-test")
         defer {
             try? FileManager.default.removeItem(at: folder)
-            UserDefaults.standard.removePersistentDomain(forName: suite)
+            TestDefaultsSuite.remove(suite)
         }
         let restoration = WorkspaceRestorationStore(
             defaultsSuiteName: suite, bookmarkMaker: { _ in Data([1]) })
@@ -422,10 +422,10 @@ struct CanvasIntegrationTests {
     @Test("A note edited during an awaited quit metadata save is flushed before the reply")
     func editsDuringQuitAreSaved() async throws {
         let folder = URL.temporaryDirectory.appending(path: UUID().uuidString)
-        let suite = "dev.rafu.canvas-quit-edit.\(UUID())"
+        let suite = TestDefaultsSuite.name("dev.rafu.canvas-quit-edit")
         defer {
             try? FileManager.default.removeItem(at: folder)
-            UserDefaults.standard.removePersistentDomain(forName: suite)
+            TestDefaultsSuite.remove(suite)
         }
         let gate = CanvasBookmarkGate()
         let restoration = WorkspaceRestorationStore(
@@ -475,7 +475,7 @@ struct CanvasIntegrationTests {
     private func makeSession(_ disk: CanvasPersistenceStore) -> WorkspaceSession {
         WorkspaceSession(
             restorationStore: WorkspaceRestorationStore(
-                defaultsSuiteName: "dev.rafu.canvas-tests.\(UUID())",
+                defaultsSuiteName: TestDefaultsSuite.name("dev.rafu.canvas-tests"),
                 bookmarkMaker: { _ in throw CancellationError() }),
             closeSaveTracker: WorkspaceCloseSaveTracker(),
             canvasStore: WorkspaceCanvasStore(persistence: disk))

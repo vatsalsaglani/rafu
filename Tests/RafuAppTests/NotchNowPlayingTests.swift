@@ -23,8 +23,8 @@ private func makePlayer(
 @MainActor
 @Test("accept: a notification track becomes the shown track, with its player's name")
 func nowPlayingAcceptsNotification() {
-    let suite = "dev.rafu.tests.now-playing.\(UUID().uuidString)"
-    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    let suite = TestDefaultsSuite.name("dev.rafu.tests.now-playing")
+    defer { TestDefaultsSuite.remove(suite) }
     let player = makePlayer(suite: suite)
     #expect(!player.hasTrack)
     player.accept(NowPlayingTrack(title: "Song", artist: "Band", playing: true), from: .spotify)
@@ -37,8 +37,8 @@ func nowPlayingAcceptsNotification() {
 @MainActor
 @Test("connect: records consent, then reads the running player once")
 func nowPlayingConnectReads() async {
-    let suite = "dev.rafu.tests.now-playing.\(UUID().uuidString)"
-    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    let suite = TestDefaultsSuite.name("dev.rafu.tests.now-playing")
+    defer { TestDefaultsSuite.remove(suite) }
     let player = makePlayer(suite: suite) { _ in
         .track(NowPlayingTrack(title: "Already playing", artist: "Artist", playing: true))
     }
@@ -54,8 +54,8 @@ func nowPlayingConnectReads() async {
 @MainActor
 @Test("refresh: a refused Apple event is reported as needing permission, not as an error")
 func nowPlayingPermissionDenied() async {
-    let suite = "dev.rafu.tests.now-playing.\(UUID().uuidString)"
-    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    let suite = TestDefaultsSuite.name("dev.rafu.tests.now-playing")
+    defer { TestDefaultsSuite.remove(suite) }
     let player = makePlayer(suite: suite) { _ in .permissionDenied }
     player.refresh()
     while player.refreshing { await Task.yield() }
@@ -67,8 +67,8 @@ func nowPlayingPermissionDenied() async {
 @MainActor
 @Test("refresh: with no player running nothing is read and no state is faked")
 func nowPlayingNothingRunning() async {
-    let suite = "dev.rafu.tests.now-playing.\(UUID().uuidString)"
-    defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    let suite = TestDefaultsSuite.name("dev.rafu.tests.now-playing")
+    defer { TestDefaultsSuite.remove(suite) }
     let player = makePlayer(suite: suite, running: []) { _ in
         Issue.record("a player that is not running must not be read")
         return .unavailable

@@ -16,7 +16,7 @@ private struct CanvasAgentFixture {
     init(presented: Bool = true) async throws {
         let session = WorkspaceSession(
             restorationStore: WorkspaceRestorationStore(
-                defaultsSuiteName: "dev.rafu.canvas-agent-tests.\(UUID())",
+                defaultsSuiteName: TestDefaultsSuite.name("dev.rafu.canvas-agent-tests"),
                 bookmarkMaker: { _ in throw CancellationError() }),
             closeSaveTracker: WorkspaceCloseSaveTracker())
         let board = CanvasBoardState(document: CanvasDocument(title: "Agent test"))

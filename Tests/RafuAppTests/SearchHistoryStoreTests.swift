@@ -5,8 +5,8 @@ import Testing
 
 @Test("Search history is per-workspace, deduped, and most recent first")
 func searchHistoryRecordsPerWorkspace() throws {
-    let suiteName = "dev.rafu.tests.\(UUID().uuidString)"
-    defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+    let suiteName = TestDefaultsSuite.name("dev.rafu.tests")
+    defer { TestDefaultsSuite.remove(suiteName) }
     let store = WorkspaceSearchHistoryStore(suiteName: suiteName)
 
     store.record(query: "first", forRootPath: "/workspace/a")
@@ -21,8 +21,8 @@ func searchHistoryRecordsPerWorkspace() throws {
 
 @Test("Search history keeps at most 15 queries and ignores blank ones")
 func searchHistoryEnforcesCapacity() throws {
-    let suiteName = "dev.rafu.tests.\(UUID().uuidString)"
-    defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+    let suiteName = TestDefaultsSuite.name("dev.rafu.tests")
+    defer { TestDefaultsSuite.remove(suiteName) }
     let store = WorkspaceSearchHistoryStore(suiteName: suiteName)
 
     store.record(query: "   ", forRootPath: "/workspace")
@@ -38,8 +38,8 @@ func searchHistoryEnforcesCapacity() throws {
 
 @Test("Search history trims whitespace before recording")
 func searchHistoryTrimsQueries() throws {
-    let suiteName = "dev.rafu.tests.\(UUID().uuidString)"
-    defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+    let suiteName = TestDefaultsSuite.name("dev.rafu.tests")
+    defer { TestDefaultsSuite.remove(suiteName) }
     let store = WorkspaceSearchHistoryStore(suiteName: suiteName)
 
     store.record(query: "  needle  ", forRootPath: "/workspace")

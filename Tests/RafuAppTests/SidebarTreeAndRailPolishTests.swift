@@ -24,12 +24,12 @@ struct SidebarTreeAndRailPolishTests {
 
     @Test("Depth defaults to the root level and is passed explicitly to rows")
     func depthIsStoredOnTheItem() {
-        let suite = "dev.rafu.sidebar-depth.\(UUID().uuidString)"
+        let suite = TestDefaultsSuite.name("dev.rafu.sidebar-depth")
         let session = WorkspaceSession(
             restorationStore: WorkspaceRestorationStore(defaultsSuiteName: suite))
         defer {
             session.descriptor = nil
-            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+            TestDefaultsSuite.remove(suite)
         }
         let node = WorkspaceFileNode(
             url: URL(filePath: "/tmp/depth/notes.txt"), relativePath: "a/b/notes.txt",

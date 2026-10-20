@@ -9,8 +9,8 @@ import Testing
 struct WorkspaceTerminationPersistenceRepairTests {
     @Test("Quit waits for both metadata saves and saves the key workspace last")
     func keyWorkspaceSavedLast() async throws {
-        let suite = "dev.rafu.quit-repair.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let suite = TestDefaultsSuite.name("dev.rafu.quit-repair")
+        defer { TestDefaultsSuite.remove(suite) }
         let store = WorkspaceRestorationStore(
             defaultsSuiteName: suite, bookmarkMaker: { _ in Data([1]) })
         let key = session(name: "key", store: store)
@@ -52,8 +52,8 @@ struct WorkspaceTerminationPersistenceRepairTests {
 
     @Test("Quit metadata save preserves dirty text and existing close confirmation state")
     func dirtyStateIsNotChangedByFlush() async {
-        let suite = "dev.rafu.quit-repair.\(UUID().uuidString)"
-        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let suite = TestDefaultsSuite.name("dev.rafu.quit-repair")
+        defer { TestDefaultsSuite.remove(suite) }
         let store = WorkspaceRestorationStore(
             defaultsSuiteName: suite, bookmarkMaker: { _ in Data([1]) })
         let workspace = session(name: "dirty", store: store)

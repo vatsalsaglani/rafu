@@ -144,6 +144,7 @@ private struct Fixture {
     let rootURL: URL
     let fileURL: URL
     let relativePath = "Sources/main.swift"
+    let defaultsSuite = TestDefaultsSuite.name("rafu-goto")
 
     init(diskText: String) throws {
         rootURL = FileManager.default.temporaryDirectory
@@ -159,7 +160,7 @@ private struct Fixture {
     @MainActor
     func session() -> WorkspaceSession {
         let store = WorkspaceRestorationStore(
-            defaultsSuiteName: rootURL.lastPathComponent, bookmarkMaker: { _ in Data([1]) })
+            defaultsSuiteName: defaultsSuite, bookmarkMaker: { _ in Data([1]) })
         let session = WorkspaceSession(restorationStore: store)
         session.descriptor = WorkspaceDescriptor(
             displayName: rootURL.lastPathComponent,
@@ -170,7 +171,6 @@ private struct Fixture {
 
     func remove() {
         try? FileManager.default.removeItem(at: rootURL)
-        UserDefaults(suiteName: rootURL.lastPathComponent)?.removePersistentDomain(
-            forName: rootURL.lastPathComponent)
+        TestDefaultsSuite.remove(defaultsSuite)
     }
 }

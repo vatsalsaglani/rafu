@@ -82,11 +82,11 @@ func alibabaDescriptorContracts() {
 
 @Test("Alibaba region preferences and importer facts preserve both source regions")
 func alibabaRegionPreferences() throws {
-    let qoderSuite = "AlibabaProvidersTests.QoderRegion.\(UUID().uuidString)"
-    let qwenSuite = "AlibabaProvidersTests.QwenRegion.\(UUID().uuidString)"
+    let qoderSuite = TestDefaultsSuite.name("AlibabaProvidersTests.QoderRegion")
+    let qwenSuite = TestDefaultsSuite.name("AlibabaProvidersTests.QwenRegion")
     defer {
-        UserDefaults().removePersistentDomain(forName: qoderSuite)
-        UserDefaults().removePersistentDomain(forName: qwenSuite)
+        TestDefaultsSuite.remove(qoderSuite)
+        TestDefaultsSuite.remove(qwenSuite)
     }
 
     #expect(QoderRegionPreference.load(suiteName: qoderSuite) == .international)

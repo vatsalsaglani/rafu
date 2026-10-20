@@ -100,13 +100,13 @@ private struct SidebarSessionFixture {
     private let suite: String
 
     init() {
-        suite = "dev.rafu.sidebar-single-click.\(UUID().uuidString)"
+        suite = TestDefaultsSuite.name("dev.rafu.sidebar-single-click")
         session = WorkspaceSession(
             restorationStore: WorkspaceRestorationStore(defaultsSuiteName: suite))
     }
 
     func remove() {
         session.descriptor = nil
-        UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+        TestDefaultsSuite.remove(suite)
     }
 }
