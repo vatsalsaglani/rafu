@@ -138,6 +138,23 @@ unmerged branch.
 
 The bootstrap GitHub workflow uses the explicit `macos-26` hosted-runner label and pins the official `actions/checkout` v6 tag commit verified on 2026-07-12. CI runs `script/verify.sh`; foreground GUI launch verification remains local.
 
+**`script/verify.sh` registers a staged bundle before the tests (2026-10-20).**
+After `script/build.sh` it runs
+`RAFU_APP_NAME="Rafu Lightning" RAFU_KEEP_STAGE=1 ./script/build_and_run.sh --stage`
+(`RAFU_KEEP_STAGE=1` keeps `dist/.RafuLightning-stage.app` instead of deleting
+it), then `lsregister -f` on that bundle, and fails unless `lsregister -dump`
+lists `dev.vatsalsaglani.rafu.editor-drag-v2`. It runs the tests with
+`RAFU_REQUIRE_DRAG_TYPE_DECLARATION=1`, so the gated
+`EditorTabStripDropRoutingTests` cannot skip silently. Then it unregisters
+(`lsregister -u`) and deletes the staged bundle (also on exit through a trap;
+`lsregister -u` cannot scan a deleted bundle, so the order is unregister, then
+delete). Registering launches nothing. A fresh CI runner has never registered a
+Rafu bundle, and without that registration AppKit does not route the private
+drag type to SwiftUI drop targets; see
+[`drag-and-drop-custom-uttype.md`](drag-and-drop-custom-uttype.md), "Tests need
+the Launch Services declaration". The release workflow runs the same
+`script/verify.sh`. The trailing `--stage` plist assertion is unchanged.
+
 Validate theme resources with `jq empty Resources/Themes/*.json`, the SVG with
 `xmllint --noout Resources/AppIcon/rafu-icon-seam.svg`, and icon generation with
 `script/generate_app_icon.sh`. A copied SVG is not a macOS bundle icon: the staged

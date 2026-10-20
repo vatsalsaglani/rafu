@@ -271,6 +271,54 @@ slots in the group's full tab order, not rendered frames. Regression:
 `EditorTabStripDropRoutingTests` (5 of its 7 hosted tests fail on the old
 strip).
 
+### Tests need the Launch Services declaration (2026-10-20)
+
+**`_findDragTargetFrom:` matches the private type against a view registered
+for `public.item` only through the declaration Launch Services REGISTERED
+from a bundle's `UTExportedTypeDeclarations`.** The in-process
+`UTType(exportedAs:conformingTo: .item)` is not enough. A view registered for
+the exact identifier (`EditorDropForwardingScrollView`) still matches.
+
+Why it matters: a test that resolves routing through `_findDragTargetFrom:`
+passes on a Mac where Rafu Lightning was ever staged and launched, and fails
+on a host that never registered a Rafu bundle. The first CI run of
+`EditorTabStripDropRoutingTests` (run 39447129379, `macos-26` hosted runner,
+main 75a8144) failed 6 hosted tests with 42 issues: the shelf and the group
+body resolved to `.none` and only `.editor` resolved, while the same tests
+passed locally on macOS 27.0.1. `EditorTabDragDropTests` never hit this: its
+fixture walks the registered views type-agnostically and does not ask
+AppKit to match types.
+
+Evidence (Swift 6.4, macOS 27.0.1 26A434, local `lsregister -dump` lists
+`dev.vatsalsaglani.rafu.editor-drag-v2` from Rafu Lightning): with the
+identifier temporarily changed to an undeclared
+`dev.vatsalsaglani.rafu.editor-drag-v2-unregistered` and the gate forced open,
+the same 6 tests failed with the same per-test issue counts as CI
+(9, 4, 3, 12, 12, 2 = 42), the column sweep gave `[.none, .editor]`, and the
+editor-centre test still passed. With the real identifier, all pass.
+
+Rule:
+
+- The 6 hosted routing tests carry `.enabled` on
+  `StripDropFixture.launchServicesDeclaresDragType`: an offscreen window whose
+  content view is a plain `NSView` registered for `public.item`, asked
+  through `_findDragTargetFrom:` with the same probe pasteboard. True only
+  when AppKit returns that view. The editor-centre and pure insertion tests
+  are not gated.
+- `script/verify.sh` (CI and release) stages the Lightning bundle with
+  `RAFU_KEEP_STAGE=1`, runs `lsregister -f` on it, fails unless
+  `lsregister -dump` lists the identifier, and runs the tests with
+  `RAFU_REQUIRE_DRAG_TYPE_DECLARATION=1`, which enables a test that fails
+  when the gate is closed. A skip therefore cannot pass verification.
+  See [`build-and-run.md`](build-and-run.md), "CI and resource validation".
+- Locally, without a registered bundle, the gated tests skip with a message
+  that says to stage and register the bundle
+  (`lsregister -f dist/.RafuLightning-stage.app`).
+
+Verify: `swift test --filter EditorTabStripDropRoutingTests` (13 tests; the
+required-declaration test skips unless the environment variable is set), and
+`./script/verify.sh`.
+
 ## A `Button` label swallows `.onDrag` (2026-10-20)
 
 **A `Button(action:)` with `.buttonStyle(.plain)` placed inside a view that

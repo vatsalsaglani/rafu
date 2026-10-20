@@ -6,6 +6,20 @@ import UniformTypeIdentifiers
 
 @testable import RafuApp
 
+/// Set by `script/verify.sh` after it registers the staged bundle, so a
+/// closed gate fails verification instead of silently skipping six tests.
+private let requireDeclarationKey = "RAFU_REQUIRE_DRAG_TYPE_DECLARATION"
+
+/// Runs a hosted routing test only where Launch Services declares the
+/// private drag type, the precondition for AppKit to route it to SwiftUI.
+private let dragTypeDeclared = ConditionTrait.enabled(
+    Comment(
+        rawValue: "Launch Services does not declare \(UTType.rafuEditorDrag.identifier); "
+            + "stage and register the app bundle first (lsregister -f)")
+) {
+    await StripDropFixture.launchServicesDeclaresDragType
+}
+
 /// Regression for "reorder by dragging a tab is inconsistent": a release on
 /// the tab shelf's breathing room or trailing controls did nothing, because
 /// only the 28 pt scrolling tab row was a drop target. The real editor canvas
@@ -13,9 +27,28 @@ import UniformTypeIdentifiers
 /// (`-[NSWindow _findDragTargetFrom:]`, the call the drag manager makes for
 /// each drag event) picks the destination for a synthetic `NSDraggingInfo`.
 /// No events are posted and no drag session starts.
+///
+/// The shelf and the group body are SwiftUI `.onDrop` targets registered for
+/// `public.item`. AppKit matches the private drag type to them only through
+/// the conformance Launch Services has REGISTERED for it, from a bundle's
+/// `UTExportedTypeDeclarations`; the in-process
+/// `UTType(exportedAs:conformingTo:)` is not enough. On a host that never
+/// registered a Rafu bundle (a fresh CI runner) those targets resolve to
+/// nothing, so the hosted routing tests are gated on that registration.
+/// `script/verify.sh` registers the staged bundle and requires the gate open.
+/// See `docs/references/drag-and-drop-custom-uttype.md`.
 @Suite("Editor tab strip drop routing and insertion index")
 @MainActor
 struct EditorTabStripDropRoutingTests {
+    @Test(
+        "Launch Services declares the private drag type when verification requires it",
+        .enabled(if: ProcessInfo.processInfo.environment[requireDeclarationKey] == "1"))
+    func dragTypeDeclaredWhenRequired() {
+        #expect(
+            StripDropFixture.launchServicesDeclaresDragType,
+            "Launch Services does not declare \(UTType.rafuEditorDrag.identifier) as public.item")
+    }
+
     // MARK: Pure insertion math
 
     @Test("Insertion resolves against tab midpoints including inset and spacing")
@@ -97,7 +130,9 @@ struct EditorTabStripDropRoutingTests {
 
     // MARK: Hosted routing
 
-    @Test("Every point of the tab shelf routes to the strip; the text routes to the editor")
+    @Test(
+        "Every point of the tab shelf routes to the strip; the text routes to the editor",
+        dragTypeDeclared)
     func shelfRouting() throws {
         let fixture = try StripDropFixture(tabCount: 3)
         defer { fixture.remove() }
@@ -123,7 +158,7 @@ struct EditorTabStripDropRoutingTests {
         #expect(fixture.target(at: NSPoint(x: 870, y: 40)) == .editor)
     }
 
-    @Test("Moving from the shelf into the text never flaps between targets")
+    @Test("Moving from the shelf into the text never flaps between targets", dragTypeDeclared)
     func boundaryDoesNotFlap() throws {
         let fixture = try StripDropFixture(tabCount: 3)
         defer { fixture.remove() }
@@ -137,7 +172,7 @@ struct EditorTabStripDropRoutingTests {
         }
     }
 
-    @Test("A release on the shelf's breathing room or controls still reorders")
+    @Test("A release on the shelf's breathing room or controls still reorders", dragTypeDeclared)
     func deadZonesReorder() throws {
         let fixture = try StripDropFixture(tabCount: 3)
         defer { fixture.remove() }
@@ -156,7 +191,7 @@ struct EditorTabStripDropRoutingTests {
         #expect(try fixture.tabs() == [tabs[0], tabs[1], tabs[2]])
     }
 
-    @Test("Each tab half resolves to the slot before or after that tab")
+    @Test("Each tab half resolves to the slot before or after that tab", dragTypeDeclared)
     func tabHalvesResolve() throws {
         let fixture = try StripDropFixture(tabCount: 12)
         defer { fixture.remove() }
@@ -166,7 +201,7 @@ struct EditorTabStripDropRoutingTests {
         try verifyHalves(fixture, slots: [1, 4, 6])
     }
 
-    @Test("A scrolled strip resolves slots against the scrolled tabs")
+    @Test("A scrolled strip resolves slots against the scrolled tabs", dragTypeDeclared)
     func scrolledStripResolves() throws {
         let fixture = try StripDropFixture(tabCount: 12)
         defer { fixture.remove() }
@@ -178,7 +213,9 @@ struct EditorTabStripDropRoutingTests {
         try verifyHalves(fixture, slots: Array(visible.prefix(3)))
     }
 
-    @Test("A drop after hover flaps between the editor and the strip still reorders")
+    @Test(
+        "A drop after hover flaps between the editor and the strip still reorders", dragTypeDeclared
+    )
     func dropAfterFlap() throws {
         let fixture = try StripDropFixture(tabCount: 3)
         defer { fixture.remove() }
@@ -361,7 +398,7 @@ private final class StripDropFixture {
 
     /// A routing query outside any drag: a fresh info over a payload-only
     /// pasteboard.
-    private func probeInfo(at point: NSPoint) -> StripDraggingInfo {
+    private static func probeInfo(in window: NSWindow, at point: NSPoint) -> StripDraggingInfo {
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("rafu.test.\(UUID().uuidString)"))
         pasteboard.clearContents()
         pasteboard.setData(
@@ -371,16 +408,38 @@ private final class StripDropFixture {
     }
 
     /// AppKit's own destination lookup for a drag event at `info.location`.
-    private func destination(for info: StripDraggingInfo) -> NSView? {
+    private static func destination(in window: NSWindow, for info: StripDraggingInfo) -> NSView? {
         let selector = NSSelectorFromString("_findDragTargetFrom:")
         guard window.responds(to: selector) else {
-            return Self.deepestRegistered(at: info.location, in: window.contentView)
+            return deepestRegistered(at: info.location, in: window.contentView)
         }
         return window.perform(selector, with: info)?.takeUnretainedValue() as? NSView
     }
 
+    private func destination(for info: StripDraggingInfo) -> NSView? {
+        Self.destination(in: window, for: info)
+    }
+
+    /// Whether AppKit routes the private drag type to a view registered only
+    /// for `public.item`, as it must to reach a SwiftUI `.onDrop`. That match
+    /// uses the declaration Launch Services registered from a bundle's
+    /// Info.plist; `UTType(exportedAs:conformingTo:)` in this process does
+    /// not provide it. Computed once per test process.
+    static let launchServicesDeclaresDragType: Bool = {
+        _ = NSApplication.shared
+        let frame = NSRect(x: 0, y: 0, width: 40, height: 40)
+        let window = NSWindow(
+            contentRect: frame.offsetBy(dx: -20000, dy: -20000),
+            styleMask: [.borderless], backing: .buffered, defer: false)
+        let view = NSView(frame: frame)
+        view.registerForDraggedTypes([NSPasteboard.PasteboardType(UTType.item.identifier)])
+        window.contentView = view
+        let found = destination(in: window, for: probeInfo(in: window, at: NSPoint(x: 20, y: 20)))
+        return found === view
+    }()
+
     func target(at point: NSPoint) -> Target {
-        classify(destination(for: probeInfo(at: point)))
+        classify(destination(for: Self.probeInfo(in: window, at: point)))
     }
 
     private func classify(_ view: NSView?) -> Target {

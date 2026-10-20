@@ -343,7 +343,11 @@ open_app() {
 
 case "$MODE" in
   --stage|stage)
-    rm -rf "$APP_BUNDLE"
+    # RAFU_KEEP_STAGE=1 keeps the staged bundle so script/verify.sh can
+    # register it with Launch Services before the tests. verify.sh removes it.
+    if [[ "${RAFU_KEEP_STAGE:-}" != 1 ]]; then
+      rm -rf "$APP_BUNDLE"
+    fi
     ;;
   --package|package)
     # Packaging stages and verifies without stopping or launching either app.
