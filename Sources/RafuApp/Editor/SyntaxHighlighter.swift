@@ -351,6 +351,14 @@ final class NeonSyntaxHighlightingPipeline: NSObject {
     /// One active parse plus at most one pending full text snapshot.
     private var syntaxWorker: SyntaxSnapshotWorker?
     private var isTornDown = false
+    /// Regex-path edit range waiting for the next main-queue turn. Neon's
+    /// `invalidate` asks the layout manager for the visible range and applies
+    /// temporary attributes synchronously. Inside `didProcessEditing` the
+    /// layout manager has not yet seen the edit, so that work reads the old
+    /// glyph map against the new, shorter string, throws `NSRangeException`,
+    /// and aborts `processEditing` before the layout managers are told. The
+    /// screen then keeps the old text while the storage holds the new text.
+    private var pendingEditInvalidation: NSRange?
     /// Monotonic parse-generation counter handed to the actor for staleness
     /// (a newer snapshot always wins). Independent of `EditorDocument.revision`.
     private var snapshotVersion = 0
@@ -527,8 +535,53 @@ final class NeonSyntaxHighlightingPipeline: NSObject {
         // Keep Neon's range bookkeeping current even while syntax is suppressed.
         highlighter.didChangeContent(in: previousRange, delta: delta)
         if !isSuppressed, syntaxActor == nil {
-            highlighter.invalidate(.range(editedRange))
+            scheduleEditInvalidation(editedRange: editedRange, delta: delta)
         }
+    }
+
+    /// Defers the regex-path invalidation until `processEditing` has returned
+    /// and every layout manager has processed the edit. One dispatch per burst
+    /// of edits; later edits fold into the pending range.
+    private func scheduleEditInvalidation(editedRange: NSRange, delta: Int) {
+        let isScheduled = pendingEditInvalidation != nil
+        pendingEditInvalidation = Self.coalescedEditInvalidation(
+            pending: pendingEditInvalidation, editedRange: editedRange, delta: delta)
+        guard !isScheduled else { return }
+        // A real next-runloop dispatch, as in the gutter: an immediate
+        // MainActor hop can still run inside processEditing.
+        DispatchQueue.main.async { [weak self] in
+            self?.flushEditInvalidation()
+        }
+    }
+
+    private func flushEditInvalidation() {
+        guard let pending = pendingEditInvalidation else { return }
+        pendingEditInvalidation = nil
+        guard !isTornDown, !isSuppressed, syntaxActor == nil,
+            let length = textView?.textStorage?.length
+        else { return }
+        let start = min(pending.location, length)
+        let end = min(NSMaxRange(pending), length)
+        highlighter.invalidate(.range(NSRange(location: start, length: end - start)))
+    }
+
+    /// Folds a later edit into a pending invalidation range. `pending` is in
+    /// the coordinates before this edit; the result is in the coordinates
+    /// after it and covers both the moved pending range and `editedRange`.
+    static func coalescedEditInvalidation(
+        pending: NSRange?, editedRange: NSRange, delta: Int
+    ) -> NSRange {
+        guard let pending else { return editedRange }
+        let replacedStart = editedRange.location
+        let replacedEnd = NSMaxRange(editedRange) - delta
+        func moved(_ location: Int, insideMapsTo inside: Int) -> Int {
+            if location >= replacedEnd { return location + delta }
+            if location > replacedStart { return inside }
+            return location
+        }
+        let start = moved(pending.location, insideMapsTo: editedRange.location)
+        let end = moved(NSMaxRange(pending), insideMapsTo: NSMaxRange(editedRange))
+        return NSUnionRange(NSRange(location: start, length: max(0, end - start)), editedRange)
     }
 
     /// Repaints the base font/foreground and re-invalidates so tokens re-apply.

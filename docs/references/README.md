@@ -96,6 +96,7 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`editor-resource-lifetime-repair.md`](editor-resource-lifetime-repair.md) | Document-owned TextKit resources, mount-host transfer, stale teardown guards, undo and hibernation |
 | [`editor-viewport-layout-repair.md`](editor-viewport-layout-repair.md) | Viewport-bounded app layout requests, caret and decoration geometry, and structural counters |
 | [`editor-gutter-incremental-index.md`](editor-gutter-incremental-index.md) | Incremental UTF-16 line starts, CRLF boundaries, deferred ruler width, and NSObject selector collision |
+| [`text-storage-process-editing.md`](text-storage-process-editing.md) | Adding work to a `didProcessEditing` delegate or notification observer, or debugging an editor whose screen keeps old text after an edit (caught `NSRangeException`, stale layout) |
 | [`syntax-bounded-snapshot-worker.md`](syntax-bounded-snapshot-worker.md) | One active and one pending parse snapshot, version gaps, stale tokens, and indexed edit points |
 | [`document-find-bounded-search.md`](document-find-bounded-search.md) | Off-main matching, request identity, pending commands, and highlight changes after TextKit edits |
 | [`workspace-navigation-and-restoration-scheduling.md`](workspace-navigation-and-restoration-scheduling.md) | Async goto, stale-result checks, bookmark caching, combined metadata saves, and quit completion |

@@ -196,6 +196,13 @@ end-of-file replacement with indent guides and blame on).
 swift test --filter EditorLineWalkTermination
 ```
 
+Root cause of the stale range (found later the same day): the regex syntax
+path ran Neon layout work inside `didProcessEditing`, which threw a caught
+`NSRangeException` and aborted `processEditing` before the layout manager
+saw the edit. See [`text-storage-process-editing.md`](text-storage-process-editing.md).
+Keep the walk guard anyway: it is the defense if any other path leaves the
+layout behind the storage.
+
 ## `NSView.display()` is a silent no-op in headless `swift test` runs
 
 There is no WindowServer session under `swift test`, so `NSView.display()`
