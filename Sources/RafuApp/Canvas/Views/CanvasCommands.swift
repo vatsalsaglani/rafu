@@ -100,6 +100,15 @@ struct CanvasCommands: Commands {
             }
             .keyboardShortcut("l", modifiers: [.command, .option])
             .disabled(board?.selection.count != 2)
+            // The menu path for deleting a selected link. Plain Backspace is
+            // never a menu key: it would take the key from text input. The
+            // item is off while card content has the keys, so Command-Delete
+            // still deletes to the line start in a note or a terminal.
+            Button("Delete Link") { board?.deleteSelectedConnectionIfAny() }
+                .keyboardShortcut(.delete, modifiers: .command)
+                .disabled(
+                    board?.selectedConnection == nil || board?.contentIsActive != false
+                        || board?.renamingCardID != nil)
             Divider()
             Button("Zoom to Card") {
                 if let id = board?.selection.first { board?.zoomToCard(id) }

@@ -429,8 +429,15 @@ private struct CanvasEdgeView: View {
             display: display, board: board, bridge: bridge, tooltip: tooltip,
             exposesToAccessibility: exposesToAccessibility,
             select: {
-                board.selectConnection(display.id)
+                // An edge is not focusable, so the board must hold the keys
+                // for Delete to reach it. `selectConnection` leaves card
+                // content, which resigns the first responder in this same
+                // turn and can swallow the first request; ask again on the
+                // next main-actor turn. `CanvasEdgeDeleteKeyMonitor` covers
+                // a board that still has no focus.
                 focusBoard()
+                board.selectConnection(display.id)
+                Task { @MainActor in focusBoard() }
             },
             hover: { inside in
                 // The curve and the pill are separate hit targets; the edge is

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 
@@ -27,13 +28,82 @@ struct CanvasEdgeActionsTests {
         board.selectConnection(edge.id)
         #expect(board.selection.isEmpty)
         #expect(board.selectedConnection?.id == edge.id)
-        // Selecting a card deselects the edge even if nobody clears it.
+        // Selecting a card deselects the edge even if nobody clears it, and
+        // clearing the cards again does not bring the old edge back.
         board.selection = [cards[2].id]
         #expect(board.selectedConnection == nil)
+        #expect(board.selectedConnectionID == nil)
         board.selection = []
-        #expect(board.selectedConnection?.id == edge.id)
+        #expect(board.selectedConnection == nil)
+        board.selectConnection(edge.id)
         board.clearConnectionSelection()
         #expect(board.selectedConnection == nil)
+    }
+
+    @Test("Every path that selects cards clears the edge selection")
+    func cardSelectionClearsEdge() throws {
+        let (board, cards) = try makeBoard()
+        try board.addConnection(from: cards[0].id, to: cards[1].id)
+        let edge = try #require(board.connections.first)
+        board.selectConnection(edge.id)
+        board.select([cards[0].id, cards[1].id])
+        #expect(board.selectedConnectionID == nil)
+        board.selectConnection(edge.id)
+        board.selection.insert(cards[2].id)
+        #expect(board.selectedConnectionID == nil)
+        // Delete then removes the selected cards' path, not a stale edge.
+        #expect(!board.deleteSelectedConnectionIfAny())
+        #expect(board.connections.count == 1)
+    }
+
+    @Test("Delete on a selected edge works after unrelated state changes, and undo and redo follow")
+    func deleteAfterReselection() throws {
+        let (board, cards) = try makeBoard()
+        try board.addConnection(from: cards[0].id, to: cards[1].id)
+        try board.addConnection(from: cards[1].id, to: cards[2].id)
+        let first = try #require(board.connections.first)
+        let second = try #require(board.connections.last)
+        board.selectConnection(first.id)
+        // Selecting another edge, and an empty card selection, keep it valid.
+        board.selectConnection(second.id)
+        board.selection = []
+        board.hoveredConnectionID = first.id
+        #expect(board.deleteSelectedConnectionIfAny())
+        #expect(board.connections.map(\.id) == [first.id])
+        #expect(board.selectedConnectionID == nil)
+        board.performUndo()
+        #expect(Set(board.connections.map(\.id)) == [first.id, second.id])
+        board.performRedo()
+        #expect(board.connections.map(\.id) == [first.id])
+    }
+
+    @Test("A selected edge that went away is dropped, not deleted twice")
+    func staleSelectedEdge() throws {
+        let (board, cards) = try makeBoard()
+        try board.addConnection(from: cards[0].id, to: cards[1].id)
+        let edge = try #require(board.connections.first)
+        board.selectConnection(edge.id)
+        board.performUndo()
+        #expect(board.connections.isEmpty)
+        let stamp = board.changeStamp
+        #expect(!board.deleteSelectedConnectionIfAny())
+        #expect(board.selectedConnectionID == nil)
+        #expect(board.changeStamp == stamp)
+    }
+
+    @Test("The edge Delete monitor takes only plain Delete keys, never from text input")
+    func deleteKeyMonitor() {
+        typealias Host = CanvasEdgeDeleteKeyMonitor.Host
+        #expect(Host.isEdgeDelete(keyCode: 51, flags: []))
+        #expect(Host.isEdgeDelete(keyCode: 117, flags: []))
+        #expect(Host.isEdgeDelete(keyCode: 51, flags: .shift))
+        #expect(!Host.isEdgeDelete(keyCode: 51, flags: .command))
+        #expect(!Host.isEdgeDelete(keyCode: 51, flags: .option))
+        #expect(!Host.isEdgeDelete(keyCode: 51, flags: .control))
+        #expect(!Host.isEdgeDelete(keyCode: 36, flags: []))
+        #expect(Host.responderAllowsEdgeDelete(nil))
+        #expect(Host.responderAllowsEdgeDelete(NSView()))
+        #expect(!Host.responderAllowsEdgeDelete(NSTextView()))
     }
 
     @Test("Delete removes only a selected edge, in one undo step")

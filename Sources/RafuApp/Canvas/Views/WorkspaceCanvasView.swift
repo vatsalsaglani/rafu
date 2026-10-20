@@ -81,6 +81,11 @@ struct WorkspaceCanvasView: View {
                 boardHasKeyboardFocus = true
             }
         )
+        .background(
+            CanvasEdgeDeleteKeyMonitor(
+                isActive: edgeDeleteKeyIsActive,
+                perform: { board.deleteSelectedConnectionIfAny() })
+        )
         .onChange(of: board.changeStamp) { _, _ in session.canvasResources[board.id]?.prune() }
         .onChange(of: board.contentIsActive) { wasActive, isActive in
             // Leaving content by any route (menu, palette, button) returns keys to the board.
@@ -356,6 +361,14 @@ struct WorkspaceCanvasView: View {
             contentIsActive: board.contentIsActive, renamingCardID: board.renamingCardID)
     }
 
+    /// Delete reaches a selected edge even when the board has no keyboard
+    /// focus (`CanvasEdgeDeleteKeyMonitor`), but only on the focused board and
+    /// never while its label popover is open.
+    private var edgeDeleteKeyIsActive: Bool {
+        board.selectedConnectionID != nil && board.labelEditorConnectionID == nil
+            && boardTakesKeys && session.selectedCanvasID == board.id
+    }
+
     /// Stage 3: keyboard handling for the board.
     private func boardKeys(_ content: some View) -> some View {
         content
@@ -396,6 +409,13 @@ struct WorkspaceCanvasView: View {
                 guard session.canCloseSelectedCanvasNodes else { return .ignored }
                 session.closeSelectedCanvasNodes()
                 return .handled
+            }
+            // Edit > Delete (and any other delete command routed to the
+            // focused board) does the same as the Delete key.
+            .onDeleteCommand {
+                guard boardTakesKeys else { return }
+                if board.deleteSelectedConnectionIfAny() { return }
+                if session.canCloseSelectedCanvasNodes { session.closeSelectedCanvasNodes() }
             }
             .onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow]) { event in
                 guard boardTakesKeys else { return .ignored }

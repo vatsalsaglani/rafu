@@ -8,7 +8,8 @@ extension CanvasBoardState {
     }
 
     /// The selected edge, if any. Selecting a card or several cards deselects
-    /// the edge, even if a caller forgets `clearConnectionSelection()`.
+    /// the edge (`selection.didSet`), even if a caller forgets
+    /// `clearConnectionSelection()`.
     var selectedConnection: CanvasConnection? {
         guard selection.isEmpty, let id = selectedConnectionID else { return nil }
         return connection(id)
@@ -50,10 +51,17 @@ extension CanvasBoardState {
     }
 
     /// Deletes the selected edge (one undo step). Returns true if there was one.
+    /// Reads `selectedConnectionID` directly: a card selection clears it
+    /// (`selection.didSet`), so it is never stale here.
     @discardableResult
     func deleteSelectedConnectionIfAny() -> Bool {
-        guard let edge = selectedConnection else { return false }
-        deleteConnection(edge.id)
+        guard let id = selectedConnectionID else { return false }
+        guard connection(id) != nil else {
+            // The edge went away (undo, an agent): drop the stale id.
+            selectedConnectionID = nil
+            return false
+        }
+        deleteConnection(id)
         return true
     }
 

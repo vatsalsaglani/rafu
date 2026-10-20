@@ -43,9 +43,24 @@ pending).
   has focus. Menu items show these keys as hints in their titles, because real
   arrow-key menu shortcuts would fire while a terminal or note has focus.
 - **Delete (Backspace)** deletes the selected edge first
-  (`deleteSelectedConnectionIfAny()`). Otherwise it removes the selected cards
-  from the Canvas, undoable, with a confirmation when a terminal is running. It
-  never deletes source files. **Escape** clears the edge selection and deselects
+  (`deleteSelectedConnectionIfAny()`, one undo step). Otherwise it removes the
+  selected cards from the Canvas, undoable, with a confirmation when a terminal
+  is running. It never deletes source files. Rules for the edge path (round 4):
+  - A non-empty card selection clears `selectedConnectionID` by every path
+    (`selection.didSet`), so Delete never acts on a stale edge, and clearing
+    the cards never brings an old edge back.
+  - An edge is not focusable. Its click asks for board focus before and after
+    `selectConnection` (the second request on the next main-actor turn),
+    because leaving card content resigns the first responder in the same turn.
+  - `CanvasEdgeDeleteKeyMonitor` (a local key monitor) deletes the selected
+    edge on Delete/Forward Delete even when the board still has no focus. It is
+    active only on the focused board, with an edge selected, the board taking
+    keys and no label popover open, and it never takes the key from text input
+    (`NSText` or any `NSTextInputClient`: editors, notes, terminals, fields).
+  - The board also answers `.onDeleteCommand` with the same body.
+  - The menu path is **Ensemble > Delete Link** (Command-Delete), enabled only
+    with an edge selected and no card content active. Plain Backspace is never
+    a menu key equivalent: it would take the key from text input. **Escape** clears the edge selection and deselects
   cards (in content, Escape goes to the content).
 - **Zoom:** one 36 pt bar with a zoom capsule. Cmd-9 zooms to fit all cards,
   Opt-Cmd-9 fits the selection, Cmd-0 is actual size (100%); the percentage

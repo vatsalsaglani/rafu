@@ -34,7 +34,14 @@ final class CanvasBoardState: Identifiable {
     private(set) var isDirty = false
     var isSaving = false
     var errorMessage: String?
-    var selection: Set<CanvasCardID> = []
+    /// A non-empty card selection always clears the edge selection, by any
+    /// path (a marquee, Select All, an agent), so Delete never acts on a
+    /// stale edge and a cleared selection never brings an old edge back.
+    var selection: Set<CanvasCardID> = [] {
+        didSet {
+            if !selection.isEmpty, selectedConnectionID != nil { selectedConnectionID = nil }
+        }
+    }
     var focusedCardID: CanvasCardID?
     var contentIsActive = false
     var visibleSize: CGSize = .zero
