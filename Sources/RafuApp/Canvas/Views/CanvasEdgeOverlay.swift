@@ -1,66 +1,13 @@
 import AppKit
 import SwiftUI
 
-// MARK: Arrowheads
-
-/// An arrowhead or port stub, as plain data so it can be drawn from a canvas.
-nonisolated struct CanvasArrowSpec: Sendable {
-    enum Kind: Sendable {
-        /// Open chevron, 9 x 10 pt (relationship "To" end, disconnected ends).
-        case openChevron
-        /// Filled triangle, 10 x 10 pt (message links).
-        case filledTriangle
-        /// The 4 pt of line next to a port that has no arrowhead.
-        case stub
-    }
-
-    let tip: CGPoint
-    /// Unit vector that points into the port.
-    let direction: CGPoint
-    let kind: Kind
-    let color: Color
-    let lineWidth: CGFloat
-}
-
-nonisolated enum CanvasArrowDrawing {
-    static func draw(_ spec: CanvasArrowSpec, in context: inout GraphicsContext) {
-        let along = spec.direction
-        let across = CGPoint(x: -along.y, y: along.x)
-        switch spec.kind {
-        case .openChevron:
-            let base = CGPoint(x: spec.tip.x - along.x * 9, y: spec.tip.y - along.y * 9)
-            var path = Path()
-            path.move(to: CGPoint(x: base.x + across.x * 5, y: base.y + across.y * 5))
-            path.addLine(to: spec.tip)
-            path.addLine(to: CGPoint(x: base.x - across.x * 5, y: base.y - across.y * 5))
-            context.stroke(
-                path, with: .color(spec.color),
-                style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
-        case .filledTriangle:
-            let base = CGPoint(x: spec.tip.x - along.x * 10, y: spec.tip.y - along.y * 10)
-            var path = Path()
-            path.move(to: spec.tip)
-            path.addLine(to: CGPoint(x: base.x + across.x * 5, y: base.y + across.y * 5))
-            path.addLine(to: CGPoint(x: base.x - across.x * 5, y: base.y - across.y * 5))
-            path.closeSubpath()
-            context.fill(path, with: .color(spec.color))
-        case .stub:
-            var path = Path()
-            path.move(to: CGPoint(x: spec.tip.x - along.x * 4, y: spec.tip.y - along.y * 4))
-            path.addLine(to: spec.tip)
-            context.stroke(
-                path, with: .color(spec.color),
-                style: StrokeStyle(lineWidth: spec.lineWidth, lineCap: .butt))
-        }
-    }
-}
-
 // MARK: Overlay above the cards
 
-/// What must draw above the cards (review 7.5 and 7.6): the connection preview
-/// with its target feedback, arrowheads and port stubs, the hovered or selected
-/// edge with its halo and end handles, and the label and "Connect to new…"
-/// popovers. It does not take hits except on the end handles.
+/// Interaction chrome above the cards: the connection drag preview with its
+/// target feedback, the end handles of the selected edge, and the label and
+/// "Connect to new…" popovers. No edge stroke, halo or arrowhead draws here;
+/// edges stay below every card (`CanvasEdgeLayering`). It takes hits only on
+/// the end handles.
 struct CanvasEdgeOverlay: View {
     @Environment(\.rafuTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -96,9 +43,8 @@ struct CanvasEdgeOverlay: View {
         let displays = CanvasEdgeScene.displays(board: board, bridge: bridge)
         let viewport = board.viewport
         ZStack(alignment: .topLeading) {
-            arrowheads(displays)
-            ForEach(emphasized(displays)) { display in
-                emphasis(display)
+            if let selected = displays.first(where: { $0.id == board.selectedConnection?.id }) {
+                endHandles(selected)
             }
             connectionPreview(viewport: viewport)
             endDragPreview(displays: displays, viewport: viewport)
@@ -147,73 +93,28 @@ struct CanvasEdgeOverlay: View {
         }
     }
 
-    // MARK: Arrowheads and stubs
+    // MARK: Selected edge
 
-    private func arrowSpecs(for display: CanvasEdgeDisplay) -> [CanvasArrowSpec] {
-        let style = CanvasEdgeStyle(
-            display: display, palette: theme.palette,
-            isHovered: board.hoveredConnectionID == display.id)
-        let route = display.route
-        guard let state = display.state else {
-            return [
-                CanvasArrowSpec(
-                    tip: route.end, direction: route.curve.endInward, kind: .openChevron,
-                    color: style.color, lineWidth: style.lineWidth),
-                CanvasArrowSpec(
-                    tip: route.start, direction: route.curve.startInward, kind: .stub,
-                    color: style.color, lineWidth: style.lineWidth),
-            ]
-        }
-        let kind: CanvasArrowSpec.Kind =
-            state.kind == .disconnected ? .openChevron : .filledTriangle
-        return [
-            CanvasArrowSpec(
-                tip: route.end, direction: route.curve.endInward, kind: kind,
-                color: style.color, lineWidth: style.lineWidth),
-            CanvasArrowSpec(
-                tip: route.start, direction: route.curve.startInward, kind: kind,
-                color: style.color, lineWidth: style.lineWidth),
-        ]
-    }
-
-    private func arrowheads(_ displays: [CanvasEdgeDisplay]) -> some View {
-        let specs = displays.flatMap { arrowSpecs(for: $0) }
-        return Canvas { context, _ in
-            for spec in specs { CanvasArrowDrawing.draw(spec, in: &context) }
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-
-    // MARK: Hovered and selected edge
-
-    private func emphasized(_ displays: [CanvasEdgeDisplay]) -> [CanvasEdgeDisplay] {
-        let selected = board.selectedConnection?.id
-        let hovered = board.hoveredConnectionID
-        return displays.filter { $0.id == selected || $0.id == hovered }
-    }
-
+    /// The two end handles of the selected edge. A handle whose port lies
+    /// under another card is not shown: that card hides the edge there, and
+    /// a handle above it would take the card's clicks.
     @ViewBuilder
-    private func emphasis(_ display: CanvasEdgeDisplay) -> some View {
-        let isSelected = board.selectedConnection?.id == display.id
-        let style = CanvasEdgeStyle(display: display, palette: theme.palette, isHovered: true)
-        ZStack(alignment: .topLeading) {
-            if isSelected {
-                CanvasEdgeCurveShape(curve: display.route.curve)
-                    .stroke(
-                        theme.palette.accent.opacity(0.22),
-                        style: StrokeStyle(lineWidth: 6, lineCap: .round))
-            }
-            CanvasEdgeCurveShape(curve: display.route.curve)
-                .stroke(style.color, style: style.strokeStyle)
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-        if isSelected {
+    private func endHandles(_ display: CanvasEdgeDisplay) -> some View {
+        let ends: Set<CanvasCardID> = [display.connection.from, display.connection.to]
+        let live = board.liveGeometry.rects
+        let cards = board.cards
+        let viewport = board.viewport
+        let startCovered = CanvasEdgeLayering.isCovered(
+            display.route.start, cards: cards, live: live, viewport: viewport, excluding: ends)
+        let endCovered = CanvasEdgeLayering.isCovered(
+            display.route.end, cards: cards, live: live, viewport: viewport, excluding: ends)
+        if !startCovered {
             CanvasEdgeEndHandle(
                 point: display.route.start,
                 changed: { endDrag = EndDrag(id: display.id, movingFrom: true, point: $0) },
                 ended: { finishEndDrag(display.id, movingFrom: true, at: $0) })
+        }
+        if !endCovered {
             CanvasEdgeEndHandle(
                 point: display.route.end,
                 changed: { endDrag = EndDrag(id: display.id, movingFrom: false, point: $0) },

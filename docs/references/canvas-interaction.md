@@ -436,12 +436,14 @@ follow the same skip.
 
 ### Edge layering and geometry
 
-- `CanvasEdgeLayer` draws edges **below** cards. `CanvasEdgeOverlay` draws
-  **above** cards. `CanvasConnectionPorts` provides the connection ports. The overlay
-  draws the arrowheads and port stubs of every edge (so connection points stay
-  visible over card borders), the hovered or selected edge with its accent halo
-  and draggable end handles, the connection drag preview with target and snap
-  feedback, and the label / "Connect to new…" popovers.
+- **Superseded 2026-10-20** (see "2026-10-20: every edge draws below every
+  card" below): every part of an edge now draws in `CanvasEdgeLayer`, below
+  the cards. The original split, kept for history: `CanvasEdgeLayer` drew
+  edges **below** cards, and `CanvasEdgeOverlay` drew **above** cards the
+  arrowheads and port stubs of every edge, the hovered or selected edge with
+  its accent halo and draggable end handles, the connection drag preview with
+  target and snap feedback, and the label / "Connect to new…" popovers.
+  `CanvasConnectionPorts` provides the connection ports.
 - `CanvasEdgeGeometry` rules: edges leave from the facing sides of the two
   cards; endpoints on one side spread 8 pt apart; Bezier control distance is
   `clamp(0.4 * d, 24, 160)`; one pass bends the curve; hit test tolerance is
@@ -570,6 +572,63 @@ Build and tests only; the key path was not driven with real input.
   existing card; ⌘↩ in a plain editor tab does nothing and the footer has no
   ⌘↩ hint; Return still opens the file in both cases; ⌘↩ while a note is in
   Edit mode behind the palette still goes to the palette.
+
+## 2026-10-20: every edge draws below every card
+
+Last verified: Apple Swift 6.4 (swiftlang-6.4.0.34.1), macOS 27.0.1 (26A434).
+Build and tests only; the layering was not checked with real input.
+
+**Rule.** A card always hides the part of an edge it covers. `CanvasEdgeLayer`
+(below the `ForEach` of cards in `WorkspaceCanvasView.boardLayers`) draws every
+part of every edge: the stroke, the hover weight (+0.5 pt), the selection halo
+(6 pt accent at 22%), the arrowheads and port stubs, the label pill, and the
+12 pt hit area. Inside the layer, `CanvasEdgeLayering.drawOrder` puts the
+hovered edge and then the selected edge last, so emphasis sits above the other
+edges and never above a card. `CanvasEdgeOverlay` (above the cards) draws only
+interaction chrome: the connection drag preview with its target and snap
+feedback, the end-drag preview, the selected edge's end handles, and the label
+and "Connect to new…" popovers. This supersedes review 7.6 ("a selected or
+hovered edge draws above all nodes"; "arrowheads and port stubs draw above the
+node border") and the old overlay split above.
+
+**Why.** The overlay redrew the whole hovered edge above every card. Hover is
+set by the edge's hit area wherever the edge is not covered, so a pointer that
+rested on the visible part of an edge (or a stale `hoveredConnectionID`)
+painted the full curve over every card between its two ends. Seen on the
+"DFAI 0001" board: a relationship from "Default shell" to ".dockerignore"
+crossed "Terminal Group 1" and a new "AUTHORING.md" card. The stroke in those
+screenshots is the 1.5 pt hover weight, not the 1 pt rest weight of the same
+edge in the earlier screenshot where it passed under the card; the earlier
+build already held the live-drag change (eff2980), so that change is not the
+cause. A card raise and its undo restore the array order exactly
+(`gestureStart` snapshots the document before the raise).
+
+**Hit testing follows drawing.** Clicks, hover, the context menu and Delete
+reach an edge only where it is visible: the hit area and pill are in the layer,
+so a covering card takes the click. The selected edge's end handles are the
+only edge hit targets above the cards; a handle whose port lies strictly inside
+a card that is not one of the edge's two ends (`CanvasEdgeLayering.isCovered`,
+live drag rects included, frames excluded) is not shown, so it never floats
+over that card or takes its clicks.
+
+**Stale hover.** SwiftUI sends no hover exit to a view that goes away (zoom
+tier hides relationships, Show Links, a closed tab). `CanvasEdgeView` clears
+`hoveredConnectionID` in `onDisappear` when it still names itself.
+
+**Trade-off.** An arrowhead at a port that another card covers is hidden with
+the rest of the edge. An arrowhead tip touches its card's border; the 1 pt
+border (and the selection ring, 2 pt outside) can cover the tip pixel.
+
+- **Tests:** `Tests/RafuAppTests/Canvas/CanvasEdgeLayeringTests.swift`
+  (draw order, covered ports with zoom and live rects, frames, undo of raise
+  plus drag restoring the order, and a source contract that the overlay draws
+  no edge stroke, halo or arrowhead).
+- **Manual check still required:** hover and select an edge that passes under
+  a card: it thickens and gets its halo only where it is visible; click the
+  covering card over the edge: the card is selected, not the edge; click the
+  visible part of the edge, then press Delete: the edge goes, ⌘Z restores it;
+  drag a card across an edge: the edge stays under it; select an edge whose
+  port lies under a third card: that end shows no handle.
 
 ## Why it matters
 

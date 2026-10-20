@@ -300,7 +300,8 @@ Landed:
   failed until the next accepted message or a pause/resume). Accepted-message
   events carry no body.
 - Behaviour change: new terminal-to-terminal links start Paused.
-- `CanvasEdgeLayer` (below cards), `CanvasEdgeOverlay` (above cards),
+- `CanvasEdgeLayer` (below cards), `CanvasEdgeOverlay` (above cards; since
+  2026-10-20 interaction chrome only, every edge draws below the cards),
   `CanvasConnectionPorts`, `CanvasLinkStatusItem` (replaces
   `CanvasSessionLinksBar`; "Enable Links" and "Pause Links" are gone, so
   `canvas-live-sessions.md` is stale). The message dot shows only while a

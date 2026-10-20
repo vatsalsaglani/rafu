@@ -422,3 +422,20 @@ d1c160a, 40d5c72).
   `▾` menu; a Terminal Group card's pane chips with enough panes to wrap, the
   status pill, and Start Agent; the `circle.hexagongrid` icon in Indigo and
   Khadi.
+
+## Status (2026-10-20, edge layering fix)
+
+- **Every edge draws below every card**, the hovered and selected edge
+  included. `CanvasEdgeOverlay` had redrawn the hovered edge above all cards,
+  so a pointer on an edge's visible part painted the whole curve over the
+  cards between its ends. `CanvasEdgeLayer` now draws the hover weight, the
+  selection halo, the arrowheads and the port stubs; the overlay keeps only the
+  drag previews, the selected edge's end handles (hidden where another card
+  covers the port) and the popovers. A disappearing edge view clears a stale
+  `hoveredConnectionID`.
+- **Reference updated:**
+  [`canvas-interaction.md`](../../references/canvas-interaction.md)
+  ("2026-10-20: every edge draws below every card"). No ADR: a presentation
+  rule inside the accepted board contract; it supersedes review 7.6 Layering.
+- **Tests:** `Tests/RafuAppTests/Canvas/CanvasEdgeLayeringTests.swift`.
+- **Open manual check:** the steps listed in that reference section.
