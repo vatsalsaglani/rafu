@@ -142,8 +142,7 @@ extension WorkspaceSession {
         guard let index = additionalRootTrees.firstIndex(where: { $0.id == id }) else { return }
         let tree = additionalRootTrees.remove(at: index)
         tree.stop()
-        if sourceControlRootID == id { sourceControlRootID = nil }
-        gitRepositoryRootIDs.remove(id)
+        dropGitRepositories(inRoot: id)
         fileIndexGeneration += 1
         scheduleCanvasWorkspaceSave()
     }
@@ -152,9 +151,9 @@ extension WorkspaceSession {
     func tearDownAdditionalRoots() {
         for tree in additionalRootTrees { tree.stop() }
         additionalRootTrees = []
-        gitRepositoryRootIDs = []
+        resetGitRepositoryState()
         workspaceFileURL = nil
-        if sourceControlRootID != nil { sourceControlRootID = nil }
+        if sourceControlRepositoryID != nil { sourceControlRepositoryID = nil }
     }
 
     /// Relaunch restoration of the extra folders. Bookmarks resolve off the
@@ -189,15 +188,20 @@ extension WorkspaceSession {
     }
 
     /// FSEvents for an additional root: reload clean open files that changed
-    /// on disk, and refresh Source Control when it shows this root.
+    /// on disk, refresh Source Control when it shows a repository of this
+    /// root, and mark the summaries of this root's other repositories.
     private func handleAdditionalRootChanges(_ changes: WorkspaceChangeSet, rootID: UUID) async {
-        if sourceControlRootID == rootID {
-            if changes.gitChanged || changes.isStorm {
-                await refreshGit()
-            } else if changes.treeChanged {
-                await refreshGitSnapshotOnly()
-            }
+        noteRepositoryListMayHaveChanged(changes, rootID: rootID)
+        let impact = WorkspaceGitRepositories.impact(
+            of: changes, repositories: repositoriesForChangeRouting(rootID: rootID))
+        let selected = effectiveSourceControlRepositoryID
+        if let selected, impact.state.contains(selected) {
+            await refreshGit()
+        } else if let selected, impact.tree.contains(selected) {
+            await refreshGitSnapshotOnly()
         }
+        noteRepositorySummariesChanged(
+            impact.state.union(impact.tree).subtracting([selected].compactMap { $0 }))
         guard !changes.changedDocumentPaths.isEmpty else { return }
         for document in openDocuments where !document.isDirty {
             let path = document.url.resolvingSymlinksInPath().standardizedFileURL.path
@@ -218,51 +222,8 @@ extension WorkspaceSession {
         isOpenFolderErrorPresented = true
     }
 
-    // MARK: - Source Control root
-
-    /// The folder Source Control and the file-tree Git badges work on.
-    var gitRootURL: URL? {
-        if let id = sourceControlRootID, let tree = rootTree(for: id) { return tree.url }
-        return rootURL
-    }
-
-    /// The root ID Source Control shows (primary when none is chosen).
-    var effectiveSourceControlRootID: UUID? {
-        if let id = sourceControlRootID, rootTree(for: id) != nil { return id }
-        return descriptor?.id
-    }
-
-    /// Roots that are Git work trees. The Source Control navigator shows a
-    /// root picker only when there is more than one.
-    var sourceControlRootChoices: [WorkspaceRoot] {
-        roots.filter { gitRepositoryRootIDs.contains($0.id) }
-    }
-
-    /// The Git badge for a Files-tree row. Badges are keyed relative to the
-    /// Source Control root, so rows of any other root show none.
-    /// `rootID` nil means the primary root.
-    func gitTreeBadge(forRelativePath path: String, rootID: UUID?) -> GitTreeBadge? {
-        guard (rootID ?? descriptor?.id) == effectiveSourceControlRootID else { return nil }
-        return gitTreeBadges[path]
-    }
-
-    func selectSourceControlRoot(_ id: UUID) {
-        sourceControlRootID = id == descriptor?.id ? nil : id
-    }
-
-    /// Re-checks which roots sit inside a Git work tree, off the main actor.
-    func refreshGitRepositoryRoots() {
-        let roots = roots
-        guard !roots.isEmpty else {
-            gitRepositoryRootIDs = []
-            return
-        }
-        Task(name: "Find Git roots") { [weak self] in
-            let ids = await WorkspaceRootBookmarks.gitRootIDs(roots)
-            guard let self, self.roots.map(\.id) == roots.map(\.id) else { return }
-            gitRepositoryRootIDs = ids
-        }
-    }
+    // The Source Control repository, its discovery, and the repository
+    // summaries live in `WorkspaceSession+Repositories.swift`.
 
     // MARK: - Search and quick open
 
@@ -387,15 +348,5 @@ nonisolated enum WorkspaceRootBookmarks {
         var isDirectory: ObjCBool = false
         return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
             && isDirectory.boolValue && FileManager.default.isReadableFile(atPath: url.path)
-    }
-
-    @concurrent
-    static func gitRootIDs(_ roots: [WorkspaceRoot]) async -> Set<UUID> {
-        Set(
-            roots.filter { root in
-                WorkspaceRootList.isInsideGitWorkTree(path: root.path) {
-                    FileManager.default.fileExists(atPath: $0)
-                }
-            }.map(\.id))
     }
 }

@@ -4,9 +4,9 @@
   tree root sections, multi-root search and quick open, the Source Control
   root picker, `.rafuworkspace` files (`RafuWorkspaceFile`), the saved list
   (`SavedWorkspaceListStore`), and the Workspaces window (X10).
-- Last verified: Swift 6.2 Linux toolchain (syntax, lint, and RafuCore logic
-  in a scratch package), 2026-10-18. Not yet built on macOS; the macOS
-  `./script/test.sh` gate is still required.
+- Last verified: macOS 27.0, Swift 6.2, Apple Git 2.54.0, 2026-10-20
+  (`./script/test.sh`; repositories, summaries, and routing tests). First
+  written on the Swift 6.2 Linux toolchain, 2026-10-18.
 
 ## Rule or observed behavior
 
@@ -18,14 +18,64 @@
   first palette query), and security scope. Nothing is preloaded.
 - The primary root's `WorkspaceRoot.id` is the descriptor ID, so it is stable
   while the workspace is open. The primary root cannot be removed.
-- Git works on `gitRootURL` (the chosen Source Control root, default the
-  primary). Every Git function in `WorkspaceSession` binds
+- Git works on `gitRootURL`, the URL of the selected repository
+  (`sourceControlRepositoryID`, the standardized folder path; nil means the
+  primary root). Every Git function in `WorkspaceSession` binds
   `let rootURL = gitRootURL` and checks `self.gitRootURL == rootURL` after
-  each await, so a result for an old root is dropped when the user switches.
-  File-tree Git badges are keyed relative to the Git root;
-  `gitTreeBadge(forRelativePath:rootID:)` returns nil for rows of any other
-  root. The picker appears only when more than one root is inside a Git work
-  tree (`.git` found by walking parents; no Git process).
+  each await, so a result for an old repository is dropped when the user
+  switches. `sourceControlRootID` is a computed compatibility view of a
+  root-level selection.
+- Repositories (`WorkspaceSession+Repositories.swift`,
+  `WorkspaceGitRepositories`): each root inside a Git work tree (`.git`
+  found by walking parents; no Git process), then the direct child folders
+  of each root that hold a `.git` entry (nested repositories), by name. One
+  directory listing per root, off the main actor; deeper nesting is not
+  searched; at most 16. Discovery runs on open, add, remove, restore,
+  Refresh, a storm, a `.git` that appears in an unlisted root or child
+  folder, and a summary that finds a folder is no longer a repository.
+- The Source Control navigator shows a Repositories section above Changes,
+  History, and Branches: one 26 pt row per repository (selection pill radius
+  6, like a Files-tree row), with name, branch (or "detached"), ahead and
+  behind, a change-count capsule (staged, unstaged, untracked, and
+  conflicted paths, each once), and a separate conflict capsule with a
+  warning symbol. Counts are words in VoiceOver ("Branch main, 3 changes, 1
+  conflict"), never color alone. A row is a button (Full Keyboard Access)
+  with a context menu. One repository in a multi-folder workspace shows a
+  single header line; a one-folder workspace with one repository shows
+  nothing extra. With no explicit choice and a primary root that is not a
+  repository, the first repository is selected.
+- Summaries (`GitRepositorySummary`) come from one
+  `git status --porcelain=v2 --branch` each (`GitService.snapshot(at:)`).
+  The selected repository's summary follows `gitSnapshot` (no extra
+  process). Others are fetched when the section appears or the list changes
+  while it is visible, on Refresh, when FSEvents show that repository
+  changed (immediately if the section is visible or it holds the active
+  editor file, otherwise marked stale until the section appears), and once
+  when the active editor file moves into a repository with no summary. One
+  task drains a pending set, one `git status` at a time, so bursts coalesce.
+  No process stays alive; nothing polls.
+- Change routing: each root's FSEvents batch is mapped to the repositories
+  it touches (`WorkspaceGitRepositories.impact`): a root-level repository by
+  `gitChanged`/`treeChanged`, a nested repository by
+  `nestedGitChangedDirectories` or a changed folder inside it. The selected
+  repository gets `refreshGit()` (state) or `refreshGitSnapshotOnly()`
+  (tree); the others get summary refreshes. Git-ignored paths are dropped
+  first (`fsevents-ignore-filter.md`).
+- File-tree Git badges are keyed relative to the root that holds the
+  selected repository (`gitBadgeRootURL`), so a selected nested
+  repository's badges land on its rows; `gitTreeBadge(forRelativePath:rootID:)`
+  returns nil for rows of any other root. Badges for nested repositories
+  that are not selected are deferred.
+- The status bar and the title bar show the branch before Source Control
+  is opened: `sourceControlBranchSummary` reads the status snapshot that
+  opening or restoring the workspace already runs (`refreshWorkspace()`),
+  so no `refreshGit()` (branches, history, merge state) starts before
+  Source Control is shown. When the active editor file is in another
+  repository, the status bar shows that repository's branch; a click selects
+  it in Source Control and shows the navigator. Source Control never
+  switches on its own when the active file changes.
+- Restoration stores roots only, not the selected repository. A selected
+  nested repository whose folder is gone falls back to the primary root.
 - Search runs each root in order and prefixes paths with the root label
   (`lib/Sources/a.swift`) only when there is more than one root. Once the
   match limit is reached, later roots are skipped and the result is marked
@@ -75,13 +125,21 @@ swift-format lint --strict <changed files>
 ```
 
 Manual: add a second folder, check both root sections, search, ⌘P, the
-Source Control picker with two repositories, Save Workspace As, reopen from
-Finder and from the Workspaces window (⇧⌘1).
+Source Control Repositories section with two repositories and a nested one
+(selection, change capsules, VoiceOver value, Tab/Space with Full Keyboard
+Access), the status-bar branch at launch with Files shown and for a file in
+another repository, Save Workspace As, reopen from Finder and from the
+Workspaces window (⇧⌘1).
 
 ## Related code, ADRs, and phases
 
 - `Sources/RafuCore/Workspace/WorkspaceRoot.swift`, `WorkspaceFileFormat.swift`,
   `SavedWorkspaceList.swift`
-- `Sources/RafuApp/Workspace/**`, `Views/WorkspacesListView.swift`,
-  `Views/WorkspacesRootSections.swift`, `Views/WorkspaceSidebarView.swift`
+- `Sources/RafuApp/Workspace/**` (`WorkspaceSession+Repositories.swift`,
+  `WorkspaceGitRepositories.swift`), `Views/WorkspacesListView.swift`,
+  `Views/WorkspacesRootSections.swift` (`SourceControlRepositoriesSection`),
+  `Views/WorkspaceStatusBar.swift`, `Views/WorkspaceSidebarView.swift`
+- `Tests/RafuAppTests/MultiFolderWorkspaceTests.swift`
+  (`MultiRepositoryWorkspaceTests`), `StatusBarBranchFormatterTests.swift`
+- `docs/references/fsevents-ignore-filter.md`
 - Phase: `docs/plans/phases/ensemble-canvas.md`, Addendum 2, X10.

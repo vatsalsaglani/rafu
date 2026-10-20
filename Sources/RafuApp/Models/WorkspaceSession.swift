@@ -111,17 +111,34 @@ final class WorkspaceSession {
     /// workspaces). Empty for a one-folder workspace. `rootURL` always means
     /// the primary root. See `WorkspaceSession+Roots.swift`.
     var additionalRootTrees: [WorkspaceRootTree] = []
-    /// The root Source Control works on; `nil` means the primary root.
-    var sourceControlRootID: UUID? {
+    /// The repository Source Control works on (`GitRepositoryRef.id`, the
+    /// standardized folder path); `nil` means the primary root. See
+    /// `WorkspaceSession+Repositories.swift`.
+    var sourceControlRepositoryID: String? {
         didSet {
-            guard oldValue != sourceControlRootID else { return }
+            guard oldValue != sourceControlRepositoryID else { return }
             resetGitWorkbenchState()
             Task { await refreshGit() }
         }
     }
-    /// IDs of roots that are inside a Git work tree, checked off the main
-    /// actor whenever the root list changes.
-    var gitRepositoryRootIDs: Set<UUID> = []
+    /// The workspace's Git repositories, in Source Control order: each root
+    /// inside a Git work tree, then its nested repositories. Found off the
+    /// main actor whenever the root list changes; at most 16.
+    var gitRepositories: [GitRepositoryRef] = []
+    /// Branch and change count per repository, keyed by repository ID. The
+    /// selected repository's entry follows `gitSnapshot`; the others are
+    /// fetched lazily (see `refreshRepositorySummaries(ids:)`).
+    var gitRepositorySummaries: [String: GitRepositorySummary] = [:]
+    /// The repository that holds the selected editor file, if any.
+    var activeDocumentRepositoryID: String?
+    /// Summary refresh work. One task drains the pending set, one
+    /// repository at a time.
+    @ObservationIgnored var repositorySummaryTask: Task<Void, Never>?
+    @ObservationIgnored var pendingRepositorySummaryIDs: Set<String> = []
+    /// Repositories that changed while the Repositories section was hidden.
+    @ObservationIgnored var staleRepositorySummaryIDs: Set<String> = []
+    @ObservationIgnored var isRepositoriesSectionVisible = false
+    @ObservationIgnored var repositoryDiscoveryTask: Task<Void, Never>?
     /// The `.rafuworkspace` file this window was opened from or saved to.
     var workspaceFileURL: URL?
     var navigatorMode: WorkspaceNavigatorMode = .files {
@@ -174,7 +191,10 @@ final class WorkspaceSession {
     /// this value and commits its destination only when Control is released.
     private(set) var editorTabSwitcherState: EditorTabSwitcherState?
     var selectedDocumentID: UUID? {
-        didSet { cancelLocationNavigation() }
+        didSet {
+            cancelLocationNavigation()
+            if oldValue != selectedDocumentID { noteActiveDocumentRepository() }
+        }
     }
     var selectedTreePath: String?
     /// The in-flight payload for the current, same-process editor drag (tab
@@ -201,7 +221,10 @@ final class WorkspaceSession {
     var pendingFileCreation: FileCreationRequest?
     var pendingFileName = ""
     var gitSnapshot: GitSnapshot? {
-        didSet { rebuildGitTreeBadges() }
+        didSet {
+            rebuildGitTreeBadges()
+            recordSelectedRepositorySummary()
+        }
     }
     /// File-tree Git decorations keyed by workspace-relative path, rebuilt from
     /// `gitSnapshot` whenever it changes so tree rows never recompute the map
@@ -2655,6 +2678,13 @@ final class WorkspaceSession {
     }
 
     private func handleExternalChanges(_ changes: WorkspaceChangeSet) async {
+        guard let primaryRootID = descriptor?.id else { return }
+        noteRepositoryListMayHaveChanged(changes, rootID: primaryRootID)
+        let impact = WorkspaceGitRepositories.impact(
+            of: changes, repositories: repositoriesForChangeRouting(rootID: primaryRootID))
+        let selectedRepositoryID = effectiveSourceControlRepositoryID
+        let selectedStateChanged = selectedRepositoryID.map(impact.state.contains) ?? false
+        let selectedTreeChanged = selectedRepositoryID.map(impact.tree.contains) ?? false
         if changes.isStorm {
             // A large debounced batch (branch checkout, npm install, mass
             // touch) collapses into one coalesced full refresh instead of
@@ -2664,17 +2694,25 @@ final class WorkspaceSession {
         } else if changes.treeChanged {
             // A working-tree edit (no `.git/HEAD` or `.git/index` touch)
             // still changes `git status`, so the lightweight snapshot
-            // refreshes alongside every tree change, not only `gitChanged`
-            // ones (which drive the heavier branch/history/merge refresh).
+            // refreshes alongside every tree change of the Source Control
+            // repository, not only `gitChanged` ones (which drive the heavier
+            // branch/history/merge refresh).
             async let directories: Void = refreshChangedDirectories(
-                changes.changedDirectoryRelativePaths)
-            async let gitSnapshotRefresh: Void = refreshGitSnapshotOnly()
+                changes.changedDirectoryRelativePaths.union(changes.ignoredDirectoryRelativePaths))
+            async let gitSnapshotRefresh: Void =
+                selectedTreeChanged && !selectedStateChanged ? refreshGitSnapshotOnly() : ()
             _ = await (directories, gitSnapshotRefresh)
             requestFileIndexRebuild()
             requestSymbolIndexIncrementalUpdate(
                 changedDirectoryRelativePaths: changes.changedDirectoryRelativePaths)
+        } else if !changes.ignoredDirectoryRelativePaths.isEmpty {
+            // Only Git-ignored paths changed: re-list what the tree shows,
+            // nothing else (`WorkspaceIgnoredPathFilter`).
+            await refreshChangedDirectories(changes.ignoredDirectoryRelativePaths)
         }
-        if changes.gitChanged { await refreshGit() }
+        if selectedStateChanged { await refreshGit() }
+        noteRepositorySummariesChanged(
+            impact.state.union(impact.tree).subtracting([selectedRepositoryID].compactMap { $0 }))
         guard !changes.changedDocumentPaths.isEmpty else { return }
         for document in openDocuments where !document.isDirty {
             let path = document.url.resolvingSymlinksInPath().standardizedFileURL.path
@@ -5882,11 +5920,19 @@ final class WorkspaceSession {
     /// `gitSnapshot.didSet`, so every snapshot refresh (and clear) keeps the
     /// file-tree decorations in sync without any per-row work.
     private func rebuildGitTreeBadges() {
-        guard let snapshot = gitSnapshot, let rootURL = gitRootURL else {
+        // Keyed relative to the root that holds the repository, so a nested
+        // repository's badges land on its rows in that root's tree.
+        guard let snapshot = gitSnapshot, let rootURL = gitBadgeRootURL else {
             if !gitTreeBadges.isEmpty { gitTreeBadges = [:] }
             return
         }
         gitTreeBadges = snapshot.treeBadges(workspaceRoot: rootURL)
+    }
+
+    /// The primary root's watcher asks nested repositories about ignored
+    /// paths with their own rules.
+    func setPrimaryNestedRepositoryPaths(_ paths: [String]) {
+        liveness.nestedRepositoryRelativePaths = paths
     }
 
     private func resetGitWorkbenchState() {

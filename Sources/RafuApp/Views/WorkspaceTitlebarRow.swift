@@ -94,6 +94,10 @@ struct WindowTitlebarRow: View {
             workspaceMenu
             if let snapshot = session.gitBranchSnapshot {
                 branchChip(StatusBarBranchFormatter.present(snapshot))
+            } else if let summary = session.sourceControlBranchSummary {
+                // Before Source Control loads branches, the status snapshot
+                // from opening the workspace names the branch.
+                branchChip(StatusBarBranchFormatter.present(summary: summary))
             }
             agentActivity
         }

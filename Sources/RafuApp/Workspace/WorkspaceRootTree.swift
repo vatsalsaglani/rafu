@@ -56,6 +56,12 @@ final class WorkspaceRootTree: Identifiable {
         }
     }
 
+    /// Folders of the nested repositories in this root, so the watcher asks
+    /// each one about ignored paths with its own rules.
+    func setNestedRepositoryPaths(_ paths: [String]) {
+        liveness.nestedRepositoryRelativePaths = paths
+    }
+
     /// Stops the watcher and index work and ends the security scope. Safe to
     /// call more than once.
     func stop() {
@@ -120,9 +126,12 @@ final class WorkspaceRootTree: Identifiable {
     private func apply(_ changes: WorkspaceChangeSet) async {
         if changes.isStorm {
             await reloadMaterializedDirectories()
-        } else if changes.treeChanged {
+        } else if changes.treeChanged || !changes.ignoredDirectoryRelativePaths.isEmpty {
+            // Git-ignored paths re-list only what the tree shows; they do not
+            // invalidate the quick-open index below.
             let scope = WorkspaceFileTreeRefreshScope.materializedDirectories(
-                affectedBy: changes.changedDirectoryRelativePaths,
+                affectedBy: changes.changedDirectoryRelativePaths.union(
+                    changes.ignoredDirectoryRelativePaths),
                 among: Set(loadedChildren.keys))
             for relativePath in scope {
                 if let children = try? await fileService.listDirectory(

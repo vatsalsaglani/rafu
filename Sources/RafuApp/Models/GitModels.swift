@@ -401,3 +401,64 @@ nonisolated struct GitMergeState: Equatable, Sendable {
             cleaned.split(separator: "\n").first.map(String.init) ?? "Merge in progress"
     }
 }
+
+/// One Git repository Source Control can show in a workspace: a root that is
+/// inside a Git work tree, or a direct child folder of a root that holds a
+/// `.git` entry (a nested repository). `id` is the standardized path.
+nonisolated struct GitRepositoryRef: Identifiable, Hashable, Sendable {
+    let id: String
+    /// The workspace root the repository is in.
+    let rootID: UUID
+    let url: URL
+    let displayName: String
+    /// The folder name of a nested repository, relative to its root; empty
+    /// for a repository at the root itself.
+    let relativePath: String
+
+    var isNested: Bool { !relativePath.isEmpty }
+
+    init(rootID: UUID, url: URL, displayName: String, relativePath: String = "") {
+        self.id = Self.identifier(for: url)
+        self.rootID = rootID
+        self.url = url
+        self.displayName = displayName
+        self.relativePath = relativePath
+    }
+
+    static func identifier(for url: URL) -> String {
+        url.standardizedFileURL.path
+    }
+}
+
+/// The small, list-sized state of one repository, from one
+/// `git status --porcelain=v2 --branch` run (`GitService.snapshot(at:)`).
+nonisolated struct GitRepositorySummary: Equatable, Sendable {
+    let branch: String
+    let isDetached: Bool
+    let aheadCount: Int
+    let behindCount: Int
+    /// Changed paths: staged, unstaged, untracked, and conflicted, each
+    /// path once.
+    let changeCount: Int
+    let conflictCount: Int
+
+    init(
+        branch: String, isDetached: Bool = false, aheadCount: Int = 0, behindCount: Int = 0,
+        changeCount: Int = 0, conflictCount: Int = 0
+    ) {
+        self.branch = branch
+        self.isDetached = isDetached
+        self.aheadCount = aheadCount
+        self.behindCount = behindCount
+        self.changeCount = changeCount
+        self.conflictCount = conflictCount
+    }
+
+    init(_ snapshot: GitSnapshot) {
+        self.init(
+            branch: snapshot.branch, isDetached: snapshot.isDetached,
+            aheadCount: snapshot.aheadCount, behindCount: snapshot.behindCount,
+            changeCount: snapshot.changes.count,
+            conflictCount: snapshot.changes.count(where: \.isConflicted))
+    }
+}

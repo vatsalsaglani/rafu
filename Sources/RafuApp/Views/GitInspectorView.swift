@@ -25,12 +25,13 @@ struct SourceControlPanelView: View {
             ) {
                 Button("Refresh", systemImage: "arrow.clockwise") {
                     Task { await refreshAllGitState() }
+                    session.refreshAllGitRepositories()
                 }
                 .buttonStyle(RafuIconButtonStyle(size: 24))
                 .help("Refresh Source Control")
             }
 
-            WorkspaceSourceControlRootPicker(session: session)
+            SourceControlRepositoriesSection(session: session)
 
             if session.gitSnapshot != nil {
                 repositoryContext

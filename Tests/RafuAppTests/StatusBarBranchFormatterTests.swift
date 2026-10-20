@@ -64,4 +64,23 @@ struct StatusBarBranchFormatterTests {
         let presentation = StatusBarBranchFormatter.present(snapshot(currentBranch: branch))
         #expect(presentation.label == branch)
     }
+
+    @Test("A repository summary presents like a branch snapshot")
+    func summaryMatchesSnapshot() {
+        let fromSummary = StatusBarBranchFormatter.present(
+            summary: GitRepositorySummary(branch: "main", aheadCount: 3, behindCount: 2))
+        let fromSnapshot = StatusBarBranchFormatter.present(
+            snapshot(currentBranch: "main", aheadCount: 3, behindCount: 2))
+        #expect(fromSummary == fromSnapshot)
+    }
+
+    @Test("A detached summary uses the HEAD label; zero counts stay nil")
+    func detachedSummary() {
+        let presentation = StatusBarBranchFormatter.present(
+            summary: GitRepositorySummary(branch: "HEAD", isDetached: true))
+        #expect(presentation.label == "HEAD")
+        #expect(presentation.isDetached)
+        #expect(presentation.aheadText == nil)
+        #expect(presentation.behindText == nil)
+    }
 }

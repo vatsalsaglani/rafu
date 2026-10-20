@@ -5,7 +5,7 @@ import Testing
 
 private let root = "/workspace/project"
 
-@Test("Only .git HEAD and index changes count as Git changes")
+@Test("Only .git HEAD, index, and ref changes count as Git changes")
 func classifierFiltersGitInternals() {
     let classifier = WorkspaceChangeClassifier()
 
@@ -18,17 +18,112 @@ func classifierFiltersGitInternals() {
     #expect(index.gitChanged)
     #expect(!index.treeChanged)
 
+    for ref in ["refs/heads/main", "refs/remotes/origin/main", "refs/tags/v1", "packed-refs"] {
+        let changes = classifier.classify(
+            paths: ["\(root)/.git/\(ref)"], rootPath: root, openDocumentPaths: [])
+        #expect(changes == WorkspaceChangeSet(gitChanged: true), "\(ref)")
+    }
+
     let internals = classifier.classify(
         paths: [
             "\(root)/.git/objects/ab/cdef0123",
             "\(root)/.git/index.lock",
-            "\(root)/.git/refs/heads/main",
+            "\(root)/.git/refs/heads/main.lock",
+            "\(root)/.git/logs/HEAD",
+            "\(root)/.git/info/exclude",
             "\(root)/.git",
         ],
         rootPath: root,
         openDocumentPaths: []
     )
     #expect(internals.isEmpty)
+}
+
+@Test("A nested repository's own .git changes are reported by folder")
+func classifierReportsNestedRepositoryGitChanges() {
+    let classifier = WorkspaceChangeClassifier()
+    let changes = classifier.classify(
+        paths: [
+            "\(root)/child/.git/HEAD",
+            "\(root)/child/.git/objects/ab/cd",
+            "\(root)/other/.git/refs/heads/main.lock",
+        ],
+        rootPath: root,
+        openDocumentPaths: []
+    )
+    #expect(changes.nestedGitChangedDirectories == ["child"])
+    #expect(!changes.treeChanged)
+    #expect(!changes.gitChanged)
+}
+
+@Test("Ignored paths re-list only their folder and never mark the tree changed")
+func classifierSeparatesIgnoredPaths() {
+    let classifier = WorkspaceChangeClassifier()
+    let openLog = "\(root)/.logs/run.log"
+    let ignoredOnly = classifier.classify(
+        paths: [openLog, "\(root)/.venv/lib/a.py"],
+        rootPath: root,
+        openDocumentPaths: [openLog],
+        isIgnored: { $0.hasPrefix(".logs/") || $0.hasPrefix(".venv/") }
+    )
+    #expect(!ignoredOnly.treeChanged)
+    #expect(ignoredOnly.changedDirectoryRelativePaths.isEmpty)
+    #expect(ignoredOnly.ignoredDirectoryRelativePaths == [".logs", ".venv/lib"])
+    #expect(ignoredOnly.changedDocumentPaths == [openLog])
+    #expect(!ignoredOnly.isEmpty)
+
+    let mixed = classifier.classify(
+        paths: ["\(root)/src/a.swift", "\(root)/src/b.log"],
+        rootPath: root,
+        openDocumentPaths: [],
+        isIgnored: { $0.hasSuffix(".log") }
+    )
+    #expect(mixed.treeChanged)
+    #expect(mixed.changedDirectoryRelativePaths == ["src"])
+    // The folder is re-listed through the tree change already.
+    #expect(mixed.ignoredDirectoryRelativePaths.isEmpty)
+}
+
+@Test("Ignored paths do not count toward a storm")
+func classifierIgnoredPathsAreNotAStorm() {
+    let classifier = WorkspaceChangeClassifier()
+    let paths = (0..<2_000).map { "\(root)/.next/cache/f\($0).js" }
+    let changes = classifier.classify(
+        paths: paths, rootPath: root, openDocumentPaths: [],
+        isIgnored: { $0.hasPrefix(".next/") })
+    #expect(!changes.isStorm)
+    #expect(!changes.treeChanged)
+    #expect(changes.ignoredDirectoryRelativePaths == [".next/cache"])
+}
+
+@Test("Candidates skip noise and .git paths and keep batch order once each")
+func classifierCandidatePaths() {
+    let classifier = WorkspaceChangeClassifier()
+    let candidates = classifier.candidateRelativePaths(
+        paths: [
+            "\(root)/src/a.swift", "\(root)/.git/HEAD", "\(root)/child/.git/index",
+            "\(root)/node_modules/x.js", "\(root)/src/a.swift", "\(root)/.venv/",
+            root, "/elsewhere/file",
+        ],
+        rootPath: root)
+    #expect(candidates == ["src/a.swift", ".venv"])
+}
+
+@Test("Ignore rules change with a .gitignore or info/exclude")
+func classifierDetectsIgnoreRuleChanges() {
+    let classifier = WorkspaceChangeClassifier()
+    #expect(
+        classifier.ignoreRulesMayHaveChanged(
+            paths: ["\(root)/src/.gitignore"], rootPath: root))
+    #expect(
+        classifier.ignoreRulesMayHaveChanged(
+            paths: ["\(root)/.git/info/exclude"], rootPath: root))
+    #expect(
+        classifier.ignoreRulesMayHaveChanged(
+            paths: ["\(root)/child/.git/info/exclude"], rootPath: root))
+    #expect(
+        !classifier.ignoreRulesMayHaveChanged(
+            paths: ["\(root)/src/a.swift", "\(root)/.git/index"], rootPath: root))
 }
 
 @Test("Noise directories and .DS_Store are dropped entirely")

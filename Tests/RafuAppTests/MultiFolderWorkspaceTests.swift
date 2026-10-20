@@ -197,6 +197,272 @@ struct MultiFolderValueTests {
 }
 
 @MainActor
+@Suite("Multi-folder workspaces with several repositories")
+struct MultiRepositoryWorkspaceTests {
+    private func id(_ url: URL) -> String { GitRepositoryRef.identifier(for: url) }
+
+    @Test("Two Git roots are two repositories, in root order")
+    func twoRepositoryRoots() async throws {
+        let fixture = try MultiRootFixture()
+        defer { fixture.remove() }
+        let session = fixture.session
+        try repositoryFixtureGit(["init", "-q", "-b", "main"], at: fixture.primary)
+        try repositoryFixtureGit(["init", "-q", "-b", "dev"], at: fixture.lib)
+        session.addFolder(at: fixture.lib)
+        session.addFolder(at: fixture.docs)
+        await session.reloadGitRepositories()
+
+        #expect(session.gitRepositories.map(\.displayName) == ["app", "lib"])
+        #expect(session.gitRepositories.allSatisfy { !$0.isNested })
+        #expect(session.sourceControlRootChoices.map(\.name) == ["app", "lib"])
+        #expect(session.selectedGitRepository?.id == id(fixture.primary))
+    }
+
+    @Test("A child folder with .git is a nested repository; deeper ones are not")
+    func nestedRepositoryDiscovered() async throws {
+        let fixture = try MultiRootFixture()
+        defer { fixture.remove() }
+        let session = fixture.session
+        try repositoryFixtureGit(["init", "-q"], at: fixture.primary)
+        let child = fixture.primary.appending(path: "child", directoryHint: .isDirectory)
+        let deep = fixture.primary.appending(path: "a/deep", directoryHint: .isDirectory)
+        for folder in [child, deep] {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try repositoryFixtureGit(["init", "-q"], at: folder)
+        }
+        await session.reloadGitRepositories()
+
+        #expect(session.gitRepositories.map(\.displayName) == ["app", "child"])
+        let nested = try #require(session.gitRepositories.last)
+        #expect(nested.isNested)
+        #expect(nested.relativePath == "child")
+        #expect(nested.rootID == session.descriptor?.id)
+
+        session.selectGitRepository(nested.id)
+        #expect(session.gitRootURL?.standardizedFileURL == child.standardizedFileURL)
+        // Badges stay keyed to the primary root's tree.
+        #expect(session.effectiveSourceControlRootID == session.descriptor?.id)
+        #expect(session.gitBadgeRootURL?.standardizedFileURL == fixture.primary.standardizedFileURL)
+    }
+
+    @Test("Selecting the second repository switches the Git root; primary is stored as nil")
+    func selectingRepositorySwitchesRoot() async throws {
+        let fixture = try MultiRootFixture()
+        defer { fixture.remove() }
+        let session = fixture.session
+        try repositoryFixtureGit(["init", "-q"], at: fixture.primary)
+        try repositoryFixtureGit(["init", "-q"], at: fixture.lib)
+        session.addFolder(at: fixture.lib)
+        await session.reloadGitRepositories()
+        let libID = try #require(session.roots.last?.id)
+
+        session.selectGitRepository(id(fixture.lib))
+        #expect(session.gitRootURL?.standardizedFileURL == fixture.lib.standardizedFileURL)
+        #expect(session.sourceControlRootID == libID)
+        #expect(session.effectiveSourceControlRootID == libID)
+
+        session.selectGitRepository(id(fixture.primary))
+        #expect(session.sourceControlRepositoryID == nil)
+        #expect(session.gitRootURL?.standardizedFileURL == fixture.primary.standardizedFileURL)
+    }
+
+    @Test("Summaries are fetched only for listed repositories, not the selected one")
+    func summariesOnlyForListedRepositories() async throws {
+        let fixture = try MultiRootFixture()
+        defer { fixture.remove() }
+        let session = fixture.session
+        try repositoryFixtureGit(["init", "-q", "-b", "main"], at: fixture.primary)
+        try repositoryFixtureGit(["init", "-q", "-b", "dev"], at: fixture.lib)
+        try "x\n".write(
+            to: fixture.lib.appending(path: "new.txt"), atomically: true, encoding: .utf8)
+        session.addFolder(at: fixture.lib)
+        await session.reloadGitRepositories()
+
+        session.refreshRepositorySummaries(ids: ["/not/listed", id(fixture.lib)])
+        await session.awaitRepositorySummaries()
+
+        #expect(Set(session.gitRepositorySummaries.keys) == [id(fixture.lib)])
+        let summary = try #require(session.gitRepositorySummary(for: id(fixture.lib)))
+        #expect(summary.branch == "dev")
+        // notes.txt (fixture) and new.txt are untracked.
+        #expect(summary.changeCount == 2)
+    }
+
+    @Test("Hidden section marks changed repositories stale instead of fetching")
+    func hiddenSectionDefersSummaries() async throws {
+        let fixture = try MultiRootFixture()
+        defer { fixture.remove() }
+        let session = fixture.session
+        try repositoryFixtureGit(["init", "-q"], at: fixture.primary)
+        try repositoryFixtureGit(["init", "-q"], at: fixture.lib)
+        session.addFolder(at: fixture.lib)
+        await session.reloadGitRepositories()
+
+        session.noteRepositorySummariesChanged([id(fixture.lib)])
+        #expect(session.repositorySummaryTask == nil)
+        #expect(session.staleRepositorySummaryIDs == [id(fixture.lib)])
+
+        session.repositoriesSectionDidAppear()
+        await session.awaitRepositorySummaries()
+        #expect(session.gitRepositorySummary(for: id(fixture.lib)) != nil)
+        #expect(session.staleRepositorySummaryIDs.isEmpty)
+        session.repositoriesSectionDidDisappear()
+    }
+
+    @Test("Removing a root drops its repository and summary at once")
+    func removingRootDropsRepository() async throws {
+        let fixture = try MultiRootFixture()
+        defer { fixture.remove() }
+        let session = fixture.session
+        try repositoryFixtureGit(["init", "-q"], at: fixture.primary)
+        try repositoryFixtureGit(["init", "-q"], at: fixture.lib)
+        session.addFolder(at: fixture.lib)
+        await session.reloadGitRepositories()
+        session.refreshRepositorySummaries(ids: [id(fixture.lib)])
+        await session.awaitRepositorySummaries()
+        session.selectGitRepository(id(fixture.lib))
+        let libID = try #require(session.roots.last?.id)
+
+        session.removeFolder(libID)
+        #expect(session.gitRepositories.map(\.displayName) == ["app"])
+        #expect(session.gitRepositorySummary(for: id(fixture.lib)) == nil)
+        #expect(session.sourceControlRepositoryID == nil)
+    }
+
+    @Test("With a primary root that is not a repository, the first repository is shown")
+    func firstRepositoryWhenPrimaryIsNotOne() async throws {
+        let fixture = try MultiRootFixture()
+        defer { fixture.remove() }
+        let session = fixture.session
+        try repositoryFixtureGit(["init", "-q"], at: fixture.lib)
+        session.addFolder(at: fixture.lib)
+        await session.reloadGitRepositories()
+        #expect(session.sourceControlRepositoryID == id(fixture.lib))
+        #expect(session.gitRootURL?.standardizedFileURL == fixture.lib.standardizedFileURL)
+    }
+
+    @Test("Opening the workspace names the branch with one status run and no full refresh")
+    func primarySummaryOnOpenWithoutSourceControl() async throws {
+        let fixture = try MultiRootFixture()
+        defer { fixture.remove() }
+        let session = fixture.session
+        try repositoryFixtureGit(["init", "-q", "-b", "main"], at: fixture.primary)
+        session.navigatorMode = .files
+        await session.reloadGitRepositories()
+        // The Git step of opening a workspace (`openLocalWorkspace` and
+        // restoration both run it).
+        await session.refreshWorkspace()
+
+        #expect(session.sourceControlBranchSummary?.branch == "main")
+        #expect(session.gitRepositorySummary(for: id(fixture.primary))?.branch == "main")
+        // No second summary fetch, no branch list, no history.
+        #expect(session.repositorySummaryTask == nil)
+        #expect(session.pendingRepositorySummaryIDs.isEmpty)
+        #expect(session.gitBranchSnapshot == nil)
+        #expect(session.gitHistoryPage == nil)
+        #expect(!session.isRepositoriesSectionVisible)
+    }
+
+    @Test("The repository of a path is the longest matching folder")
+    func longestPrefixLookup() {
+        let rootID = UUID()
+        let outer = GitRepositoryRef(
+            rootID: rootID, url: URL(filePath: "/w/app"), displayName: "app")
+        let inner = GitRepositoryRef(
+            rootID: rootID, url: URL(filePath: "/w/app/child"), displayName: "child",
+            relativePath: "child")
+        let repositories = [outer, inner]
+        #expect(
+            WorkspaceGitRepositories.repository(containing: "/w/app/child/a.c", in: repositories)
+                == inner)
+        #expect(
+            WorkspaceGitRepositories.repository(containing: "/w/app/childish/a", in: repositories)
+                == outer)
+        #expect(
+            WorkspaceGitRepositories.repository(containing: "/w/other/a", in: repositories) == nil)
+    }
+
+    @Test("A change batch touches the repositories whose folders changed")
+    func changeImpact() {
+        let rootID = UUID()
+        let outer = GitRepositoryRef(
+            rootID: rootID, url: URL(filePath: "/w/app"), displayName: "app")
+        let inner = GitRepositoryRef(
+            rootID: rootID, url: URL(filePath: "/w/app/child"), displayName: "child",
+            relativePath: "child")
+        let repositories = [outer, inner]
+
+        let edit = WorkspaceGitRepositories.impact(
+            of: WorkspaceChangeSet(treeChanged: true, changedDirectoryRelativePaths: ["child/src"]),
+            repositories: repositories)
+        #expect(edit.state.isEmpty)
+        #expect(edit.tree == [outer.id, inner.id])
+
+        let commit = WorkspaceGitRepositories.impact(
+            of: WorkspaceChangeSet(nestedGitChangedDirectories: ["child"]),
+            repositories: repositories)
+        #expect(commit.state == [inner.id])
+        #expect(commit.tree.isEmpty)
+
+        let outerOnly = WorkspaceGitRepositories.impact(
+            of: WorkspaceChangeSet(
+                treeChanged: true, gitChanged: true, changedDirectoryRelativePaths: ["src"]),
+            repositories: repositories)
+        #expect(outerOnly.state == [outer.id])
+        #expect(outerOnly.tree.isEmpty)
+
+        let ignored = WorkspaceGitRepositories.impact(
+            of: WorkspaceChangeSet(ignoredDirectoryRelativePaths: [".venv"]),
+            repositories: repositories)
+        #expect(ignored.state.isEmpty && ignored.tree.isEmpty)
+    }
+
+    @Test("Row text names branch and counts in words")
+    func rowPresentation() {
+        let repository = GitRepositoryRef(
+            rootID: UUID(), url: URL(filePath: "/w/app"), displayName: "app")
+        let loading = GitRepositoryRowPresentation(repository: repository, summary: nil)
+        #expect(loading.accessibilityValue == "Loading status")
+        #expect(loading.changeText == nil)
+
+        let busy = GitRepositoryRowPresentation(
+            repository: repository,
+            summary: GitRepositorySummary(
+                branch: "main", aheadCount: 2, behindCount: 1, changeCount: 3, conflictCount: 1))
+        #expect(busy.branchText == "main")
+        #expect(busy.changeText == "3")
+        #expect(busy.conflictText == "1")
+        #expect(
+            busy.accessibilityValue
+                == "Branch main, 3 changes, 1 conflict, 2 ahead, 1 behind")
+
+        let detached = GitRepositoryRowPresentation(
+            repository: repository,
+            summary: GitRepositorySummary(branch: "HEAD", isDetached: true))
+        #expect(detached.branchText == "detached")
+        #expect(detached.accessibilityValue == "Detached HEAD, No changes")
+    }
+}
+
+private func repositoryFixtureGit(_ arguments: [String], at root: URL) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = arguments
+    process.currentDirectoryURL = root
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    try process.run()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+        throw RepositoryFixtureError.gitFailed(arguments)
+    }
+}
+
+private enum RepositoryFixtureError: Error {
+    case gitFailed([String])
+}
+
+@MainActor
 private struct MultiRootFixture {
     let session: WorkspaceSession
     let base: URL

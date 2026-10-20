@@ -26,8 +26,28 @@ struct WorkspaceStatusBar: View {
                     .lineLimit(1)
             }
 
-            if let branchSnapshot = session.gitBranchSnapshot {
+            // The branch of the repository that holds the editor file. When
+            // that is not the Source Control repository, a click selects it
+            // in Source Control; the selection never changes on its own.
+            if let other = session.activeDocumentRepositoryOutsideSourceControl {
+                summaryChip(
+                    StatusBarBranchFormatter.present(summary: other.summary),
+                    repositoryName: other.repository.displayName,
+                    action: {
+                        session.selectGitRepository(other.repository.id)
+                        session.showNavigator(.sourceControl)
+                    },
+                    help: "Show \(other.repository.displayName) in Source Control")
+            } else if let branchSnapshot = session.gitBranchSnapshot {
                 branchControl(branchSnapshot)
+            } else if let summary = session.sourceControlBranchSummary {
+                // Branches load with Source Control; until then the status
+                // snapshot from opening the workspace names the branch.
+                summaryChip(
+                    StatusBarBranchFormatter.present(summary: summary),
+                    repositoryName: repositoryNameForChip,
+                    action: { session.showNavigator(.sourceControl) },
+                    help: "Show Source Control")
             }
 
             Spacer()
@@ -179,24 +199,7 @@ struct WorkspaceStatusBar: View {
             searchPrompt: "Search branches",
             sectionTitle: { $0.kind == .local ? "Local" : "Remote" }
         ) {
-            HStack(spacing: RafuMetrics.space1) {
-                Image(systemName: "arrow.triangle.branch")
-                Text(presentation.label)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                if presentation.isDetached {
-                    Text("detached")
-                        .font(.system(size: 9.5, weight: .semibold))
-                        .foregroundStyle(theme.palette.textMuted)
-                }
-                if let aheadText = presentation.aheadText {
-                    Label(aheadText, systemImage: "arrow.up")
-                }
-                if let behindText = presentation.behindText {
-                    Label(behindText, systemImage: "arrow.down")
-                }
-            }
-            .lineLimit(1)
+            branchLabel(presentation, repositoryName: repositoryNameForChip)
         }
         .help(
             presentation.isDetached
@@ -207,6 +210,64 @@ struct WorkspaceStatusBar: View {
             presentation.isDetached
                 ? "Detached HEAD, switch branches"
                 : "Current branch \(presentation.label), switch branches")
+    }
+
+    /// The Source Control repository's name, shown only when the workspace
+    /// has more than one repository.
+    private var repositoryNameForChip: String? {
+        guard session.gitRepositories.count > 1 else { return nil }
+        return session.selectedGitRepository?.displayName
+    }
+
+    private func branchLabel(
+        _ presentation: StatusBarBranchFormatter.Presentation, repositoryName: String?
+    ) -> some View {
+        HStack(spacing: RafuMetrics.space1) {
+            Image(systemName: "arrow.triangle.branch")
+            if let repositoryName {
+                Text(repositoryName)
+                    .foregroundStyle(theme.palette.textMuted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Text(presentation.label)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if presentation.isDetached {
+                Text("detached")
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(theme.palette.textMuted)
+            }
+            if let aheadText = presentation.aheadText {
+                Label(aheadText, systemImage: "arrow.up")
+            }
+            if let behindText = presentation.behindText {
+                Label(behindText, systemImage: "arrow.down")
+            }
+        }
+        .lineLimit(1)
+    }
+
+    /// A branch chip from a repository summary: a plain button, because
+    /// switching branches needs the full branch list of Source Control.
+    private func summaryChip(
+        _ presentation: StatusBarBranchFormatter.Presentation, repositoryName: String?,
+        action: @escaping () -> Void, help: String
+    ) -> some View {
+        Button(action: action) {
+            branchLabel(presentation, repositoryName: repositoryName)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(
+            [
+                repositoryName.map { "Repository \($0)" },
+                presentation.isDetached
+                    ? "Detached HEAD" : "Branch \(presentation.label)",
+            ].compactMap { $0 }.joined(separator: ", ")
+        )
+        .accessibilityHint(help)
     }
 }
 
@@ -265,6 +326,17 @@ nonisolated enum StatusBarBranchFormatter {
             isDetached: snapshot.isDetached,
             aheadText: snapshot.aheadCount > 0 ? "\(snapshot.aheadCount)" : nil,
             behindText: snapshot.behindCount > 0 ? "\(snapshot.behindCount)" : nil
+        )
+    }
+
+    /// The same chip from a repository summary (another repository, or the
+    /// Source Control repository before its branches load).
+    static func present(summary: GitRepositorySummary) -> Presentation {
+        Presentation(
+            label: summary.isDetached ? "HEAD" : summary.branch,
+            isDetached: summary.isDetached,
+            aheadText: summary.aheadCount > 0 ? "\(summary.aheadCount)" : nil,
+            behindText: summary.behindCount > 0 ? "\(summary.behindCount)" : nil
         )
     }
 }
