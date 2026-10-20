@@ -139,14 +139,21 @@ struct WorkspaceWindowView: View {
                     editorCanvas
                         // Resize floor: rail 40 + sidebar min 220 + the
                         // handle's 10 pt hit area + deck lane (this 472 +
-                        // the 10 pt inset on both sides below, 20) = 762.
+                        // the 12 pt inset on both sides below, 24) = 766.
                         // The window's own `minWidth` (below, in `body`)
                         // is raised to 774 to clear it with a small margin.
                         .frame(minWidth: 472, minHeight: 220)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .layoutPriority(1)
                 }
-                .padding(RafuMetrics.workbenchInset)
+                // Equal gutter on all four sides when the sidebar is
+                // collapsed: the handle's hit area counts toward it.
+                .padding(
+                    WorkbenchDeckLane.padding(
+                        isSidebarCollapsed: session.isSidebarCollapsed,
+                        handleWidth: WorkbenchSplitHandle.hitAreaWidth
+                    )
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(theme.palette.appBackground)
                 .layoutPriority(1)

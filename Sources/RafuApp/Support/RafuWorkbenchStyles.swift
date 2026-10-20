@@ -81,6 +81,8 @@ nonisolated struct AttachedWorkbenchTabPresentation: Equatable, Sendable {
 
 /// Four corner wedges that visually expose the surrounding surface without
 /// changing the decorated content's geometry, hit region, or responder chain.
+/// Flat: only for a surface that casts no shadow (an editor group). The deck
+/// uses `WorkbenchDeckCornerWedges`, which also repaints its shadow.
 struct CornerCutoutOverlay: View {
     let radius: CGFloat
     let surrounding: Color
@@ -130,27 +132,19 @@ struct WorkbenchDeckSurface<Content: View>: View {
                 // so it never touches the TextKit/SwiftTerm viewport or
                 // forces it offscreen. Reduce Transparency is a no-op here:
                 // a shadow is not a material.
-                RoundedRectangle(
-                    cornerRadius: RafuMetrics.radiusWorkbenchDeck,
-                    style: .continuous
-                )
-                .fill(theme.palette.editorBackground)
-                .shadow(
-                    color: WorkbenchDeckShadowStyle.color(
-                        for: .deck,
-                        isDark: theme.isDark,
-                        contrastIncreased: colorSchemeContrast == .increased
-                    ),
-                    radius: RafuMetrics.deckShadowRadius,
-                    x: 0,
-                    y: RafuMetrics.deckShadowY
-                )
-                .accessibilityHidden(true)
+                WorkbenchDeckShadowShape(fill: theme.palette.editorBackground, shadow: shadowColor)
             }
             .overlay {
-                CornerCutoutOverlay(
-                    radius: RafuMetrics.radiusWorkbenchDeck,
-                    surrounding: theme.palette.appBackground
+                // The corner wedges repaint what lies behind the card's
+                // rounded corners — the frame AND the deck's shadow — above
+                // the square-cornered AppKit content. Flat frame-coloured
+                // wedges cut the shadow off inside the card's bounding box,
+                // which left visible square points at the bottom corners in
+                // Khadi (design polish round 4).
+                WorkbenchDeckCornerWedges(
+                    surrounding: theme.palette.appBackground,
+                    fill: theme.palette.editorBackground,
+                    shadow: shadowColor
                 )
                 // The card's edge hairline, in every theme. A light theme's
                 // shadow is faint, so this hairline is what separates the
@@ -169,7 +163,98 @@ struct WorkbenchDeckSurface<Content: View>: View {
                 )
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
+                if theme.isDark {
+                    WorkbenchDeckTopHighlight()
+                }
             }
+    }
+
+    private var shadowColor: Color {
+        WorkbenchDeckShadowStyle.color(
+            for: .deck,
+            isDark: theme.isDark,
+            contrastIncreased: colorSchemeContrast == .increased
+        )
+    }
+}
+
+/// The deck's rounded shape and the shadow it casts on the frame. It is drawn
+/// twice from this one definition — behind the card, and again inside the
+/// corner wedges — so the two copies always match pixel for pixel.
+private struct WorkbenchDeckShadowShape: View {
+    let fill: Color
+    let shadow: Color
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: RafuMetrics.radiusWorkbenchDeck, style: .continuous)
+            .fill(fill)
+            .shadow(
+                color: shadow,
+                radius: RafuMetrics.deckShadowRadius,
+                x: 0,
+                y: RafuMetrics.deckShadowY
+            )
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
+/// The four corner regions between the card's bounding box and its rounded
+/// outline, painted as the frame plus the deck's own shadow, so a corner
+/// looks exactly like the frame just outside the card. The mask applies only
+/// to this decoration layer; the card's content is never clipped or masked
+/// (the TextKit/SwiftTerm no-clip rule).
+private struct WorkbenchDeckCornerWedges: View {
+    let surrounding: Color
+    let fill: Color
+    let shadow: Color
+
+    var body: some View {
+        ZStack {
+            Rectangle().fill(surrounding)
+            WorkbenchDeckShadowShape(fill: fill, shadow: shadow)
+        }
+        .mask {
+            CornerCutoutShape(radius: RafuMetrics.radiusWorkbenchDeck)
+                .fill(style: FillStyle(eoFill: true))
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+/// A 1 pt top highlight just inside the dark deck's rim, fading out down the
+/// corners, so the card's top edge catches light like a raised surface
+/// (design polish round 4). Dark themes only: a white line on a light card
+/// would be invisible.
+private struct WorkbenchDeckTopHighlight: View {
+    /// Tall enough that the continuous corners keep their full shape; the
+    /// gradient is clear by half of it.
+    private static let height = RafuMetrics.radiusWorkbenchDeck * 4
+
+    var body: some View {
+        RoundedRectangle(
+            cornerRadius: RafuMetrics.radiusWorkbenchDeck - RafuMetrics.hairline,
+            style: .continuous
+        )
+        .strokeBorder(
+            LinearGradient(
+                stops: [
+                    .init(
+                        color: .white.opacity(WorkbenchDeckShadowStyle.topHighlightOpacity),
+                        location: 0),
+                    .init(color: .white.opacity(0), location: 0.5),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            ),
+            lineWidth: RafuMetrics.hairline
+        )
+        .padding(RafuMetrics.hairline)
+        .frame(height: Self.height)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
@@ -177,8 +262,9 @@ struct WorkbenchDeckSurface<Content: View>: View {
 /// raised deck and the selected tab card. Dark themes read a black shadow
 /// stronger, because it must stand out against an already-dark frame; light
 /// themes keep it faint, so it stays a soft depth cue rather than a dark halo.
-/// The tab's shadow is tighter (`tabShadowRadius`) and so needs a higher
-/// opacity than the deck's to read at all; in a light theme it is the
+/// Design polish round 4 deepened the deck (dark 0.30 → 0.55, light
+/// 0.10 → 0.14) so the card reads clearly raised. The tab's shadow is tighter
+/// (`tabShadowRadius`); in a light theme it is the
 /// selected tab's main lift, because the white fill is only a step above
 /// the shelf (design polish round 3 raised it 0.12 → 0.18). Increase Contrast halves both:
 /// that mode's accessibility signal is the already-promoted `borderStrong`
@@ -190,12 +276,16 @@ nonisolated enum WorkbenchDeckShadowStyle {
         case tab
     }
 
+    /// White opacity of the dark deck's 1 pt inner top highlight
+    /// (`WorkbenchDeckTopHighlight`). Light themes draw none.
+    static let topHighlightOpacity: Double = 0.06
+
     static func opacity(
         for surface: Surface = .deck, isDark: Bool, contrastIncreased: Bool = false
     ) -> Double {
         let base: Double =
             switch surface {
-            case .deck: isDark ? 0.30 : 0.10
+            case .deck: isDark ? 0.55 : 0.14
             case .tab: isDark ? 0.40 : 0.18
             }
         return contrastIncreased ? base / 2 : base

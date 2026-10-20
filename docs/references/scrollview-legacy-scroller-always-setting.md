@@ -62,6 +62,40 @@ system-wide "Show scroll bars" preference and overriding it changes behaviour
 the user asked for. Overriding the compatibility flag on the subclass is what
 makes a themed scroller coexist with overlay scrolling.
 
+### A sidebar `List`: overlay style on that one scroll view (2026-10-20, round 4)
+
+Under "Always", the Files `List` drew a legacy 15 pt vertical scroller with a
+neutral system track. In Khadi the track clashed with the sidebar tone, and the
+reserved width pushed the selection pill off-centre. On the user's direction
+([ADR 0031 §g](../decisions/0031-card-header-tabs-and-themed-chrome.md)) that
+one scroll view is forced to overlay style by `OverlayScrollerConfigurator`
+(same file as `ScrollerHidingConfigurator`). Rules:
+
+- **Per scroll view only.** Never assign `NSScroller`'s global preferred
+  style. The editor keeps `EditorThemedScroller` and follows the preference.
+- **Keep the vertical scroller.** Unlike `ScrollerHidingConfigurator`, it sets
+  `scrollerStyle = .overlay` and `autohidesScrollers = true` but never sets
+  `hasVerticalScroller = false`, so the list still shows its position while
+  scrolling. It also sets `scrollerKnobStyle` from the theme (light knob on a
+  dark theme).
+- **Attachment point differs from a `ScrollView`.** A `List` has no single
+  content view to host the probe, and `.background` on a `List` puts the probe
+  BESIDE the list's `NSScrollView`, not inside it, so `enclosingScrollView` is
+  `nil`. The probe instead searches outward from its parent, breadth-first,
+  for the nearest `NSScrollView` whose window frame contains the probe's
+  centre. It never descends into a scroll view, so an editor's text view (and
+  its scroll view, which does not contain the sidebar's centre anyway) is
+  skipped. The result is cached weakly.
+- **Re-apply after a preference change.** AppKit resets every scroll view's
+  style on `NSScroller.preferredScrollerStyleDidChangeNotification`. The probe
+  observes it and re-applies one main-queue turn later, after AppKit's reset.
+- **Trade-off.** A user with "Always" sees the sidebar scroller only while
+  scrolling there.
+
+Not verified by screenshot at the time of writing: no GUI launch was done in
+the implementing session. The search falls back to doing nothing when no
+containing scroll view is found, so a miss leaves the stock scroller.
+
 ## Why it matters
 
 The bug reproduces only when a real Mac's system-wide scroll-bar preference

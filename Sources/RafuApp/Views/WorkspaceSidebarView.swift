@@ -56,6 +56,10 @@ struct WorkspaceSidebarView: View {
             .listStyle(.plain)
             .environment(\.defaultMinListRowHeight, FileTreeMetrics.rowHeight)
             .scrollContentBackground(.hidden)
+            // Overlay scrollers on this List only, so "Show scroll bars:
+            // Always" does not draw a legacy track in a neutral system tone
+            // beside the rows (see `OverlayScrollerConfigurator`).
+            .background(OverlayScrollerConfigurator(knobStyle: theme.isDark ? .light : .dark))
             // Finder (or cross-workspace) drops on the tree background land in
             // the workspace root; folder rows below claim their own drops.
             .dropDestination(for: URL.self) { urls, _ in
@@ -114,9 +118,11 @@ struct WorkspaceSidebarView: View {
             newItemMenu
         }
         .padding(.horizontal, 10)
-        // The header sits directly below the titlebar row; 10 pt above puts
-        // the title's baseline on the first editor tab's text baseline.
-        .padding(.top, 10)
+        // The header sits directly below the titlebar row, level with the
+        // deck card's top edge. The tab labels' centre is the card's 12 pt
+        // inset plus half the 38 pt tab shelf (31 pt); 19 pt above plus half
+        // of this 24 pt row puts the title's centre on the same line.
+        .padding(.top, 19)
         .padding(.bottom, 8)
         // The header's empty leading run doubles as a window-move surface
         // (`isMovable` is off; see WindowDragHandle). The icon buttons above
@@ -271,8 +277,11 @@ struct WorkspaceFileTreeItem: View {
     /// row; the selection pill keeps its own 1 pt inset inside the row. The
     /// trailing inset keeps long names clear of the split divider: without
     /// it, `.plain` list rows run flush against the divider and names cross
-    /// it instead of truncating inside the pane.
-    static let rowInsets = EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 12)
+    /// it instead of truncating inside the pane. 8 pt (design polish round 4,
+    /// down from 12) now that the List's scroller is overlay-style and
+    /// reserves no width: the selection pill ends as far from the pane's
+    /// trailing edge as it starts from its leading edge.
+    static let rowInsets = EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 8)
 
     private var loadedChildren: [WorkspaceFileNode]? {
         if let rootTree { return rootTree.loadedChildren[node.relativePath] }
@@ -563,6 +572,13 @@ nonisolated enum FileTreeMetrics {
     static let selectionRadius: CGFloat = 6
     /// Vertical inset of the selection pill inside the touching rows.
     static let selectionInset: CGFloat = 1
+    /// Fixed width of a row's icon column; the 12 pt icon is centred in it
+    /// (design polish round 4). An SF Symbol's intrinsic width varies by
+    /// glyph, so without a fixed slot the names drifted from row to row.
+    static let iconSlot: CGFloat = 16
+    /// Gap between the icon slot and the name. Slot + gap (20) keeps the name
+    /// where the former 2 pt lead + 12 pt icon + 6 pt gap put it.
+    static let iconLabelGap: CGFloat = 4
 }
 
 /// Emits a lazily loaded directory as flat List rows: the label row, then
@@ -672,8 +688,10 @@ private struct FileTreeRow: View {
                         .frame(width: FileTreeMetrics.indentStep)
                         .accessibilityHidden(true)
                 }
+                // A fixed icon slot, so every name at one depth starts at the
+                // same x whatever the icon's own width.
                 FileIconView(icon: icon, size: 12)
-                    .padding(.leading, 2)
+                    .frame(width: FileTreeMetrics.iconSlot)
                     .accessibilityHidden(true)
                 // Middle truncation keeps the extension visible when a long
                 // name has to shrink; tail truncation used to hide ".md"/".sh"
@@ -682,7 +700,7 @@ private struct FileTreeRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .foregroundStyle(nameColor)
-                    .padding(.leading, 6)
+                    .padding(.leading, FileTreeMetrics.iconLabelGap)
                     .layoutPriority(1)
                 Spacer(minLength: 4)
                 if let gitBadge {

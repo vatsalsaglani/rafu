@@ -19,9 +19,11 @@ nonisolated enum RafuMetrics {
     // Compact semantic workbench tier (ADR 0022, amended by the frame+card
     // redesign). These values describe structure, not theme color, and
     // deliberately leave radiusPanel intact.
-    /// 10 pt (design polish round 2, up from 8) so the stronger deck shadow's
-    /// radius + y-offset still fits inside the frame gutter.
-    static let workbenchInset: CGFloat = 10
+    /// 12 pt (design polish round 4, up from 10; round 2 raised it from 8)
+    /// so the deeper deck shadow's radius + y-offset still fits inside the
+    /// frame gutter. The card sits this far from the frame on every side,
+    /// including beside a collapsed sidebar (`WorkbenchDeckLane`).
+    static let workbenchInset: CGFloat = 12
     static let editorGroupGapTarget: CGFloat = 4
     static let radiusWorkbenchDeck: CGFloat = 12
     static let radiusEditorGroup: CGFloat = 5
@@ -33,9 +35,10 @@ nonisolated enum RafuMetrics {
     /// `WorkbenchDeckShadowStyle`'s theme-aware color with its own, smaller
     /// radius/offset. Design polish round 2 raised the deck's reach from
     /// 6 + 2 to 7 + 3 so the card visibly lifts off the darker Indigo frame;
-    /// 7 + 3 = 10 is the most the 10 pt inset holds.
-    static let deckShadowRadius: CGFloat = 7
-    static let deckShadowY: CGFloat = 3
+    /// round 4 raised it again to 8 + 4 (with the inset 10 → 12) so the card
+    /// reads clearly raised; 8 + 4 = 12 is the most the 12 pt inset holds.
+    static let deckShadowRadius: CGFloat = 8
+    static let deckShadowY: CGFloat = 4
     /// Window redesign phase 4: tabs are detached rounded cards, not attached
     /// caps.
     static let radiusWorkbenchTab: CGFloat = 10

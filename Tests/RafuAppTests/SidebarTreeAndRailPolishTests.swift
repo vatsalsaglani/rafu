@@ -14,7 +14,9 @@ struct SidebarTreeAndRailPolishTests {
         #expect(WorkspaceFileTreeItem.rowInsets.leading == 4)
         #expect(WorkspaceFileTreeItem.rowInsets.top == 0)
         #expect(WorkspaceFileTreeItem.rowInsets.bottom == 0)
-        #expect(WorkspaceFileTreeItem.rowInsets.trailing == 12)
+        #expect(WorkspaceFileTreeItem.rowInsets.trailing == 8)
+        #expect(FileTreeMetrics.iconSlot == 16)
+        #expect(FileTreeMetrics.iconLabelGap == 4)
         #expect(FileTreeMetrics.rowHeight == 26)
         #expect(FileTreeMetrics.indentStep == 14)
         #expect(FileTreeMetrics.selectionRadius == 6)
@@ -137,6 +139,38 @@ struct SidebarTreeAndRailPolishTests {
         #expect(thread.maxX < panes.maxX)
     }
 
+    @Test("Tree names start at one x per depth and the List's scroller is overlay-style")
+    func treeIconSlotAndOverlayScroller() throws {
+        let source = try Self.source("Sources/RafuApp/Views/WorkspaceSidebarView.swift")
+        let row = try Self.section(
+            of: source, from: "private struct FileTreeRow: View", to: "private var nameColor")
+        #expect(row.contains(".frame(width: FileTreeMetrics.iconSlot)"))
+        #expect(row.contains(".padding(.leading, FileTreeMetrics.iconLabelGap)"))
+        #expect(!row.contains(".padding(.leading, 2)"))
+
+        // The SF Symbol branch has a fixed box like the asset branch, so its
+        // intrinsic glyph width never moves the label beside it.
+        let icons = try Self.source("Sources/RafuApp/Support/FileIconProvider.swift")
+        let symbol = try Self.section(
+            of: icons, from: "Image(systemName: icon.symbol)", to: "private func template")
+        #expect(symbol.contains(".frame(width: size, height: size)"))
+
+        // Per scroll view, never global: the sidebar List's own scroll view.
+        #expect(
+            source.contains(
+                ".background(OverlayScrollerConfigurator(knobStyle: theme.isDark ? .light : .dark))"
+            ))
+        let configurator = try Self.source("Sources/RafuApp/Support/ScrollViewConfigurator.swift")
+        #expect(!configurator.contains("NSScroller.preferredScrollerStyle ="))
+        let probe = try Self.section(
+            of: configurator, from: "final class OverlayScrollerProbeView",
+            to: "/// Only writes a property that differs, so a re-apply from `layout()` never")
+        // Overlay style, but the vertical scroller stays enabled.
+        #expect(probe.contains("scrollView.scrollerStyle = .overlay"))
+        #expect(!probe.contains("hasVerticalScroller = false"))
+        #expect(probe.contains("NSScroller.preferredScrollerStyleDidChangeNotification"))
+    }
+
     @Test("The Files header puts the three creation actions in one neutral plus menu")
     func headerPlusMenu() throws {
         let source = try Self.source("Sources/RafuApp/Views/WorkspaceSidebarView.swift")
@@ -145,7 +179,7 @@ struct SidebarTreeAndRailPolishTests {
             to: "/// New File, New Folder, and Add Folder to Workspace in one")
         #expect(header.contains("Button(\"Filter Files\", systemImage: \"magnifyingglass\")"))
         #expect(header.contains("newItemMenu"))
-        #expect(header.contains(".padding(.top, 10)"))
+        #expect(header.contains(".padding(.top, 19)"))
         #expect(header.contains(".padding(.bottom, 8)"))
         #expect(header.contains(".background(WindowDragHandle())"))
         #expect(!header.contains("Button(\"New"))

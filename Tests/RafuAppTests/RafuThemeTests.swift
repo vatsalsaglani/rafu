@@ -18,6 +18,14 @@ private func sameColor(_ lhs: Color, _ rhs: Color, tolerance: CGFloat = 0.001) -
         && abs(l.alphaComponent - r.alphaComponent) < tolerance
 }
 
+private func relativeLuminance(_ color: Color) -> CGFloat {
+    guard let color = NSColor(color).usingColorSpace(.sRGB) else { return 0 }
+    let linear = [color.redComponent, color.greenComponent, color.blueComponent].map {
+        $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4)
+    }
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+}
+
 /// Minimal valid theme JSON with only the required keys, plus overridable
 /// extras appended verbatim inside the `ui` object.
 private func minimalThemeJSON(extraUI: String = "") -> Data {
@@ -225,12 +233,56 @@ func legacyRequiredKeysRemainSufficient() throws {
 func tabShelfTones() {
     // Design polish round 3: the white selected tab needs a shelf it can
     // lift off, and the band separates the header from the breadcrumb/body.
+    // Round 4 moved the shelf to #F3EEE3 under the deeper frame.
     let khadi = RafuThemeCatalog.khadi.palette
-    #expect(sameColor(khadi.tabBarBackground, Color(rafuHex: "#F4F0E6")))
+    #expect(sameColor(khadi.tabBarBackground, Color(rafuHex: "#F3EEE3")))
     #expect(sameColor(khadi.editorBackground, Color(rafuHex: "#FAF7F0")))
     #expect(sameColor(khadi.tabActiveBackground, Color(rafuHex: "#FFFFFF")))
     let indigo = RafuThemeCatalog.indigo.palette
     #expect(sameColor(indigo.tabBarBackground, indigo.editorBackground))
+}
+
+@Test("Bundled frames sit a clear step below their deck card (design polish round 4)")
+@MainActor
+func bundledFrameAndCardDepth() {
+    // A deeper frame and a lifted card make the deck read as raised.
+    let indigo = RafuThemeCatalog.indigo.palette
+    #expect(sameColor(indigo.appBackground, Color(rafuHex: "#090B10")))
+    #expect(sameColor(indigo.sidebarBackground, Color(rafuHex: "#090B10")))
+    #expect(sameColor(indigo.statusBarBackground, Color(rafuHex: "#090B10")))
+    #expect(sameColor(indigo.editorBackground, Color(rafuHex: "#181D29")))
+    #expect(sameColor(indigo.tabBarBackground, Color(rafuHex: "#181D29")))
+    #expect(sameColor(indigo.hover, Color(rafuHex: "#202735")))
+    #expect(sameColor(indigo.tabActiveBackground, Color(rafuHex: "#222A38")))
+    #expect(sameColor(indigo.selection, Color(rafuHex: "#242C3C")))
+    #expect(sameColor(indigo.borderSubtle, Color(rafuHex: "#262E3E")))
+
+    let khadi = RafuThemeCatalog.khadi.palette
+    #expect(sameColor(khadi.appBackground, Color(rafuHex: "#EBE5D8")))
+    #expect(sameColor(khadi.sidebarBackground, Color(rafuHex: "#EBE5D8")))
+    #expect(sameColor(khadi.statusBarBackground, Color(rafuHex: "#EBE5D8")))
+    #expect(sameColor(khadi.hover, Color(rafuHex: "#E4DCCB")))
+    // Selection stays a stronger step than hover on the deeper frame.
+    #expect(sameColor(khadi.selection, Color(rafuHex: "#DDD3BE")))
+    #expect(relativeLuminance(khadi.selection) < relativeLuminance(khadi.hover))
+    #expect(relativeLuminance(khadi.hover) < relativeLuminance(khadi.appBackground))
+
+    for theme in [RafuThemeCatalog.indigo, RafuThemeCatalog.khadi] {
+        let palette = theme.palette
+        // The text area, gutter, and tab shelf inside the card stay one tone
+        // with the card (Khadi's shelf is its one deliberate step).
+        let editor = theme.editor
+        #expect(
+            sameColor(Color(rafuHex: editor.background), palette.editorBackground), "\(theme.name)")
+        #expect(
+            sameColor(
+                Color(rafuHex: editor.gutterBackground ?? editor.background),
+                palette.editorBackground),
+            "\(theme.name)")
+        #expect(
+            relativeLuminance(palette.appBackground) < relativeLuminance(palette.editorBackground),
+            "\(theme.name) frame below card")
+    }
 }
 
 @Test("Bundled primary and essential secondary text meet 4.5 to 1 on immediate surfaces")

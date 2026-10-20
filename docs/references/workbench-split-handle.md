@@ -76,6 +76,18 @@ with a 10 pt handle layout width.
 
 Recorded in [ADR 0031](../decisions/0031-card-header-tabs-and-themed-chrome.md).
 
+### 2026-10-20 round 4: the handle is part of the collapsed gutter
+
+- The deck inset went 10 → 12 pt. The minimum is still **774 pt**:
+  40 + 220 + 10 + 472 + 24 = 766 plus margin.
+- The handle stays present while the sidebar is collapsed (so a drag reopens
+  it), and its 10 pt hit area used to add to the 10 pt inset: the card sat
+  20 pt from the rail but 10 pt from the other edges. `WorkbenchDeckLane.padding`
+  now subtracts the handle width from the leading inset while collapsed, so the
+  card sits 12 pt from the rail, as from every other edge. With the sidebar
+  open, the leading gutter is still handle + inset. Tested in
+  `WorkbenchDeckPresentationTests.collapsedGutterIsEqual`.
+
 ## Why it matters
 
 The obvious implementation — an `NSSplitView` with a collapsible subview — is

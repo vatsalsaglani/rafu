@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 
 @testable import RafuApp
@@ -55,7 +56,7 @@ struct WorkbenchDeckPresentationTests {
         #expect(RafuMetrics.statusBarHeight == 24)
     }
 
-    @Test("The four-point inset is external and adds no content padding")
+    @Test("The deck inset is external and adds no content padding")
     func insetIsExternal() throws {
         let source = try Self.source("Sources/RafuApp/Views/WorkspaceWindowView.swift")
         let deckLane = try Self.section(
@@ -64,16 +65,41 @@ struct WorkbenchDeckPresentationTests {
             through: ".background(theme.palette.appBackground)"
         )
         let padding = try #require(
-            deckLane.range(of: ".padding(RafuMetrics.workbenchInset)")
+            deckLane.range(of: "WorkbenchDeckLane.padding(")
         )
         let backing = try #require(
             deckLane.range(of: ".background(theme.palette.appBackground)")
         )
 
-        // Design polish round 2: 8 → 10 so the stronger deck shadow fits.
-        #expect(RafuMetrics.workbenchInset == 10)
-        #expect(Self.occurrences(of: ".padding(", in: deckLane) == 1)
+        // Design polish round 2: 8 → 10 so the stronger deck shadow fits;
+        // round 4: 10 → 12 for the deeper shadow.
+        #expect(RafuMetrics.workbenchInset == 12)
+        #expect(deckLane.contains("isSidebarCollapsed: session.isSidebarCollapsed"))
+        #expect(deckLane.contains("handleWidth: WorkbenchSplitHandle.hitAreaWidth"))
+        #expect(Self.occurrences(of: ".padding(", in: deckLane) == 2)
         #expect(padding.lowerBound < backing.lowerBound)
+    }
+
+    @Test("A collapsed sidebar leaves the same gutter beside the card as every other edge")
+    @MainActor
+    func collapsedGutterIsEqual() {
+        let inset = RafuMetrics.workbenchInset
+        let handle = WorkbenchSplitHandle.hitAreaWidth
+        let open = WorkbenchDeckLane.padding(isSidebarCollapsed: false, handleWidth: handle)
+        #expect(open == EdgeInsets(top: inset, leading: inset, bottom: inset, trailing: inset))
+
+        // Collapsed: the handle's hit area is part of the gutter, so the
+        // rail-to-card distance equals the inset on the other three sides.
+        let collapsed = WorkbenchDeckLane.padding(isSidebarCollapsed: true, handleWidth: handle)
+        #expect(collapsed.leading + handle == inset)
+        #expect(collapsed.top == inset)
+        #expect(collapsed.bottom == inset)
+        #expect(collapsed.trailing == inset)
+
+        // A handle wider than the inset never yields negative padding.
+        let wide = WorkbenchDeckLane.padding(
+            isSidebarCollapsed: true, handleWidth: inset + 4, inset: inset)
+        #expect(wide.leading == 0)
     }
 
     @Test("Native split geometry and interaction modifiers stay authoritative")

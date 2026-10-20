@@ -1159,8 +1159,10 @@ private struct EditorGroupTabBar: View {
     private static let stripMargin: CGFloat = RafuMetrics.space2
     /// Width of the trailing fade, and the row's trailing inset: a strip
     /// scrolled to its end, or a tab revealed by `scrollTo`, sits fully
-    /// clear of the fade.
-    private static let trailingFadeWidth: CGFloat = 28
+    /// clear of the fade. 48 pt (design polish round 4, up from 28): a
+    /// narrower fade left a sharp fragment of the next, overflowing tab
+    /// visible beside the "+" control.
+    private static let trailingFadeWidth: CGFloat = 48
 
     @Environment(\.rafuTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

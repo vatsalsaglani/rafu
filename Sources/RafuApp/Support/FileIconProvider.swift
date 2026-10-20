@@ -253,9 +253,14 @@ struct FileIconView: View {
                     .frame(width: size, height: size)
             }
         } else {
+            // A fixed box like the asset branch: each SF Symbol has its own
+            // intrinsic width (about 7–16 pt at 12 pt), which otherwise
+            // shifts the label beside it from row to row. The frame does not
+            // clip, so a wide glyph still draws in full.
             Image(systemName: icon.symbol)
                 .font(.system(size: size, weight: .medium))
                 .foregroundStyle(theme.palette.color(for: icon.tint))
+                .frame(width: size, height: size)
         }
     }
 

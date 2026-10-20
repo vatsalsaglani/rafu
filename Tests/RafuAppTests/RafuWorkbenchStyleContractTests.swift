@@ -9,14 +9,15 @@ struct RafuWorkbenchStyleContractTests {
     @Test("Compact workbench metrics are semantic and exact")
     func compactMetrics() {
         // Design polish round 2: the inset grew 8 → 10 so the stronger deck
-        // shadow (radius 6 → 7, y 2 → 3) still fits inside the gutter.
-        #expect(RafuMetrics.workbenchInset == 10)
+        // shadow (radius 6 → 7, y 2 → 3) still fits inside the gutter; round
+        // 4 grew it to 12 for a deeper shadow (radius 8, y 4).
+        #expect(RafuMetrics.workbenchInset == 12)
         #expect(RafuMetrics.editorGroupGapTarget == 4)
         #expect(RafuMetrics.radiusWorkbenchDeck == 12)
         #expect(RafuMetrics.radiusEditorGroup == 5)
-        #expect(RafuMetrics.deckShadowRadius == 7)
-        #expect(RafuMetrics.deckShadowY == 3)
-        // The shadow must stay inside the deck lane's 10 pt gutter, or the
+        #expect(RafuMetrics.deckShadowRadius == 8)
+        #expect(RafuMetrics.deckShadowY == 4)
+        // The shadow must stay inside the deck lane's 12 pt gutter, or the
         // lane would clip it.
         #expect(
             RafuMetrics.deckShadowRadius + RafuMetrics.deckShadowY <= RafuMetrics.workbenchInset)
@@ -61,7 +62,50 @@ struct RafuWorkbenchStyleContractTests {
         #expect(source.contains("struct WorkbenchDeckSurface<Content: View>"))
         #expect(source.contains("struct EditorGroupSurface<Content: View>"))
         #expect(!source.contains(".clipShape("))
-        #expect(!source.contains(".mask("))
+        // Round 4: the one mask shapes the deck's corner-wedge DECORATION
+        // (frame + shadow), never the card's content.
+        #expect(Self.occurrences(of: ".mask", in: source) == 1)
+        let wedges = try Self.section(
+            of: source,
+            from: "private struct WorkbenchDeckCornerWedges: View",
+            to: "private struct WorkbenchDeckTopHighlight: View"
+        )
+        #expect(wedges.contains(".mask {"))
+        #expect(wedges.contains("WorkbenchDeckShadowShape(fill: fill, shadow: shadow)"))
+        #expect(wedges.contains(".allowsHitTesting(false)"))
+        let deck = try Self.section(
+            of: source,
+            from: "struct WorkbenchDeckSurface<Content: View>",
+            to: "private struct WorkbenchDeckShadowShape: View"
+        )
+        #expect(!deck.contains(".mask"))
+    }
+
+    @Test("The deck's corner wedges repaint its shadow; only the editor group keeps flat wedges")
+    func deckCornerWedgesCarryTheShadow() throws {
+        let source = try Self.workbenchStyleSource()
+        let deck = try Self.section(
+            of: source,
+            from: "struct WorkbenchDeckSurface<Content: View>",
+            to: "private struct WorkbenchDeckShadowShape: View"
+        )
+        // Flat frame-coloured wedges cut the shadow off inside the card's
+        // bounding box and left square points at the bottom corners.
+        #expect(!deck.contains("CornerCutoutOverlay("))
+        #expect(deck.contains("WorkbenchDeckCornerWedges("))
+        #expect(deck.contains("surrounding: theme.palette.appBackground"))
+        // The dark-only inner top highlight.
+        #expect(deck.contains("if theme.isDark {"))
+        #expect(deck.contains("WorkbenchDeckTopHighlight()"))
+        #expect(WorkbenchDeckShadowStyle.topHighlightOpacity == 0.06)
+
+        let group = try Self.section(
+            of: source,
+            from: "struct EditorGroupSurface<Content: View>",
+            to: "/// Shared one-row panel header."
+        )
+        #expect(group.contains("CornerCutoutOverlay("))
+        #expect(!group.contains(".shadow("))
     }
 
     @Test(
@@ -82,14 +126,28 @@ struct RafuWorkbenchStyleContractTests {
             to: "enum WorkbenchDeckShadowStyle"
         )
         #expect(deckSection.contains(".shadow("))
-        // The shadow lives on a dedicated `RoundedRectangle` background
-        // shape, which sits before the content-touching `.overlay` that
-        // draws the border — never directly on `content` itself.
-        let shapeFill = try #require(deckSection.range(of: ".fill(theme.palette.editorBackground)"))
-        let shadowCall = try #require(deckSection.range(of: ".shadow("))
+        // The shadow lives on a dedicated `RoundedRectangle` shape
+        // (`WorkbenchDeckShadowShape`), drawn as the card's background before
+        // the content-touching `.overlay` that draws the border — never
+        // directly on `content` itself. Round 4 draws the same shape again
+        // inside the corner wedges, so both copies share one definition.
+        let backgroundShape = try #require(
+            deckSection.range(
+                of:
+                    "WorkbenchDeckShadowShape(fill: theme.palette.editorBackground, shadow: shadowColor)"
+            ))
         let contentOverlay = try #require(deckSection.range(of: ".overlay {"))
+        #expect(backgroundShape.lowerBound < contentOverlay.lowerBound)
+        let shapeSection = try Self.section(
+            of: deckSection,
+            from: "private struct WorkbenchDeckShadowShape: View",
+            to: "private struct WorkbenchDeckCornerWedges: View"
+        )
+        let shapeFill = try #require(shapeSection.range(of: ".fill(fill)"))
+        let shadowCall = try #require(shapeSection.range(of: ".shadow("))
         #expect(shapeFill.lowerBound < shadowCall.lowerBound)
-        #expect(shadowCall.lowerBound < contentOverlay.lowerBound)
+        #expect(shapeSection.contains("RafuMetrics.deckShadowRadius"))
+        #expect(shapeSection.contains("RafuMetrics.deckShadowY"))
 
         let tabSection = try Self.section(
             of: workbenchSource,
@@ -116,8 +174,10 @@ struct RafuWorkbenchStyleContractTests {
         // step above the Khadi shelf, so the shadow carries the lift.
         let dark = WorkbenchDeckShadowStyle.opacity(for: .deck, isDark: true)
         let light = WorkbenchDeckShadowStyle.opacity(for: .deck, isDark: false)
-        #expect(dark == 0.30)
-        #expect(light == 0.10)
+        // Round 4 deepened the deck again (0.30 → 0.55, 0.10 → 0.14) so the
+        // card reads clearly raised.
+        #expect(dark == 0.55)
+        #expect(light == 0.14)
         #expect(dark > light)
         #expect(WorkbenchDeckShadowStyle.opacity(isDark: true) == dark)
 
@@ -147,17 +207,24 @@ struct RafuWorkbenchStyleContractTests {
             to: "enum WorkbenchDeckShadowStyle"
         )
         // A light theme's shadow is faint, so the hairline is its card edge:
-        // it is never gated on the theme being dark.
+        // it is never gated on the theme being dark. The only dark gate
+        // wraps the round-4 inner top highlight, which comes after it.
         #expect(!deckSection.contains("isDark ?"))
-        #expect(!deckSection.contains("if theme.isDark"))
+        #expect(Self.occurrences(of: "if theme.isDark", in: deckSection) == 1)
+        let gate = try #require(deckSection.range(of: "if theme.isDark {"))
+        let gateBody = try #require(deckSection[gate.upperBound...].range(of: "}"))
+        let gated = deckSection[gate.upperBound..<gateBody.lowerBound]
+        #expect(
+            gated.trimmingCharacters(in: .whitespacesAndNewlines) == "WorkbenchDeckTopHighlight()")
         #expect(deckSection.contains(".strokeBorder("))
         #expect(deckSection.contains(": theme.palette.borderSubtle,"))
         #expect(deckSection.contains("lineWidth: RafuMetrics.hairline"))
         // The hairline sits in the overlay, after the corner wedges, so it
         // draws above the AppKit editor and its scroller.
-        let wedges = try #require(deckSection.range(of: "CornerCutoutOverlay("))
+        let wedges = try #require(deckSection.range(of: "WorkbenchDeckCornerWedges("))
         let hairline = try #require(deckSection.range(of: ".strokeBorder("))
         #expect(wedges.lowerBound < hairline.lowerBound)
+        #expect(hairline.lowerBound < gate.lowerBound)
     }
 
     @Test("Corner and seam overlays cannot intercept input or accessibility")

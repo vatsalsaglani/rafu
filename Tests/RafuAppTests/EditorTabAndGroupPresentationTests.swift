@@ -140,11 +140,12 @@ struct EditorTabAndGroupPresentationTests {
             bar.components(separatedBy: ".tint(theme.palette.textSecondary)").count - 1 == 2)
         #expect(bar.components(separatedBy: ".menuIndicator(.hidden)").count - 1 == 2)
         #expect(bar.contains(".scrollIndicators(.never)"))
-        // Design polish round 3: a 28 pt trailing fade that is also the
+        // Design polish round 3: a trailing fade (28 pt; 48 since round 4,
+        // so no sharp fragment of the next tab shows) that is also the
         // row's trailing inset (a strip scrolled to its end leaves the last
         // tab clear of it), then 8 pt before the fixed "+" so the controls
         // never sit on a faded tab.
-        #expect(bar.contains("private static let trailingFadeWidth: CGFloat = 28"))
+        #expect(bar.contains("private static let trailingFadeWidth: CGFloat = 48"))
         #expect(bar.contains(".frame(width: Self.trailingFadeWidth)"))
         #expect(
             bar.contains(".contentMargins(.trailing, Self.trailingFadeWidth, for: .scrollContent)"))

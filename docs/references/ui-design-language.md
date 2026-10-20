@@ -119,21 +119,22 @@ describe. The authority is
 
 | Surface | Value |
 |---|---|
-| Deck | radius 12, inset 10; shadow 0.30 dark / 0.10 light, radius 7, y 3 |
+| Deck | radius 12, inset 12 on all four sides (also beside a collapsed sidebar: the handle's 10 pt hit area counts toward the gutter); shadow 0.55 dark / 0.14 light, radius 8, y 4 (round 4); corner wedges repaint frame + shadow; dark themes add a 1 pt inner top highlight (white 6 %) |
 | Selected tab | `tabActiveBackground` (Indigo `#222A38`, Khadi `#FFFFFF`) + `borderSubtle` hairline (`borderStrong` under Increase Contrast); semibold 12.5 pt; shadow 0.40 dark / 0.18 light, radius 4 |
 | Inactive tab | **Unfilled** — no `chipBackground`, no outline; medium 12.5 pt |
 | Tab accent edge | None. `StitchedAccentEdge` is removed |
-| Tab shelf | Fixed 38 pt (5 pt breathing), painted `tabBarBackground`: Indigo `#151A24` (= card), Khadi `#F4F0E6` (one step below the card `#FAF7F0`). An unset `tabBarBackground` falls back to `editorBackground` |
+| Tab shelf | Fixed 38 pt (5 pt breathing), painted `tabBarBackground`: Indigo `#181D29` (= card), Khadi `#F3EEE3` (one step below the card `#FAF7F0`). An unset `tabBarBackground` falls back to `editorBackground` |
 | Header hairline | Exactly one. The shelf hairline is hidden when a breadcrumb follows |
 | Breadcrumb | Card tone, 26 pt tall, 12 pt padding |
-| Shelf overflow | Leading fade only while scrolled; 28 pt trailing fade with an 8 pt gap before `+` / `⌄`. Both grey — never accent. `ScrollViewReader` reveals the selected tab |
-| Indigo frame | `#0C0F15` for `appBackground`, `sidebarBackground`, `statusBarBackground`; `borderStrong` `#6A748D` (3:1 gate) |
-| Window minimum | 774 pt (40 + 220 + 10 + 472 + 20 = 762 + margin) |
+| Shelf overflow | Leading fade only while scrolled; 48 pt trailing fade (round 4, from 28) with an 8 pt gap before `+` / `⌄`. Both grey — never accent. `ScrollViewReader` reveals the selected tab |
+| Indigo frame and card | Frame `#090B10` for `appBackground`, `sidebarBackground`, `statusBarBackground`; card `#181D29` for `editorBackground`, `tabBarBackground`, `editor.background`, `editor.gutterBackground`; `hover` `#202735`, `lineHighlight` `#1D2335`, `elevatedBackground` `#1E2432`; `borderStrong` `#6A748D` (3:1 gate) |
+| Khadi frame | `#EBE5D8` for `appBackground`, `sidebarBackground`, `statusBarBackground`; `hover` `#E4DCCB`; `selection` `#DDD3BE` (stays stronger than hover); card `#FAF7F0` |
+| Window minimum | 774 pt (40 + 220 + 10 + 472 + 24 = 766 + margin) |
 | Sidebar seam | None at rest; grab bar on hover only |
 | Activity Rail | Selection fill + `borderSubtle` hairline, 15 pt glyph, 6 pt spacing, 10 pt top inset; `RafuRailAppTile` draws `RafuSeamGlyph` natively on a `tabActiveBackground` tile, non-interactive and `accessibilityHidden` |
-| Files tree | `RafuFileTreeDisclosureStyle` + `FileTreeMetrics` (row 26, indent 14, selection radius 6); indent guides with a strong segment beside the selected child |
-| Sidebar header | `magnifyingglass` filter + one `plus` menu (New File…, New Folder…, Add Folder to Workspace…) |
-| Scrollers | `EditorThemedScroller` — theme track and knob, `isCompatibleWithOverlayScrollers` overridden, `scrollerStyle` never written |
+| Files tree | `RafuFileTreeDisclosureStyle` + `FileTreeMetrics` (row 26, indent 14, selection radius 6, 16 pt icon slot, 4 pt icon-to-name gap, trailing row inset 8); indent guides with a strong segment beside the selected child |
+| Sidebar header | `magnifyingglass` filter + one `plus` menu (New File…, New Folder…, Add Folder to Workspace…); 19 pt top padding so the title centre aligns with the tab labels' centre |
+| Scrollers | Editor: `EditorThemedScroller` — theme track and knob, `isCompatibleWithOverlayScrollers` overridden, `scrollerStyle` never written. Files `List`: `OverlayScrollerConfigurator` forces overlay style on that one scroll view (round 4) |
 | Ensemble symbol | `circle.hexagongrid` everywhere |
 
 Increase Contrast now does three things in the workbench: promotes the tab
