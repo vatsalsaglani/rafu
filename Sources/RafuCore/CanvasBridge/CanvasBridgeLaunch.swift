@@ -49,11 +49,7 @@ public nonisolated enum CanvasBridgeLaunch {
             try data.write(to: configURL, options: .atomic)
             try FileManager.default.setAttributes(
                 [.posixPermissions: 0o600], ofItemAtPath: configURL.path)
-            launch.arguments =
-                [
-                    "--mcp-config", configURL.path,
-                    "--dangerously-load-development-channels", "server:rafu",
-                ] + arguments
+            launch.arguments = claudeBridgeArguments(configPath: configURL.path) + arguments
             launch.environment["MCP_PROTOCOL_NEGOTIATION"] = "legacy"
         } else {
             launch.arguments =
@@ -106,6 +102,17 @@ public nonisolated enum CanvasBridgeLaunch {
                 Data("Rafu: The Ensemble agent launch could not be prepared.\n".utf8))
             return 127
         }
+    }
+
+    /// Claude's `--mcp-config` and `--dangerously-load-development-channels` are variadic.
+    /// The spaced form takes every later non-option token, so a user prompt became a
+    /// channel entry. The `--flag=value` form takes exactly one value and never reads
+    /// the next argument, so the user's arguments keep their own meaning.
+    static func claudeBridgeArguments(configPath: String) -> [String] {
+        [
+            "--mcp-config=\(configPath)",
+            "--dangerously-load-development-channels=server:rafu",
+        ]
     }
 
     public static func shouldAttach(provider: String, arguments: [String]) -> Bool {

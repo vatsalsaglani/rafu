@@ -78,6 +78,79 @@ struct CanvasBridgeLaunchTests {
         #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
     }
 
+    /// Claude Code 2.1.304 rejected `claude 'prompt'` because the prompt followed
+    /// `--dangerously-load-development-channels server:rafu` and became a second entry.
+    @Test func claudeBridgeFlagsNeverTakeAUserArgument() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let config = fixture.wrapper.appendingPathComponent("claude-mcp.json").path
+        let prompt = "Read the note titled \"Local Keycloak – brief\"; run $(literal) 'as is'"
+        let cases: [[String]] = [
+            [prompt],
+            ["--model", "sonnet", "--permission-mode", "plan", prompt],
+            [prompt, "--add-dir", "/tmp/a", "/tmp/b"],
+            ["--resume"],
+            ["--resume", "session-id"],
+            ["--", "-a prompt that starts with a dash"],
+            ["--model", "sonnet", "--", prompt],
+            [],
+        ]
+        for arguments in cases {
+            #expect(CanvasBridgeLaunch.shouldAttach(provider: "claude", arguments: arguments))
+            let launch = try CanvasBridgeLaunch.plan(
+                provider: "claude", arguments: arguments, environment: fixture.environment)
+            #expect(
+                launch.arguments
+                    == [
+                        "--mcp-config=\(config)",
+                        "--dangerously-load-development-channels=server:rafu",
+                    ] + arguments)
+            // The spaced variadic form must never appear: it would capture what follows.
+            #expect(!launch.arguments.contains("--mcp-config"))
+            #expect(!launch.arguments.contains("--dangerously-load-development-channels"))
+            let parsed = VariadicCapture(launch.arguments)
+            #expect(parsed.values["--mcp-config"] == [config])
+            #expect(parsed.values["--dangerously-load-development-channels"] == ["server:rafu"])
+            #expect(parsed.rest == arguments)
+        }
+        // The old spaced prefix: the parse model reproduces the reported failure.
+        let old = VariadicCapture(
+            ["--mcp-config", config, "--dangerously-load-development-channels", "server:rafu"]
+                + [prompt])
+        #expect(old.values["--dangerously-load-development-channels"] == ["server:rafu", prompt])
+        #expect(old.rest.isEmpty)
+    }
+
+    /// Commander's rule for the two Rafu flags: `--flag value...` takes each later token
+    /// up to the next one that starts with `-`; `--flag=value` takes only its own value.
+    private struct VariadicCapture {
+        var values: [String: [String]] = [:]
+        var rest: [String] = []
+
+        init(_ argv: [String]) {
+            let flags = ["--mcp-config", "--dangerously-load-development-channels"]
+            var active: String?
+            for (index, token) in argv.enumerated() {
+                if token == "--" {
+                    rest += argv[index...]
+                    return
+                }
+                if let flag = active, !token.hasPrefix("-") {
+                    values[flag, default: []].append(token)
+                    continue
+                }
+                active = nil
+                if flags.contains(token) {
+                    active = token
+                } else if let flag = flags.first(where: { token.hasPrefix("\($0)=") }) {
+                    values[flag, default: []].append(String(token.dropFirst(flag.count + 1)))
+                } else {
+                    rest.append(token)
+                }
+            }
+        }
+    }
+
     private struct Fixture {
         let root: URL
         let wrapper: URL

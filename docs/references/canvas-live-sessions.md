@@ -4,12 +4,16 @@
   strategies (ADR 0028).
 - Last checked: 2026-10-19, macOS 27.0.1 (26A434), Apple Swift 6.4
   (swiftlang-6.4.0.34.1), Claude Code 2.1.303, Codex CLI 0.163.0. Source checks are distinct from live model verification.
+  The Claude launch argument form was re-verified on 2026-10-21 against Claude
+  Code 2.1.304 (see "Claude bridge flags are variadic").
 
 ## Rules and verified provider interfaces
 
 Claude accepts an MCP stdio channel with the experimental `claude/channel`
 capability and `notifications/claude/channel` notifications. The startup flag
-`--dangerously-load-development-channels server:rafu` requires provider consent.
+`--dangerously-load-development-channels=server:rafu` requires provider consent.
+Rafu passes it, and `--mcp-config=<path>`, in the single-token `=` form only;
+see "Claude bridge flags are variadic".
 It does not change tool permissions. MCP protocol 2026-07-28 cannot carry these
 notifications; the bridge selects 2025-11-25 and legacy negotiation.
 A channel notification is not a model acknowledgement.
@@ -286,6 +290,81 @@ remained responsive. Provider startup and model-message checks are separate
 from this UI-loop check.
 
 
+## Claude bridge flags are variadic
+
+- Applies to: `CanvasBridgeLaunch.plan` (claude branch) and
+  `claudeBridgeArguments(configPath:)` in
+  `Sources/RafuCore/CanvasBridge/CanvasBridgeLaunch.swift`.
+- Last verified: 2026-10-21, macOS 27.0 (Darwin 27.0.0), Claude Code 2.1.304.
+
+Rule: pass Rafu's Claude flags as `--mcp-config=<path>` and
+`--dangerously-load-development-channels=server:rafu`, one token each. Never
+use the spaced form `--flag value`. The `=` form lets Rafu keep its flags as a
+prefix and never moves, splits, or reads the user's arguments.
+
+Why: Claude Code declares both options as Commander variadic options
+(`--mcp-config <configs...>`, `--dangerously-load-development-channels
+<servers...>`). In the spaced form, Commander gives the option every later
+token up to the next token that starts with `-`. The old prefix
+`--mcp-config <path> --dangerously-load-development-channels server:rafu`
+followed by a positional prompt made the prompt a second channel entry.
+Claude Code then exited at once with:
+
+```text
+--dangerously-load-development-channels entries must be tagged: Read the Rafu note titled "Local Keycloak – brief" (…) … Report to the coordinator terminal over the Rafu message link.
+  plugin:<name>@<marketplace>  — plugin-provided channel (allowlist enforced)
+  server:<name>                — manually configured MCP server
+```
+
+Launches whose first user argument was an option (for example `--resume`)
+worked by chance. Codex is not affected: its `-c key=value` option takes one
+value.
+
+Evidence:
+
+- Source, from the strings of the installed 2.1.304 executable. In
+  Commander's `parseOptions`, the variadic capture is reset before each token.
+  The `--name=value` branch emits one value and does not start a capture
+  again. Claude Code's own argv scanners (the `u()` value lookup and the
+  `iyt` settings scan) also accept `--mcp-config=<value>`.
+- Real CLI, with no session and no inference. Each probe gives an untagged
+  `--channels` entry, so Claude Code exits at its channel-tag check. The
+  `--channels` check is not gated on print mode, and `--channels` is the same
+  `<servers...>` option type. As a second safety net, the probe set
+  `ANTHROPIC_BASE_URL=http://127.0.0.1:9` (a dead local port),
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, stdin from `/dev/null`, and a
+  40-second alarm. Results:
+  - `--channels bogus 'probe prompt "q" $(x)'` gives
+    `--channels entries must be tagged: bogus, probe prompt "q" $(x)`. This
+    reproduces the bug.
+  - `--channels=bogus 'probe prompt …'` gives `… must be tagged: bogus`.
+  - `--mcp-config <file> 'probe prompt …' --channels=bogus` gives
+    `MCP config file not found: …/probe prompt "q" $(x)`. The spaced
+    `--mcp-config` also takes the prompt.
+  - `--mcp-config=<file> --channels=bogus 'probe prompt …'` and
+    `--mcp-config=<file> --channels=bogus --add-dir /tmp /var -- '-dash prompt'`
+    both stop at `… must be tagged: bogus`. The prompt stays positional.
+  - `--add-dir /tmp /var --channels bogus` gives `… must be tagged: bogus`.
+    An option token ends a variadic capture.
+- Do not probe `--dangerously-load-development-channels` itself this way. Its
+  tag check is skipped in print mode, so a non-TTY probe could go on to a
+  session.
+
+Not covered by this rule: an argument list that is malformed by itself.
+For example, `--add-dir a b 'prompt'` gives the prompt to `--add-dir` in any
+launcher, with or without Rafu.
+
+Verification:
+
+```bash
+swift test --filter CanvasBridgeLaunchTests
+```
+
+`claudeBridgeFlagsNeverTakeAUserArgument` asserts the exact argument arrays
+for a positional prompt (spaces, quotes, `$()`), a prompt with options,
+`--resume`, a user `--` marker, and an empty list. It also replays
+Commander's variadic rule on the result, and on the old spaced prefix.
+
 ## Claude dynamic MCP warning in 2.1.302
 
 Verified on 2026-10-18 by inspection of the installed Claude Code 2.1.302
@@ -307,7 +386,8 @@ An upstream report describes the same false warning and reports successful
 notification delivery on 2.1.295:
 https://github.com/anthropics/claude-code/issues/100865 . The documented
 `--dangerously-load-development-channels server:rafu` syntax remains correct:
-https://code.claude.com/docs/en/channels-reference .
+https://code.claude.com/docs/en/channels-reference . Rafu sends the same entry
+in the `=` form; see "Claude bridge flags are variadic".
 
 Do not change user or repository MCP configuration to hide this warning. Check
 `/mcp` in the running terminal to confirm that `rafu` is connected. If provider
