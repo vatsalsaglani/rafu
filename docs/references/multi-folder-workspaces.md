@@ -82,6 +82,19 @@
   truncated. Quick open merges per-root ranked lists round robin.
 - Root labels are the folder name; when two roots share a name the parent is
   added (`client/app`), and if that still collides the full path is used.
+- Files-tree root sections (`WorkspaceRootSection`) are `DisclosureGroup`s
+  with `RafuFileTreeDisclosureStyle`, like every folder group. They must
+  never use the default style: one default-style group switches the whole
+  Files `List` to `NSOutlineView`, and collapsing the primary root after a
+  navigator switch then aborted the app
+  (`list-custom-disclosure-group-style.md`). The header is a flat 26 pt row
+  with the tree rows' insets: its 14 pt chevron cell is in the column of a
+  depth-0 row's chevron, and it toggles on a click anywhere on the row,
+  Return/Space, ←/→, and the VoiceOver default action. With more than one
+  root, each root's direct children are depth 1, so their first indent guide
+  runs down from the root chevron; a one-folder workspace keeps depth 0 and
+  shows no root header. Collapse state is ephemeral window state
+  (`collapsedRootIDs`); every root starts expanded.
 - `.rafuworkspace`: UTType `dev.rafu.workspace` (conforms to `public.json`),
   exported and registered as an Owner document type in the Info.plist that
   `script/build_and_run.sh` writes (index 2, checked by `plutil`). JSON keys:

@@ -40,7 +40,7 @@ struct WorkspaceSidebarView: View {
                         session: session, root: primary, tree: nil,
                         isExpanded: rootExpandedBinding(primary.id)
                     ) {
-                        primaryRootItems
+                        primaryRootItems(depth: WorkspaceRootTreeItems.childDepth)
                     }
                     ForEach(session.additionalRootTrees) { tree in
                         WorkspaceRootSection(
@@ -53,7 +53,7 @@ struct WorkspaceSidebarView: View {
                         }
                     }
                 } else {
-                    primaryRootItems
+                    primaryRootItems(depth: 0)
                 }
             }
             .listStyle(.plain)
@@ -169,14 +169,16 @@ struct WorkspaceSidebarView: View {
         session.descriptor?.displayName ?? "Files"
     }
 
-    @ViewBuilder
-    private var primaryRootItems: some View {
+    /// The primary root's top level: depth 0 in a one-folder workspace, one
+    /// level under its root header in a multi-folder workspace.
+    private func primaryRootItems(depth: Int) -> some View {
         ForEach(session.loadedChildren[""] ?? [], id: \.id) { node in
             WorkspaceFileTreeItem(
                 session: session,
                 node: node,
                 renameNode: $renameNode,
-                renameText: $renameText
+                renameText: $renameText,
+                depth: depth
             )
         }
     }
@@ -216,11 +218,14 @@ struct WorkspaceSidebarView: View {
 /// the lazy tree: `OutlineGroup` needs a fully materialized `children`
 /// key path up front, which is exactly what per-directory loading avoids.
 ///
-/// Every group uses `RafuFileTreeDisclosureStyle`, which emits the label and
-/// the expanded children as flat List rows. The List therefore draws no
-/// outline triangle and no outline indentation; each row draws its own
-/// indent guides, 9 pt chevron, and icon from `depth`, which the recursion
-/// passes down (the body never derives it from the path).
+/// Every group in the Files List uses `RafuFileTreeDisclosureStyle`, the
+/// multi-folder root sections (`WorkspaceRootSection`) included. The style
+/// emits the label and the expanded children as flat List rows, so the List
+/// is never an outline: it draws no outline triangle and no outline
+/// indentation, and each row draws its own indent guides, 9 pt chevron, and
+/// icon from `depth`, which the recursion passes down (the body never
+/// derives it from the path). One default-style group would switch the
+/// whole List to `NSOutlineView`; see list-custom-disclosure-group-style.md.
 struct WorkspaceFileTreeItem: View {
     @Bindable var session: WorkspaceSession
     let node: WorkspaceFileNode
@@ -624,10 +629,11 @@ private struct FileTreeIndentGuides: View {
 
 /// The 9 pt disclosure chevron in its 14 pt cell. It rotates without motion
 /// under Reduce Motion. VoiceOver reaches the toggle through the folder
-/// row's element, so the glyph itself is hidden.
-private struct FileTreeDisclosureChevron: View {
+/// row's element, so the glyph itself is hidden. A root header toggles from
+/// its whole row and passes no `toggle`, so a chevron click toggles once.
+struct FileTreeDisclosureChevron: View {
     let isExpanded: Bool
-    let toggle: () -> Void
+    var toggle: (() -> Void)?
     @Environment(\.rafuTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -639,13 +645,13 @@ private struct FileTreeDisclosureChevron: View {
             .animation(reduceMotion ? nil : RafuMotion.pressRelease, value: isExpanded)
             .frame(width: FileTreeMetrics.indentStep, height: FileTreeMetrics.rowHeight)
             .contentShape(.rect)
-            .onTapGesture(perform: toggle)
+            .onTapGesture { toggle?() }
             .accessibilityHidden(true)
     }
 }
 
 /// A "Loading…" or "No items" row, indented and guided like a child row.
-private struct FileTreePlaceholderRow<Content: View>: View {
+struct FileTreePlaceholderRow<Content: View>: View {
     let depth: Int
     @ViewBuilder let content: Content
     @Environment(\.rafuTheme) private var theme

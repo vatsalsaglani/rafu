@@ -88,6 +88,60 @@ struct SidebarTreeAndRailPolishTests {
         #expect(!source.contains("List(selection: $"))
     }
 
+    /// Regression: a default-style root `DisclosureGroup` switched the Files
+    /// List to `NSOutlineView`, and collapsing the primary root after a
+    /// navigator switch aborted in `AG::Graph::value_set`.
+    @Test("Root sections use the flat disclosure style so the Files List is never an outline")
+    func rootSectionsAreNeverAnOutline() throws {
+        let sidebar = try Self.source("Sources/RafuApp/Views/WorkspaceSidebarView.swift")
+        let roots = try Self.source("Sources/RafuApp/Views/WorkspacesRootSections.swift")
+        let section = try Self.section(
+            of: roots, from: "struct WorkspaceRootSection<Content: View>: View",
+            to: "struct WorkspaceRootTreeItems")
+        #expect(section.contains(".disclosureGroupStyle(RafuFileTreeDisclosureStyle())"))
+        #expect(section.contains(".onKeyPress(keys: [.return, .space, .leftArrow, .rightArrow])"))
+        #expect(section.contains(".accessibilityValue(isExpanded ? \"Expanded\" : \"Collapsed\")"))
+        #expect(section.contains(".accessibilityAction { isExpanded.toggle() }"))
+        #expect(section.contains(".isHeader"))
+        #expect(section.contains("Text(\"Primary\")"))
+        #expect(section.contains("\"arrow.triangle.branch\""))
+        #expect(section.contains(".dropDestination(for: URL.self)"))
+        #expect(section.contains(".contextMenu { menu }"))
+        // The header's chevron has no tap action of its own: the whole row
+        // toggles, and a second toggle would cancel the first.
+        #expect(section.contains("FileTreeDisclosureChevron(isExpanded: isExpanded)"))
+        #expect(!section.contains("Task { @MainActor in"))
+
+        // Exactly one group in the root sections file, and it is styled.
+        #expect(Self.count("DisclosureGroup(", in: roots) == 1)
+        #expect(Self.count(".disclosureGroupStyle(RafuFileTreeDisclosureStyle())", in: roots) == 1)
+        // Every group in the Files tree sources is styled.
+        let files = sidebar + roots
+        #expect(
+            Self.count("DisclosureGroup(", in: files)
+                == Self.count(".disclosureGroupStyle(RafuFileTreeDisclosureStyle())", in: files))
+
+        // Nesting: with more than one root the children sit at depth 1
+        // under the header; one folder keeps depth 0.
+        #expect(WorkspaceRootTreeItems.childDepth == 1)
+        #expect(sidebar.contains("primaryRootItems(depth: WorkspaceRootTreeItems.childDepth)"))
+        #expect(sidebar.contains("primaryRootItems(depth: 0)"))
+        #expect(roots.contains("rootTree: tree, depth: Self.childDepth"))
+    }
+
+    @Test("A root header's chevron shares the column of a depth-0 row's chevron")
+    func rootHeaderGeometry() {
+        let header = WorkspaceRootSection<EmptyView>.headerInsets
+        #expect(header.leading == WorkspaceFileTreeItem.rowInsets.leading)
+        #expect(header.trailing == WorkspaceFileTreeItem.rowInsets.trailing)
+        #expect(header.top == 4)
+        #expect(header.bottom == 0)
+    }
+
+    private static func count(_ needle: String, in haystack: String) -> Int {
+        haystack.components(separatedBy: needle).count - 1
+    }
+
     @Test("The rail opens with a hidden, non-interactive 28 pt themed app tile")
     func railAppTile() throws {
         #expect(RafuRailAppTile.size == 28)

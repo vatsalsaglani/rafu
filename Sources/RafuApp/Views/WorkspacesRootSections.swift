@@ -37,34 +37,58 @@ struct WorkspaceRootSection<Content: View>: View {
         session.gitRepositories.count > 1 && session.selectedGitRepository?.rootID == root.id
     }
 
+    /// The root uses the same flat style as every folder group. A
+    /// default-style group anywhere in the Files List turns the whole List
+    /// into an `NSOutlineView`, and collapsing a root there aborted in
+    /// `AG::Graph::value_set` (see list-custom-disclosure-group-style.md).
+    /// The row traits sit on the header row, not on the group: the flat
+    /// style turns the group into several rows, and a modifier on the group
+    /// would apply to every child row.
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
             content
         } label: {
             header
+                .listRowInsets(Self.headerInsets)
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
         }
-        .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 1, trailing: 12))
-        .listRowSeparator(.hidden)
-        .listRowBackground(Color.clear)
+        .disclosureGroupStyle(RafuFileTreeDisclosureStyle())
+    }
+
+    /// The tree rows' leading and trailing insets, so the header's chevron
+    /// cell is the column of a depth-0 row's chevron and the root's
+    /// children (depth 1) hang their first indent guide straight down from
+    /// it. The top inset separates one root section from the one above.
+    static var headerInsets: EdgeInsets {
+        let rowInsets = WorkspaceFileTreeItem.rowInsets
+        return EdgeInsets(
+            top: 4, leading: rowInsets.leading, bottom: 0, trailing: rowInsets.trailing)
     }
 
     private var header: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 0) {
+            // The whole header row toggles (below), so the chevron has no
+            // tap action of its own; one would toggle a second time.
+            FileTreeDisclosureChevron(isExpanded: isExpanded)
             Image(systemName: isPrimary ? "folder.fill" : "folder")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(theme.palette.textSecondary)
+                .frame(width: FileTreeMetrics.iconSlot)
                 .accessibilityHidden(true)
             Text(label)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(theme.palette.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .padding(.leading, FileTreeMetrics.iconLabelGap)
             if isPrimary {
                 Text("Primary")
                     .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(theme.palette.textMuted)
                     .lineLimit(1)
                     .fixedSize()
+                    .padding(.leading, 6)
             }
             Spacer(minLength: 4)
             if isSourceControlRoot {
@@ -75,14 +99,28 @@ struct WorkspaceRootSection<Content: View>: View {
                     .accessibilityHidden(true)
             }
         }
-        .padding(.vertical, 2)
-        .padding(.horizontal, 6)
+        .padding(.trailing, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: FileTreeMetrics.rowHeight)
         .background(
             RoundedRectangle(cornerRadius: 5, style: .continuous)
                 .fill(isDropTargeted ? theme.palette.accentSoft : Color.clear)
         )
         .contentShape(.rect)
+        // The flat style leaves the List no outline row, so the header
+        // carries what the outline gave, as folder rows do: a click anywhere
+        // on the row, Full Keyboard Access focus with Return/Space and
+        // Left/Right Arrow, and a VoiceOver expansion state and action.
+        .simultaneousGesture(TapGesture().onEnded { isExpanded.toggle() })
+        .focusable(interactions: .activate)
+        .onKeyPress(keys: [.return, .space, .leftArrow, .rightArrow]) { press in
+            switch press.key {
+            case .leftArrow: isExpanded = false
+            case .rightArrow: isExpanded = true
+            default: isExpanded.toggle()
+            }
+            return .handled
+        }
         .help(root.path)
         .contextMenu { menu }
         .dropDestination(for: URL.self) { urls, _ in
@@ -96,8 +134,13 @@ struct WorkspaceRootSection<Content: View>: View {
         .accessibilityLabel(
             isPrimary ? "Folder \(label), primary" : "Folder \(label)"
         )
+        .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
         .accessibilityHint(isExpanded ? "Collapses the folder" : "Expands the folder")
         .accessibilityAddTraits(.isHeader)
+        .accessibilityAction { isExpanded.toggle() }
+        .accessibilityAction(named: isExpanded ? "Collapse" : "Expand") {
+            isExpanded.toggle()
+        }
     }
 
     @ViewBuilder
@@ -134,14 +177,17 @@ struct WorkspaceRootSection<Content: View>: View {
     }
 }
 
-/// The lazily listed top level of an additional root.
+/// The lazily listed top level of an additional root. Its rows sit one
+/// level under the root header (`childDepth`), as the primary root's rows
+/// do in a multi-folder workspace.
 struct WorkspaceRootTreeItems: View {
     @Bindable var session: WorkspaceSession
     let tree: WorkspaceRootTree
     @Binding var renameNode: WorkspaceFileNode?
     @Binding var renameText: String
 
-    @Environment(\.rafuTheme) private var theme
+    /// Depth of a root's direct children under its root header.
+    static let childDepth = 1
 
     var body: some View {
         if let children = tree.loadedChildren[""] {
@@ -153,27 +199,24 @@ struct WorkspaceRootTreeItems: View {
                 ForEach(children, id: \.id) { node in
                     WorkspaceFileTreeItem(
                         session: session, node: node, renameNode: $renameNode,
-                        renameText: $renameText, rootTree: tree)
+                        renameText: $renameText, rootTree: tree, depth: Self.childDepth)
                 }
             }
         } else {
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.mini)
-                Text("Loading…").font(.caption)
+            FileTreePlaceholderRow(depth: Self.childDepth) {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.mini)
+                    Text("Loading…").font(.caption)
+                }
             }
-            .foregroundStyle(theme.palette.textSecondary)
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
             .onAppear { tree.loadChildrenIfNeeded("") }
         }
     }
 
     private func message(_ text: String) -> some View {
-        Text(text)
-            .font(.caption)
-            .foregroundStyle(theme.palette.textSecondary)
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
+        FileTreePlaceholderRow(depth: Self.childDepth) {
+            Text(text).font(.caption)
+        }
     }
 }
 
