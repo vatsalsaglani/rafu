@@ -4,6 +4,7 @@
 - Original guard verification: Swift 6.2, macOS 14+, Xcode 16, 2026-07-15.
 - Bounded-read verification: Swift 6.4, macOS 27.0.1, 2026-10-17; focused
   regression tests and the canonical Rafu Lightning app check passed.
+- Line-walk termination verification: Swift 6.4, macOS 27.0.1, 2026-10-20.
 
 ## Rule or observed behavior
 
@@ -160,6 +161,40 @@ ran — e.g. `inlineBlameDrawClearsRectBeyondScanCap` asserts
 this pattern over a timing bound when guarding a single bounded call site;
 timing bounds remain appropriate for guarding *repeated-per-visible-line*
 scans (as in `indentGuideLineScanBounded`/`manyLineDocumentDrawIsBounded`).
+
+## A per-line draw walk must always advance and stop at the text end (2026-10-20)
+
+Applies to: `RafuTextView.drawIndentGuides`, `drawFileBlameAnnotations`, and
+any new walk over `viewport.characterRange`. Verified on Swift 6.4, macOS
+27.0.1, 2026-10-20.
+
+Observed: the release v0.1.9-beta hung forever (99% CPU, beachball) after
+the user selected `us-west-2` at the end of a 31-line `.env` file and typed.
+`sample` of the hung process showed 100% of main-thread samples in
+`-[NSTextView drawRect:]` → `RafuTextView.drawBackground(in:)` →
+`drawIndentGuides(in:)` → `boundedLineRange(around:in:)`. The same screen
+drew gutter numbers 29 and 30 on top of each other, so the layout was stale.
+
+Cause: both walks were `while location < NSMaxRange(charRange) { …
+location = NSMaxRange(lineRange) }`. The layout manager's visible character
+range can be longer than the text while an edit is in flight. At
+`location == content.length`, `boundedLineRange` returns an empty range, so
+`location` never moves and the loop never ends. The bounded scan from
+2026-07-18 limits each step; it does not make the loop finish.
+
+Rule: walk visible lines only through `RafuTextView.forEachBoundedLine(
+intersecting:in:_:)`. It clamps the end to `content.length` and stops when a
+step does not advance. Do not trust `viewport.characterRange` to be inside
+the current text. The trailing empty line still draws through the extra
+line fragment path, outside the walk.
+
+Regression: `EditorLineWalkTerminationTests` (range past the end, range at
+the end, CRLF and an unterminated last line, and a draw after an
+end-of-file replacement with indent guides and blame on).
+
+```bash
+swift test --filter EditorLineWalkTermination
+```
 
 ## `NSView.display()` is a silent no-op in headless `swift test` runs
 

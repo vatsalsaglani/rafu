@@ -1218,7 +1218,7 @@ final class RafuTextView: NSTextView {
         let content = string as NSString
         let caret = min(selectedRange().location, content.length)
         guard viewport.containsInsertion(at: caret),
-            let lineRange = boundedLineRange(around: caret, in: content),
+            let lineRange = Self.boundedLineRange(around: caret, in: content),
             let fragmentRect = viewport.lineEndRect(for: lineRange)
         else { return }
 
@@ -1265,16 +1265,10 @@ final class RafuTextView: NSTextView {
             .font: annotationFont, .foregroundColor: fileBlameColor,
         ]
 
-        var location = charRange.location
-        while location < NSMaxRange(charRange) {
-            guard let lineRange = boundedLineRange(around: location, in: content) else { break }
-            defer { location = NSMaxRange(lineRange) }
-            guard let text = fileBlameAnnotations[lineRange.location], !text.isEmpty else {
-                continue
-            }
-
-            guard let fragmentRect = viewport.lineEndRect(for: lineRange) else { continue }
-
+        Self.forEachBoundedLine(intersecting: charRange, in: content) { lineRange in
+            guard let text = fileBlameAnnotations[lineRange.location], !text.isEmpty,
+                let fragmentRect = viewport.lineEndRect(for: lineRange)
+            else { return }
             drawFileBlameLabel(text, at: fragmentRect, attributes: attributes, viewport: viewport)
         }
         // An empty document or trailing newline has no glyph in charRange.
@@ -1308,7 +1302,7 @@ final class RafuTextView: NSTextView {
         let content = string as NSString
         let caret = min(selectedRange().location, content.length)
         guard viewport.containsInsertion(at: caret),
-            let lineRange = boundedLineRange(around: caret, in: content)
+            let lineRange = Self.boundedLineRange(around: caret, in: content)
         else { return }
         let lineRect =
             lineRange.length == 0
@@ -1338,21 +1332,11 @@ final class RafuTextView: NSTextView {
         let leftInset = origin.x + textContainer.lineFragmentPadding
 
         indentGuideColor.setFill()
-        var location = charRange.location
-        while location < NSMaxRange(charRange) {
-            // `NSString.lineRange(for:)` walks to the line's true start and
-            // end, which is O(document) per call on single-giant-line content
-            // (e.g. minified JSON) and produced a 30-second main-thread hang
-            // during drawing. Line discovery is therefore bounded: a line
-            // whose boundary sits farther than the scan cap from the visible
-            // range draws no guides, and drawing stops for this pass.
-            guard let lineRange = boundedLineRange(around: location, in: content) else { break }
-            defer { location = NSMaxRange(lineRange) }
+        Self.forEachBoundedLine(intersecting: charRange, in: content) { lineRange in
             guard let columns = leadingWhitespaceColumns(of: lineRange, in: content),
-                columns > 0
-            else { continue }
-
-            guard let lineRect = viewport.boundingRect(for: lineRange) else { continue }
+                columns > 0,
+                let lineRect = viewport.boundingRect(for: lineRange)
+            else { return }
             var column = 0
             while column < columns {
                 let x = leftInset + CGFloat(column) * columnWidth
@@ -1370,12 +1354,40 @@ final class RafuTextView: NSTextView {
     /// and unbounded scans would hang the main thread.
     private static let maxIndentGuideLineScan = 4_096
 
+    /// Calls `body` with each line that intersects `range`, in order. Shared
+    /// by indent-guide and full-file blame drawing.
+    ///
+    /// `NSString.lineRange(for:)` walks to the line's true start and end,
+    /// which is O(document) per call on single-giant-line content (e.g.
+    /// minified JSON) and produced a 30-second main-thread hang during
+    /// drawing. Line discovery is therefore bounded: a line whose boundary
+    /// sits farther than the scan cap from the visible range stops the walk.
+    ///
+    /// The walk also always advances and never passes the text's end. The
+    /// layout manager's visible character range can be longer than the text
+    /// while an edit is in flight; at `content.length` the line range is
+    /// empty, and the old `while` loop spun forever inside `drawRect:` after
+    /// a selection near the end of a file was replaced (2026-10-20).
+    static func forEachBoundedLine(
+        intersecting range: NSRange, in content: NSString, _ body: (NSRange) -> Void
+    ) {
+        let end = min(NSMaxRange(range), content.length)
+        var location = max(0, range.location)
+        while location < end {
+            guard let lineRange = boundedLineRange(around: location, in: content),
+                NSMaxRange(lineRange) > location
+            else { return }
+            body(lineRange)
+            location = NSMaxRange(lineRange)
+        }
+    }
+
     /// Bounded replacement for `NSString.lineRange(for:)` used by both
     /// indent-guide drawing and `drawFileBlameAnnotations`. Returns the line
     /// range containing `location` (trailing newline included, matching
     /// `lineRange(for:)`), or `nil` when either boundary lies beyond
     /// `maxIndentGuideLineScan`.
-    private func boundedLineRange(around location: Int, in content: NSString) -> NSRange? {
+    static func boundedLineRange(around location: Int, in content: NSString) -> NSRange? {
         guard location >= 0, location <= content.length else { return nil }
         // A position between CR and LF still belongs to the preceding line.
         let location =
