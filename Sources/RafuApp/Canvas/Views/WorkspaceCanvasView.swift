@@ -834,8 +834,10 @@ struct WorkspaceCanvasView: View {
 /// reads the live rect of a move or resize (`CanvasLiveGeometry`), so a drag
 /// frame re-runs this small modifier for each card. It never re-runs the
 /// card's own body or the board's: a modifier's `content` is not re-evaluated
-/// when only the modifier body runs.
-private struct CanvasCardPlacement: ViewModifier {
+/// when only the modifier body runs. The frame is top-leading: should a card
+/// ever report more than its rect, it overflows downward, so its header and
+/// top border stay on the rect that edges and ports are computed from.
+struct CanvasCardPlacement: ViewModifier {
     let id: CanvasCardID
     let rect: CanvasRect
     let viewport: CanvasViewport
@@ -844,7 +846,7 @@ private struct CanvasCardPlacement: ViewModifier {
     func body(content: Content) -> some View {
         let shown = live.rect(for: id) ?? rect
         content
-            .frame(width: shown.width, height: shown.height)
+            .frame(width: shown.width, height: shown.height, alignment: .topLeading)
             .scaleEffect(viewport.scale, anchor: .topLeading)
             .offset(
                 x: shown.x * viewport.scale + viewport.x,

@@ -630,6 +630,65 @@ border (and the selection ring, 2 pt outside) can cover the tip pixel.
   drag a card across an edge: the edge stays under it; select an edge whose
   port lies under a third card: that end shows no handle.
 
+## 2026-10-20: a card draws exactly inside its stored rect
+
+Last verified: Apple Swift 6.4 (swiftlang-6.4.0.34.1), macOS 27.0.1 (26A434).
+Build and tests only; not yet checked on the live board.
+
+**Symptom.** On "DFAI 0001" an edge ended at the visible top border of the
+".dockerignore" file card, but the selected edge's end handle sat about 20 pt
+lower, inside the header. The card was drawn above its stored rect; edges,
+ports, handles and resize zones use the stored rect.
+
+**Root cause (a SwiftUI layout rule).** A flexible frame with a maximum and no
+minimum, `.frame(maxWidth: .infinity, maxHeight: .infinity)`, reports
+`max(proposal, child)`. When the child is inflexible and larger, the frame is
+larger than the proposal. The file excerpt is up to 40 lines of fixed 15 pt
+(620 pt with its insets), so its frame, the shell's body frame and the card face
+all became taller than the card. `CanvasCardPlacement` then gave the face a
+`.frame(width:height:)` with the default centre alignment, which centres the
+oversized face on the rect: the top moved up by half the excess, the bottom
+down by half. The face's background, `clipShape`, border, selection ring and
+ports are attached to the oversized face, so they moved with it. The resize
+zones have an explicit rect size, so they stayed on the rect. The excerpt's own
+`.clipped()` clipped at the oversized frame, so it cut nothing. Measured: a
+shell for a 200 × 64 terminal card with a missing group reported 200 × 158;
+the placement put an oversized card's header at y = −176 for a rect at y = 50
+(50 − (652 − 200) / 2).
+
+**Same class elsewhere.** Every inflexible body in a short card: the
+terminal's "No terminal yet" and "Start Shell" blocks, the native app's
+reference and permission faces, the image notice, and the zoomed-out (summary
+and silhouette) faces, whose title font grows as the scale falls. A note body
+is a `ScrollView` and was not affected. Whiteboard items (shape, text, frame,
+service icon) fill their frame; their outer frame now has the same cap.
+
+**Rule.** `View.canvasCardFill(alignment:)` (in `CanvasCardViews.swift`) is
+`.frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity,
+alignment:)`. The minimums cap the frame at the proposal; the content
+overflows from `alignment` (top-leading by default). It is applied to the
+standard card face (before its background and clip shape), the live body, the
+whiteboard item face (centre alignment) and `CanvasFileExcerptLines`. Overflow
+goes downward and the face's clip shape cuts it at the card's bottom edge.
+`CanvasCardPlacement` also uses `alignment: .topLeading`, so a card that still
+reports more than its rect keeps its header on the rect. The stored rects,
+the undo steps and the edge geometry are unchanged. Use the same cap for any
+new card body: `.frame(maxHeight: .infinity)` without `minHeight: 0` does not
+bound an inflexible child.
+
+- **Tests:** `Tests/RafuAppTests/Canvas/CanvasCardBoundsTests.swift` (the
+  SwiftUI frame rule itself, a 40-line excerpt, the shell at 100% and 15% for
+  a terminal and a file card, and placement top alignment with an oversized
+  card). The shell test failed (200 × 158) and the placement test failed
+  (y = −176) before the fix.
+- **Manual check still required:** on a board with a long file card (40 or
+  more lines) in a short rect, select an edge that ends on its top: the end
+  handle sits on the visible top border and the header shows the first line
+  below it; resize the card shorter: the lines are cut at the bottom edge and
+  the header does not move; zoom out to 25% and 10%: the card's border stays
+  on its edges' ends; repeat with a terminal card whose group is missing and a
+  short native app card.
+
 ## Why it matters
 
 Canvas mixes gesture-driven custom views with native responders (terminal, web,

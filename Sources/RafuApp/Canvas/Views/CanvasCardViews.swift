@@ -56,7 +56,10 @@ struct CanvasCardShell: View {
         let selected = board.selection.contains(card.id)
         let contentFocused = board.contentIsActive && board.focusedCardID == card.id
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        // Exactly the stored rect, whatever the body asks for: the surface,
+        // border, ring and ports must sit where edges are computed.
         return faceContent(face, scale: scale, selected: selected, contentFocused: contentFocused)
+            .canvasCardFill()
             .background(theme.palette.elevatedBackground)
             .clipShape(shape)
             .background { surface(shape) }
@@ -79,7 +82,7 @@ struct CanvasCardShell: View {
         let scale = board.viewport.scale
         let selected = board.selection.contains(card.id)
         return CanvasWhiteboardCardFace(card: card, board: board)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .canvasCardFill(alignment: .center)
             .contentShape(.rect)
             .gesture(headerGesture)
             .contextMenu { CanvasCardMenuContent(card: card, board: board, session: session) }
@@ -237,8 +240,11 @@ struct CanvasCardShell: View {
                 .frame(width: width, height: height, alignment: .topLeading)
                 .clipped()
         } else {
+            // Content taller than the body (a centred block in a short card)
+            // overflows downward, where the face's clip shape cuts it at the
+            // card's bottom edge; it never pushes the header up.
             cardBody
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .canvasCardFill()
         }
     }
 
@@ -789,6 +795,23 @@ struct CanvasCardShell: View {
         board.endGesture()
         resizeStart = nil
         frozenBodySize = nil
+    }
+}
+
+extension View {
+    /// Takes exactly the size the parent proposes, whatever the content asks
+    /// for. `.frame(maxWidth: .infinity, maxHeight: .infinity)` alone is not
+    /// enough: with no minimum, a flexible frame reports the larger of the
+    /// proposal and its child, so an inflexible child (40 fixed-height
+    /// excerpt lines, a centred button block) makes the frame taller than
+    /// the card. The board's placement frame then centred that taller card
+    /// on its rect, so its top border drew above the stored rect while edges
+    /// and handles stayed on it. `minWidth: 0, minHeight: 0` caps the frame
+    /// at the proposal; the content overflows from `alignment` instead.
+    func canvasCardFill(alignment: Alignment = .topLeading) -> some View {
+        frame(
+            minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity,
+            alignment: alignment)
     }
 }
 

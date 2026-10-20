@@ -16,25 +16,13 @@ struct CanvasFileExcerptCard: View {
     @State private var lines: [AttributedString] = []
     @State private var notice: String?
 
-    private let lineHeight: CGFloat = 15
-    private let inset: CGFloat = 10
+    private let lineHeight = CanvasFileExcerptLines.lineHeight
+    private let inset = CanvasFileExcerptLines.inset
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if let notice {
-                Text(notice).font(.system(size: 12)).foregroundStyle(theme.palette.textSecondary)
-            } else {
-                ForEach(lines.indices, id: \.self) { index in
-                    Text(lines[index])
-                        .font(.system(size: 11, design: .monospaced))
-                        .lineLimit(1)
-                        .frame(height: lineHeight, alignment: .leading)
-                }
-            }
-        }
-        .padding(inset)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .clipped()
+        CanvasFileExcerptLines(
+            lines: lines, notice: notice, noticeColor: theme.palette.textSecondary
+        )
         .contentShape(.rect)
         .gesture(
             SpatialTapGesture(count: 2).onEnded { value in
@@ -96,6 +84,36 @@ struct CanvasFileExcerptCard: View {
             output.append(piece)
         }
         return output
+    }
+}
+
+/// The excerpt's lines, top-aligned and clipped to the size it is given. Up
+/// to 40 lines of 15 pt is far taller than most cards, so the frame must not
+/// grow to the lines (`canvasCardFill`): the extra lines are cut at the
+/// card's bottom edge, and the first line stays under the header.
+struct CanvasFileExcerptLines: View {
+    static let lineHeight: CGFloat = 15
+    static let inset: CGFloat = 10
+    let lines: [AttributedString]
+    let notice: String?
+    var noticeColor: Color = .secondary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let notice {
+                Text(notice).font(.system(size: 12)).foregroundStyle(noticeColor)
+            } else {
+                ForEach(lines.indices, id: \.self) { index in
+                    Text(lines[index])
+                        .font(.system(size: 11, design: .monospaced))
+                        .lineLimit(1)
+                        .frame(height: Self.lineHeight, alignment: .leading)
+                }
+            }
+        }
+        .padding(Self.inset)
+        .canvasCardFill()
+        .clipped()
     }
 }
 
