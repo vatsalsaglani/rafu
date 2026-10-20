@@ -175,8 +175,11 @@ final class CanvasBoardState: Identifiable {
     /// Adds a card. With `center` (board units) the card appears centred on
     /// that point. Otherwise it appears at the middle of the visible board,
     /// stepping 24 pt from the previous new card; a board that has not been laid
-    /// out yet keeps the older cascade.
-    func add(title: String, content: CanvasCardContent, center: CGPoint? = nil) throws {
+    /// out yet keeps the older cascade. Returns the new card's id.
+    @discardableResult
+    func add(title: String, content: CanvasCardContent, center: CGPoint? = nil) throws
+        -> CanvasCardID
+    {
         guard cards.count < CanvasLimits.cards else { throw CanvasError.capacity }
         let center = center ?? creationCenter
         creationCenter = nil
@@ -216,6 +219,7 @@ final class CanvasBoardState: Identifiable {
             try edit { $0.cards.append(card) }
         }
         select([card.id])
+        return card.id
     }
 
     func removeSelection() throws {

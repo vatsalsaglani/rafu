@@ -71,6 +71,9 @@ pending).
   content is active; otherwise Next Tab keeps it. This is a known conflict, not
   an accident: do not "fix" it by removing either binding without choosing which
   one the user keeps.
+- **Quick Open ⌘↩ adds a file.** With an Ensemble as the focused tab, ⌘P, a
+  file row, then **Command-Return** adds that file as a card (Return still
+  opens it). See "2026-10-20: Quick Open adds a file to the Ensemble".
 - **Pointer feedback:** resize zones use `pointerStyle`. Resizing applies
   per-type minimum sizes with resistance and a spring.
 
@@ -529,6 +532,44 @@ chips in a flow `Layout`, with an `AgentStatusPill`, a hover/focus `⋯` backed 
 the context menu, and a Start Agent card row.
 
 `CanvasBoardState.ensembleSymbol` is `circle.hexagongrid`.
+
+## 2026-10-20: Quick Open adds a file to the Ensemble
+
+Last verified: Apple Swift 6.4 (swiftlang-6.4.0.34.1), macOS 27.0.1 (26A434).
+Build and tests only; the key path was not driven with real input.
+
+- **Path:** ⌘P (file mode), select a file row, **⌘↩**. The palette closes and
+  `WorkspaceSession.addFileToSelectedCanvas(_:)` runs. Return keeps its meaning
+  (Open). The footer shows "⌘↩ Add to Ensemble" only while an Ensemble is the
+  focused tab (`PaletteFooterHints.text(boardActive:)`). VoiceOver gets the same
+  action as the row's "Add to Ensemble" accessibility action.
+- **Placement:** `CanvasBoardState.add` (now `@discardableResult`, returns the
+  new `CanvasCardID`) at the middle of the visible board with the 24 pt cascade.
+  `creationCenter` is cleared first, as every non-popover add path must. The
+  card kind comes from `CanvasDroppedFileKind.content(forRelativePath:)`, so a
+  raster image becomes an image card and everything else a file card, exactly
+  as a drop does. One `edit`, so one undo step.
+- **After the add:** `focusCanvasCard(_:in:)` reveals, selects and tracks the
+  card (`focusedCardID`), and does not enter content.
+- **No duplicate:** `CanvasFileCardLookup.existingCard(forRelativePath:in:)`
+  finds the first `.file` or `.image` card with that path; the action then
+  selects and reveals it instead of adding a second card.
+- **Other folders are refused.** Board paths are relative to the primary
+  folder. A match whose `rootID` is not `descriptor?.id` sets
+  `board.errorMessage` to `WorkspaceSession.canvasFileOutsideFolderMessage`
+  and adds nothing. A full board (`CanvasLimits.cards`) shows the capacity
+  error.
+- **Scope:** one row at a time. No ⇧⌘↩, no multi-select, no folder rows.
+- **Key routing:** a local key monitor (`CommandPaletteKeyMonitor`), not
+  `onKeyPress`. See pitfall 5 in
+  [`command-palette-and-search-pitfalls.md`](command-palette-and-search-pitfalls.md).
+- **Tests:** `Tests/RafuAppTests/Canvas/CanvasQuickOpenAddTests.swift`.
+- **Manual check still required:** open an Ensemble tab, ⌘P, type a file
+  name, ⌘↩: the palette closes and one selected card appears in the middle of
+  the board; ⌘Z removes it; ⌘P and ⌘↩ on the same file again selects the
+  existing card; ⌘↩ in a plain editor tab does nothing and the footer has no
+  ⌘↩ hint; Return still opens the file in both cases; ⌘↩ while a note is in
+  Edit mode behind the palette still goes to the palette.
 
 ## Why it matters
 

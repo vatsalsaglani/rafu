@@ -1,4 +1,5 @@
 import AppKit
+import RafuCore
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -390,6 +391,40 @@ extension WorkspaceSession {
         }
     }
 
+    /// Quick Open's ⌘↩: puts the chosen file on the Ensemble in the focused
+    /// tab as a file or image card, at the middle of the visible board, as one
+    /// undo step. A file the board already shows is selected and revealed, not
+    /// added twice. Board paths are relative to the primary folder, so a match
+    /// from another folder of a multi-folder workspace is refused with a
+    /// visible message rather than stored against the wrong base.
+    func addFileToSelectedCanvas(_ match: WorkspaceFileMatch) {
+        guard let board = selectedCanvas, !isTerminalGroupModalInputBlocked else { return }
+        guard match.rootID == descriptor?.id else {
+            board.errorMessage = Self.canvasFileOutsideFolderMessage
+            return
+        }
+        if let existing = CanvasFileCardLookup.existingCard(
+            forRelativePath: match.relativePath, in: board.cards)
+        {
+            focusCanvasCard(existing, in: board)
+            return
+        }
+        board.backToBoard()
+        board.creationCenter = nil
+        do {
+            let name = (match.relativePath as NSString).lastPathComponent
+            let id = try board.add(
+                title: String(name.prefix(120)),
+                content: CanvasDroppedFileKind.content(forRelativePath: match.relativePath))
+            focusCanvasCard(id, in: board)
+        } catch {
+            board.errorMessage = error.localizedDescription
+        }
+    }
+
+    nonisolated static let canvasFileOutsideFolderMessage =
+        "This file is outside the Ensemble\u{2019}s folder."
+
     func chooseCanvasApplication(_ id: CanvasID) {
         guard let board = canvas.boards[id] else { return }
         let panel = NSOpenPanel()
@@ -420,5 +455,21 @@ extension WorkspaceSession {
                 openFile(atRelativePath: path)
             } catch { self?.selectedCanvas?.errorMessage = error.localizedDescription }
         }
+    }
+}
+
+/// Finds the card that already shows a workspace file, so adding the same file
+/// from Quick Open selects it instead of making a duplicate.
+nonisolated enum CanvasFileCardLookup {
+    /// The first file or image card whose path is `path`, in board order.
+    static func existingCard(forRelativePath path: String, in cards: [CanvasCard])
+        -> CanvasCardID?
+    {
+        cards.first { card in
+            switch card.content {
+            case .file(let cardPath), .image(let cardPath): cardPath == path
+            default: false
+            }
+        }?.id
     }
 }

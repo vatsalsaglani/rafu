@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import RafuCore
 import SwiftUI
@@ -82,6 +83,7 @@ struct CommandPaletteView: View {
             moveSelection(-1)
             return .handled
         }
+        .background(CommandPaletteKeyMonitor(perform: runSecondarySelection))
         .onChange(of: query) { _, _ in selectedIndex = 0 }
         .onChange(of: parsed.mode) { _, newMode in
             if newMode == .symbols { prepareSymbolsIfNeeded() }
@@ -143,7 +145,15 @@ struct CommandPaletteView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 15))
                 .focused($searchFocused)
-                .onSubmit { runSelection() }
+                .onSubmit {
+                    // ⌘↩ belongs to `CommandPaletteKeyMonitor`. If it lets the
+                    // key pass (no Ensemble, or a row without that action),
+                    // the field editor may still submit; ⌘↩ never means Open.
+                    guard NSApp.currentEvent?.modifierFlags.contains(.command) != true else {
+                        return
+                    }
+                    runSelection()
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -306,11 +316,16 @@ struct CommandPaletteView: View {
         }
         .buttonStyle(.plain)
         .disabled(!row.isEnabled)
+        .accessibilityActions {
+            if let secondaryAction = row.secondaryAction {
+                Button("Add to Ensemble") { secondaryAction() }
+            }
+        }
     }
 
     private var paletteFooterHints: some View {
         HStack(spacing: 0) {
-            Text(PaletteFooterHints.text)
+            Text(PaletteFooterHints.text(boardActive: session.selectedCanvasID != nil))
                 .font(.system(size: 11))
                 .foregroundStyle(theme.palette.textSecondary)
                 .lineLimit(1)
@@ -355,6 +370,17 @@ struct CommandPaletteView: View {
         rows[selectedIndex].action()
     }
 
+    /// ⌘↩ on the selected row. False when the row has no secondary action, so
+    /// the key monitor lets the key pass.
+    private func runSecondarySelection() -> Bool {
+        let rows = currentRows
+        guard rows.indices.contains(selectedIndex),
+            let secondaryAction = rows[selectedIndex].secondaryAction
+        else { return false }
+        secondaryAction()
+        return true
+    }
+
     // MARK: - Rows per mode
 
     private func rows(for parsed: PaletteQueryParser.ParsedQuery) -> [PaletteRow] {
@@ -392,10 +418,13 @@ struct CommandPaletteView: View {
     /// index query (`runFileQuery`); this only turns the paths it found into
     /// rows. In a multi-folder workspace the detail names the folder.
     private func fileRows(matching term: String) -> [PaletteRow] {
-        fileMatches.map { match in
+        // ⌘↩ "Add to Ensemble" exists only while an Ensemble is the focused
+        // tab behind the palette.
+        let boardActive = session.selectedCanvasID != nil
+        return fileMatches.map { match in
             let name = (match.relativePath as NSString).lastPathComponent
             let icon = FileIconProvider.fileIcon(named: name)
-            return PaletteRow(
+            var row = PaletteRow(
                 id: "file:\(match.id)",
                 symbolName: icon.symbol,
                 iconTint: icon.tint,
@@ -406,6 +435,13 @@ struct CommandPaletteView: View {
                 dismiss()
                 session.openFile(match)
             }
+            if boardActive {
+                row.secondaryAction = {
+                    dismiss()
+                    session.addFileToSelectedCanvas(match)
+                }
+            }
+            return row
         }
     }
 
@@ -1336,6 +1372,11 @@ private struct PaletteRow: Identifiable {
     var shortcut: String? = nil
     var isEnabled = true
     let action: @MainActor () -> Void
+    /// ⌘↩ on the selected row (and a VoiceOver action). Only file rows set
+    /// it, and only while an Ensemble is the focused tab: "Add to Ensemble".
+    /// Declared after `action` so every call site's trailing closure still
+    /// binds `action`.
+    var secondaryAction: (@MainActor () -> Void)? = nil
 }
 
 private struct PaletteCommand {
@@ -1360,7 +1401,13 @@ private struct PaletteCommand {
 /// The palette's footer legend: arrow keys, Return and Escape as the keys the
 /// user presses, not as pictograms.
 nonisolated enum PaletteFooterHints {
-    static let text = "↑↓ Navigate · ↩ Open · esc Close"
+    static let text = text(boardActive: false)
+
+    /// With an Ensemble as the focused tab, ⌘↩ adds the selected file to it.
+    static func text(boardActive: Bool) -> String {
+        let base = "↑↓ Navigate · ↩ Open · esc Close"
+        return boardActive ? base + " · ⌘↩ Add to Ensemble" : base
+    }
 }
 
 /// Splits a palette query into its mode prefix and search term: plain text

@@ -78,6 +78,42 @@ Rule: in a SwiftUI view, never let an action closure capture a
 body-computed collection that a `@State` index addresses. Capture neither,
 or capture both.
 
+### Pitfall 5: a Command-modified Return does not reliably reach `onKeyPress`
+
+Last verified: Apple Swift 6.4 (swiftlang-6.4.0.34.1), macOS 27.0.1
+(26A434), 2026-10-20. Reasoned from the AppKit event path and the code; not
+driven with real input.
+
+Context: Quick Open's ⌘↩ "Add to Ensemble" (see
+[`canvas-interaction.md`](canvas-interaction.md)). The search `TextField` is
+an AppKit field editor and is first responder while the palette is open.
+
+Observation: AppKit sends a Command-modified key through
+`performKeyEquivalent` (the window, then the main menu) before any view gets
+`keyDown`. The Format menu binds ⌘↩ to "Done Editing" while a note is being
+edited, so a menu item can take the key first. If nothing takes it, the
+field editor can turn ⌘↩ into `insertNewline:`, which SwiftUI reports as
+`onSubmit` (Open). An `onKeyPress(.return)` on the palette's root view is
+therefore not a dependable owner of ⌘↩.
+
+Rule: the palette owns ⌘↩ with a local key monitor
+(`CommandPaletteKeyMonitor`, `Sources/RafuApp/Views/CommandPaletteKeyMonitor.swift`),
+the same shape as `CanvasReturnKeyMonitor`. It acts only on events for its own
+window while that window is key, only for Return (36) or keypad Enter (76)
+with Command and no other modifier, and it consumes the key only when the
+selected row has a `secondaryAction`. As a second guard, `onSubmit` ignores a
+submit whose `NSApp.currentEvent` carries Command, so ⌘↩ never means Open,
+even when the monitor lets the key pass. The monitor installs in
+`viewDidMoveToWindow` and removes itself when the sheet's view leaves its
+window, so it lives exactly as long as the presented palette.
+
+`PaletteRow.secondaryAction` is declared after `action`: the memberwise
+initializer's trailing closure must keep binding `action` at every call site.
+The first draft declared it before `action` and built the optional closure
+inline with a ternary in `fileRows`; that crashed the type checker ("failed
+to produce diagnostic for expression"). The shipped shape builds the row with
+its trailing `action`, then assigns `row.secondaryAction`.
+
 ## Why it matters
 
 All three failure modes present identically from the user's chair —
@@ -111,6 +147,8 @@ swift test   # SearchCommandPaletteTests, WorkspaceFileNameIndexTests
 ## Related code, ADRs, and phases
 
 - `Sources/RafuApp/Views/CommandPaletteView.swift` (`resultsList`, `queryDebounce`)
+- `Sources/RafuApp/Views/CommandPaletteKeyMonitor.swift` (⌘↩, pitfall 5)
+- `Tests/RafuAppTests/Canvas/CanvasQuickOpenAddTests.swift`
 - `Sources/RafuApp/Services/WorkspaceFileNameIndex.swift` (`build`)
 - `Tests/RafuAppTests/SearchCommandPaletteTests.swift`
 - `Tests/RafuAppTests/WorkspaceFileNameIndexTests.swift`
