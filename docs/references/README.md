@@ -134,6 +134,8 @@ Keep one focused subject per note. Add it to this index. Use an ADR instead when
 
 - [Canvas live sessions](canvas-live-sessions.md): provider interfaces, Claude bridge flags in the single-token `=` form (variadic options), per-shell bridge strategies, host-environment scrub, and live connection checks.
 
+- [Ensemble bridge resilience](ensemble-bridge-resilience.md): the MCP bridge never exits on a link failure, bounded reconnect backoff, the `unregistered` response code, route-scoped suspension with `release` and rebind, the App Nap activity option set, and the off-screen mutation guard.
+
 - [macOS redesign visual system](macos-redesign-visual-system.md): the "One Gold Thread" rules: gold budget, neutral structure, focus language, Canvas-only shadows, typography roles, `RafuMotion` values, and `RafuHaptics` rules.
 - [Linux Swift verification](linux-swift-verification.md): checking Swift changes in a Linux container without the macOS SDK (`swiftc -parse -swift-version 6`, `swift-format lint`, scratch SwiftPM packages) and why a Mac build stays mandatory.
 - [Canvas interaction](canvas-interaction.md): Canvas input map, Return to Board, z-order, snapping and zoom faces, edge layering and link states, note Read/Edit modes, inline card rename and board-key gating, the paused-links notice below the tool palette, the Hand tool as latched Space-drag with the palette outside every board gesture, headless NSHostingView gesture diagnostics, Quick Open ⌘↩ adding a file card, every edge (hover and selection included) drawing below every card, and every card face capped to its stored rect (`canvasCardFill`: a `maxHeight: .infinity` frame without `minHeight: 0` grows to an inflexible child).

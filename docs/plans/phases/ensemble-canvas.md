@@ -94,7 +94,9 @@ themselves (to avoid conflicts). New strings may already say "Ensemble".
    modifier chains; avoid mixed `Double`/`CGFloat` arithmetic; macOS 15 APIs only.
 4. Visual rules: gold only for focus/selection/live/primary; theme tokens only;
    help + accessibility labels on icon-only controls; Reduce Motion paths.
-5. Security: agents act only through the visible Ensemble; every agent-started
+5. Security: agents act only through an Ensemble that is open in the workspace;
+   it need not be on screen. Tools that start a process or dock an app still
+   need it shown (see ADR 0026, amendment of 2026-10-22). Every agent-started
    process appears as a terminal node; per-Ensemble "Agent control" (Off / Ask /
    Allow, default Ask) gates mutating tools; bounded payloads; no secrets or
    message bodies in logs.
@@ -439,3 +441,37 @@ d1c160a, 40d5c72).
   rule inside the accepted board contract; it supersedes review 7.6 Layering.
 - **Tests:** `Tests/RafuAppTests/Canvas/CanvasEdgeLayeringTests.swift`.
 - **Open manual check:** the steps listed in that reference section.
+
+## Status (2026-10-22, link resilience and Codex rebind)
+
+- **The MCP stdio bridge stays alive through a lost launcher link.** It ends
+  only on stdin EOF, a poll error, an oversized frame, an encode failure, or an
+  output write failure. Reconnect backoff is 300 ms doubled to a 5 000 ms cap
+  (heartbeat only). Tool calls during an outage return an `isError` reply. One
+  deduplicated stderr line per state change, at most 200 bytes, with no token,
+  path, thread, or message text. New optional `CanvasBridgeResponse.code`
+  (`"unregistered"`) triggers re-registration.
+- **Suspension is route-scoped and Codex can rebind.** A new `release`
+  operation clears the route after the visible TUI exits; a `bind` from a new
+  supervisor endpoint replaces a dead, stale, released, or suspended route, and
+  is refused while a live agent holds it. `unregister` works while suspended.
+  Root cause: the proxy revoked with `.transportLost` on a normal Ctrl-D, and
+  suspension was permanent.
+- **Agents can change an Ensemble that is open but not on screen.** The guard
+  is now board identity in the workspace. Tools that start a process or dock an
+  app still need the Ensemble shown.
+- **App Nap:** a `ProcessInfo` activity with
+  `.userInitiatedAllowingIdleSystemSleep` is held only while a terminal has a
+  live, non-suspended agent route. It never blocks idle system or display
+  sleep.
+- **Docs:** new
+  [`ensemble-bridge-resilience.md`](../../references/ensemble-bridge-resilience.md);
+  [`canvas-live-sessions.md`](../../references/canvas-live-sessions.md) updated
+  for route-scoped suspension and off-screen edits; ADR 0026 amended
+  (2026-10-22) by the user's explicit direction.
+- **Tests:** on `main` after the merge (`aa7e782`), the parallel suite and the
+  `--no-parallel` (CI mode) suite both passed with 262 RafuCore tests and 2860
+  RafuApp tests.
+- **Open checks:** live behaviour overnight, with the screensaver running, and
+  after a real Ctrl-D is not yet verified. The exact overnight trigger of the
+  old Codex "Disconnected from this task" text stays unknown.

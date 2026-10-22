@@ -51,6 +51,36 @@ Codex needs a private server because MCP config overrides do not use its shared
 daemon. These servers are tied to the terminal process, with bounded shutdown.
 See `docs/references/canvas-live-sessions.md` for verified interfaces and limits.
 
+## Link resilience and off-screen edits (2026-10-22)
+
+By the user's explicit direction, links must keep working while the Ensemble is
+not on screen and while the screensaver runs. This amendment changes three
+parts of the decision above.
+
+**Suspension scope.** Suspension applies to one route, not for ever to the
+terminal capability. The Codex supervisor sends a `release` operation after its
+visible TUI exits, which clears the route and the suspension. A `bind` from a
+new supervisor endpoint replaces a route that is dead, stale, released, or
+suspended; it is still refused while a live agent holds the route. A normal
+Ctrl-D exit therefore no longer needs a new terminal: the user runs `codex`
+again. The MCP bridge also stays alive through a lost launcher link and
+reconnects with bounded backoff instead of exiting.
+
+**Off-screen mutation.** Mutating tools need an Ensemble that is open in the
+workspace, not an Ensemble that is on screen. Notes, nodes, edges, diagrams,
+frames, and export apply while the tab is not selected. Tools that start a
+process or dock an app still need the Ensemble shown, because a terminal card
+starts its process only through its view. Off-screen edits in Allow mode apply
+without the user watching; they stay undoable and recorded.
+
+**Power.** While a terminal holds a live, non-suspended agent route, the app
+holds a `ProcessInfo` activity with
+`.userInitiatedAllowingIdleSystemSleep`. It stops App Nap, sudden termination,
+and automatic termination. It never prevents idle system sleep or display
+sleep, so the user's power settings still decide when the Mac sleeps.
+
+See [`../references/ensemble-bridge-resilience.md`](../references/ensemble-bridge-resilience.md).
+
 ## Named peers (2026-10-18)
 
 The user requested names and `@mentions` for multiple terminal sessions. Card

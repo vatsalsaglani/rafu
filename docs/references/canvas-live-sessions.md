@@ -254,11 +254,19 @@ a navigation request or a message that identifies another thread. The original
 protocol bytes are forwarded; no terminal text is read or stored. Frame and
 message buffers are bounded to 256 KiB.
 
-Suspension is permanent for that terminal capability. The broker rejects later
-registration attempts and cancels and awaits pending queue processes before
+Suspension is route-scoped since 2026-10-22, not permanent for the terminal
+capability. The broker rejects later registration attempts from the same client
+and endpoint, and cancels and awaits pending queue processes before
 acknowledging suspension. The proxy closes the transport if it cannot confirm
 suspension. A provider can already have accepted a message before suspension;
-that message cannot be recalled. Start a new terminal to restore the link.
+that message cannot be recalled. The supervisor sends a `release` operation
+after the visible TUI exits, which clears the route and the suspension; if
+`release` does not reach the app, the next `bind` from a new supervisor
+endpoint replaces a dead, stale, released, or suspended route. A new `codex`
+run in the same terminal therefore reconnects, and the status text says "Run
+codex again to reconnect." A bind is still refused while a live agent holds the
+route. See
+[`ensemble-bridge-resilience.md`](ensemble-bridge-resilience.md).
 Explicit resume/fork/agents commands use the normal CLI without a bridge.
 Child-agent thread activity can suspend links conservatively. This limit is visible in the terminal status.
 
@@ -622,5 +630,26 @@ arbitrary network-failure recovery or every provider version.
 The message bridge reports `connected` as permission to deliver a message, not merely the presence of a running CLI. Peer responses also expose `linkState` (`live`, `paused`, `disconnected`, `failed`, or `related`). A paused edge must be resumed in Canvas. Restarting either terminal does not resume an edge. The MCP instructions explain this distinction; explicit sends to a paused peer return the same recovery step. No pause permission is bypassed. Older peer responses without this optional field still decode.
 
 Evidence: the CC1 and Codex sessions changed from Paused to Live when the existing edge was resumed, without restarting either CLI. A real check then passed from Codex to CC1 and back through `send_message`, with `LINK_OK` visible in Codex. Claude’s startup channel notice alone did not establish a missing bridge. Check the current link state and MCP status before diagnosing startup failure. Regression coverage: `CanvasLiveBridgeTests.livePeerProviders` and `canvasPeerProviderRemainsCompatibleWithOlderResponses`; run `./script/test.sh --filter CanvasLiveBridgeTests` and `./script/test.sh --filter CanvasBridgeTests`. The edge badge uses intrinsic width within its text limit, so a short state label does not fill the hover width.
+
+## Off-screen agent edits (2026-10-22)
+
+The mutation guard in `CanvasAgentActions` is "the board is open in this
+workspace" (`session.canvas.boards[board.id] === board`), not "the Ensemble
+view is on screen". Notes, nodes, edges, mermaid and `diagram_build`, frames,
+export, and `terminal_create` without a process work while the Ensemble tab is
+not the selected tab.
+
+Tools that start a process or need a live window still need the Ensemble shown:
+app docking and `app_inspect`, `terminal_start`, `terminal_create` with an
+agent or a command, and `terminal_send` to a terminal that is not live. A
+terminal card starts its process only through its view
+(`terminalStartRequest`, the canvas terminal lease, `permitsLiveContent`).
+Their error text is: "Show this Ensemble in Rafu to let agents open apps or
+start terminals. Other changes work while it is in the background." A closed
+board returns: "This Ensemble is closed in Rafu. Open it to let agents change
+it. Reading still works."
+
+Ask mode is unchanged off screen: the call waits 12 s and then returns
+`pending_approval`, and the user sees the request when the tab is next shown.
 
 The restore notice derives its paused count from current bridge state. Only its dismissal is view state. Keeping the initial count in `@State` left a paused banner visible after an individual link was resumed. `WorkbenchChromeRedesignTests.canvasLinkStatusLayout` guards the observation boundary and compact badge layout.
