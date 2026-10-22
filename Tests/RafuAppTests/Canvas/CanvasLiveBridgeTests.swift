@@ -9,6 +9,24 @@ private final class CanvasBridgeClock {
     var date = Date(timeIntervalSince1970: 1_000)
 }
 
+/// Records the begin/end activity calls the bridge makes instead of changing
+/// the test process's power assertions.
+@MainActor
+private final class CanvasActivityProbe {
+    private(set) var options: [ProcessInfo.ActivityOptions] = []
+    private(set) var reasons: [String] = []
+    private(set) var ended = 0
+    var active: Int { options.count - ended }
+
+    func begin(_ value: ProcessInfo.ActivityOptions, _ reason: String) -> any NSObjectProtocol {
+        options.append(value)
+        reasons.append(reason)
+        return NSObject()
+    }
+
+    func end() { ended += 1 }
+}
+
 @MainActor
 private struct CanvasLiveBridgeFixture {
     let session: WorkspaceSession
@@ -23,7 +41,7 @@ private struct CanvasLiveBridgeFixture {
     let bridge: CanvasLiveBridge
     let edge: UUID
 
-    init() throws {
+    init(activity: CanvasActivityProbe? = nil) throws {
         let session = WorkspaceSession(
             restorationStore: WorkspaceRestorationStore(
                 defaultsSuiteName: TestDefaultsSuite.name("dev.rafu.canvas-bridge-tests"),
@@ -52,7 +70,11 @@ private struct CanvasLiveBridgeFixture {
                     let card = board.cards.first(where: { $0.id == cardID })
                 else { return nil }
                 return (session, board, card)
-            }, now: { clock.date })
+            }, now: { clock.date },
+            beginActivity: { options, reason in
+                activity?.begin(options, reason) ?? NSObject()
+            },
+            endActivity: { _ in activity?.end() })
         board.revokeSessionLinks = { [weak bridge, weak board] edges in
             guard let board else { return }
             for edge in edges { bridge?.disable(edge, in: board) }
@@ -81,6 +103,44 @@ private struct CanvasLiveBridgeFixture {
         #expect(await bridge.handle(request(0, "register")).error == nil)
         #expect(await bridge.handle(request(1, "register")).error == nil)
         bridge.enable(edge, in: board)
+    }
+
+    static func route() -> String { "unix:///tmp/rafu-cdx-\(UUID().uuidString)/socket" }
+
+    /// The supervisor's request. Its client ID is not the MCP client's.
+    func bind(_ index: Int = 0, route: String, thread: String = UUID().uuidString)
+        -> CanvasBridgeRequest
+    {
+        var bind = request(index, "bind", client: UUID().uuidString, provider: "codex")
+        bind.threadID = thread
+        bind.endpoint = route
+        bind.executable = "/local/bin/codex"
+        return bind
+    }
+
+    /// An MCP client registering for a bound route.
+    func codexRegistration(_ index: Int = 0, route: String, client: String)
+        -> CanvasBridgeRequest
+    {
+        var registration = request(index, "register", client: client, provider: "codex")
+        registration.endpoint = route
+        registration.executable = "/local/bin/codex"
+        return registration
+    }
+
+    func release(_ index: Int = 0, route: String) -> CanvasBridgeRequest {
+        var release = request(index, "release", client: UUID().uuidString, provider: "codex")
+        release.endpoint = route
+        return release
+    }
+
+    func suspend(
+        _ index: Int = 0, route: String, reason: String = "transportLost"
+    ) -> CanvasBridgeRequest {
+        var suspend = request(index, "suspend", client: UUID().uuidString, provider: "codex")
+        suspend.endpoint = route
+        suspend.reason = reason
+        return suspend
     }
 }
 
@@ -561,14 +621,14 @@ struct CanvasLiveBridgeTests {
         #expect(await fixture.bridge.handle(suspend).error == nil)
         #expect(
             fixture.bridge.status(for: fixture.controllers[1].id)
-                == "Session changed. Restart this terminal to reconnect.")
+                == "Session changed. Run codex again to reconnect.")
         #expect(
             await fixture.bridge.handle(fixture.request(0, "list")).peers.first?.connected == false)
         #expect(
             await fixture.bridge.handle(fixture.request(0, "send", destination: 1, text: "blocked"))
                 .error != nil)
 
-        for operation in ["register", "bind", "list", "send", "receive", "unregister"] {
+        for operation in ["register", "bind", "list", "send", "receive"] {
             var request = registration
             request.operation = operation
             request.destination = fixture.cards[0].id.rawValue.uuidString
@@ -796,11 +856,12 @@ struct CanvasLiveBridgeTests {
         suspend.clientID = UUID().uuidString
         suspend.reason = "transportLost"
         #expect(await fixture.bridge.handle(suspend).error == nil)
-        let expected = "Connection lost. Restart this terminal to reconnect."
+        let expected = "Connection lost. Run codex again to reconnect."
         #expect(fixture.bridge.status(for: fixture.controllers[0].id) == expected)
         #expect(
             fixture.bridge.notice
-                == "Codex lost its terminal connection. Restart its terminal to reconnect.")
+                == "Codex lost its terminal connection. Run codex again in its terminal to reconnect."
+        )
         #expect(await fixture.bridge.handle(registration).error == expected)
         // A legacy retry cannot replace the first cause with a navigation message.
         suspend.reason = nil
@@ -827,9 +888,225 @@ struct CanvasLiveBridgeTests {
         #expect(await fixture.bridge.handle(suspend).error == nil)
         #expect(
             fixture.bridge.status(for: fixture.controllers[0].id)
-                == "Session changed. Restart this terminal to reconnect.")
+                == "Session changed. Run codex again to reconnect.")
         #expect(
-            fixture.bridge.notice == "Codex changed sessions. Restart its terminal to reconnect.")
+            fixture.bridge.notice
+                == "Codex changed sessions. Run codex again in its terminal to reconnect.")
+    }
+
+    // MARK: Relaunching Codex in the same terminal
+
+    @Test("A relaunched Codex binds and registers after the previous run released the route")
+    func codexRebindAfterPreviousCodexExit() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        let first = CanvasLiveBridgeFixture.route()
+        let second = CanvasLiveBridgeFixture.route()
+        let firstClient = UUID().uuidString
+        #expect(await fixture.bridge.handle(fixture.bind(route: first)).error == nil)
+        #expect(
+            await fixture.bridge.handle(
+                fixture.codexRegistration(route: first, client: firstClient)
+            ).error == nil)
+        #expect(fixture.bridge.status(for: fixture.controllers[0].id) == "Codex connected")
+
+        #expect(await fixture.bridge.handle(fixture.release(route: first)).error == nil)
+        #expect(
+            fixture.bridge.status(for: fixture.controllers[0].id)
+                == "Run claude or codex to connect")
+
+        let secondThread = UUID().uuidString
+        #expect(
+            await fixture.bridge.handle(fixture.bind(route: second, thread: secondThread)).error
+                == nil)
+        #expect(
+            await fixture.bridge.handle(
+                fixture.codexRegistration(route: second, client: UUID().uuidString)
+            ).error == nil)
+        #expect(fixture.bridge.status(for: fixture.controllers[0].id) == "Codex connected")
+    }
+
+    @Test("A relaunched Codex replaces a route whose agent never unregistered")
+    func codexRebindAfterUnregisterFailed() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        let first = CanvasLiveBridgeFixture.route()
+        let second = CanvasLiveBridgeFixture.route()
+        let firstClient = UUID().uuidString
+        let secondClient = UUID().uuidString
+        #expect(await fixture.bridge.handle(fixture.bind(route: first)).error == nil)
+        #expect(
+            await fixture.bridge.handle(
+                fixture.codexRegistration(route: first, client: firstClient)
+            ).error == nil)
+
+        fixture.clock.date.addTimeInterval(16)
+        #expect(await fixture.bridge.handle(fixture.bind(route: second)).error == nil)
+        // The old client lost its registration, and it cannot retake the new route.
+        var receive = fixture.request(0, "receive", client: firstClient, provider: "codex")
+        let lost = await fixture.bridge.handle(receive)
+        #expect(lost.error == CanvasBridgeResponse.unregisteredMessage)
+        #expect(lost.code == CanvasBridgeResponse.unregisteredCode)
+        receive = fixture.codexRegistration(route: first, client: firstClient)
+        #expect(await fixture.bridge.handle(receive).error != nil)
+        #expect(
+            await fixture.bridge.handle(
+                fixture.codexRegistration(route: second, client: secondClient)
+            ).error == nil)
+        #expect(fixture.bridge.status(for: fixture.controllers[0].id) == "Codex connected")
+    }
+
+    @Test("A relaunched Codex replaces a suspended route at once and clears its notice")
+    func codexRebindAfterSuspension() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        let first = CanvasLiveBridgeFixture.route()
+        let second = CanvasLiveBridgeFixture.route()
+        #expect(await fixture.bridge.handle(fixture.bind(route: first)).error == nil)
+        #expect(
+            await fixture.bridge.handle(
+                fixture.codexRegistration(route: first, client: UUID().uuidString)
+            ).error == nil)
+        #expect(await fixture.bridge.handle(fixture.suspend(route: first)).error == nil)
+        #expect(
+            fixture.bridge.status(for: fixture.controllers[0].id)
+                == "Connection lost. Run codex again to reconnect.")
+        #expect(fixture.bridge.notice != nil)
+
+        #expect(await fixture.bridge.handle(fixture.bind(route: second)).error == nil)
+        #expect(fixture.bridge.notice == nil)
+        let client = UUID().uuidString
+        #expect(
+            await fixture.bridge.handle(
+                fixture.codexRegistration(route: second, client: client)
+            ).error == nil)
+        #expect(fixture.bridge.status(for: fixture.controllers[0].id) == "Codex connected")
+        #expect(
+            await fixture.bridge.handle(
+                fixture.request(0, "list", client: client, provider: "codex")
+            ).error == nil)
+    }
+
+    @Test("A second agent is refused while the first holds a fresh route")
+    func concurrentSecondAgentStillRefused() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        let first = CanvasLiveBridgeFixture.route()
+        let second = CanvasLiveBridgeFixture.route()
+        #expect(await fixture.bridge.handle(fixture.bind(route: first)).error == nil)
+        #expect(
+            await fixture.bridge.handle(
+                fixture.codexRegistration(route: first, client: UUID().uuidString)
+            ).error == nil)
+
+        #expect(await fixture.bridge.handle(fixture.bind(route: second)).error != nil)
+        var claude = fixture.request(0, "register", client: UUID().uuidString)
+        #expect(await fixture.bridge.handle(claude).error != nil)
+        claude = fixture.codexRegistration(route: second, client: UUID().uuidString)
+        #expect(await fixture.bridge.handle(claude).error != nil)
+        #expect(fixture.bridge.status(for: fixture.controllers[0].id) == "Codex connected")
+
+        fixture.clock.date.addTimeInterval(16)
+        #expect(await fixture.bridge.handle(fixture.bind(route: second)).error == nil)
+    }
+
+    @Test("Release needs the matching route and changes nothing otherwise")
+    func releaseRequiresMatchingEndpoint() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        let route = CanvasLiveBridgeFixture.route()
+        #expect(await fixture.bridge.handle(fixture.bind(route: route)).error == nil)
+        #expect(
+            await fixture.bridge.handle(
+                fixture.codexRegistration(route: route, client: UUID().uuidString)
+            ).error == nil)
+        #expect(
+            await fixture.bridge.handle(fixture.release(route: CanvasLiveBridgeFixture.route()))
+                .error != nil)
+        var claude = fixture.release(route: route)
+        claude.provider = "claude"
+        #expect(await fixture.bridge.handle(claude).error != nil)
+        var other = fixture.release(1, route: route)
+        other.token = "wrong-capability"
+        #expect(await fixture.bridge.handle(other).error != nil)
+        #expect(fixture.bridge.status(for: fixture.controllers[0].id) == "Codex connected")
+    }
+
+    @Test("An agent can unregister while its route is suspended")
+    func unregisterWorksWhileSuspended() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        let route = CanvasLiveBridgeFixture.route()
+        let client = UUID().uuidString
+        #expect(await fixture.bridge.handle(fixture.bind(route: route)).error == nil)
+        #expect(
+            await fixture.bridge.handle(fixture.codexRegistration(route: route, client: client))
+                .error == nil)
+        #expect(await fixture.bridge.handle(fixture.suspend(route: route)).error == nil)
+        #expect(
+            await fixture.bridge.handle(
+                fixture.request(0, "unregister", client: client, provider: "codex")
+            ).error == nil)
+        // The route stays suspended until a new run replaces it.
+        #expect(
+            fixture.bridge.status(for: fixture.controllers[0].id)
+                == "Connection lost. Run codex again to reconnect.")
+        #expect(
+            await fixture.bridge.handle(fixture.request(0, "list", client: client)).error != nil)
+        #expect(
+            await fixture.bridge.handle(fixture.bind(route: CanvasLiveBridgeFixture.route()))
+                .error == nil)
+    }
+
+    @Test("An unknown client is told to register again")
+    func unknownClientGetsAStableCode() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        #expect(await fixture.bridge.handle(fixture.request(0, "register")).error == nil)
+        let unknown = await fixture.bridge.handle(
+            fixture.request(0, "list", client: UUID().uuidString))
+        #expect(unknown.code == CanvasBridgeResponse.unregisteredCode)
+    }
+
+    @Test("The power activity is held only while an agent route exists")
+    func activityHeldOnlyWhileAgentsAreConnected() async throws {
+        let probe = CanvasActivityProbe()
+        let fixture = try CanvasLiveBridgeFixture(activity: probe)
+        #expect(probe.options.isEmpty)
+
+        #expect(await fixture.bridge.handle(fixture.request(0, "register")).error == nil)
+        #expect(probe.options.count == 1)
+        #expect(await fixture.bridge.handle(fixture.request(1, "register")).error == nil)
+        #expect(probe.options.count == 1)
+        #expect(
+            await fixture.bridge.handle(fixture.request(0, "unregister")).error == nil)
+        #expect(probe.active == 1)
+        #expect(
+            await fixture.bridge.handle(fixture.request(1, "unregister")).error == nil)
+        #expect(probe.active == 0)
+
+        let route = CanvasLiveBridgeFixture.route()
+        #expect(await fixture.bridge.handle(fixture.bind(route: route)).error == nil)
+        #expect(probe.active == 1)
+        #expect(await fixture.bridge.handle(fixture.suspend(route: route)).error == nil)
+        #expect(probe.active == 0)
+        #expect(
+            await fixture.bridge.handle(fixture.bind(route: CanvasLiveBridgeFixture.route()))
+                .error == nil)
+        #expect(probe.active == 1)
+        fixture.bridge.remove(fixture.controllers[0])
+        #expect(probe.active == 0)
+
+        // Prevent App Nap only. Never keep the Mac or the display awake.
+        for options in probe.options {
+            #expect(options == .userInitiatedAllowingIdleSystemSleep)
+            #expect(!options.contains(.idleSystemSleepDisabled))
+            #expect(!options.contains(.idleDisplaySleepDisabled))
+        }
+    }
+
+    @Test("A released Codex route ends the activity")
+    func releaseEndsActivity() async throws {
+        let probe = CanvasActivityProbe()
+        let fixture = try CanvasLiveBridgeFixture(activity: probe)
+        let route = CanvasLiveBridgeFixture.route()
+        #expect(await fixture.bridge.handle(fixture.bind(route: route)).error == nil)
+        #expect(probe.active == 1)
+        #expect(await fixture.bridge.handle(fixture.release(route: route)).error == nil)
+        #expect(probe.active == 0)
     }
 
     // MARK: Per-link state (redesign W6b)

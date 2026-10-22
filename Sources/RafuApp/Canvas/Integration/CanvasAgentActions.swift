@@ -230,8 +230,49 @@ enum CanvasAgentActions {
     static let pendingMessage =
         "Waiting for the user to approve this action in Rafu. Call action_status with this request_id later."
     static let hiddenMessage =
-        "Open this Ensemble in Rafu to let agents change it. Reading still works."
+        "This Ensemble is closed in Rafu. Open it to let agents change it. Reading still works."
+    static let notShownMessage =
+        "Show this Ensemble in Rafu to let agents open apps or start terminals. Other changes work while it is in the background."
     static let resultBytes = 24 * 1_024
+
+    /// An open Ensemble accepts changes whether or not its tab is selected, so
+    /// agents can keep working while the window is hidden or the display sleeps.
+    private static func isOpen(_ board: CanvasBoardState, in session: WorkspaceSession) -> Bool {
+        session.canvas.boards[board.id] === board
+    }
+
+    /// Only these need views that exist while the Ensemble is on screen: a docked
+    /// app window, or a terminal card that starts a process through its own view.
+    /// Links and live shells work in the background.
+    private static func needsShownBoard(_ call: CanvasAgentToolCall, caller: CanvasAgentCaller)
+        -> Bool
+    {
+        switch call.tool {
+        case .appOpen, .terminalStart: return true
+        case .terminalCreate: return call.startsProcess
+        case .terminalSend:
+            guard !isRoutedByLink(call, caller: caller),
+                let card = try? findCard(call.nodeID, in: caller.board),
+                case .terminal(let groupID) = card.content
+            else { return false }
+            return caller.session.terminal.terminalGroup(groupID)?.panes.first?.status != .live
+        default: return false
+        }
+    }
+
+    /// A message to a terminal that a Live link reaches is the user's consent.
+    private static func isRoutedByLink(_ call: CanvasAgentToolCall, caller: CanvasAgentCaller)
+        -> Bool
+    {
+        guard call.tool == .terminalSend, call.text != nil, let node = call.nodeID else {
+            return false
+        }
+        return CanvasLiveBridge.shared.hasLiveRoute(from: caller.controllerID, to: node)
+    }
+
+    private static func isShown(_ board: CanvasBoardState, in session: WorkspaceSession) -> Bool {
+        session.canvasResources[board.id]?.isPresented == true
+    }
 
     static func handle(_ call: CanvasAgentToolCall, caller: CanvasAgentCaller) async
         -> CanvasBridgeResponse
@@ -243,18 +284,12 @@ enum CanvasAgentActions {
         }
         let board = caller.board
         var risk = call.risk
-        let routedByLink: Bool =
-            if call.tool == .terminalSend, call.text != nil, let node = call.nodeID {
-                CanvasLiveBridge.shared.hasLiveRoute(
-                    from: caller.controllerID, to: node)
-            } else {
-                false
-            }
+        let routedByLink = isRoutedByLink(call, caller: caller)
         if routedByLink { risk = .edit }
         if risk != .read {
-            guard caller.session.canvasResources[board.id]?.isPresented == true else {
-                return .init(error: hiddenMessage)
-            }
+            guard isOpen(board, in: caller.session) else { return .init(error: hiddenMessage) }
+            guard !needsShownBoard(call, caller: caller) || isShown(board, in: caller.session)
+            else { return .init(error: notShownMessage) }
             guard center.admit(caller.controllerID) else {
                 return .init(error: "Too many Ensemble changes. Wait one minute.")
             }
@@ -299,12 +334,16 @@ enum CanvasAgentActions {
     static func perform(_ call: CanvasAgentToolCall, caller: CanvasAgentCaller) async
         -> CanvasBridgeResponse
     {
-        // A late approval can arrive after the user hid the board or turned
-        // Agent control off. Check again right before the change.
+        // A late approval can arrive after the user closed the board, hid it for a
+        // tool that needs it shown, or turned Agent control off. Check again right
+        // before the change.
         if call.risk != .read {
-            guard caller.session.canvasResources[caller.board.id]?.isPresented == true else {
+            guard isOpen(caller.board, in: caller.session) else {
                 return .init(error: hiddenMessage)
             }
+            guard
+                !needsShownBoard(call, caller: caller) || isShown(caller.board, in: caller.session)
+            else { return .init(error: notShownMessage) }
             guard caller.board.agentControlMode != .off else {
                 return .init(error: CanvasAgentPolicy.offMessage)
             }

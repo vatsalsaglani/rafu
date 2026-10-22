@@ -9,13 +9,27 @@ final class CanvasLiveBridge {
     typealias Location = (session: WorkspaceSession, board: CanvasBoardState, card: CanvasCard)
     @ObservationIgnored private let resolveLocation: (@MainActor (UUID) -> Location?)?
     @ObservationIgnored private let now: @MainActor () -> Date
+    typealias ActivityBegin =
+        @MainActor (ProcessInfo.ActivityOptions, String) -> any NSObjectProtocol
+    typealias ActivityEnd = @MainActor (any NSObjectProtocol) -> Void
+    @ObservationIgnored private let beginActivity: ActivityBegin
+    @ObservationIgnored private let endActivity: ActivityEnd
+    /// Held only while at least one terminal has a live agent route. See `updateActivity`.
+    @ObservationIgnored private var activity: (any NSObjectProtocol)?
 
+    /// `beginActivity` and `endActivity` are test seams; the defaults use `ProcessInfo`.
     init(
         location: (@MainActor (UUID) -> Location?)? = nil,
-        now: @escaping @MainActor () -> Date = { Date() }
+        now: @escaping @MainActor () -> Date = { Date() },
+        beginActivity: @escaping ActivityBegin = {
+            ProcessInfo.processInfo.beginActivity(options: $0, reason: $1)
+        },
+        endActivity: @escaping ActivityEnd = { ProcessInfo.processInfo.endActivity($0) }
     ) {
         resolveLocation = location
         self.now = now
+        self.beginActivity = beginActivity
+        self.endActivity = endActivity
     }
     private enum SuspensionReason: String {
         case sessionChanged
@@ -23,18 +37,29 @@ final class CanvasLiveBridge {
 
         var status: String {
             switch self {
-            case .sessionChanged: "Session changed. Restart this terminal to reconnect."
-            case .transportLost: "Connection lost. Restart this terminal to reconnect."
+            case .sessionChanged: "Session changed. Run codex again to reconnect."
+            case .transportLost: "Connection lost. Run codex again to reconnect."
             }
         }
 
         var notice: String {
             switch self {
-            case .sessionChanged: "Codex changed sessions. Restart its terminal to reconnect."
+            case .sessionChanged:
+                "Codex changed sessions. Run codex again in its terminal to reconnect."
             case .transportLost:
-                "Codex lost its terminal connection. Restart its terminal to reconnect."
+                "Codex lost its terminal connection. Run codex again in its terminal to reconnect."
             }
         }
+    }
+
+    /// A route with a live agent is fresh for this long after its last request.
+    private static let routeFreshness: TimeInterval = 15
+
+    /// True while a running agent owns the terminal's route. A suspended route is
+    /// dead by definition. A stale one belongs to an agent that stopped talking.
+    private func routeHeld(_ endpoint: Endpoint) -> Bool {
+        !endpoint.suspended && (endpoint.clientID != nil || endpoint.endpoint != nil)
+            && now().timeIntervalSince(endpoint.lastSeen) < Self.routeFreshness
     }
 
     private struct Endpoint {
@@ -132,7 +157,27 @@ final class CanvasLiveBridge {
         endpoints = endpoints.filter { $0.value.controller?.id != controller.id }
         endpoints[token] = Endpoint(
             controller: controller, generation: controller.generation, lastSeen: now())
+        updateActivity()
         revision &+= 1
+    }
+
+    /// Keeps the process out of App Nap while an agent route exists. A napping
+    /// app answers the stdio bridge late, so overnight agent updates would time
+    /// out. `.userInitiatedAllowingIdleSystemSleep` stops App Nap and automatic
+    /// termination but never keeps the Mac or the display awake; the user's own
+    /// power settings still decide that. A client that dies without unregistering
+    /// keeps the activity until its terminal closes.
+    private func updateActivity() {
+        let needed = endpoints.values.contains {
+            $0.controller != nil && ($0.clientID != nil || $0.endpoint != nil) && !$0.suspended
+        }
+        if needed, activity == nil {
+            activity = beginActivity(
+                .userInitiatedAllowingIdleSystemSleep, "Ensemble agent links are connected")
+        } else if !needed, let held = activity {
+            endActivity(held)
+            activity = nil
+        }
     }
 
     func remove(_ controller: WorkspaceTerminalController) {
@@ -146,6 +191,7 @@ final class CanvasLiveBridge {
         if let directory = directories.removeValue(forKey: controller.id) {
             Task.detached { try? FileManager.default.removeItem(at: directory) }
         }
+        updateActivity()
         revision &+= 1
     }
 
@@ -301,15 +347,38 @@ final class CanvasLiveBridge {
         return "\(endpoint.provider == "claude" ? "Claude" : "Codex") connected"
     }
 
+    private static let unregistered = CanvasBridgeResponse(
+        error: CanvasBridgeResponse.unregisteredMessage, code: CanvasBridgeResponse.unregisteredCode
+    )
+
+    private func clearSuspensionNotice() {
+        if notice == SuspensionReason.sessionChanged.notice
+            || notice == SuspensionReason.transportLost.notice
+        {
+            notice = nil
+        }
+    }
+
+    /// Cancels in-flight Codex queue processes for a terminal and waits for them.
+    /// Callers store their state first, so a re-entrant request sees it.
+    private func cancelDeliveries(for token: String) async {
+        let pending = deliveries.values.filter {
+            $0.sourceToken == token || $0.targetToken == token
+        }
+        for delivery in pending { delivery.task.cancel() }
+        for delivery in pending { _ = await delivery.task.result }
+    }
+
     func handle(_ request: CanvasBridgeRequest) async -> CanvasBridgeResponse {
         guard UUID(uuidString: request.clientID) != nil,
             var source = endpoints[request.token], let controller = source.controller,
             source.generation == controller.generation, location(of: controller.id) != nil
         else { return .init(error: "This terminal session is no longer available.") }
         guard
-            ["bind", "suspend", "register", "list", "send", "receive", "unregister", "tool"]
-                .contains(
-                    request.operation)
+            [
+                "bind", "suspend", "release", "register", "list", "send", "receive", "unregister",
+                "tool",
+            ].contains(request.operation)
         else {
             return .init(error: "Unsupported bridge request.")
         }
@@ -325,40 +394,86 @@ final class CanvasLiveBridge {
             source.inbox = []
             endpoints[request.token] = source
             notice = source.suspensionReason.notice
+            updateActivity()
             revision &+= 1
             // Revoke first, then stop in-flight queue processes before the TUI can navigate.
-            let pending = deliveries.values.filter {
-                $0.sourceToken == request.token || $0.targetToken == request.token
-            }
-            for delivery in pending { delivery.task.cancel() }
-            for delivery in pending { _ = await delivery.task.result }
+            await cancelDeliveries(for: request.token)
             return .init()
-        }
-        guard !source.suspended else {
-            return .init(error: source.suspensionReason.status)
         }
         if let provider = request.provider, let registered = source.provider,
             source.clientID == request.clientID, provider != registered
         {
             return .init(error: "The session provider cannot change.")
         }
+        // A finished run must be able to leave, and a new run to take over, even
+        // when the route is suspended. A suspended route is dead by definition.
+        if request.operation == "release" {
+            guard request.provider == "codex", let route = request.endpoint,
+                source.endpoint == route
+            else { return .init(error: "This terminal cannot release that Codex session.") }
+            source.clientID = nil
+            source.provider = nil
+            source.threadID = nil
+            source.endpoint = nil
+            source.executable = nil
+            source.inbox = []
+            source.suspended = false
+            source.lastSeen = now()
+            endpoints[request.token] = source
+            clearSuspensionNotice()
+            updateActivity()
+            revision &+= 1
+            await cancelDeliveries(for: request.token)
+            return .init()
+        }
         if request.operation == "bind" {
+            let bindError = "This terminal cannot bind that Codex session."
             guard request.provider == "codex", let thread = request.threadID,
                 UUID(uuidString: thread) != nil,
-                Self.validCodexRoute(endpoint: request.endpoint, executable: request.executable),
-                source.threadID == nil
-                    || (source.threadID == thread && source.endpoint == request.endpoint),
-                source.clientID == nil
-                    || (source.provider == "codex" && source.endpoint == request.endpoint)
-            else { return .init(error: "This terminal cannot bind that Codex session.") }
+                Self.validCodexRoute(endpoint: request.endpoint, executable: request.executable)
+            else { return .init(error: bindError) }
+            if source.endpoint == request.endpoint {
+                // The same supervisor run: keep the one thread it prepared.
+                guard !source.suspended, source.threadID == nil || source.threadID == thread
+                else { return .init(error: bindError) }
+            } else {
+                // A new supervisor run replaces a dead, stale or suspended route,
+                // and never a live agent.
+                guard !(source.provider != nil && routeHeld(source)) else {
+                    return .init(
+                        error:
+                            "Another agent is already connected in this terminal. Exit it first, or start a new terminal."
+                    )
+                }
+                source.clientID = nil
+                source.inbox = []
+                source.suspended = false
+                source.suspensionReason = .sessionChanged
+                clearSuspensionNotice()
+            }
             source.provider = "codex"
             source.threadID = thread
             source.endpoint = request.endpoint
             source.executable = request.executable
             source.lastSeen = now()
             endpoints[request.token] = source
+            updateActivity()
             revision &+= 1
             return .init()
+        }
+        if request.operation == "unregister" {
+            guard source.clientID == request.clientID else { return Self.unregistered }
+            source.clientID = nil
+            source.inbox = []
+            source.threadID = nil
+            source.lastSeen = now()
+            endpoints[request.token] = source
+            updateActivity()
+            revision &+= 1
+            return .init()
+        }
+        if source.suspended && request.operation != "register" {
+            return .init(error: source.suspensionReason.status)
         }
         if request.operation == "register" {
             guard request.provider == "claude" || request.provider == "codex" else {
@@ -371,10 +486,23 @@ final class CanvasLiveBridge {
                     return .init(error: "Invalid Codex terminal route.")
                 }
             }
-            guard
-                source.clientID == nil || source.clientID == request.clientID
-                    || now().timeIntervalSince(source.lastSeen) > 15
-            else {
+            let fresh = now().timeIntervalSince(source.lastSeen) < Self.routeFreshness
+            if source.suspended {
+                // Only another agent may take over a dead route, never its owner.
+                guard source.clientID != request.clientID,
+                    request.provider != "codex" || request.endpoint != source.endpoint, !fresh
+                else { return .init(error: source.suspensionReason.status) }
+                source.suspended = false
+                source.suspensionReason = .sessionChanged
+                clearSuspensionNotice()
+            }
+            // The old agent must not retake a route a new supervisor just bound.
+            if request.provider == "codex", source.endpoint != nil,
+                request.endpoint != source.endpoint, fresh
+            {
+                return .init(error: "Another agent is already connected in this terminal.")
+            }
+            guard source.clientID == nil || source.clientID == request.clientID || !fresh else {
                 return .init(error: "Another agent is already connected in this terminal.")
             }
             if source.clientID != request.clientID {
@@ -397,22 +525,14 @@ final class CanvasLiveBridge {
             source.executable = request.executable
             source.lastSeen = now()
             endpoints[request.token] = source
+            updateActivity()
             revision &+= 1
             return .init(peers: peers(for: controller.id))
         }
-        guard source.clientID == request.clientID else {
-            return .init(error: "Session is not registered.")
-        }
+        guard source.clientID == request.clientID else { return Self.unregistered }
         source.lastSeen = now()
         endpoints[request.token] = source
         switch request.operation {
-        case "unregister":
-            source.clientID = nil
-            source.inbox = []
-            source.threadID = nil
-            endpoints[request.token] = source
-            revision &+= 1
-            return .init()
         case "list": return .init(peers: peers(for: controller.id))
         case "tool":
             guard let call = request.agentCall, let provider = source.provider,

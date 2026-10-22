@@ -5,11 +5,22 @@ import Synchronization
 /// One TUI-only transport. Navigation revokes the Canvas route before it reaches
 /// Codex. Two bounded stream workers retain no transcript or tool output.
 final class CanvasCodexProxy: Sendable {
-    enum ProxyError: Error { case transport, malformedFrame, timedOut }
+    enum ProxyError: Error { case transport, malformedFrame, timedOut, pendingOverflow }
     enum SuspensionReason: String, Sendable { case sessionChanged, transportLost }
+    /// Why the link ended while the terminal was still running. Raw values are
+    /// fixed phrases for the supervisor's one stderr line; they carry no data.
+    enum LinkLoss: String, Sendable {
+        case sessionChange = "the conversation changed"
+        case appServerClosed = "the Codex server closed the connection"
+        case frame = "a malformed frame"
+        case timeout = "a frame did not finish in time"
+        case pendingOverflow = "too many unanswered requests"
+        case bridgeUnavailable = "Rafu did not confirm a session change"
+    }
     private struct State {
         var stopped = false
         var revoked = false
+        var lostLink: LinkLoss?
         var listener: (any DispatchSourceRead)?
         var streams: [Int32] = []
         var workers = 0
@@ -49,6 +60,17 @@ final class CanvasCodexProxy: Sendable {
         } catch {
             Darwin.close(listener)
             throw error
+        }
+    }
+
+    /// The first noteworthy loss, or nil after a normal terminal exit. The TUI
+    /// closing its own socket is not a loss, and neither is anything that follows
+    /// `stop()`.
+    var lostLink: LinkLoss? { state.withLock { $0.lostLink } }
+
+    private func noteLoss(_ loss: LinkLoss) {
+        state.withLock { state in
+            if state.lostLink == nil, !state.stopped { state.lostLink = loss }
         }
     }
 
@@ -201,10 +223,12 @@ final class CanvasCodexProxy: Sendable {
                         if let identifier = Self.requestID(object["id"]) {
                             try state.withLock { state in
                                 if outgoing, object["method"] != nil {
-                                    guard state.pendingIDs.count < 256,
-                                        !state.pendingIDs.contains(identifier)
-                                    else {
+                                    guard !state.pendingIDs.contains(identifier) else {
                                         throw ProxyError.malformedFrame
+                                    }
+                                    // A full table is a limit reached, not a bad frame.
+                                    guard state.pendingIDs.count < 256 else {
+                                        throw ProxyError.pendingOverflow
                                     }
                                     state.pendingIDs.insert(identifier)
                                 } else if !outgoing, object["method"] == nil {
@@ -228,9 +252,25 @@ final class CanvasCodexProxy: Sendable {
                 if opcode == 8 { return }
             }
         } catch {
+            classify(error, outgoing: outgoing)
             // Any transport ambiguity must revoke the route. If IPC is already
             // unavailable, closing both sockets also prevents further TUI turns.
             try? revoke(.transportLost)
+        }
+    }
+
+    /// Records why a worker ended, so the supervisor can tell the user once the
+    /// terminal exits. The TUI closing its own socket is the normal way out.
+    private func classify(_ error: any Error, outgoing: Bool) {
+        switch error {
+        case ProxyError.timedOut: noteLoss(.timeout)
+        case ProxyError.pendingOverflow: noteLoss(.pendingOverflow)
+        case ProxyError.malformedFrame: noteLoss(.frame)
+        case ProxyError.transport: if !outgoing { noteLoss(.appServerClosed) }
+        default:
+            // A JSON parse error is a frame problem. Anything else came from the
+            // revocation call itself.
+            noteLoss((error as NSError).domain == NSCocoaErrorDomain ? .frame : .bridgeUnavailable)
         }
     }
 
@@ -286,6 +326,7 @@ final class CanvasCodexProxy: Sendable {
             try suspend(reason)
             state.revoked = true
         }
+        if reason == .sessionChanged { noteLoss(.sessionChange) }
     }
 
     /// Large result/error envelopes cannot change the selected thread. Match the

@@ -4,6 +4,14 @@ import Testing
 
 @testable import RafuApp
 
+/// Removes the fixture's temporary workspace when the fixture goes away.
+private final class CanvasAgentScratchFolder: Sendable {
+    let url = FileManager.default.temporaryDirectory.appending(
+        path: "rafu-agent-actions-\(UUID().uuidString)")
+    init() { try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true) }
+    deinit { try? FileManager.default.removeItem(at: url) }
+}
+
 @MainActor
 private struct CanvasAgentFixture {
     let session: WorkspaceSession
@@ -12,14 +20,22 @@ private struct CanvasAgentFixture {
     let bridge: CanvasLiveBridge
     let token = "agent-tools-private-capability"
     let client = UUID().uuidString
+    private let scratch = CanvasAgentScratchFolder()
 
+    /// The board is open in the session's store, as in the app. `presented`
+    /// also gives it a visible owner, like a selected Ensemble tab.
     init(presented: Bool = true) async throws {
+        let scratch = scratch
         let session = WorkspaceSession(
             restorationStore: WorkspaceRestorationStore(
                 defaultsSuiteName: TestDefaultsSuite.name("dev.rafu.canvas-agent-tests"),
                 bookmarkMaker: { _ in throw CancellationError() }),
-            closeSaveTracker: WorkspaceCloseSaveTracker())
-        let board = CanvasBoardState(document: CanvasDocument(title: "Agent test"))
+            closeSaveTracker: WorkspaceCloseSaveTracker(),
+            canvasStore: WorkspaceCanvasStore(
+                persistence: CanvasPersistenceStore(directory: scratch.url.appending(path: "state"))
+            ))
+        #expect(await session.canvas.configure(root: scratch.url))
+        let board = try #require(await session.canvas.create(title: "Agent test"))
         let shell = TerminalShell(path: "/bin/zsh", name: "zsh", isDefault: true)
         let profile = TerminalPaneLaunchProfile(shell: .preferredShell, startingFolder: .root)
         let group = try session.terminal.createLiveGroup(
@@ -125,12 +141,61 @@ struct CanvasAgentActionsTests {
         #expect(fixture.board.cards.count == 2)
     }
 
-    @Test("A hidden Ensemble refuses changes even in Allow")
-    func hiddenBoardRefusesChanges() async throws {
+    @Test("An open Ensemble accepts changes while its tab is not on screen")
+    func mutationWorksWhenBoardIsOpenButNotPresented() async throws {
+        let fixture = try await CanvasAgentFixture(presented: false)
+        #expect(fixture.session.canvasResources[fixture.board.id]?.isPresented != true)
+        fixture.board.setAgentControlMode(.allow)
+        let created = try await fixture.call("note_create", ["title": "Background"])
+        #expect(created.error == nil)
+        #expect(fixture.board.cards.count == 3)
+        let noteID = fixture.cards[1].id.rawValue.uuidString
+        let written = try await fixture.call(
+            "note_write", ["node_id": noteID, "mode": "append", "text": "- from the background"])
+        #expect(written.error == nil)
+        let edge = try await fixture.call(
+            "edge_create",
+            [
+                "from": noteID, "to": try #require(created.toolResult?.nodeID),
+                "kind": "relationship",
+            ])
+        #expect(edge.error == nil)
+        let stopped = try await fixture.call("terminal_create", ["title": "Parked shell"])
+        #expect(stopped.error == nil)
+        #expect(fixture.board.cards.count == 4)
+    }
+
+    @Test("Ask still gates a background change and pends without a visible Ensemble")
+    func askPendsWhileBoardIsNotPresented() async throws {
+        let fixture = try await CanvasAgentFixture(presented: false)
+        let task = Task { try await fixture.call("note_create", ["title": "Asked"]) }
+        let approval = try #require(await fixture.pendingApproval())
+        CanvasAgentCenter.shared.decide(approval.id, .once)
+        let response = try await task.value
+        #expect(response.error == nil)
+        #expect(fixture.board.cards.count == 3)
+    }
+
+    @Test("A closed Ensemble refuses changes even in Allow")
+    func mutationRefusedWhenBoardIsClosed() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        fixture.session.canvas.forgetClosed(fixture.board.id)
+        let response = try await fixture.call("note_create", ["title": "Closed"])
+        #expect(response.error == CanvasAgentActions.hiddenMessage)
+        #expect(response.error?.contains("closed") == true)
+        #expect(fixture.board.cards.count == 2)
+    }
+
+    @Test("Opening apps and starting terminals still need the Ensemble on screen")
+    func processAndAppToolsNeedTheBoardShown() async throws {
         let fixture = try await CanvasAgentFixture(presented: false)
         fixture.board.setAgentControlMode(.allow)
-        let response = try await fixture.call("note_create", ["title": "Hidden"])
-        #expect(response.error == CanvasAgentActions.hiddenMessage)
+        let app = try await fixture.call("app_open", ["bundle_id": "com.apple.finder"])
+        #expect(app.error == CanvasAgentActions.notShownMessage)
+        let started = try await fixture.call(
+            "terminal_create", ["title": "Agent", "agent": "claude"])
+        #expect(started.error == CanvasAgentActions.notShownMessage)
         #expect(fixture.board.cards.count == 2)
     }
 

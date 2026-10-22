@@ -17,7 +17,37 @@ public nonisolated enum CanvasCodexSession {
         executable: String, arguments: [String], environment: [String: String],
         serverArguments: [String]
     ) -> Int32 {
+        let socket = environment["RAFU_CANVAS_SOCKET"]
+        return run(
+            executable: executable, arguments: arguments, environment: environment,
+            serverArguments: serverArguments,
+            exchange: { request in
+                guard let socket else { throw SessionError.launchFailed }
+                let client = LauncherIPCClient(
+                    socketURL: URL(fileURLWithPath: socket), timeoutSeconds: 5)
+                let response = try client.exchange(
+                    LauncherIPCEnvelope(kind: .canvasBridge, canvasBridge: request))
+                guard case .canvasBridge(let result) = response else {
+                    throw SessionError.launchFailed
+                }
+                return result
+            },
+            report: { line in
+                FileHandle.standardError.write(Data((line + "\n").utf8))
+            })
+    }
+
+    /// `exchange` reaches the app's bridge and `report` prints one stderr line.
+    /// Both are seams for tests. A line never carries the token, an endpoint,
+    /// a thread ID or message text.
+    static func run(
+        executable: String, arguments: [String], environment: [String: String],
+        serverArguments: [String],
+        exchange: @escaping @Sendable (CanvasBridgeRequest) throws -> CanvasBridgeResponse,
+        report: @escaping @Sendable (String) -> Void
+    ) -> Int32 {
         var phase = StartupPhase.directory
+        var bindRefusal: String?
         let directory = "/tmp/rafu-cdx-\(UUID().uuidString)"
         let socket = directory + "/socket"
         let endpoint = "unix://" + socket
@@ -27,7 +57,7 @@ public nonisolated enum CanvasCodexSession {
                 attributes: [.posixPermissions: 0o700]
             )
         } catch {
-            reportFailure(phase)
+            reportFailure(phase, report)
             return 126
         }
         defer { try? FileManager.default.removeItem(atPath: directory) }
@@ -36,7 +66,7 @@ public nonisolated enum CanvasCodexSession {
         phase = .watcher
         let descriptor = Darwin.open(directory, O_EVTONLY | O_CLOEXEC)
         guard descriptor >= 0 else {
-            reportFailure(phase)
+            reportFailure(phase, report)
             return 126
         }
         let ready = DispatchSemaphore(value: 0)
@@ -93,7 +123,7 @@ public nonisolated enum CanvasCodexSession {
                 environment: environment, isolatedGroup: true, discardIO: true
             )
         } catch {
-            reportFailure(phase)
+            reportFailure(phase, report)
             return 126
         }
         control.withLock { state in
@@ -108,12 +138,12 @@ public nonisolated enum CanvasCodexSession {
         if !socketIsOwned(socket), ready.wait(timeout: .now() + 15) == .timedOut,
             !socketIsOwned(socket)
         {
-            reportFailure(phase)
+            reportFailure(phase, report)
             return 126
         }
         if let signal = control.withLock({ $0.stopSignal }) { return 128 + signal }
         guard socketIsOwned(socket) else {
-            reportFailure(phase)
+            reportFailure(phase, report)
             return 126
         }
 
@@ -126,25 +156,29 @@ public nonisolated enum CanvasCodexSession {
                 phase = .thread
                 let thread = try rpc.createThread(cwd: workingDirectory(arguments))
                 guard let token = environment["RAFU_CANVAS_TOKEN"],
-                    let bridgeSocket = environment["RAFU_CANVAS_SOCKET"]
+                    environment["RAFU_CANVAS_SOCKET"] != nil
                 else { throw SessionError.launchFailed }
                 phase = .binding
                 let request = CanvasBridgeRequest(
                     token: token, operation: "bind", provider: "codex", threadID: thread,
                     endpoint: endpoint, executable: executable
                 )
-                let client = LauncherIPCClient(
-                    socketURL: URL(fileURLWithPath: bridgeSocket), timeoutSeconds: 5)
-                let response = try client.exchange(
-                    LauncherIPCEnvelope(kind: .canvasBridge, canvasBridge: request))
-                guard case .canvasBridge(let result) = response, result.error == nil else {
+                let result: CanvasBridgeResponse
+                do {
+                    result = try exchange(request)
+                } catch {
+                    bindRefusal = "Rafu did not answer."
+                    throw error
+                }
+                if let refusal = result.error {
+                    bindRefusal = CanvasAgentText.singleLine(refusal, limit: 120)
                     throw SessionError.launchFailed
                 }
                 terminalArguments = ["resume", thread] + arguments
                 preparedThread = thread
             }
             guard let token = environment["RAFU_CANVAS_TOKEN"],
-                let bridgeSocket = environment["RAFU_CANVAS_SOCKET"]
+                environment["RAFU_CANVAS_SOCKET"] != nil
             else {
                 throw SessionError.launchFailed
             }
@@ -153,14 +187,10 @@ public nonisolated enum CanvasCodexSession {
             let proxy = try CanvasCodexProxy(
                 frontend: frontend, backend: endpoint, threadID: preparedThread ?? ""
             ) { reason in
-                let client = LauncherIPCClient(
-                    socketURL: URL(fileURLWithPath: bridgeSocket), timeoutSeconds: 5)
                 let request = CanvasBridgeRequest(
                     token: token, operation: "suspend", provider: "codex", endpoint: endpoint,
                     reason: reason.rawValue)
-                let response = try client.exchange(
-                    LauncherIPCEnvelope(kind: .canvasBridge, canvasBridge: request))
-                guard case .canvasBridge(let result) = response, result.error == nil else {
+                guard try exchange(request).error == nil else {
                     throw SessionError.deliveryFailed
                 }
             }
@@ -192,9 +222,20 @@ public nonisolated enum CanvasCodexSession {
             defer { serverExit.cancel() }
             exited.wait()
             control.withLock { $0.terminal = nil }
-            return waitForExit(terminal)
+            let status = waitForExit(terminal)
+            // Free the terminal's route so a later `codex` can bind at once. A
+            // failed release is harmless: the app also replaces a stale route.
+            _ = try? exchange(
+                CanvasBridgeRequest(
+                    token: token, operation: "release", provider: "codex", endpoint: endpoint))
+            if let loss = proxy.lostLink {
+                report(
+                    "Rafu: The Ensemble link to this Codex session was lost (\(loss.rawValue)). Run codex again to reconnect."
+                )
+            }
+            return status
         } catch {
-            reportFailure(phase)
+            reportFailure(phase, report, detail: phase == .binding ? bindRefusal : nil)
             return 126
         }
     }
@@ -524,7 +565,16 @@ public nonisolated enum CanvasCodexSession {
         }
     }
 
-    private static func reportFailure(_ phase: StartupPhase) {
-        FileHandle.standardError.write(Data("Rafu: \(phase.message)\n".utf8))
+    /// `detail` is an app literal for a refused bind, never request data.
+    private static func reportFailure(
+        _ phase: StartupPhase, _ report: (String) -> Void, detail: String? = nil
+    ) {
+        guard let detail else {
+            report("Rafu: \(phase.message)")
+            return
+        }
+        let hint =
+            detail.contains("new terminal") ? "" : " Run codex again, or start a new terminal."
+        report("Rafu: \(phase.message) \(detail)\(hint)")
     }
 }

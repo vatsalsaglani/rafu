@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import Synchronization
 import Testing
 
 @testable import RafuCore
@@ -41,6 +42,85 @@ struct CanvasCodexSessionTests {
         #expect(errno == ESRCH)
         #expect(
             !FileManager.default.fileExists(atPath: String(endpoint.dropFirst("unix://".count))))
+    }
+
+    /// Records bridge requests and printed lines for a supervisor run.
+    private final class BridgeProbe: Sendable {
+        let requests = Mutex<[CanvasBridgeRequest]>([])
+        let lines = Mutex<[String]>([])
+        let bindReply = Mutex(CanvasBridgeResponse())
+        let bindFailure = Mutex<(any Error)?>(nil)
+
+        func exchange(_ request: CanvasBridgeRequest) throws -> CanvasBridgeResponse {
+            requests.withLock { $0.append(request) }
+            if request.operation == "bind" {
+                if let failure = bindFailure.withLock({ $0 }) { throw failure }
+                return bindReply.withLock { $0 }
+            }
+            return CanvasBridgeResponse()
+        }
+
+        func run(_ fixture: Fixture) -> Int32 {
+            CanvasCodexSession.run(
+                executable: fixture.executable.path, arguments: [],
+                environment: ProcessInfo.processInfo.environment.merging([
+                    "RAFU_CANVAS_TOKEN": "fixture-private-token",
+                    "RAFU_CANVAS_SOCKET": "/tmp/fixture-bridge.sock",
+                ]) { _, value in value },
+                serverArguments: [],
+                exchange: { try self.exchange($0) },
+                report: { line in self.lines.withLock { $0.append(line) } })
+        }
+    }
+
+    @Test func releaseFollowsTheTerminalExitSoAnotherRunCanBind() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let probe = BridgeProbe()
+        #expect(probe.run(fixture) == 23)
+        let requests = probe.requests.withLock { $0 }
+        #expect(requests.map(\.operation) == ["bind", "release"])
+        #expect(requests[1].endpoint == requests[0].endpoint)
+        #expect(requests[1].provider == "codex")
+        #expect(requests.allSatisfy { $0.token == "fixture-private-token" })
+        // A normal exit prints nothing.
+        #expect(probe.lines.withLock { $0.isEmpty })
+    }
+
+    @Test func refusedBindReportsTheAppReasonAndANextStep() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let probe = BridgeProbe()
+        let reason = "Another agent is already connected in this terminal."
+        probe.bindReply.withLock { $0 = CanvasBridgeResponse(error: reason) }
+        #expect(probe.run(fixture) == 126)
+        let lines = probe.lines.withLock { $0 }
+        #expect(lines.count == 1)
+        let line = try #require(lines.first)
+        #expect(line.hasPrefix("Rafu: Ensemble could not bind the Codex session."))
+        #expect(line.contains(reason))
+        #expect(line.contains("start a new terminal"))
+        #expect(!line.contains("rafu-cdx"))
+        #expect(!line.contains("fixture-private-token"))
+        #expect(!line.contains("/tmp"))
+        #expect(line.utf8.count < 300)
+        #expect(probe.requests.withLock { $0.map(\.operation) } == ["bind"])
+        // No terminal started, so there is nothing to release.
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: fixture.root.appendingPathComponent("terminal.json").path))
+    }
+
+    @Test func unreachableAppDuringBindIsNamedWithoutDetail() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let probe = BridgeProbe()
+        probe.bindFailure.withLock { $0 = LauncherIPCClientError.disconnected }
+        #expect(probe.run(fixture) == 126)
+        let line = try #require(probe.lines.withLock { $0.first })
+        #expect(line.contains("Rafu did not answer."))
+        #expect(line.contains("Run codex again"))
+        #expect(!line.contains("rafu-cdx"))
     }
 
     @Test func deliveryPreservesMessageAndThreadArguments() async throws {

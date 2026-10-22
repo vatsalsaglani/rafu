@@ -42,15 +42,24 @@ public nonisolated struct CanvasBridgeResponse: Codable, Hashable, Sendable {
     public var messages: [CanvasBridgeMessage]
     /// The result of an orchestration tool call. Optional for older peers.
     public var toolResult: CanvasAgentToolResult?
+    /// A stable class for an error the peer can act on without matching text.
+    /// Optional; older peers ignore it.
+    public var code: String?
+
+    /// The app no longer knows this client. The MCP server registers again.
+    public static let unregisteredCode = "unregistered"
+    public static let unregisteredMessage = "Session is not registered."
 
     public init(
         error: String? = nil, peers: [CanvasBridgePeer] = [],
-        messages: [CanvasBridgeMessage] = [], toolResult: CanvasAgentToolResult? = nil
+        messages: [CanvasBridgeMessage] = [], toolResult: CanvasAgentToolResult? = nil,
+        code: String? = nil
     ) {
         self.error = error
         self.peers = peers
         self.messages = messages
         self.toolResult = toolResult
+        self.code = code
     }
 }
 

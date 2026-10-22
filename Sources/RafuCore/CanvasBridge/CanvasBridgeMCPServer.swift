@@ -11,9 +11,26 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
     public static let maximumTextBytes = 16 * 1_024
 
     private struct State: Sendable {
+        /// The stdio loop runs. Only stdin EOF, a poll error, an oversized frame or
+        /// an output failure clear it. A lost app link never does.
         var connected = true
         var initialized = false
         var threadID: String?
+        /// The app knows this client. Any loss clears it; a good register sets it.
+        var registered = false
+        var degraded = false
+        var backoffMilliseconds = CanvasBridgeMCPServer.initialBackoffMilliseconds
+        /// Uptime in nanoseconds before which the heartbeat does no work.
+        var retryAt: UInt64 = 0
+        var lastDiagnostic: String?
+    }
+
+    static let initialBackoffMilliseconds = 300
+    static let maximumBackoffMilliseconds = 5_000
+
+    /// Pure retry policy: double after each failure, up to a cap.
+    public static func nextBackoff(_ current: Int) -> Int {
+        min(max(current, 1) * 2, maximumBackoffMilliseconds)
     }
 
     private let token: String
@@ -24,11 +41,17 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
     private let exchange: Exchange
     private let state = Mutex(State())
     private let output: Mutex<@Sendable (Data) throws -> Void>
+    private let diagnostics: @Sendable (String) -> Void
+    private let uptime: @Sendable () -> UInt64
 
+    /// `diagnostics` receives one bounded line without a newline. A line never
+    /// carries the token, a socket path, a thread ID or message text.
     public init(
         token: String, provider: String, endpoint: String? = nil, executable: String? = nil,
         exchange: @escaping Exchange,
-        output: @escaping @Sendable (Data) throws -> Void
+        output: @escaping @Sendable (Data) throws -> Void,
+        diagnostics: (@Sendable (String) -> Void)? = nil,
+        uptime: @escaping @Sendable () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }
     ) {
         self.token = token
         self.provider = provider
@@ -36,24 +59,35 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
         self.executable = provider == "codex" ? executable : nil
         self.exchange = exchange
         self.output = Mutex(output)
+        self.diagnostics = diagnostics ?? Self.writeDiagnostic
+        self.uptime = uptime
+    }
+
+    @Sendable
+    private static func writeDiagnostic(_ line: String) {
+        try? FileHandle.standardError.write(contentsOf: Data((line + "\n").utf8))
     }
 
     /// The caller supplies a bounded local IPC exchange; this function owns stdin/stdout.
+    /// It returns only on stdin EOF, a poll error, an oversized frame or an output
+    /// failure. A lost or refused app link keeps the server alive and retrying.
     public static func run(token: String, provider: String, exchange: @escaping Exchange) {
         let environment = ProcessInfo.processInfo.environment
         let server = CanvasBridgeMCPServer(
             token: token, provider: provider,
             endpoint: environment["RAFU_CANVAS_CODEX_ENDPOINT"],
-            executable: environment["RAFU_CANVAS_CODEX_EXECUTABLE"], exchange: exchange
-        ) {
-            try FileHandle.standardOutput.write(contentsOf: $0)
-        }
+            executable: environment["RAFU_CANVAS_CODEX_EXECUTABLE"], exchange: exchange,
+            output: { try FileHandle.standardOutput.write(contentsOf: $0) }
+        )
         guard provider == "claude" || provider == "codex" else { return }
-        guard server.register() else { return }
+        // A failed first register is not fatal. The heartbeat and the next tool
+        // call register again, and the client still sees a live MCP server.
+        server.register()
         defer {
             _ = try? exchange(
                 CanvasBridgeRequest(
                     token: token, operation: "unregister", clientID: server.clientID))
+            server.diagnoseClosed()
         }
 
         // GCD is limited to the synchronous CLI boundary. Cancellation is explicit.
@@ -70,7 +104,7 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
         var pending = Data()
         var bytes = [UInt8](repeating: 0, count: 4_096)
         while server.isConnected {
-            // Bounded readiness checks also let IPC loss stop a quiet stdio session.
+            // Bounded readiness checks keep the loop responsive to the stop flag.
             var descriptor = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
             let readiness = Darwin.poll(&descriptor, 1, 250)
             if readiness < 0 {
@@ -97,13 +131,15 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
 
     public var isConnected: Bool { state.withLock { $0.connected } }
 
+    public var isRegistered: Bool { state.withLock { $0.registered } }
+
     @discardableResult
     public func register() -> Bool {
         guard provider == "claude" || provider == "codex" else {
             disconnect()
             return false
         }
-        return perform("register") != nil
+        return exchangeOnce("register") != nil
     }
 
     /// Parses a single bounded JSON-RPC line. Notifications have no response.
@@ -176,10 +212,13 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
                 }
                 return callAgentTool(id: id, name: name, arguments: arguments)
             }
-            guard let response, let encoded = try? JSONEncoder().encode(response),
+            guard let response else {
+                return toolReply(id: id, text: Self.unreachableText, failed: true)
+            }
+            guard let encoded = try? JSONEncoder().encode(response),
                 encoded.count <= Self.maximumFrameBytes / 2
             else {
-                return toolReply(id: id, text: "Ensemble connection unavailable.", failed: true)
+                return toolReply(id: id, text: "Ensemble response is too large.", failed: true)
             }
             return toolReply(
                 id: id, text: String(decoding: encoded, as: UTF8.self),
@@ -202,7 +241,7 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
             return toolReply(id: id, text: error.message, failed: true)
         }
         guard let response = perform("tool", call: call) else {
-            return toolReply(id: id, text: "Ensemble connection unavailable.", failed: true)
+            return toolReply(id: id, text: Self.unreachableText, failed: true)
         }
         if let error = response.error {
             return toolReply(
@@ -217,13 +256,21 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
         return toolReply(id: id, text: String(decoding: encoded, as: UTF8.self), failed: false)
     }
 
-    /// A transport write is not a model acknowledgement.
+    /// A transport write is not a model acknowledgement. This is also the
+    /// heartbeat. While the link is down it only registers again, no faster than
+    /// the bounded backoff, and it never ends the server.
     public func receiveChannelMessages() {
-        guard state.withLock({ $0.connected && $0.initialized }),
-            let response = perform("receive")
-        else { return }
-        guard response.error == nil else {
-            disconnect()
+        guard state.withLock({ $0.connected && $0.initialized }) else { return }
+        guard uptime() >= state.withLock({ $0.retryAt }) else { return }
+        guard isRegistered else {
+            register()
+            return
+        }
+        guard let response = exchangeOnce("receive") else { return }
+        if let error = response.error {
+            // The route may be paused, suspended or reset. Register again, bounded.
+            state.withLock { $0.registered = false }
+            noteFailure(refused: error)
             return
         }
         guard provider == "claude" else { return }
@@ -257,10 +304,9 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
         let previous = state.withLock { $0.threadID }
         if previous == candidate { return true }
         state.withLock { $0.threadID = candidate }
-        guard let response = perform("register"), response.error == nil else {
-            disconnect()
-            return false
-        }
+        // A failed register is not fatal. The next register sends the stored
+        // thread, and the tool call itself reports the outage.
+        _ = exchangeOnce("register")
         return true
     }
 
@@ -269,24 +315,111 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
         call: CanvasAgentToolCall? = nil
     ) -> CanvasBridgeResponse? {
         guard isConnected else { return nil }
+        // A caller is waiting, so it registers again at once. Only the heartbeat
+        // honours the backoff.
+        if !isRegistered, exchangeOnce("register") == nil { return nil }
+        return exchangeOnce(operation, destination: destination, text: text, call: call)
+    }
+
+    /// One IPC exchange. A transport error or a refused register marks the link
+    /// degraded and returns nil. Nothing here ends the server.
+    private func exchangeOnce(
+        _ operation: String, destination: String? = nil, text: String? = nil,
+        call: CanvasAgentToolCall? = nil
+    ) -> CanvasBridgeResponse? {
+        guard isConnected else { return nil }
+        let response: CanvasBridgeResponse
         do {
-            let response = try exchange(
+            response = try exchange(
                 CanvasBridgeRequest(
                     token: token, operation: operation, clientID: clientID,
                     provider: provider, threadID: state.withLock { $0.threadID },
                     endpoint: operation == "register" ? endpoint : nil,
                     executable: operation == "register" ? executable : nil,
                     destination: destination, text: text, agentCall: call))
-            if operation == "register", response.error != nil {
-                disconnect()
-                return nil
-            }
-            return response
         } catch {
-            disconnect()
+            state.withLock { $0.registered = false }
+            noteFailure(transport: error)
             return nil
         }
+        if operation == "register" {
+            if let error = response.error {
+                state.withLock { $0.registered = false }
+                noteFailure(refused: error)
+                return nil
+            }
+            state.withLock { $0.registered = true }
+            noteSuccess()
+            return response
+        }
+        if response.code == CanvasBridgeResponse.unregisteredCode
+            || response.error == CanvasBridgeResponse.unregisteredMessage
+        {
+            // The app lost this client. The next heartbeat or call registers again.
+            state.withLock { $0.registered = false }
+            return response
+        }
+        if response.error == nil { noteSuccess() }
+        return response
     }
+
+    private func noteSuccess() {
+        let restored = state.withLock { state -> Bool in
+            let wasDegraded = state.degraded
+            state.degraded = false
+            state.backoffMilliseconds = Self.initialBackoffMilliseconds
+            state.retryAt = 0
+            state.lastDiagnostic = nil
+            return wasDegraded
+        }
+        if restored { diagnose("Ensemble link restored.") }
+    }
+
+    private func noteFailure(transport error: any Error) {
+        noteFailure(line: "Ensemble link lost (\(Self.category(of: error))). Retrying.")
+    }
+
+    /// `message` is an app literal, never request data. It is still bounded.
+    private func noteFailure(refused message: String) {
+        let literal = CanvasAgentText.singleLine(message, limit: 100)
+        noteFailure(line: "Ensemble link refused: \(literal) Retrying.")
+    }
+
+    private func noteFailure(line: String) {
+        let announce = state.withLock { state -> Bool in
+            state.degraded = true
+            state.retryAt = uptime() + UInt64(state.backoffMilliseconds) * 1_000_000
+            state.backoffMilliseconds = Self.nextBackoff(state.backoffMilliseconds)
+            guard state.lastDiagnostic != line else { return false }
+            state.lastDiagnostic = line
+            return true
+        }
+        if announce { diagnose(line) }
+    }
+
+    /// A category from the error type only. It never reads a path or a message.
+    static func category(of error: any Error) -> String {
+        guard let error = error as? LauncherIPCClientError else { return "connection error" }
+        switch error {
+        case .disconnected: return "Rafu closed the connection"
+        case .rejected: return "request rejected"
+        case .systemCall(_, let code):
+            if error.isListenerUnavailable { return "Rafu is not listening" }
+            if code == EAGAIN || code == ETIMEDOUT { return "Rafu did not answer in time" }
+            return "connection error"
+        }
+    }
+
+    private func diagnose(_ line: String) {
+        diagnostics(String(("Rafu: " + line).prefix(200)))
+    }
+
+    private func diagnoseClosed() {
+        if state.withLock({ $0.degraded }) { diagnose("Ensemble link closed.") }
+    }
+
+    private static let unreachableText =
+        "Rafu is not reachable right now. The Ensemble link is reconnecting. Try again in a few seconds."
 
     private func disconnect() { state.withLock { $0.connected = false } }
 
