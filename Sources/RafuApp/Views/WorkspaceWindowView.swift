@@ -123,11 +123,26 @@ struct WorkspaceWindowView: View {
             // sidebar pane beside it is. There is no right rail and no right
             // utility panel.
             HStack(spacing: 0) {
+                // The rail and sidebar sit above the deck: a later HStack
+                // child is on top for hit testing, so deck content that
+                // reaches past its edge (an Ensemble card) would otherwise
+                // take the sidebar's clicks.
                 WorkspaceActivityRail(session: session)
+                    .zIndex(1)
                 if !session.isSidebarCollapsed {
+                    // A fixed `.frame(width:)` centres an over-wide child, which
+                    // paints half of it over the Activity Rail. So sidebar
+                    // content must declare no minimum above
+                    // `WorkbenchSidebarResize.minimumWidth`; leading alignment
+                    // plus the clip keep the rail on screen regardless.
                     WorkspaceSidebarPanelView(session: session)
-                        .frame(width: WorkbenchSidebarResize.clamp(session.sidebarWidth))
+                        .frame(
+                            width: WorkbenchSidebarResize.clamp(session.sidebarWidth),
+                            alignment: .leading
+                        )
+                        .clipped()
                         .frame(maxHeight: .infinity)
+                        .zIndex(1)
                 }
                 // Present even while collapsed, right after the rail, so a
                 // drag outward from the collapsed edge can reopen the
@@ -142,6 +157,11 @@ struct WorkspaceWindowView: View {
                         // the 12 pt inset on both sides below, 24) = 766.
                         // The window's own `minWidth` (below, in `body`)
                         // is raised to 774 to clear it with a small margin.
+                        // `sidebarWidth` is not window-responsive, so this
+                        // floor holds only at a 220 pt sidebar. Below the
+                        // true floor the deck clips at the trailing edge
+                        // (the row aligns leading) instead of the rail
+                        // vanishing off the leading edge.
                         .frame(minWidth: 472, minHeight: 220)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .layoutPriority(1)
@@ -158,12 +178,12 @@ struct WorkspaceWindowView: View {
                 .background(theme.palette.appBackground)
                 .layoutPriority(1)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
 
             // The status bar owns its top boundary.
             WorkspaceStatusBar(session: session)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var editorCanvas: some View {

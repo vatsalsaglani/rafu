@@ -689,6 +689,35 @@ bound an inflexible child.
   on its edges' ends; repeat with a terminal card whose group is missing and a
   short native app card.
 
+## 2026-11-01: a card past the board edge takes no clicks
+
+Last verified: Swift 6.2 language mode, macOS Darwin 27.0.0. Build, lint,
+parallel tests (2,887 in 203 suites) and `build_and_run.sh --verify` only;
+not yet checked by hand on the live board.
+
+**Symptom.** With an Ensemble open, a click on the left sidebar, the editor tab
+bar, or other chrome went to a card that was scrolled partly under that chrome.
+With no card underneath, the click worked.
+
+**Root cause (a SwiftUI rule).** `.clipped()` clips drawing only, not hit
+testing. `boardLayers` in `WorkspaceCanvasView.swift` ended in `.clipped()`, so
+the hidden part of a card still took clicks. The deck lane is also a later
+child than the rail and sidebar in the workbench `HStack`, so it was on top for
+hit testing.
+
+**Rule.** A clipped container whose children can overflow must also declare
+`.contentShape(.rect)` after `.clipped()`. The board now does. The Activity Rail
+and sidebar pane carry `.zIndex(1)` in `WorkspaceWindowView.workbenchContent`,
+so no deck content can win their clicks.
+
+- **Test:** `boardHitTestingStaysInsideItsFrame` in
+  `Tests/RafuAppTests/WorkbenchDeckPresentationTests.swift` (source contract).
+- **Manual check still required:** pan a terminal card and a note card so they
+  sit partly under the sidebar and under the tab bar; click sidebar rows, the
+  rail, and tabs; each click must reach the chrome, not the card. Also check
+  that a native terminal card (an AppKit view) obeys the content shape; if it
+  does not, its `NativeContentMount.hitTest` needs a visible-rect guard.
+
 ## Why it matters
 
 Canvas mixes gesture-driven custom views with native responders (terminal, web,

@@ -116,9 +116,11 @@ struct WorkbenchDeckPresentationTests {
         // the Files-only 200/260/420 to fit Search and Source Control,
         // which were authored for the former 300-520 right panel), not a
         // split view's own min/ideal/max frame triplet.
+        // (Alignment and clipping of that frame: see
+        // `sidebarContentStaysInsideItsPane`.)
         #expect(
             windowContent.contains(
-                ".frame(width: WorkbenchSidebarResize.clamp(session.sidebarWidth))"
+                "width: WorkbenchSidebarResize.clamp(session.sidebarWidth)"
             )
         )
         #expect(WorkbenchSidebarResize.minimumWidth == 220)
@@ -176,6 +178,56 @@ struct WorkbenchDeckPresentationTests {
             WorkspaceNavigatorMode.allCases == [
                 .files, .search, .sourceControl, .terminals, .history,
             ])
+    }
+
+    @Test("Sidebar content cannot spill over the Activity Rail")
+    func sidebarContentStaysInsideItsPane() throws {
+        let window = try Self.source("Sources/RafuApp/Views/WorkspaceWindowView.swift")
+        let workbench = try Self.section(
+            in: window,
+            from: "private var workbenchContent: some View",
+            through: "private var editorCanvas: some View"
+        )
+        // Collapse whitespace so the assertions survive formatter wrapping.
+        let flat = workbench.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        // A fixed width frame centres an over-wide child over the rail, so
+        // the pane aligns leading and clips to its own rect.
+        #expect(
+            flat.contains(
+                "WorkbenchSidebarResize.clamp(session.sidebarWidth), alignment: .leading )"
+                    + " .clipped()"))
+        #expect(flat.contains("alignment: .topLeading"))
+
+        // No navigator-hosted panel may demand more than the sidebar minimum.
+        let git = try Self.source("Sources/RafuApp/Views/GitInspectorView.swift")
+        #expect(!git.contains("frame(minWidth: 300"))
+        #expect(WorkbenchSidebarResize.minimumWidth == 220)
+    }
+
+    @Test("Ensemble cards past the board edge cannot take sidebar or tab bar clicks")
+    func boardHitTestingStaysInsideItsFrame() throws {
+        // `clipped()` clips drawing, not hit testing: the board must also
+        // declare its content shape, and the rail and sidebar must sit above
+        // the deck so an overflowing card never wins their clicks.
+        let canvas = try Self.source("Sources/RafuApp/Canvas/Views/WorkspaceCanvasView.swift")
+        let layers = try Self.section(
+            in: canvas,
+            from: "private func boardLayers(",
+            through: "private func boardChrome("
+        )
+        let flatLayers = layers.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        #expect(flatLayers.contains(".clipped() .contentShape(.rect) }"))
+
+        let window = try Self.source("Sources/RafuApp/Views/WorkspaceWindowView.swift")
+        let workbench = try Self.section(
+            in: window,
+            from: "private var workbenchContent: some View",
+            through: "WorkbenchSplitHandle(session: session)"
+        )
+        let flatWorkbench = workbench.split(whereSeparator: \.isWhitespace).joined(
+            separator: " ")
+        #expect(flatWorkbench.contains("WorkspaceActivityRail(session: session) .zIndex(1)"))
+        #expect(flatWorkbench.contains(".frame(maxHeight: .infinity) .zIndex(1)"))
     }
 
     private static func occurrences(of needle: String, in source: String) -> Int {

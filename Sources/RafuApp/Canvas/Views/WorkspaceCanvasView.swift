@@ -247,7 +247,11 @@ struct WorkspaceCanvasView: View {
         } action: {
             board.visibleSize = $0
         }
+        // `clipped()` clips drawing only. Without the content shape, a card
+        // that extends past the board edge still takes clicks meant for the
+        // sidebar, the tab bar, or other chrome painted over it.
         .clipped()
+        .contentShape(.rect)
     }
 
     /// Stage 2: popover, drop, scroll and magnify bridges, zoom capsule, focus.

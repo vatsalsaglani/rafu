@@ -53,7 +53,6 @@ struct SourceControlPanelView: View {
                 }
             }
         }
-        .frame(minWidth: 300, idealWidth: 340)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .alert("Create Branch", isPresented: $isCreatingBranch) {
             TextField("Branch name", text: $newBranchName)
@@ -327,7 +326,6 @@ struct GitInspectorView: View {
                 historyView
             }
         }
-        .frame(minWidth: 300, idealWidth: 340)
         // `alignment: .top` is load-bearing: `.frame(maxHeight: .infinity)`
         // defaults to CENTER alignment, so any tab whose content under-fills
         // (History with no commits) floated the whole header/picker stack to
@@ -667,10 +665,14 @@ struct GitInspectorView: View {
                     .foregroundStyle(theme.palette.textSecondary)
                     .lineLimit(1)
                 Spacer(minLength: 4)
+                // The buttons outrank the caption, so a narrow sidebar
+                // truncates the caption instead of the button titles.
                 Button("Stage All") { Task { await session.stageAll() } }
                     .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+                    .layoutPriority(1)
                 Button("Commit") { Task { await session.commit() } }
                     .buttonStyle(RafuProminentButtonStyle(compact: true))
+                    .layoutPriority(1)
                     .keyboardShortcut(.return, modifiers: .command)
                     .help("Commit staged changes (⌘Return)")
                     .disabled(

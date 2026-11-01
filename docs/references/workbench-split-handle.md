@@ -88,6 +88,60 @@ Recorded in [ADR 0031](../decisions/0031-card-header-tabs-and-themed-chrome.md).
   open, the leading gutter is still handle + inset. Tested in
   `WorkbenchDeckPresentationTests.collapsedGutterIsEqual`.
 
+### 2026-11-01: no navigator may declare a width minimum above 220 pt
+
+Verified on Swift 6.2 language mode, macOS Darwin 27.0.0.
+
+- **Bug.** With a narrow sidebar and Source Control open, the left Activity Rail
+  was covered and the panel's right side was cut.
+- **Root cause.** `GitInspectorView.swift` declared
+  `.frame(minWidth: 300, idealWidth: 340)` on `SourceControlPanelView` and
+  `GitInspectorView` — the only minimum in any navigator-hosted view — while the
+  sidebar can be `WorkbenchSidebarResize.minimumWidth` (220 pt).
+  `WorkspaceWindowView` wraps the sidebar in a fixed
+  `.frame(width: WorkbenchSidebarResize.clamp(session.sidebarWidth))`, which
+  **centres an over-wide child**: half painted over the rail (the sidebar draws
+  after the rail in the `HStack`) and half spilled under the deck lane.
+- **Second, latent defect.** The 774 pt window floor assumes a 220 pt sidebar,
+  but `sidebarWidth` is not window-responsive — only `WorkbenchSplitHandle` and
+  restoration write it. With a 300 pt sidebar the row needs 846 pt, and the
+  centred row frame split the overflow and pushed the rail off the leading edge.
+
+Rules this establishes:
+
+1. **Sidebar content must declare no minimum width above
+   `WorkbenchSidebarResize.minimumWidth`.** Note that this supersedes the
+   closing sentence of rule 8 above, which recorded the 300 pt inner minimum as
+   acceptable.
+2. **Leading alignment plus a clip keeps the rail on screen.** The sidebar frame
+   is now `alignment: .leading` + `.clipped()`; the workbench row frame is
+   `alignment: .leading` and the `workbenchContent` column `.topLeading`. A
+   too-narrow window therefore clips the deck at the trailing edge instead of
+   hiding the rail.
+3. **`.clipped()` will cut focus rings and shadows past the pane's trailing
+   edge.** Accepted cost of rule 2.
+4. Shrink order is explicit, not emergent: the commit composer's Stage All /
+   Commit buttons carry `.layoutPriority(1)` so the caption truncates first at
+   220 pt.
+5. A real window-responsive sidebar clamp (a `GeometryReader`) is **out of
+   scope** for this change.
+
+Minimums are unchanged: sidebar 220 pt, window 774 pt.
+
+Regression test: "Sidebar content cannot spill over the Activity Rail"
+(`sidebarContentStaysInsideItsPane`) in
+`Tests/RafuAppTests/WorkbenchDeckPresentationTests.swift`, source-contract style
+with whitespace collapsed; the `nativeSplitContract` assertion was updated.
+
+Gates for this increment: `./script/format.sh --lint` clean; `./script/build.sh`
+with no compiler warnings (only the pre-existing SwiftPM SwiftTerm bundle
+"missing creator" notice); `./script/test.sh` **parallel** 2,886 tests in 203
+suites passed; `./script/build_and_run.sh --verify` launched Rafu Lightning.
+
+Not verified: the manual pass — a 774 pt window with the sidebar near 220 pt,
+cycling Files / Search / Source Control / Terminals / History with a long branch
+name (rail whole, content truncates), and keyboard focus on the commit field.
+
 ## Why it matters
 
 The obvious implementation — an `NSSplitView` with a collapsible subview — is
