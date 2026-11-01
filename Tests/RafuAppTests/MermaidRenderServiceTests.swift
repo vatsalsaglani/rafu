@@ -102,23 +102,28 @@ func layoutIsThemeIndependent() async throws {
 
 @Test("An oversized diagram is refused before rasterisation")
 func oversizedDiagramThrowsTooLarge() async {
-    let source = fanOutFlowchart(nodeCount: 1000)
+    let source = fanOutFlowchart(nodeCount: 400)
     let target = diagram(kind: .flowchart, source: source)
     do {
         _ = try await MermaidRenderService.shared.raster(
             for: target, theme: await indigoSpec(), scale: 2.0)
-        Issue.record("Expected .tooLarge for a 1000-node fan-out")
+        Issue.record("Expected .tooLarge for a 400-node fan-out")
     } catch let failure as MermaidRenderService.Failure {
-        guard case .tooLarge = failure else {
+        guard case .tooLarge(let size) = failure else {
             Issue.record("Expected .tooLarge, got \(failure)")
             return
         }
+        #expect(size.width * size.height > MermaidRenderService.maxPointArea)
+        let reason = MermaidRenderService.reason(for: failure)
+        #expect(reason.contains("\(Int(size.width))×\(Int(size.height)) pt"))
+        #expect(reason.contains("8000×8000 pt"))
+        #expect(reason.contains("Split"))
     } catch {
         Issue.record("Expected a MermaidRenderService.Failure, got \(error)")
     }
 }
 
-@Test("A large-but-legal diagram backs its effective scale off, never below 1.0")
+@Test("A large-but-legal diagram backs its effective scale off, never below the minimum")
 func largeLegalDiagramBacksScaleOff() async throws {
     let source = fanOutFlowchart(nodeCount: 60)
     let target = diagram(kind: .flowchart, source: source)
@@ -133,14 +138,40 @@ func largeLegalDiagramBacksScaleOff() async throws {
     } else {
         #expect(raster.scale == requestedScale)
     }
-    #expect(raster.scale >= 1.0)
+    #expect(raster.scale >= MermaidRenderService.minimumScale)
+}
+
+/// Regression: a 2534×1910 pt erDiagram (4.84 M pt², over the old 4 M pt²
+/// cap) fell back to raw source. A diagram between the old and the new cap
+/// now renders at a scale below 1.0 that keeps the raster inside the pixel cap.
+@Test("A diagram past the old point-area cap renders below scale 1.0")
+func diagramPastTheOldCapRendersScaledDown() async throws {
+    let oldCap: CGFloat = 4_000_000
+    // A 100-node fan-out lays out at about 6 M pt², between the old and new cap.
+    let target = diagram(kind: .flowchart, source: fanOutFlowchart(nodeCount: 100))
+    let rendered = try await MermaidRenderService.shared.raster(
+        for: target, theme: await indigoSpec(), scale: 1.0)
+    #expect(rendered.pointSize.width * rendered.pointSize.height > oldCap)
+    let area = rendered.pointSize.width * rendered.pointSize.height
+    #expect(area <= MermaidRenderService.maxPointArea)
+    #expect(rendered.scale < 1.0)
+    #expect(rendered.scale >= MermaidRenderService.minimumScale)
+    #expect(area * rendered.scale * rendered.scale <= MermaidRenderService.maxRasterPixels * 1.01)
+    #expect(rendered.image.width > 0)
+}
+
+@Test("The scale floor and the point-area ceiling agree on the raster pixel cap")
+func pointAreaCeilingMatchesTheMinimumScale() {
+    let floor = MermaidRenderService.minimumScale
+    #expect(
+        MermaidRenderService.maxPointArea * floor * floor == MermaidRenderService.maxRasterPixels)
 }
 
 @Test(
     "The failure-to-reason mapping never leaks upstream error text",
     arguments: [
         MermaidRenderService.Failure.notRenderable, .empty,
-        .tooLarge(CGSize(width: 3000, height: 3000)), .contextCreationFailed,
+        .tooLarge(CGSize(width: 9000, height: 9000)), .contextCreationFailed,
     ])
 func failureReasonNeverLeaksUpstreamText(failure: MermaidRenderService.Failure) {
     let reason = MermaidRenderService.reason(for: failure)

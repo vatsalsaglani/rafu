@@ -25,6 +25,24 @@ logged under "Agents" in the Ensemble bar, and undoable by the user.
 5. Paths are workspace-relative. Commands are argument arrays, never shell
    strings: `["swift", "test"]`, not `"swift test && rm x"`.
 6. Keep notes short and structured. A note holds at most 64 KiB.
+7. **Long text goes in a file or a note.** A prompt, message or brief longer
+   than a few lines does not go in the call. Write it to a file (or a Rafu
+   note), then send a one-line prompt or message that names the path or note
+   title and says what to do with it. This holds for every agent (Claude,
+   Codex, others) and for `terminal_create` `prompt`, `terminal_send` and
+   `send_message`. The peer can re-read the file after it compacts, and the
+   user can see and edit it. Real limits:
+
+   | Where | Limit |
+   |---|---|
+   | `terminal_create` `prompt` | 1,024 bytes (it becomes one argument of the launch line); newlines turn into spaces |
+   | `command` array | 32 items, 1,024 bytes each, 4,096 bytes for the typed line, no control characters |
+   | `terminal_send` `text` | 4,096 bytes, typed as one line |
+   | `send_message` and note-node `text` | 16 KiB |
+   | `note_write` / a whole note | 16 KiB per call / 64 KiB per note |
+   | `mermaid_set` source | 16 KiB; the diagram must also render under 8000 x 8000 pt |
+
+   A refused call says which limit it hit and leaves no node behind.
 
 ## Inspect
 
@@ -35,23 +53,48 @@ logged under "Agents" in the Ensemble bar, and undoable by the user.
 
 ## Delegate to a peer agent
 
-1. Create the peer:
-   `terminal_create {"agent": "codex", "title": "Codex — Tests", "prompt": "Run the test suite and report failures", "near": "<your node id>"}`
+1. Write the brief to a file or a note when it is longer than a few lines
+   (rule 7). Then create the peer **and link it in one call**:
+   `terminal_create {"agent": "codex", "title": "Codex — Tests", "prompt": "Read the note titled Tests and do what it says", "link": true, "near": "<your node id>"}`
    (`agent` can be `claude`, `codex`, `opencode`, `gemini`, `cursor`, `kimi`,
    `cline`; only `claude` and `codex` take `prompt` and join message links.)
-2. Link it: `edge_create {"from": "<your node id>", "to": "<new node id>", "kind": "message", "label": "tests"}`.
-   A new message link starts Paused.
-3. Go live: `link_set_state {"edge_id": "<edge id>", "state": "live"}`. The
-   link shows Live once both terminals run an agent that has connected
-   (Codex connects after its first Rafu tool call).
-4. Send work: `send_message {"destination": "<node id or @mention>", "text": "..."}`
-   or `terminal_send {"node_id": "...", "text": "..."}`.
-5. Read replies: Claude Code receives channel messages automatically; also
+   Starting the terminal **moves the user's view to the new node**, because a
+   terminal starts only in a node that is on screen. The result says so.
+2. Read the result `state` (same words as `ensemble_describe`):
+   - `running`: the shell is up and Rafu is typing the launch line. This does
+     not yet mean the agent runs.
+   - `stopped`: the node exists but its shell did not start. The line is
+     **queued, not typed**; the message says why (for example four terminals
+     already hold a live view) and what to call next. Call `terminal_start`
+     once that is fixed: Rafu then types the queued line.
+3. Verify before you tell the user an agent runs: call `ensemble_describe`
+   (the node `state` is `running` and `agent` is set) and `list_connections`
+   (the peer is listed). Codex connects after its first Rafu tool call, so a
+   Codex peer may show up a little later.
+4. **Link peers by default**, also a peer meant for the user to talk to. A
+   link costs nothing: pause it (`link_set_state` `paused`) when you want
+   quiet; do not skip it. Without `link`, do it by hand:
+   `edge_create {"from": "<your node id>", "to": "<new node id>", "kind": "message"}`
+   (starts Paused), then `link_set_state {"edge_id": "<edge id>", "state": "live"}`.
+   The link shows Live once both terminals run an agent that has connected.
+   If `link` was asked and the link could not be made, the result says so and
+   keeps the node: use `edge_create` and `link_set_state` yourself.
+5. Send work: `send_message {"destination": "<node id or @mention>", "text": "..."}`
+   (the new peer's `mention` is in the `terminal_create` result). The result
+   has `delivered: true` when Rafu queued it; the peer may not have read it
+   yet. A paused link or a peer that is not connected is an error that says so.
+6. Read replies: Claude Code receives channel messages automatically; also
    call `receive_messages`.
 
 `terminal_send` uses a Live message link when one exists. Without one, Rafu
-types only into terminals **you** created: text into an agent terminal, or a
-`command` argument array into a shell terminal.
+types only into terminals **you** created: `text` when an agent is connected in
+that node, or a `command` argument array into a shell. Its result has `state`
+too: `stopped` means the line is queued, not typed.
+
+**Recovery.** If `terminal_send` says the node has no connected agent for text
+but you know an agent runs there (you typed `claude` into a shell node), create
+a message link to it (`edge_create` kind `message`), set it live, and use
+`send_message`. Do not conclude that you cannot talk to it.
 
 ## Shared memory with notes
 
@@ -65,6 +108,10 @@ types only into terminals **you** created: text into an agent terminal, or a
 
 - Mermaid: `node_create {"kind": "mermaid", "title": "Plan", "text": "flowchart LR\n  A[Design] --> B[Build] --> C[Test]"}`,
   then `mermaid_set {"node_id": "...", "source": "..."}` to change it.
+  Rafu draws a diagram up to **8000 x 8000 pt** (larger ones are scaled down
+  to fit memory, so a big diagram is small on the board); past 8000 pt it
+  shows the raw source instead. Keep a diagram under that: split a large
+  schema into several diagrams (one per area) and group them in a frame.
 - Architecture diagrams with icons:
   1. `icon_search {"query": "queue"}` returns `pack_id`, `icon_id`, `label`.
      The Common pack is always there; AWS, Azure and Google Cloud packs exist
@@ -123,7 +170,9 @@ types only into terminals **you** created: text into an agent terminal, or a
   `app` (adds the node without launching).
 - `node_update` renames, moves (`x`, `y` top-left) or resizes a node.
 - `node_remove`, `edge_remove` — always confirmed by the user in Ask mode.
-- `terminal_start` starts a stopped terminal node.
+- `terminal_start` starts a stopped terminal node and moves the user's view
+  to it. Read the result `state`; lines queued for the node are typed when
+  its shell is up.
 
 See `references/tools.md` for every tool and its limits, and
 `references/recipes.md` for longer workflows.

@@ -543,6 +543,15 @@ normalized names produce an ambiguity error; no arbitrary match is selected.
 Renaming a card changes its alias while the UUID stays stable. Copy Mention in
 the card menu and the Rename dialog show the same helper's spelling.
 
+A successful `send_message` returns `delivered: true` with "Queued … not
+acknowledged yet" in its message: it reports handoff to the peer's terminal, not
+an acknowledgement. Failures stay errors. `terminal_send` accepts `text` when
+Rafu created the node with an `agent`, or when
+`CanvasLiveBridge.connectedProvider(controllerID:)` reports a connected
+provider; a `command` that happens to start a known agent CLI only records a
+describe hint and never opens the text path. Only `claude` and `codex` register
+with the bridge, and Rafu never scrapes terminal output to guess.
+
 Mentions are interpreted by the connected agent through Rafu's tools. They do
 not intercept terminal keystrokes or replace Claude/Codex native `@file`
 completion. A file, app, or plain shell does not become an agent endpoint when
@@ -644,6 +653,15 @@ app docking and `app_inspect`, `terminal_start`, `terminal_create` with an
 agent or a command, and `terminal_send` to a terminal that is not live. A
 terminal card starts its process only through its view
 (`terminalStartRequest`, the canvas terminal lease, `permitsLiveContent`).
+
+**Amended 2026-10-25.** "Shown" is no longer enough on its own: a card culled by
+the viewport, or drawn as the compact face below 50 % zoom, is not mounted and so
+never consumes `terminalStartRequest`. `CanvasTerminalStarter` now reveals the
+node first (pan at live zoom, zoom in below it), waits a bounded 2.5 s, and
+reports `running` or `stopped` instead of a bare `ok`. A line that cannot be
+typed yet is queued per node and typed when the process runs, so a
+`terminal_send` straight after a `terminal_start` is no longer dropped. See
+[`ensemble-agent-terminal-tools.md`](ensemble-agent-terminal-tools.md).
 Their error text is: "Show this Ensemble in Rafu to let agents open apps or
 start terminals. Other changes work while it is in the background." A closed
 board returns: "This Ensemble is closed in Rafu. Open it to let agents change

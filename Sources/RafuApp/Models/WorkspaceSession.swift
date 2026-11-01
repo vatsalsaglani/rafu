@@ -1899,8 +1899,16 @@ final class WorkspaceSession {
         _ = editorLayout.closeTab(tab.id)
     }
 
+    /// The title of the alert `presentTerminalGroupError` shows. Callers that
+    /// must tell it from the other `isOpenFolderErrorPresented` producers match it.
+    static let terminalGroupErrorTitle = "Terminal Group"
+
+    var isTerminalGroupErrorPresented: Bool {
+        isOpenFolderErrorPresented && openFolderErrorTitle == Self.terminalGroupErrorTitle
+    }
+
     private func presentTerminalGroupError(_ message: String) {
-        openFolderErrorTitle = "Terminal Group"
+        openFolderErrorTitle = Self.terminalGroupErrorTitle
         openFolderErrorMessage = String(decoding: message.utf8.prefix(512), as: UTF8.self)
         isOpenFolderErrorPresented = true
     }

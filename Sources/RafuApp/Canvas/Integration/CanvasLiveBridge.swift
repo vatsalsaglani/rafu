@@ -664,7 +664,11 @@ final class CanvasLiveBridge {
             notice = "Message queued. The receiving agent has not acknowledged it."
             recordAccepted(route)
             revision &+= 1
-            return .init()
+            var delivery = CanvasAgentToolResult(
+                message:
+                    "Queued for the receiving agent. It has not acknowledged the message yet.")
+            delivery.delivered = true
+            return .init(toolResult: delivery)
         default: return .init(error: "Unsupported bridge request.")
         }
     }

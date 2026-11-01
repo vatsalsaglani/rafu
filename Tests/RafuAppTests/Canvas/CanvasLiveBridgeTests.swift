@@ -197,6 +197,22 @@ struct CanvasLiveBridgeTests {
         #expect(await fixture.bridge.handle(fixture.request(1, "receive")).messages.isEmpty)
     }
 
+    @Test("A queued send reports delivery; a paused link still errors by name")
+    func sendReportsDelivery() async throws {
+        let fixture = try CanvasLiveBridgeFixture()
+        await fixture.registerPair()
+        let sent = await fixture.bridge.handle(
+            fixture.request(0, "send", destination: 1, text: "queued"))
+        #expect(sent.error == nil)
+        #expect(sent.toolResult?.delivered == true)
+        #expect(sent.toolResult?.message?.contains("not acknowledged") == true)
+        fixture.bridge.disable(fixture.edge, in: fixture.board)
+        let blocked = await fixture.bridge.handle(
+            fixture.request(0, "send", destination: 1, text: "blocked"))
+        #expect(blocked.toolResult == nil)
+        #expect(blocked.error?.contains("paused") == true)
+    }
+
     @Test("Removing an enabled edge drops pending messages")
     func disableDropsInbox() async throws {
         let fixture = try CanvasLiveBridgeFixture()

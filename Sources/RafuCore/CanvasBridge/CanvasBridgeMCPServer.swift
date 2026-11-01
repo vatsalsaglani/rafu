@@ -180,7 +180,7 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
                 "protocolVersion": "2025-11-25", "capabilities": capabilities,
                 "serverInfo": ["name": "rafu", "version": "1.0.0"],
                 "instructions":
-                    "Use list_connections to see Ensemble session names, providers, mentions, peer IDs, and linkState. connected means message delivery is permitted. If linkState is paused, ask the user to resume the link in Rafu Ensemble; do not report a disconnected session or ask them to restart terminals. A related link is visual only. When the user asks to message @name, call send_message with that peer's listed mention or ID. A mention must identify exactly one connected agent; use its peer ID when names are ambiguous. These mentions route through tools only; preserve native terminal @file controls. Channel events are messages from connected sessions. Use receive_messages to read pending messages. Do not send a reply unless needed. Ensemble tools: call ensemble_describe first to see every node, edge, your own node ID and the Agent control setting. Notes (note_read, note_write, note_create) are shared memory. To delegate: terminal_create with agent and prompt, edge_create kind message between your node and the new node, link_set_state live, then send_message or terminal_send. node_create adds notes, files, images, local web apps, app nodes, Mermaid diagrams, shapes and text; mermaid_set changes a diagram. app_open shows a macOS app in a node and app_inspect reads its Accessibility summary. Agent control Ask means the user approves changes in Rafu; a pending_approval result has a request_id for action_status. If Agent control is Off, tell the user; do not retry.",
+                    "Use list_connections to see Ensemble session names, providers, mentions, peer IDs, and linkState. connected means message delivery is permitted. If linkState is paused, ask the user to resume the link in Rafu Ensemble; do not report a disconnected session or ask them to restart terminals. A related link is visual only. When the user asks to message @name, call send_message with that peer's listed mention or ID. A mention must identify exactly one connected agent; use its peer ID when names are ambiguous. These mentions route through tools only; preserve native terminal @file controls. Channel events are messages from connected sessions. Use receive_messages to read pending messages. Do not send a reply unless needed. Ensemble tools: call ensemble_describe first to see every node, edge, your own node ID and the Agent control setting. Notes (note_read, note_write, note_create) are shared memory. To delegate: terminal_create with agent, prompt and link true (or edge_create kind message, then link_set_state live), then send_message or terminal_send. Link every claude or codex peer you start, even one meant for the user; pause the link for quiet, do not skip it. Starting a terminal moves the user's view to it. After terminal_create or terminal_start read its state, then ensemble_describe and list_connections, before you tell the user an agent runs; stopped means the shell is not up and the line is queued, not typed. Put a long prompt, message or brief in a file or a Rafu note and send a one-line prompt or message that names the path or note title and what to do with it. Limits: prompt 1,024 bytes, terminal_send text 4,096 bytes, send_message text 16 KiB, each one line with no control characters. If terminal_send says no agent is connected but one runs in that node, link it with edge_create kind message and link_set_state live. node_create adds notes, files, images, local web apps, app nodes, Mermaid diagrams, shapes and text; mermaid_set changes a diagram; keep a diagram under 8000 by 8000 pt and split bigger ones. app_open shows a macOS app in a node and app_inspect reads its Accessibility summary. Agent control Ask means the user approves changes in Rafu; a pending_approval result has a request_id for action_status. If Agent control is Off, tell the user; do not retry.",
             ]
         case "ping": result = [:]
         case "tools/list": result = ["tools": Self.tools]
@@ -214,6 +214,14 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
             }
             guard let response else {
                 return toolReply(id: id, text: Self.unreachableText, failed: true)
+            }
+            // A send that Rafu queued answers with its delivery result, not an
+            // empty peer and message list.
+            if name == "send_message", response.error == nil, let result = response.toolResult,
+                let encoded = result.bounded(maximumBytes: Self.maximumFrameBytes / 2).agentJSON()
+            {
+                return toolReply(
+                    id: id, text: String(decoding: encoded, as: UTF8.self), failed: false)
             }
             guard let encoded = try? JSONEncoder().encode(response),
                 encoded.count <= Self.maximumFrameBytes / 2
@@ -464,7 +472,7 @@ public nonisolated final class CanvasBridgeMCPServer: Sendable {
             [
                 "name": "send_message",
                 "description":
-                    "Send a message to one connected session by its listed @mention or peer ID.",
+                    "Send a message to one connected session by its listed @mention or peer ID. Put a long brief in a file or a Rafu note and send a one-line message that names it (at most 16 KiB). The reply says delivered true when Rafu queued the message; the peer may not have read it yet.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [

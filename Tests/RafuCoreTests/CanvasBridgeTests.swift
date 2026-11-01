@@ -93,6 +93,24 @@ private func canvasRPC(_ method: String, params: [String: Any] = [:], id: Int? =
     #expect(instructions.contains("ambiguous"))
 }
 
+/// A tripwire on the durable guidance every agent receives, not on its prose.
+@Test func canvasInstructionsTeachLinkingVerifyingAndShortPrompts() throws {
+    let server = CanvasExchangeCapture().server()
+    let data = try #require(server.handle(canvasRPC("initialize")))
+    let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let result = try #require(object["result"] as? [String: Any])
+    let instructions = try #require(result["instructions"] as? String)
+    #expect(instructions.contains("link true"))
+    #expect(instructions.contains("list_connections"))
+    #expect(instructions.contains("state"))
+    #expect(instructions.contains("queued, not typed"))
+    #expect(instructions.contains("file or a Rafu note"))
+    #expect(instructions.contains("1,024 bytes"))
+    #expect(instructions.contains("8000 by 8000"))
+    // The text goes to every agent on every session: keep it short.
+    #expect(instructions.utf8.count < 4_000)
+}
+
 @Test func canvasBridgeProtocolRoundTrips() throws {
     let request = CanvasBridgeRequest(
         token: "token", operation: "send", clientID: "client", provider: "claude",
@@ -144,6 +162,45 @@ private func canvasRPC(_ method: String, params: [String: Any] = [:], id: Int? =
                 ])))
     #expect(String(decoding: reply, as: UTF8.self).contains("Invalid destination"))
     #expect(capture.requests.withLock { $0.count } == count)
+}
+
+@Test func canvasSendMessageRepliesWithTheDeliveryResultNotAnEmptyList() throws {
+    let capture = CanvasExchangeCapture()
+    var delivery = CanvasAgentToolResult(message: "Queued for the receiving agent.")
+    delivery.delivered = true
+    capture.responses.withLock { $0["send"] = CanvasBridgeResponse(toolResult: delivery) }
+    let server = capture.server()
+    #expect(server.register())
+    let reply = try #require(
+        server.handle(
+            canvasRPC(
+                "tools/call",
+                params: [
+                    "name": "send_message",
+                    "arguments": ["destination": "peer", "text": "Hello"],
+                ])))
+    let text = String(decoding: reply, as: UTF8.self)
+    #expect(text.contains("delivered"))
+    #expect(text.contains("Queued for the receiving agent."))
+    #expect(!text.contains("messages"))
+}
+
+@Test func canvasSendMessageFailureStaysAnError() throws {
+    let capture = CanvasExchangeCapture()
+    capture.responses.withLock { $0["send"] = CanvasBridgeResponse(error: "This link is paused.") }
+    let server = capture.server()
+    #expect(server.register())
+    let reply = try #require(
+        server.handle(
+            canvasRPC(
+                "tools/call",
+                params: [
+                    "name": "send_message",
+                    "arguments": ["destination": "peer", "text": "Hello"],
+                ])))
+    let text = String(decoding: reply, as: UTF8.self)
+    #expect(text.contains("This link is paused."))
+    #expect(text.contains("isError"))
 }
 
 @Test func canvasInvalidAndOversizedFramesDoNotCallExchange() throws {

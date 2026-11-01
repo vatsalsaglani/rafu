@@ -1,6 +1,6 @@
 # Bundled Ensemble coordinator skill
 
-> **Status (2026-10-18): Retired.** The `ensemble-with-rafu` skill this note describes was removed in the round-2 redesign (see docs/plans/phases/ensemble-canvas.md). Kept for history; do not use it as current guidance. The replacement skill is `Sources/RafuApp/Resources/AgentSkills/rafu-ensemble/`. Agents use the MCP tools in `Sources/RafuCore/CanvasBridge/CanvasAgentTools.swift`. No reference note for the agent tools exists yet. The installer `Sources/RafuApp/Conductor/Ensemble/ConductorSkillInstaller.swift` is kept.
+> **Status (2026-10-18): Retired.** The `ensemble-with-rafu` skill this note describes was removed in the round-2 redesign (see docs/plans/phases/ensemble-canvas.md). Kept for history; do not use it as current guidance. The replacement skill is `Sources/RafuApp/Resources/AgentSkills/rafu-ensemble/`. Agents use the MCP tools in `Sources/RafuCore/CanvasBridge/CanvasAgentTools.swift`. The agent tools are documented in [`ensemble-agent-terminal-tools.md`](ensemble-agent-terminal-tools.md). The installer `Sources/RafuApp/Conductor/Ensemble/ConductorSkillInstaller.swift` is kept.
 
 - **Applies to:** `Sources/RafuApp/Resources/EnsembleSkills/`,
   `ConductorSkillInstaller`, Settings → Ensemble, and coordinator verb updates

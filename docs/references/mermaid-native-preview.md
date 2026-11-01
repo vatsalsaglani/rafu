@@ -112,9 +112,16 @@ Rasterisation adds memory cost (a 1258×1414 pt diagram at 2× is ~28 MB). Three
 
 | Cap | Value | Behaviour on breach |
 |---|---|---|
-| Raster pixels per diagram | 4 M px (~16 MB) | back off `scale` toward 1.0 |
-| Diagram point area | 4 M pt² (~2000×2000 pt) | honest fallback, "too large to render natively" |
+| Raster pixels per diagram | 4 M px (~16 MB) | back off `scale` toward `minimumScale` |
+| Minimum effective scale | 0.25 | `clampedScale` floors here (it floored at 1.0 before 2026-10-25); the card scales the raster to fit |
+| Diagram point area | 64 M pt² (8000×8000 pt) | honest fallback, "too large to render natively" |
 | Layout cache entries | 24, LRU | bounded `PositionedGraph` retention |
+
+The point-area cap is `maxRasterPixels / minimumScale²` (4 M px ÷ 0.25²), so
+every accepted diagram still fits the pixel cap at its backed-off scale. A
+2534×1910 pt diagram renders at about 0.91 scale — arithmetic from the caps, not
+a visual check. A layout probe of a 400-node fan-out measured about 68 M pt² in
+about 0.3 s, just past the refusal line.
 
 **Important caveat:** These are proposals verified against the current test suite and a manual pass of the app GUI, not a measured Release idle-memory pass. Revisit against a real Release idle pass in a later phase.
 
@@ -138,7 +145,7 @@ A non-native diagram renderer (hand-written with bounded capability) either sile
 - Unsupported sources throw `.notRenderable`, never a partial raster.
 - Layout is theme-independent: the same source yields identical point sizes across themes (Indigo/Khadi spike result).
 - An oversized diagram is refused before rasterisation (`.tooLarge`).
-- A large-but-legal diagram backs its effective scale off, never below 1.0.
+- A large-but-legal diagram backs its effective scale off, never below `minimumScale` (0.25).
 - The failure-to-reason mapping never leaks upstream error text (no "parsererror", no "BeautifulMermaid", no "nserror").
 - The macOS flip fix places the widest-label node in the upper half of the raster (canary for upstream fix).
 

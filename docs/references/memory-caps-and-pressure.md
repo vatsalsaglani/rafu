@@ -38,9 +38,11 @@ These limits are coordinator-verified real values. They protect against runaway 
 | Large-file guard: max unguarded bytes | 2 MB | DocumentGuardPolicy.swift:23 | Syntax parsing guard threshold |
 | Large-file guard: max line length | 10,000 UTF-16 units | DocumentGuardPolicy.swift:29 | Long-line parsing guard threshold |
 | Undo levels | 200 | CodeEditorView.swift (`undoLevelCap=200`) | Bounded undo stack per document |
-| Mermaid raster pixels per diagram (unmeasured proposal) | 4 M px (~16 MB) | MermaidRenderService.swift:89 | Back off scale toward 1.0 if raster would exceed cap; ADR 0020 |
-| Mermaid diagram point area (unmeasured proposal) | 4 M pt² (~2000×2000 pt) | MermaidRenderService.swift:92 | Refuse render entirely with "too large" fallback; ADR 0020 |
-| Mermaid layout cache entries (unmeasured proposal) | 24 LRU | MermaidRenderService.swift:94 | Bounded `PositionedGraph` retention; theme-independent layout cached; ADR 0020 |
+| Mermaid raster pixels per diagram (unmeasured proposal) | 4 M px (~16 MB) | MermaidRenderService.swift:90 (`maxRasterPixels`) | Back off scale toward `minimumScale` if raster would exceed cap; ADR 0020 |
+| Mermaid minimum effective scale (unmeasured proposal) | 0.25 | MermaidRenderService.swift:93 (`minimumScale`) | Floor for the backed-off scale; the card scales the raster to fit; ADR 0020 amendment 2026-10-25 |
+| Mermaid diagram point area (unmeasured proposal) | 64 M pt² (8000×8000 pt) | MermaidRenderService.swift:98 (`maxPointArea`) | Refuse render entirely with "too large" fallback; equals pixel cap ÷ `minimumScale`²; ADR 0020 amendment 2026-10-25 |
+| Mermaid layout cache entries (unmeasured proposal) | 24 LRU | MermaidRenderService.swift:100 (`maxCacheEntries`) | Bounded `PositionedGraph` retention; theme-independent layout cached; ADR 0020 |
+| Ensemble queued terminal lines per node (design bound) | 8 lines, 15-minute expiry | CanvasTerminalStarter.swift (`pendingTerminalLineLimit`, `pendingTerminalLineLifetime`) | Drops the oldest request rather than typing it late; never persisted or logged; see `ensemble-agent-terminal-tools.md` |
 
 ## Why it matters
 

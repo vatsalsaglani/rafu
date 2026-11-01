@@ -310,4 +310,504 @@ struct CanvasAgentActionsTests {
         }
         #expect(last.error != nil)
     }
+
+    /// Regression: the app used to create the node first and then fail the long
+    /// prompt as a bare `Invalid value for "command"`.
+    @Test("A long prompt is refused by name and leaves no node behind")
+    func longPromptIsAtomic() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        let groupsBefore = fixture.session.terminal.terminalGroups.count
+        var call = CanvasAgentToolCall(tool: .terminalCreate)
+        call.agent = "claude"
+        call.prompt = String(repeating: "word ", count: 500)
+        let response = await fixture.bridge.handle(
+            CanvasBridgeRequest(
+                token: fixture.token, operation: "tool", clientID: fixture.client,
+                provider: "claude", agentCall: call))
+        let error = try #require(response.error)
+        #expect(error.contains("\"prompt\""))
+        #expect(error.contains("1,024"))
+        #expect(!error.contains("word word"))
+        #expect(fixture.board.cards.count == 2)
+        #expect(fixture.session.terminal.terminalGroups.count == groupsBefore)
+        #expect(
+            !CanvasAgentCenter.shared.log(for: fixture.board.id).contains {
+                $0.outcome.contains("word word")
+            })
+    }
+
+    @Test("An over-long terminal_send argument is refused with the limit")
+    func longSendArgumentNamesTheLimit() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        var call = CanvasAgentToolCall(tool: .terminalSend)
+        call.nodeID = fixture.cards[0].id.rawValue.uuidString
+        call.command = ["echo", String(repeating: "x", count: 1_500)]
+        let response = await fixture.bridge.handle(
+            CanvasBridgeRequest(
+                token: fixture.token, operation: "tool", clientID: fixture.client,
+                provider: "claude", agentCall: call))
+        let error = try #require(response.error)
+        #expect(error.contains("argument 2"))
+        #expect(error.contains("1,500 bytes"))
+        #expect(error.contains("1,024"))
+    }
+
+    @Test("terminal_create link adds one message link from the caller to the new node")
+    func createLinksThePeer() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        let response = try await fixture.call(
+            "terminal_create", ["title": "Helper Agent", "link": true])
+        #expect(response.error == nil)
+        let result = try #require(response.toolResult)
+        #expect(fixture.board.cards.count == 3)
+        let created = try #require(fixture.board.cards.last)
+        #expect(result.nodeID == created.id.rawValue.uuidString)
+        #expect(fixture.board.connections.count == 1)
+        let edge = try #require(fixture.board.connections.first)
+        #expect(edge.isMessageLink)
+        #expect(edge.from == fixture.cards[0].id)
+        #expect(edge.to == created.id)
+        #expect(result.edgeID == edge.id.uuidString)
+        #expect(result.mention == "@helper-agent")
+        // Without `link` there is no edge and no mention.
+        let plain = try await fixture.call("terminal_create", ["title": "Solo"])
+        #expect(plain.toolResult?.edgeID == nil)
+        #expect(plain.toolResult?.mention == nil)
+        #expect(fixture.board.connections.count == 1)
+    }
+
+    @Test("A linked terminal_create under Ask pends, then returns the link")
+    func createLinkUnderAsk() async throws {
+        let fixture = try await CanvasAgentFixture()
+        let task = Task { try await fixture.call("terminal_create", ["link": true]) }
+        let approval = try #require(await fixture.pendingApproval())
+        #expect(approval.summary.contains { $0.hasPrefix("Link:") })
+        CanvasAgentCenter.shared.decide(approval.id, .once)
+        let response = try await task.value
+        #expect(response.error == nil)
+        #expect(response.toolResult?.edgeID != nil)
+        #expect(fixture.board.connections.count == 1)
+        CanvasAgentCenter.shared.forgetGrants(on: fixture.board.id)
+    }
+
+    @Test("Text into a shell node without a connected agent points to the message link")
+    func textIntoShellPointsToTheFix() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        let created = try await fixture.call("terminal_create", ["title": "Plain"])
+        let nodeID = try #require(created.toolResult?.nodeID)
+        let refused = try await fixture.call("terminal_send", ["node_id": nodeID, "text": "hello"])
+        #expect(refused.error == CanvasAgentActions.noAgentTextMessage)
+        #expect(refused.error?.contains("edge_create") == true)
+        #expect(refused.error?.contains("link_set_state") == true)
+        // A launched-agent hint labels the node in ensemble_describe but never
+        // opens the text path: only a connected agent does.
+        let card = try #require(fixture.board.cards.last)
+        CanvasAgentCenter.shared.noteLaunchedAgent(card.id, agent: "claude")
+        let described = try await fixture.call("ensemble_describe")
+        #expect(described.toolResult?.nodes?.last?.agent == "claude")
+        let again = try await fixture.call("terminal_send", ["node_id": nodeID, "text": "hello"])
+        #expect(again.error == CanvasAgentActions.noAgentTextMessage)
+    }
+}
+
+/// A text the tests plant in prompts and commands, to prove it never comes back
+/// in a result or the activity log.
+private let secretLine = "ZEBRA-SECRET-PROMPT"
+
+/// Runs a body with the start wait cut to a few steps: no card view exists in
+/// these tests, so a start is never confirmed and the full wait would only slow
+/// them. The value is task-local, so parallel tests never see it.
+@MainActor
+private func withShortStartWait<T>(steps: Int = 1, _ body: () async throws -> T) async rethrows
+    -> T
+{
+    try await CanvasTerminalStarter.$confirmSteps.withValue(steps) { try await body() }
+}
+
+@MainActor
+private final class TypedLines {
+    var lines: [String] = []
+}
+
+@Suite("Ensemble terminal start and queued lines")
+@MainActor
+struct CanvasTerminalStartTests {
+    @Test("terminal_create that cannot start says stopped and queued, and never repeats the prompt")
+    func createReportsStoppedAndQueued() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        let response = try await withShortStartWait {
+            try await fixture.call(
+                "terminal_create", ["agent": "claude", "prompt": "fix \(secretLine) now"])
+        }
+        #expect(response.error == nil)
+        let result = try #require(response.toolResult)
+        #expect(result.state == "stopped")
+        let message = try #require(result.message)
+        #expect(message.contains("stopped"))
+        #expect(message.contains("queued, not typed"))
+        #expect(message.contains("terminal_start"))
+        #expect(!message.contains(secretLine))
+        let card = try #require(fixture.board.cards.last)
+        #expect(fixture.board.pendingTerminalLineCount(for: card.id) == 1)
+        #expect(
+            !CanvasAgentCenter.shared.log(for: fixture.board.id).contains {
+                $0.outcome.contains(secretLine) || $0.outcome.contains("Done")
+            })
+    }
+
+    @Test("terminal_send into a stopped node says queued, not typing, and keeps the line")
+    func sendIntoStoppedNodeIsQueued() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        let created = try await fixture.call("terminal_create", ["title": "Plain"])
+        #expect(created.toolResult?.state == "stopped")
+        let nodeID = try #require(created.toolResult?.nodeID)
+        let response = try await withShortStartWait {
+            try await fixture.call(
+                "terminal_send", ["node_id": nodeID, "command": ["echo", secretLine]])
+        }
+        #expect(response.error == nil)
+        let result = try #require(response.toolResult)
+        #expect(result.state == "stopped")
+        let message = try #require(result.message)
+        #expect(message.contains("queued, not typed"))
+        #expect(!message.contains("Typing"))
+        #expect(!message.contains(secretLine))
+        let card = try #require(fixture.board.cards.last)
+        #expect(fixture.board.pendingTerminalLineCount(for: card.id) == 1)
+        #expect(
+            !CanvasAgentCenter.shared.log(for: fixture.board.id).contains {
+                $0.outcome.contains(secretLine)
+            })
+    }
+
+    @Test("terminal_start on a stopped node with queued lines says they stay queued")
+    func startKeepsQueuedLines() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        let created = try await withShortStartWait {
+            try await fixture.call("terminal_create", ["agent": "codex", "prompt": "hello"])
+        }
+        let nodeID = try #require(created.toolResult?.nodeID)
+        let started = try await withShortStartWait {
+            try await fixture.call("terminal_start", ["node_id": nodeID])
+        }
+        let result = try #require(started.toolResult)
+        #expect(result.state == "stopped")
+        #expect(result.message?.contains("still stopped") == true)
+        #expect(result.message?.contains("1 line stays queued") == true)
+        // The same start request is not set twice, and the line is not doubled.
+        let card = try #require(fixture.board.cards.last)
+        #expect(fixture.board.pendingTerminalLineCount(for: card.id) == 1)
+        #expect(fixture.board.terminalStartRequest == card.id)
+    }
+
+    @Test("A start request for another card is not overwritten")
+    func startRequestIsNotOverwritten() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        let other = fixture.cards[1].id
+        fixture.board.terminalStartRequest = other
+        let created = try await withShortStartWait {
+            try await fixture.call("terminal_create", ["agent": "claude"])
+        }
+        #expect(created.error == nil)
+        #expect(fixture.board.terminalStartRequest == other)
+    }
+
+    @Test("Starting a node far from the view pans it into view and says so")
+    func startRevealsTheNode() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        fixture.board.visibleSize = CGSize(width: 1_000, height: 700)
+        fixture.board.setViewport(CanvasViewport(scale: 1, x: -20_000, y: 0))
+        let before = fixture.board.viewport
+        let response = try await withShortStartWait {
+            try await fixture.call("terminal_create", ["agent": "claude"])
+        }
+        let card = try #require(fixture.board.cards.last)
+        #expect(fixture.board.viewport != before)
+        #expect(fixture.board.viewport.scale == before.scale)
+        let right = (card.rect.x + card.rect.width) * 1 + fixture.board.viewport.x
+        #expect(right <= 1_000)
+        #expect(response.toolResult?.message?.contains("moved your view") == true)
+    }
+
+    @Test("Starting a node while zoomed out zooms in to live content")
+    func startZoomsInFromTheSummaryFace() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        fixture.board.visibleSize = CGSize(width: 1_000, height: 700)
+        fixture.board.setViewport(CanvasViewport(scale: 0.3, x: 0, y: 0))
+        _ = try await withShortStartWait {
+            try await fixture.call("terminal_create", ["agent": "claude"])
+        }
+        #expect(CanvasZoomFace(scale: fixture.board.viewport.scale).showsLiveContent)
+    }
+
+    @Test("A node that is already running is not revealed or moved by a plain send")
+    func sendToRunningNodeLeavesTheView() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        fixture.board.visibleSize = CGSize(width: 1_000, height: 700)
+        fixture.board.setViewport(CanvasViewport(scale: 1, x: -20_000, y: 0))
+        let before = fixture.board.viewport
+        let report = try await CanvasTerminalStarter.start(
+            card: fixture.cards[0],
+            groupID: terminalGroupID(of: fixture.cards[0]), line: nil, board: fixture.board,
+            session: fixture.session, onGiveUp: {})
+        #expect(report.running)
+        #expect(!report.viewMoved)
+        #expect(fixture.board.viewport == before)
+    }
+
+    @Test("Ask mode returns the same truthful state once approved")
+    func askModeReturnsTheState() async throws {
+        let fixture = try await CanvasAgentFixture()
+        let task = Task {
+            try await withShortStartWait {
+                try await fixture.call(
+                    "terminal_create", ["agent": "claude", "prompt": secretLine])
+            }
+        }
+        let approval = try #require(await fixture.pendingApproval())
+        #expect(!approval.summary.joined().contains("types"))
+        CanvasAgentCenter.shared.decide(approval.id, .once)
+        let response = try await task.value
+        #expect(response.toolResult?.state == "stopped")
+        #expect(response.toolResult?.message?.contains(secretLine) == false)
+        CanvasAgentCenter.shared.forgetGrants(on: fixture.board.id)
+    }
+
+    @Test("An unrelated alert during the start wait is not reported as a terminal manager refusal")
+    func unrelatedAlertIsNotARefusal() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        let created = try await fixture.call("terminal_create", ["title": "Plain"])
+        #expect(created.toolResult?.state == "stopped")
+        let card = try #require(fixture.board.cards.last)
+        let session = fixture.session
+        // Runs when the start wait first suspends, after it noted the alerts.
+        let raised = Task { @MainActor in
+            session.openFolderErrorTitle = "Git Error"
+            session.openFolderErrorMessage = "A Git command failed."
+            session.isOpenFolderErrorPresented = true
+        }
+        let report = try await withShortStartWait(steps: 3) {
+            try await CanvasTerminalStarter.start(
+                card: card, groupID: terminalGroupID(of: card), line: nil, board: fixture.board,
+                session: session, onGiveUp: {})
+        }
+        await raised.value
+        #expect(session.isOpenFolderErrorPresented)
+        #expect(report.hold != .refused)
+        let message = CanvasAgentActions.startMessage(
+            report, title: card.title, kind: .start, lineBytes: nil)
+        #expect(!message.contains("terminal manager refused"))
+        session.isOpenFolderErrorPresented = false
+    }
+
+    @Test("A Terminal Group alert during the start wait is reported as a refusal")
+    func terminalGroupAlertIsARefusal() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        let created = try await fixture.call("terminal_create", ["title": "Plain"])
+        #expect(created.toolResult?.state == "stopped")
+        let card = try #require(fixture.board.cards.last)
+        let session = fixture.session
+        let raised = Task { @MainActor in
+            session.openFolderErrorTitle = WorkspaceSession.terminalGroupErrorTitle
+            session.openFolderErrorMessage = "The terminal could not start."
+            session.isOpenFolderErrorPresented = true
+        }
+        let report = try await withShortStartWait(steps: 3) {
+            try await CanvasTerminalStarter.start(
+                card: card, groupID: terminalGroupID(of: card), line: nil, board: fixture.board,
+                session: session, onGiveUp: {})
+        }
+        await raised.value
+        #expect(report.hold == .refused)
+        let message = CanvasAgentActions.startMessage(
+            report, title: card.title, kind: .start, lineBytes: nil)
+        #expect(message.contains("terminal manager refused"))
+        session.isOpenFolderErrorPresented = false
+    }
+
+    @Test("A Terminal Group alert that was already shown is not read as a new refusal")
+    func existingTerminalGroupAlertIsNotNew() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        let created = try await fixture.call("terminal_create", ["title": "Plain"])
+        #expect(created.toolResult?.state == "stopped")
+        let card = try #require(fixture.board.cards.last)
+        let session = fixture.session
+        session.openFolderErrorTitle = WorkspaceSession.terminalGroupErrorTitle
+        session.isOpenFolderErrorPresented = true
+        let report = try await withShortStartWait(steps: 2) {
+            try await CanvasTerminalStarter.start(
+                card: card, groupID: terminalGroupID(of: card), line: nil, board: fixture.board,
+                session: session, onGiveUp: {})
+        }
+        #expect(report.hold != .refused)
+        session.isOpenFolderErrorPresented = false
+    }
+
+    @Test("The drain types each queued line once, in order, and clears the queue")
+    func drainTypesOnce() async throws {
+        let fixture = try await CanvasAgentFixture()
+        let lead = fixture.cards[0]
+        let typed = TypedLines()
+        #expect(fixture.board.queueTerminalLine("cd /tmp", for: lead.id))
+        #expect(fixture.board.queueTerminalLine("claude", for: lead.id))
+        let first = Task { await drain(fixture, lead, typed) }
+        let second = Task { await drain(fixture, lead, typed) }
+        _ = await (first.value, second.value)
+        #expect(typed.lines == ["cd /tmp", "claude"])
+        #expect(fixture.board.pendingTerminalLines[lead.id] == nil)
+        let again = await drain(fixture, lead, typed)
+        #expect(again)
+        #expect(typed.lines.count == 2)
+    }
+
+    @Test("A refused send keeps the line at the front for the next drain")
+    func refusedSendStaysQueued() throws {
+        let board = CanvasBoardState(document: CanvasDocument(title: "Queue"))
+        try board.add(title: "T", content: .note(snapshot: ""))
+        let card = try #require(board.cards.first).id
+        #expect(board.queueTerminalLine("one", for: card))
+        #expect(board.queueTerminalLine("two", for: card))
+        #expect(board.drainPendingTerminalLines(for: card) { _ in false } == 0)
+        #expect(board.pendingTerminalLines[card]?.map(\.text) == ["one", "two"])
+        let typed = TypedLines()
+        #expect(
+            board.drainPendingTerminalLines(for: card) {
+                typed.lines.append($0)
+                return true
+            }
+                == 2)
+        #expect(typed.lines == ["one", "two"])
+        #expect(board.pendingTerminalLines[card] == nil)
+    }
+
+    @Test("The queue is bounded, expires, and goes with its node or board")
+    func queueLifecycle() throws {
+        let board = CanvasBoardState(document: CanvasDocument(title: "Queue"))
+        try board.add(title: "A", content: .note(snapshot: ""))
+        try board.add(title: "B", content: .note(snapshot: ""))
+        let a = board.cards[0].id
+        let b = board.cards[1].id
+        for index in 0..<CanvasBoardState.pendingTerminalLineLimit {
+            #expect(board.queueTerminalLine("line \(index)", for: a))
+        }
+        #expect(!board.queueTerminalLine("one too many", for: a))
+        // Old lines are dropped, not typed long after the request.
+        let old = Date(timeIntervalSinceNow: -CanvasBoardState.pendingTerminalLineLifetime - 1)
+        #expect(board.queueTerminalLine("stale", for: b, now: old))
+        let typed = TypedLines()
+        board.drainPendingTerminalLines(for: b) {
+            typed.lines.append($0)
+            return true
+        }
+        #expect(typed.lines.isEmpty)
+        #expect(board.pendingTerminalLines[b] == nil)
+        // Removing the card drops its lines.
+        board.select([a])
+        try board.removeSelection()
+        #expect(board.pendingTerminalLines[a] == nil)
+        #expect(board.queueTerminalLine("x", for: b))
+        board.discardPendingTerminalLines()
+        #expect(board.pendingTerminalLines.isEmpty)
+    }
+
+    @Test("A drain for a card that left the board clears its lines and stops")
+    func drainStopsWhenTheCardIsGone() async throws {
+        let fixture = try await CanvasAgentFixture()
+        let lead = fixture.cards[0]
+        let typed = TypedLines()
+        let ghost = CanvasCardID()
+        #expect(fixture.board.queueTerminalLine("x", for: ghost))
+        let done = await drain(fixture, lead, typed, card: ghost)
+        #expect(!done)
+        #expect(typed.lines.isEmpty)
+        #expect(fixture.board.pendingTerminalLines[ghost] == nil)
+    }
+
+    @Test("A link that cannot be made is reported, and the node stays")
+    func linkFailureIsReportedNotThrown() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        // A caller whose node is not on the board: the node is created, the edge
+        // from the caller cannot be.
+        let stranger = CanvasCard(
+            title: "Gone", rect: CanvasRect(x: 0, y: 0, width: 300, height: 200),
+            content: .note(snapshot: ""))
+        let caller = CanvasAgentCaller(
+            session: fixture.session, board: fixture.board, card: stranger,
+            controllerID: UUID(), provider: "claude",
+            sendMessage: { _, _ in .init() })
+        var call = CanvasAgentToolCall(tool: .terminalCreate)
+        call.title = "Orphan Peer"
+        call.link = true
+        let response = await CanvasAgentActions.perform(call, caller: caller)
+        #expect(response.error == nil)
+        let result = try #require(response.toolResult)
+        #expect(fixture.board.cards.count == 3)
+        #expect(fixture.board.connections.isEmpty)
+        #expect(result.nodeID != nil)
+        #expect(result.edgeID == nil)
+        #expect(result.mention == "@orphan-peer")
+        let message = try #require(result.message)
+        #expect(message.contains("link was not made"))
+        #expect(message.contains("edge_create"))
+        #expect(message.contains("link_set_state"))
+    }
+
+    @Test("Start messages name the lease cap and the start limit, and never a line")
+    func startMessagesNameTheReason() {
+        var report = CanvasTerminalStartReport()
+        report.queuedLines = 2
+        report.hold = .leaseCap
+        let cap = CanvasAgentActions.startMessage(
+            report, title: "Peer", kind: .create, lineBytes: 120)
+        #expect(cap.contains("Four Ensemble terminals"))
+        #expect(cap.contains("120-byte"))
+        #expect(cap.contains("queued, not typed"))
+        report.hold = .unavailable
+        let limit = CanvasAgentActions.startMessage(
+            report, title: "Peer", kind: .send, lineBytes: 10)
+        #expect(limit.contains("live-session limit"))
+        report.hold = nil
+        report.running = true
+        let live = CanvasAgentActions.startMessage(
+            report, title: "Peer", kind: .create, lineBytes: 120)
+        #expect(live.contains("running"))
+        #expect(live.contains("ensemble_describe"))
+        #expect(!live.contains("queued, not typed"))
+        #expect(CanvasAgentActions.queueFullMessage("Peer").contains("queued lines"))
+    }
+
+    private func drain(
+        _ fixture: CanvasAgentFixture, _ lead: CanvasCard, _ typed: TypedLines,
+        card: CanvasCardID? = nil
+    ) async -> Bool {
+        await CanvasTerminalStarter.drain(
+            card: card ?? lead.id, groupID: terminalGroupID(of: lead), board: fixture.board,
+            session: fixture.session, settle: 0, isReady: { _ in true },
+            send: { _, line in
+                typed.lines.append(line)
+                return true
+            })
+    }
+
+    private func terminalGroupID(of card: CanvasCard) -> TerminalGroupID {
+        guard case .terminal(let id) = card.content else {
+            preconditionFailure("not a terminal card")
+        }
+        return id
+    }
 }

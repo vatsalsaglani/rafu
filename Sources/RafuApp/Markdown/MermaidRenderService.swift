@@ -85,11 +85,17 @@ actor MermaidRenderService {
     /// Upper bound on rasterised pixels per diagram (~16 MB at 4 bytes/px).
     /// A proposal recorded in ADR 0020 pending a measured Release idle pass —
     /// not a verified budget. Exceeding it at the requested `scale` backs the
-    /// effective scale off toward 1.0 rather than refusing to render.
+    /// effective scale off, down to `minimumScale`, rather than refusing to
+    /// render.
     static let maxRasterPixels: CGFloat = 4_000_000
-    /// Upper bound on a diagram's own point-space area (~2000×2000 pt) before
-    /// Rafu refuses to render it at all. Same caveat as above.
-    static let maxPointArea: CGFloat = 4_000_000
+    /// The smallest effective scale. A large diagram renders below 1.0 so its
+    /// raster still fits `maxRasterPixels`; the card scales it to fit anyway.
+    static let minimumScale: CGFloat = 0.25
+    /// Upper bound on a diagram's own point-space area (8000×8000 pt) before
+    /// Rafu refuses to render it at all. It is `maxRasterPixels` at
+    /// `minimumScale` (4 M px ÷ 0.25²), so every accepted diagram fits the
+    /// pixel cap. Arithmetic, not a measured budget: same caveat as above.
+    static let maxPointArea: CGFloat = 64_000_000
     /// LRU cap on retained `PositionedGraph`/label cache entries. Same caveat.
     static let maxCacheEntries = 24
 
@@ -102,9 +108,9 @@ actor MermaidRenderService {
 
     private init() {}
 
-    /// Renders `diagram` at `scale`, backing the effective scale off toward
-    /// 1.0 if the full raster would exceed `maxRasterPixels`, and refusing
-    /// entirely past `maxPointArea`. `diagram.source` is normalised
+    /// Renders `diagram` at `scale`, backing the effective scale off (to no
+    /// less than `minimumScale`) if the full raster would exceed
+    /// `maxRasterPixels`, and refusing entirely past `maxPointArea`. `diagram.source` is normalised
     /// (`normalizeMermaid(_:)` in `MarkdownModels.swift`) before this is
     /// ever called, so upstream's header-strictness quirks never reach here.
     func raster(
@@ -172,7 +178,9 @@ actor MermaidRenderService {
         case .empty:
             return "diagram parsed to no visible content"
         case .tooLarge(let size):
-            return "too large to render natively (\(Int(size.width))×\(Int(size.height)) pt)"
+            let limit = Int(maxPointArea.squareRoot())
+            return
+                "too large to render natively (\(Int(size.width))×\(Int(size.height)) pt; the limit is \(limit)×\(limit) pt). Split the diagram into smaller ones, or export the board or a frame."
         case .contextCreationFailed:
             return "could not allocate a rendering surface"
         }
@@ -214,15 +222,15 @@ actor MermaidRenderService {
         lru.append(key)
     }
 
-    /// Backs `scale` off toward (but never below) 1.0 so the raster stays
-    /// under `maxRasterPixels`; a diagram already under the cap at the
+    /// Backs `scale` off toward (but never below) `minimumScale` so the raster
+    /// stays under `maxRasterPixels`; a diagram already under the cap at the
     /// requested scale is returned unchanged.
     private func clampedScale(for pointSize: CGSize, requested scale: CGFloat) -> CGFloat {
         guard pointSize.width > 0, pointSize.height > 0 else { return scale }
         let pixelsAtRequested = pointSize.width * pointSize.height * scale * scale
         guard pixelsAtRequested > Self.maxRasterPixels else { return scale }
         let maxScale = (Self.maxRasterPixels / (pointSize.width * pointSize.height)).squareRoot()
-        return max(1.0, min(scale, maxScale))
+        return max(Self.minimumScale, min(scale, maxScale))
     }
 
     /// Builds a Rafu-authored accessibility label from the parsed model —

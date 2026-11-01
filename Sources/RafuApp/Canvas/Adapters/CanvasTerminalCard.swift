@@ -82,6 +82,16 @@ struct CanvasTerminalCard: View {
                 board.terminalStartRequest = nil
                 startOrRestart(id)
             }
+            // Lines an agent queued while the shell was stopped: type them once
+            // this card's shell runs, so a later Start (the agent's terminal_start
+            // or the user's button) delivers them. The drain is idempotent.
+            .task(id: pane.sessionID) {
+                guard pane.sessionID != nil, board.pendingTerminalLines[card.id] != nil else {
+                    return
+                }
+                await CanvasTerminalStarter.drain(
+                    card: card.id, groupID: id, board: board, session: session)
+            }
             .onDisappear {
                 guard session.canvasResources[board.id]?.canPresent(owner: presentationID) == true,
                     session.canvasTerminalOwners[id] == board.id

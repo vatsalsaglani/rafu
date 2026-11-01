@@ -277,6 +277,7 @@ final class WorkspaceCanvasStore {
     }
 
     func forgetClosed(_ id: CanvasID) {
+        boards[id]?.discardPendingTerminalLines()
         onBoardHidden?(id)
         boards[id] = nil
         fileBindings[id] = nil

@@ -107,7 +107,10 @@ private let nodeB = "7F9619FF-8B86-D011-B42D-00C04FC964FF"
         try CanvasAgentToolCall.parse(
             tool: "terminal_create", arguments: ["agent": "gemini", "prompt": "Do it"])
     }
-    #expect(throws: CanvasAgentToolError.invalidArgument("command")) {
+    #expect(
+        throws: CanvasAgentToolError.invalidArgumentReason(
+            key: "command", reason: CanvasAgentShellRefusal.controlCharacter(index: 1).reason())
+    ) {
         try CanvasAgentToolCall.parse(
             tool: "terminal_create", arguments: ["command": ["echo", "a\nrm -rf ~"]])
     }
@@ -225,6 +228,46 @@ private let nodeB = "7F9619FF-8B86-D011-B42D-00C04FC964FF"
     #expect(CanvasAgentLaunch.argv(agent: "sh", prompt: nil) == nil)
 }
 
+@Test func typedLineIsBoundedInBytesNotScalars() throws {
+    let limit = CanvasAgentToolCall.maximumPromptBytes
+    // Two-byte and four-byte scalars: a scalar count would allow twice or four
+    // times the byte limit.
+    for unit in ["é", "😀"] {
+        let long = String(repeating: unit, count: limit)
+        let line = CanvasAgentText.singleLine(long, maxBytes: limit)
+        #expect(line.utf8.count <= limit)
+        #expect(line.utf8.count == limit)
+        #expect(line == String(repeating: unit, count: limit / unit.utf8.count))
+        #expect(String(validating: Array(line.utf8), as: UTF8.self) == line)
+    }
+    // A limit inside a scalar cuts before it, never through it.
+    let odd = CanvasAgentText.singleLine(String(repeating: "é", count: 10), maxBytes: 5)
+    #expect(odd == "éé")
+    #expect(CanvasAgentText.singleLine("a\tb\nc", maxBytes: 100) == "a b c")
+    #expect(CanvasAgentText.singleLine("short", maxBytes: 100) == "short")
+    // The launch prompt uses the same bound.
+    let argv = try #require(
+        CanvasAgentLaunch.argv(agent: "claude", prompt: String(repeating: "é", count: limit)))
+    #expect(argv.last?.utf8.count == limit)
+}
+
+@Test func terminalSendTextIsRefusedByBytesNotScalars() throws {
+    let limit = CanvasAgentToolCall.maximumPromptBytes
+    let fits = String(repeating: "é", count: limit / 2)
+    let call = try CanvasAgentToolCall.parse(
+        tool: "terminal_send", arguments: ["node_id": nodeA, "text": fits])
+    #expect(call.text == fits)
+    let over = String(repeating: "é", count: limit / 2 + 1)
+    do {
+        _ = try CanvasAgentToolCall.parse(
+            tool: "terminal_send", arguments: ["node_id": nodeA, "text": over])
+        Issue.record("Expected the multibyte text to be refused")
+    } catch {
+        #expect(error.message.contains("4,098 bytes"))
+        #expect(error.message.contains("4,096"))
+    }
+}
+
 @Test func agentNoteEditsAreMinimalAndBounded() throws {
     let append = try CanvasAgentNoteEditor.edit("# Plan", mode: .append, text: "- step")
     #expect(append.result == "# Plan\n- step")
@@ -315,4 +358,188 @@ private let nodeB = "7F9619FF-8B86-D011-B42D-00C04FC964FF"
     ]
     let data = try JSONSerialization.data(withJSONObject: reply)
     #expect(data.count < 48 * 1_024)
+}
+
+// MARK: Typed-line limits and refusal reasons
+
+@Test func agentShellRefusalNamesTheLimitThatWasHit() {
+    #expect(CanvasAgentShell.refusal(for: ["swift", "test"]) == nil)
+    #expect(CanvasAgentShell.refusal(for: []) == .empty)
+    #expect(CanvasAgentShell.refusal(for: [""]) == .empty)
+    #expect(
+        CanvasAgentShell.refusal(for: Array(repeating: "a", count: 33))
+            == .tooManyArguments(count: 33, limit: 32))
+    #expect(CanvasAgentShell.refusal(for: ["echo", "a\nb"]) == .controlCharacter(index: 1))
+    #expect(CanvasAgentShell.refusal(for: ["echo", "a\tb"]) == .controlCharacter(index: 1))
+    // 32 arguments of 200 bytes pass the per-argument limit and exceed the line.
+    let wide = Array(repeating: String(repeating: "a", count: 200), count: 32)
+    #expect(CanvasAgentShell.refusal(for: wide) == .lineTooLong(bytes: 32 * 200 + 31, limit: 4_096))
+    #expect(CanvasAgentShell.commandLine(wide) == nil)
+}
+
+@Test func agentShellArgumentLimitIsNamedAndExact() {
+    let limit = CanvasAgentToolCall.maximumCommandArgumentBytes
+    #expect(limit == 1_024)
+    let fits = String(repeating: "a", count: limit)
+    #expect(CanvasAgentShell.refusal(for: ["echo", fits]) == nil)
+    #expect(CanvasAgentShell.commandLine(["echo", fits]) != nil)
+    let over = String(repeating: "a", count: limit + 1)
+    #expect(
+        CanvasAgentShell.refusal(for: ["echo", over])
+            == .argumentTooLong(index: 1, bytes: limit + 1, limit: limit))
+    #expect(CanvasAgentShell.commandLine(["echo", over]) == nil)
+}
+
+/// Regression: a ~1,500-byte argument used to fail as a bare `Invalid value for "command".`
+@Test func terminalSendCommandOverTheArgumentLimitNamesTheLimit() throws {
+    let secret = "SECRET" + String(repeating: "x", count: 1_494)
+    let refusal = try #require(CanvasAgentShell.refusal(for: ["echo", secret]))
+    #expect(refusal == .argumentTooLong(index: 1, bytes: 1_500, limit: 1_024))
+    let reason = refusal.reason()
+    #expect(reason.contains("argument 2"))
+    #expect(reason.contains("1,500 bytes"))
+    #expect(reason.contains("1,024"))
+    #expect(reason.contains("4,096"))
+    #expect(reason.contains("file or a Rafu note"))
+    #expect(!reason.contains("SECRET"))
+
+    do {
+        _ = try CanvasAgentToolCall.parse(
+            tool: "terminal_send", arguments: ["node_id": nodeA, "command": ["echo", secret]])
+        Issue.record("Expected the over-long argument to be refused")
+    } catch {
+        #expect(error == .invalidArgumentReason(key: "command", reason: reason))
+        #expect(error.message.hasPrefix("Invalid value for \"command\": "))
+        #expect(!error.message.contains("SECRET"))
+    }
+}
+
+/// Regression: a 2,500-character prompt used to pass `prompt` validation and
+/// then fail as `Invalid value for "command"` after the node was created.
+@Test func terminalCreateRefusesALongPromptAsPromptBeforeAnyNodeExists() throws {
+    let prompt = (["SECRET line one", String(repeating: "word ", count: 500)])
+        .joined(separator: "\n")
+    #expect(prompt.utf8.count > 2_500)
+    do {
+        _ = try CanvasAgentToolCall.parse(
+            tool: "terminal_create", arguments: ["agent": "claude", "prompt": prompt])
+        Issue.record("Expected the long prompt to be refused")
+    } catch {
+        guard case .invalidArgumentReason(let key, let reason) = error else {
+            Issue.record("Expected a reason, got \(error)")
+            return
+        }
+        #expect(key == "prompt")
+        #expect(reason.contains("the prompt is"))
+        #expect(reason.contains("1,024 bytes"))
+        #expect(reason.contains("file or a Rafu note"))
+        #expect(!error.message.contains("SECRET"))
+    }
+    // A prompt past the 4 KiB field bound gets the same reason.
+    #expect(throws: CanvasAgentToolError.self) {
+        try CanvasAgentToolCall.parse(
+            tool: "terminal_create",
+            arguments: ["agent": "codex", "prompt": String(repeating: "a", count: 5_000)])
+    }
+    let accepted = String(repeating: "a", count: 1_024)
+    let call = try CanvasAgentToolCall.parse(
+        tool: "terminal_create", arguments: ["agent": "claude", "prompt": accepted])
+    #expect(call.prompt == accepted)
+}
+
+@Test func terminalSendTextOverTheLimitNamesTheLimit() {
+    let text = String(repeating: "a", count: CanvasAgentToolCall.maximumPromptBytes + 1)
+    do {
+        _ = try CanvasAgentToolCall.parse(
+            tool: "terminal_send", arguments: ["node_id": nodeA, "text": text])
+        Issue.record("Expected the long text to be refused")
+    } catch {
+        #expect(error.message.contains("\"text\""))
+        #expect(error.message.contains("4,097 bytes"))
+        #expect(error.message.contains("4,096"))
+    }
+}
+
+@Test func terminalSchemasDeclareTheTypedLineLimits() throws {
+    func definition(_ name: String) throws -> (String, [String: Any]) {
+        let entry = try #require(
+            CanvasAgentToolCatalog.definitions.first { $0["name"] as? String == name })
+        let schema = try #require(entry["inputSchema"] as? [String: Any])
+        return (
+            try #require(entry["description"] as? String),
+            try #require(schema["properties"] as? [String: Any])
+        )
+    }
+    let (createText, create) = try definition("terminal_create")
+    let prompt = try #require(create["prompt"] as? [String: Any])
+    #expect(prompt["maxLength"] as? Int == 1_024)
+    #expect((prompt["description"] as? String)?.contains("file or a note") == true)
+    let command = try #require(create["command"] as? [String: Any])
+    let commandText = try #require(command["description"] as? String)
+    #expect(commandText.contains("1024 bytes each"))
+    #expect(commandText.contains("32 arguments"))
+    #expect(create["link"] != nil)
+    #expect(createText.contains("link"))
+    let (_, send) = try definition("terminal_send")
+    let sendCommand = try #require(send["command"] as? [String: Any])
+    #expect((sendCommand["description"] as? String)?.contains("1024 bytes each") == true)
+}
+
+@Test func terminalCreateLinkParsesOnlyOnTerminalCreate() throws {
+    let call = try CanvasAgentToolCall.parse(
+        tool: "terminal_create", arguments: ["agent": "claude", "link": true])
+    #expect(call.link == true)
+    #expect(call.approvalSummary.contains { $0.hasPrefix("Link:") })
+    let plain = try CanvasAgentToolCall.parse(tool: "terminal_create", arguments: [:])
+    #expect(plain.link == nil)
+    #expect(!plain.approvalSummary.contains { $0.hasPrefix("Link:") })
+    #expect(throws: CanvasAgentToolError.invalidArgument("link")) {
+        try CanvasAgentToolCall.parse(tool: "terminal_create", arguments: ["link": "yes"])
+    }
+    #expect(throws: CanvasAgentToolError.unexpectedArgument("link")) {
+        try CanvasAgentToolCall.parse(
+            tool: "terminal_start", arguments: ["node_id": nodeA, "link": true])
+    }
+    #expect(throws: CanvasAgentToolError.unexpectedArgument("link")) {
+        try CanvasAgentToolCall.parse(tool: "note_create", arguments: ["title": "A", "link": true])
+    }
+}
+
+@Test func agentLaunchRecognisesAKnownAgentProgram() {
+    #expect(CanvasAgentLaunch.agent(forCommand: ["claude", "--resume"]) == "claude")
+    #expect(CanvasAgentLaunch.agent(forCommand: ["/opt/homebrew/bin/codex"]) == "codex")
+    #expect(CanvasAgentLaunch.agent(forCommand: ["cursor-agent"]) == "cursor-agent")
+    #expect(CanvasAgentLaunch.agent(forCommand: ["swift", "test"]) == nil)
+    #expect(CanvasAgentLaunch.agent(forCommand: []) == nil)
+}
+
+@Test func agentToolResultEncodesDeliveryAndMention() throws {
+    var result = CanvasAgentToolResult(message: "Queued")
+    result.delivered = true
+    result.mention = "@helper"
+    let text = String(decoding: try #require(result.agentJSON()), as: UTF8.self)
+    #expect(text.contains("\"delivered\":true"))
+    #expect(text.contains("\"mention\":\"@helper\""))
+}
+
+@Test func toolResultCarriesTheNodeStateInSnakeCaseJSON() throws {
+    var result = CanvasAgentToolResult(message: "Created.")
+    result.state = "stopped"
+    let json = String(decoding: try #require(result.agentJSON()), as: UTF8.self)
+    #expect(json.contains("\"state\":\"stopped\""))
+}
+
+@Test func terminalAndMermaidDescriptionsTeachTheStateAndTheLimit() throws {
+    func description(_ name: String) throws -> String {
+        let entry = try #require(
+            CanvasAgentToolCatalog.definitions.first { $0["name"] as? String == name })
+        return try #require(entry["description"] as? String)
+    }
+    let create = try description("terminal_create")
+    #expect(create.contains("state"))
+    #expect(create.contains("queued, not typed"))
+    #expect(create.contains("link true"))
+    #expect(try description("terminal_start").contains("state"))
+    #expect(try description("terminal_send").contains("link_set_state"))
+    #expect(try description("mermaid_set").contains("8000 by 8000"))
 }

@@ -90,6 +90,9 @@ final class CanvasAgentCenter {
         [UUID: (controllerID: UUID, date: Date, response: CanvasBridgeResponse)] = [:]
     /// Terminal nodes an agent created, so it may type into them later.
     @ObservationIgnored private var created: [CanvasCardID: (caller: UUID, agent: String?)] = [:]
+    /// An agent CLI the caller typed into a terminal as a `command`. A hint for
+    /// `ensemble_describe` only; it never allows `text` input.
+    @ObservationIgnored private var launchedAgents: [CanvasCardID: String] = [:]
     @ObservationIgnored let now: @MainActor () -> Date
 
     static let approvalWait: Duration = .seconds(12)
@@ -136,6 +139,13 @@ final class CanvasAgentCenter {
     }
 
     func creator(of card: CanvasCardID) -> (caller: UUID, agent: String?)? { created[card] }
+
+    func noteLaunchedAgent(_ card: CanvasCardID, agent: String) {
+        if launchedAgents.count > 200 { launchedAgents.removeAll() }
+        launchedAgents[card] = agent
+    }
+
+    func launchedAgent(of card: CanvasCardID) -> String? { launchedAgents[card] }
 
     /// Adds a question and waits briefly for the user. Returns the choice, or
     /// nil when the wait ended first; the question then stays open.
@@ -351,12 +361,8 @@ enum CanvasAgentActions {
         let response: CanvasBridgeResponse
         do {
             response = try await execute(call, caller: caller)
-        } catch let error as CanvasAgentToolError {
-            response = .init(error: error.message)
         } catch {
-            response = .init(
-                error: (error as? LocalizedError)?.errorDescription
-                    ?? "The Ensemble action failed.")
+            response = .init(error: Self.failureText(error))
         }
         if call.risk != .read {
             CanvasAgentCenter.shared.record(
@@ -365,6 +371,13 @@ enum CanvasAgentActions {
                     ?? "Done")
         }
         return response
+    }
+
+    /// The text an agent sees for a failed action: the tool's own words, else
+    /// the error's description.
+    private static func failureText(_ error: Error) -> String {
+        if let error = error as? CanvasAgentToolError { return error.message }
+        return (error as? LocalizedError)?.errorDescription ?? "The Ensemble action failed."
     }
 
     // MARK: Dispatch
@@ -401,12 +414,13 @@ enum CanvasAgentActions {
         }
     }
 
-    private static func ok(_ message: String, node: CanvasCardID? = nil, edge: UUID? = nil)
-        -> CanvasBridgeResponse
-    {
+    private static func ok(
+        _ message: String, node: CanvasCardID? = nil, edge: UUID? = nil, state: String? = nil
+    ) -> CanvasBridgeResponse {
         var result = CanvasAgentToolResult(message: message)
         result.nodeID = node?.rawValue.uuidString
         result.edgeID = edge?.uuidString
+        result.state = state
         return .init(toolResult: result)
     }
 
@@ -439,6 +453,7 @@ enum CanvasAgentActions {
                 if agent == nil, let creator = CanvasAgentCenter.shared.creator(of: card.id) {
                     agent = creator.agent
                 }
+                if agent == nil { agent = CanvasAgentCenter.shared.launchedAgent(of: card.id) }
             case .file(let value), .image(let value): path = value
             case .nativeApp(let bundleID): path = bundleID
             case .web(let destination): path = destination.address
@@ -712,6 +727,14 @@ enum CanvasAgentActions {
         let session = caller.session
         let board = caller.board
         guard board.cards.count < CanvasLimits.cards else { throw CanvasError.capacity }
+        if call.link == true {
+            guard board.connections.count < CanvasLimits.connections else {
+                throw CanvasError.capacity
+            }
+        }
+        // Build and check the typed line before anything exists, so a refused
+        // prompt or command leaves no node behind.
+        let line = try launchLine(for: call)
         let folder = try await startingFolder(call.cwd, session: session)
         let vendor = call.agent.map { CanvasAgentKinds.displayName(agent: $0) }
         let requested = call.title ?? vendor ?? "Terminal"
@@ -739,22 +762,89 @@ enum CanvasAgentActions {
         try insert(card, into: board)
         CanvasAgentCenter.shared.noteCreatedTerminal(
             card.id, caller: caller.controllerID, agent: call.agent)
-        guard call.startsProcess else {
-            return ok("Added a stopped terminal \"\(card.title)\".", node: card.id)
+        if let command = call.command, let launched = CanvasAgentLaunch.agent(forCommand: command) {
+            CanvasAgentCenter.shared.noteLaunchedAgent(card.id, agent: launched)
         }
+        guard let line else {
+            return linked(
+                "Added a stopped terminal \"\(card.title)\".", state: "stopped", card: card,
+                call: call, caller: caller)
+        }
+        let report = try await start(card, line: line, caller: caller)
+        // A fresh node holds no lines, so its first line is always queued. If that
+        // ever changed, the node exists: report it instead of an error that
+        // would promise "no node behind".
+        guard !report.queueFull else {
+            return linked(
+                queueFullMessage(card.title), state: report.running ? "running" : "stopped",
+                card: card, call: call, caller: caller)
+        }
+        var message = startMessage(
+            report, title: card.title, kind: .create, lineBytes: line.utf8.count)
+        if call.link != true, call.agent == "claude" || call.agent == "codex" {
+            message += " Next: edge_create kind message to it, then link_set_state live."
+        }
+        return linked(
+            message, state: report.running ? "running" : "stopped", card: card, call: call,
+            caller: caller)
+    }
+
+    /// The shell line a `terminal_create` call types, or nil when it starts no
+    /// process. Throws the reason when the prompt or command is refused.
+    private static func launchLine(for call: CanvasAgentToolCall) throws -> String? {
+        guard call.startsProcess else { return nil }
         let argv =
             call.command
             ?? call.agent.flatMap { CanvasAgentLaunch.argv(agent: $0, prompt: call.prompt) }
-        guard let argv, let line = CanvasAgentShell.commandLine(argv) else {
-            throw CanvasAgentToolError.invalidArgument("command")
+        guard let argv else { throw CanvasAgentToolError.invalidArgument("command") }
+        if let refusal = CanvasAgentShell.refusal(for: argv) {
+            let isPrompt = call.command == nil && call.prompt != nil
+            throw CanvasAgentToolError.invalidArgumentReason(
+                key: isPrompt ? "prompt" : "command", reason: refusal.reason(isPrompt: isPrompt))
         }
-        try start(card, line: line, caller: caller)
-        let next =
-            call.agent == "claude" || call.agent == "codex"
-            ? " Next: edge_create kind message to it, then link_set_state live." : ""
-        return ok(
-            "Starting \"\(card.title)\". Rafu types this line when the shell is ready: \(line).\(next)",
-            node: card.id)
+        return CanvasAgentShell.commandLine(argv)
+    }
+
+    /// Adds the message link `terminal_create` asked for with `link`: from the
+    /// caller's node to the new one, then Live. The reply names the edge and the
+    /// new peer's mention. The node already exists by now, so a link that fails
+    /// is reported in the message and the node stays.
+    private static func linked(
+        _ message: String, state: String, card: CanvasCard, call: CanvasAgentToolCall,
+        caller: CanvasAgentCaller
+    ) -> CanvasBridgeResponse {
+        var result = CanvasAgentToolResult(message: message)
+        result.nodeID = card.id.rawValue.uuidString
+        result.state = state
+        guard call.link == true else { return .init(toolResult: result) }
+        result.mention = CanvasBridgePeer.mention(for: card.title)
+        let byHand =
+            "To link it by hand: edge_create kind message from your node to this node, then link_set_state live."
+        var edge = CanvasAgentToolCall(tool: .edgeCreate)
+        edge.from = caller.card.id.rawValue.uuidString
+        edge.to = card.id.rawValue.uuidString
+        edge.kind = "message"
+        let created: CanvasBridgeResponse
+        do {
+            created = try edgeCreate(edge, board: caller.board)
+        } catch {
+            result.message =
+                "\(message) The node exists, but the message link was not made: \(failureText(error)) \(byHand)"
+            return .init(toolResult: result)
+        }
+        result.edgeID = created.toolResult?.edgeID
+        var live = CanvasAgentToolCall(tool: .linkSetState)
+        live.edgeID = created.toolResult?.edgeID
+        live.state = "live"
+        do {
+            let linkState = try linkSetState(live, board: caller.board)
+            result.message = [message, "Linked from your node.", linkState.toolResult?.message]
+                .compactMap { $0 }.joined(separator: " ")
+        } catch {
+            result.message =
+                "\(message) The node exists and the message link was added, but it was not set live: \(failureText(error)) Call link_set_state live with the edge_id."
+        }
+        return .init(toolResult: result)
     }
 
     /// Validates a starting folder inside the workspace after resolving links.
@@ -786,65 +876,109 @@ enum CanvasAgentActions {
         async throws -> CanvasBridgeResponse
     {
         let card = try findCard(call.nodeID, in: caller.board)
-        try start(card, line: nil, caller: caller)
-        return ok("Started \"\(card.title)\".", node: card.id)
+        let report = try await start(card, line: nil, caller: caller)
+        return ok(
+            startMessage(report, title: card.title, kind: .start, lineBytes: nil), node: card.id,
+            state: report.running ? "running" : "stopped")
     }
 
-    /// Starts the visible terminal node through its own Start path. A line is
-    /// typed once the shell process exists; that wait runs after the reply so
-    /// the agent's bridge call never outlasts its IPC timeout.
+    /// Starts the visible terminal node through its own Start path and queues the
+    /// line, if any, on the board. The wait for the shell stays short so the
+    /// agent's bridge call never outlasts its IPC timeout; typing continues
+    /// after the reply (`CanvasTerminalStarter`).
     private static func start(_ card: CanvasCard, line: String?, caller: CanvasAgentCaller)
-        throws
+        async throws -> CanvasTerminalStartReport
     {
         guard case .terminal(let groupID) = card.content else {
             throw CanvasAgentToolError.invalidArgument("node_id")
         }
-        let session = caller.session
-        guard let pane = session.terminal.terminalGroup(groupID)?.panes.first else {
-            throw CanvasError.unavailable
-        }
-        if pane.status == .stopped || pane.status == .exited {
-            caller.board.terminalStartRequest = card.id
-        }
-        guard let line else { return }
         let boardID = caller.board.id
         let agent = caller.agentName
         let title = card.title
-        Task(name: "Type agent line into Ensemble terminal") { [weak session] in
-            guard let session else { return }
-            let typed = await Self.typeLine(line, into: groupID, session: session)
-            if !typed {
-                CanvasAgentCenter.shared.record(
-                    boardID, agent: agent, action: "Type into a terminal",
-                    outcome: "Failed: \"\(title)\" did not start in time")
-            }
+        return try await CanvasTerminalStarter.start(
+            card: card, groupID: groupID, line: line, board: caller.board,
+            session: caller.session
+        ) {
+            CanvasAgentCenter.shared.record(
+                boardID, agent: agent, action: "Type into a terminal",
+                outcome: "Failed: \"\(title)\" did not start in time; the line stays queued")
         }
     }
 
-    /// A bounded wait (at most ten seconds) for the card's shell, then one line.
-    private static func typeLine(
-        _ line: String, into groupID: TerminalGroupID, session: WorkspaceSession
-    ) async -> Bool {
-        for attempt in 0..<100 {
-            if let current = session.terminal.terminalGroup(groupID)?.panes.first,
-                let controller = session.terminal.terminalController(for: current.id),
-                current.status == .live,
-                CanvasLiveBridge.shared.hasBootstrap(controllerID: controller.id) || attempt >= 40
-            {
-                // The PTY buffers the line until the shell reads it.
-                if attempt > 0 { try? await Task.sleep(for: .milliseconds(300)) }
-                if controller.sendReply(line) { return true }
+    enum StartMessageKind { case create, start, send }
+
+    /// What an agent is told after a start. It names states and byte counts, never
+    /// the line itself: this text also goes to the activity log.
+    static func startMessage(
+        _ report: CanvasTerminalStartReport, title: String, kind: StartMessageKind,
+        lineBytes: Int?
+    ) -> String {
+        let moved = report.viewMoved ? " Rafu moved your view to this node." : ""
+        let size = lineBytes.map { "\($0)-byte " } ?? ""
+        let lines =
+            report.queuedLines == 1 ? "1 queued line" : "\(report.queuedLines) queued lines"
+        let check = " Read ensemble_describe (state, agent) before you tell the user an agent runs."
+        if report.running {
+            switch kind {
+            case .create:
+                return
+                    "Started \"\(title)\". Its shell is running and Rafu is typing the \(size)launch line into it.\(moved)\(check)"
+            case .start:
+                let typing =
+                    report.queuedLines > 0 ? " Rafu is typing \(lines) into it." : ""
+                return "The shell in \"\(title)\" is running.\(typing)\(moved)"
+            case .send:
+                return "Typing a \(size)line into \"\(title)\".\(moved)"
             }
-            do { try await Task.sleep(for: .milliseconds(100)) } catch { return false }
         }
-        return false
+        let lead: String
+        switch kind {
+        case .create: lead = "Created \"\(title)\", but its shell is stopped."
+        case .start: lead = "The shell in \"\(title)\" is still stopped."
+        case .send: lead = "\"\(title)\" is stopped."
+        }
+        let queued: String
+        switch kind {
+        case .create, .send:
+            queued = " The \(size)line is queued, not typed (\(lines) in all)."
+        case .start:
+            queued =
+                report.queuedLines == 0
+                ? ""
+                : (report.queuedLines == 1
+                    ? " 1 line stays queued." : " \(report.queuedLines) lines stay queued.")
+        }
+        let advice: String
+        switch report.hold {
+        case .leaseCap:
+            advice =
+                " Four Ensemble terminals already hold a live view. Ask the user to close one, then call terminal_start on this node."
+        case .unavailable:
+            advice =
+                " This node cannot start a shell now (live-session limit or no saved profile). Ask the user to free a terminal, then call terminal_start."
+        case .refused:
+            advice =
+                " Rafu tried to start it and the terminal manager refused; Rafu shows the reason to the user. Ask the user, then call terminal_start."
+        case nil:
+            advice =
+                " Rafu asked the node to start and it did not start within 2.5 seconds. Call terminal_start, then ensemble_describe to check state."
+        }
+        let typing = kind == .start ? "" : " Rafu types the queued lines when the shell starts."
+        return lead + queued + advice + typing + moved
     }
+
+    static func queueFullMessage(_ title: String) -> String {
+        "\"\(title)\" already has \(CanvasBoardState.pendingTerminalLineLimit) queued lines and its shell is not ready. Wait for it to start, or call terminal_start, then send again."
+    }
+
+    static let noAgentTextMessage =
+        "This node has no connected agent for text input. Send command as an argument array, or, if an agent is running here, create a message link (edge_create kind message) and set it live with link_set_state."
 
     private static func terminalSend(_ call: CanvasAgentToolCall, caller: CanvasAgentCaller)
         async throws -> CanvasBridgeResponse
     {
         let card = try findCard(call.nodeID, in: caller.board)
-        guard case .terminal = card.content else {
+        guard case .terminal(let groupID) = card.content else {
             throw CanvasAgentToolError.invalidArgument("node_id")
         }
         if let text = call.text,
@@ -865,19 +999,36 @@ enum CanvasAgentActions {
         }
         let line: String
         if let command = call.command {
+            if let refusal = CanvasAgentShell.refusal(for: command) {
+                throw CanvasAgentToolError.invalidArgumentReason(
+                    key: "command", reason: refusal.reason())
+            }
             guard let quoted = CanvasAgentShell.commandLine(command) else {
                 throw CanvasAgentToolError.invalidArgument("command")
             }
             line = quoted
-        } else {
-            guard creator.agent != nil, let text = call.text else {
-                return .init(
-                    error: "This is a shell terminal. Send command as an argument array.")
+            if let launched = CanvasAgentLaunch.agent(forCommand: command) {
+                CanvasAgentCenter.shared.noteLaunchedAgent(card.id, agent: launched)
             }
-            line = CanvasAgentText.singleLine(text, limit: CanvasAgentToolCall.maximumPromptBytes)
+        } else {
+            // Text needs an agent the app knows about: one Rafu created, or one
+            // that registered with the bridge in this node. A launched-agent hint
+            // from an earlier command is not enough.
+            let pane = caller.session.terminal.terminalGroup(groupID)?.panes.first
+            let connected = pane?.sessionID.flatMap {
+                CanvasLiveBridge.shared.connectedProvider(controllerID: $0)
+            }
+            guard creator.agent != nil || connected != nil, let text = call.text else {
+                return .init(error: Self.noAgentTextMessage)
+            }
+            line = CanvasAgentText.singleLine(
+                text, maxBytes: CanvasAgentToolCall.maximumPromptBytes)
         }
-        try start(card, line: line, caller: caller)
-        return ok("Typing into \"\(card.title)\".", node: card.id)
+        let report = try await start(card, line: line, caller: caller)
+        guard !report.queueFull else { return .init(error: queueFullMessage(card.title)) }
+        return ok(
+            startMessage(report, title: card.title, kind: .send, lineBytes: line.utf8.count),
+            node: card.id, state: report.running ? "running" : "stopped")
     }
 
     // MARK: Edges

@@ -475,3 +475,47 @@ d1c160a, 40d5c72).
 - **Open checks:** live behaviour overnight, with the screensaver running, and
   after a real Ctrl-D is not yet verified. The exact overnight trigger of the
   old Codex "Disconnected from this task" text stays unknown.
+
+## Status (2026-10-25, X4 agent terminal start and send; X5 Mermaid scale)
+
+Workstream X4 (agent orchestration MCP tools), plus one X5 raster-cap change.
+Seven reported bugs addressed.
+
+- **A start no longer reports `ok` when nothing started.** New
+  `Canvas/Integration/CanvasTerminalStarter.swift` queues the line, refuses
+  early with a named reason (4-terminal lease cap, `startAvailability`), reveals
+  the node (pan at live zoom, zoom in below it, and the result says the view
+  moved), sets `terminalStartRequest` only when it is free or already this
+  card, waits at most 2.5 s re-asking at most 3 times, and reports `running` or
+  `stopped` in `ensemble_describe`'s words. A process still starts only through
+  the card's own view (ADR 0023, ADR 0025 preserved).
+- **A `terminal_send` right after `terminal_start` is no longer lost.** Root
+  cause was "pane live ≠ process running ≠ shell ready", not re-entrancy. An
+  ordered per-node queue (8 lines, 15-minute expiry, not observed, not
+  persisted, not logged) drains once the process runs plus a 500 ms settle,
+  bounded at about 10 s, one drain per node; bridge terminals skip the settle.
+  `CanvasTerminalCard` drains on `.task(id: pane.sessionID)`.
+- **Command and prompt bounds are explicit:** 32 arguments, 1,024 bytes each,
+  4,096 bytes per quoted line, prompt 1,024 bytes, `terminal_send` text 4,096
+  bytes. Refusal reasons carry counts only, and `terminal_create` validates
+  before it creates, so a refusal leaves no node.
+- **Mermaid:** `minimumScale` 0.25 (`clampedScale` no longer floors at 1.0) and
+  `maxPointArea` 64 M pt² (8000×8000 pt), with `maxRasterPixels` unchanged at
+  4 M. No `WKWebView`, and no per-node full-size/Export action in this change.
+- **Docs:** new
+  [`ensemble-agent-terminal-tools.md`](../../references/ensemble-agent-terminal-tools.md);
+  ADR 0020 amended (2026-10-25);
+  [`mermaid-native-preview.md`](../../references/mermaid-native-preview.md),
+  [`memory-caps-and-pressure.md`](../../references/memory-caps-and-pressure.md)
+  and [`canvas-live-sessions.md`](../../references/canvas-live-sessions.md)
+  updated.
+- **Verification:** `./script/format.sh --lint` clean; `./script/build.sh` 0
+  source warnings; `./script/test.sh` 2,885 tests in 203 suites passed (16.1 s);
+  `./script/test.sh --no-parallel` 2,885 tests passed (47.4 s);
+  `./script/build_and_run.sh --verify` exit 0.
+- **Open checks — a live MCP pass inside Rafu Lightning is outstanding:** an
+  off-screen or zoomed-out create, `terminal_start` then an immediate
+  `terminal_send`, the 500 ms settle against heavy rc files, the 4-terminal
+  lease cap, Ask mode, the 17-table `erDiagram` by eye, the
+  `.task(id: pane.sessionID)` drain, and the refused-start alert path. The
+  Mermaid caps also still await a measured Release idle pass.

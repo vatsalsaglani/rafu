@@ -82,6 +82,9 @@ public nonisolated enum CanvasAgentToolError: Error, Equatable, Sendable {
     case unexpectedArgument(String)
     case missingArgument(String)
     case invalidArgument(String)
+    /// An invalid value with the reason and the accepted form. The reason carries
+    /// byte counts and limits only, never the offending text.
+    case invalidArgumentReason(key: String, reason: String)
     case headingNotFound
     case noteTooLarge
     case textTooLarge(kilobytes: Int)
@@ -92,6 +95,7 @@ public nonisolated enum CanvasAgentToolError: Error, Equatable, Sendable {
         case .unexpectedArgument(let key): "Unexpected argument \"\(key)\"."
         case .missingArgument(let key): "Missing argument \"\(key)\"."
         case .invalidArgument(let key): "Invalid value for \"\(key)\"."
+        case .invalidArgumentReason(let key, let reason): "Invalid value for \"\(key)\": \(reason)"
         case .headingNotFound: "No Markdown heading in the note matches \"heading\"."
         case .noteTooLarge: "A note can contain at most 64 KiB of UTF-8 text."
         case .textTooLarge(let kilobytes):
@@ -176,6 +180,8 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
     /// An argument vector. Rafu quotes each element; it never runs a shell string.
     public var command: [String]?
     public var prompt: String?
+    /// `terminal_create`: also link the new terminal to the caller by a message link.
+    public var link: Bool?
     public var state: String?
     public var bundleID: String?
     public var appName: String?
@@ -216,6 +222,12 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
     public static let maximumPromptBytes = 4 * 1_024
     public static let maximumCommandBytes = 4 * 1_024
     public static let maximumCommandArguments = 32
+    /// One argument is typed inside one shell line. This 1,024-byte bound and
+    /// the 4,096-byte bound on the whole line are deliberate limits on a line
+    /// typed into a terminal, and on a prompt that must stay one positional
+    /// argument rather than a variadic-flag hazard (commit d79f9fe). They are
+    /// not a measured tty limit.
+    public static let maximumCommandArgumentBytes = 1_024
     public static let maximumNoteSliceScalars = 4_000
 
     /// The risk of the call itself. `terminal_send` into a live message link is
@@ -258,6 +270,7 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         add("Label", label)
         add("Folder", cwd)
         add("Agent", agent)
+        if link == true { lines.append("Link: live message link to this terminal") }
         if let command { add("Command", CanvasAgentShell.commandLine(command)) }
         add("State", state)
         add("App", bundleID ?? appName)
@@ -299,7 +312,7 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         case .nodeUpdate: return ["node_id", "title", "x", "y", "width", "height"]
         case .nodeRemove, .terminalStart, .appInspect: return ["node_id"]
         case .terminalCreate:
-            return placement.union(["title", "cwd", "agent", "command", "prompt"])
+            return placement.union(["title", "cwd", "agent", "command", "prompt", "link"])
         case .terminalSend: return ["node_id", "text", "command"]
         case .edgeCreate: return ["from", "to", "kind", "label"]
         case .edgeRemove: return ["edge_id"]
@@ -369,6 +382,10 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
             call.command = strings
         }
         call.prompt = try string("prompt")
+        if let value = arguments["link"] {
+            guard let flag = value as? Bool else { throw .invalidArgument("link") }
+            call.link = flag
+        }
         call.state = try string("state")?.lowercased()
         call.bundleID = try string("bundle_id")
         call.appName = try string("app_name")
@@ -411,6 +428,12 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
 
     // MARK: Validation
 
+    static func lineTextReason(bytes: Int) -> String {
+        "the text is \(CanvasAgentShellRefusal.grouped(bytes)) bytes; at most "
+            + "\(CanvasAgentShellRefusal.grouped(maximumPromptBytes)) bytes are accepted per call. "
+            + CanvasAgentShellRefusal.longBriefAdvice
+    }
+
     /// Both the MCP server and the app call this. It bounds every field.
     public func validate() throws(CanvasAgentToolError) {
         try validateFieldBounds()
@@ -427,15 +450,25 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         if let title, !CanvasAgentText.validTitle(title) { throw .invalidArgument("title") }
         if let label, !CanvasAgentText.validTitle(label) { throw .invalidArgument("label") }
         if let text, text.utf8.count > Self.maximumTextBytes || text.contains("\0") {
+            if tool == .terminalSend, !text.contains("\0") {
+                throw .invalidArgumentReason(
+                    key: "text", reason: Self.lineTextReason(bytes: text.utf8.count))
+            }
             throw .invalidArgument(tool == .mermaidSet ? "source" : "text")
         }
         if let heading, heading.utf8.count > 200 || heading.contains("\n") {
             throw .invalidArgument("heading")
         }
-        if let prompt,
-            prompt.isEmpty || prompt.utf8.count > Self.maximumPromptBytes || prompt.contains("\0")
-        {
-            throw .invalidArgument("prompt")
+        if let prompt {
+            if prompt.isEmpty || prompt.contains("\0") { throw .invalidArgument("prompt") }
+            if prompt.utf8.count > Self.maximumPromptBytes {
+                throw .invalidArgumentReason(
+                    key: "prompt",
+                    reason: CanvasAgentShellRefusal.argumentTooLong(
+                        index: 1, bytes: prompt.utf8.count,
+                        limit: Self.maximumCommandArgumentBytes
+                    ).reason(isPrompt: true))
+            }
         }
         for (key, value) in [("x", x), ("y", y)] {
             if let value, !value.isFinite || abs(value) > 50_000 { throw .invalidArgument(key) }
@@ -455,8 +488,8 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         if let agent, CanvasAgentLaunch.executable(for: agent) == nil {
             throw .invalidArgument("agent")
         }
-        if let command, CanvasAgentShell.commandLine(command) == nil {
-            throw .invalidArgument("command")
+        if let command, let refusal = CanvasAgentShell.refusal(for: command) {
+            throw .invalidArgumentReason(key: "command", reason: refusal.reason())
         }
         if let bundleID, !CanvasAgentText.validBundleID(bundleID) {
             throw .invalidArgument("bundle_id")
@@ -537,11 +570,21 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
                 }
             }
             if agent != nil, command != nil { throw .invalidArgument("command") }
+            // The prompt becomes one argument of the typed launch line. Refuse here,
+            // before any node exists, with the reason.
+            if let agent, prompt != nil,
+                let argv = CanvasAgentLaunch.argv(agent: agent, prompt: prompt),
+                let refusal = CanvasAgentShell.refusal(for: argv)
+            {
+                throw .invalidArgumentReason(key: "prompt", reason: refusal.reason(isPrompt: true))
+            }
         case .terminalSend:
             try require(nodeID, "node_id")
             guard (text == nil) != (command == nil) else { throw .missingArgument("text") }
-            if let text, text.isEmpty || text.utf8.count > Self.maximumPromptBytes {
-                throw .invalidArgument("text")
+            if let text, text.isEmpty { throw .invalidArgument("text") }
+            if let text, text.utf8.count > Self.maximumPromptBytes {
+                throw .invalidArgumentReason(
+                    key: "text", reason: Self.lineTextReason(bytes: text.utf8.count))
             }
         case .edgeCreate:
             try require(from, "from")
@@ -721,6 +764,23 @@ public nonisolated enum CanvasAgentText {
             && value.unicodeScalars.allSatisfy { allowed.contains($0) }
     }
 
+    /// Control characters become spaces; the result holds at most `maxBytes` bytes
+    /// of UTF-8, cut on a scalar boundary, with no ellipsis. For a line that is
+    /// typed into a terminal, where a count in scalars would not bound the bytes.
+    public static func singleLine(_ value: String, maxBytes: Int) -> String {
+        var scalars = String.UnicodeScalarView()
+        var bytes = 0
+        for scalar in value.unicodeScalars {
+            let kept: Unicode.Scalar =
+                CharacterSet.controlCharacters.contains(scalar) ? " " : scalar
+            let size = String(kept).utf8.count
+            if bytes + size > maxBytes { break }
+            scalars.append(kept)
+            bytes += size
+        }
+        return String(scalars)
+    }
+
     /// Control characters become spaces; the result is cut to `limit` scalars.
     public static func singleLine(_ value: String, limit: Int) -> String {
         var scalars = String.UnicodeScalarView()
@@ -764,17 +824,88 @@ public nonisolated enum CanvasAgentShell {
         return "'" + argument.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    /// One shell line from an argument vector, or nil when the vector is empty,
-    /// too long, or contains control characters. Each element is quoted, so
-    /// no element can add a pipe, redirect, substitution or second command.
+    /// One shell line from an argument vector, or nil when `refusal(for:)` finds
+    /// a reason. Each element is quoted, so no element can add a pipe, redirect,
+    /// substitution or second command.
     public static func commandLine(_ argv: [String]) -> String? {
-        guard let first = argv.first, !first.isEmpty,
-            argv.count <= CanvasAgentToolCall.maximumCommandArguments,
-            argv.allSatisfy({ !CanvasAgentText.hasControl($0) && $0.utf8.count <= 1_024 })
-        else { return nil }
-        let line = argv.map(quote).joined(separator: " ")
-        guard line.utf8.count <= CanvasAgentToolCall.maximumCommandBytes else { return nil }
-        return line
+        guard refusal(for: argv) == nil else { return nil }
+        return argv.map(quote).joined(separator: " ")
+    }
+
+    /// Why `commandLine` would refuse `argv`, or nil when it accepts it. Carries
+    /// indices, byte counts and limits only, never the argument text.
+    public static func refusal(for argv: [String]) -> CanvasAgentShellRefusal? {
+        guard let first = argv.first, !first.isEmpty else { return .empty }
+        let maximumArguments = CanvasAgentToolCall.maximumCommandArguments
+        guard argv.count <= maximumArguments else {
+            return .tooManyArguments(count: argv.count, limit: maximumArguments)
+        }
+        let argumentLimit = CanvasAgentToolCall.maximumCommandArgumentBytes
+        for (index, argument) in argv.enumerated() {
+            if CanvasAgentText.hasControl(argument) { return .controlCharacter(index: index) }
+            let bytes = argument.utf8.count
+            if bytes > argumentLimit {
+                return .argumentTooLong(index: index, bytes: bytes, limit: argumentLimit)
+            }
+        }
+        let lineBytes = argv.map(quote).joined(separator: " ").utf8.count
+        let lineLimit = CanvasAgentToolCall.maximumCommandBytes
+        if lineBytes > lineLimit { return .lineTooLong(bytes: lineBytes, limit: lineLimit) }
+        return nil
+    }
+}
+
+/// Why a typed shell line was refused. `index` counts from zero.
+public nonisolated enum CanvasAgentShellRefusal: Equatable, Sendable {
+    case empty
+    case tooManyArguments(count: Int, limit: Int)
+    case controlCharacter(index: Int)
+    case argumentTooLong(index: Int, bytes: Int, limit: Int)
+    case lineTooLong(bytes: Int, limit: Int)
+
+    static let longBriefAdvice =
+        "Put a long brief in a file or a Rafu note, then pass a short one-line text that names the path or the note title."
+
+    /// 1,024-style digit grouping, independent of the user's locale.
+    static func grouped(_ number: Int) -> String {
+        let digits = String(abs(number))
+        var grouped = ""
+        for (offset, digit) in digits.reversed().enumerated() {
+            if offset > 0, offset % 3 == 0 { grouped.append(",") }
+            grouped.append(digit)
+        }
+        return (number < 0 ? "-" : "") + String(grouped.reversed())
+    }
+
+    /// The reason for an agent to read. `isPrompt` words it for `prompt`, the
+    /// second argument of the agent launch line.
+    public func reason(isPrompt: Bool = false) -> String {
+        let accepted =
+            "The line is typed as one line: at most "
+            + "\(CanvasAgentToolCall.maximumCommandArguments) arguments, "
+            + "\(Self.grouped(CanvasAgentToolCall.maximumCommandArgumentBytes)) bytes each, "
+            + "\(Self.grouped(CanvasAgentToolCall.maximumCommandBytes)) bytes in all, "
+            + "and no control characters."
+        switch self {
+        case .empty:
+            return "the argument array is empty or its first element is empty."
+        case .tooManyArguments(let count, let limit):
+            return "\(count) arguments; at most \(limit) are accepted. \(accepted)"
+        case .controlCharacter(let index):
+            return "argument \(index + 1) contains a control character such as a newline or tab. "
+                + accepted
+        case .argumentTooLong(let index, let bytes, let limit):
+            let subject = isPrompt ? "the prompt" : "argument \(index + 1)"
+            let detail =
+                isPrompt
+                ? "A prompt is typed as one argument of the launch line, so newlines become spaces and it holds at most \(Self.grouped(limit)) bytes."
+                : "Each argument holds at most \(Self.grouped(limit)) bytes of UTF-8 and the whole line at most \(Self.grouped(CanvasAgentToolCall.maximumCommandBytes))."
+            return "\(subject) is \(Self.grouped(bytes)) bytes. \(detail) \(Self.longBriefAdvice)"
+        case .lineTooLong(let bytes, let limit):
+            return
+                "the quoted line is \(Self.grouped(bytes)) bytes; at most \(Self.grouped(limit)) are accepted. "
+                + Self.longBriefAdvice
+        }
     }
 }
 
@@ -788,6 +919,14 @@ public nonisolated enum CanvasAgentLaunch {
 
     public static func executable(for agent: String) -> String? { executables[agent] }
 
+    /// The agent CLI a command starts, when its program is one Rafu knows. Only a
+    /// hint: nothing proves the program runs or registered with the bridge.
+    public static func agent(forCommand argv: [String]) -> String? {
+        guard let first = argv.first else { return nil }
+        let program = first.split(separator: "/").last.map(String.init) ?? first
+        return executables[program] == nil ? nil : program
+    }
+
     /// Claude Code and Codex accept an initial task as one positional argument
     /// and stay interactive.
     public static func acceptsPrompt(_ agent: String) -> Bool {
@@ -800,8 +939,10 @@ public nonisolated enum CanvasAgentLaunch {
         guard let executable = executable(for: agent) else { return nil }
         guard let prompt else { return [executable] }
         guard acceptsPrompt(agent) else { return nil }
-        let line = CanvasAgentText.singleLine(prompt, limit: CanvasAgentToolCall.maximumPromptBytes)
-            .trimmingCharacters(in: .whitespaces)
+        let line = CanvasAgentText.singleLine(
+            prompt, maxBytes: CanvasAgentToolCall.maximumPromptBytes
+        )
+        .trimmingCharacters(in: .whitespaces)
         return line.isEmpty ? [executable] : [executable, line]
     }
 }
@@ -895,6 +1036,16 @@ public nonisolated struct CanvasAgentToolResult: Codable, Hashable, Sendable {
     public var createdNodes: [String: String]?
     /// A workspace-relative file path, for example an export.
     public var path: String?
+    /// `send_message`: true when Rafu queued the message for the receiving
+    /// agent. It does not mean the agent has read it.
+    public var delivered: Bool?
+    /// `terminal_create` with `link`: the new peer's `@mention` for `send_message`.
+    public var mention: String?
+    /// `terminal_create`, `terminal_start` and `terminal_send`: where the
+    /// node's shell stands when the call returns. Same words as the node
+    /// `state` in `ensemble_describe`: `running` or `stopped`. `stopped` means
+    /// any line is queued, not typed.
+    public var state: String?
 
     public init(status: Status = .ok, message: String? = nil) {
         self.status = status
@@ -982,6 +1133,10 @@ public nonisolated enum CanvasAgentToolCatalog {
         property("string", "Title, at most 120 characters.")
     }
 
+    private static var commandLimits: String {
+        "Typed as one line: at most \(CanvasAgentToolCall.maximumCommandArguments) arguments, \(CanvasAgentToolCall.maximumCommandArgumentBytes) bytes each, \(CanvasAgentToolCall.maximumCommandBytes) bytes in all, no control characters."
+    }
+
     private static func schema(_ properties: [String: Any], required: [String] = [])
         -> [String: Any]
     {
@@ -1046,7 +1201,7 @@ public nonisolated enum CanvasAgentToolCatalog {
             )
         case .nodeCreate:
             return (
-                "Add a node. kind note/mermaid/text use text; file/image use a workspace-relative path; web uses a localhost URL; app uses bundle_id or app_name (the app is not launched; use app_open); shape uses shape; service_icon uses pack_id and icon_id from icon_search plus label; frame uses title and member_ids. A terminal node is created stopped.",
+                "Add a node. kind note/mermaid/text use text (a Mermaid diagram larger than 8000 by 8000 pt is not drawn; split it); file/image use a workspace-relative path; web uses a localhost URL; app uses bundle_id or app_name (the app is not launched; use app_open); shape uses shape; service_icon uses pack_id and icon_id from icon_search plus label; frame uses title and member_ids. A terminal node is created stopped.",
                 schema(
                     [
                         "kind": property(
@@ -1089,7 +1244,7 @@ public nonisolated enum CanvasAgentToolCatalog {
             )
         case .terminalCreate:
             return (
-                "Add a terminal node. With agent (claude, codex, opencode, gemini, cursor, kimi, cline) or command (an argument array, never a shell string) Rafu starts the shell in the visible node and types that command. prompt gives claude or codex its first task. Starting asks the user unless Agent control is Allow.",
+                "Add a terminal node. With agent (claude, codex, opencode, gemini, cursor, kimi, cline) or command (an argument array, never a shell string) Rafu starts the shell in the visible node and types that command. prompt gives claude or codex its first task. A prompt or command is typed as one line (see the limits on those arguments), so a long brief goes in a file or a note and the prompt names it. link true also adds a message link from your node to the new one: use it for every claude or codex peer, even one meant for the user (pause the link for quiet, do not skip it). Starting moves the user's view to the node. The reply has state: running means the shell is up and Rafu is typing the line; stopped means the node exists and the line is queued, not typed. Read state, then ensemble_describe and list_connections, before you tell the user an agent runs. Starting asks the user unless Agent control is Allow.",
                 schema(
                     [
                         "title": title,
@@ -1098,32 +1253,48 @@ public nonisolated enum CanvasAgentToolCatalog {
                             "string", "Agent CLI to start.",
                             ["enum": CanvasAgentLaunch.executables.keys.sorted()]),
                         "command": property(
-                            "array", "Argument vector to run instead of an agent.",
+                            "array",
+                            "Argument vector to run instead of an agent. \(commandLimits)",
                             [
-                                "items": ["type": "string"],
+                                "items": [
+                                    "type": "string",
+                                    "maxLength": CanvasAgentToolCall.maximumCommandArgumentBytes,
+                                ],
                                 "maxItems": CanvasAgentToolCall.maximumCommandArguments,
                             ]),
-                        "prompt": property("string", "First task for claude or codex."),
+                        "prompt": property(
+                            "string",
+                            "First task for claude or codex, typed as one argument of the launch line: at most \(CanvasAgentToolCall.maximumCommandArgumentBytes) bytes, newlines become spaces. For a longer brief write a file or a note and pass a one-line prompt that names the path or note title and what to do with it.",
+                            ["maxLength": CanvasAgentToolCall.maximumCommandArgumentBytes]),
+                        "link": property(
+                            "boolean",
+                            "Also add a message link from your node to the new terminal, Paused until you call link_set_state live. Do this for a claude or codex peer; the link turns Live when both run an agent."
+                        ),
                         "near": near, "x": x, "y": y,
                     ])
             )
         case .terminalStart:
             return (
-                "Start the shell in a stopped terminal node. Asks the user unless Agent control is Allow.",
+                "Start the shell in a stopped terminal node and type any lines queued for it. Moves the user's view to the node. The reply has state (running or stopped); stopped means queued lines are still not typed. Asks the user unless Agent control is Allow.",
                 schema(["node_id": nodeID], required: ["node_id"])
             )
         case .terminalSend:
             return (
-                "Send work to a terminal node. text goes through a Live message link when one connects you, like send_message. Otherwise Rafu types it only into a terminal you created: text into an agent terminal, or command (an argument array) into a shell terminal. Typing asks the user unless Agent control is Allow.",
+                "Send work to a terminal node. text goes through a Live message link when one connects you, like send_message. Otherwise Rafu types it only into a terminal you created: text into an agent terminal, or command (an argument array) into a shell terminal. The reply has state: stopped means the line is queued, not typed. If Rafu says no agent is connected but one runs in that node, link it (edge_create kind message, then link_set_state live). Typing asks the user unless Agent control is Allow.",
                 schema(
                     [
                         "node_id": nodeID,
                         "text": property(
-                            "string", "Task or one line of input.",
+                            "string",
+                            "Task or one line of input, at most \(CanvasAgentToolCall.maximumPromptBytes) bytes. For a longer brief write a file or a note and send a one-line text that names it.",
                             ["maxLength": CanvasAgentToolCall.maximumPromptBytes]),
                         "command": property(
-                            "array", "Argument vector for a shell terminal you created.",
-                            ["items": ["type": "string"]]),
+                            "array",
+                            "Argument vector for a shell terminal you created. \(commandLimits)",
+                            [
+                                "items": ["type": "string"],
+                                "maxItems": CanvasAgentToolCall.maximumCommandArguments,
+                            ]),
                     ], required: ["node_id"])
             )
         case .edgeCreate:
@@ -1171,7 +1342,7 @@ public nonisolated enum CanvasAgentToolCatalog {
             )
         case .mermaidSet:
             return (
-                "Set the Mermaid source of a mermaid node. Rafu renders it natively.",
+                "Set the Mermaid source of a mermaid node. Rafu renders it natively up to 8000 by 8000 pt; a larger diagram shows its raw source, so split big diagrams into several smaller ones.",
                 schema(
                     [
                         "node_id": nodeID,

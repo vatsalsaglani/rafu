@@ -157,11 +157,30 @@ against a ~150 MB idle target. Caps, recorded in
 
 | Cap | Value | Behaviour on breach |
 |---|---|---|
-| Raster pixels per diagram | 4 M px (~16 MB) | back off `scale` toward 1.0 |
-| Diagram point area | 4 M pt² (~2000×2000 pt) | honest fallback, "too large to render natively" |
+| Raster pixels per diagram | 4 M px (~16 MB) | back off `scale` toward `minimumScale` |
+| Minimum effective scale | 0.25 | `clampedScale` floors here; the card scales the raster to fit |
+| Diagram point area | 64 M pt² (8000×8000 pt) | honest fallback, "too large to render natively" |
 | Layout cache entries | 24, LRU | bounded `PreparedDiagram` retention |
 
 These are **proposals, not measurements.** Revisit against a Release idle pass.
+
+### Amendment (2026-10-25): a large diagram scales down instead of being refused
+
+The native bounded-renderer decision is unchanged. Only the caps move.
+
+`minimumScale` is `0.25` and `clampedScale` now floors at it rather than at
+`1.0`, so a large but legal diagram renders smaller instead of refusing.
+`maxPointArea` rises from 4 M pt² to **64,000,000 pt² (8000×8000 pt)**, which is
+`maxRasterPixels / 0.25²` — every accepted diagram therefore still fits the pixel
+cap. `maxRasterPixels` is unchanged at 4,000,000 (~16 MB worst-case raster).
+
+A 2534×1910 pt diagram renders at about 0.91 scale. That figure is arithmetic
+from the caps, not a visual check. A layout probe of a 400-node fan-out measured
+about 68 M pt² in about 0.3 s, i.e. just past the refusal line.
+
+No `WKWebView` is introduced (the AGENTS.md invariant holds), and this change
+adds no per-node "Open full size" or Export action. The "proposal pending a
+measured Release idle pass" caveat above still applies to all of these values.
 
 ## Alternatives considered
 

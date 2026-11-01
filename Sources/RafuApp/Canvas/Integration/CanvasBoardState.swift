@@ -54,6 +54,13 @@ final class CanvasBoardState: Identifiable {
     /// (or restart) its shell. The card clears it. Starting is always an
     /// explicit user action; nothing sets this on its own.
     var terminalStartRequest: CanvasCardID?
+    /// Lines an agent asked Rafu to type into a terminal node whose shell is
+    /// not ready. Held in order, a few per node, and dropped when they get
+    /// old, when the node goes, or when the board closes. Never saved, never
+    /// logged, and not observed: the terminal card and the agent tools drain it.
+    @ObservationIgnored var pendingTerminalLines: [CanvasCardID: [PendingTerminalLine]] = [:]
+    /// Nodes with a drain loop running, so one node never has two.
+    @ObservationIgnored var terminalLineDrains: Set<CanvasCardID> = []
     /// Board-space point for the next added card, set by the Add popover and
     /// consumed by `add`. Any other path to add a card clears it first.
     @ObservationIgnored var creationCenter: CGPoint?
@@ -168,6 +175,7 @@ final class CanvasBoardState: Identifiable {
         redo.removeAll()
         revokeChangedLinks(replacing: changed)
         document = changed
+        prunePendingTerminalLines()
         markDirty()
         requestSave?()
     }
