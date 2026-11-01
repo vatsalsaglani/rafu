@@ -16,6 +16,8 @@ nonisolated enum CanvasLimits {
     static let connections = 200
     static let noteBytes = 64 * 1_024
     static let documentBytes = 2 * 1_024 * 1_024
+    /// How much of a Markdown file an Ensemble file card reads and renders.
+    static let markdownPreviewBytes = 64 * 1_024
     static let webSurfaces = 2
     /// Whiteboard and Mermaid bounds (X5).
     static let mermaidSourceBytes = 16 * 1_024

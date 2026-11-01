@@ -31,6 +31,20 @@ struct CanvasRepositoryCardTests {
             to: root.appending(path: "large.txt"))
         let prefix = try await CanvasPreviewLoader.text(path: "large.txt", root: root)
         #expect(prefix.utf8.count == 8 * 1_024)
+        try Data(String(repeating: "y", count: 128 * 1_024).utf8).write(
+            to: root.appending(path: "huge.md"))
+        let preview = try await CanvasPreviewLoader.text(
+            path: "huge.md", root: root, limit: CanvasLimits.markdownPreviewBytes)
+        #expect(preview.utf8.count == 64 * 1_024)
+        // The limit is clamped: a larger request never reads more than 64 KiB.
+        let clamped = try await CanvasPreviewLoader.text(
+            path: "huge.md", root: root, limit: 10 * 1_024 * 1_024)
+        #expect(clamped.utf8.count == 64 * 1_024)
+        try Data([0x61, 0, 0x62]).write(to: root.appending(path: "binary.md"))
+        await #expect(throws: CanvasError.unavailable) {
+            try await CanvasPreviewLoader.text(
+                path: "binary.md", root: root, limit: CanvasLimits.markdownPreviewBytes)
+        }
     }
 
     @Test("Image decode has bounded RGBA dimensions and failed loads release their reservation")

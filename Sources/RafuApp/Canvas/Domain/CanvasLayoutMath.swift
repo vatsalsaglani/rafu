@@ -75,7 +75,6 @@ nonisolated struct CanvasResizeOutcome: Equatable, Sendable {
 
 nonisolated enum CanvasLayoutMath {
     static let maximumDimension = 2_000.0
-    static let tidyGap = 16.0
     /// Resistance past the minimum: 30% of the excess, at most 12 pt.
     static let resistanceFactor = 0.3
     static let resistanceLimit = 12.0
@@ -126,32 +125,6 @@ nonisolated enum CanvasLayoutMath {
                 result[index].y = cursor
             }
             cursor += length(rects[index]) + gap
-        }
-        return result
-    }
-
-    /// Flows the rects in reading order into rows separated by `tidyGap`, so
-    /// no two rects overlap. Returns rects in input order.
-    static func tidy(_ rects: [CanvasRect], maximumRowWidth: Double = 1_800) -> [CanvasRect] {
-        guard !rects.isEmpty else { return rects }
-        let order = readingOrder(of: rects.enumerated().map { ($0.offset, $0.element) })
-        let originX = rects.map(\.x).min() ?? 0
-        let originY = rects.map(\.y).min() ?? 0
-        var result = rects
-        var x = originX
-        var y = originY
-        var rowHeight = 0.0
-        for index in order {
-            let rect = rects[index]
-            if x > originX, x + rect.width > originX + maximumRowWidth {
-                x = originX
-                y += rowHeight + tidyGap
-                rowHeight = 0
-            }
-            result[index].x = x
-            result[index].y = y
-            x += rect.width + tidyGap
-            rowHeight = max(rowHeight, rect.height)
         }
         return result
     }
@@ -334,6 +307,15 @@ extension CanvasCardContent {
         // Whiteboard items stay light: only the stored card minimum applies.
         case .shape, .stroke, .text, .serviceIcon:
             CGSize(width: CanvasRect.absoluteMinimumWidth, height: CanvasRect.absoluteMinimumHeight)
+        }
+    }
+
+    /// A whiteboard item: shape, stroke, text or service icon. Tidy Up moves a
+    /// loose one together with the card it sits next to.
+    nonisolated var isWhiteboardDrawing: Bool {
+        switch self {
+        case .shape, .stroke, .text, .serviceIcon: true
+        case .file, .image, .note, .terminal, .web, .nativeApp, .mermaid, .frame: false
         }
     }
 

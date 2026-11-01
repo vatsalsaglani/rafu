@@ -718,6 +718,116 @@ so no deck content can win their clicks.
   that a native terminal card (an AppKit view) obeys the content shape; if it
   does not, its `NativeContentMount.hitTest` needs a visible-rect guard.
 
+## 2026-11-01: Find in Ensemble (⌘F) and the find gate
+
+Last verified: Apple Swift 6.4 (swiftlang-6.4.0.34.1), macOS 27.0.1 (26A434).
+Build and unit tests only; the key path was not driven with real input.
+
+- **Paths:** the bar's magnifying-glass button, Ensemble > Find in Ensemble…
+  (⌘F), and the palette row "Ensemble: Find…". All three set
+  `CanvasBoardState.isFindPresented`. The board shows `CanvasFindPanel` as a
+  palette near its top (`CanvasFindOverlay`, an overlay on the board surface,
+  over a light scrim): command-palette width and chrome, no animation. A
+  click on the scrim or Esc closes it. Return or a click calls
+  `focusCanvasCard(_:in:)` (reveal and select, as the agent-summary jump
+  menus do).
+- **⌘F ownership.** Edit > Find in File… (⌘F) is `.disabled` while no document
+  is selected, and selecting an Ensemble tab sets `selectedDocumentID = nil`.
+  The Ensemble item is declared inside `CanvasCommands`' `if let board,
+  session` block, so ⌘F exists as an Ensemble key only while a board is the
+  selected tab. A split with an editor in one group and an Ensemble in the
+  other has one of them focused; check both focus orders by hand.
+- **The find gate.** The palette's field must never send N, T, V, H, Space or
+  Delete to the board. `CanvasInlineRename.boardTakesKeys` now also needs
+  `isFindPresented == false`, and "Delete Link" (⌘Delete) is disabled while
+  the palette is open. Any new palette or popover that owns a text field over
+  the board must join that gate.
+- **Index.** `CanvasBoardSearchIndex` (pure, `Domain/CanvasBoardSearch.swift`)
+  holds titles and small metadata only: kind, path, host, bundle id, a Mermaid
+  first line, a 120-character prefix of a text or shape label, a frame's card
+  count, agent name, peer titles and link labels. It never holds a note body
+  (up to 64 KiB, and a stale snapshot) or terminal output. Matching reuses
+  `CommandPaletteMatcher`; the title counts in full, other fields at half.
+- **Agent kind is runtime-only.** A terminal card stores a group id. The
+  provider comes from the live pane (`directAgentTerminal`, else the
+  controller's `resolvedAgentProvider`) and is injected into the pure index.
+  Provider changes do not bump `changeStamp`, so the list refreshes on
+  reopen, not live.
+- **Filters.** Kind chips and agent chips show only what is on the board.
+  Kinds and agents are one "or" group; "Linked" is an "and". Chips for cards
+  that vanish are dropped from the filter.
+- **Tests:** `Tests/RafuAppTests/Canvas/CanvasBoardSearchTests.swift`,
+  `CanvasInlineRenameTests` (the gate).
+- **Manual check still required:** ⌘F in a split with an editor in both
+  focus orders; typing "n", "t", Space and Delete in the field changes
+  nothing on the board; VoiceOver reads the field and each row; Return on an
+  off-screen card pans to it and selects it; after Return on a terminal card
+  the terminal has keyboard focus (the popover close must not take it back).
+
+## 2026-11-01: Markdown file cards render a preview
+
+Last verified: Apple Swift 6.4 (swiftlang-6.4.0.34.1), macOS 27.0.1 (26A434).
+Build and unit tests only; the card was not driven with a real pointer.
+
+- **Behaviour.** A file card for a `.md` or `.markdown` file opens as a rendered
+  preview: front matter (`MarkdownFrontmatterCard`), headings, lists, tables,
+  fenced code with the Tree-sitter fence highlighter, and native Mermaid
+  diagrams. Other file cards keep the plain excerpt. A "Show Source" /
+  "Show Preview" button sits at the card's top trailing corner (only while the
+  pointer is over the card or it is active), and the card menu has the same
+  action (`CanvasCardCommands.secondary`).
+- **The toggle is view state, not saved.** `CanvasCardContent` is a Codable
+  enum; a flag on `.file(path:)` would change the shape of every file card in
+  every `.rafuensemble` file. The choice lives in
+  `CanvasBoardResources.markdownCardShowsSource` and is dropped on prune or
+  stop. A reopened board shows Preview again. A test pins that the encoded
+  cards are identical before and after a toggle.
+- **Read path.** `CanvasPreviewLoader.text(path:root:limit:)` takes a limit
+  (default 8 KiB for the excerpt) clamped to
+  `CanvasLimits.markdownPreviewBytes` (64 KiB). The open document's buffer
+  (even a dirty one) wins over the disk. The text is cut at its last line end
+  when it reaches the limit (`CanvasMarkdownCard.truncatedAtLastLine`) and the
+  card ends with "Preview shows the first 64 KB". A cut can still fall inside
+  a fenced block; that is accepted and shown with the notice.
+- **Render path.** The source is parsed off the main actor into
+  `CanvasMarkdownCard.Item` rows (`MarkdownPreviewSegmentParser`, then
+  `CanvasNoteMarkdown.blocks(in:)` per Markdown segment). Only the rows stay in
+  `@State`; the source string is dropped. Rows sit in a `LazyVStack`, one
+  MarkdownUI view per top-level block, so a long file builds only what is
+  scrolled to. Row ids are running numbers: each segment numbers its blocks
+  from line zero, so a source line is not unique. At most 8 Mermaid diagrams
+  render natively per card; later fences show as code.
+- **Refresh.** No file watcher. The load task is keyed by path and the matching
+  open document's `revision`, which changes on save and on an external reload.
+  Typing in an open editor does not refresh the card until it is saved.
+- **Scroll ownership.** The scroll view is `.scrollDisabled` unless the card is
+  content-active. Wheel events were already safe: the board's scroll monitor
+  keeps them (pans and zooms) unless the pointer is inside the focused,
+  content-active card's body (`capturesScroll`). A single click on the body
+  makes the card content-active (`activateCard` -> `board.focus`).
+- **Source mode no longer colours prose as code.** The regex
+  `SyntaxHighlighter` appended its Markdown rules after the generic operator,
+  number and keyword rules, then the trailing string and `#` comment rules
+  repainted headings and quoted prose, so "In", "for" and "in" turned into
+  keywords. `md` and `markdown` now use their own rule list
+  (`markdownRules`: HTML comment, heading, bold, italic, list, quote, link,
+  inline code). The editor uses Tree-sitter for Markdown, so this path serves
+  the excerpt card and the regex fallback.
+- **Known limits.** Task-list boxes are inert (no `canvasNoteTasks` context:
+  a file card never writes the file) but VoiceOver still announces them. A
+  double-click opens the file in the editor, so it cannot select a word.
+  Relative images and links resolve against the file's own folder;
+  `CanvasNoteLink` and `CanvasNoteImageProvider` still refuse anything outside
+  the workspace.
+- **Tests:** `CanvasMarkdownCardTests`, `EditorSyntaxHighlighterTests`
+  ("Markdown source is never coloured as code"), `CanvasRepositoryCardTests`
+  (limit clamp), `CanvasCardBoundsTests` (the preview keeps its size).
+- **Manual check still required:** a `.md` card renders by default; it scrolls
+  inside once clicked and the board pans and zooms when it is not active;
+  Show Source colours Markdown only; resize and zoom faces keep the borders;
+  a save in the editor refreshes the card; Reduce Motion and VoiceOver; reopen
+  the board and see Preview again with no new keys in the `.rafuensemble` file.
+
 ## Why it matters
 
 Canvas mixes gesture-driven custom views with native responders (terminal, web,

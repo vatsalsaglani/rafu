@@ -209,6 +209,7 @@ struct SyntaxHighlighter {
     }
 
     private var rules: [Rule] {
+        if ["md", "markdown"].contains(fileExtension) { return Self.markdownRules }
         // Rule order matters: later rules override earlier attributes, so
         // strings/doc comments/comments come last to win inside their spans.
         var rules: [Rule] = [
@@ -226,17 +227,6 @@ struct SyntaxHighlighter {
                         #"\b(?!(?:if|for|while|switch|catch|guard|return|in|do|else)\b)([a-z_][\w]*)\s*\("#,
                         "function", captureGroup: 1),
                 ], at: 0)
-        }
-        if ["md", "markdown"].contains(fileExtension) {
-            rules.append(contentsOf: [
-                Rule(#"(?m)^#{1,6}\s+.*$"#, "markup.heading"),
-                Rule(#"\*\*[^*\n]+\*\*|__[^_\n]+__"#, "markup.bold"),
-                Rule(#"(?<![*_\w])[*_][^*_\n]+[*_](?![*_\w])"#, "markup.italic"),
-                Rule(#"(?m)^\s*(?:[-*+]|\d+\.)\s"#, "markup.list"),
-                Rule(#"(?m)^>.*$"#, "markup.quote"),
-                Rule(#"`[^`\n]+`"#, "markup.code"),
-                Rule(#"\[[^\]]+\]\([^\)]+\)"#, "markup.link"),
-            ])
         }
         if ["swift", "py", "pyw", "js", "jsx", "mjs", "cjs", "ts", "tsx", "rs", "go", "rb"]
             .contains(fileExtension)
@@ -276,14 +266,35 @@ struct SyntaxHighlighter {
         if fileName == "makefile" || fileName.hasSuffix(".mk") {
             rules.append(Rule(#"(?m)^([A-Za-z0-9_.%/-]+)\s*:"#, "function", captureGroup: 1))
         }
-        // Spans that must win over everything matched above.
-        rules.append(contentsOf: [
+        return rules + Self.codeSpanRules
+    }
+
+    /// Spans that must win over everything matched before them in a code file.
+    private static var codeSpanRules: [Rule] {
+        [
             Rule(#"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'"#, "string"),
             Rule(#"\\(?:[nrt0\\'\"]|u\{[0-9A-Fa-f]+\}|x[0-9A-Fa-f]{2})"#, "escape"),
             Rule(#"(?m)///.*$|/\*\*[\s\S]*?\*/"#, "docComment"),
             Rule(#"(?m)//(?!/).*$|/\*(?!\*)[\s\S]*?\*/|(?m)^\s*#(?!\w).*$"#, "comment"),
-        ])
-        return rules
+        ]
+    }
+
+    /// Markdown is prose, not code: no keyword, operator, number, string or
+    /// `#` comment rules, so "In", "for", "42" and quoted words keep the plain
+    /// foreground and a `# Heading` stays a heading. Later rules win, so inline
+    /// code comes after bold and italic. The editor uses Tree-sitter for
+    /// Markdown; this path serves Ensemble file cards and the regex fallback.
+    private static var markdownRules: [Rule] {
+        [
+            Rule(#"(?s)<!--.*?-->"#, "comment"),
+            Rule(#"(?m)^#{1,6}\s+.*$"#, "markup.heading"),
+            Rule(#"\*\*[^*\n]+\*\*|__[^_\n]+__"#, "markup.bold"),
+            Rule(#"(?<![*_\w])[*_][^*_\n]+[*_](?![*_\w])"#, "markup.italic"),
+            Rule(#"(?m)^\s*(?:[-*+]|\d+\.)\s"#, "markup.list"),
+            Rule(#"(?m)^>.*$"#, "markup.quote"),
+            Rule(#"\[[^\]]+\]\([^\)]+\)"#, "markup.link"),
+            Rule(#"`[^`\n]+`"#, "markup.code"),
+        ]
     }
 
     private var isCodeFile: Bool {

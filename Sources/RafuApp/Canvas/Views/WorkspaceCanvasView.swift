@@ -64,6 +64,9 @@ struct WorkspaceCanvasView: View {
             // below the tool palette (`boardTopOverlay`).
             boardSurface
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .overlay(alignment: .top) {
+                    CanvasFindOverlay(board: board, session: session)
+                }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(theme.palette.editorBackground)
@@ -90,6 +93,21 @@ struct WorkspaceCanvasView: View {
         .onChange(of: board.contentIsActive) { wasActive, isActive in
             // Leaving content by any route (menu, palette, button) returns keys to the board.
             if wasActive, !isActive { boardHasKeyboardFocus = true }
+            board.attentionFocusChanged()
+        }
+        // Tidy Up reads focus time. Only these coarse transitions feed it.
+        .onChange(of: board.focusedCardID) { _, _ in board.attentionFocusChanged() }
+        .onReceive(
+            NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)
+        ) {
+            _ in
+            board.suspendAttention()
+            session.flushCanvasAttention(board)
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+        ) {
+            _ in board.resumeAttention()
         }
         .onChange(of: board.cards.count) { _, count in
             if count > 0 { tipDismissed = true }
@@ -98,8 +116,11 @@ struct WorkspaceCanvasView: View {
             session.canvasResources[board.id]?.present(owner: presentationID)
             // A reopened board restores message links Paused; say so once.
             showsRestoredLinksNotice = pausedLinkCount > 0
+            if NSApplication.shared.isActive { board.resumeAttention() }
         }
         .onDisappear {
+            board.suspendAttention()
+            session.flushCanvasAttention(board)
             connectionDrag.reset()
             session.canvasResources[board.id]?.hide(owner: presentationID)
         }
@@ -361,7 +382,8 @@ struct WorkspaceCanvasView: View {
     /// the card instead of saving the new name.
     private var boardTakesKeys: Bool {
         CanvasInlineRename.boardTakesKeys(
-            contentIsActive: board.contentIsActive, renamingCardID: board.renamingCardID)
+            contentIsActive: board.contentIsActive, renamingCardID: board.renamingCardID,
+            isFindPresented: board.isFindPresented)
     }
 
     /// Delete reaches a selected edge even when the board has no keyboard

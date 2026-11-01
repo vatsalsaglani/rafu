@@ -111,6 +111,16 @@ struct CanvasCardCommands {
                     id: "dock", title: "Dock \(card.title)", symbol: "rectangle.inset.filled"
                 ) { app.dock(appName: card.title, session: session) }
             ]
+        case .file(let path):
+            guard CanvasMarkdownCard.isMarkdown(path: path), let resources else { return [] }
+            let showsSource = resources.showsSource(for: card.id, path: path)
+            return [
+                Action(
+                    id: "markdownSource",
+                    title: showsSource ? "Show Preview" : "Show Source",
+                    symbol: showsSource ? "doc.richtext" : "chevron.left.forwardslash.chevron.right"
+                ) { resources.toggleSource(for: card.id, path: path) }
+            ]
         default:
             return []
         }
@@ -309,9 +319,13 @@ nonisolated enum CanvasInlineRename {
     }
 
     /// Board shortcuts (Return, Space, Delete, arrows, Tab, N, T, ⌘A, ⌘Z)
-    /// apply only when no card content is active and no title field is open.
-    static func boardTakesKeys(contentIsActive: Bool, renamingCardID: CanvasCardID?) -> Bool {
-        !contentIsActive && renamingCardID == nil
+    /// apply only when no card content is active, no title field is open, and
+    /// the Find in Ensemble field is closed. Otherwise typing "n" in the find
+    /// field would add a note.
+    static func boardTakesKeys(
+        contentIsActive: Bool, renamingCardID: CanvasCardID?, isFindPresented: Bool
+    ) -> Bool {
+        !contentIsActive && renamingCardID == nil && !isFindPresented
     }
 }
 

@@ -17,13 +17,19 @@ struct CanvasInlineRenameTests {
         #expect(CanvasInlineRename.committedTitle(draft: tooLong, current: "Terminal") == nil)
     }
 
-    @Test("Board shortcuts stand aside while a title field or card content has the keys")
+    @Test("Board shortcuts stand aside while a title field, card content or find has the keys")
     func boardTakesKeys() {
         let id = CanvasCardID()
-        #expect(CanvasInlineRename.boardTakesKeys(contentIsActive: false, renamingCardID: nil))
-        #expect(!CanvasInlineRename.boardTakesKeys(contentIsActive: false, renamingCardID: id))
-        #expect(!CanvasInlineRename.boardTakesKeys(contentIsActive: true, renamingCardID: nil))
-        #expect(!CanvasInlineRename.boardTakesKeys(contentIsActive: true, renamingCardID: id))
+        func takes(content: Bool, renaming: CanvasCardID?, find: Bool) -> Bool {
+            CanvasInlineRename.boardTakesKeys(
+                contentIsActive: content, renamingCardID: renaming, isFindPresented: find)
+        }
+        #expect(takes(content: false, renaming: nil, find: false))
+        #expect(!takes(content: false, renaming: id, find: false))
+        #expect(!takes(content: true, renaming: nil, find: false))
+        #expect(!takes(content: true, renaming: id, find: false))
+        // Typing in the Find in Ensemble field must never reach N, T, Space or Delete.
+        #expect(!takes(content: false, renaming: nil, find: true))
     }
 
     @Test("Every board key handler checks the rename-aware gate")

@@ -277,6 +277,7 @@ final class WorkspaceCanvasStore {
     }
 
     func forgetClosed(_ id: CanvasID) {
+        saveAttentionAtClose(id)
         boards[id]?.discardPendingTerminalLines()
         onBoardHidden?(id)
         boards[id] = nil
@@ -299,15 +300,66 @@ final class WorkspaceCanvasStore {
     }
 
     func flushAll() async -> Bool {
+        for board in Array(boards.values) { await flushAttention(board) }
         for id in Array(boards.keys) {
             guard await save(id) else { return false }
         }
         return true
     }
 
+    // MARK: Attention
+
+    /// Writes the focus time a board has gathered since its last flush to the
+    /// sidecar. Cheap and safe to call at any boundary: with nothing gathered
+    /// it does nothing, and a write that fails keeps the time for later.
+    func flushAttention(_ board: CanvasBoardState) async {
+        guard let workspace, boards[board.id] === board else { return }
+        let delta = board.takeAttentionDelta()
+        guard !delta.isEmpty else { return }
+        let saved = await persistence.recordAttention(
+            board.id, delta: delta, live: Set(board.cards.map(\.id)), workspace: workspace)
+        if let saved {
+            board.adoptSavedAttention(saved)
+        } else {
+            board.restoreAttentionDelta(delta)
+        }
+    }
+
+    /// The board is closing: ends its running stretch and writes what is left.
+    private func saveAttentionAtClose(_ id: CanvasID) {
+        guard let workspace, let board = boards[id] else { return }
+        board.requestAttentionFlush = nil
+        board.suspendAttention()
+        let delta = board.takeAttentionDelta()
+        guard !delta.isEmpty else { return }
+        let live = Set(board.cards.map(\.id))
+        Task(name: "Save Ensemble attention") { [persistence] in
+            _ = await persistence.recordAttention(
+                id, delta: delta, live: live, workspace: workspace)
+        }
+    }
+
+    private func loadAttention(into board: CanvasBoardState) {
+        guard let workspace else { return }
+        let ticket = generation
+        let id = board.id
+        Task(name: "Load Ensemble attention") { [weak self, weak board, persistence] in
+            let saved = await persistence.loadAttention(id, workspace: workspace)
+            guard let self, let board, self.generation == ticket, self.boards[board.id] === board,
+                board.attentionSaved.isEmpty
+            else { return }
+            board.adoptSavedAttention(saved)
+        }
+    }
+
     private func install(_ document: CanvasDocument) -> CanvasBoardState {
         boards[document.id]?.requestSave = nil
+        boards[document.id]?.requestAttentionFlush = nil
         let board = CanvasBoardState(document: document)
+        board.requestAttentionFlush = { [weak self, weak board] in
+            guard let self, let board else { return }
+            Task(name: "Save Ensemble attention") { await self.flushAttention(board) }
+        }
         board.revokeSessionLinks = { [weak board] ids in
             guard let board else { return }
             for id in ids { CanvasLiveBridge.shared.disable(id, in: board) }
@@ -325,6 +377,7 @@ final class WorkspaceCanvasStore {
             }
         }
         boards[document.id] = board
+        loadAttention(into: board)
         return board
     }
 

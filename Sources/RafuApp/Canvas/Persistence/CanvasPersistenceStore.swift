@@ -92,6 +92,7 @@ actor CanvasPersistenceStore {
             try Task.checkCancellation()
             try FileManager.default.removeItem(at: url)
         }
+        forgetAttention(id, workspace: workspace)
     }
 
     // MARK: File-bound boards (X5)
@@ -145,6 +146,140 @@ actor CanvasPersistenceStore {
         return Array(
             records.filter { CanvasCardContent.validRelativePath($0.path) }
                 .suffix(Self.fileBoardIndexLimit))
+    }
+
+    // MARK: Attention sidecar
+
+    /// Durations and dates only, per board and card id. Never a title, a path
+    /// or any card text. Lives beside the boards, outside every board file and
+    /// every `.rafuensemble` file, so it is never shared by accident.
+    private nonisolated struct AttentionFile: Codable, Equatable, Sendable {
+        struct Card: Codable, Equatable, Sendable {
+            var id: CanvasCardID
+            var seconds: Double
+            /// Seconds since 1970.
+            var lastFocused: Double
+        }
+        struct Board: Codable, Equatable, Sendable {
+            var id: CanvasID
+            var cards: [Card]
+        }
+        var version = 1
+        var boards: [Board] = []
+
+        func records(for id: CanvasID) -> CanvasAttention.Records {
+            var result: CanvasAttention.Records = [:]
+            for card in boards.first(where: { $0.id == id })?.cards ?? [] {
+                result[card.id] = CanvasNodeAttention(
+                    seconds: card.seconds,
+                    lastFocused: Date(timeIntervalSince1970: card.lastFocused))
+            }
+            return result
+        }
+
+        /// Replaces board `id` (removes it when `records` is empty) and keeps
+        /// at most `CanvasLimits.boards` boards, the most recently focused first.
+        mutating func set(_ saved: CanvasAttention.Records, for id: CanvasID, now: Date) {
+            boards.removeAll { $0.id == id }
+            if !saved.isEmpty {
+                // Whole seconds and tenths keep the file small.
+                let cards = saved.map { key, value in
+                    Card(
+                        id: key, seconds: (value.seconds * 10).rounded() / 10,
+                        lastFocused: value.lastFocused.timeIntervalSince1970.rounded())
+                }.sorted { $0.id.rawValue.uuidString < $1.id.rawValue.uuidString }
+                boards.append(Board(id: id, cards: cards))
+            }
+            // Other boards age out on the same rule.
+            boards = boards.compactMap { board in
+                guard board.id != id else { return board }
+                let kept = CanvasAttention.pruned(records(for: board.id), live: nil, now: now)
+                guard !kept.isEmpty else { return nil }
+                return Board(
+                    id: board.id,
+                    cards: board.cards.filter { kept[$0.id] != nil })
+            }
+            func newest(_ board: Board) -> Double { board.cards.map(\.lastFocused).max() ?? 0 }
+            boards.sort {
+                if newest($0) != newest($1) { return newest($0) > newest($1) }
+                return $0.id.rawValue.uuidString < $1.id.rawValue.uuidString
+            }
+            boards = Array(boards.prefix(CanvasLimits.boards))
+        }
+    }
+
+    nonisolated static let attentionFileName = "ensemble-attention.json"
+
+    /// The saved attention for board `id`, aged and pruned. Never throws: a
+    /// missing, corrupt, oversized or locked file is an empty record, so a
+    /// board always opens.
+    func loadAttention(
+        _ id: CanvasID, workspace: TerminalGroupWorkspaceKey, now: Date = Date()
+    ) -> CanvasAttention.Records {
+        let result = try? withLock(workspace: workspace) { folder in
+            CanvasAttention.pruned(readAttentionFile(folder).records(for: id), live: nil, now: now)
+        }
+        return result ?? [:]
+    }
+
+    /// Adds `delta` to board `id`'s saved attention, drops cards not in `live`
+    /// and entries that aged out, and writes the sidecar atomically (0600).
+    /// Returns the board's saved records, or nil when nothing could be written
+    /// (the caller keeps `delta` and tries again later).
+    func recordAttention(
+        _ id: CanvasID, delta: CanvasAttention.Records, live: Set<CanvasCardID>,
+        workspace: TerminalGroupWorkspaceKey, now: Date = Date()
+    ) -> CanvasAttention.Records? {
+        try? withLock(workspace: workspace) { folder in
+            var file = readAttentionFile(folder)
+            let merged = CanvasAttention.pruned(
+                CanvasAttention.merged(file.records(for: id), adding: delta), live: live, now: now)
+            file.set(merged, for: id, now: now)
+            try writeAttentionFile(file, in: folder)
+            return merged
+        }
+    }
+
+    /// Forgets board `id` (it was deleted).
+    func forgetAttention(_ id: CanvasID, workspace: TerminalGroupWorkspaceKey, now: Date = Date()) {
+        try? withLock(workspace: workspace) { folder in
+            var file = readAttentionFile(folder)
+            guard file.boards.contains(where: { $0.id == id }) else { return }
+            file.set([:], for: id, now: now)
+            try writeAttentionFile(file, in: folder)
+        }
+    }
+
+    private func writeAttentionFile(_ file: AttentionFile, in folder: URL) throws {
+        let data = try JSONEncoder().encode(file)
+        guard data.count <= CanvasLimits.attentionFileBytes else { throw CanvasError.capacity }
+        try Task.checkCancellation()
+        let url = folder.appending(path: Self.attentionFileName)
+        try data.write(to: url, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    /// A bounded, non-following read. Anything unusual is an empty file.
+    private func readAttentionFile(_ folder: URL) -> AttentionFile {
+        let url = folder.appending(path: Self.attentionFileName)
+        let fd = url.withUnsafeFileSystemRepresentation { path in
+            path.map { Darwin.open($0, O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW) } ?? -1
+        }
+        guard fd >= 0 else { return AttentionFile() }
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        defer { try? handle.close() }
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+            info.st_size <= CanvasLimits.attentionFileBytes,
+            let data = try? handle.read(upToCount: CanvasLimits.attentionFileBytes + 1),
+            data.count <= CanvasLimits.attentionFileBytes,
+            var file = try? JSONDecoder().decode(AttentionFile.self, from: data),
+            file.version == 1
+        else { return AttentionFile() }
+        file.boards = file.boards.prefix(CanvasLimits.boards).map { board in
+            AttentionFile.Board(id: board.id, cards: Array(board.cards.prefix(CanvasLimits.cards)))
+        }
+        return file
     }
 
     private func fileURL(_ id: CanvasID, folder: URL) -> URL {

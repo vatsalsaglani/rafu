@@ -2,6 +2,57 @@ import AppKit
 import RafuCore
 import SwiftUI
 
+/// The body of a file card. A Markdown file shows a rendered preview by
+/// default and the plain source excerpt when the user switches; every other
+/// file shows the excerpt. The choice is view state in `CanvasBoardResources`
+/// and is never saved.
+struct CanvasFileCard: View {
+    let card: CanvasCard
+    let path: String
+    let board: CanvasBoardState
+    let session: WorkspaceSession
+    var activate: () -> Void = {}
+    @State private var isHovering = false
+
+    private var isMarkdown: Bool { CanvasMarkdownCard.isMarkdown(path: path) }
+    private var showsSource: Bool {
+        session.canvasResources[board.id]?.showsSource(for: card.id, path: path)
+            ?? CanvasMarkdownCard.defaultShowsSource(path: path)
+    }
+    private var isActive: Bool { board.contentIsActive && board.focusedCardID == card.id }
+
+    var body: some View {
+        Group {
+            if isMarkdown, !showsSource {
+                CanvasMarkdownFileCard(
+                    card: card, path: path, board: board, session: session, activate: activate)
+            } else {
+                CanvasFileExcerptCard(
+                    card: card, path: path, board: board, session: session, activate: activate)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if isMarkdown, isHovering || isActive { toggle }
+        }
+        .onHover { isHovering = $0 }
+    }
+
+    private var toggle: some View {
+        let title = showsSource ? "Show Preview" : "Show Source"
+        return Button {
+            session.canvasResources[board.id]?.toggleSource(for: card.id, path: path)
+        } label: {
+            Image(
+                systemName: showsSource ? "doc.richtext" : "chevron.left.forwardslash.chevron.right"
+            )
+        }
+        .buttonStyle(RafuIconButtonStyle(size: 24, iconSize: 12))
+        .help(title)
+        .accessibilityLabel(title)
+        .padding(6)
+    }
+}
+
 /// A read-only, syntax-coloured excerpt of the first lines of a file (review
 /// C12). Loaded lazily, only while the card is on screen, and bounded to 40
 /// lines and 8 KiB. An open editor buffer, even a dirty one, is the source
@@ -33,7 +84,16 @@ struct CanvasFileExcerptCard: View {
         .simultaneousGesture(TapGesture().onEnded { activate() })
         .help("Double-click to open \(path) in the editor")
         .accessibilityLabel("\(path), first lines")
-        .task(id: path) { await load() }
+        .task(
+            id: LoadKey(path: path, revision: session.openDocument(forCanvasPath: path)?.revision)
+        ) {
+            await load()
+        }
+    }
+
+    private struct LoadKey: Hashable {
+        let path: String
+        let revision: Int?
     }
 
     private func load() async {

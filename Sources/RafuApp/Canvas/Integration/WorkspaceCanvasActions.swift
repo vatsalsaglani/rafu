@@ -167,6 +167,12 @@ extension WorkspaceSession {
         selectEditorTab(tab, in: group.id)
     }
 
+    /// Writes a board's focus time to the attention sidecar (hidden, app in the
+    /// background). Coarse boundaries only; see `CanvasBoardState.attentionScores`.
+    func flushCanvasAttention(_ board: CanvasBoardState) {
+        Task(name: "Save Ensemble attention") { [canvas] in await canvas.flushAttention(board) }
+    }
+
     func performCanvasEdit(_ board: CanvasBoardState, _ operation: () throws -> Void) {
         do { try operation() } catch { board.errorMessage = error.localizedDescription }
     }

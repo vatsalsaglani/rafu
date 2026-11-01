@@ -75,3 +75,46 @@ func extensionSensitiveSyntaxRules() {
         #expect(tokens.contains(where: { $0.name == expectedToken }))
     }
 }
+
+@MainActor
+@Test("Markdown source is never coloured as code")
+func markdownSourceIsNotColouredAsCode() {
+    let source = """
+        # Heading
+        In for in a sentence, "quoted prose" and 42 items.
+        **bold** and `code`
+        - item
+        | a | b |
+        """
+    for name in ["md", "MARKDOWN"] {
+        let highlighter = SyntaxHighlighter(theme: RafuThemeCatalog.indigo, fileExtension: name)
+        let tokens = highlighter.tokenApplication(
+            in: source, targetRange: NSRange(location: 0, length: (source as NSString).length)
+        ).tokens
+        let names = Set(tokens.map(\.name))
+        for code in ["keyword", "operator", "number", "string", "comment", "type"] {
+            #expect(!names.contains(code), "\(code) token in \(name)")
+        }
+        let heading = tokens.first { $0.name == "markup.heading" }
+        #expect(heading?.range == NSRange(location: 0, length: 9))
+        #expect(names.isSuperset(of: ["markup.bold", "markup.code", "markup.list"]))
+    }
+}
+
+@MainActor
+@Test("Markdown HTML comments are comments and swift keeps its code rules")
+func markdownCommentsAndCodeRulesRemain() {
+    let markdown = SyntaxHighlighter(theme: RafuThemeCatalog.indigo, fileExtension: "md")
+    let note = "<!-- hidden -->\ntext"
+    #expect(
+        markdown.tokenApplication(
+            in: note, targetRange: NSRange(location: 0, length: (note as NSString).length)
+        ).tokens.contains { $0.name == "comment" })
+    let swift = SyntaxHighlighter(theme: RafuThemeCatalog.indigo, fileExtension: "swift")
+    let code = "let s = \"x\" // c"
+    let names = Set(
+        swift.tokenApplication(
+            in: code, targetRange: NSRange(location: 0, length: (code as NSString).length)
+        ).tokens.map(\.name))
+    #expect(names.isSuperset(of: ["keyword", "string", "comment"]))
+}

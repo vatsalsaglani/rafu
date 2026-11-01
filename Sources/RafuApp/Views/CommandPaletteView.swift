@@ -652,6 +652,13 @@ struct CommandPaletteView: View {
                 session.selectedCanvas?.fitAll()
             },
             .init(
+                title: "Ensemble: Find…", symbolName: "magnifyingglass",
+                keywords: ["search", "card", "terminal", "claude", "codex", "link", "board"]
+            ) {
+                dismiss()
+                session.selectedCanvas?.isFindPresented = true
+            },
+            .init(
                 title: "Ensemble: Tidy Up", symbolName: "square.grid.2x2",
                 keywords: ["board", "layout"]
             ) {

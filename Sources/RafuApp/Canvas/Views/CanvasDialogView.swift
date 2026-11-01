@@ -274,6 +274,7 @@ struct CanvasShortcutsSheet: View {
         ("Tab, ⇧Tab", "Select the next or previous card"),
         ("N, T", "New note, new terminal"),
         ("⌫", "Remove the selection from the Ensemble. Files are never deleted"),
+        ("⌘F", "Find a card by name, kind, agent, or link, and go to it"),
         ("⌘9, ⌥⌘9, ⌘0", "Zoom to fit, zoom to selection, actual size"),
         ("⌥⌘L", "Connect two selected cards"),
         ("⌃⌥1…⌃⌥9", "Add a terminal with that shell (when the machine has more than one)"),

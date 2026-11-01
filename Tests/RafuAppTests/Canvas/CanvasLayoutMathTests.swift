@@ -43,27 +43,6 @@ struct CanvasLayoutMathTests {
             CanvasLayoutMath.distribute([rects[0], rects[1]], .horizontal) == [rects[0], rects[1]])
     }
 
-    @Test("Tidy Up removes every overlap and wraps rows")
-    func tidy() {
-        let rects = (0..<7).map { index in rect(Double(index % 2) * 10, Double(index) * 5, 380, 260)
-        }
-        let tidy = CanvasLayoutMath.tidy(rects, maximumRowWidth: 1_200)
-        for first in tidy.indices {
-            for second in tidy.indices where second > first {
-                let a = CGRect(
-                    x: tidy[first].x, y: tidy[first].y, width: tidy[first].width,
-                    height: tidy[first].height)
-                let b = CGRect(
-                    x: tidy[second].x, y: tidy[second].y, width: tidy[second].width,
-                    height: tidy[second].height)
-                #expect(!a.intersects(b))
-            }
-        }
-        // Three 380 pt rects and two 16 pt gaps fit in 1200; the fourth wraps.
-        let ys = Set(tidy.map(\.y))
-        #expect(ys.count == 3)
-    }
-
     @Test("Reading order is top-left to bottom-right with row banding")
     func readingOrder() {
         let items: [(String, CanvasRect)] = [

@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The one 36 pt Ensemble bar: the name (double-click renames) with its
-/// pull-down, the link status, the agent summary, Add, Arrange and Export.
+/// pull-down, the link status, the agent summary, Find, Add, Arrange and Export.
 /// There is no overflow menu: every action it held is in the name menu, the
 /// link popover, the Add palette, a card's context menu, or the menu bar's
 /// Ensemble menu.
@@ -16,6 +16,7 @@ struct CanvasBar: View {
             Spacer(minLength: 8)
             CanvasLinkStatusItem(board: board)
             CanvasAgentSummaryBar(board: board, session: session)
+            findButton
             CanvasAddCardMenu(board: board, session: session)
             arrangeMenu
             exportButton
@@ -86,6 +87,20 @@ struct CanvasBar: View {
         .fixedSize()
         .help("Ensemble actions: rename, duplicate, open, close")
         .accessibilityLabel("Ensemble actions")
+    }
+
+    /// Find in Ensemble. The same state as the menu bar's Find in Ensemble…
+    /// (⌘F) and the palette row; the board shows the palette
+    /// (`CanvasFindOverlay`).
+    private var findButton: some View {
+        Button {
+            board.isFindPresented.toggle()
+        } label: {
+            Label("Find in Ensemble", systemImage: "magnifyingglass")
+        }
+        .buttonStyle(RafuIconButtonStyle(isActive: board.isFindPresented, size: 24, iconSize: 13))
+        .help("Find in Ensemble (⌘F)")
+        .accessibilityLabel("Find in Ensemble")
     }
 
     /// The same action and disabled rule as the menu bar's Export….

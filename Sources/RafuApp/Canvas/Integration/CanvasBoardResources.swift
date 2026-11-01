@@ -13,6 +13,9 @@ final class CanvasBoardResources {
     @ObservationIgnored private(set) var webs: [CanvasCardID: CanvasWebPreviewController] = [:]
     @ObservationIgnored private(set) var apps: [CanvasCardID: CanvasNativeAppController] = [:]
     @ObservationIgnored private var visibleApps: [CanvasCardID: Set<UUID>] = [:]
+    /// Cards the user switched away from their default Markdown face. View
+    /// state only: it is never saved, so every reopen starts from the default.
+    private(set) var markdownCardShowsSource: [CanvasCardID: Bool] = [:]
     private(set) var isWindowAvailable = true
     var isPresented: Bool { owner != nil }
     var permitsLiveContent: Bool { isPresented && isWindowAvailable }
@@ -65,6 +68,14 @@ final class CanvasBoardResources {
             apps[id]?.stop()
         }
     }
+    /// Whether a file card draws raw source. A card without a choice uses
+    /// `defaultShowsSource` for its path.
+    func showsSource(for card: CanvasCardID, path: String) -> Bool {
+        markdownCardShowsSource[card] ?? CanvasMarkdownCard.defaultShowsSource(path: path)
+    }
+    func toggleSource(for card: CanvasCardID, path: String) {
+        markdownCardShowsSource[card] = !showsSource(for: card, path: path)
+    }
     func prune() {
         guard let board else { return }
         let retained = board.retainedNoteIDs
@@ -73,6 +84,9 @@ final class CanvasBoardResources {
             board.noteSnapshots[id] = nil
         }
         let current = Set(board.cards.map(\.id))
+        for id in Array(markdownCardShowsSource.keys) where !current.contains(id) {
+            markdownCardShowsSource[id] = nil
+        }
         for id in Array(webs.keys) where !current.contains(id) {
             webs[id]?.stop()
             webs[id] = nil
@@ -85,6 +99,7 @@ final class CanvasBoardResources {
     }
     func stop(cards: Set<CanvasCardID>) {
         for id in cards {
+            markdownCardShowsSource[id] = nil
             webs[id]?.stop()
             apps[id]?.stop()
             webs[id] = nil

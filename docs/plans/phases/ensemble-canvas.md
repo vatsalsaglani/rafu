@@ -4,7 +4,11 @@
 - Integration branch: `claude/rafu-macos-redesign-nqcu7h` (restarted from `main`).
 - Earlier spec still applies for visual rules: `macos-redesign.md`,
   `docs/references/macos-redesign-visual-system.md`, `canvas-interaction.md`.
-- The user asked to ignore ADR constraints. Do not edit `docs/decisions/`.
+- Past ADRs do not block new work (user direction, clarified 2026-11-01).
+  When new work conflicts with an earlier decision, the new direction wins.
+  Still record each new durable decision as an ADR in `docs/decisions/`, and
+  when it conflicts with an older ADR, record the conflict there: amend or
+  supersede the older ADR and name it in the new one.
 
 ## User direction (summary)
 
@@ -519,3 +523,45 @@ Seven reported bugs addressed.
   lease cap, Ask mode, the 17-table `erDiagram` by eye, the
   `.task(id: pane.sessionID)` drain, and the refused-start alert path. The
   Mermaid caps also still await a measured Release idle pass.
+
+## Status (2026-11-01, clustering Tidy Up and the attention record)
+
+Uncommitted on `main` at the time of writing.
+
+- **Tidy Up clusters instead of flowing rows.** New pure, deterministic
+  `Canvas/Domain/CanvasClusterLayout.swift`: rigid frame units (a frame with
+  members is never emitted; members move by one integer translation), loose
+  drawings attached within 120 pt, link-connected clusters laid out hub-and-rays
+  with a ≤80-sweep separation pass and a never-overlapping shelf fallback, and
+  shelf packing shaped by the viewport aspect. The old grid
+  (`CanvasLayoutMath.tidy`/`tidyGap`) is removed and no grid mode is kept;
+  `fitAll()` runs after the single `edit` (one undo step, one save).
+  `CanvasCardContent.isWhiteboardDrawing` was added to classify drawings.
+- **Per-card attention record.** New `Canvas/Domain/CanvasNodeAttention.swift`
+  (record, decay, merge, prune, caps as an `extension CanvasLimits`,
+  `CanvasAttentionClock`), fed only by coarse focus transitions, with a 7-day
+  half-life and a workspace-local `ensemble-attention.json` sidecar
+  (atomic 0600, fail-soft, durations and dates only, nothing logged) handled in
+  `CanvasPersistenceStore`; flush and lifecycle hooks in `CanvasBoardState`,
+  `WorkspaceCanvasStore`, `WorkspaceCanvasActions`, `WorkspaceCanvasView`.
+- **New decision:**
+  [ADR 0032](../../decisions/0032-ensemble-clustering-tidy-and-attention-record.md)
+  (owner decision: a persisted sidecar over topology-only or session-only
+  attention; relates to ADR 0025 and ADR 0023).
+- **New reference:**
+  [`ensemble-clustering-tidy.md`](../../references/ensemble-clustering-tidy.md).
+- **Tests:** new `Tests/RafuAppTests/Canvas/CanvasClusterLayoutTests.swift`
+  (14 layout + 2 board tests, including that 640 × 420 pt terminals no longer
+  tidy into a 2-wide column) and
+  `Tests/RafuAppTests/Canvas/CanvasNodeAttentionTests.swift` (20 tests). The old
+  `tidy` test was removed from `CanvasLayoutMathTests.swift`.
+- **Verification** (Swift 6.2 language mode, macOS Darwin 27.0.0, 2026-11-01):
+  format lint clean; build clean apart from the known SwiftTerm bundle "missing
+  creator" notice; parallel suite 2,931 tests in 210 suites + 278 in 16 passed
+  (re-run after the search-palette change, so it describes the final tree);
+  `./script/build_and_run.sh --verify` exit 0. No `--no-parallel` (CI mode) run
+  is recorded for this increment.
+- **Open manual checks, none done by a person yet:** Tidy Up on a real board;
+  undo of a Tidy; zoom-to-fit with Reduce Motion; the sidecar file on disk;
+  cluster spacing with 640 × 420 pt terminals at 16:10; the quit-path
+  `flushAll`.

@@ -48,6 +48,9 @@ final class CanvasBoardState: Identifiable {
     var connectingFrom: CanvasCardID?
     /// View state, not saved: the "Show Links" choice (review 7.6).
     var linkVisibility: CanvasLinkVisibility = .all
+    /// View state, not saved: the Find in Ensemble popover is open. While it
+    /// is, its text field owns the keys (`CanvasInlineRename.boardTakesKeys`).
+    var isFindPresented = false
     /// The card whose title is being renamed inline in its header.
     var renamingCardID: CanvasCardID?
     /// Set by Return, the header or the menu to ask the terminal card to start
@@ -59,6 +62,19 @@ final class CanvasBoardState: Identifiable {
     /// old, when the node goes, or when the board closes. Never saved, never
     /// logged, and not observed: the terminal card and the agent tools drain it.
     @ObservationIgnored var pendingTerminalLines: [CanvasCardID: [PendingTerminalLine]] = [:]
+    /// Focus-time bookkeeping for Tidy Up. Durations and dates per card; no
+    /// text. Not observed and never touched inside an edit or a gesture: the
+    /// board view reports coarse focus transitions only.
+    @ObservationIgnored private var attentionClock = CanvasAttentionClock()
+    /// What the sidecar held when the board opened or last flushed.
+    @ObservationIgnored private(set) var attentionSaved: CanvasAttention.Records = [:]
+    /// Focus time since the last flush.
+    @ObservationIgnored private(set) var attentionPending: CanvasAttention.Records = [:]
+    /// False while the board view is hidden or the app is in the background.
+    @ObservationIgnored private var attentionIsRunning = false
+    @ObservationIgnored private var lastAttentionFlush: Date?
+    /// Asks the store to write `attentionPending`. Set by the store.
+    @ObservationIgnored var requestAttentionFlush: (@MainActor () -> Void)?
     /// Nodes with a drain loop running, so one node never has two.
     @ObservationIgnored var terminalLineDrains: Set<CanvasCardID> = []
     /// Board-space point for the next added card, set by the Add popover and
@@ -377,12 +393,111 @@ final class CanvasBoardState: Identifiable {
         requestSave?()
     }
 
-    /// Tidy Up: flows every card into rows with a 16 pt gap so none overlap.
-    func arrange() throws {
-        try edit { value in
-            let tidy = CanvasLayoutMath.tidy(value.cards.map(\.rect))
-            for index in value.cards.indices { value.cards[index].rect = tidy[index] }
+    /// Tidy Up: groups related cards into clusters (linked cards stay together,
+    /// the most attended card in the middle), then zooms to fit. The move is one
+    /// undo step; the zoom is a viewport change and is not.
+    func arrange(now: Date = Date()) throws {
+        let scores = attentionScores(at: now)
+        let nodes = document.cards.map {
+            CanvasClusterLayout.Node(
+                id: $0.id, rect: $0.rect, frameMembers: $0.content.diagramFrame?.memberIDs,
+                isDrawing: $0.content.isWhiteboardDrawing)
         }
+        let aspect =
+            visibleSize.width > 0 && visibleSize.height > 0
+            ? Double(visibleSize.width / visibleSize.height) : 1.6
+        let placed = CanvasClusterLayout.clustered(
+            nodes: nodes, edges: document.connections.map { ($0.from, $0.to) },
+            attention: scores.seconds, lastFocused: scores.lastFocused, targetAspect: aspect)
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        try withAnimation(RafuMotion.resolve(RafuMotion.zoomToFit, reduceMotion: reduceMotion)) {
+            try edit { value in
+                for index in value.cards.indices {
+                    if let rect = placed[value.cards[index].id], rect.isValid {
+                        value.cards[index].rect = rect
+                    }
+                }
+            }
+        }
+        fitAll()
+    }
+
+    // MARK: Attention
+
+    /// The board view reports a change of the focused card or of whether its
+    /// content is open. Time is counted per transition, never per frame.
+    func attentionFocusChanged(now: Date = Date()) {
+        moveAttentionClock(now: now)
+    }
+
+    /// The board view is hidden or the app went to the background.
+    func suspendAttention(now: Date = Date()) {
+        attentionIsRunning = false
+        moveAttentionClock(now: now)
+    }
+
+    /// The board view is shown again and the app is active.
+    func resumeAttention(now: Date = Date()) {
+        attentionIsRunning = true
+        moveAttentionClock(now: now)
+    }
+
+    private func moveAttentionClock(now: Date) {
+        let focus =
+            attentionIsRunning
+            ? focusedCardID.map { CanvasAttentionFocus(card: $0, contentIsActive: contentIsActive) }
+            : nil
+        guard let sample = attentionClock.move(to: focus, at: now) else { return }
+        record(sample, now: now)
+    }
+
+    private func record(_ sample: CanvasAttentionClock.Sample, now: Date) {
+        attentionPending = CanvasAttention.merged(
+            attentionPending, adding: [sample.card: sample.record])
+        // Routine flushes are throttled; boundaries flush on their own.
+        if lastAttentionFlush.map({
+            now.timeIntervalSince($0) >= CanvasLimits.attentionFlushInterval
+        })
+            ?? true
+        {
+            requestAttentionFlush?()
+        }
+    }
+
+    /// Hands the focus time since the last flush to the caller, including the
+    /// stretch that is still running.
+    func takeAttentionDelta(now: Date = Date()) -> CanvasAttention.Records {
+        if let sample = attentionClock.fold(at: now) {
+            attentionPending = CanvasAttention.merged(
+                attentionPending, adding: [sample.card: sample.record])
+        }
+        let delta = attentionPending
+        attentionPending = [:]
+        lastAttentionFlush = now
+        return delta
+    }
+
+    /// A flush could not write: keep the time for the next one.
+    func restoreAttentionDelta(_ delta: CanvasAttention.Records) {
+        attentionPending = CanvasAttention.merged(attentionPending, adding: delta)
+    }
+
+    /// The sidecar's records, as loaded at open or returned by a flush.
+    func adoptSavedAttention(_ records: CanvasAttention.Records) {
+        attentionSaved = records
+    }
+
+    /// Decayed attention seconds and last-focused dates for every card, with
+    /// unflushed time and the running stretch included.
+    func attentionScores(at now: Date = Date())
+        -> (seconds: [CanvasCardID: Double], lastFocused: [CanvasCardID: Date])
+    {
+        var pending = attentionPending
+        if let sample = attentionClock.preview(at: now) {
+            pending = CanvasAttention.merged(pending, adding: [sample.card: sample.record])
+        }
+        return CanvasAttention.scores(
+            CanvasAttention.merged(attentionSaved, adding: pending), at: now)
     }
 
     /// Moves the cards to the end (front) or start (back) of the stack. The

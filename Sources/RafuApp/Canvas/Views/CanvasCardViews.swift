@@ -456,7 +456,7 @@ struct CanvasCardShell: View {
         } else if case .web = card.content {
             CanvasWebCard(card: card, board: board, session: session)
         } else if case .file(let path) = card.content {
-            CanvasFileExcerptCard(
+            CanvasFileCard(
                 card: card, path: path, board: board, session: session, activate: activateCard)
         } else if case .note = card.content {
             CanvasNoteCard(

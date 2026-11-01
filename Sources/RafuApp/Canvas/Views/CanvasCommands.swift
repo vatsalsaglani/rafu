@@ -21,6 +21,11 @@ struct CanvasCommands: Commands {
                 CanvasDiagramMenuItems(board: board, session: session, showsShortcut: true)
                 Divider()
                 cardNavigationItems(board: board, session: session)
+                // Declared here, not beside Find in File…, so ⌘F exists only
+                // while an Ensemble board is the selected tab (the file-find
+                // item is disabled then: no document is selected).
+                Button("Find in Ensemble…") { board.isFindPresented = true }
+                    .keyboardShortcut("f", modifiers: .command)
             }
             Divider()
             Button("Zoom to Fit") { board?.fitAll() }
@@ -108,7 +113,7 @@ struct CanvasCommands: Commands {
                 .keyboardShortcut(.delete, modifiers: .command)
                 .disabled(
                     board?.selectedConnection == nil || board?.contentIsActive != false
-                        || board?.renamingCardID != nil)
+                        || board?.renamingCardID != nil || board?.isFindPresented == true)
             Divider()
             Button("Zoom to Card") {
                 if let id = board?.selection.first { board?.zoomToCard(id) }

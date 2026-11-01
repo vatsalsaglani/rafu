@@ -35,6 +35,23 @@ struct CanvasCardBoundsTests {
         #expect(host.sizeThatFits(in: Self.proposal) == Self.proposal)
     }
 
+    @Test("A Markdown preview card keeps the size it is given")
+    func markdownPreviewIsBounded() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let session = makeSession(folder)
+        #expect(await session.canvas.configure(root: folder))
+        let board = try #require(await session.canvas.create(title: "Bounds"))
+        let card = CanvasCard(
+            title: "README", rect: CanvasRect(x: 0, y: 0, width: 300, height: 200),
+            content: .file(path: "README.md"))
+        let host = NSHostingController(
+            rootView: CanvasMarkdownFileCard(
+                card: card, path: "README.md", board: board, session: session))
+        #expect(host.sizeThatFits(in: Self.proposal) == Self.proposal)
+    }
+
     @Test(
         "A card shell takes exactly its proposed size even when its face asks for more",
         arguments: [
@@ -44,6 +61,9 @@ struct CanvasCardBoundsTests {
             // A zoomed-out face: its title font grows as the scale falls.
             (CanvasCardContent.terminal(groupID: TerminalGroupID()), 0.15),
             (CanvasCardContent.file(path: "Dockerfile"), 0.15),
+            // A Markdown file card draws a scrolling preview, not the excerpt.
+            (CanvasCardContent.file(path: "README.md"), 1.0),
+            (CanvasCardContent.file(path: "README.md"), 0.15),
         ])
     func shellKeepsProposedSize(content: CanvasCardContent, scale: Double) async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)

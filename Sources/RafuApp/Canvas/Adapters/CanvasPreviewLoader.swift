@@ -25,9 +25,16 @@ nonisolated enum CanvasPreviewLoader {
         return url
     }
 
-    @concurrent static func text(path: String, root: URL) async throws -> String {
+    /// The first `limit` bytes of a regular file inside `root`, as UTF-8. The
+    /// limit is clamped to `CanvasLimits.markdownPreviewBytes`; the default
+    /// stays 8 KiB for the plain excerpt. A cut inside a multi-byte character
+    /// decodes to one replacement character at the end.
+    @concurrent static func text(path: String, root: URL, limit: Int = 8 * 1_024) async throws
+        -> String
+    {
         let url = try checkedURL(path: path, root: root)
-        let data = try read(url, limit: 8 * 1_024, prefixOnly: true)
+        let data = try read(
+            url, limit: min(max(0, limit), CanvasLimits.markdownPreviewBytes), prefixOnly: true)
         guard !data.contains(0) else { throw CanvasError.unavailable }
         return String(decoding: data, as: UTF8.self)
     }
