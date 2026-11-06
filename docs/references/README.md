@@ -130,6 +130,7 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 Keep one focused subject per note. Add it to this index. Use an ADR instead when the content is a choice among alternatives rather than an observed engineering fact.
 
 - [Single-click sidebar opening](sidebar-single-click-opening.md): native file activation without programmatic reveal reopening.
+- [Files tree selection and Trash](files-tree-selection-and-trash.md): Files multi-selection (⌘/⇧-click, ⇧↑↓), Move to Trash (confirm, Undo/Redo registration, dirty documents detach to untitled), the ⌘⌫ precedence with Ensemble Delete Link, the single-item drag limit, and Copy Path (⇧⌘C/⌥⌘C).
 - [Documentation hover timing and lifetime](editor-hover-request-timing.md): short per-identifier delay and cancellation for hidden or scrolled editors.
 
 - [Terminal modified Return](terminal-modified-return.md): legacy newline bytes, negotiated keyboard input, and the bounded native event bridge.
