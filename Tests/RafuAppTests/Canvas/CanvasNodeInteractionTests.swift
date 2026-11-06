@@ -120,7 +120,7 @@ struct CanvasNodeInteractionTests {
         #expect(CanvasAddKind.matches("") == CanvasAddKind.allCases)
         #expect(CanvasAddKind.matches("  ") == CanvasAddKind.allCases)
         #expect(CanvasAddKind.matches("TERM") == [.terminal])
-        #expect(CanvasAddKind.matches("app") == [.webApp, .macApp])
+        #expect(CanvasAddKind.matches("app") == [.webApp])
         #expect(CanvasAddKind.matches("zzz").isEmpty)
     }
 

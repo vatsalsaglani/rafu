@@ -19,16 +19,38 @@ struct CanvasWhiteboardTests {
         #expect(document.revision == 3)
         #expect(
             document.cards.map(\.content.kindName) == [
-                "Note", "File", "Image", "Terminal", "Local Web App", "Native App",
+                "Note", "File", "Image", "Terminal", "Local Web App", "Note",
             ])
+        // The removed Mac App kind keeps its card as a note.
+        if case .note(let text) = document.cards[5].content {
+            #expect(text.hasPrefix("Mac App card: com.apple.finder"))
+        } else {
+            Issue.record("The Mac App card must open as a note")
+        }
         #expect(document.cards[0].content == .note(snapshot: "- [ ] ship"))
         #expect(document.cards[2].content == .image(path: "docs/shot.png"))
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let reencoded = try encoder.encode(document)
-        let before = try #require(JSONSerialization.jsonObject(with: data) as? NSDictionary)
-        let after = try #require(JSONSerialization.jsonObject(with: reencoded) as? NSDictionary)
-        #expect(before == after)
+        let before = try #require(
+            JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let after = try #require(
+            JSONSerialization.jsonObject(with: reencoded) as? [String: Any])
+        let beforeCards = try #require(before["cards"] as? [[String: Any]])
+        let afterCards = try #require(after["cards"] as? [[String: Any]])
+        #expect(beforeCards.count == afterCards.count)
+        // Every card except the converted Mac App card re-encodes unchanged.
+        for index in beforeCards.indices where index != 5 {
+            #expect(
+                NSDictionary(dictionary: beforeCards[index])
+                    == NSDictionary(dictionary: afterCards[index]))
+        }
+        #expect(!String(decoding: reencoded, as: UTF8.self).contains("nativeApp"))
+        var beforeRest = before
+        var afterRest = after
+        beforeRest["cards"] = nil
+        afterRest["cards"] = nil
+        #expect(NSDictionary(dictionary: beforeRest) == NSDictionary(dictionary: afterRest))
     }
 
     @Test("Every new kind round-trips through a saved board")

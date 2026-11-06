@@ -150,19 +150,17 @@ struct CanvasBoardSearchTests {
         #expect(reversed == first)
     }
 
-    @Test("Files, apps, frames and diagrams get a useful detail line")
+    @Test("Files, frames and diagrams get a useful detail line")
     func detailLines() {
         let frame = CanvasFrame(title: "Group", memberIDs: [CanvasCardID(), CanvasCardID()])
         let built = index([
             card("readme", .file(path: "docs/README.md")),
-            card("Mail", .nativeApp(bundleID: "com.apple.mail")),
             card("Layout", .frame(frame)),
             card("Flow", .mermaid(source: "graph TD\nA-->B")),
         ])
         #expect(built.items[0].subtitle == "File · docs/README.md")
-        #expect(titles(built.matches("com.apple.mail")) == ["Mail"])
-        #expect(built.items[2].detail == "2 cards")
-        #expect(built.items[3].detail == "graph TD")
+        #expect(built.items[1].detail == "2 cards")
+        #expect(built.items[2].detail == "graph TD")
         #expect(titles(built.matches("", filter: .init(categories: [.diagram]))) == ["Flow"])
     }
 

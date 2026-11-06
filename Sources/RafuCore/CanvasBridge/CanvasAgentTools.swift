@@ -118,8 +118,6 @@ public nonisolated enum CanvasAgentTool: String, CaseIterable, Codable, Sendable
     case edgeCreate = "edge_create"
     case edgeRemove = "edge_remove"
     case linkSetState = "link_set_state"
-    case appOpen = "app_open"
-    case appInspect = "app_inspect"
     case mermaidSet = "mermaid_set"
     case actionStatus = "action_status"
     case iconSearch = "icon_search"
@@ -143,8 +141,6 @@ public nonisolated enum CanvasAgentTool: String, CaseIterable, Codable, Sendable
         case .edgeCreate: "Add a link"
         case .edgeRemove: "Remove a link"
         case .linkSetState: "Change a link state"
-        case .appOpen: "Open an app"
-        case .appInspect: "Inspect an app"
         case .mermaidSet: "Change a diagram"
         case .actionStatus: "Read an action status"
         case .iconSearch: "Search icons"
@@ -183,8 +179,6 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
     /// `terminal_create`: also link the new terminal to the caller by a message link.
     public var link: Bool?
     public var state: String?
-    public var bundleID: String?
-    public var appName: String?
     public var path: String?
     public var url: String?
     public var shape: String?
@@ -209,7 +203,7 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
     public init(tool: CanvasAgentTool) { self.tool = tool }
 
     public static let nodeKinds = [
-        "note", "terminal", "file", "image", "web", "app", "mermaid", "shape", "text",
+        "note", "terminal", "file", "image", "web", "mermaid", "shape", "text",
         "service_icon", "frame",
     ]
     public static let exportTargets = ["board", "selection", "frame"]
@@ -234,8 +228,8 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
     /// downgraded by the app, which knows the link state.
     public var risk: CanvasAgentRisk {
         switch tool {
-        case .ensembleDescribe, .noteRead, .appInspect, .actionStatus, .iconSearch: .read
-        case .nodeRemove, .edgeRemove, .terminalStart, .terminalSend, .appOpen, .export:
+        case .ensembleDescribe, .noteRead, .actionStatus, .iconSearch: .read
+        case .nodeRemove, .edgeRemove, .terminalStart, .terminalSend, .export:
             .sensitive
         case .terminalCreate: startsProcess ? .sensitive : .edit
         default: .edit
@@ -273,7 +267,6 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         if link == true { lines.append("Link: live message link to this terminal") }
         if let command { add("Command", CanvasAgentShell.commandLine(command)) }
         add("State", state)
-        add("App", bundleID ?? appName)
         add("Path", path)
         add("URL", url)
         if let packID, let iconID { add("Icon", "\(packID)/\(iconID)") }
@@ -306,18 +299,17 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         case .noteCreate: return placement.union(["title", "markdown"])
         case .nodeCreate:
             return placement.union([
-                "kind", "title", "text", "path", "url", "bundle_id", "app_name", "shape",
+                "kind", "title", "text", "path", "url", "shape",
                 "width", "height", "pack_id", "icon_id", "label", "member_ids",
             ])
         case .nodeUpdate: return ["node_id", "title", "x", "y", "width", "height"]
-        case .nodeRemove, .terminalStart, .appInspect: return ["node_id"]
+        case .nodeRemove, .terminalStart: return ["node_id"]
         case .terminalCreate:
             return placement.union(["title", "cwd", "agent", "command", "prompt", "link"])
         case .terminalSend: return ["node_id", "text", "command"]
         case .edgeCreate: return ["from", "to", "kind", "label"]
         case .edgeRemove: return ["edge_id"]
         case .linkSetState: return ["edge_id", "state"]
-        case .appOpen: return placement.union(["bundle_id", "app_name"])
         case .mermaidSet: return ["node_id", "source"]
         case .actionStatus: return ["request_id"]
         case .iconSearch: return ["query", "limit"]
@@ -387,8 +379,6 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
             call.link = flag
         }
         call.state = try string("state")?.lowercased()
-        call.bundleID = try string("bundle_id")
-        call.appName = try string("app_name")
         call.path = try string("path")
         call.url = try string("url")
         call.shape = try string("shape")?.lowercased()
@@ -491,15 +481,6 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         if let command, let refusal = CanvasAgentShell.refusal(for: command) {
             throw .invalidArgumentReason(key: "command", reason: refusal.reason())
         }
-        if let bundleID, !CanvasAgentText.validBundleID(bundleID) {
-            throw .invalidArgument("bundle_id")
-        }
-        if let appName,
-            appName.isEmpty || appName.unicodeScalars.count > 100 || appName.contains("/")
-                || !CanvasAgentText.validTitle(appName)
-        {
-            throw .invalidArgument("app_name")
-        }
         if let url, url.isEmpty || url.utf8.count > 2_048 || CanvasAgentText.hasControl(url) {
             throw .invalidArgument("url")
         }
@@ -548,7 +529,7 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         }
         switch tool {
         case .ensembleDescribe: break
-        case .noteRead, .nodeRemove, .terminalStart, .appInspect: try require(nodeID, "node_id")
+        case .noteRead, .nodeRemove, .terminalStart: try require(nodeID, "node_id")
         case .noteWrite:
             try require(nodeID, "node_id")
             try require(text, "text")
@@ -596,8 +577,6 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         case .linkSetState:
             try require(edgeID, "edge_id")
             try require(state, "state")
-        case .appOpen:
-            guard bundleID != nil || appName != nil else { throw .missingArgument("bundle_id") }
         case .mermaidSet:
             try require(nodeID, "node_id")
             try require(text, "source")
@@ -624,8 +603,6 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         switch kind {
         case "file", "image": if path == nil { throw .missingArgument("path") }
         case "web": if url == nil { throw .missingArgument("url") }
-        case "app":
-            guard bundleID != nil || appName != nil else { throw .missingArgument("bundle_id") }
         case "service_icon":
             if packID == nil { throw .missingArgument("pack_id") }
             if iconID == nil { throw .missingArgument("icon_id") }
@@ -755,13 +732,6 @@ public nonisolated enum CanvasAgentText {
             charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_/")
         return !value.isEmpty && value.utf8.count <= 200 && !value.hasPrefix("/")
             && !value.contains("..") && value.unicodeScalars.allSatisfy { allowed.contains($0) }
-    }
-
-    public static func validBundleID(_ value: String) -> Bool {
-        let allowed = CharacterSet(
-            charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_")
-        return !value.isEmpty && value.utf8.count <= 255
-            && value.unicodeScalars.allSatisfy { allowed.contains($0) }
     }
 
     /// Control characters become spaces; the result holds at most `maxBytes` bytes
@@ -1201,7 +1171,7 @@ public nonisolated enum CanvasAgentToolCatalog {
             )
         case .nodeCreate:
             return (
-                "Add a node. kind note/mermaid/text use text (a Mermaid diagram larger than 8000 by 8000 pt is not drawn; split it); file/image use a workspace-relative path; web uses a localhost URL; app uses bundle_id or app_name (the app is not launched; use app_open); shape uses shape; service_icon uses pack_id and icon_id from icon_search plus label; frame uses title and member_ids. A terminal node is created stopped.",
+                "Add a node. kind note/mermaid/text use text (a Mermaid diagram larger than 8000 by 8000 pt is not drawn; split it); file/image use a workspace-relative path; web uses a localhost URL; shape uses shape; service_icon uses pack_id and icon_id from icon_search plus label; frame uses title and member_ids. A terminal node is created stopped.",
                 schema(
                     [
                         "kind": property(
@@ -1212,8 +1182,6 @@ public nonisolated enum CanvasAgentToolCatalog {
                             ["maxLength": textLimit]),
                         "path": property("string", "Workspace-relative file path."),
                         "url": property("string", "http(s) URL on localhost or 127.0.0.1."),
-                        "bundle_id": property("string", "macOS bundle identifier."),
-                        "app_name": property("string", "App name, for example Simulator."),
                         "shape": property(
                             "string", "Shape kind.", ["enum": CanvasAgentToolCall.shapes]),
                         "width": property("number", "Optional width (96–2000)."),
@@ -1324,21 +1292,6 @@ public nonisolated enum CanvasAgentToolCatalog {
                         "state": property(
                             "string", "Link state.", ["enum": CanvasAgentToolCall.linkStates]),
                     ], required: ["edge_id", "state"])
-            )
-        case .appOpen:
-            return (
-                "Open a macOS app and show it in an app node (reuses a node for the same app). Asks the user unless Agent control is Allow.",
-                schema([
-                    "bundle_id": property(
-                        "string", "Bundle identifier, for example com.apple.Safari."),
-                    "app_name": property("string", "App name, for example Simulator."),
-                    "near": near, "x": x, "y": y,
-                ])
-            )
-        case .appInspect:
-            return (
-                "Read the Accessibility summary of the app window docked in an app node, to verify what the app shows. Needs the user's Accessibility permission. Read-only.",
-                schema(["node_id": nodeID], required: ["node_id"])
             )
         case .mermaidSet:
             return (

@@ -32,7 +32,7 @@ pending).
 - **Double-click:** on a header title it renames inline; on the header
   background it zooms to the card (animated); on empty board it opens the Add
   popover at that point with type-ahead (Note, Terminal, File…, Image…,
-  Web App…, Mac App…). Double-click in a file card body opens the file at that
+  Web App…; the Mac App entry was removed on 2026-11-06). Double-click in a file card body opens the file at that
   line; a double-click on a note block enters Edit mode at that line.
 - **Return** on one selected card enters its content; on a stopped terminal it
   starts the shell (an explicit key press); on a note it begins editing.
@@ -686,8 +686,8 @@ bound an inflexible child.
   handle sits on the visible top border and the header shows the first line
   below it; resize the card shorter: the lines are cut at the bottom edge and
   the header does not move; zoom out to 25% and 10%: the card's border stays
-  on its edges' ends; repeat with a terminal card whose group is missing and a
-  short native app card.
+  on its edges' ends; repeat with a terminal card whose group is missing (the native app
+  card of the original check was removed on 2026-11-06).
 
 ## 2026-11-01: a card past the board edge takes no clicks
 

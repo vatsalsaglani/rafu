@@ -1,6 +1,6 @@
 ---
 name: rafu-ensemble
-description: Work inside a Rafu Ensemble (a visual board of terminals, notes, diagrams and apps). Use when the rafu MCP tools are available (ensemble_describe, note_write, terminal_create, edge_create, send_message, diagram_build, app_open) to inspect the board, start a peer agent such as Codex or Claude Code, link it with a message edge, delegate a task, read replies, keep shared notes, draw diagrams, export them, and open and verify apps.
+description: Work inside a Rafu Ensemble (a visual board of terminals, notes and diagrams). Use when the rafu MCP tools are available (ensemble_describe, note_write, terminal_create, edge_create, send_message, diagram_build) to inspect the board, start a peer agent such as Codex or Claude Code, link it with a message edge, delegate a task, read replies, keep shared notes, draw diagrams, and export them.
 ---
 
 # Working in a Rafu Ensemble
@@ -16,7 +16,7 @@ logged under "Agents" in the Ensemble bar, and undoable by the user.
 2. Agent control is the user's choice for this Ensemble:
    - `off`: read only. Tell the user; do not retry changes.
    - `ask`: Rafu asks the user before each change. Removing nodes or links,
-     starting processes, typing into terminals, opening apps and exporting
+     starting processes, typing into terminals and exporting
      ask every time.
    - `allow`: changes run at once.
 3. A result with `"status": "pending_approval"` has a `request_id`. Do other
@@ -154,20 +154,9 @@ a message link to it (`edge_create` kind `message`), set it live, and use
   `frame` with `frame_id`. Files go to the workspace `exports/` folder; the
   result has the workspace-relative `path`.
 
-## Open and verify apps
-
-1. `app_open {"app_name": "Simulator"}` or `{"bundle_id": "com.apple.Safari"}`
-   opens the app and shows it in an app node.
-2. `app_inspect {"node_id": "..."}` returns the Accessibility summary of the
-   docked window (titles, buttons, values). It needs the user's
-   Accessibility permission; if it is missing, ask the user to allow Rafu in
-   System Settings > Privacy & Security > Accessibility.
-3. Use the summary to check your change, then report what you saw.
-
 ## Other tools
 
-- `node_create` kinds `file`/`image` (`path`), `web` (`url` on localhost),
-  `app` (adds the node without launching).
+- `node_create` kinds `file`/`image` (`path`), `web` (`url` on localhost).
 - `node_update` renames, moves (`x`, `y` top-left) or resizes a node.
 - `node_remove`, `edge_remove` — always confirmed by the user in Ask mode.
 - `terminal_start` starts a stopped terminal node and moves the user's view

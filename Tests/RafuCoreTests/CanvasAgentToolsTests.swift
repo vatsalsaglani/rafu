@@ -124,8 +124,16 @@ private let nodeB = "7F9619FF-8B86-D011-B42D-00C04FC964FF"
     #expect(throws: CanvasAgentToolError.missingArgument("path")) {
         try CanvasAgentToolCall.parse(tool: "node_create", arguments: ["kind": "file"])
     }
-    #expect(throws: CanvasAgentToolError.invalidArgument("bundle_id")) {
-        try CanvasAgentToolCall.parse(tool: "app_open", arguments: ["bundle_id": "com.x;rm"])
+    // The Mac App tools were removed. Their names are now unknown tools.
+    for name in ["app_open", "app_inspect"] {
+        #expect(throws: CanvasAgentToolError.unknownTool) {
+            try CanvasAgentToolCall.parse(tool: name, arguments: ["bundle_id": "com.apple.finder"])
+        }
+        #expect(CanvasAgentTool(rawValue: name) == nil)
+    }
+    #expect(throws: CanvasAgentToolError.invalidArgument("kind")) {
+        try CanvasAgentToolCall.parse(
+            tool: "node_create", arguments: ["kind": "app"])
     }
 }
 
@@ -155,11 +163,11 @@ private let nodeB = "7F9619FF-8B86-D011-B42D-00C04FC964FF"
 }
 
 @Test func agentToolRisksMatchTheSafetyModel() throws {
-    for tool in [CanvasAgentTool.ensembleDescribe, .noteRead, .appInspect, .actionStatus] {
+    for tool in [CanvasAgentTool.ensembleDescribe, .noteRead, .actionStatus] {
         #expect(CanvasAgentToolCall(tool: tool).risk == .read)
     }
     for tool in [
-        CanvasAgentTool.nodeRemove, .edgeRemove, .terminalStart, .terminalSend, .appOpen,
+        CanvasAgentTool.nodeRemove, .edgeRemove, .terminalStart, .terminalSend,
     ] {
         #expect(CanvasAgentToolCall(tool: tool).risk == .sensitive)
     }

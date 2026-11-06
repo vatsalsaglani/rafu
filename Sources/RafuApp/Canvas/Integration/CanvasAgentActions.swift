@@ -251,14 +251,14 @@ enum CanvasAgentActions {
         session.canvas.boards[board.id] === board
     }
 
-    /// Only these need views that exist while the Ensemble is on screen: a docked
-    /// app window, or a terminal card that starts a process through its own view.
+    /// Only these need views that exist while the Ensemble is on screen: a
+    /// terminal card that starts a process through its own view.
     /// Links and live shells work in the background.
     private static func needsShownBoard(_ call: CanvasAgentToolCall, caller: CanvasAgentCaller)
         -> Bool
     {
         switch call.tool {
-        case .appOpen, .terminalStart: return true
+        case .terminalStart: return true
         case .terminalCreate: return call.startsProcess
         case .terminalSend:
             guard !isRoutedByLink(call, caller: caller),
@@ -403,8 +403,6 @@ enum CanvasAgentActions {
         case .edgeCreate: return try edgeCreate(call, board: board)
         case .edgeRemove: return try edgeRemove(call, board: board)
         case .linkSetState: return try linkSetState(call, board: board)
-        case .appOpen: return try await appOpen(call, caller: caller)
-        case .appInspect: return try await appInspect(call, board: board)
         case .mermaidSet: return try mermaidSet(call, board: board)
         case .iconSearch: return iconSearch(call)
         case .frameCreate: return try frameCreate(call, caller: caller)
@@ -455,7 +453,6 @@ enum CanvasAgentActions {
                 }
                 if agent == nil { agent = CanvasAgentCenter.shared.launchedAgent(of: card.id) }
             case .file(let value), .image(let value): path = value
-            case .nativeApp(let bundleID): path = bundleID
             case .web(let destination): path = destination.address
             default: break
             }
@@ -631,10 +628,6 @@ enum CanvasAgentActions {
             let destination = try CanvasWebDestination(url)
             content = .web(destination: destination)
             title = title ?? destination.address
-        case "app":
-            let app = try await resolveApp(bundleID: call.bundleID, name: call.appName)
-            content = .nativeApp(bundleID: app.bundleID)
-            title = title ?? app.name
         case "service_icon":
             guard let packID = call.packID, let iconID = call.iconID else {
                 throw CanvasAgentToolError.missingArgument("icon_id")
@@ -1100,78 +1093,6 @@ enum CanvasAgentActions {
         return ok(message, edge: edge.id)
     }
 
-    // MARK: Apps
-
-    private static func appOpen(_ call: CanvasAgentToolCall, caller: CanvasAgentCaller)
-        async throws -> CanvasBridgeResponse
-    {
-        let app = try await resolveApp(bundleID: call.bundleID, name: call.appName)
-        let board = caller.board
-        let card: CanvasCard
-        if let existing = board.cards.first(where: {
-            $0.content == .nativeApp(bundleID: app.bundleID)
-        }) {
-            card = existing
-            board.select([card.id])
-        } else {
-            card = CanvasCard(
-                title: String(app.name.prefix(120)),
-                rect: placement(call, kind: "app", caller: caller),
-                content: .nativeApp(bundleID: app.bundleID))
-            try insert(card, into: board)
-        }
-        let docked = await CanvasAgentKinds.open(
-            bundleID: app.bundleID, card: card.id, session: caller.session)
-        return ok(
-            docked
-                ? "Opened \(app.name) and docked it in node \"\(card.title)\". Use app_inspect to read its window."
-                : "Opened \(app.name). It is not docked in node \"\(card.title)\": the user must allow Rafu in System Settings > Privacy & Security > Accessibility, then choose Dock in the node.",
-            node: card.id)
-    }
-
-    private struct ResolvedApp {
-        let url: URL
-        let name: String
-        let bundleID: String
-    }
-
-    private static func resolveApp(bundleID: String?, name: String?) async throws -> ResolvedApp {
-        var url: URL?
-        if let bundleID {
-            url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
-        } else if let name {
-            let folders = [
-                "/Applications", "/Applications/Utilities", "/System/Applications",
-                "/System/Applications/Utilities",
-                "/Applications/Xcode.app/Contents/Developer/Applications",
-            ]
-            url = folders.map { URL(fileURLWithPath: $0).appending(path: "\(name).app") }
-                .first { FileManager.default.fileExists(atPath: $0.path) }
-        }
-        guard let url else { throw CanvasAgentToolError.invalidArgument("bundle_id") }
-        let identity = try await CanvasPreviewLoader.appIdentity(url)
-        return ResolvedApp(url: url, name: identity.name, bundleID: identity.bundleID)
-    }
-
-    private static func appInspect(_ call: CanvasAgentToolCall, board: CanvasBoardState)
-        async throws -> CanvasBridgeResponse
-    {
-        let card = try findCard(call.nodeID, in: board)
-        guard case .nativeApp = card.content else {
-            throw CanvasAgentToolError.invalidArgument("node_id")
-        }
-        guard let summary = await CanvasAgentKinds.inspect(card.id) else {
-            return .init(
-                error:
-                    "Rafu cannot read this app yet. The user must allow Rafu in System Settings > Privacy & Security > Accessibility, and the app window must be docked in the node."
-            )
-        }
-        var result = CanvasAgentToolResult()
-        result.nodeID = card.id.rawValue.uuidString
-        result.text = summary
-        return .init(toolResult: result.bounded(maximumBytes: resultBytes))
-    }
-
     // MARK: Diagrams
 
     private static func mermaidSet(_ call: CanvasAgentToolCall, board: CanvasBoardState) throws
@@ -1295,7 +1216,7 @@ enum CanvasAgentActions {
     }
 }
 
-// MARK: Cross-workstream kinds (X5 whiteboard, X6 docking, X9 diagrams)
+// MARK: Cross-workstream kinds (X5 whiteboard, X9 diagrams)
 
 /// The only place that names card kinds and services from other workstreams.
 /// If one of their contracts changes, only this enum changes.
@@ -1307,7 +1228,6 @@ enum CanvasAgentKinds {
         if case .file = content { return "file" }
         if case .image = content { return "image" }
         if case .web = content { return "web" }
-        if case .nativeApp = content { return "app" }
         if case .mermaid = content { return "mermaid" }
         if case .shape = content { return "shape" }
         if case .stroke = content { return "stroke" }
@@ -1409,18 +1329,6 @@ enum CanvasAgentKinds {
                 boardID: board, target: .board,
                 format: .gif(seconds: .init(seconds), fps: .init(fps)), session: session)
         }
-    }
-
-    static func inspect(_ card: CanvasCardID) async -> String? {
-        await CanvasAppDocking.shared.inspect(cardID: card)
-    }
-
-    /// Launches the app and docks it in its card. Never prompts for
-    /// permission; without it the app opens undocked.
-    static func open(bundleID: String, card: CanvasCardID, session: WorkspaceSession) async
-        -> Bool
-    {
-        await CanvasAppDocking.shared.open(bundleID: bundleID, in: card, session: session)
     }
 
     static func displayName(agent: String) -> String {

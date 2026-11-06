@@ -126,14 +126,13 @@ nonisolated struct CanvasWebDestination: Codable, Equatable, Sendable {
     }
 }
 
-nonisolated enum CanvasCardContent: Codable, Equatable, Sendable {
+nonisolated enum CanvasCardContent: Equatable, Sendable {
     case file(path: String)
     case image(path: String)
     /// A persisted snapshot only. A native text storage owns live note edits.
     case note(snapshot: String)
     case terminal(groupID: TerminalGroupID)
     case web(destination: CanvasWebDestination)
-    case nativeApp(bundleID: String)
     /// Mermaid source rendered natively (X5). The live editor owns edits;
     /// this is the committed source.
     case mermaid(source: String)
@@ -151,7 +150,6 @@ nonisolated enum CanvasCardContent: Codable, Equatable, Sendable {
         case .note: "Note"
         case .terminal: "Terminal"
         case .web: "Local Web App"
-        case .nativeApp: "Native App"
         case .mermaid: "Diagram"
         case .shape(let shape): shape.kind.title
         case .stroke(let stroke): stroke.kind.title
@@ -168,7 +166,6 @@ nonisolated enum CanvasCardContent: Codable, Equatable, Sendable {
         case .note: "note.text"
         case .terminal: "terminal"
         case .web: "globe"
-        case .nativeApp: "macwindow"
         case .mermaid: "point.3.connected.trianglepath.dotted"
         case .shape(let shape):
             switch shape.kind {
@@ -195,15 +192,6 @@ nonisolated enum CanvasCardContent: Codable, Equatable, Sendable {
         case .note(let text):
             guard text.utf8.count <= CanvasLimits.noteBytes else { throw CanvasError.noteTooLarge }
         case .web(let destination): try destination.validate()
-        case .nativeApp(let id):
-            guard !id.isEmpty, id.utf8.count <= 255,
-                id.unicodeScalars.allSatisfy({
-                    CharacterSet(
-                        charactersIn:
-                            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_"
-                    ).contains($0)
-                })
-            else { throw CanvasError.invalidDocument }
         case .terminal: break
         case .mermaid(let source):
             guard CanvasStyleDecoding.validMermaidSource(source) else {
@@ -224,6 +212,85 @@ nonisolated enum CanvasCardContent: Codable, Equatable, Sendable {
             && path.split(separator: "/", omittingEmptySubsequences: false).allSatisfy {
                 !$0.isEmpty && $0 != "." && $0 != ".."
             }
+    }
+}
+
+// MARK: Saved form
+
+/// The saved JSON shape of a card's content.
+///
+/// `Stored` mirrors every live case with the same names and labels, so the
+/// synthesized coding keeps the exact bytes older boards were written with.
+/// It also keeps `nativeApp`, the removed Mac App kind: a board saved while
+/// that kind existed must still open. Such a card reads as a note that keeps
+/// the card's id, rect, title, and links. Nothing writes `nativeApp` again.
+///
+/// The extension is `nonisolated`: this target defaults to `@MainActor`, and an
+/// extension of a nonisolated type does not inherit the type's isolation.
+/// Decoding runs off the main actor, where a main-actor `init(from:)` traps.
+nonisolated extension CanvasCardContent: Codable {
+    private enum Stored: Codable {
+        case file(path: String)
+        case image(path: String)
+        case note(snapshot: String)
+        case terminal(groupID: TerminalGroupID)
+        case web(destination: CanvasWebDestination)
+        case nativeApp(bundleID: String)
+        case mermaid(source: String)
+        case shape(CanvasShape)
+        case stroke(CanvasStroke)
+        case text(CanvasText)
+        case frame(CanvasFrame)
+        case serviceIcon(CanvasServiceIcon)
+    }
+
+    /// The note text for a removed Mac App card. The bundle identifier is
+    /// shown only when it is short and plain, so a forged value stays inert.
+    static func removedMacAppSnapshot(bundleID: String) -> String {
+        let allowed = CharacterSet(
+            charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_")
+        let plain =
+            !bundleID.isEmpty && bundleID.utf8.count <= 255
+            && bundleID.unicodeScalars.allSatisfy { allowed.contains($0) }
+        let name = plain ? bundleID : "unknown app"
+        return "Mac App card: \(name)\n\nMac App cards were removed from Rafu. "
+            + "This note keeps the card's place and links."
+    }
+
+    init(from decoder: any Decoder) throws {
+        switch try Stored(from: decoder) {
+        case .file(let path): self = .file(path: path)
+        case .image(let path): self = .image(path: path)
+        case .note(let snapshot): self = .note(snapshot: snapshot)
+        case .terminal(let groupID): self = .terminal(groupID: groupID)
+        case .web(let destination): self = .web(destination: destination)
+        case .nativeApp(let bundleID):
+            self = .note(snapshot: Self.removedMacAppSnapshot(bundleID: bundleID))
+        case .mermaid(let source): self = .mermaid(source: source)
+        case .shape(let shape): self = .shape(shape)
+        case .stroke(let stroke): self = .stroke(stroke)
+        case .text(let text): self = .text(text)
+        case .frame(let frame): self = .frame(frame)
+        case .serviceIcon(let icon): self = .serviceIcon(icon)
+        }
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        let stored: Stored =
+            switch self {
+            case .file(let path): .file(path: path)
+            case .image(let path): .image(path: path)
+            case .note(let snapshot): .note(snapshot: snapshot)
+            case .terminal(let groupID): .terminal(groupID: groupID)
+            case .web(let destination): .web(destination: destination)
+            case .mermaid(let source): .mermaid(source: source)
+            case .shape(let shape): .shape(shape)
+            case .stroke(let stroke): .stroke(stroke)
+            case .text(let text): .text(text)
+            case .frame(let frame): .frame(frame)
+            case .serviceIcon(let icon): .serviceIcon(icon)
+            }
+        try stored.encode(to: encoder)
     }
 }
 

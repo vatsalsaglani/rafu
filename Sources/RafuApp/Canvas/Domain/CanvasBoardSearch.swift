@@ -10,7 +10,6 @@ nonisolated enum CanvasSearchCategory: String, CaseIterable, Sendable {
     case image
     case diagram
     case web
-    case app
     case frame
     case drawing
 
@@ -23,7 +22,6 @@ nonisolated enum CanvasSearchCategory: String, CaseIterable, Sendable {
         case .image: "Image"
         case .diagram: "Diagram"
         case .web: "Local Web App"
-        case .app: "Mac App"
         case .frame: "Frame"
         case .drawing: "Shape & Text"
         }
@@ -37,7 +35,6 @@ nonisolated enum CanvasSearchCategory: String, CaseIterable, Sendable {
         case .image: .image
         case .mermaid: .diagram
         case .web: .web
-        case .nativeApp: .app
         case .frame: .frame
         case .shape, .stroke, .text, .serviceIcon: .drawing
         }
@@ -183,8 +180,6 @@ nonisolated struct CanvasBoardSearchIndex: Sendable {
             let host = CanvasCardPresentation.displayTitle(
                 title: destination.address, content: content)
             return (host, [destination.address])
-        case .nativeApp(let bundleID):
-            return (bundleID, [])
         case .mermaid(let source):
             return (CanvasCardSummaryText.firstLine(of: source, limit: 60), [])
         case .shape(let shape):

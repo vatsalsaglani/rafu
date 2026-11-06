@@ -431,26 +431,6 @@ extension WorkspaceSession {
     nonisolated static let canvasFileOutsideFolderMessage =
         "This file is outside the Ensemble\u{2019}s folder."
 
-    func chooseCanvasApplication(_ id: CanvasID) {
-        guard let board = canvas.boards[id] else { return }
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.applicationBundle]
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.directoryURL = URL(fileURLWithPath: "/Applications", isDirectory: true)
-        panel.prompt = "Add App"
-        panel.begin { [weak self, weak board] response in
-            guard response == .OK, let self, let board, let url = panel.url else { return }
-            Task(name: "Read selected app identity") {
-                do {
-                    let app = try await CanvasPreviewLoader.appIdentity(url)
-                    guard self.canvas.boards[id] === board else { return }
-                    try board.add(title: app.name, content: .nativeApp(bundleID: app.bundleID))
-                } catch { board.errorMessage = error.localizedDescription }
-            }
-        }
-    }
-
     func openCanvasFile(_ path: String) {
         guard let rootURL else { return }
         Task { [weak self] in

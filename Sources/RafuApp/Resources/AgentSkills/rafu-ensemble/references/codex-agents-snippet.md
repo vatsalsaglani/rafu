@@ -23,7 +23,6 @@ message that names it (limits: prompt 1,024 bytes, `terminal_send` text 4,096
 bytes, `send_message` 16 KiB). If `terminal_send` says no agent is connected
 but one runs in that node, link it and set the link live. Keep a Mermaid
 diagram under 8000 x 8000 pt; split bigger ones. Use notes (`note_create`, `note_write`) as shared memory,
-`diagram_build`/`mermaid_set` for diagrams, `export` for PNG/PDF/GIF files,
-and `app_open` + `app_inspect` to verify apps. Commands are argument arrays,
+`diagram_build`/`mermaid_set` for diagrams, and `export` for PNG/PDF/GIF files. Commands are argument arrays,
 never shell strings. Never retry an action the user denied.
 ```

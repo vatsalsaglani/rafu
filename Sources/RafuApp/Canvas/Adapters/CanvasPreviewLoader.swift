@@ -3,11 +3,6 @@ import Foundation
 import ImageIO
 
 nonisolated enum CanvasPreviewLoader {
-    struct AppIdentity: Sendable {
-        let name: String
-        let bundleID: String
-    }
-
     @concurrent static func relativePath(for url: URL, root: URL) async throws -> String {
         let base = root.resolvingSymlinksInPath().standardizedFileURL
         let target = url.resolvingSymlinksInPath().standardizedFileURL
@@ -69,21 +64,6 @@ nonisolated enum CanvasPreviewLoader {
         guard let bounded = context.makeImage() else { throw CanvasError.unavailable }
         try Task.checkCancellation()
         return bounded
-    }
-
-    @concurrent static func appIdentity(_ url: URL) async throws -> AppIdentity {
-        guard url.pathExtension == "app" else { throw CanvasError.invalidPath }
-        let data = try read(url.appending(path: "Contents/Info.plist"), limit: 1_024 * 1_024)
-        guard
-            let info = try PropertyListSerialization.propertyList(from: data, format: nil)
-                as? [String: Any],
-            let id = info["CFBundleIdentifier"] as? String,
-            !id.isEmpty, id.utf8.count <= 255
-        else { throw CanvasError.invalidPath }
-        let label =
-            (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String)
-            ?? url.deletingPathExtension().lastPathComponent
-        return .init(name: String(label.prefix(100)), bundleID: id)
     }
 
     private static func read(_ url: URL, limit: Int, prefixOnly: Bool = false) throws -> Data {

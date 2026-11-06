@@ -187,12 +187,10 @@ struct CanvasAgentActionsTests {
         #expect(fixture.board.cards.count == 2)
     }
 
-    @Test("Opening apps and starting terminals still need the Ensemble on screen")
-    func processAndAppToolsNeedTheBoardShown() async throws {
+    @Test("Starting terminals still needs the Ensemble on screen")
+    func processToolsNeedTheBoardShown() async throws {
         let fixture = try await CanvasAgentFixture(presented: false)
         fixture.board.setAgentControlMode(.allow)
-        let app = try await fixture.call("app_open", ["bundle_id": "com.apple.finder"])
-        #expect(app.error == CanvasAgentActions.notShownMessage)
         let started = try await fixture.call(
             "terminal_create", ["title": "Agent", "agent": "claude"])
         #expect(started.error == CanvasAgentActions.notShownMessage)

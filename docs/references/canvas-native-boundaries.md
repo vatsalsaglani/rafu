@@ -4,6 +4,16 @@
 - Verified: 2026-10-18, macOS 27.0.1, Apple Swift 6.4, Swift 6.2 package mode,
   strict concurrency, arm64, deployment target macOS 15.
 
+> **Status (2026-11-06): the native app node was removed.** The user removed
+> the Mac App card, Accessibility docking, and the `app_open` and `app_inspect`
+> tools because the feature did not work as expected (ADR 0025 Amendment 3).
+> The sections below stay as history. A legacy `nativeApp` card now decodes as
+> a note (`CanvasCardContent.Stored` in `CanvasDocument.swift`). The files
+> `CanvasAppDocking.swift`, `CanvasAppDockingModel.swift`, and
+> `CanvasNativeAppCard.swift` no longer exist; `CanvasAppDockingTests` is gone.
+> Regression: `CanvasDocumentTests.removedMacAppCardBecomesTombstoneNote` and
+> `canvasSourcesHaveNoMacAppCode`.
+
 ## Native app node: docking replaces capture (2026-10-18, supersedes capture text below)
 
 Applies to the native app card. Mac follow-up: 2026-10-18, macOS 27.0.1,

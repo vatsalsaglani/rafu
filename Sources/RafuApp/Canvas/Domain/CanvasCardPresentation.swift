@@ -49,8 +49,6 @@ nonisolated enum CanvasCardPresentation {
             return terminalTitle ?? ""
         case .web(let destination):
             return displayTitle(title: destination.address, content: content)
-        case .nativeApp(let bundleID):
-            return bundleID
         case .mermaid(let source):
             return CanvasCardSummaryText.firstLine(of: source, limit: 60)
         case .shape(let shape):

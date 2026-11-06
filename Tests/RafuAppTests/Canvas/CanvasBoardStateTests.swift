@@ -84,7 +84,7 @@ struct CanvasBoardStateTests {
     func removeAndUndo() throws {
         let board = CanvasBoardState(document: CanvasDocument(title: "Task"))
         try board.add(title: "One", content: .terminal(groupID: TerminalGroupID()))
-        try board.add(title: "Two", content: .nativeApp(bundleID: "com.apple.TextEdit"))
+        try board.add(title: "Two", content: .note(snapshot: "two"))
         board.connectingFrom = board.cards[0].id
         try board.connect(to: board.cards[1].id)
         #expect(board.connections.count == 1)

@@ -1229,13 +1229,6 @@ struct CommandPaletteView: View {
                     dismiss()
                     session.canvasDialog = .web(board.id)
                 },
-                .init(
-                    title: "Ensemble: Add Mac App…", symbolName: "macwindow",
-                    keywords: ["card"]
-                ) {
-                    dismiss()
-                    session.chooseCanvasApplication(board.id)
-                },
                 .init(title: "Ensemble: Actual Size", symbolName: "1.square", keywords: ["zoom"]) {
                     dismiss()
                     board.zoom(1 / board.viewport.scale)
