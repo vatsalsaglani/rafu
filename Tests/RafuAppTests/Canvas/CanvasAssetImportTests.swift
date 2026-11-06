@@ -129,6 +129,24 @@ struct CanvasAssetImportTests {
         #expect(try Data(contentsOf: first) == Self.png)
     }
 
+    @Test("Copies the board refuses are removed again; invalid paths are skipped")
+    func removeCopiesDeletesOnlyCopiedFiles() async throws {
+        let (folder, root, outside) = try Self.makeFolders()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let source = outside.appending(path: "shot.png")
+        try Self.png.write(to: source)
+        let paths = try await CanvasAssetImporter.copy(
+            [source], into: ".rafu/ensemble-assets/plan", root: root)
+        let kept = root.appending(path: "keep.txt")
+        try Data("keep".utf8).write(to: kept)
+
+        await CanvasAssetImporter.removeCopies(paths + ["../outside/shot.png"], root: root)
+
+        #expect(!FileManager.default.fileExists(atPath: root.appending(path: paths[0]).path))
+        #expect(FileManager.default.fileExists(atPath: kept.path))
+        #expect(FileManager.default.fileExists(atPath: source.path))
+    }
+
     @Test("An image over 16 MB is refused before it is read, and nothing is left behind")
     func sizeCapRefusesBatch() async throws {
         let (folder, root, outside) = try Self.makeFolders()

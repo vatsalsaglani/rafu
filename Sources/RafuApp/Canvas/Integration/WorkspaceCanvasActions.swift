@@ -404,7 +404,14 @@ extension WorkspaceSession {
                 case .externalImage: next.next()
                 }
             }
-            try placeCanvasDroppedFiles(paths, on: board, at: request.location)
+            do {
+                try placeCanvasDroppedFiles(paths, on: board, at: request.location)
+            } catch {
+                // The board refused the cards after the copy: remove the
+                // copies so no file stays behind without a card.
+                await CanvasAssetImporter.removeCopies(copied, root: root)
+                throw error
+            }
             let folderURL = root.appending(path: request.folder)
             let copiedURLs = copied.map { root.appending(path: $0) }
             let noun = copied.count == 1 ? "1 image" : "\(copied.count) images"

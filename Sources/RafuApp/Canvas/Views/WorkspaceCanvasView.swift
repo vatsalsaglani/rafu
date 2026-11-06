@@ -120,7 +120,11 @@ struct WorkspaceCanvasView: View {
         // primary button, so once it is up the preview is stale.
         .task(id: board.dropPreview != nil) {
             while board.dropPreview != nil {
-                do { try await Task.sleep(for: CanvasDropPreviewWatchdog.interval) } catch {
+                do {
+                    try await Task.sleep(
+                        for: CanvasDropPreviewWatchdog.interval,
+                        tolerance: CanvasDropPreviewWatchdog.tolerance)
+                } catch {
                     return
                 }
                 if CanvasDropPreviewWatchdog.dragHasEnded(
@@ -938,6 +942,7 @@ private struct CanvasSnapGuideLayer: View {
 /// When a drop preview is stale: no drag runs without the primary button.
 nonisolated enum CanvasDropPreviewWatchdog {
     static let interval: Duration = .milliseconds(500)
+    static let tolerance: Duration = .milliseconds(100)
 
     static func dragHasEnded(pressedMouseButtons: Int) -> Bool {
         pressedMouseButtons & 1 == 0

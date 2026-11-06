@@ -178,6 +178,18 @@ nonisolated enum CanvasAssetImporter {
         try copySynchronously(sources, into: folder, root: root)
     }
 
+    /// Removes files that `copy` wrote, by the relative paths it returned,
+    /// when the board then refuses their cards (for example an agent filled
+    /// the board during the copy). Paths that are not valid workspace-relative
+    /// paths are skipped.
+    @concurrent
+    static func removeCopies(_ relativePaths: [String], root: URL) async {
+        let base = root.resolvingSymlinksInPath().standardizedFileURL
+        for path in relativePaths where CanvasCardContent.validRelativePath(path) {
+            try? FileManager.default.removeItem(at: base.appending(path: path))
+        }
+    }
+
     static func copySynchronously(_ sources: [URL], into folder: String, root: URL) throws
         -> [String]
     {
