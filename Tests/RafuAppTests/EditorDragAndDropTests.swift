@@ -232,6 +232,35 @@ func rafuTextViewForwardsNonTextDragKinds() {
     #expect(!RafuTextView.shouldForward(.text))
 }
 
+@Test("A Finder drop of only image files goes into a Markdown editor's text")
+func rafuTextViewInsertsAllImageDropIntoMarkdown() {
+    let images = [
+        URL(fileURLWithPath: "/tmp/a.png"), URL(fileURLWithPath: "/tmp/b.JPG"),
+        URL(fileURLWithPath: "/tmp/c.svg"),
+    ]
+    #expect(
+        RafuTextView.insertsMarkdownImageDrop(
+            kind: .externalFiles, fileURLs: images, canAcceptImages: true))
+}
+
+@Test("A mixed, non-Markdown, empty, or internal drop keeps forwarding")
+func rafuTextViewForwardsOtherDrops() {
+    let image = URL(fileURLWithPath: "/tmp/a.png")
+    let text = URL(fileURLWithPath: "/tmp/notes.md")
+    #expect(
+        !RafuTextView.insertsMarkdownImageDrop(
+            kind: .externalFiles, fileURLs: [image, text], canAcceptImages: true))
+    #expect(
+        !RafuTextView.insertsMarkdownImageDrop(
+            kind: .externalFiles, fileURLs: [image], canAcceptImages: false))
+    #expect(
+        !RafuTextView.insertsMarkdownImageDrop(
+            kind: .externalFiles, fileURLs: [], canAcceptImages: true))
+    #expect(
+        !RafuTextView.insertsMarkdownImageDrop(
+            kind: .internalPayload, fileURLs: [image], canAcceptImages: true))
+}
+
 // MARK: - Finder file drop classification (EditorDragKind)
 
 @Test("EditorDragKind gives rafuEditorDrag precedence over a coincidentally-present file URL")

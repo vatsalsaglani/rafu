@@ -187,6 +187,12 @@ struct CodeEditorView: NSViewRepresentable {
         textView.blameHoverAction = { [weak coordinator = coordinator] in
             coordinator?.presentBlameHover()
         }
+        textView.markdownImageEligibility = { [weak coordinator = coordinator] in
+            coordinator?.acceptsMarkdownImages ?? false
+        }
+        textView.markdownImageAction = { [weak coordinator = coordinator] sources, range in
+            coordinator?.insertMarkdownImages(sources, replacing: range)
+        }
         coordinator.installSyntaxPipeline(for: textView)
         textView.textStorage?.delegate = coordinator
         coordinator.installFindController(for: textView)
@@ -493,6 +499,7 @@ struct CodeEditorView: NSViewRepresentable {
         private var appliedSuppression = false
         private var loadedRevision: Int?
         private let fileService = WorkspaceFileService()
+        private var markdownImageTask: Task<Void, Never>?
 
         /// Capped undo manager vended to the text view via
         /// `undoManager(for:)`. Lazily built so its `levelsOfUndo` cap is set
@@ -537,6 +544,9 @@ struct CodeEditorView: NSViewRepresentable {
             textView?.hoverTheme = nil
             textView?.findAction = nil
             textView?.blameHoverAction = nil
+            textView?.markdownImageAction = nil
+            textView?.markdownImageEligibility = nil
+            markdownImageTask?.cancel()
             gutterRuler?.peekAction = nil
             guard let document, document.editorResources?.coordinator === self else { return }
             document.saveAction = nil
@@ -882,6 +892,75 @@ struct CodeEditorView: NSViewRepresentable {
                 if changed, findState?.isActive == true {
                     findState?.refresh()
                 }
+            }
+        }
+
+        // MARK: Markdown image paste and drop
+
+        /// A saved Markdown document takes pasted and dropped images. An
+        /// untitled document has no folder to store them in yet.
+        var acceptsMarkdownImages: Bool {
+            guard let document, !resourcesReleased, !isLoading else { return false }
+            return document.isMarkdown && !document.isUntitled
+        }
+
+        /// Stores `sources` beside the document off the main actor, then
+        /// inserts one image reference per stored file as one undoable edit.
+        /// The insertion replaces `range` when the text has not changed since
+        /// the paste or drop; otherwise it goes at the current selection.
+        func insertMarkdownImages(_ sources: [MarkdownImageSource], replacing range: NSRange) {
+            guard let document, !sources.isEmpty else { return }
+            guard !document.isUntitled else {
+                NSSound.beep()
+                document.errorMessage = "Save the document before you add images to it."
+                return
+            }
+            let documentURL = document.url
+            let template = MarkdownImageFolder.storedTemplate()
+            let writer = MarkdownImageAssetWriter()
+            let generation = editGeneration
+            // A second paste never cancels the first: its image may already
+            // be on disk and still needs its link. Only teardown cancels.
+            markdownImageTask = Task(name: "Store Markdown images") { [weak self] in
+                var paths: [String] = []
+                var failure: (any Error)?
+                for source in sources {
+                    do {
+                        paths.append(
+                            try await writer.store(
+                                source, for: documentURL, folderTemplate: template))
+                    } catch is CancellationError {
+                        return
+                    } catch {
+                        failure = error
+                    }
+                }
+                guard let self, !Task.isCancelled else { return }
+                self.finishMarkdownImageInsertion(
+                    paths: paths, failure: failure, documentURL: documentURL,
+                    range: range, generation: generation)
+            }
+        }
+
+        private func finishMarkdownImageInsertion(
+            paths: [String], failure: (any Error)?, documentURL: URL,
+            range: NSRange, generation: Int
+        ) {
+            guard let document, let textView, !resourcesReleased else { return }
+            if !paths.isEmpty {
+                if document.url == documentURL {
+                    let target = generation == editGeneration ? range : textView.selectedRange()
+                    textView.insertMarkdownImageReferences(paths, replacing: target)
+                } else {
+                    NSSound.beep()
+                    document.errorMessage =
+                        "The document moved while Rafu saved the image. The image is in the old folder; add its link by hand."
+                    return
+                }
+            }
+            if let failure {
+                NSSound.beep()
+                document.errorMessage = failure.localizedDescription
             }
         }
 

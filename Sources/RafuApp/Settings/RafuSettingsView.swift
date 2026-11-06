@@ -130,6 +130,8 @@ struct RafuSettingsView: View {
             )
         }
 
+        MarkdownImageSettingsSection()
+
         NotchSettingsSection()
 
         Section {
