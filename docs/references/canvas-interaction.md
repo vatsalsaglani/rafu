@@ -405,6 +405,34 @@ it needs a run-loop wait.
 
 Verification: `swift test --filter CanvasHandToolTests`.
 
+### Board key map (2026-11-06)
+
+Applies to `CanvasBoardKeyMap`, `CanvasToolKeyMonitor`, `CanvasToolPalette`,
+`CanvasAddPopover` and `CanvasCommands`. Last verified: Swift 6.2 language
+mode, macOS 27, headless build and tests only.
+
+- One table, `CanvasBoardKeyMap`: tools V H R O D A L P X M I, Add N T F I W,
+  Icon Library / Service Icon S, Convert Selection to Frame G. Image tool and
+  Add Image share I (same action). Free: B C E J K Q U Y Z.
+  `duplicateKeys()` must stay empty (`CanvasBoardKeyMapTests`).
+- The letters show as a 9 pt badge at the bottom-right of each tool button,
+  as a key hint at the top-right of each Add tile, in tooltips ("Rectangle
+  (R)") and in VoiceOver hints ("Shortcut R"). The Ensemble Shortcuts sheet
+  reads the same table.
+- **Single-letter keys never become menu key equivalents.** A menu equivalent
+  with no modifiers runs before a text field sees the key, so "r" in a note
+  would pick the Rectangle tool. Ensemble ▸ Tools has plain titles. A source
+  scan fails on `keyboardShortcut("<letter>", modifiers: [])`.
+- The local monitor acts only with the board focused, no card content active,
+  no rename, no sheet, its own key window, and a first responder that is not
+  text input (`NSText` or any `NSTextInputClient`, which includes terminals).
+  `NSHostingView` itself is not an `NSTextInputClient` (checked with a
+  compiled probe), so the focused board still passes.
+- N and T stay in `WorkspaceCanvasView.boardKeys`; the monitor lets them pass
+  (`boardHandledAddKinds`), so each runs once.
+
+Verification: `swift test --filter CanvasBoardKeyMapTests`.
+
 ### Z-order is array order
 
 Stacking order is `board.cards` array order: the last card is on top.

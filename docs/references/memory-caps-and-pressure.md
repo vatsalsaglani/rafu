@@ -44,6 +44,17 @@ These limits are coordinator-verified real values. They protect against runaway 
 | Mermaid layout cache entries (unmeasured proposal) | 24 LRU | MermaidRenderService.swift:100 (`maxCacheEntries`) | Bounded `PositionedGraph` retention; theme-independent layout cached; ADR 0020 |
 | Ensemble queued terminal lines per node (design bound) | 8 lines, 15-minute expiry | CanvasTerminalStarter.swift (`pendingTerminalLineLimit`, `pendingTerminalLineLifetime`) | Drops the oldest request rather than typing it late; never persisted or logged; see `ensemble-agent-terminal-tools.md` |
 
+**Icon Library (2026-11-06):**
+
+- `CanvasIconPackLibrary.images` is an `NSCache` with `countLimit = 300` and
+  `totalCostLimit = 16 MiB`. Cost is the largest bitmap's pixels × 4, or the
+  point size at 2x × 4 for a vector image.
+- The Icon Library panel is held only while open (`CanvasLibraryPanelHolder`).
+  `willCloseNotification` drops the reference, so the panel, its hosting view
+  and its search results are freed. The last reference lives one main-actor
+  turn more, because AppKit is still inside `close()`.
+- Verification: `swift test --filter RafuPopupComponentsTests`.
+
 ## Why it matters
 
 Memory-pressure response keeps the app responsive under kernel-signaled memory warnings without adding polling or standing timers. Shedding the filename index on pressure is invisible to the user (rebuilds on demand), freeing a typically ~2-5 MB snapshot from transient pressure relief.

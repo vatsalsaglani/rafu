@@ -26,43 +26,55 @@ struct CanvasConnectionDialog: View {
     private var bothTerminals: Bool { isTerminal(from) && isTerminal(to) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(edgeID == nil ? "Connect Cards" : "Edit Link")
-                .font(.system(size: 15, weight: .semibold))
-            Form {
-                Picker("From:", selection: $from) {
-                    Text("Choose a card").tag(Optional<CanvasCardID>.none)
-                    ForEach(board?.cards ?? []) { Text($0.title).tag(Optional($0.id)) }
-                }
-                Picker("To:", selection: $to) {
-                    Text("Choose a card").tag(Optional<CanvasCardID>.none)
-                    ForEach(board?.cards ?? []) { Text($0.title).tag(Optional($0.id)) }
-                }
-                TextField("Label:", text: $label, prompt: Text("Label (optional)"))
-                if bothTerminals {
-                    Picker("Kind:", selection: $kind) {
-                        Text("Relationship").tag(CanvasConnectionBehavior.related)
-                        Text("Message link").tag(CanvasConnectionBehavior.session)
+        VStack(alignment: .leading, spacing: 0) {
+            RafuPopupHeader(
+                symbol: "point.topleft.down.to.point.bottomright.curvepath",
+                title: edgeID == nil ? "Connect Cards" : "Edit Link")
+            VStack(alignment: .leading, spacing: 14) {
+                Form {
+                    Picker("From:", selection: $from) {
+                        Text("Choose a card").tag(Optional<CanvasCardID>.none)
+                        ForEach(board?.cards ?? []) { Text($0.title).tag(Optional($0.id)) }
+                    }
+                    Picker("To:", selection: $to) {
+                        Text("Choose a card").tag(Optional<CanvasCardID>.none)
+                        ForEach(board?.cards ?? []) { Text($0.title).tag(Optional($0.id)) }
+                    }
+                    TextField("Label:", text: $label, prompt: Text("Label (optional)"))
+                    if bothTerminals {
+                        Picker("Kind:", selection: $kind) {
+                            Text("Relationship").tag(CanvasConnectionBehavior.related)
+                            Text("Message link").tag(CanvasConnectionBehavior.session)
+                        }
                     }
                 }
+                .formStyle(.columns)
+                Text(
+                    bothTerminals
+                        ? "A message link lets the two agent sessions send messages both ways. A relationship only shows that the cards belong together."
+                        : "A relationship shows that two cards belong together. It sends nothing."
+                )
+                .font(.callout).foregroundStyle(theme.palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                if let error {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.callout)
+                        .foregroundStyle(theme.palette.error)
+                }
             }
-            .formStyle(.columns)
-            Text(
-                bothTerminals
-                    ? "A message link lets the two agent sessions send messages both ways. A relationship only shows that the cards belong together."
-                    : "A relationship shows that two cards belong together. It sends nothing."
-            )
-            .font(.callout).foregroundStyle(theme.palette.textSecondary)
-            .fixedSize(horizontal: false, vertical: true)
-            if let error { Text(error).foregroundStyle(theme.palette.error) }
-            HStack {
-                Spacer()
-                Button("Cancel", role: .cancel) { session.canvasDialog = nil }
-                Button("Save", action: save).keyboardShortcut(.defaultAction)
+            .padding(16)
+            RafuPopupFooter(hints: [("↩", "Save"), ("esc", "Cancel")]) {
+                Button("Cancel") { session.canvasDialog = nil }
+                    .buttonStyle(RafuSecondaryButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                Button("Save", action: save)
+                    .buttonStyle(RafuProminentButtonStyle())
+                    .keyboardShortcut(.defaultAction)
                     .disabled(from == nil || to == nil || from == to)
             }
         }
-        .padding(24).frame(width: 480)
+        .frame(width: 480, alignment: .top)
+        .rafuPopupSurface(.sheet)
         .onAppear {
             if let edge = board?.connections.first(where: { $0.id == edgeID }) {
                 from = edge.from

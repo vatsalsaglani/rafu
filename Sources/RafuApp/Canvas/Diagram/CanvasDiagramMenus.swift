@@ -100,44 +100,74 @@ struct CanvasDiagramCardMenuItems: View {
 /// needs presentation state.
 @MainActor
 enum CanvasDiagramPanels {
-    private static var libraryPanel: NSPanel?
+    /// The Icon Library panel while it is on screen. Closing it releases the
+    /// panel, its hosting view and its search results (no keep-alive).
+    static let libraryHolder = CanvasLibraryPanelHolder()
     private static let libraryTarget = CanvasIconLibraryTarget()
 
-    /// Adds "Icons…" and "Convert to Frame" to the whiteboard tool palette.
-    /// Called once at launch.
+    /// Test seam: whether an Icon Library panel is alive.
+    static var libraryPanelIsLoaded: Bool { libraryHolder.isLoaded }
+
+    /// Adds "Icon Library…" (S) and "Convert Selection to Frame" (G) to the
+    /// whiteboard tool palette. Called once at launch.
     static func registerPaletteItems() {
+        CanvasBoardKeyMap.assertUnique()
         CanvasToolPalette.register(
             CanvasToolPaletteItem(
-                id: "x9.icons", title: "Icon Library…", symbol: "square.grid.3x3"
+                id: CanvasBoardKeyMap.iconLibraryItemID, title: "Icon Library…",
+                symbol: "square.grid.3x3",
+                key: CanvasBoardKeyMap.paletteItemKeys[CanvasBoardKeyMap.iconLibraryItemID]
             ) { board, session in showLibrary(board: board, session: session) })
         CanvasToolPalette.register(
             CanvasToolPaletteItem(
-                id: "x9.frame", title: "Convert Selection to Frame", symbol: "rectangle.dashed"
+                id: CanvasBoardKeyMap.convertToFrameItemID, title: "Convert Selection to Frame",
+                symbol: "rectangle.dashed",
+                key: CanvasBoardKeyMap.paletteItemKeys[CanvasBoardKeyMap.convertToFrameItemID]
             ) { board, session in
                 session.performCanvasEdit(board) { try board.convertSelectionToFrame() }
             })
     }
 
+    /// Shows the floating Icon Library: a borderless, non-activating panel
+    /// with the Rafu popup surface. Arrow keys move, Return adds, Escape
+    /// closes.
     static func showLibrary(board: CanvasBoardState, session: WorkspaceSession) {
         libraryTarget.board = board
         libraryTarget.session = session
-        if let panel = libraryPanel {
+        if let panel = libraryHolder.panel {
             panel.makeKeyAndOrderFront(nil)
             return
         }
-        let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 520),
-            styleMask: [.titled, .closable, .resizable, .utilityWindow],
+        let panel = CanvasIconLibraryPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 540),
+            styleMask: [.borderless, .nonactivatingPanel, .utilityWindow, .resizable],
             backing: .buffered, defer: true)
         panel.title = "Icon Library"
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = true
+        panel.level = .floating
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.isMovableByWindowBackground = true
+        panel.titleVisibility = .hidden
+        panel.minSize = NSSize(width: 360, height: 400)
+        panel.setAccessibilityTitle("Icon Library")
         panel.contentView = NSHostingView(
-            rootView: CanvasIconLibraryView(target: libraryTarget)
-                .rafuTheme(RafuThemeCatalog.resolvedForCurrentAppearance())
-                .rafuMotionScope())
-        panel.center()
-        libraryPanel = panel
+            rootView: CanvasIconLibraryView(
+                target: libraryTarget, close: { [weak panel] in panel?.close() }
+            )
+            .rafuPopupSurface(.floating)
+            .rafuTheme(RafuThemeCatalog.resolvedForCurrentAppearance())
+            .rafuMotionScope())
+        if let parent = NSApp.mainWindow ?? NSApp.keyWindow {
+            let frame = parent.frame
+            panel.setFrameOrigin(
+                NSPoint(x: frame.midX - 220, y: max(frame.minY, frame.midY - 270)))
+        } else {
+            panel.center()
+        }
+        libraryHolder.install(panel)
         panel.makeKeyAndOrderFront(nil)
     }
 
@@ -157,34 +187,54 @@ enum CanvasDiagramPanels {
     }
 
     static func editLabel(card: CanvasCard, board: CanvasBoardState, session: WorkspaceSession) {
-        let alert = NSAlert()
-        alert.messageText = "Edit Label"
-        alert.informativeText = "The label appears below the icon."
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Cancel")
-        let field = NSTextField(string: card.title)
-        field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
-        field.setAccessibilityLabel("Label")
-        alert.accessoryView = field
-        alert.window.initialFirstResponder = field
-        let window = NSApp.keyWindow
-        Task {
-            let response: NSApplication.ModalResponse
-            if let window {
-                response = await alert.beginSheetModal(for: window)
-            } else {
-                response = alert.runModal()
+        presentSheet(size: NSSize(width: 420, height: 190)) { dismiss in
+            CanvasTextFieldPopup(
+                symbol: "character.cursor.ibeam", title: "Edit Label",
+                message: "The label appears below the icon.", fieldLabel: "Label",
+                initialText: card.title, actionTitle: "Save", dismiss: dismiss
+            ) { label in
+                session.performCanvasEdit(board) { try board.setServiceIconLabel(card.id, label) }
             }
-            guard response == .alertFirstButtonReturn else { return }
-            let label = field.stringValue
-            session.performCanvasEdit(board) { try board.setServiceIconLabel(card.id, label) }
         }
     }
 
-    private static func presentSheet<Content: View>(
+    /// Asks a yes/no question in a Rafu popup sheet on the workspace window.
+    /// Returns false when the user cancels, or when no window can host it
+    /// (nothing changes then).
+    static func confirm(
+        symbol: String, title: String, message: String, actionTitle: String
+    ) async -> Bool {
+        guard parentWindow() != nil else { return false }
+        return await withCheckedContinuation { continuation in
+            let answer = CanvasPopupAnswer(continuation)
+            presentSheet(size: NSSize(width: 420, height: 180)) { dismiss in
+                RafuConfirmPopup(
+                    symbol: symbol, title: title, message: message,
+                    actions: [
+                        .init(actionTitle) {
+                            dismiss()
+                            answer.resume(true)
+                        }
+                    ],
+                    defaultActionID: actionTitle
+                ) {
+                    dismiss()
+                    answer.resume(false)
+                }
+            }
+        }
+    }
+
+    /// The workspace window a sheet attaches to. The Icon Library panel can
+    /// be the key window; a sheet never attaches to it.
+    private static func parentWindow() -> NSWindow? {
+        [NSApp.keyWindow, NSApp.mainWindow].compactMap { $0 }.first { !($0 is NSPanel) }
+    }
+
+    static func presentSheet<Content: View>(
         size: NSSize, @ViewBuilder content: (@escaping () -> Void) -> Content
     ) {
-        guard let parent = NSApp.keyWindow ?? NSApp.mainWindow else { return }
+        guard let parent = parentWindow() else { return }
         let sheet = NSWindow(
             contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled],
             backing: .buffered, defer: true)
@@ -198,5 +248,107 @@ enum CanvasDiagramPanels {
                 .rafuTheme(RafuThemeCatalog.resolvedForCurrentAppearance())
                 .rafuMotionScope())
         parent.beginSheet(sheet)
+    }
+}
+
+/// Resumes a continuation once. A popup can report through its button and
+/// again through Escape; only the first answer counts.
+@MainActor
+final class CanvasPopupAnswer {
+    private var continuation: CheckedContinuation<Bool, Never>?
+
+    init(_ continuation: CheckedContinuation<Bool, Never>) { self.continuation = continuation }
+
+    func resume(_ value: Bool) {
+        continuation?.resume(returning: value)
+        continuation = nil
+    }
+}
+
+/// Holds the Icon Library panel only while it is open. The panel's close
+/// drops the reference, so the panel, its hosting view and its search
+/// results are freed (E-fix 1).
+@MainActor
+final class CanvasLibraryPanelHolder {
+    private(set) var panel: NSPanel?
+    private var closeObserver: (any NSObjectProtocol)?
+
+    var isLoaded: Bool { panel != nil }
+
+    func install(_ panel: NSPanel) {
+        release()
+        self.panel = panel
+        closeObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: panel, queue: nil
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.release() }
+        }
+    }
+
+    /// Drops the panel. AppKit is still inside `close()` when this runs, so
+    /// the last reference lives until the next main-actor turn.
+    func release() {
+        if let closeObserver { NotificationCenter.default.removeObserver(closeObserver) }
+        closeObserver = nil
+        guard let closing = panel else { return }
+        panel = nil
+        Task { @MainActor in withExtendedLifetime(closing) {} }
+    }
+}
+
+/// A borderless panel that still takes the keys (its search field), and
+/// closes on Escape.
+final class CanvasIconLibraryPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+    override func cancelOperation(_ sender: Any?) { close() }
+}
+
+/// A popup with one text field: Edit Label and similar small edits. Return
+/// saves; Escape cancels.
+struct CanvasTextFieldPopup: View {
+    let symbol: String
+    let title: String
+    let message: String
+    let fieldLabel: String
+    let initialText: String
+    let actionTitle: String
+    let dismiss: () -> Void
+    let save: (String) -> Void
+    @Environment(\.rafuTheme) private var theme
+    @State private var text = ""
+    @FocusState private var fieldFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            RafuPopupHeader(symbol: symbol, title: title, subtitle: message)
+            TextField(fieldLabel, text: $text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .focused($fieldFocused)
+                .rafuField(isFocused: fieldFocused)
+                .accessibilityLabel(fieldLabel)
+                .onSubmit(submit)
+                .padding(16)
+            RafuPopupFooter(hints: [("↩", actionTitle), ("esc", "Cancel")]) {
+                Button("Cancel", action: dismiss)
+                    .buttonStyle(RafuSecondaryButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                Button(actionTitle, action: submit)
+                    .buttonStyle(RafuProminentButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .rafuPopupSurface(.sheet)
+        .onAppear {
+            text = initialText
+            fieldFocused = true
+        }
+    }
+
+    private func submit() {
+        dismiss()
+        save(text)
     }
 }

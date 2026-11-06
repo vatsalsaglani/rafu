@@ -145,6 +145,35 @@ hairline to `borderStrong`, halves the deck shadow, and halves the tab shadow.
 screenshots and a Fable review; the screen has been locked since, so no
 light/dark × Indigo/Khadi pass has been done on them.
 
+### Popups (ADR 0033, 2026-11-06)
+
+Applies to `Sources/RafuApp/Support/RafuPopupComponents.swift` and every
+Rafu-drawn popup. Last verified: Swift 6.2 language mode, macOS 27, headless
+build and tests only (GUI checks are manual).
+
+- Compose popups from `RafuPopupSurface` (`.rafuPopupSurface(.floating)` for a
+  panel or overlay, `.sheet` inside a system sheet), `RafuPopupHeader`,
+  `RafuPopupSearchField`, `RafuPopupRow`, `RafuPopupFooter`, `RafuKeyHint`,
+  `RafuEmptyState` and `RafuConfirmPopup`. Tokens only; no blur; no shadow.
+- **Return never destroys.** `RafuConfirmPopup.defaultActionIndex` never
+  returns a destructive action; Cancel is the default unless a
+  non-destructive default is named.
+- A system sheet does not close on Escape by itself. A popup without a visible
+  Cancel button adds a zero-size, transparent `.cancelAction` button (Open
+  Ensemble, Ensemble Shortcuts).
+- A borderless panel cannot become key unless it overrides `canBecomeKey`
+  (`CanvasIconLibraryPanel`); without it the search field takes no typing.
+- A sheet must not attach to a floating panel: `CanvasDiagramPanels`
+  picks the first key/main window that is not an `NSPanel`.
+- A borderless `Menu` keeps only the text and image of its label. A shape
+  label (the old Style ink circle) draws nothing; draw extras as an
+  `.overlay` on the menu, not inside its label.
+- `.focused(_:)` belongs on the `TextField` itself; `RafuPopupSearchField`
+  takes a `FocusState<Bool>.Binding` for that reason. `onSubmit` and
+  `onKeyPress` on the wrapper still receive the field's events.
+
+Verification: `swift test --filter RafuPopupComponentsTests`.
+
 ## Why it matters
 
 The flat, modern, layered language unifies Rafu's visual identity across fifty+ surfaces without forcing a monolithic design system or theme-JSON bloat. All six bundled themes (Indigo, Khadi, and four AI-generated) and future user themes decode identically by leveraging optional `ui` keys with derived fallbacks. The shared components (chip, field, header row, sheet header) ensure consistent rhythm, touch targets, and accessibility (via standard controls + explicit focus rings). The geometry in RafuMetrics is product identity, not theme identity — it anchors every corner radius and spacing decision.

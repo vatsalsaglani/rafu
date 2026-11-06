@@ -17,6 +17,7 @@ struct CanvasCommands: Commands {
             if let board, let session {
                 Menu("Add to Ensemble") { CanvasAddMenuItems(board: board, session: session) }
                 terminalShellShortcutItems(board: board, session: session)
+                Menu("Tools") { toolItems(board: board, session: session) }
                 // X9 diagrams
                 CanvasDiagramMenuItems(board: board, session: session, showsShortcut: true)
                 Divider()
@@ -142,6 +143,28 @@ struct CanvasCommands: Commands {
             Button("Ensemble Shortcuts") { session?.canvasDialog = .shortcuts }
                 .disabled(session == nil)
         }
+    }
+
+    /// The tool bar's tools plus Icon Library… and Convert Selection to
+    /// Frame. Plain titles with no key equivalents: their letters are board
+    /// keys (`CanvasBoardKeyMap`), and a modifier-free menu equivalent would
+    /// take the letter from every text field.
+    @ViewBuilder
+    private func toolItems(board: CanvasBoardState, session: WorkspaceSession) -> some View {
+        let tool = CanvasWhiteboardTool.forBoard(board.id)
+        ForEach(CanvasWhiteboardToolKind.allCases) { kind in
+            Button(kind.title, systemImage: kind.symbol) {
+                CanvasToolPalette.choose(kind, tool: tool, board: board, session: session)
+            }
+        }
+        Divider()
+        Button("Icon Library…", systemImage: "square.grid.3x3") {
+            CanvasDiagramPanels.showLibrary(board: board, session: session)
+        }
+        Button("Convert Selection to Frame", systemImage: "rectangle.dashed") {
+            session.performCanvasEdit(board) { try board.convertSelectionToFrame() }
+        }
+        .disabled(board.selection.isEmpty)
     }
 
     /// ⌃⌥1…⌃⌥9: one shortcut per discovered-shell catalog position (1 = the
