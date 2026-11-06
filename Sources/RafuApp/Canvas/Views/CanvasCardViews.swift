@@ -114,11 +114,17 @@ struct CanvasCardShell: View {
     /// An agent card speaks its full status sentence ("Done, unread, 4
     /// minutes ago"); every other card keeps its plain state word.
     private var accessibilityValue: String {
-        guard let status = commands.agentCardStatus else { return headerState ?? "" }
+        let provenance = CanvasAgentProvenanceStore.shared.record(for: card.id, now: Date())?
+            .byline
+        guard let status = commands.agentCardStatus else {
+            return [headerState, provenance].compactMap(\.self).filter { !$0.isEmpty }
+                .joined(separator: ", ")
+        }
         let elapsed = commands.agentCardStatusDate.map {
             AgentActivityStore.shared.now.timeIntervalSince($0)
         }
-        return status.accessibilityValue(elapsed: elapsed ?? 0)
+        return [status.accessibilityValue(elapsed: elapsed ?? 0), provenance].compactMap(\.self)
+            .joined(separator: ", ")
     }
 
     /// The card kinds this shell draws itself. Every other kind (the
@@ -248,46 +254,77 @@ struct CanvasCardShell: View {
         }
     }
 
+    /// The summary and silhouette faces. Glyph, status dot and status pill
+    /// keep constant screen sizes (`CanvasCompactFaceMetrics`), so a zoomed-out
+    /// board stays readable; the title keeps its 11-screen-point floor.
     private func compactFace(_ face: CanvasZoomFace, scale: Double) -> some View {
-        let titleSize = CanvasZoomMetrics.titleFontSize(scale: scale)
-        let detailSize = max(12, 11 / scale)
-        return VStack(alignment: .leading, spacing: 6 / max(scale, 0.1)) {
-            HStack(spacing: 6) {
-                kindGlyph(size: titleSize)
-                Text(displayTitle)
-                    .font(.system(size: titleSize, weight: .semibold))
-                    .foregroundStyle(theme.palette.textPrimary)
-                    .lineLimit(face == .silhouette ? 2 : 1)
-            }
-            if face == .summary {
-                if let status = commands.agentCardStatus {
-                    HStack(spacing: 4) {
-                        AgentActivityGlyph(status: status)
-                        Text(status.word)
-                            .font(.system(size: detailSize, weight: .medium))
-                            .foregroundStyle(theme.palette.textSecondary).lineLimit(1)
-                    }
-                } else if let state = headerState {
-                    Text(state)
-                        .font(.system(size: detailSize, weight: .medium))
-                        .foregroundStyle(theme.palette.textSecondary).lineLimit(1)
-                }
-                let line =
-                    commands.noteModel?.excerpt
-                    ?? CanvasCardPresentation.summaryLine(
-                        for: card.content, terminalTitle: terminalReportedTitle)
-                if !line.isEmpty {
-                    Text(line)
-                        .font(.system(size: detailSize))
-                        .foregroundStyle(theme.palette.textMuted).lineLimit(1)
-                }
+        let metrics = CanvasCompactFaceMetrics(face: face, scale: scale)
+        return Group {
+            if face == .silhouette {
+                silhouetteFace(metrics, scale: scale)
+            } else {
+                summaryFace(metrics)
             }
         }
-        .padding(12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .contentShape(.rect)
         .gesture(headerGesture)
         .contextMenu { CanvasCardMenuContent(card: card, board: board, session: session) }
+    }
+
+    private func summaryFace(_ metrics: CanvasCompactFaceMetrics) -> some View {
+        VStack(alignment: .leading, spacing: metrics.padding / 2) {
+            HStack(spacing: metrics.padding / 2) {
+                kindGlyph(size: metrics.glyph)
+                Text(displayTitle)
+                    .font(.system(size: metrics.titleFont, weight: .semibold))
+                    .foregroundStyle(theme.palette.textPrimary)
+                    .lineLimit(1)
+            }
+            if let status = commands.agentCardStatus {
+                AgentStatusPill(status: status, elapsed: nil, fontSize: metrics.pillFont)
+            } else if let state = headerState {
+                Text(state)
+                    .font(.system(size: metrics.pillFont, weight: .medium))
+                    .foregroundStyle(theme.palette.textSecondary).lineLimit(1)
+            }
+            let line =
+                commands.noteModel?.excerpt
+                ?? CanvasCardPresentation.summaryLine(
+                    for: card.content, terminalTitle: terminalReportedTitle)
+            if !line.isEmpty {
+                Text(line)
+                    .font(.system(size: metrics.pillFont))
+                    .foregroundStyle(theme.palette.textMuted).lineLimit(1)
+            }
+        }
+        .padding(metrics.padding)
+    }
+
+    /// A centred glyph, the title under it only when the card is wide enough
+    /// on screen, and an agent's status dot in the top-trailing corner. A
+    /// plain terminal shows no dot.
+    private func silhouetteFace(_ metrics: CanvasCompactFaceMetrics, scale: Double) -> some View {
+        let showsTitle = CanvasCompactFaceMetrics.showsTitle(
+            face: .silhouette, onScreenWidth: card.rect.width * scale)
+        let glyph = CanvasCompactFaceMetrics.fittedGlyph(
+            metrics.glyph, cardWidth: card.rect.width, cardHeight: card.rect.height)
+        return ZStack(alignment: .topTrailing) {
+            VStack(spacing: metrics.padding / 2) {
+                kindGlyph(size: glyph)
+                if showsTitle {
+                    Text(displayTitle)
+                        .font(.system(size: metrics.titleFont, weight: .semibold))
+                        .foregroundStyle(theme.palette.textPrimary)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if let status = commands.agentCardStatus {
+                AgentStatusDot(status: status, size: metrics.dot)
+                    .padding(metrics.padding / 2)
+            }
+        }
     }
 
     // MARK: Header
@@ -333,6 +370,11 @@ struct CanvasCardShell: View {
                     } action: {
                         titleFrame = $0
                     }
+            }
+            if let provenance = CanvasAgentProvenanceStore.shared.record(
+                for: card.id, now: Date())
+            {
+                CanvasAgentProvenanceBadge(record: provenance)
             }
             if let agentStatus {
                 AgentStatusPill(

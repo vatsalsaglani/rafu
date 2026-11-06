@@ -402,15 +402,22 @@ struct CanvasReturnToBoardButton: View {
     }
 }
 
-/// Header chip: "Modified" or "Preview". Shape and word, not colour alone.
+/// Header chip: "Modified", "Preview", or an agent's name with its vendor
+/// mark. Shape and word, not colour alone.
 struct CanvasHeaderBadge: View {
     @Environment(\.rafuTheme) private var theme
     let text: String
     var symbol: String?
+    /// A vendor mark in place of the symbol.
+    var icon: ConductorCLIID?
 
     var body: some View {
         HStack(spacing: 3) {
-            if let symbol { Image(systemName: symbol).font(.system(size: 9)) }
+            if let icon {
+                AgentIconView(cli: icon, size: 12).accessibilityHidden(true)
+            } else if let symbol {
+                Image(systemName: symbol).font(.system(size: 9))
+            }
             Text(text)
         }
         .font(.system(size: 11, weight: .medium))
@@ -510,5 +517,29 @@ struct CanvasResizeZones: View {
         case (_, _, true, _): return .frameResize(position: .top)
         default: return .frameResize(position: .bottom)
         }
+    }
+}
+
+/// Round B (B9): the agent badge a card header shows for
+/// `CanvasAgentProvenanceRecord.lifetime` after an agent added, moved,
+/// resized or wrote it. Not interactive; the record's own task prunes it.
+struct CanvasAgentProvenanceBadge: View {
+    let record: CanvasAgentProvenanceRecord
+
+    var body: some View {
+        CanvasHeaderBadge(text: record.agentName, icon: record.cli)
+            .help(
+                "\(record.byline) · \(record.date.formatted(date: .omitted, time: .shortened))"
+            )
+            .accessibilityHidden(true)
+            .task(id: record.date) {
+                let remaining =
+                    CanvasAgentProvenanceRecord.lifetime
+                    - Date().timeIntervalSince(record.date)
+                if remaining > 0 {
+                    do { try await Task.sleep(for: .seconds(remaining)) } catch { return }
+                }
+                CanvasAgentProvenanceStore.shared.prune(now: Date())
+            }
     }
 }

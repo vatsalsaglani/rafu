@@ -42,7 +42,7 @@ Bounds that are part of the decision, not implementation detail:
   unreachable and must not be written.
 - **No cost or spend.** Rafu has no billing access and will not estimate one.
 - **No sub-agent count.** The ledger collapses subagent events; deferred.
-- **No tab-strip badge.** Deferred.
+- **Tab-strip pill and Dock badge** (amended 2026-11-07, see below).
 - **Read/unread is not persisted.** It is session-scoped: a FIFO of 256
   acknowledged reply IDs plus an observable revision.
 
@@ -63,6 +63,29 @@ with an amber "N needs you" and a red "N failed" that open jump menus
 (`focusCanvasCard`). Shell-only terminal cards are unchanged — they gain no
 agent vocabulary.
 
+### Amendment 2026-11-07: tab pill, Dock badge, provenance mark
+
+This replaces "No tab-strip badge. Deferred."
+
+- **Tab pill.** An Ensemble tab shows one pill after its title: "N failed"
+  in `error` or "N needs you" in `warning`. Failed outranks needs you, the
+  same precedence as above. It is a count only, of the same seven-state
+  vocabulary; it adds no state and names no card. No pill at zero. A click
+  reveals the first counted card (`focusCanvasCard`).
+- **Dock badge.** The app-wide sum of needs-you and failed cards over every
+  open Ensemble in every visible window, capped at "99+", cleared at zero.
+  Tabs refresh it when their counts change; there is no timer.
+- **Agent provenance badge.** A card an agent added, moved, resized, renamed
+  or wrote shows the agent's name and vendor mark for 8 s, from the tool
+  call, not from activity events. It is **not a status**: it never enters
+  `AgentCardStatus`, never changes precedence, and is never saved. The
+  board notice "Claude added Note 3 · Undo" accompanies it; its Undo works
+  only while no later edit changed the board's cards or links.
+
+All three use `CanvasAgentSummaryItem(board:session:)` or the tool log, so the
+tab, the bar, the Dock and the card header cannot disagree. Details:
+[`ensemble-presence-and-trust.md`](../references/ensemble-presence-and-trust.md).
+
 ## Alternatives considered
 
 - **Derive Failed from a non-zero exit status.** Rejected: it mislabels a
@@ -70,8 +93,10 @@ agent vocabulary.
   failures frequently and wrongly.
 - **Persist read/unread.** Rejected: the ledger itself is session-scoped, so
   persisted read state would outlive the replies it refers to.
-- **More states (cost, sub-agent count, tab badge).** Rejected or deferred as
-  above; a vocabulary a person cannot verify is worse than silence.
+- **More states (cost, sub-agent count).** Rejected or deferred as above; a
+  vocabulary a person cannot verify is worse than silence. The tab badge,
+  first deferred here, is now the count-only pill of the 2026-11-07
+  amendment.
 - **A dedicated 1 s ticker for elapsed time.** Rejected in favour of the
   existing 30 s tick, to keep the idle-work budget.
 
@@ -94,7 +119,8 @@ exit code, a persisted activity ledger, or a product decision to show spend.
 - References:
   [`agent-hooks-and-now-playing.md`](../references/agent-hooks-and-now-playing.md)
   ("Agent card status vocabulary"),
-  [`canvas-interaction.md`](../references/canvas-interaction.md).
+  [`canvas-interaction.md`](../references/canvas-interaction.md),
+  [`ensemble-presence-and-trust.md`](../references/ensemble-presence-and-trust.md).
 - Phase: [`ensemble-canvas.md`](../plans/phases/ensemble-canvas.md).
 - Related ADRs: [0021](0021-agent-terminals.md),
   [0025](0025-workspace-canvas-and-app-previews.md).

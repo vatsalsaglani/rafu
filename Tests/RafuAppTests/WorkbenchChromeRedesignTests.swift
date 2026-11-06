@@ -179,6 +179,11 @@ struct WorkbenchChromeRedesignTests {
         let waitingEnsemble = TabHoverPreviewContentBuilder.ensemble(
             title: "Ensemble", hasCardNeedingApproval: true)
         #expect(waitingEnsemble.statusWord == "Needs approval")
+
+        // Round B (E1): the agent counts replace the generic word.
+        let countedEnsemble = TabHoverPreviewContentBuilder.ensemble(
+            title: "Ensemble", hasCardNeedingApproval: true, needsYou: 1, failed: 1)
+        #expect(countedEnsemble.statusWord == "1 needs you · 1 failed")
     }
 
     // MARK: - E5: find in selection

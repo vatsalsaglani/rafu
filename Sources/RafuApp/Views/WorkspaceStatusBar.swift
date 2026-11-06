@@ -59,11 +59,26 @@ struct WorkspaceStatusBar: View {
             GitHubAccountStatusView(session: session)
 
             if showsProcessMemory, let sample = memory.sample {
-                Label(ResourceMemoryFormat.label(sample.displayBytes), systemImage: "memorychip")
-                    .foregroundStyle(theme.palette.textMuted)
-                    .help(
-                        "Rafu process memory footprint, as Activity Monitor shows it. "
-                            + "This is shared by all windows.")
+                // Round B (R1): the settled median, a trend arrow only for a
+                // sustained change, and live/peak/settled in the tooltip.
+                // The colour never changes.
+                let settling = memory.settling
+                HStack(spacing: 3) {
+                    Label(
+                        MemoryChipPresentation.label(settling, live: sample.displayBytes),
+                        systemImage: "memorychip")
+                    if let arrow = MemoryChipPresentation.trendSymbol(settling.trend) {
+                        Image(systemName: arrow)
+                            .font(.system(size: 8, weight: .semibold))
+                            .accessibilityHidden(true)
+                    }
+                }
+                .foregroundStyle(theme.palette.textMuted)
+                .help(MemoryChipPresentation.help(settling, live: sample.displayBytes))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Rafu memory")
+                .accessibilityValue(
+                    MemoryChipPresentation.values(settling, live: sample.displayBytes))
             }
 
             Button {

@@ -227,6 +227,50 @@ struct CanvasAgentActionsTests {
             })
     }
 
+    @Test("An agent edit marks the card and posts a notice whose Undo is gated")
+    func agentEditProvenanceAndUndo() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        let created = try await fixture.call("note_create", ["title": "Findings"])
+        let id = try #require(created.toolResult?.nodeID)
+        let card = try #require(fixture.board.cards.first { $0.id.rawValue.uuidString == id })
+        let store = CanvasAgentProvenanceStore.shared
+        let mark = try #require(store.record(for: card.id, now: Date()))
+        #expect(mark.agentName == "Claude")
+        #expect(mark.verb == "added")
+        #expect(mark.boardID == fixture.board.id)
+        #expect(mark.changeStamp == fixture.board.changeStamp)
+
+        let notice = try #require(fixture.board.notice)
+        #expect(notice.tone == .info)
+        #expect(notice.message == "Claude added Findings")
+        let undo = try #require(notice.action)
+        #expect(undo.title == "Undo")
+        #expect(store.allowsAction(noticeID: notice.id, board: fixture.board))
+        undo.perform()
+        #expect(fixture.board.cards.count == 2)
+
+        // Again; then a later edit makes the notice's Undo a no-op.
+        _ = try await fixture.call("note_create", ["title": "Second"])
+        let second = try #require(fixture.board.notice)
+        let secondUndo = try #require(second.action)
+        try fixture.board.edit { $0.cards[0].rect.x += 40 }
+        #expect(!store.allowsAction(noticeID: second.id, board: fixture.board))
+        secondUndo.perform()
+        #expect(fixture.board.cards.count == 3)
+        #expect(fixture.board.cards[0].rect.x == fixture.cards[0].rect.x + 40)
+    }
+
+    @Test("A read leaves no mark and no notice")
+    func readLeavesNoMark() async throws {
+        let fixture = try await CanvasAgentFixture()
+        fixture.board.setAgentControlMode(.allow)
+        _ = try await fixture.call("ensemble_describe")
+        #expect(fixture.board.notice == nil)
+        #expect(
+            CanvasAgentProvenanceStore.shared.record(for: fixture.cards[1].id, now: Date()) == nil)
+    }
+
     @Test("Ask waits for the user; Allow Once runs the action")
     func askThenAllowOnce() async throws {
         let fixture = try await CanvasAgentFixture()

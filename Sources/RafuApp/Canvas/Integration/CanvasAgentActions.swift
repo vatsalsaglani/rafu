@@ -358,6 +358,7 @@ enum CanvasAgentActions {
                 return .init(error: CanvasAgentPolicy.offMessage)
             }
         }
+        let before = CanvasAgentProvenanceStore.Before(caller.board)
         let response: CanvasBridgeResponse
         do {
             response = try await execute(call, caller: caller)
@@ -369,6 +370,9 @@ enum CanvasAgentActions {
                 caller.board.id, agent: caller.agentName, action: call.tool.actionTitle,
                 outcome: response.error.map { "Failed: \($0)" } ?? response.toolResult?.message
                     ?? "Done")
+            // Round B (B9): an 8 s agent badge on the card and an "· Undo" notice.
+            CanvasAgentProvenanceStore.shared.noteEdit(
+                call, response: response, caller: caller, before: before)
         }
         return response
     }

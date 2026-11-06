@@ -11,11 +11,52 @@ final class ResidentMemoryMonitor {
     static let shared = ResidentMemoryMonitor()
 
     private(set) var sample: ProcessMemorySample?
+    /// Round B (R1): the settled median, peak and trend for the status-bar
+    /// chip. Fed at most once per `settlingInterval`, so the Resources
+    /// popover's 2 s loop does not change the 5 s cadence the median means.
+    private(set) var settling = MemorySettling()
+    @ObservationIgnored private var lastSettlingSample: ContinuousClock.Instant?
+    static let settlingInterval: Duration = .milliseconds(4_500)
 
     init() {}
 
     func refresh() {
-        sample = ProcessMemorySampler().sample()
+        let sample = ProcessMemorySampler().sample()
+        self.sample = sample
+        guard let sample else { return }
+        let now = ContinuousClock.now
+        if let last = lastSettlingSample, now - last < Self.settlingInterval { return }
+        lastSettlingSample = now
+        settling.append(sample.displayBytes)
+    }
+}
+
+/// The status-bar memory chip's words. Pure.
+nonisolated enum MemoryChipPresentation {
+    /// The settled value, or the live one before there is a settled value.
+    static func label(_ settling: MemorySettling, live: UInt64?) -> String {
+        ResourceMemoryFormat.label(settling.settled ?? live)
+    }
+
+    static func trendSymbol(_ trend: MemorySettling.Trend) -> String? {
+        switch trend {
+        case .flat: nil
+        case .up: "arrow.up.right"
+        case .down: "arrow.down.right"
+        }
+    }
+
+    /// "Live 302.0 MB · Peak 302.0 MB · Settled 201.0 MB (median of 30 s)."
+    static func values(_ settling: MemorySettling, live: UInt64?) -> String {
+        let live = live ?? settling.live
+        return "Live \(ResourceMemoryFormat.label(live)) · "
+            + "Peak \(ResourceMemoryFormat.label(settling.peak ?? live)) · "
+            + "Settled \(ResourceMemoryFormat.label(settling.settled ?? live)) (median of 30 s)."
+    }
+
+    static func help(_ settling: MemorySettling, live: UInt64?) -> String {
+        "Rafu process memory footprint, as Activity Monitor shows it. "
+            + values(settling, live: live) + " Shared by all windows."
     }
 }
 
@@ -200,6 +241,14 @@ struct ResourcesView: View {
         + "sections below cover all open windows, not just this one. They are "
         + "separate processes Rafu spawned, not slices of that number."
 
+    /// The status bar shows the settled value (the median of 30 s), not the
+    /// live footprint shown here; say so with the number.
+    private var compositionExplanationText: String {
+        guard let settled = memory.settling.settled else { return Self.compositionExplanation }
+        return Self.compositionExplanation + " The status bar shows the settled value, "
+            + "\(ResourceMemoryFormat.label(settled)): the median of the last 30 s."
+    }
+
     private static let timelineExplanation =
         "Change in the whole app's resident memory measured shortly after each "
         + "action, across all open windows. It covers everything happening in "
@@ -282,7 +331,7 @@ struct ResourcesView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityLabel("Summary: \(summaryLine)")
             if showsExplanation {
-                Text(tab == .composition ? Self.compositionExplanation : Self.timelineExplanation)
+                Text(tab == .composition ? compositionExplanationText : Self.timelineExplanation)
                     .font(.caption2)
                     .foregroundStyle(theme.palette.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -588,6 +637,25 @@ enum WorkspaceContentAdapter {
             metrics.isFileIndexTruncated = isTruncated
         }
         metrics.hasOpenDiff = session.gitOpenDiff != nil
+        metrics.ensembles = ensembleMetrics(for: session)
         return metrics
+    }
+
+    /// One metric per open Ensemble, by title. The image pool belongs to the
+    /// session, not to a board, so its bytes go on the first row as "shared".
+    private static func ensembleMetrics(for session: WorkspaceSession) -> [EnsembleContentMetric] {
+        let boards = session.canvas.boards.values.sorted {
+            $0.title.localizedStandardCompare($1.title) == .orderedAscending
+        }
+        let imageBytes = UInt64(max(0, session.canvasImages.reservedBytes))
+        return boards.enumerated().map { index, board in
+            let liveWebs =
+                session.canvasResources[board.id]?.webs.values.count { $0.webView != nil } ?? 0
+            return EnsembleContentMetric(
+                id: board.id.rawValue.uuidString, title: board.title,
+                contents: board.cards.map(\.content), liveWebSurfaces: liveWebs,
+                reservedImageBytes: index == 0 ? imageBytes : 0,
+                imagePoolIsShared: index == 0 && boards.count > 1)
+        }
     }
 }

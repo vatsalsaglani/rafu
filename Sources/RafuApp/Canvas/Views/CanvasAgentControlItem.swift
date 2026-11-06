@@ -1,54 +1,89 @@
 import RafuCore
 import SwiftUI
 
+/// The Agent control pill's words and glyph. Pure, so the grammar is
+/// testable: a mode glyph plus the word, and "· N waiting" while actions wait.
+nonisolated enum AgentControlPresentation {
+    static func symbol(_ mode: CanvasAgentControlMode) -> String {
+        switch mode {
+        case .off: "hand.raised"
+        case .ask: "questionmark.circle"
+        case .allow: "checkmark.circle"
+        }
+    }
+
+    /// "Allow", "Ask · 2 waiting".
+    static func label(_ mode: CanvasAgentControlMode, waiting: Int) -> String {
+        waiting > 0 ? "\(mode.title) · \(waiting) waiting" : mode.title
+    }
+
+    /// "Ask, 2 waiting for approval".
+    static func accessibilityValue(_ mode: CanvasAgentControlMode, waiting: Int) -> String {
+        waiting > 0 ? "\(mode.title), \(waiting) waiting for approval" : mode.title
+    }
+}
+
 /// The Agent control chip in the Ensemble bar. It shows the setting and the
 /// number of agent actions waiting for approval. Its popover is the approval
 /// panel: it opens by itself when an agent asks, and it never blocks the board.
 struct CanvasAgentControlItem: View {
     @Environment(\.rafuTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let board: CanvasBoardState
     @State private var isPresented = false
+    /// Bumped when the waiting count grows; one cross-fade per bump.
+    @State private var arrivals = 0
+    @State private var isDimmed = false
     private let center = CanvasAgentCenter.shared
 
     var body: some View {
         let pending = center.approvals(for: board.id).count
+        let mode = board.agentControlMode
         Button {
             isPresented.toggle()
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: "person.2.wave.2")
+                Image(systemName: AgentControlPresentation.symbol(mode))
                     .accessibilityHidden(true)
-                Text("Agents: \(board.agentControlMode.title)")
-                if pending > 0 {
-                    Text("\(pending)")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(theme.palette.textPrimary)
-                        .padding(.horizontal, 5)
-                        .background(theme.palette.accentSoft, in: Capsule())
-                }
+                Text(AgentControlPresentation.label(mode, waiting: pending))
             }
             .font(.system(size: 11))
-            .foregroundStyle(theme.palette.textSecondary)
+            .foregroundStyle(pending > 0 ? theme.palette.textPrimary : theme.palette.textSecondary)
             .lineLimit(1)
             .padding(.horizontal, 10)
             .frame(height: 22)
-            .background(theme.palette.elevatedBackground, in: Capsule())
+            .background(
+                pending > 0
+                    ? theme.palette.warning.opacity(0.18) : theme.palette.elevatedBackground,
+                in: Capsule()
+            )
             .overlay(Capsule().strokeBorder(theme.palette.borderSubtle, lineWidth: 1))
+            .opacity(isDimmed ? 0.6 : 1)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .help("Agent control for this Ensemble: what agents in its terminals may change.")
         .accessibilityLabel("Agent control")
-        .accessibilityValue(
-            pending > 0
-                ? "\(board.agentControlMode.title), \(pending) waiting for approval"
-                : board.agentControlMode.title
-        )
+        .accessibilityValue(AgentControlPresentation.accessibilityValue(mode, waiting: pending))
         .popover(isPresented: $isPresented, arrowEdge: .bottom) {
             CanvasAgentControlPanel(board: board)
         }
         .onChange(of: pending) { old, new in
-            if new > old { isPresented = true }
+            if new > old {
+                isPresented = true
+                arrivals += 1
+            }
+        }
+        .task(id: arrivals) {
+            // One cross-fade (0.6 → 1) when the waiting count grows; none
+            // under Reduce Motion.
+            guard arrivals > 0, !reduceMotion else { return }
+            withAnimation(RafuMotion.stateCrossFade) { isDimmed = true }
+            do { try await Task.sleep(for: .milliseconds(300)) } catch {
+                isDimmed = false
+                return
+            }
+            withAnimation(RafuMotion.stateCrossFade) { isDimmed = false }
         }
     }
 }
