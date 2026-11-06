@@ -74,7 +74,7 @@ lists its manual steps.
 | G10 | merged (c60a2b9) |
 | UX Round A | merged (8aad547): fit on arrival, 25 % zoom floor, overview, drop grammar, set-down, seeds, warning hue (brief: Fable UX review 2026-11-06) |
 | UX Round B | merged (4f1b033): tab pill and Dock badge, readable small faces, Agents pill, agent provenance with gated Undo, settled memory chip, Resources Ensemble rows |
-| UX Round C | planned: board name only on the tab, tool bar in the board bar when wide, "Saved" tick, board silhouettes in Open Ensemble, monochrome file icons, Icon Library density |
+| UX Round C | merged (f9d8ed9): board name only on the tab, palette in the bar when wide (key monitor on the board), saved tick, Open Ensemble silhouettes, monochrome file icons with a setting, Icon Library density, branch once |
 
 ### Open follow-ups
 
