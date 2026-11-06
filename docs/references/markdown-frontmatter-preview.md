@@ -80,3 +80,5 @@ buffer update.
 - `docs/plans/phases/markdown-frontmatter-preview.md`
 - `RafuMarkdownCodeBlockCard` in
   `Sources/RafuApp/Markdown/RafuMarkdownStyling.swift`
+- [`mdx-preview.md`](mdx-preview.md): `.mdx` documents reuse this front-matter
+  pass before the MDX component scanner runs (ADR 0034).
