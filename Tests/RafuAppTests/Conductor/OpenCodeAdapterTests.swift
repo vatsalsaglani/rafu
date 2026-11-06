@@ -201,6 +201,19 @@ func c3ExecutableDiscoveryFallsBackToCandidates() async {
     #expect(resolved?.path == "/usr/bin/true")
 }
 
+@Test("C3 probe output past its cap maps to outputTooLarge")
+func c3AdapterProcessMapsOutputTooLarge() async {
+    let result = await C3AdapterProcess.run(
+        executableURL: URL(fileURLWithPath: "/usr/bin/head"),
+        arguments: ["-c", "4096", "/dev/zero"],
+        environment: ["PATH": "/usr/bin:/bin"],
+        timeout: .seconds(5),
+        maximumOutputBytes: 1_024)
+
+    #expect(result.completion == .outputTooLarge)
+    #expect(result.standardOutput.isEmpty)
+}
+
 @Test("OpenCode recorded model transcript parses in order as discovered choices")
 func openCodeModelTranscriptParses() throws {
     let fixture = try openCodeFixture("models-1.18.4.txt")
