@@ -266,6 +266,17 @@ final class RafuTextView: NSTextView {
         return super.validateUserInterfaceItem(item)
     }
 
+    /// Menu items can validate through `validateMenuItem(_:)` without
+    /// reaching `validateUserInterfaceItem(_:)`; apply the same image rule.
+    override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(paste(_:)), !hasMarkedText(),
+            markdownImagePasteDecision(.general) != .defaultPaste
+        {
+            return true
+        }
+        return super.validateMenuItem(menuItem)
+    }
+
     /// Replaces `range` with one `![Image](path)` line per stored image as a
     /// single undoable edit, then places the caret after it. Undo removes
     /// the text only; the stored image files stay on disk.
