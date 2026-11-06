@@ -82,6 +82,56 @@ struct WorkspaceSidebarSingleClickTests {
         #expect(second.openDocuments.isEmpty)
     }
 
+    @Test("Command and Shift activation select without opening")
+    func modifiedActivationDoesNotOpen() {
+        let fixture = SidebarSessionFixture()
+        defer { fixture.remove() }
+        let session = fixture.session
+        let first = fileNode()
+        let second = fileNode()
+
+        item(session: session, node: first).activateRow(.toggle)
+        item(session: session, node: second).activateRow(.toggle)
+
+        #expect(session.selectedTreePaths == [first.url.path, second.url.path])
+        #expect(session.openDocuments.isEmpty)
+
+        item(session: session, node: first).activateRow(.extend)
+        #expect(session.openDocuments.isEmpty)
+    }
+
+    @Test("A plain activation after a multi-selection opens and collapses it")
+    func plainActivationCollapsesSelection() throws {
+        let fixture = SidebarSessionFixture()
+        defer { fixture.remove() }
+        let session = fixture.session
+        let first = fileNode()
+        let second = fileNode()
+        item(session: session, node: first).activateRow(.toggle)
+        item(session: session, node: second).activateRow(.toggle)
+
+        item(session: session, node: first).activateRow(.none)
+
+        #expect(session.selectedTreePaths == [first.url.path])
+        #expect(try #require(session.selectedDocument).url == first.url)
+    }
+
+    @Test("Reveal and editor selection collapse a multi-selection")
+    func revealCollapsesSelection() {
+        let fixture = SidebarSessionFixture()
+        defer { fixture.remove() }
+        let session = fixture.session
+        let first = fileNode()
+        let second = fileNode()
+        item(session: session, node: first).activateRow(.toggle)
+        item(session: session, node: second).activateRow(.toggle)
+
+        session.revealInSidebar(path: "/tmp/sidebar-folder")
+
+        #expect(session.selectedTreePaths == ["/tmp/sidebar-folder"])
+        #expect(session.selectedTreePath == "/tmp/sidebar-folder")
+    }
+
     private func fileNode() -> WorkspaceFileNode {
         WorkspaceFileNode(
             url: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".txt"),

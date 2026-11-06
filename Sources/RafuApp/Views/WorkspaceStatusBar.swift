@@ -52,6 +52,8 @@ struct WorkspaceStatusBar: View {
 
             Spacer()
 
+            TransientStatusNoticeView(session: session)
+
             agentActivity
 
             GitHubAccountStatusView(session: session)
@@ -268,6 +270,40 @@ struct WorkspaceStatusBar: View {
             ].compactMap { $0 }.joined(separator: ", ")
         )
         .accessibilityHint(help)
+    }
+}
+
+/// The short confirmation after Copy Path or Move to Trash. It shows for 2
+/// seconds and fades out; under Reduce Motion it appears and goes without a
+/// fade. VoiceOver hears it as an announcement.
+private struct TransientStatusNoticeView: View {
+    let session: WorkspaceSession
+    @Environment(\.rafuTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let notice = session.transientStatusNotice
+        Group {
+            if let notice {
+                Label(notice.text, systemImage: "checkmark")
+                    .lineLimit(1)
+                    .foregroundStyle(theme.palette.textSecondary)
+                    .transition(.opacity)
+            }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: notice?.id)
+        .task(id: notice?.id) {
+            guard let notice else { return }
+            AccessibilityNotification.Announcement(notice.text).post()
+            do {
+                try await Task.sleep(for: .seconds(2))
+            } catch {
+                return
+            }
+            if session.transientStatusNotice?.id == notice.id {
+                session.transientStatusNotice = nil
+            }
+        }
     }
 }
 

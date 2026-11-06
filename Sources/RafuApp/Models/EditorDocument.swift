@@ -239,6 +239,22 @@ final class EditorDocument: Identifiable {
         isUntitled = false
     }
 
+    /// Its file went to the Trash while the buffer had unsaved changes: the
+    /// document stays open as an untitled document with the same name, so
+    /// ⌘S asks for a new place through the save panel and never writes the
+    /// trashed path back. Returns the new synthetic identity URL so the
+    /// caller can retarget the tab.
+    @discardableResult
+    func detachFromDisk() -> URL {
+        let name = displayName
+        url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+            .appending(path: name, directoryHint: .notDirectory)
+        isUntitled = true
+        knownDiskModificationDate = nil
+        return url
+    }
+
     static let bitmapImageExtensions: Set<String> = [
         "png", "jpg", "jpeg", "gif", "bmp", "tiff", "tif", "webp", "heic", "heif", "ico",
     ]

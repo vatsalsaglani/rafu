@@ -22,6 +22,13 @@ Keep opening attached to an explicit row action. Do not open a file from an
 reveal into another editor action. This can change the selected editor or its
 focus without a file-row action.
 
+Multi-selection (2026-11-06): only a plain click or a keyboard/VoiceOver
+activation opens a file. A ⌘-click or ⇧-click changes the selection and does
+not open; a Control-click changes nothing (it is the context-menu click).
+`selectedTreePath` is now a compatibility accessor over
+`WorkspaceSession.treeSelection`; setting it collapses the selection to one
+row. See [files-tree-selection-and-trash.md](files-tree-selection-and-trash.md).
+
 Selection remains drawn per row. The existing list has no native selection
 binding because a selected file below a collapsed folder previously caused a
 phantom selection highlight. This change does not replace that policy.

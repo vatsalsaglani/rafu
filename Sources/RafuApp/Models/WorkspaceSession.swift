@@ -196,7 +196,37 @@ final class WorkspaceSession {
             if oldValue != selectedDocumentID { noteActiveDocumentRepository() }
         }
     }
-    var selectedTreePath: String?
+    /// The Files tree selection (one or more rows, with a Shift anchor).
+    /// Selection, Move to Trash, and path copying live in
+    /// `WorkspaceSession+FileTree.swift`.
+    var treeSelection = FileTreeSelection() {
+        didSet { if oldValue.paths != treeSelection.paths { treeDragSelection = nil } }
+    }
+    /// One-path view of `treeSelection` for every caller that predates
+    /// multi-selection (editor tab sync, reveal, Settings). Setting it
+    /// always collapses the selection to that one path (or clears it).
+    var selectedTreePath: String? {
+        get { treeSelection.primaryPath }
+        set { treeSelection.select(newValue) }
+    }
+    /// Whether the Files List has keyboard focus. Written by the sidebar;
+    /// File > Move to Trash (⌘⌫) is enabled only while it is true, so the
+    /// key never leaves an editor, a terminal, or an Ensemble board.
+    var isFilesTreeFocused = false
+    /// Root sections the user collapsed (multi-folder workspaces only).
+    /// Ephemeral window state; every root starts expanded.
+    var collapsedTreeRootIDs: Set<UUID> = []
+    /// The Move to Trash confirmation the sidebar shows, if any.
+    var pendingTrashRequest: WorkspaceTrashRequest?
+    /// A short message in the status bar ("Copied Relative Path", "Moved
+    /// 3 items to the Trash"). The status bar clears it after 2 seconds.
+    var transientStatusNotice: TransientStatusNotice?
+    /// The selected rows a multi-row tree drag carries. SwiftUI's `.onDrag`
+    /// makes exactly one dragging item, so a drop on a tree folder expands
+    /// the one dropped URL to this set when the URL is in it. Cleared on
+    /// any selection change and when a drop uses it.
+    @ObservationIgnored
+    var treeDragSelection: [URL]?
     /// The in-flight payload for the current, same-process editor drag (tab
     /// or sidebar file). Only ever read inside a `performDrop` that already
     /// validated the `.rafuEditorDrag` type — never used to decide whether a
@@ -3616,7 +3646,9 @@ final class WorkspaceSession {
         close(document)
     }
 
-    private func close(_ document: EditorDocument) {
+    /// Closes without a save prompt. Internal so Move to Trash can close a
+    /// clean document whose file went to the Trash.
+    func close(_ document: EditorDocument) {
         guard let index = openDocuments.firstIndex(where: { $0.id == document.id }) else { return }
         openDocuments.remove(at: index)
         if let tab = editorLayout.tab(matching: .file(document.url)) {

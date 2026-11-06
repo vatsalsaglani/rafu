@@ -26,6 +26,11 @@ come with it and must be re-implemented by hand:
 
 Related implementation notes for that tree:
 
+- The tree has no `List(selection:)`; it draws its own multi-selection, so
+  it also owns ⇧↑/⇧↓ (`.onKeyPress` on the List) and tracks the List's focus
+  with `@FocusState` for File > Move to Trash (⌘⌫). See
+  [files-tree-selection-and-trash.md](files-tree-selection-and-trash.md).
+
 - Depth is passed **through the recursion**, not inferred from the row, because
   the flat rows carry no outline level any more.
 - The lazy child load is triggered from a placeholder row's `.onAppear`.
