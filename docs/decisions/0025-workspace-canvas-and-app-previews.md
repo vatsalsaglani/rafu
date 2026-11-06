@@ -145,3 +145,28 @@ feature because it did not work as expected.
 - The Add popover and menu list Note, Terminal, File, Image, and Web App. The
   MCP `node_create` kind `app` is rejected as an invalid kind.
 
+## Amendment 4 (2026-11-06): outside images are copied in with consent
+
+The user dropped 11 screenshots from the Desktop onto a board. The drop was
+refused ("Choose a file inside this workspace.") because a card may reference
+only workspace-relative paths. The user decided that such a drop must work.
+
+- A card never references a path outside the workspace root. This keeps the
+  inert restore of this ADR: a reopened board can read only files that
+  `CanvasPreviewLoader.checkedURL` resolves inside the root.
+- A raster image from outside the workspace is **copied into the workspace**,
+  after explicit consent, to `<root>/.rafu/ensemble-assets/<board-slug>/`
+  (the parent folder is a per-workspace setting, `ensembleAssetFolder`). The
+  card references the copy. The consent sheet offers "Always copy without
+  asking in this workspace", stored per workspace root.
+- Any other file from outside (text, PDF, SVG, folders) is still refused, now
+  with a board notice instead of the save-failure banner.
+- The copy is bounded (16 MiB per file), atomic (temporary file, then an
+  exclusive rename), never overwrites (`-2`, `-3` suffixes), never follows a
+  symlink, and is all or nothing per drop. Rafu never edits `.gitignore`.
+
+Alternatives considered: referencing outside paths (breaks the root boundary
+and inert restore), and embedding images in the board document (bounded by
+`CanvasLimits.documentBytes` and duplicated in undo history). See
+`docs/references/canvas-interaction.md`, "Drop preview ownership, board
+notices, and outside images".

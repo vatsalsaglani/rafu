@@ -192,7 +192,7 @@ final class WorkspaceCanvasStore {
                 snapshot.id, relativePath: binding.relativePath, workspace: workspace)
             return saved
         } catch {
-            board.errorMessage = error.localizedDescription
+            board.showNotice(error.localizedDescription)
             return nil
         }
     }
@@ -208,7 +208,7 @@ final class WorkspaceCanvasStore {
             _ = try await files.write(snapshot, to: url, root: nil, embedImagesFrom: root)
             return true
         } catch {
-            board.errorMessage = error.localizedDescription
+            board.showNotice(error.localizedDescription)
             return false
         }
     }
@@ -245,7 +245,7 @@ final class WorkspaceCanvasStore {
             _ = install(document)
             return true
         } catch {
-            boards[id]?.errorMessage = error.localizedDescription
+            boards[id]?.saveFailureMessage = error.localizedDescription
             return false
         }
     }
@@ -258,7 +258,7 @@ final class WorkspaceCanvasStore {
             return await create(
                 title: String(board.title.prefix(100)) + " Copy", copying: snapshot)
         } catch {
-            board.errorMessage = error.localizedDescription
+            board.saveFailureMessage = error.localizedDescription
             return nil
         }
     }
@@ -406,10 +406,10 @@ final class WorkspaceCanvasStore {
                         snapshot, expectedRevision: board.revision, workspace: workspace)
                 }
                 board.acceptSaved(saved, stamp: stamp)
-                board.errorMessage = nil
+                board.saveFailureMessage = nil
             } catch {
                 board.isSaving = false
-                board.errorMessage = error.localizedDescription
+                board.saveFailureMessage = error.localizedDescription
                 return false
             }
         }

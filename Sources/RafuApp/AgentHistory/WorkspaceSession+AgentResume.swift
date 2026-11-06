@@ -111,9 +111,10 @@ extension WorkspaceSession {
         _ key: AgentHistorySessionKey, boardID: CanvasID, at point: CGPoint?
     ) -> Bool {
         guard let board = canvas.boards[boardID] else { return false }
+        board.clearDropPreview()
         guard let summary = AgentHistoryStore.shared.index.sessions.first(where: { $0.key == key })
         else {
-            board.errorMessage = "This session is no longer in Agent History."
+            board.showNotice("This session is no longer in Agent History.")
             return true
         }
         let center = point.map { CanvasBoardDropGeometry.boardPoint($0, viewport: board.viewport) }

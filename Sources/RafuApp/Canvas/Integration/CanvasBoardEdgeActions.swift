@@ -68,7 +68,7 @@ extension CanvasBoardState {
     // MARK: Editing (every change is one undo step)
 
     private func performEdgeEdit(_ operation: () throws -> Void) {
-        do { try operation() } catch { errorMessage = error.localizedDescription }
+        do { try operation() } catch { showNotice(error.localizedDescription) }
     }
 
     func deleteConnection(_ id: UUID) {
@@ -87,7 +87,7 @@ extension CanvasBoardState {
         let label =
             trimmed.isEmpty ? CanvasConnection.placeholderLabel(for: edge.behavior) : trimmed
         guard CanvasDocument.validTitle(label) else {
-            errorMessage = "A label needs 1 to 120 characters and no control characters."
+            showNotice("A label needs 1 to 120 characters and no control characters.")
             return
         }
         performEdgeEdit {

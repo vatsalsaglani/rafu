@@ -258,3 +258,80 @@ struct CanvasBoardDropGeometryDefaultRectTests {
         #expect(rect == card.rect)
     }
 }
+
+@Suite("Ensemble board drop preview for files outside the workspace")
+struct CanvasDropPreviewOutsideTests {
+    private let viewport = CanvasViewport()
+    private let surface = CGSize(width: 1_000, height: 800)
+    private let centre = CGPoint(x: 500, y: 400)
+    private let context = CanvasDropAction.Context(hasWorkspace: true, rootPath: "/work/app")
+
+    private func preview(_ urls: [URL], fromFilesTree: Bool = false) -> CanvasDropPreview? {
+        CanvasDropAction.resolve(
+            content: .files(urls, fromFilesTree: fromFilesTree), at: centre, surface: surface,
+            viewport: viewport, context: context)
+    }
+
+    @Test("A batch of outside images previews a copy, not a plain add")
+    func externalImageBatch() throws {
+        let urls = (1...11).map { URL(fileURLWithPath: "/Users/me/Desktop/Shot \($0).png") }
+        let result = try #require(preview(urls))
+        #expect(result.label == "Copy and add 11 image cards")
+        #expect(result.tone == .accept)
+        #expect(result.shape == .board)
+        let single = try #require(preview([urls[0]]))
+        #expect(single.label == "Copy and add image card")
+        guard case .card = single.shape else {
+            Issue.record("Expected a ghost card")
+            return
+        }
+    }
+
+    @Test("A mixed batch with outside images says cards, not image cards")
+    func mixedBatch() throws {
+        let urls = [
+            URL(fileURLWithPath: "/work/app/notes.md"),
+            URL(fileURLWithPath: "/Users/me/Desktop/Shot.png"),
+        ]
+        #expect(try #require(preview(urls)).label == "Copy and add 2 cards")
+    }
+
+    @Test("An outside non-image previews the refusal in the warn tone")
+    func externalNonImage() throws {
+        let urls = [
+            URL(fileURLWithPath: "/Users/me/Desktop/Shot.png"),
+            URL(fileURLWithPath: "/Users/me/Desktop/todo.txt"),
+        ]
+        let result = try #require(preview(urls))
+        #expect(result.label == "Needs a file inside this workspace")
+        #expect(result.tone == .warn)
+        #expect(result.shape == .board)
+    }
+
+    @Test("Files inside the workspace keep their labels")
+    func insideUnchanged() throws {
+        #expect(
+            try #require(preview([URL(fileURLWithPath: "/work/app/a.png")])).label
+                == "Add image card")
+        #expect(
+            try #require(
+                preview([
+                    URL(fileURLWithPath: "/work/app/a.swift"),
+                    URL(fileURLWithPath: "/work/app/b.swift"),
+                ])
+            ).label == "Add 2 cards")
+        // A sibling folder that shares the prefix is still outside.
+        #expect(
+            try #require(preview([URL(fileURLWithPath: "/work/application/a.txt")])).tone
+                == .warn)
+    }
+
+    @Test("Unknown hover files and Files-list drags are never called outside")
+    func unknownAndFilesTree() throws {
+        #expect(
+            try #require(preview([CanvasDropAction.unknownFileURL])).label == "Open as file card")
+        #expect(
+            try #require(preview([URL(fileURLWithPath: "/elsewhere/a.txt")], fromFilesTree: true))
+                .label == "Open as file card")
+    }
+}

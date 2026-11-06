@@ -146,7 +146,7 @@ struct CanvasEdgeActionsTests {
         #expect(board.connection(id)?.customLabel == nil)
         board.setConnectionLabel(id, to: String(repeating: "x", count: 121))
         #expect(board.connection(id)?.label == "Related to")
-        #expect(board.errorMessage != nil)
+        #expect(board.notice?.message != nil)
     }
 
     @Test("Reverse Direction swaps a relationship and ignores message links")

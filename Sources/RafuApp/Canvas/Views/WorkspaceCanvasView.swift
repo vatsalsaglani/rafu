@@ -31,9 +31,6 @@ struct WorkspaceCanvasView: View {
     /// one attachment to the other does not end it.
     @GestureState private var gridDragIsLive = false
     @GestureState private var boardDragIsLive = false
-    /// The board's hover drop preview: a tinted highlight and a one-line
-    /// label for what a drop here would do. `nil` shows nothing.
-    @State private var dropPreview: CanvasDropPreview?
     @FocusState private var boardHasKeyboardFocus: Bool
     @AppStorage("canvasEmptyBoardTipDismissed") private var tipDismissed = false
     @State private var showsRestoredLinksNotice = false
@@ -47,7 +44,9 @@ struct WorkspaceCanvasView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let message = board.errorMessage {
+            // Save failures only. Every other message is the board notice
+            // under the tool palette (`CanvasBoardNoticeView`).
+            if let message = board.saveFailureMessage {
                 HStack {
                     Text(message).font(.callout)
                     Spacer()
@@ -107,11 +106,31 @@ struct WorkspaceCanvasView: View {
         .onReceive(
             NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
         ) {
-            _ in board.resumeAttention()
+            _ in
+            board.resumeAttention()
+            // A drag that ended in another app cannot leave a preview behind.
+            board.clearDropPreview()
         }
         .onChange(of: board.cards.count) { _, count in
             if count > 0 { tipDismissed = true }
         }
+        // Last safety net for the hover preview: some drag destinations
+        // under the board (a card's text view, the editor group) can end a
+        // session without telling either drop half. A drag always holds the
+        // primary button, so once it is up the preview is stale.
+        .task(id: board.dropPreview != nil) {
+            while board.dropPreview != nil {
+                do { try await Task.sleep(for: CanvasDropPreviewWatchdog.interval) } catch {
+                    return
+                }
+                if CanvasDropPreviewWatchdog.dragHasEnded(
+                    pressedMouseButtons: NSEvent.pressedMouseButtons)
+                {
+                    board.clearDropPreview()
+                }
+            }
+        }
+        .canvasAssetImportConsent(board: board, session: session)
         .onAppear {
             session.canvasResources[board.id]?.present(owner: presentationID)
             // A reopened board restores message links Paused; say so once.
@@ -119,6 +138,7 @@ struct WorkspaceCanvasView: View {
             if NSApplication.shared.isActive { board.resumeAttention() }
         }
         .onDisappear {
+            board.clearDropPreview()
             board.suspendAttention()
             session.flushCanvasAttention(board)
             connectionDrag.reset()
@@ -244,7 +264,7 @@ struct WorkspaceCanvasView: View {
                     .offset(x: marquee.minX, y: marquee.minY)
                     .allowsHitTesting(false).accessibilityHidden(true)
             }
-            if let dropPreview {
+            if let dropPreview = board.dropPreview {
                 dropPreviewOverlay(dropPreview, in: geometry.size)
                     .animation(
                         RafuMotion.resolve(RafuMotion.targetHighlight, reduceMotion: reduceMotion),
@@ -297,8 +317,7 @@ struct WorkspaceCanvasView: View {
             .onDrop(
                 of: [.rafuEnsembleDrag, .rafuEditorDrag, .fileURL],
                 delegate: CanvasFileDropDelegate(
-                    boardID: board.id, session: session, surfaceSize: geometry.size,
-                    dropPreview: $dropPreview)
+                    boardID: board.id, session: session, surfaceSize: geometry.size)
             )
             .background(
                 CanvasScrollBridge(
@@ -328,8 +347,7 @@ struct WorkspaceCanvasView: View {
                             size: geometry.size, anchor: point)
                     },
                     hidden: {},
-                    drop: CanvasFileDrop.target(
-                        boardID: board.id, session: session, dropPreview: $dropPreview)
+                    drop: CanvasFileDrop.target(boardID: board.id, session: session)
                 )
             )
             // Space-drag and the Hand tool pan over cards too. Otherwise this
@@ -477,6 +495,10 @@ struct WorkspaceCanvasView: View {
                     return .handled
                 }
                 guard boardTakesKeys else { return .ignored }
+                if board.notice != nil {
+                    board.dismissNotice()
+                    return .handled
+                }
                 board.selection = []
                 board.clearConnectionSelection()
                 board.connectingFrom = nil
@@ -497,6 +519,7 @@ struct WorkspaceCanvasView: View {
                 pausedLinksNotice
                     .transition(.opacity)
             }
+            CanvasBoardNoticeView(board: board)
         }
         .padding(.top, CanvasBoardTopOverlayMetrics.topInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -909,6 +932,15 @@ private struct CanvasSnapGuideLayer: View {
             .offset(x: origin.x - (isVertical ? 0.5 : 0), y: origin.y - (isVertical ? 0 : 0.5))
             .transition(.opacity)
             .allowsHitTesting(false).accessibilityHidden(true)
+    }
+}
+
+/// When a drop preview is stale: no drag runs without the primary button.
+nonisolated enum CanvasDropPreviewWatchdog {
+    static let interval: Duration = .milliseconds(500)
+
+    static func dragHasEnded(pressedMouseButtons: Int) -> Bool {
+        pressedMouseButtons & 1 == 0
     }
 }
 

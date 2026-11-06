@@ -8,14 +8,15 @@ import UniformTypeIdentifiers
 /// SwiftUI's `.onDrop`, so this bridge view accepts the drop itself. Over a
 /// visible board it owns every drag: files, Agent History rows,
 /// Terminals-panel Terminal Group rows, and editor tabs. See
-/// `docs/references/canvas-interaction.md`, "File drops".
+/// `docs/references/canvas-interaction.md`, "Board drop previews".
 struct CanvasBoardDropTarget {
     /// Whether the board takes this decoded drag. False rejects the drag.
     let accepts: (CanvasBoardDropContent) -> Bool
     /// The hover preview `content` would produce at the drop point (bridge's
     /// top-left space) on a bridge of size `surface`, or `nil` for none.
     let preview: (CanvasBoardDropContent, CGPoint, CGSize) -> CanvasDropPreview?
-    /// Drives the board's hover preview state.
+    /// Drives the board's hover preview (`CanvasBoardState.dropPreview`, the
+    /// one owner both drop halves share). `nil` clears it.
     let update: (CanvasDropPreview?) -> Void
     /// The decoded drag, the drop point in the bridge's top-left space, and
     /// the bridge's size (for the edge bands of a dropped tab).
@@ -119,8 +120,12 @@ struct CanvasScrollBridge: NSViewRepresentable {
         }
 
         override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
-            guard let drop, let content = droppedContent(sender) else { return false }
-            return drop.accepts(content)
+            guard let drop, let content = droppedContent(sender), drop.accepts(content) else {
+                // A refused drop gets no perform or conclude call.
+                drop?.update(nil)
+                return false
+            }
+            return true
         }
 
         override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
@@ -132,6 +137,15 @@ struct CanvasScrollBridge: NSViewRepresentable {
         }
 
         override func concludeDragOperation(_ sender: NSDraggingInfo?) {
+            drop?.update(nil)
+            dropSequence = nil
+        }
+
+        /// AppKit sends this to every destination the session visited, also
+        /// when the drop happened on another view (a card's own text view, a
+        /// hidden editor view, another window) or was cancelled with Escape.
+        /// Without it a preview drawn by this view can outlive the drag.
+        override func draggingEnded(_ sender: NSDraggingInfo) {
             drop?.update(nil)
             dropSequence = nil
         }

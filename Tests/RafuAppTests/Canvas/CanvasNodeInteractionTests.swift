@@ -19,7 +19,7 @@ struct CanvasNodeInteractionTests {
         task.cancel()
         await task.value
         #expect(board.cards.isEmpty)
-        #expect(board.errorMessage == nil)
+        #expect(board.notice?.message == nil)
         #expect(await session.canvas.flushAll())
     }
 
@@ -62,7 +62,7 @@ struct CanvasNodeInteractionTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let (session, board) = try await fixture(root)
         await session.addCanvasDroppedFiles([inside, outside], to: board.id, at: .zero)
-        #expect(board.cards.isEmpty && board.errorMessage != nil)
+        #expect(board.cards.isEmpty && board.notice?.message != nil)
         await session.addCanvasDroppedFiles([directory], to: board.id, at: .zero)
         #expect(board.cards.isEmpty)
         #expect(await session.canvas.flushAll())
@@ -83,10 +83,10 @@ struct CanvasNodeInteractionTests {
         await session.addCanvasDroppedFiles(
             [file, folder, picture], to: board.id, at: CGPoint(x: 40, y: 40))
         #expect(board.cards.map(\.content) == [.file(path: "notes.md"), .image(path: "shot.PNG")])
-        #expect(board.errorMessage == nil)
+        #expect(board.notice?.message == nil)
         await session.addCanvasDroppedFiles([folder], to: board.id, at: .zero)
         #expect(board.cards.count == 2)
-        #expect(board.errorMessage == nil)
+        #expect(board.notice?.message == nil)
         #expect(await session.canvas.flushAll())
     }
 
