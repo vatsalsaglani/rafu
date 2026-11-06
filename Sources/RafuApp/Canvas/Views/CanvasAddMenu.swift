@@ -2,7 +2,7 @@ import SwiftUI
 
 /// What the Add menu and the Add popover can make (review C19, 7.4).
 enum CanvasAddKind: CaseIterable, Identifiable {
-    case note, terminal, file, image, webApp, macApp
+    case note, terminal, file, image, webApp
 
     var id: Self { self }
 
@@ -21,7 +21,6 @@ enum CanvasAddKind: CaseIterable, Identifiable {
         case .file: "File…"
         case .image: "Image…"
         case .webApp: "Web App…"
-        case .macApp: "Mac App…"
         }
     }
 
@@ -32,13 +31,12 @@ enum CanvasAddKind: CaseIterable, Identifiable {
         case .file: "doc"
         case .image: "photo"
         case .webApp: "globe"
-        case .macApp: "macwindow"
         }
     }
 
     /// Adds the card. With `center` (board units) it appears there; otherwise
     /// at the middle of the visible board. Nothing starts: a terminal is made
-    /// stopped, a web app unloaded, a Mac app unopened.
+    /// stopped, a web app unloaded.
     @MainActor
     func perform(on board: CanvasBoardState, session: WorkspaceSession, center: CGPoint? = nil) {
         board.creationCenter = center
@@ -48,7 +46,6 @@ enum CanvasAddKind: CaseIterable, Identifiable {
         case .file: session.chooseCanvasFile(board.id, imageOnly: false)
         case .image: session.chooseCanvasFile(board.id, imageOnly: true)
         case .webApp: session.canvasDialog = .web(board.id)
-        case .macApp: session.chooseCanvasApplication(board.id)
         }
     }
 }
@@ -125,12 +122,11 @@ extension CanvasAddKind {
         case .file: "file"
         case .image: "image"
         case .webApp: "webApp"
-        case .macApp: "macApp"
         }
     }
 }
 
-/// Grouped items: [Note, Terminal (with Shell)] [File…, Image…] [Web App…, Mac App…].
+/// Grouped items: [Note, Terminal (with Shell)] [File…, Image…] [Web App…].
 struct CanvasAddMenuItems: View {
     let board: CanvasBoardState
     let session: WorkspaceSession
@@ -153,7 +149,6 @@ struct CanvasAddMenuItems: View {
         item(.image)
         Divider()
         item(.webApp)
-        item(.macApp)
         CanvasDiagramAddMenuItem(board: board, session: session)  // X9 diagrams
     }
 

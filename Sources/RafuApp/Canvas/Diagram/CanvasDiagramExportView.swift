@@ -199,10 +199,6 @@ struct CanvasDiagramStaticCard: View {
             CanvasDiagramStaticChrome(card: card) {
                 CanvasDiagramSummaryText(text: destination.address, lines: 2)
             }
-        case .nativeApp(let bundleID):
-            CanvasDiagramStaticChrome(card: card) {
-                CanvasDiagramSummaryText(text: bundleID, lines: 1)
-            }
         case .mermaid:
             CanvasDiagramStaticChrome(card: card) {
                 if let image = mermaidSnapshot?.image {

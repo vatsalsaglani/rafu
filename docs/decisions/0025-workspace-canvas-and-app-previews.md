@@ -124,3 +124,24 @@ by `WorkspaceSession`) plus a session-only
 `movedTerminalCardSourceGroups` map. The source-group map is never persisted,
 so after a relaunch an undo falls back to the focused group. VoiceOver
 announces both the move and the undo.
+
+## Amendment 3 (2026-11-06): native app cards removed
+
+Supersedes the clauses "Native app cards use public NSWorkspace activation and
+ScreenCaptureKit's single-window system picker", "Native app cards remain
+preview-only", and the later Accessibility docking of the same card (see
+`docs/references/canvas-native-boundaries.md`). The user decided to remove the
+feature because it did not work as expected.
+
+- The Mac App card kind, its Add menu and palette entries, the `app_open` and
+  `app_inspect` agent tools, and Accessibility docking are removed. Rafu no
+  longer uses `AXUIElement` or the Accessibility permission.
+- A board saved while the kind existed still opens. `CanvasCardContent` decodes
+  the legacy `nativeApp(bundleID:)` value through a private `Stored` enum and
+  returns a note that reads "Mac App card: <bundle id>" and says the kind was
+  removed. The card keeps its id, rect, title, and links. Nothing is marked
+  dirty; the next edit saves the converted form. Encoding never writes
+  `nativeApp`. Every other kind keeps its exact saved JSON shape.
+- The Add popover and menu list Note, Terminal, File, Image, and Web App. The
+  MCP `node_create` kind `app` is rejected as an invalid kind.
+

@@ -17,7 +17,7 @@ Off blocks edit and sensitive tools.
 | `note_read` | read | `node_id`, `offset`?, `length`? (≤ 4000 scalars) |
 | `note_write` | edit | `node_id`, `text` (≤ 16 KiB), `mode` (append, prepend, replace, insert_after_heading), `heading`? |
 | `note_create` | edit | `title`, `markdown`?, `near`?, `x`?, `y`? |
-| `node_create` | edit | `kind` (note, terminal, file, image, web, app, mermaid, shape, text, service_icon, frame) and per kind: `text`, `path`, `url`, `bundle_id`/`app_name`, `shape`, `pack_id`+`icon_id`+`label`, `member_ids`; `title`?, `width`?, `height`?, `near`?, `x`?, `y`? |
+| `node_create` | edit | `kind` (note, terminal, file, image, web, mermaid, shape, text, service_icon, frame) and per kind: `text`, `path`, `url`, `shape`, `pack_id`+`icon_id`+`label`, `member_ids`; `title`?, `width`?, `height`?, `near`?, `x`?, `y`? |
 | `node_update` | edit | `node_id`, `title`?, `x`?, `y`?, `width`? (96–2000), `height`? (64–2000) |
 | `node_remove` | sensitive | `node_id` (not your own node) |
 | `terminal_create` | edit; sensitive with `agent` or `command` | `title`?, `cwd`? (workspace-relative folder), `agent`?, `command`? (argument array, ≤ 32 items, ≤ 1,024 bytes each), `prompt`? (claude or codex, ≤ 1,024 bytes), `link`? (true adds a message link, returns `edge_id` and `mention`), `near`?, `x`?, `y`? |
@@ -26,8 +26,6 @@ Off blocks edit and sensitive tools.
 | `edge_create` | edit | `from`, `to`, `kind` (relationship, message), `label`? |
 | `edge_remove` | sensitive | `edge_id` |
 | `link_set_state` | edit | `edge_id`, `state` (live, paused) |
-| `app_open` | sensitive | `bundle_id` or `app_name`, `near`?, `x`?, `y`? |
-| `app_inspect` | read | `node_id` |
 | `mermaid_set` | edit | `node_id`, `source` (≤ 16 KiB) |
 | `icon_search` | read | `query`, `limit`? (1–50) |
 | `frame_create` | edit | `title`, `member_ids` (≤ 100) |

@@ -11,8 +11,6 @@ final class CanvasBoardResources {
     private var owner: UUID?
     @ObservationIgnored private var notes: [CanvasCardID: CanvasNoteBuffer] = [:]
     @ObservationIgnored private(set) var webs: [CanvasCardID: CanvasWebPreviewController] = [:]
-    @ObservationIgnored private(set) var apps: [CanvasCardID: CanvasNativeAppController] = [:]
-    @ObservationIgnored private var visibleApps: [CanvasCardID: Set<UUID>] = [:]
     /// Cards the user switched away from their default Markdown face. View
     /// state only: it is never saved, so every reopen starts from the default.
     private(set) var markdownCardShowsSource: [CanvasCardID: Bool] = [:]
@@ -51,23 +49,6 @@ final class CanvasBoardResources {
         webs[card.id] = value
         return value
     }
-    func nativeApp(for card: CanvasCard) -> CanvasNativeAppController? {
-        if let value = apps[card.id] { return value }
-        guard case .nativeApp(let bundleID) = card.content else { return nil }
-        // Docking has its own limit and checks `permitsLiveContent` itself.
-        let value = CanvasNativeAppController(bundleID: bundleID, cardID: card.id)
-        apps[card.id] = value
-        return value
-    }
-    func showNative(_ id: CanvasCardID, owner: UUID) { visibleApps[id, default: []].insert(owner) }
-    func hideNative(_ id: CanvasCardID, owner: UUID) {
-        visibleApps[id]?.remove(owner)
-        Task { [weak self] in
-            await Task.yield()
-            guard let self, visibleApps[id]?.isEmpty != false else { return }
-            apps[id]?.stop()
-        }
-    }
     /// Whether a file card draws raw source. A card without a choice uses
     /// `defaultShowsSource` for its path.
     func showsSource(for card: CanvasCardID, path: String) -> Bool {
@@ -91,19 +72,12 @@ final class CanvasBoardResources {
             webs[id]?.stop()
             webs[id] = nil
         }
-        for id in Array(apps.keys) where !current.contains(id) {
-            apps[id]?.stop()
-            apps[id] = nil
-            visibleApps[id] = nil
-        }
     }
     func stop(cards: Set<CanvasCardID>) {
         for id in cards {
             markdownCardShowsSource[id] = nil
             webs[id]?.stop()
-            apps[id]?.stop()
             webs[id] = nil
-            apps[id] = nil
         }
         leaveInteractiveContent()
     }
@@ -124,7 +98,6 @@ final class CanvasBoardResources {
         }
         leaveInteractiveContent()
         for web in webs.values { web.stop() }
-        for app in apps.values { app.stop() }
     }
     private func leaveInteractiveContent() {
         guard let session, let board else { return }

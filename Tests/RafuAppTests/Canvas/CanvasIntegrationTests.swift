@@ -21,15 +21,12 @@ struct CanvasIntegrationTests {
         #expect(await session.canvas.configure(root: folder))
         let board = try #require(await session.canvas.create(title: "Layout"))
         session.presentCanvasBoard(board)
-        try board.add(title: "Finder", content: .nativeApp(bundleID: "com.apple.finder"))
-        let cardID = try #require(board.cards.first?.id)
+        try board.add(title: "Note", content: .note(snapshot: "layout"))
         let host = NSHostingView(rootView: EditorCanvasView(session: session, openFolder: {}))
         host.frame = CGRect(x: 0, y: 0, width: 1200, height: 800)
         host.layoutSubtreeIfNeeded()
         #expect(board.visibleSize.width > 1100)
         #expect(board.visibleSize.height > 650)
-        let app = try #require(session.canvasResources[board.id]?.apps[cardID])
-        #expect(!app.isDocked)
         host.frame.size = CGSize(width: 900, height: 600)
         host.layoutSubtreeIfNeeded()
         #expect(board.visibleSize.width > 800 && board.visibleSize.width < 950)
@@ -145,7 +142,6 @@ struct CanvasIntegrationTests {
         let group = try #require(other.terminal.terminalGroup(groupID))
         #expect(group.panes.allSatisfy { $0.status == .stopped && $0.sessionID == nil })
         #expect(other.canvasResources[board.id]?.webs.isEmpty == true)
-        #expect(other.canvasResources[board.id]?.apps.isEmpty == true)
         reopened.focus(card.id)
         reopened.contentIsActive = true
         other.canvasTerminalOwners[groupID] = reopened.id
@@ -335,26 +331,22 @@ struct CanvasIntegrationTests {
         #expect(decoded.editorLayout == nil && decoded.canvasIDs.isEmpty)
     }
 
-    @Test("Window availability never docks, launches, or moves a native app by itself")
+    @Test("Window availability only toggles live content and starts nothing")
     func visibilityIsInert() async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }
         let session = makeSession(CanvasPersistenceStore(directory: folder))
         #expect(await session.canvas.configure(root: folder))
         let board = try #require(await session.canvas.create(title: "Test"))
-        try board.add(title: "Calculator", content: .nativeApp(bundleID: "com.apple.calculator"))
+        try board.add(title: "Notes", content: .note(snapshot: "inert"))
         session.installCanvasResources(for: board)
         let resources = try #require(session.canvasResources[board.id])
         resources.present(owner: UUID())
-        let app = try #require(resources.nativeApp(for: board.cards[0]))
         #expect(resources.permitsLiveContent)
         resources.pause()
         #expect(!resources.permitsLiveContent)
         resources.windowBecameAvailable()
         #expect(resources.permitsLiveContent)
-        #expect(!app.isDocked)
-        #expect(CanvasAppDocking.shared.state(for: board.cards[0].id) == .notDocked)
-        #expect(await CanvasAppDocking.shared.inspect(cardID: board.cards[0].id) == nil)
         #expect(await session.canvas.flushAll())
     }
 

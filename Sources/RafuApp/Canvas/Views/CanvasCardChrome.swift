@@ -64,10 +64,6 @@ struct CanvasCardCommands {
                 web.stop()
                 load()
             }
-        case .nativeApp:
-            return Action(
-                id: "open", title: "Open \(card.title)", symbol: "arrow.up.forward.app"
-            ) { resources?.nativeApp(for: card)?.openApp() }
         case .mermaid, .shape, .text:  // X5 whiteboard
             return Action(
                 id: "edit", title: CanvasWhiteboardEditing.editTitle(card.content),
@@ -96,21 +92,6 @@ struct CanvasCardCommands {
                     ) { NSWorkspace.shared.open(url) })
             }
             return items
-        case .nativeApp:
-            guard let app = resources?.nativeApp(for: card) else { return [] }
-            if app.isDocked {
-                return [
-                    Action(
-                        id: "undock", title: "Undock \(card.title)",
-                        symbol: "rectangle.portrait.and.arrow.right"
-                    ) { app.undock() }
-                ]
-            }
-            return [
-                Action(
-                    id: "dock", title: "Dock \(card.title)", symbol: "rectangle.inset.filled"
-                ) { app.dock(appName: card.title, session: session) }
-            ]
         case .file(let path):
             guard CanvasMarkdownCard.isMarkdown(path: path), let resources else { return [] }
             let showsSource = resources.showsSource(for: card.id, path: path)

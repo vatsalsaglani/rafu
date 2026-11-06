@@ -16,7 +16,7 @@ struct CanvasWhiteboardCardFace: View {
         switch content {
         case .shape, .stroke, .text, .serviceIcon, .frame: false
         case .mermaid: true
-        case .file, .image, .note, .terminal, .web, .nativeApp: true
+        case .file, .image, .note, .terminal, .web: true
         }
     }
 
@@ -24,7 +24,7 @@ struct CanvasWhiteboardCardFace: View {
     static func renders(_ content: CanvasCardContent) -> Bool {
         switch content {
         case .mermaid, .shape, .stroke, .text, .frame, .serviceIcon: true
-        case .file, .image, .note, .terminal, .web, .nativeApp: false
+        case .file, .image, .note, .terminal, .web: false
         }
     }
 
@@ -40,7 +40,7 @@ struct CanvasWhiteboardCardFace: View {
             CanvasTextFace(card: card, text: text, board: board)
         case .frame, .serviceIcon:
             CanvasDiagramCardFace(card: card, board: board)
-        case .file, .image, .note, .terminal, .web, .nativeApp:
+        case .file, .image, .note, .terminal, .web:
             EmptyView()
         }
     }

@@ -350,7 +350,6 @@ struct CanvasCardShell: View {
                 }
             }
             if isDirtyFile { CanvasHeaderBadge(text: "Modified") }
-            if showsDockedBadge { CanvasHeaderBadge(text: "Docked", symbol: "pin.fill") }
             if let model = commands.noteModel, model.isEditing {
                 CanvasNoteFormatBar(
                     model: model, availableWidth: CGFloat(card.rect.width), showsEditingLabel: false
@@ -449,9 +448,7 @@ struct CanvasCardShell: View {
     // MARK: Card body
 
     @ViewBuilder private var cardBody: some View {
-        if case .nativeApp = card.content {
-            CanvasNativeAppCard(card: card, board: board, session: session)
-        } else if case .terminal = card.content {
+        if case .terminal = card.content {
             CanvasTerminalCard(card: card, board: board, session: session)
         } else if case .web = card.content {
             CanvasWebCard(card: card, board: board, session: session)
@@ -564,11 +561,6 @@ struct CanvasCardShell: View {
         return session.openDocuments.contains {
             $0.isDirty && session.relativePath(for: $0.url) == path
         }
-    }
-
-    private var showsDockedBadge: Bool {
-        guard case .nativeApp = card.content else { return false }
-        return CanvasAppDocking.shared.state(for: card.id).isDocked
     }
 
     // MARK: Hover

@@ -642,6 +642,8 @@ Evidence: the CC1 and Codex sessions changed from Paused to Live when the existi
 
 ## Off-screen agent edits (2026-10-22)
 
+(2026-11-06: app docking and `app_inspect` were removed with the Mac App card.)
+
 The mutation guard in `CanvasAgentActions` is "the board is open in this
 workspace" (`session.canvas.boards[board.id] === board`), not "the Ensemble
 view is on screen". Notes, nodes, edges, mermaid and `diagram_build`, frames,
@@ -649,7 +651,7 @@ export, and `terminal_create` without a process work while the Ensemble tab is
 not the selected tab.
 
 Tools that start a process or need a live window still need the Ensemble shown:
-app docking and `app_inspect`, `terminal_start`, `terminal_create` with an
+`terminal_start`, `terminal_create` with an
 agent or a command, and `terminal_send` to a terminal that is not live. A
 terminal card starts its process only through its view
 (`terminalStartRequest`, the canvas terminal lease, `permitsLiveContent`).

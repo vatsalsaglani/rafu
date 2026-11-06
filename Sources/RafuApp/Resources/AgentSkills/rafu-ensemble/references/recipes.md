@@ -52,11 +52,3 @@ and put them in a frame instead of one huge diagram.
 2. `diagram_build` with nodes, edges with labels, and `"frame": "Production"`.
 3. `export {"format": "gif", "target": "frame", "frame_id": "<frame node id>", "seconds": 4}`.
 4. Tell the user the returned `path`.
-
-## Verify an app
-
-1. Build and run the app in a terminal node (`terminal_create` with
-   `command`).
-2. `app_open {"app_name": "<App Name>"}`.
-3. `app_inspect {"node_id": "<app node>"}` and compare the window's controls
-   and values with what you expect.

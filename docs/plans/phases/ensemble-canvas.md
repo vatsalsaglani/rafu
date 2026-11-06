@@ -29,11 +29,12 @@
 7. The right agent SVG icon (Claude, Codex, …) everywhere in the app.
 8. Use the empty titlebar row (workspace name, drag, double-click zoom, or better).
 9. Native apps visible directly in the node, with no screen sharing.
+   **Removed 2026-11-06** on the user's direction (ADR 0025 Amendment 3).
 10. Notch HUD rebuilt like Cider (`/home/user/vatsalsaglani/cider`, same
     author): mascot, now playing, Ensembles and agents, usage.
 11. Make it look better.
 
-**Platform fact for item 9:** macOS has no public API to embed another app's
+**Platform fact for item 9 (feature removed 2026-11-06):** macOS has no public API to embed another app's
 live window in our view. Screen capture needs Screen Recording permission. The
 chosen approach is **docking**: with the user's Accessibility permission, Rafu
 moves and sizes the real app window so it sits exactly over the node and follows
@@ -48,7 +49,7 @@ node shows the app icon and an explanation with "Open Accessibility Settings".
 | X3 | Sonnet | Remove old Ensemble feature | `Conductor/Run/**`, `Conductor/Library/**`, `Conductor/Ensemble/**` except `ConductorSkillInstaller.swift`, `Views/Conductor*`, `Views/Ensemble*`, Ensemble aux tabs/routes/commands/rail entry, `Sources/RafuCore/Ensemble*` + `rafu ensemble` CLI, their tests. KEEP agent CLI support: `ConductorCLIID`, `ConductorCLIIcons`, `Conductor/Adapters/**`, `ConductorAdapterRegistry`, model catalog/resolution/cache, anything the Agents settings pane or terminals use. |
 | X4 | Opus | Agent orchestration MCP tools + Rafu skill/plugin | `Sources/RafuCore/CanvasBridge/**`, `Canvas/Integration/CanvasLiveBridge.swift`, new `Canvas/Integration/CanvasAgentActions.swift`, `Conductor/Ensemble/ConductorSkillInstaller.swift`, `Settings/EnsembleSettingsTab.swift`, new skill/plugin resources under `Resources/AgentSkills/`, `Canvas/Integration/CanvasTerminalBootstrap.swift`, related tests |
 | X5 | Opus | Whiteboard, Mermaid node, file format | `Canvas/Domain/**` (new card kinds; keep `CanvasConnection` stable), `Canvas/Persistence/**`, `Canvas/Integration/WorkspaceCanvasStore.swift`, new `Canvas/Whiteboard/**`, new `Canvas/Adapters/CanvasMermaidCard.swift`, UTType/document registration in `Resources/` plist template and `App/` open-file routing for the new extension |
-| X6 | Opus | Native app docking | `Canvas/Adapters/CanvasNativeAppCard.swift`, `CanvasPreviewLoader.swift`, `CanvasWindowCloseGuard.swift`, new `Canvas/Integration/CanvasAppDocking.swift` |
+| X6 | Opus | Native app docking (**removed 2026-11-06**) | `Canvas/Adapters/CanvasNativeAppCard.swift`, `CanvasPreviewLoader.swift`, `CanvasWindowCloseGuard.swift`, new `Canvas/Integration/CanvasAppDocking.swift` |
 | X7 | Sonnet | Notch HUD like Cider | `Terminal/Notch*.swift`, `Views/Notch*.swift`, new `Notch/**`, mascot assets in `Resources/Mascot/`, notch settings rows in `Settings/RafuSettingsView.swift` (General notch section only) |
 | X8 | Sonnet | Workbench: titlebar, tab split, agent icons, polish | `Views/WorkspaceWindowView.swift`, `Views/FlatWindowChrome.swift`, `Views/EditorTabSwitcherView.swift`, `Editor/EditorTabSwitcher.swift`, `Editor/EditorLayout.swift`, `Views/EditorCanvasView.swift` (tab bar + group drop zones), `Support/Rafu*Styles.swift`, new `Support/AgentIdentity.swift`, `Views/WorkspaceTerminalsPanelView.swift` (icons only), `Views/WorkspaceStatusBar.swift`, `Views/CommandPaletteView.swift` |
 
@@ -75,7 +76,7 @@ themselves (to avoid conflicts). New strings may already say "Ensemble".
 - **Agent actions (X4 defines):** `@MainActor enum CanvasAgentActions` with
   async functions the bridge calls; it uses existing `WorkspaceSession` canvas
   APIs and X5's kinds. Every mutation is undoable and visible.
-- **App docking (X6 defines, X4 calls):**
+- **App docking (X6 defines, X4 calls; removed 2026-11-06):**
   `CanvasAppDocking.shared.inspect(cardID:) async -> String?` (Accessibility
   summary of the docked window) and `open(bundleID:in:)`.
 - **Ensemble file format (X5):** extension `.rafuensemble` (UTType

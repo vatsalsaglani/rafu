@@ -210,8 +210,5 @@ struct CanvasLayoutMathTests {
         #expect(
             CanvasCardContent.web(destination: try CanvasWebDestination("http://localhost:3000"))
                 .minimumSize == CGSize(width: 320, height: 220))
-        #expect(
-            CanvasCardContent.nativeApp(bundleID: "com.apple.finder").minimumSize
-                == CGSize(width: 220, height: 160))
     }
 }
