@@ -24,6 +24,8 @@ committed (AGENTS.md).
 | G5 | `issues/ensemble-popups-shortcuts` | C: board key map, key badges on tools and Add tiles, Tools menu. D: Rafu popup components (ADR 0033), Open Ensemble, Icon Library, Add palette, Ensemble dialogs and confirms. E-fix 1: release the Icon Library panel, bound the icon cache | Opus, medium | G1 |
 | G6 | `issues/mdx` | I: `.mdx` routing, MDX block scanner, native component registry, fallback block (ADR 0034) | Opus, medium | none (runs in stage 2 for the build limit) |
 | G7 | `issues/ensemble-memory` | E-fix 2: hibernate a document hidden under a board; memory profile note with the user's S0–S6 measurements | Sonnet, high, or coordinator | G2 merged (shares `WorkspaceSession.swift`) |
+| G9 | `issues/all-dialogs` | Every alert and confirmation in the Rafu popup language (ADR 0033 amendment): `RafuMessagePopup`, `RafuTextFieldPopup`, `RafuPopupPresenter`, footer order | Sonnet, high (user direction) | G5 |
+| G10 | `issues/image-polish` | Issues seen only in the screenshots: drop placement avoids cards, themed Files focus ring, shell labels, search-field focus ring, untitled numbering; "Ask Siri" investigated, not changed | Sonnet, high (user direction) | G4, G5 |
 
 Stages: 1 = G1, G2, G3. 2 = G4, G5, G6 (after G1 merges). 3 = G7, then a
 documentation pass for the indexes.
@@ -32,7 +34,7 @@ documentation pass for the indexes.
 
 - G2 owns `Views/WorkspaceSidebarView.swift`, `Views/WorkspaceStatusBar.swift`, and the
   File menu items in `App/RafuAppCommands.swift`. G5 does not migrate the Rename File
-  alert in this round.
+  alert in this round (superseded: G9 migrated it).
 - G3 owns the paste/drop region of `Editor/RafuTextView.swift` and the coordinator wiring
   in `Editor/CodeEditorView.swift`. It must not edit `Editor/EditorDragAndDrop.swift`.
 - G4 owns `Canvas/Views/WorkspaceCanvasView.swift`, `CanvasFileDropDelegate.swift`,
@@ -68,6 +70,8 @@ lists its manual steps.
 | G6 | merged (a66ede5) |
 | G7 | merged (94d8729): no behaviour change; the newest-8 grace keeps the document under a board loaded, so hiding it saves nothing. S0–S6 table awaits the user's measurements |
 | G8 | merged (7244528): probe output through pipes, child killed at the cap (disk-fill incident 2026-11-06 17:00) |
+| G9 | merged (260033d): no `.alert`, `.confirmationDialog` or `NSAlert` left except the no-window fallback in `RafuPopupPresenter`; `RafuDialogPolicyTests` pins this |
+| G10 | merged (c60a2b9) |
 
 ### Open follow-ups
 
@@ -76,4 +80,6 @@ lists its manual steps.
 - G4 review F2 (symlinked root mislabels the hover), F4 (empty folder after rollback, stale `.rafu-import-*`), F5 (raw Cocoa error), F6 (persistent notice for Save As/export failures), F7 (settings row for "always copy" and the asset folder), F8 (decode tests' file).
 - G6: unclosed-tag scan is quadratic in document size; Ensemble cards show `.mdx` tags as text.
 - G8: Gemini and Cursor adapters keep the `readabilityHandler` + `readDataToEndOfFile` capture race.
-- `LauncherRequestRouterTests.listenerRestartsAfterStop` and `AgentActivityStoreTests.watchSpool` fail under heavy parallel load only (pass alone and serially).
+- `LauncherRequestRouterTests` (`listenerRestartsAfterStop`, the live-cap test) and `AgentActivityStoreTests.watchSpool` fail under heavy parallel load only (pass alone and serially).
+- G10: "Ask Siri" needs an AppKit outline view for the Files tree (SwiftUI owns the context `NSMenu`); measure the drop placement search on a full board; the untitled breadcrumb drag area is gone.
+- G9: check sheet sizes and Escape in sheets on screen; two popups fired at once from one view can clash (one sheet per view).
