@@ -430,13 +430,19 @@ func fastCrashesEscalateToManualRestart() async {
     // real headroom instead.
     let crashRoundTripTimeout = Duration.seconds(5)
 
-    for _ in 0..<3 {
+    for crash in 1...3 {
         let session = await waitForSession(manager: manager, languageID: "swift")
         #expect(session != nil)
         let handles = await spawner.handles(serverName: "swift")
         await handles.last?.terminate()
+        // `pushStatus` delivers through unordered fire-and-forget `Task`s, so
+        // an earlier `.starting`/`.running` push can land after `.backingOff`
+        // and stay `.last` until the next spawn. Look for this crash's own
+        // `.backingOff` status rather than the newest entry.
         let becameBackingOff = await waitUntil(timeout: crashRoundTripTimeout) {
-            await collector.statuses.last?.phase == .backingOff
+            await collector.statuses.contains {
+                $0.phase == .backingOff && $0.consecutiveCrashes == crash
+            }
         }
         #expect(becameBackingOff)
     }
