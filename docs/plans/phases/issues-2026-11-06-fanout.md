@@ -72,6 +72,9 @@ lists its manual steps.
 | G8 | merged (7244528): probe output through pipes, child killed at the cap (disk-fill incident 2026-11-06 17:00) |
 | G9 | merged (260033d): no `.alert`, `.confirmationDialog` or `NSAlert` left except the no-window fallback in `RafuPopupPresenter`; `RafuDialogPolicyTests` pins this |
 | G10 | merged (c60a2b9) |
+| UX Round A | merged (8aad547): fit on arrival, 25 % zoom floor, overview, drop grammar, set-down, seeds, warning hue (brief: Fable UX review 2026-11-06) |
+| UX Round B | merged (4f1b033): tab pill and Dock badge, readable small faces, Agents pill, agent provenance with gated Undo, settled memory chip, Resources Ensemble rows |
+| UX Round C | planned: board name only on the tab, tool bar in the board bar when wide, "Saved" tick, board silhouettes in Open Ensemble, monochrome file icons, Icon Library density |
 
 ### Open follow-ups
 
@@ -82,4 +85,6 @@ lists its manual steps.
 - G8: Gemini and Cursor adapters keep the `readabilityHandler` + `readDataToEndOfFile` capture race.
 - `LauncherRequestRouterTests` (`listenerRestartsAfterStop`, the live-cap test) and `AgentActivityStoreTests.watchSpool` fail under heavy parallel load only (pass alone and serially).
 - G10: "Ask Siri" needs an AppKit outline view for the Files tree (SwiftUI owns the context `NSMenu`); measure the drop placement search on a full board; the untitled breadcrumb drag area is gone.
+- UX Round A: Indigo ANSI yellow moved from `#D4A24E` to `git.modified` `#D2B958` (Khadi unchanged); confirm the not-allowed cursor on the AppKit drop path; agent-created cards get no landing ring.
+- UX Round B: the Dock badge refreshes only from mounted tab items; the provenance badge prunes only at ≥ 50 % zoom; "✓ Allow" without the "Agents:" prefix needs a GUI judgement.
 - G9: check sheet sizes and Escape in sheets on screen; two popups fired at once from one view can clash (one sheet per view).
