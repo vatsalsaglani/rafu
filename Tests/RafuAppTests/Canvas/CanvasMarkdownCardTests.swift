@@ -7,10 +7,10 @@ import Testing
 @Suite("Canvas Markdown file card")
 struct CanvasMarkdownCardTests {
     @Test(
-        "Only .md and .markdown files are Markdown, in any case",
+        "Only .md, .markdown, and .mdx files are Markdown, in any case",
         arguments: [
             ("a/b.md", true), ("a/b.MARKDOWN", true), ("README.Md", true),
-            ("a/b.mdx", false), ("a/b.txt", false), ("README", false), ("md", false),
+            ("a/b.mdx", true), ("a/b.txt", false), ("README", false), ("md", false),
             ("notes.md.bak", false),
         ])
     func recognisesMarkdown(path: String, expected: Bool) {

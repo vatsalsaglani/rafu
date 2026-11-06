@@ -13,7 +13,7 @@ nonisolated enum CanvasMarkdownCard {
     /// The card draws these files as Markdown by default.
     static func isMarkdown(path: String) -> Bool {
         switch (path as NSString).pathExtension.lowercased() {
-        case "md", "markdown": true
+        case "md", "markdown", "mdx": true
         default: false
         }
     }
@@ -63,6 +63,13 @@ nonisolated enum CanvasMarkdownCard {
                 kinds.append(.frontmatter(result))
             case .markdown(let text):
                 kinds.append(contentsOf: CanvasNoteMarkdown.blocks(in: text).map { .block($0) })
+            case .component(let block):
+                // The card parses without MDX mode, so this is not reached
+                // today; keep the name visible if it ever is.
+                kinds.append(
+                    contentsOf: CanvasNoteMarkdown.blocks(in: "`<\(block.name)>`").map {
+                        .block($0)
+                    })
             case .mermaid(let result):
                 diagrams += 1
                 if diagrams <= maxDiagrams {

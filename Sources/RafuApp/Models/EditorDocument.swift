@@ -199,7 +199,7 @@ final class EditorDocument: Identifiable {
         self.url = url
         isUntitled = false
         let ext = url.pathExtension.lowercased()
-        if ["md", "markdown"].contains(ext) {
+        if Self.markdownExtensions.contains(ext) {
             // Markdown opens in the mode the user last picked; Edit by default.
             let stored = UserDefaults.standard.string(forKey: "markdownDefaultMode") ?? ""
             markdownMode = MarkdownPresentationMode(rawValue: stored) ?? .edit
@@ -267,7 +267,10 @@ final class EditorDocument: Identifiable {
 
     var displayName: String { url.lastPathComponent }
     var iconName: String { FileTypePresentation.symbol(for: url, isDirectory: false) }
-    var isMarkdown: Bool { ["md", "markdown"].contains(url.pathExtension.lowercased()) }
+    /// `.mdx` renders through the native MDX path (ADR 0034).
+    static let markdownExtensions: Set<String> = ["md", "markdown", "mdx"]
+
+    var isMarkdown: Bool { Self.markdownExtensions.contains(url.pathExtension.lowercased()) }
     var isSVG: Bool { url.pathExtension.lowercased() == "svg" }
     var isBitmapImage: Bool {
         Self.bitmapImageExtensions.contains(url.pathExtension.lowercased())

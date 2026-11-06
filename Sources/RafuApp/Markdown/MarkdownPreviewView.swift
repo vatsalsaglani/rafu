@@ -5,6 +5,9 @@ struct MarkdownPreviewView: View {
     @Environment(\.rafuTheme) private var theme
     @State private var segments: [MarkdownPreviewSegment] = []
     @State private var errorMessage: String?
+    /// The MDX component registry, loaded off the main actor with each
+    /// disk read and reused by the live-buffer refresh. Nil for Markdown.
+    @State private var mdxRegistry: MDXComponentRegistry?
 
     let document: EditorDocument
     private let fileService = WorkspaceFileService()
@@ -17,6 +20,8 @@ struct MarkdownPreviewView: View {
         document.url.deletingLastPathComponent()
     }
 
+    private var isMDX: Bool { document.url.pathExtension.lowercased() == "mdx" }
+
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 18) {
@@ -26,6 +31,10 @@ struct MarkdownPreviewView: View {
                         systemImage: "exclamationmark.triangle",
                         description: Text(errorMessage)
                     )
+                }
+
+                if let warnings = mdxRegistry?.warnings, !warnings.isEmpty {
+                    MDXRegistryWarningsView(warnings: warnings)
                 }
 
                 ForEach(segments) { segment in
@@ -43,6 +52,9 @@ struct MarkdownPreviewView: View {
 
                     case .frontmatter(let result):
                         MarkdownFrontmatterCard(result: result)
+
+                    case .component(let block):
+                        MDXComponentView(block: block, baseURL: documentDirectory)
                     }
                 }
             }
@@ -55,6 +67,12 @@ struct MarkdownPreviewView: View {
         .task(id: "\(document.url.path)#\(document.revision)") {
             do {
                 let source = try await fileService.readText(at: document.url)
+                if isMDX {
+                    let url = document.url
+                    mdxRegistry = await Task.detached {
+                        MDXComponentRegistry.load(forDocumentAt: url)
+                    }.value
+                }
                 await applySegments(from: source)
             } catch is CancellationError {
                 return
@@ -101,7 +119,13 @@ struct MarkdownPreviewView: View {
     /// one-shot editor text snapshot — never retained; only the parsed
     /// `segments` persist in view state.
     private func applySegments(from source: String) async {
-        let parsed = await Task.detached { MarkdownPreviewSegmentParser().parse(source) }.value
+        let context: MDXParseContext? =
+            isMDX
+            ? MDXParseContext(registry: mdxRegistry ?? .builtIn, baseURL: documentDirectory)
+            : nil
+        let parsed = await Task.detached {
+            MarkdownPreviewSegmentParser().parse(source, mdx: context)
+        }.value
         segments = parsed
         errorMessage = nil
     }
@@ -113,6 +137,8 @@ nonisolated struct MarkdownPreviewSegment: Identifiable, Sendable {
         case markdown(String)
         case mermaid(MermaidParseResult)
         case frontmatter(MarkdownFrontmatterParseResult)
+        /// An MDX component block (`.mdx` documents only, ADR 0034).
+        case component(MDXBlock)
     }
 
     let id = UUID()
@@ -120,7 +146,15 @@ nonisolated struct MarkdownPreviewSegment: Identifiable, Sendable {
 }
 
 nonisolated struct MarkdownPreviewSegmentParser: Sendable {
-    func parse(_ source: String) -> [MarkdownPreviewSegment] {
+    /// One piece of a Markdown chunk after Mermaid fences are lifted out.
+    enum Piece: Sendable {
+        case markdown(String)
+        case mermaid(MermaidParseResult)
+    }
+
+    /// `mdx` is non-nil for `.mdx` documents only (ADR 0034). Plain Markdown
+    /// never goes through the MDX scanner.
+    func parse(_ source: String, mdx: MDXParseContext? = nil) -> [MarkdownPreviewSegment] {
         var prefix: [MarkdownPreviewSegment] = []
         var markdownSource = source
         if let scanned = MarkdownFrontmatterScanner().scan(source) {
@@ -135,46 +169,80 @@ nonisolated struct MarkdownPreviewSegmentParser: Sendable {
             }
         }
 
+        guard let mdx else {
+            return prefix + Self.segments(fromMarkdown: markdownSource, keepsBlank: true)
+        }
+        var result = prefix
+        var builder = MDXBlockBuilder(context: mdx)
+        for content in MDXBlockScanner().scan(markdownSource) {
+            switch content {
+            case .markdown(let text):
+                result.append(contentsOf: Self.segments(fromMarkdown: text, keepsBlank: false))
+            case .component(let node):
+                result.append(.init(content: .component(builder.build(node))))
+            }
+        }
+        return result
+    }
+
+    private static func segments(fromMarkdown markdown: String, keepsBlank: Bool)
+        -> [MarkdownPreviewSegment]
+    {
+        let pieces = splitMermaid(markdown)
+        if pieces.isEmpty {
+            return keepsBlank ? [.init(content: .markdown(markdown))] : []
+        }
+        return pieces.map { piece in
+            switch piece {
+            case .markdown(let text): .init(content: .markdown(text))
+            case .mermaid(let result): .init(content: .mermaid(result))
+            }
+        }
+    }
+
+    /// Lifts ```` ```mermaid ```` fences out of `markdown`. Blank Markdown
+    /// between diagrams is dropped; with no fence the whole text is one
+    /// piece (empty when it is blank).
+    static func splitMermaid(_ markdown: String) -> [Piece] {
+        let isBlank = markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let expression = try? NSRegularExpression(
             pattern: #"(?is)```mermaid[^\n]*\n(.*?)```"#
         )
         guard let expression else {
-            return prefix + [.init(content: .markdown(markdownSource))]
+            return isBlank ? [] : [.markdown(markdown)]
         }
 
-        let sourceString = markdownSource as NSString
+        let sourceString = markdown as NSString
         let fullRange = NSRange(location: 0, length: sourceString.length)
-        let matches = expression.matches(in: markdownSource, range: fullRange)
+        let matches = expression.matches(in: markdown, range: fullRange)
         guard !matches.isEmpty else {
-            return prefix + [.init(content: .markdown(markdownSource))]
+            return isBlank ? [] : [.markdown(markdown)]
         }
 
-        var result = prefix
+        var result: [Piece] = []
         var cursor = 0
         for match in matches {
             if match.range.location > cursor {
-                let markdown = sourceString.substring(
+                let text = sourceString.substring(
                     with: NSRange(location: cursor, length: match.range.location - cursor)
                 )
-                if !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    result.append(.init(content: .markdown(markdown)))
+                if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    result.append(.markdown(text))
                 }
             }
             if match.numberOfRanges > 1, match.range(at: 1).location != NSNotFound {
                 let mermaid = sourceString.substring(with: match.range(at: 1))
-                result.append(
-                    .init(content: .mermaid(MarkdownParser().parseMermaid(mermaid)))
-                )
+                result.append(.mermaid(MarkdownParser().parseMermaid(mermaid)))
             }
             cursor = match.range.location + match.range.length
         }
 
         if cursor < sourceString.length {
-            let markdown = sourceString.substring(
+            let text = sourceString.substring(
                 with: NSRange(location: cursor, length: sourceString.length - cursor)
             )
-            if !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                result.append(.init(content: .markdown(markdown)))
+            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                result.append(.markdown(text))
             }
         }
         return result

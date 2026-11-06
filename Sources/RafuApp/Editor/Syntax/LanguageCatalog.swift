@@ -50,6 +50,9 @@ nonisolated enum LanguageCatalog {
         "hpp": Mapping(grammarID: nil, lspID: "cpp"),
         "md": Mapping(grammarID: .markdown, lspID: "markdown"),
         "markdown": Mapping(grammarID: .markdown, lspID: "markdown"),
+        // MDX (ADR 0034): Markdown grammar for highlighting; component tags
+        // read as HTML blocks. No MDX grammar or language server.
+        "mdx": Mapping(grammarID: .markdown, lspID: nil),
         "json": Mapping(grammarID: .json, lspID: "json"),
         "jsonc": Mapping(grammarID: .json, lspID: nil),
         "yaml": Mapping(grammarID: .yaml, lspID: "yaml"),
