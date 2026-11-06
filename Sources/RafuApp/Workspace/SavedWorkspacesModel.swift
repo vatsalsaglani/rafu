@@ -99,11 +99,8 @@ final class SavedWorkspacesModel {
     }
 
     func presentMissing(_ name: String) {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "\(name) could not be found."
-        alert.informativeText =
-            "It was moved, renamed, or deleted. Use Remove from List to forget it."
-        alert.runModal()
+        RafuPopupPresenter.presentMessage(
+            title: "\(name) could not be found.",
+            message: "It was moved, renamed, or deleted. Use Remove from List to forget it.")
     }
 }

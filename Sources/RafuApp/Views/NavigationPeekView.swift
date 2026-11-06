@@ -18,17 +18,24 @@ struct NavigationPeekView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider().overlay(theme.palette.borderSubtle)
+            RafuPopupHeader(
+                symbol: "arrow.triangle.turn.up.right.diamond", title: title,
+                showsEscapeHint: false
+            ) {
+                if let tierLabel {
+                    RafuChip(text: tierLabel)
+                }
+            }
             content
+            RafuPopupFooter(hints: [("↑↓", "Navigate"), ("↩", "Open"), ("esc", "Close")]) {
+                Button("Close") { dismiss() }
+                    .buttonStyle(RafuSecondaryButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+            }
         }
-        .frame(width: 560, height: 360)
-        .background(peekBackground)
-        .clipShape(RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
-                .strokeBorder(theme.palette.borderStrong.opacity(0.5))
-        )
+        .frame(width: 560, height: 360, alignment: .top)
+        .rafuPopupSurface(.sheet)
+        .onExitCommand { dismiss() }
         .onKeyPress(.downArrow) {
             moveSelection(1)
             return .handled
@@ -44,38 +51,17 @@ struct NavigationPeekView: View {
         .onChange(of: session.navigationPeekContent) { _, _ in selectedIndex = 0 }
     }
 
-    private var header: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "arrow.triangle.turn.up.right.diamond")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(theme.palette.accent)
-                .frame(width: 24, height: 24)
-                .background(Circle().fill(theme.palette.chipBackground))
-            Text(title)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(theme.palette.textPrimary)
-            Spacer()
-            if let tierLabel {
-                RafuChip(text: tierLabel)
-            }
-        }
-        .padding(.horizontal, 16)
-        .frame(height: 46)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(tierLabel.map { "\(title), \($0)" } ?? title)
-    }
-
     @ViewBuilder
     private var content: some View {
         switch session.navigationPeekContent {
         case .results(let answer):
             candidateList(answer)
         case .indexing:
-            message("Indexing symbols…")
+            RafuEmptyState(symbol: "clock", message: "Indexing symbols…")
         case .empty(let kind):
-            message(emptyMessage(for: kind))
+            RafuEmptyState(symbol: "questionmark.circle", message: emptyMessage(for: kind))
         case nil:
-            message("Nothing found")
+            RafuEmptyState(symbol: "questionmark.circle", message: "Nothing found")
         }
     }
 
@@ -159,60 +145,14 @@ struct NavigationPeekView: View {
             session.navigateToSymbolCandidate(candidate)
             dismiss()
         } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "curlybraces")
-                    .frame(width: 20)
-                    .foregroundStyle(
-                        isSelected ? theme.palette.accent : theme.palette.textSecondary)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(candidate.name)
-                        .foregroundStyle(theme.palette.textPrimary)
-                        .lineLimit(1)
-                    Text("\(candidate.relativePath) · \(candidate.kindLabel)")
-                        .font(.caption)
-                        .foregroundStyle(theme.palette.textSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    if !candidate.previewLine.isEmpty {
-                        Text(candidate.previewLine)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(theme.palette.textMuted)
-                            .lineLimit(1)
-                    }
-                }
-                Spacer()
-                if isSelected {
-                    Image(systemName: "return")
-                        .font(.caption)
-                        .foregroundStyle(theme.palette.textMuted)
-                }
-            }
-            .padding(.horizontal, 12)
-            .frame(minHeight: 44)
-            .contentShape(
-                RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
-            )
-            .background(
-                RoundedRectangle(cornerRadius: RafuMetrics.radiusControl, style: .continuous)
-                    .fill(isSelected ? theme.palette.selection : .clear)
-            )
+            RafuPopupRow(
+                symbol: "curlybraces", title: candidate.name,
+                caption: "\(candidate.relativePath) · \(candidate.kindLabel)",
+                keyHint: isSelected ? "↩" : nil, isSelected: isSelected)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(
             "\(candidate.name), \(candidate.kindLabel), \(candidate.relativePath)")
-    }
-
-    private func message(_ text: String) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: "questionmark.circle")
-                .font(.system(size: 22))
-                .foregroundStyle(theme.palette.textMuted)
-            Text(text)
-                .foregroundStyle(theme.palette.textSecondary)
-            Button("Close") { dismiss() }
-                .keyboardShortcut(.cancelAction)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func emptyMessage(for kind: NavigationTargetKind) -> String {
@@ -222,10 +162,6 @@ struct NavigationPeekView: View {
         case .references: "No references found"
         case .hover: "Nothing found"
         }
-    }
-
-    private var peekBackground: some View {
-        theme.palette.cardBackground
     }
 
     private func moveSelection(_ delta: Int) {

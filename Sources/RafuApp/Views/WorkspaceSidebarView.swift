@@ -99,30 +99,34 @@ struct WorkspaceSidebarView: View {
             .onDisappear { session.isFilesTreeFocused = false }
         }
         .background(theme.palette.sidebarBackground)
-        .alert(
-            session.pendingTrashRequest?.title ?? "Move to Trash?",
-            isPresented: trashBinding,
-            presenting: session.pendingTrashRequest
-        ) { _ in
+        .sheet(item: $session.pendingTrashRequest) { request in
             // Cancel is the default button, so Return never trashes.
-            Button("Cancel", role: .cancel) { session.pendingTrashRequest = nil }
-                .keyboardShortcut(.defaultAction)
-            Button("Move to Trash", role: .destructive) {
-                let undoManager = undoManager
-                Task { await session.performPendingTrash(undoManager: undoManager) }
+            RafuConfirmPopup(
+                symbol: "trash", title: request.title, message: request.message,
+                actions: [
+                    .init("Move to Trash", isDestructive: true) {
+                        let undoManager = undoManager
+                        Task { await session.performPendingTrash(undoManager: undoManager) }
+                    }
+                ]
+            ) {
+                session.pendingTrashRequest = nil
             }
-        } message: { request in
-            Text(request.message)
         }
-        .alert("Rename File", isPresented: renameBinding) {
-            TextField("Name", text: $renameText)
-            Button("Cancel", role: .cancel) { renameNode = nil }
-            Button("Rename") {
-                guard let node = renameNode else { return }
-                Task { await session.rename(node, to: renameText) }
+        .sheet(item: $renameNode) { node in
+            RafuTextFieldPopup(
+                symbol: "pencil", title: "Rename File",
+                subtitle: "Enter a new name for \(node.name).", fieldLabel: "Name",
+                initialText: node.name,
+                actionTitle: "Rename",
+                validate: { $0.contains("/") ? "A name cannot contain /." : nil },
+                cancel: { renameNode = nil }
+            ) { name in
+                renameNode = nil
+                // An unchanged name is a no-op, not a failed move.
+                guard name != node.name else { return }
+                Task { await session.rename(node, to: name) }
             }
-        } message: {
-            Text("Enter a new name for \(renameNode?.name ?? "this item").")
         }
         .sheet(isPresented: creationBinding) {
             FileCreationSheet(session: session)
@@ -228,17 +232,6 @@ struct WorkspaceSidebarView: View {
                 }
             }
         )
-    }
-
-    private var trashBinding: Binding<Bool> {
-        Binding(
-            get: { session.pendingTrashRequest != nil },
-            set: { if !$0 { session.pendingTrashRequest = nil } }
-        )
-    }
-
-    private var renameBinding: Binding<Bool> {
-        Binding(get: { renameNode != nil }, set: { if !$0 { renameNode = nil } })
     }
 
     private var creationBinding: Binding<Bool> {

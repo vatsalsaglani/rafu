@@ -77,22 +77,28 @@ struct TerminalGroupSavedLayoutsSection: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, RafuMetrics.space2)
-        .confirmationDialog(
-            deletionCandidate.map { "Delete \u{201C}\($0.name.rawValue)\u{201D}?" }
-                ?? "Delete Saved Terminal Group?",
+        // `SavedTerminalGroupRecord` is not `Identifiable`, so this keeps the
+        // Boolean presentation and reads the candidate inside.
+        .sheet(
             isPresented: Binding(
                 get: { deletionCandidate != nil },
-                set: { if !$0 { deletionCandidate = nil } }),
-            titleVisibility: .visible,
-            presenting: deletionCandidate
-        ) { record in
-            Button("Delete", role: .destructive) {
-                session.deleteSavedTerminalGroup(record.id)
-                deletionCandidate = nil
+                set: { if !$0 { deletionCandidate = nil } })
+        ) {
+            if let record = deletionCandidate {
+                RafuConfirmPopup(
+                    symbol: "trash",
+                    title: "Delete \u{201C}\(record.name.rawValue)\u{201D}?",
+                    message: "This removes the saved layout. Open terminal groups are not closed.",
+                    actions: [
+                        .init("Delete", isDestructive: true) {
+                            session.deleteSavedTerminalGroup(record.id)
+                            deletionCandidate = nil
+                        }
+                    ]
+                ) {
+                    deletionCandidate = nil
+                }
             }
-            Button("Cancel", role: .cancel) { deletionCandidate = nil }
-        } message: { _ in
-            Text("This removes the saved layout. Open terminal groups are not closed.")
         }
     }
 

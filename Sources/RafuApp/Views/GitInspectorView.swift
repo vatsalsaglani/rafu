@@ -54,31 +54,39 @@ struct SourceControlPanelView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .alert("Create Branch", isPresented: $isCreatingBranch) {
-            TextField("Branch name", text: $newBranchName)
-            Button("Cancel", role: .cancel) { newBranchName = "" }
-            Button("Create and Check Out") {
-                let name = newBranchName
+        .sheet(isPresented: $isCreatingBranch) {
+            RafuTextFieldPopup(
+                symbol: "arrow.triangle.branch", title: "Create Branch",
+                subtitle: "Create a branch from the current HEAD and switch to it.",
+                fieldLabel: "Branch name", actionTitle: "Create and Check Out",
+                cancel: {
+                    newBranchName = ""
+                    isCreatingBranch = false
+                }
+            ) { name in
                 newBranchName = ""
+                isCreatingBranch = false
                 Task { await session.gitCreateBranch(named: name) }
             }
-            .disabled(newBranchName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        } message: {
-            Text("Create a branch from the current HEAD and switch to it.")
         }
-        .confirmationDialog(
-            "Merge \(pendingMergeBranch ?? "branch") into \(snapshot.branch)?",
-            isPresented: mergeConfirmationBinding
-        ) {
+        .sheet(isPresented: mergeConfirmationBinding) {
             if let branch = pendingMergeBranch {
-                Button("Merge \(branch)") {
+                RafuConfirmPopup(
+                    symbol: "arrow.triangle.merge",
+                    title: "Merge \(branch) into \(snapshot.branch)?",
+                    message:
+                        "Git may stop for conflicts. Rafu will show conflicted files in Changes.",
+                    actions: [
+                        .init("Merge \(branch)") {
+                            pendingMergeBranch = nil
+                            Task { await session.gitMergeBranch(named: branch) }
+                        }
+                    ],
+                    defaultActionID: "Merge \(branch)"
+                ) {
                     pendingMergeBranch = nil
-                    Task { await session.gitMergeBranch(named: branch) }
                 }
             }
-            Button("Cancel", role: .cancel) { pendingMergeBranch = nil }
-        } message: {
-            Text("Git may stop for conflicts. Rafu will show conflicted files in Changes.")
         }
     }
 
@@ -340,24 +348,23 @@ struct GitInspectorView: View {
             }
         }
         .task(id: session.gitRootURL) { await refreshAllGitState() }
-        .confirmationDialog(
-            pendingStashAction?.title ?? "Update stash?",
-            isPresented: stashConfirmationBinding
-        ) {
-            if let action = pendingStashAction {
-                Button(action.confirmationLabel, role: .destructive) {
-                    pendingStashAction = nil
-                    Task {
-                        switch action {
-                        case .pop(let entry): await session.popStash(entry)
-                        case .drop(let entry): await session.dropStash(entry)
+        .sheet(item: $pendingStashAction) { action in
+            RafuConfirmPopup(
+                symbol: "archivebox", title: action.title, message: action.message,
+                actions: [
+                    .init(action.confirmationLabel, isDestructive: true) {
+                        pendingStashAction = nil
+                        Task {
+                            switch action {
+                            case .pop(let entry): await session.popStash(entry)
+                            case .drop(let entry): await session.dropStash(entry)
+                            }
                         }
                     }
-                }
+                ]
+            ) {
+                pendingStashAction = nil
             }
-            Button("Cancel", role: .cancel) { pendingStashAction = nil }
-        } message: {
-            Text(pendingStashAction?.message ?? "The stash list will remain unchanged.")
         }
         .sheet(isPresented: $isStashSheetPresented) {
             GitStashChangesSheet(session: session)
@@ -590,21 +597,22 @@ struct GitInspectorView: View {
         .sheet(isPresented: $isAddWorktreeSheetPresented) {
             GitAddWorktreeSheet(session: session)
         }
-        .confirmationDialog(
-            "Remove worktree “\(pendingWorktreeRemoval?.name ?? "")”?",
-            isPresented: worktreeRemovalBinding
-        ) {
+        .sheet(isPresented: worktreeRemovalBinding) {
             if let worktree = pendingWorktreeRemoval {
-                Button("Remove Worktree", role: .destructive) {
+                RafuConfirmPopup(
+                    symbol: "trash", title: "Remove worktree “\(worktree.name)”?",
+                    message:
+                        "The worktree's files are removed from disk. Git refuses if it has uncommitted changes or is locked; its branch is not deleted.",
+                    actions: [
+                        .init("Remove Worktree", isDestructive: true) {
+                            pendingWorktreeRemoval = nil
+                            Task { await session.removeWorktree(worktree) }
+                        }
+                    ]
+                ) {
                     pendingWorktreeRemoval = nil
-                    Task { await session.removeWorktree(worktree) }
                 }
             }
-            Button("Cancel", role: .cancel) { pendingWorktreeRemoval = nil }
-        } message: {
-            Text(
-                "The worktree's files are removed from disk. Git refuses if it has uncommitted changes or is locked; its branch is not deleted."
-            )
         }
     }
 
@@ -837,13 +845,6 @@ struct GitInspectorView: View {
 
     private var snapshot: GitSnapshot {
         session.gitSnapshot ?? GitSnapshot(branch: "Git", changes: [])
-    }
-
-    private var stashConfirmationBinding: Binding<Bool> {
-        Binding(
-            get: { pendingStashAction != nil },
-            set: { if !$0 { pendingStashAction = nil } }
-        )
     }
 
     private func refreshAllGitState() async {

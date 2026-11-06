@@ -72,8 +72,7 @@ struct LanguageServersSettingsSection: View {
             }
         }
         .task { await trustModel.load() }
-        .alert(
-            "Workspace Trust Error",
+        .sheet(
             isPresented: Binding(
                 get: { trustModel.presentedError != nil },
                 set: { isPresented in
@@ -81,9 +80,11 @@ struct LanguageServersSettingsSection: View {
                 }
             )
         ) {
-            Button("OK") { trustModel.presentedError = nil }
-        } message: {
-            Text(trustModel.presentedError ?? "")
+            RafuMessagePopup(
+                title: "Workspace Trust Error", message: trustModel.presentedError ?? ""
+            ) {
+                trustModel.presentedError = nil
+            }
         }
         .sheet(isPresented: $model.isPresentingEntryForm) {
             UserServerEntryForm(model: model)
@@ -100,8 +101,7 @@ struct LanguageServersSettingsSection: View {
                 }
             )
         }
-        .alert(
-            "Language Server Error",
+        .sheet(
             isPresented: Binding(
                 get: { model.presentedError != nil },
                 set: { isPresented in
@@ -109,9 +109,11 @@ struct LanguageServersSettingsSection: View {
                 }
             )
         ) {
-            Button("OK") { model.presentedError = nil }
-        } message: {
-            Text(model.presentedError ?? "")
+            RafuMessagePopup(
+                title: "Language Server Error", message: model.presentedError ?? ""
+            ) {
+                model.presentedError = nil
+            }
         }
         .task { await model.load() }
     }

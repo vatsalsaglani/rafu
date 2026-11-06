@@ -83,3 +83,47 @@ What stays system:
   constraints (no per-document web views).
 - **A blurred material surface.** Rejected: it fights Reduce Transparency and
   the flat workbench language.
+
+## Amendment 2026-11-06 (all dialogs)
+
+Owner direction: "update all dialogues". Every alert and confirmation now uses
+the language. Phase: G9 in the same fan-out plan.
+
+- **New components.** `RafuMessagePopup` (error and info, one OK button, Return
+  and Escape both close it). `RafuTextFieldPopup` (promoted from the Ensemble
+  Edit Label popup; adds validation, a busy state and an inline error).
+  `RafuPopupPresenter` (`Support/RafuPopupPresenter.swift`) hosts a popup as a
+  sheet on the key workspace window for callers with no SwiftUI host.
+- **Footer order.** `RafuConfirmPopup` draws destructive actions first, then
+  Cancel, then the other actions (`footerOrder`). This is the macOS save-sheet
+  layout and keeps Return far from the destructive button. Return still never
+  destroys, and no destructive action has a keyboard shortcut. Side effect:
+  Remove from Ensemble now reads `Close Terminal and Remove Card | Cancel |
+  Remove from Ensemble`.
+- **Defaults of the migrated dialogs.**
+
+  | Dialog | Return runs |
+  |---|---|
+  | Save changes before closing? | Save and Close (`Discard | Cancel | Save and Close`) |
+  | Merge branch | Merge |
+  | Quit Rafu? (last tab closed) | Quit |
+  | Create Branch, Rename File, Duplicate Theme | the action, once the name is valid |
+  | Error and info messages | OK |
+  | Apply Replacements | Cancel (bulk write to many files) |
+  | Move to Trash, Pop or Drop stash, Remove worktree, Delete saved layout, Replace skill files, Close terminal group or pane | Cancel |
+
+- **Migrated.** Close dirty tab, editor error, Create Branch, Merge, stash
+  Pop/Drop, Remove worktree, Delete saved layout, search error, Apply
+  Replacements, Move to Trash, Rename File, open-folder and terminal-group
+  errors, terminal close confirmation, command-line tool result, Quit, skill
+  replace, language-server errors, Duplicate Theme and theme errors, the
+  `.rafuensemble` open error, the missing-workspace error, and Navigation Peek
+  (header, rows, footer and empty states from the popup components).
+- **What stays system.** `NSOpenPanel`, `NSSavePanel` and `.fileImporter`;
+  native `Picker`, `Menu` and `Toggle` inside a popup; and one `NSAlert`
+  fallback inside `RafuPopupPresenter.presentMessage`, used only when no
+  window can host a sheet (every window closed before the error arrived), so
+  the user still sees the error.
+- **Supersedes** the earlier lines in this ADR that keep the Files "Rename
+  File" alert, system error alerts, and Navigation Peek out of the language.
+  `RafuDialogPolicyTests` pins the rule in source.

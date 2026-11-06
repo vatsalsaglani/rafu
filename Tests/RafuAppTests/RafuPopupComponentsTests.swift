@@ -49,6 +49,7 @@ struct RafuPopupComponentsTests {
         let popup = String(source[start.upperBound..<end.lowerBound])
         #expect(popup.contains("cancelButton(isDefault: defaultIndex == nil)"))
         #expect(popup.contains(".onExitCommand(perform: cancel)"))
+        #expect(popup.contains("Self.footerOrder(actions)"))
         // The destructive branch has no keyboard shortcut.
         let destructive = try #require(popup.range(of: "if action.isDestructive {"))
         let next = try #require(
@@ -58,6 +59,57 @@ struct RafuPopupComponentsTests {
         // No shadow and no blur in the popup language.
         #expect(!source.contains(".shadow("))
         #expect(!source.contains("Material"))
+        // The message popup has exactly one default action; Escape closes it.
+        let messageStart = try #require(source.range(of: "struct RafuMessagePopup: View"))
+        let messageEnd = try #require(
+            source.range(
+                of: "struct RafuTextFieldPopup: View",
+                range: messageStart.upperBound..<source.endIndex
+            ))
+        let message = String(source[messageStart.upperBound..<messageEnd.lowerBound])
+        #expect(message.components(separatedBy: ".keyboardShortcut(.defaultAction)").count == 2)
+        #expect(message.contains(".keyboardShortcut(.cancelAction)"))
+        #expect(message.contains(".onExitCommand(perform: dismiss)"))
+    }
+
+    @Test("The footer puts destructive actions left of Cancel and the others right")
+    func footerOrder() {
+        let discard = RafuConfirmPopup.Action("Discard", isDestructive: true) {}
+        let remove = RafuConfirmPopup.Action("Remove", isDestructive: true) {}
+        let save = RafuConfirmPopup.Action("Save and Close") {}
+        let other = RafuConfirmPopup.Action("Other") {}
+        let mixed = RafuConfirmPopup.footerOrder([save, discard, other, remove])
+        #expect(mixed.leading.map(\.id) == ["Discard", "Remove"])
+        #expect(mixed.trailing.map(\.id) == ["Save and Close", "Other"])
+        #expect(RafuConfirmPopup.footerOrder([save, other]).leading.isEmpty)
+        #expect(RafuConfirmPopup.footerOrder([discard]).trailing.isEmpty)
+    }
+
+    @Test("The close prompt makes Save and Close the Return action, never Discard")
+    func closePromptDefault() {
+        let save = RafuConfirmPopup.Action("Save and Close") {}
+        let discard = RafuConfirmPopup.Action("Discard", isDestructive: true) {}
+        #expect(
+            RafuConfirmPopup.defaultActionIndex([save, discard], preferred: "Save and Close") == 0)
+        #expect(RafuConfirmPopup.defaultActionIndex([save, discard], preferred: "Discard") == nil)
+    }
+
+    @Test("Message popups pick a symbol per kind")
+    func messagePopupSymbols() {
+        #expect(RafuMessagePopup.symbol(for: .error) == "exclamationmark.triangle")
+        #expect(RafuMessagePopup.symbol(for: .info) == "info.circle")
+    }
+
+    @Test("A text popup submits only a non-empty, valid, trimmed value")
+    func textFieldCanSubmit() {
+        let any: (String) -> String? = { _ in nil }
+        let noSlash: (String) -> String? = { $0.contains("/") ? "No slashes." : nil }
+        #expect(!RafuTextFieldPopup.canSubmit("", validate: any))
+        #expect(!RafuTextFieldPopup.canSubmit("   \n", validate: any))
+        #expect(!RafuTextFieldPopup.canSubmit("a/b", validate: noSlash))
+        #expect(RafuTextFieldPopup.canSubmit(" ok ", validate: noSlash))
+        #expect(RafuTextFieldPopup.problem("a/b", validate: noSlash) == "No slashes.")
+        #expect(RafuTextFieldPopup.problem("  ", validate: noSlash) == nil)
     }
 
     @Test("Increase Contrast shows the full border")

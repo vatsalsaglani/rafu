@@ -228,19 +228,29 @@ private struct WorkspaceSearchContent: View {
             searchResults
         }
         .defaultFocus($isQueryFocused, true)
-        .alert("Workspace Search", isPresented: errorBinding) {
-            Button("OK", role: .cancel) { search.clearError() }
-        } message: {
-            Text(search.errorMessage ?? "Search failed.")
+        .sheet(isPresented: errorBinding) {
+            RafuMessagePopup(
+                title: "Workspace Search", message: search.errorMessage ?? "Search failed."
+            ) {
+                search.clearError()
+            }
         }
-        .confirmationDialog(
-            "Apply \(search.replacementPreview?.replacementCount ?? 0) replacements?",
-            isPresented: $isApplyConfirmationPresented
-        ) {
-            Button("Apply Replacements") { Task { await session.applyWorkspaceReplacement() } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Files changed since this preview was created will not be overwritten.")
+        .sheet(isPresented: $isApplyConfirmationPresented) {
+            // Cancel stays the Return action: the replacement writes many
+            // files at once.
+            RafuConfirmPopup(
+                symbol: "arrow.left.arrow.right",
+                title: "Apply \(search.replacementPreview?.replacementCount ?? 0) replacements?",
+                message: "Files changed since this preview was created will not be overwritten.",
+                actions: [
+                    .init("Apply Replacements") {
+                        isApplyConfirmationPresented = false
+                        Task { await session.applyWorkspaceReplacement() }
+                    }
+                ]
+            ) {
+                isApplyConfirmationPresented = false
+            }
         }
     }
 

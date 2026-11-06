@@ -19,6 +19,8 @@ struct ThemeSettingsSection: View {
     @State private var isImporting = false
     @State private var isCreating = false
     @State private var newThemeName = "My Rafu Theme"
+    @State private var isCopyingTheme = false
+    @State private var themeCopyError: String?
     @State private var statusMessage: String?
 
     private let service = ThemeFileService()
@@ -80,6 +82,7 @@ struct ThemeSettingsSection: View {
                 HStack {
                     Button("Duplicate…", systemImage: "plus.square.on.square") {
                         newThemeName = "My Rafu Theme"
+                        themeCopyError = nil
                         isCreating = true
                     }
                     .help("Create an editable copy of the active theme")
@@ -115,28 +118,21 @@ struct ThemeSettingsSection: View {
             Task { await importTheme(result) }
         }
         .sheet(isPresented: $isCreating) {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Duplicate Theme").font(.headline)
-                TextField("Theme name", text: $newThemeName)
-                Text("The JSON copy is stored in Rafu’s theme folder and selected immediately.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                HStack {
-                    Spacer()
-                    Button("Cancel", role: .cancel) { isCreating = false }
-                    Button("Duplicate") { Task { await createThemeCopy() } }
-                        .buttonStyle(RafuProminentButtonStyle())
-                        .disabled(
-                            newThemeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
+            RafuTextFieldPopup(
+                symbol: "doc.on.doc", title: "Duplicate Theme",
+                subtitle:
+                    "The JSON copy is stored in Rafu’s theme folder and selected immediately.",
+                fieldLabel: "Theme name", initialText: newThemeName, actionTitle: "Duplicate",
+                isBusy: isCopyingTheme, errorMessage: themeCopyError,
+                cancel: { isCreating = false }
+            ) { name in
+                Task { await createThemeCopy(named: name) }
             }
-            .padding(20)
-            .frame(width: 420)
         }
-        .alert("Theme", isPresented: statusBinding) {
-            Button("OK", role: .cancel) { statusMessage = nil }
-        } message: {
-            Text(statusMessage ?? "")
+        .sheet(isPresented: statusBinding) {
+            RafuMessagePopup(title: "Theme", message: statusMessage ?? "") {
+                statusMessage = nil
+            }
         }
     }
 
@@ -283,17 +279,21 @@ struct ThemeSettingsSection: View {
         }
     }
 
-    private func createThemeCopy() async {
+    private func createThemeCopy(named name: String) async {
+        isCopyingTheme = true
+        themeCopyError = nil
+        defer { isCopyingTheme = false }
         do {
             guard let source = selectedThemeURL ?? RafuThemeCatalog.resourceURL(for: .indigo)
             else { return }
-            let descriptor = try await service.createCopy(from: source, named: newThemeName)
+            let descriptor = try await service.createCopy(from: source, named: name)
             isCreating = false
             await reloadThemes()
             apply(selection.selecting(descriptor.id, isDark: descriptor.appearance == "dark"))
             NSWorkspace.shared.activateFileViewerSelecting([descriptor.fileURL])
         } catch {
-            statusMessage = error.localizedDescription
+            // The Duplicate popup stays open and shows the error inline.
+            themeCopyError = error.localizedDescription
         }
     }
 

@@ -257,27 +257,15 @@ private struct WorkspaceWindowPresentations: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .alert(session.openFolderErrorTitle, isPresented: $session.isOpenFolderErrorPresented) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(session.openFolderErrorMessage)
+            .sheet(isPresented: $session.isOpenFolderErrorPresented) {
+                RafuMessagePopup(
+                    title: session.openFolderErrorTitle, message: session.openFolderErrorMessage
+                ) {
+                    session.isOpenFolderErrorPresented = false
+                }
             }
-            .confirmationDialog(
-                session.terminalGroupCloseConfirmationTitle,
-                isPresented: terminalGroupCloseBinding,
-                titleVisibility: .visible
-            ) {
-                Button(session.terminalGroupCloseConfirmationActionTitle, role: .destructive) {
-                    session.confirmTerminalGroupClose()
-                }
-                if session.canSuppressPendingTerminalPaneCloseConfirmation {
-                    Button("Close and Don’t Ask Again", role: .destructive) {
-                        session.confirmTerminalPaneCloseAndSuppressFutureWarnings()
-                    }
-                }
-                Button("Cancel", role: .cancel) { session.cancelTerminalGroupClose() }
-            } message: {
-                Text(session.terminalGroupCloseConfirmationMessage)
+            .sheet(isPresented: terminalGroupCloseBinding) {
+                terminalGroupClosePopup
             }
             .sheet(item: terminalGroupSaveRequestBinding) { request in
                 TerminalGroupSaveSheet(session: session, request: request)
@@ -331,11 +319,39 @@ private struct WorkspaceWindowPresentations: ViewModifier {
                     onDecline: { session.languageIntelligence.declineTrust($0) }
                 )
             }
-            .alert("Command Line Tool", isPresented: cliMessageBinding) {
-                Button("OK", role: .cancel) { session.cliInstallMessage = nil }
-            } message: {
-                Text(session.cliInstallMessage ?? "")
+            .sheet(isPresented: cliMessageBinding) {
+                RafuMessagePopup(
+                    kind: .info, title: "Command Line Tool",
+                    message: session.cliInstallMessage ?? ""
+                ) {
+                    session.cliInstallMessage = nil
+                }
             }
+    }
+
+    /// The confirmation for closing a terminal group or pane that still has
+    /// a live process. Every button reaches a session method that clears
+    /// `pendingTerminalGroupClose`; the sheet closes when the model does.
+    private var terminalGroupClosePopup: some View {
+        var actions: [RafuConfirmPopup.Action] = [
+            .init(session.terminalGroupCloseConfirmationActionTitle, isDestructive: true) {
+                session.confirmTerminalGroupClose()
+            }
+        ]
+        if session.canSuppressPendingTerminalPaneCloseConfirmation {
+            actions.append(
+                .init("Close and Don’t Ask Again", isDestructive: true) {
+                    session.confirmTerminalPaneCloseAndSuppressFutureWarnings()
+                })
+        }
+        return RafuConfirmPopup(
+            symbol: "terminal",
+            title: session.terminalGroupCloseConfirmationTitle,
+            message: session.terminalGroupCloseConfirmationMessage,
+            actions: actions
+        ) {
+            session.cancelTerminalGroupClose()
+        }
     }
 
     private var cliMessageBinding: Binding<Bool> {
@@ -412,18 +428,18 @@ private struct EmptyWindowQuitConfirmationView: View {
     @State private var neverAskAgain = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            RafuSheetHeader(
-                icon: "questionmark.circle",
+        VStack(alignment: .leading, spacing: 0) {
+            RafuPopupHeader(
+                symbol: "questionmark.circle",
                 title: "Quit Rafu?",
                 subtitle: "No editor tabs are open in this window."
             )
             Toggle("Don’t ask again when the last editor is closed", isOn: $neverAskAgain)
-            HStack {
+                .padding(16)
+            RafuPopupFooter(hints: [("↩", "Quit"), ("esc", "Cancel")]) {
                 Button("Cancel", role: .cancel) { dismiss() }
                     .buttonStyle(RafuSecondaryButtonStyle())
                     .keyboardShortcut(.cancelAction)
-                Spacer()
                 Button("Quit") {
                     if neverAskAgain {
                         UserDefaults.standard.set(
@@ -437,7 +453,8 @@ private struct EmptyWindowQuitConfirmationView: View {
                 .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(RafuMetrics.sheetPadding)
-        .frame(width: 430)
+        .frame(width: 430, alignment: .top)
+        .rafuPopupSurface(.sheet)
+        .onExitCommand { dismiss() }
     }
 }
