@@ -113,13 +113,10 @@ extension WorkspaceSession {
         }
     }
 
-    /// A system error alert: ADR 0033 keeps error alerts native.
+    /// A Rafu error popup on the workspace window (ADR 0033).
     private func presentEnsembleFileError(_ message: String) {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "The Ensemble file could not be opened."
-        alert.informativeText = message
-        alert.runModal()
+        RafuPopupPresenter.presentMessage(
+            title: "The Ensemble file could not be opened.", message: message)
     }
 }
 

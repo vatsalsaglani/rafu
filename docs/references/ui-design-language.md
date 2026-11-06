@@ -154,7 +154,20 @@ build and tests only (GUI checks are manual).
 - Compose popups from `RafuPopupSurface` (`.rafuPopupSurface(.floating)` for a
   panel or overlay, `.sheet` inside a system sheet), `RafuPopupHeader`,
   `RafuPopupSearchField`, `RafuPopupRow`, `RafuPopupFooter`, `RafuKeyHint`,
-  `RafuEmptyState` and `RafuConfirmPopup`. Tokens only; no blur; no shadow.
+  `RafuEmptyState`, `RafuConfirmPopup`, `RafuMessagePopup` (error and info,
+  one OK button) and `RafuTextFieldPopup` (one field, optional validation,
+  busy state and inline error). Tokens only; no blur; no shadow.
+- **Every dialog uses these.** There is no `.alert(`, `.confirmationDialog(` or
+  `NSAlert(` in `Sources/RafuApp`, with one exception: the no-window fallback
+  in `RafuPopupPresenter.presentMessage`. A view uses `.sheet` with a popup
+  component. Model code and `Task` bodies with no SwiftUI host call
+  `RafuPopupPresenter` (`presentMessage`, `presentSheet`), which attaches a
+  sheet to the key workspace window.
+- **Footer order** (`RafuConfirmPopup.footerOrder`): destructive actions on
+  the left, then Cancel, then the other actions on the right. The save prompt
+  reads `Discard | Cancel | Save and Close`. Return runs the right-most
+  non-destructive default and never the destructive one. Destructive buttons
+  have no keyboard shortcut.
 - **Return never destroys.** `RafuConfirmPopup.defaultActionIndex` never
   returns a destructive action; Cancel is the default unless a
   non-destructive default is named.
@@ -172,11 +185,24 @@ build and tests only (GUI checks are manual).
   `RafuPopupSearchField` draws its own 2 pt `focusRing` stroke, so the field
   also sets `.focusEffectDisabled()`; without it the popup shows a second,
   system-blue ring (seen on Open Ensemble, 2026-11-06).
+- A `.sheet(isPresented:)` whose binding setter ignores writes (the terminal
+  group close confirmation, which the model owns) needs an explicit `cancel`
+  closure in the popup. Escape and Cancel must call the model method; do not
+  rely on `dismiss()`.
+- A `.sheet` on a per-document view inside a split still attaches to the
+  window, so each `EditorDocumentView` can keep its own error popup.
+- `SavedTerminalGroupRecord` is not `Identifiable`, so its delete confirmation
+  keeps `.sheet(isPresented:)` and reads the candidate inside the content.
+- A sheet shown over another sheet from the same view may not appear. A popup
+  that can fail after submit shows the error inline (`RafuTextFieldPopup`
+  `errorMessage`) instead of opening a second popup (Duplicate Theme).
 - `.focused(_:)` belongs on the `TextField` itself; `RafuPopupSearchField`
   takes a `FocusState<Bool>.Binding` for that reason. `onSubmit` and
   `onKeyPress` on the wrapper still receive the field's events.
 
-Verification: `swift test --filter RafuPopupComponentsTests`.
+Verification: `swift test --filter RafuPopupComponentsTests` and
+`swift test --filter RafuDialogPolicyTests` (the source policy for the rules
+above).
 
 ## Why it matters
 

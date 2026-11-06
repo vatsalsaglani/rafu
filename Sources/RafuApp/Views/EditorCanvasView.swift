@@ -23,12 +23,23 @@ struct EditorCanvasView: View {
                 session.closeBlame()
             }
         }
-        .alert("Save changes before closing?", isPresented: closeAlertBinding) {
-            Button("Save and Close") { session.saveAndClosePendingDocument() }
-            Button("Discard", role: .destructive) { session.discardAndClosePendingDocument() }
-            Button("Cancel", role: .cancel) { session.pendingCloseDocument = nil }
-        } message: {
-            Text("\(session.pendingCloseDocument?.displayName ?? "This file") has unsaved changes.")
+        .sheet(item: $session.pendingCloseDocument) { document in
+            // Discard | Cancel | Save and Close. Return saves; Discard is
+            // destructive and has no shortcut.
+            RafuConfirmPopup(
+                symbol: "doc.badge.ellipsis",
+                title: "Save changes before closing?",
+                message: "\(document.displayName) has unsaved changes.",
+                actions: [
+                    .init("Save and Close") { session.saveAndClosePendingDocument() },
+                    .init("Discard", isDestructive: true) {
+                        session.discardAndClosePendingDocument()
+                    },
+                ],
+                defaultActionID: "Save and Close"
+            ) {
+                session.pendingCloseDocument = nil
+            }
         }
     }
 
@@ -75,13 +86,6 @@ struct EditorCanvasView: View {
         case .standaloneDiff, .editor:
             EditorLayoutTreeView(node: session.editorLayout.root, session: session)
         }
-    }
-
-    private var closeAlertBinding: Binding<Bool> {
-        Binding(
-            get: { session.pendingCloseDocument != nil },
-            set: { if !$0 { session.pendingCloseDocument = nil } }
-        )
     }
 }
 
@@ -2395,10 +2399,13 @@ private struct EditorDocumentView: View {
                 }
             }
         }
-        .alert("Editor Error", isPresented: errorBinding) {
-            Button("OK", role: .cancel) { document.errorMessage = nil }
-        } message: {
-            Text(document.errorMessage ?? "The editor encountered an error.")
+        .sheet(isPresented: errorBinding) {
+            RafuMessagePopup(
+                title: "Editor Error",
+                message: document.errorMessage ?? "The editor encountered an error."
+            ) {
+                document.errorMessage = nil
+            }
         }
     }
 

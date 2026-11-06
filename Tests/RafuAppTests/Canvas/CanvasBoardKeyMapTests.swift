@@ -106,9 +106,9 @@ struct CanvasBoardKeyMapTests {
 
     @Test("Ensemble popups use the Rafu popup language, not NSAlert")
     func noAlertsInEnsemble() throws {
-        // A system error alert stays native (ADR 0033): the one in the
-        // Ensemble file actions reports a file that could not be opened.
-        let allowed: [String: Int] = ["CanvasEnsembleFileActions.swift": 1]
+        // The Ensemble file error uses `RafuPopupPresenter` (ADR 0033
+        // amendment); the one no-window `NSAlert` fallback lives there.
+        let allowed: [String: Int] = [:]
         for file in try Self.swiftFiles(under: "Sources/RafuApp/Canvas") {
             let source = try String(contentsOf: file, encoding: .utf8)
             let count = source.components(separatedBy: "NSAlert(").count - 1

@@ -188,11 +188,12 @@ enum CanvasDiagramPanels {
 
     static func editLabel(card: CanvasCard, board: CanvasBoardState, session: WorkspaceSession) {
         presentSheet(size: NSSize(width: 420, height: 190)) { dismiss in
-            CanvasTextFieldPopup(
+            RafuTextFieldPopup(
                 symbol: "character.cursor.ibeam", title: "Edit Label",
-                message: "The label appears below the icon.", fieldLabel: "Label",
-                initialText: card.title, actionTitle: "Save", dismiss: dismiss
+                subtitle: "The label appears below the icon.", fieldLabel: "Label",
+                initialText: card.title, actionTitle: "Save", cancel: dismiss
             ) { label in
+                dismiss()
                 session.performCanvasEdit(board) { try board.setServiceIconLabel(card.id, label) }
             }
         }
@@ -204,7 +205,7 @@ enum CanvasDiagramPanels {
     static func confirm(
         symbol: String, title: String, message: String, actionTitle: String
     ) async -> Bool {
-        guard parentWindow() != nil else { return false }
+        guard RafuPopupPresenter.parentWindow() != nil else { return false }
         return await withCheckedContinuation { continuation in
             let answer = CanvasPopupAnswer(continuation)
             presentSheet(size: NSSize(width: 420, height: 180)) { dismiss in
@@ -225,43 +226,10 @@ enum CanvasDiagramPanels {
         }
     }
 
-    /// The workspace window a sheet attaches to. The Icon Library panel can
-    /// be the key window; a sheet never attaches to it.
-    private static func parentWindow() -> NSWindow? {
-        [NSApp.keyWindow, NSApp.mainWindow].compactMap { $0 }.first { !($0 is NSPanel) }
-    }
-
     static func presentSheet<Content: View>(
         size: NSSize, @ViewBuilder content: (@escaping () -> Void) -> Content
     ) {
-        guard let parent = parentWindow() else { return }
-        let sheet = NSWindow(
-            contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled],
-            backing: .buffered, defer: true)
-        sheet.isReleasedWhenClosed = false
-        let dismiss: () -> Void = { [weak parent, weak sheet] in
-            guard let sheet else { return }
-            if let parent { parent.endSheet(sheet) } else { sheet.close() }
-        }
-        sheet.contentViewController = NSHostingController(
-            rootView: content(dismiss)
-                .rafuTheme(RafuThemeCatalog.resolvedForCurrentAppearance())
-                .rafuMotionScope())
-        parent.beginSheet(sheet)
-    }
-}
-
-/// Resumes a continuation once. A popup can report through its button and
-/// again through Escape; only the first answer counts.
-@MainActor
-final class CanvasPopupAnswer {
-    private var continuation: CheckedContinuation<Bool, Never>?
-
-    init(_ continuation: CheckedContinuation<Bool, Never>) { self.continuation = continuation }
-
-    func resume(_ value: Bool) {
-        continuation?.resume(returning: value)
-        continuation = nil
+        RafuPopupPresenter.presentSheet(size: size, content: content)
     }
 }
 
@@ -302,53 +270,4 @@ final class CanvasIconLibraryPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
     override func cancelOperation(_ sender: Any?) { close() }
-}
-
-/// A popup with one text field: Edit Label and similar small edits. Return
-/// saves; Escape cancels.
-struct CanvasTextFieldPopup: View {
-    let symbol: String
-    let title: String
-    let message: String
-    let fieldLabel: String
-    let initialText: String
-    let actionTitle: String
-    let dismiss: () -> Void
-    let save: (String) -> Void
-    @Environment(\.rafuTheme) private var theme
-    @State private var text = ""
-    @FocusState private var fieldFocused: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            RafuPopupHeader(symbol: symbol, title: title, subtitle: message)
-            TextField(fieldLabel, text: $text)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .focused($fieldFocused)
-                .rafuField(isFocused: fieldFocused)
-                .accessibilityLabel(fieldLabel)
-                .onSubmit(submit)
-                .padding(16)
-            RafuPopupFooter(hints: [("↩", actionTitle), ("esc", "Cancel")]) {
-                Button("Cancel", action: dismiss)
-                    .buttonStyle(RafuSecondaryButtonStyle())
-                    .keyboardShortcut(.cancelAction)
-                Button(actionTitle, action: submit)
-                    .buttonStyle(RafuProminentButtonStyle())
-                    .keyboardShortcut(.defaultAction)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .rafuPopupSurface(.sheet)
-        .onAppear {
-            text = initialText
-            fieldFocused = true
-        }
-    }
-
-    private func submit() {
-        dismiss()
-        save(text)
-    }
 }

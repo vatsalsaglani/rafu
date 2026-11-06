@@ -3,8 +3,9 @@ import SwiftUI
 
 // Rafu popup language (ADR 0033). One quiet surface for every Rafu-drawn
 // popup: Open Ensemble, the Icon Library, the Add palette, the Ensemble
-// dialogs and confirmations, and the Command Palette container. Open and
-// save panels and system error alerts stay native.
+// dialogs and confirmations, every alert and confirmation in the workbench,
+// and the Command Palette container. Only the open and save panels stay
+// native (`RafuPopupPresenter` keeps one no-window fallback alert).
 //
 // Tokens only: `cardBackground`, `borderStrong`, `selection`, `hover`,
 // `textPrimary`/`textSecondary`/`textMuted`, `error`. No blur, so Reduce
@@ -440,10 +441,15 @@ struct RafuConfirmPopup: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(16)
+            let order = Self.footerOrder(actions)
+            let defaultID = defaultIndex.map { actions[$0].id }
             RafuPopupFooter(hints: [("esc", "Cancel")]) {
+                ForEach(order.leading) { action in
+                    actionButton(action, isDefault: false)
+                }
                 cancelButton(isDefault: defaultIndex == nil)
-                ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
-                    actionButton(action, isDefault: index == defaultIndex)
+                ForEach(order.trailing) { action in
+                    actionButton(action, isDefault: action.id == defaultID)
                 }
             }
         }
@@ -487,6 +493,14 @@ struct RafuConfirmPopup: View {
         else { return nil }
         return index
     }
+
+    /// The footer layout, left to right: destructive actions, Cancel, then
+    /// the other actions. This is the macOS save-sheet order (Discard |
+    /// Cancel | Save): the default action sits at the far right, away from
+    /// the destructive one. Each group keeps the caller's order.
+    static func footerOrder(_ actions: [Action]) -> (leading: [Action], trailing: [Action]) {
+        (actions.filter(\.isDestructive), actions.filter { !$0.isDestructive })
+    }
 }
 
 /// A bordered button in the theme's `error` colour, for a destructive action.
@@ -520,5 +534,133 @@ struct RafuDestructiveButtonStyle: ButtonStyle {
                 .onHover { isHovering = $0 }
                 .opacity(isEnabled ? 1 : 0.4)
         }
+    }
+}
+
+/// An error or information message: title, the message text, and one OK
+/// button. Return and Escape both close it.
+struct RafuMessagePopup: View {
+    enum Kind {
+        case error
+        case info
+    }
+
+    var kind: Kind = .error
+    let title: String
+    let message: String
+    var okTitle = "OK"
+    var placement: RafuPopupPlacement = .sheet
+    let dismiss: () -> Void
+    @Environment(\.rafuTheme) private var theme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            RafuPopupHeader(symbol: Self.symbol(for: kind), title: title)
+            Text(message)
+                .font(.system(size: 13))
+                .foregroundStyle(theme.palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+                .padding(16)
+            RafuPopupFooter(hints: [("↩", okTitle)]) {
+                // Escape closes too. The zero-size button gives the sheet a
+                // cancel action without a second visible button.
+                Button("Close", action: dismiss)
+                    .keyboardShortcut(.cancelAction)
+                    .frame(width: 0, height: 0)
+                    .opacity(0)
+                    .accessibilityHidden(true)
+                Button(okTitle, action: dismiss)
+                    .buttonStyle(RafuProminentButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .frame(width: 420, alignment: .top)
+        .rafuPopupSurface(placement)
+        .onExitCommand(perform: dismiss)
+    }
+
+    static func symbol(for kind: Kind) -> String {
+        switch kind {
+        case .error: "exclamationmark.triangle"
+        case .info: "info.circle"
+        }
+    }
+}
+
+/// A popup with one text field: Rename, Create Branch, Duplicate Theme,
+/// Edit Label. Return submits; Escape cancels. The action stays disabled
+/// while the trimmed text is empty or `validate` returns a message.
+struct RafuTextFieldPopup: View {
+    var symbol = "pencil"
+    let title: String
+    var subtitle: String?
+    let fieldLabel: String
+    var initialText = ""
+    let actionTitle: String
+    /// An error message for text that is not acceptable, or nil. Receives
+    /// the trimmed text.
+    var validate: (String) -> String? = { _ in nil }
+    var isBusy = false
+    /// A failure from the caller's own work (for example a file error after
+    /// submit). Shown under the field in place of a second popup.
+    var errorMessage: String?
+    var width: CGFloat = 420
+    let cancel: () -> Void
+    let submit: (String) -> Void
+    @Environment(\.rafuTheme) private var theme
+    @State private var text = ""
+    @FocusState private var fieldFocused: Bool
+
+    var body: some View {
+        let problem = Self.problem(text, validate: validate) ?? errorMessage
+        let canSubmit = Self.canSubmit(text, validate: validate) && !isBusy
+        VStack(alignment: .leading, spacing: 0) {
+            RafuPopupHeader(symbol: symbol, title: title, subtitle: subtitle)
+            VStack(alignment: .leading, spacing: 10) {
+                TextField(fieldLabel, text: $text)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .focused($fieldFocused)
+                    .rafuField(isFocused: fieldFocused)
+                    .accessibilityLabel(fieldLabel)
+                    .onSubmit { if canSubmit { submit(text) } }
+                if let problem {
+                    Label(problem, systemImage: "exclamationmark.triangle")
+                        .font(.callout)
+                        .foregroundStyle(theme.palette.error)
+                }
+            }
+            .padding(16)
+            RafuPopupFooter(hints: [("↩", actionTitle), ("esc", "Cancel")]) {
+                Button("Cancel", action: cancel)
+                    .buttonStyle(RafuSecondaryButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                Button(actionTitle) { submit(text) }
+                    .buttonStyle(RafuProminentButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canSubmit)
+            }
+        }
+        .frame(width: width, alignment: .top)
+        .rafuPopupSurface(.sheet)
+        .onExitCommand(perform: cancel)
+        .task {
+            text = initialText
+            fieldFocused = true
+        }
+    }
+
+    /// True when the trimmed text is not empty and `validate` accepts it.
+    nonisolated static func canSubmit(_ text: String, validate: (String) -> String?) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && validate(trimmed) == nil
+    }
+
+    /// The validation message to show, if the text is not empty.
+    nonisolated static func problem(_ text: String, validate: (String) -> String?) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : validate(trimmed)
     }
 }

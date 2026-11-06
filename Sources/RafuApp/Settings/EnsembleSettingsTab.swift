@@ -81,27 +81,30 @@ struct EnsembleSettingsSection: View {
         }
         .fileDialogMessage("Choose a skills folder. Rafu creates rafu-ensemble inside it.")
         .fileDialogConfirmationLabel("Install Here")
-        .confirmationDialog(
-            "Replace existing skill files?",
-            isPresented: pendingReplacementPresented,
-            titleVisibility: .visible
-        ) {
+        .sheet(isPresented: pendingReplacementPresented) {
             if let pending = model.pendingReplacement {
-                Button(
-                    "Replace \(pending.conflicts.count) Existing File(s)",
-                    role: .destructive
+                RafuConfirmPopup(
+                    title: "Replace existing skill files?",
+                    message:
+                        "Rafu replaces only the rafu-ensemble skill files after this confirmation.",
+                    actions: [
+                        .init(
+                            "Replace \(pending.conflicts.count) Existing File(s)",
+                            isDestructive: true
+                        ) {
+                            startInstall(
+                                at: pending.destination,
+                                replaceConfirmed: true,
+                                requiresSecurityScope: pending.requiresSecurityScope)
+                            // The confirmation is answered; the install task
+                            // owns the outcome.
+                            model.clearPendingReplacement()
+                        }
+                    ]
                 ) {
-                    startInstall(
-                        at: pending.destination,
-                        replaceConfirmed: true,
-                        requiresSecurityScope: pending.requiresSecurityScope)
+                    model.clearPendingReplacement()
                 }
             }
-            Button("Cancel", role: .cancel) {
-                model.clearPendingReplacement()
-            }
-        } message: {
-            Text("Rafu replaces only the rafu-ensemble skill files after this confirmation.")
         }
     }
 
