@@ -56,11 +56,15 @@ nonisolated enum CanvasDropAction {
         /// skips that check. The check is lexical (no symlink resolution on
         /// the main actor); the drop itself resolves symlinks.
         var rootPath: String?
+        /// The rects of the cards a dropped card must not cover
+        /// (`CanvasBoardDropGeometry.obstacles`). The ghost lands where the
+        /// card lands: on the nearest free position.
+        var occupied: [CanvasRect]
 
         init(
             hasWorkspace: Bool, cardCount: Int = 0, isTerminalGroupTab: Bool = false,
             paneCount: Int = 1, alreadyOnABoard: Bool = false, boardFull: Bool = false,
-            rootPath: String? = nil
+            rootPath: String? = nil, occupied: [CanvasRect] = []
         ) {
             self.hasWorkspace = hasWorkspace
             self.cardCount = cardCount
@@ -69,6 +73,7 @@ nonisolated enum CanvasDropAction {
             self.alreadyOnABoard = alreadyOnABoard
             self.boardFull = boardFull
             self.rootPath = rootPath
+            self.occupied = occupied
         }
     }
 
@@ -106,8 +111,9 @@ nonisolated enum CanvasDropAction {
         guard !context.boardFull else {
             return CanvasDropPreview(label: "This Ensemble is full", tone: .warn, shape: .board)
         }
-        let rect = CanvasBoardDropGeometry.defaultRect(
-            for: .terminal(groupID: TerminalGroupID()), centeredAt: boardPoint)
+        let rect = CanvasBoardDropGeometry.freeRect(
+            for: .terminal(groupID: TerminalGroupID()), centeredAt: boardPoint,
+            avoiding: context.occupied)
         return CanvasDropPreview(label: label, tone: .accept, shape: .card(rect.cgRect))
     }
 
@@ -164,7 +170,8 @@ nonisolated enum CanvasDropAction {
         let isImage: Bool = {
             if case .image = content { true } else { false }
         }()
-        let rect = CanvasBoardDropGeometry.defaultRect(for: content, centeredAt: boardPoint)
+        let rect = CanvasBoardDropGeometry.freeRect(
+            for: content, centeredAt: boardPoint, avoiding: context.occupied)
         let label =
             copies ? "Copy and add image card" : isImage ? "Add image card" : "Open as file card"
         return CanvasDropPreview(label: label, tone: .accept, shape: .card(rect.cgRect))

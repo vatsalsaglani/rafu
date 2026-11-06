@@ -658,8 +658,11 @@ final class WorkspaceSession {
         return preferredShellStore.resolved(in: shells)
             ?? shells.first(where: \.isDefault)
             ?? shells.first
-            ?? TerminalShell(
-                path: TerminalShellCatalog.environmentShellPath(), name: "Default", isDefault: true)
+            ?? {
+                let path = TerminalShellCatalog.environmentShellPath()
+                return TerminalShell(
+                    path: path, name: (path as NSString).lastPathComponent, isDefault: true)
+            }()
     }
 
     /// Wires `terminal.sessionDidExit`/`sessionDidBell` on first use — lazy
@@ -3532,19 +3535,16 @@ final class WorkspaceSession {
         return document
     }
 
-    /// Monotonic counter for untitled tabs' display names ("Untitled",
-    /// "Untitled 2", …); never reused, so closing one and opening another
-    /// never collides with a still-open tab.
-    @ObservationIgnored
-    private var untitledDocumentCounter = 0
-
     /// Opens a new blank, unsaved editor tab with no backing file — the ⌘N
     /// entry point (issue #6). Selects the new tab immediately, exactly like
     /// `open(_:)` does for a file. `⌘S` on it routes through
     /// `saveUntitledDocument(_:)` to a save panel; see `EditorDocument.isUntitled`.
     func newUntitledDocument() {
-        untitledDocumentCounter += 1
-        let document = registerDocument(EditorDocument(untitledNumber: untitledDocumentCounter))
+        // The lowest number no open untitled tab uses, so a lone new tab is
+        // "Untitled" and closing "Untitled" frees its number.
+        let number = EditorDocument.lowestFreeUntitledNumber(
+            among: openDocuments.filter(\.isUntitled).map(\.displayName))
+        let document = registerDocument(EditorDocument(untitledNumber: number))
         select(document)
     }
 

@@ -7,8 +7,9 @@ import Foundation
 nonisolated struct TerminalShell: Equatable, Identifiable, Sendable {
     var id: String { path }
     let path: String
-    /// "Default (\(basename))" for the `$SHELL` entry, bare basename for
-    /// everything else discovered.
+    /// The bare basename ("zsh"), also for the `$SHELL` entry. `isDefault`
+    /// marks the default, so a label never has to carry the word in the
+    /// middle of the shell name where a narrow tile would cut it.
     let name: String
     let isDefault: Bool
 
@@ -83,8 +84,7 @@ nonisolated struct TerminalShellCatalog: Sendable {
 
             seenPaths.insert(path)
             seenBasenames.insert(basename)
-            let name = isDefaultEntry ? "Default (\(basename))" : basename
-            result.append(TerminalShell(path: path, name: name, isDefault: isDefaultEntry))
+            result.append(TerminalShell(path: path, name: basename, isDefault: isDefaultEntry))
         }
         return result
     }

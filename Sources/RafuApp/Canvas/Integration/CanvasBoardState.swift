@@ -258,12 +258,20 @@ final class CanvasBoardState: Identifiable {
         -> CanvasCardID
     {
         guard cards.count < CanvasLimits.cards else { throw CanvasError.capacity }
+        // An explicit centre is a drop: it lands on the nearest free spot,
+        // where its ghost was. A menu's `creationCenter` is exact.
+        let isDrop = center != nil
         let center = center ?? creationCenter
         creationCenter = nil
         let size = CanvasBoardDropGeometry.defaultSize(for: content)
         var rect: CanvasRect
         if let center {
-            rect = CanvasBoardDropGeometry.defaultRect(for: content, centeredAt: center)
+            rect =
+                isDrop
+                ? CanvasBoardDropGeometry.freeRect(
+                    for: content, centeredAt: center,
+                    avoiding: CanvasBoardDropGeometry.obstacles(in: cards))
+                : CanvasBoardDropGeometry.defaultRect(for: content, centeredAt: center)
         } else {
             rect = CanvasRect(x: 40, y: 40, width: size.width, height: size.height)
             if visibleSize.width > 0, visibleSize.height > 0 {

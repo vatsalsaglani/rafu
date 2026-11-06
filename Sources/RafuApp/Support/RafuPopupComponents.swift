@@ -241,6 +241,9 @@ struct RafuPopupSearchField: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .focused(focus)
+                // The overlay below is the one focus indication, in the theme's
+                // focus colour; the system ring would draw a second, blue one.
+                .focusEffectDisabled()
                 .accessibilityLabel(prompt)
             if let hint { RafuKeyHint(hint) }
         }

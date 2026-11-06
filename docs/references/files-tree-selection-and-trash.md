@@ -129,7 +129,24 @@ each bound once.
 ### "Ask Siri" in the context menu
 
 macOS adds "Ask Siri" to SwiftUI context menus (Finder and Xcode show it too).
-It is not Rafu's item; leave it.
+It is not Rafu's item. 2026-11-06: the user asked to remove it from Rafu's own
+menus. The AppKit lever is `NSMenu.allowsContextMenuPlugIns = false`, an
+instance property. A SwiftUI `.contextMenu` builds its `NSMenu` inside SwiftUI,
+and no public hook gives Rafu that instance before it opens, so the only way
+is a swizzle of `NSMenu` or a private API. Rafu does not do that. Left as is;
+a real fix needs the Files tree on an AppKit `NSOutlineView` with
+`menu(for:)`, as `RafuTextView.menu(for:)` does for the editor.
+
+### Row focus ring
+
+A file or folder row uses `.focusable(interactions: .activate)` for Full
+Keyboard Access. The system ring it draws is a sharp rectangle on the whole
+list cell, wider than the rounded selection pill. The row now sets
+`.focusEffectDisabled()` and mirrors focus in a row-owned `@FocusState`;
+`FileTreeRow` draws a 2 pt `theme.palette.focusRing` stroke in the selection
+pill's own rounded shape. Focus stays visible (Full Keyboard Access, Increase
+Contrast); it is not hidden. Manual check: Tab into the Files list with Full
+Keyboard Access on, and Control-click a row.
 
 ## Why it matters
 

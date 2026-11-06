@@ -113,10 +113,23 @@ nonisolated enum TerminalNaming {
             .joined(separator: " · ")
     }
 
-    /// Menu title for a shell. Two shells with the same name (for example
-    /// `/bin/zsh` and a Homebrew `zsh`) get their path appended so the menu
-    /// items can be told apart.
+    /// Menu title for a shell: its name, with " (default)" after it for the
+    /// default shell. Two shells with the same name (for example `/bin/zsh`
+    /// and a Homebrew `zsh`) get their path appended so the menu items can
+    /// be told apart.
     static func shellMenuTitle(for shell: TerminalShell, among shells: [TerminalShell]) -> String {
+        let title = shell.isDefault ? shell.name + defaultShellSuffix : shell.name
+        let duplicates = shells.count { $0.name == shell.name } > 1
+        return duplicates ? title + separator + shell.path : title
+    }
+
+    /// The marker after the default shell's name in a menu title. A tile that
+    /// cannot fit it shows `shellChipName` and a separate marker.
+    static let defaultShellSuffix = " (default)"
+
+    /// The shell name for a tile that shows the default marker on its own:
+    /// the name, with the path appended only for a same-named shell.
+    static func shellChipName(for shell: TerminalShell, among shells: [TerminalShell]) -> String {
         let duplicates = shells.count { $0.name == shell.name } > 1
         return duplicates ? shell.name + separator + shell.path : shell.name
     }

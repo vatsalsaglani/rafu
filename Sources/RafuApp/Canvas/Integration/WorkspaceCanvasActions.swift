@@ -436,19 +436,22 @@ extension WorkspaceSession {
     }
 
     /// Adds one card per workspace-relative path as one edit, then selects
-    /// them. One file is centred on the drop point, exactly where its hover
-    /// ghost was (`CanvasBoardDropGeometry.defaultRect`). A batch cascades
+    /// them. One file is centred on the drop point, or on the nearest free
+    /// spot when that would cover a card, exactly where its hover ghost was
+    /// (`CanvasBoardDropGeometry.freeRect`). A batch cascades
     /// down and right from the drop point.
     private func placeCanvasDroppedFiles(
         _ paths: [String], on board: CanvasBoardState, at location: CGPoint
     ) throws {
         guard !paths.isEmpty else { return }
         let point = CanvasBoardDropGeometry.boardPoint(location, viewport: board.viewport)
+        let obstacles = CanvasBoardDropGeometry.obstacles(in: board.cards)
         let cards = paths.enumerated().map { index, path in
             let content = CanvasDroppedFileKind.content(forRelativePath: path)
             let rect: CanvasRect
             if paths.count == 1 {
-                rect = CanvasBoardDropGeometry.defaultRect(for: content, centeredAt: point)
+                rect = CanvasBoardDropGeometry.freeRect(
+                    for: content, centeredAt: point, avoiding: obstacles)
             } else {
                 rect = CanvasRect(
                     x: min(50_000, max(-50_000, point.x + Double(index) * 24)),

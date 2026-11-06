@@ -121,7 +121,7 @@ struct TerminalShellPickerPresentationTests {
             TerminalShell(path: "/bin/zsh", name: "zsh", isDefault: false),
             TerminalShell(
                 path: "/opt/homebrew/bin/fish",
-                name: "Default (fish)",
+                name: "fish",
                 isDefault: true
             ),
             TerminalShell(path: "/usr/local/bin/nu", name: "nu", isDefault: false),

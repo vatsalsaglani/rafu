@@ -15,7 +15,7 @@ struct CanvasAddItemTests {
     // `record()` through `perform` below cannot collide with, and silently
     // persist as, a developer's actual preferred shell.
     private let zsh = TerminalShell(
-        path: "/opt/rafu-fixture-shells/zsh", name: "Default (zsh)", isDefault: true)
+        path: "/opt/rafu-fixture-shells/zsh", name: "zsh", isDefault: true)
     private let fish = TerminalShell(
         path: "/opt/rafu-fixture-shells/fish", name: "fish", isDefault: false)
 
@@ -43,6 +43,12 @@ struct CanvasAddItemTests {
         #expect(shellItem.id == "shell:\(fish.path)")
         #expect(shellItem.title(amongShells: [zsh, fish]) == "Terminal — fish")
         #expect(shellItem.symbol == "apple.terminal")
+    }
+
+    @Test("The default shell's title reads \"zsh (default)\", not a cut-up name")
+    func defaultShellTitle() {
+        let title = CanvasAddItem.terminalShell(zsh).title(amongShells: [zsh, fish])
+        #expect(title == "Terminal — zsh (default)")
     }
 
     @Test("A shell row's title de-duplicates same-named shells by path, like the menu")
