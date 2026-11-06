@@ -137,6 +137,8 @@ describe. The authority is
 | Navigator panel headers | Every rail panel (Files, Search, Source Control, Terminals, History) places its header with `rafuNavigatorHeaderPlacement(rowHeight:)`: title centre 31 pt below the pane top (`RafuMetrics.navigatorHeaderTitleCenterY`), on the tab labels' line. `RafuUtilityPanelHeader` applies it itself (14 pt sidebar-tone strip above its 34 pt band). Never a hand-tuned `.padding(.top, …)`; `NavigatorPanelHeaderPlacementTests` enforces it |
 | Scrollers | Editor: `EditorThemedScroller` — theme track and knob, `isCompatibleWithOverlayScrollers` overridden, `scrollerStyle` never written. Files `List`: `OverlayScrollerConfigurator` forces overlay style on that one scroll view (round 4) |
 | Ensemble symbol | `circle.hexagongrid` everywhere |
+| Warning hue | Indigo `#E8894A`, Khadi `#9E4A14` (UX Round A, ADR 0031 §g); 10.8° (Indigo) and 13.6° (Khadi) of HSB hue from the accent, toward orange, and 4.5:1 on app, elevated and card. ANSI yellow derives from `git.modified` first, not from `warning` |
+| Ensemble drop grammar | Accept: solid `accent` ring 1.5 pt (2.5 pt Increase Contrast), 8 % fill, 20 pt glyph in `textSecondary`, 12 pt medium name in `textPrimary`, accent label pill below. Refuse: no ring; a 3 pt `warning` bar on the board's top edge and a `cardBackground` pill (`xmark.octagon` 12 pt `warning`, 12 pt semibold `textPrimary`, `borderSubtle` hairline) below the tool palette; "not allowed" cursor. See `canvas-interaction.md`, UX Round A |
 
 Increase Contrast now does three things in the workbench: promotes the tab
 hairline to `borderStrong`, halves the deck shadow, and halves the tab shadow.

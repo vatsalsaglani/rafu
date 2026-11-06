@@ -173,13 +173,19 @@ struct CanvasBar: View {
     }
 }
 
-/// "−  100% ⌄  +" in one capsule (review C10). Button and menu zoom animate;
-/// pinch and scroll stay 1:1.
+/// "−  100% ⌄  +  Fit" in one capsule (review C10, UX Round A B2). Button and
+/// menu zoom animate and stop at 25 %; pinch and scroll stay 1:1. `Fit`
+/// shows only while a card is out of view.
 struct CanvasZoomCapsule: View {
     @Environment(\.rafuTheme) private var theme
+    @AppStorage(CanvasOverviewPreference.pinnedKey) private var overviewPinned = false
     let board: CanvasBoardState
 
     var body: some View {
+        // O(cards) on each viewport change; the percent already re-renders.
+        let showsFit = CanvasArrival.anyCardOutOfView(
+            cards: board.cards.map(\.rect), viewport: board.viewport,
+            visible: board.visibleSize)
         HStack(spacing: 0) {
             Button {
                 board.zoom(1 / 1.2)
@@ -188,6 +194,7 @@ struct CanvasZoomCapsule: View {
             }
             .buttonStyle(RafuIconButtonStyle(size: 24, iconSize: 11))
             .help("Zoom Out")
+            .disabled(CanvasZoomMetrics.isAtInteractiveFloor(board.viewport.scale))
             Menu {
                 Button("Zoom to Fit") { board.fitAll() }
                 Button("Zoom to Selection") { board.zoomToSelection() }
@@ -196,6 +203,8 @@ struct CanvasZoomCapsule: View {
                 Divider()
                 Button("50%") { board.zoom(toScale: 0.5) }
                 Button("200%") { board.zoom(toScale: 2) }
+                Divider()
+                Toggle("Show Overview", isOn: $overviewPinned)
             } label: {
                 HStack(spacing: 3) {
                     Text(board.viewport.scale, format: .percent.precision(.fractionLength(0)))
@@ -224,6 +233,17 @@ struct CanvasZoomCapsule: View {
             }
             .buttonStyle(RafuIconButtonStyle(size: 24, iconSize: 11))
             .help("Zoom In")
+            if showsFit {
+                Button("Fit") { board.fitAll() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(theme.palette.textPrimary)
+                    .padding(.horizontal, 8)
+                    .frame(minHeight: 24)
+                    .contentShape(.rect)
+                    .help("Zoom to Fit (⌘9)")
+                    .accessibilityLabel("Zoom to Fit")
+            }
         }
         .padding(.horizontal, 3)
         .frame(height: 28)

@@ -66,6 +66,26 @@ struct CanvasDropHoverSafetyTests {
         #expect(!source.contains("ensemble=\\(!info.itemProviders"))
     }
 
+    @Test("Both drop halves refuse a warn preview: forbidden in SwiftUI, none in AppKit")
+    func warnPreviewRefusesInBothHalves() throws {
+        let root = try Self.packageRoot()
+        let delegate = try String(
+            contentsOf: root.appending(
+                path: "Sources/RafuApp/Canvas/Views/CanvasFileDropDelegate.swift"),
+            encoding: .utf8)
+        #expect(delegate.contains("CanvasDropAcceptance.resolve(valid: valid, preview: preview)"))
+        #expect(delegate.contains("case .forbidden: return DropProposal(operation: .forbidden)"))
+        let bridge = try String(
+            contentsOf: root.appending(
+                path: "Sources/RafuApp/Canvas/Adapters/CanvasScrollBridge.swift"),
+            encoding: .utf8)
+        #expect(bridge.contains("CanvasDropAcceptance.resolve(valid: true, preview: preview)"))
+        #expect(bridge.contains("case .cancel, .forbidden: return []"))
+        let warn = CanvasDropPreview(
+            label: "Needs a single-pane terminal", tone: .warn, shape: .board)
+        #expect(CanvasDropAcceptance.resolve(valid: true, preview: warn) == .forbidden)
+    }
+
     /// Each non-comment `itemProviders(for:` call with the name of the
     /// nearest `func` declared above it (closures declare none, so this is
     /// the enclosing named function).

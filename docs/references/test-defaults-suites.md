@@ -64,8 +64,9 @@ leaked files were not deleted; removing them is the user's choice.
 
 Some tests write to the test runner's standard domain
 (`~/Library/Preferences/swiftpm-testing-helper.plist`): keys
-`dev.rafu.last-workspace.v1`, `dev.rafu.recent-workspaces.v1` and
-`canvasEmptyBoardTipDismissed`. Code under test that falls back to
+`dev.rafu.last-workspace.v1` and `dev.rafu.recent-workspaces.v1`
+(`canvasEmptyBoardTipDismissed` is no longer written: UX Round A removed the
+empty-board tip). Code under test that falls back to
 `UserDefaults.standard` needs an injected suite to stop this.
 
 Tests that pass `TestDefaultsSuite.name(_:)` inline and never call

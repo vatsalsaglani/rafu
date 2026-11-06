@@ -51,9 +51,15 @@ struct CanvasFileDropDelegate: DropDelegate {
         return valid
     }
 
+    /// A warn-tone preview refuses the drop: the cursor shows "not allowed"
+    /// and `performDrop` never runs (`CanvasDropAcceptance`).
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        let valid = updatePreview(info: info)
-        return DropProposal(operation: valid ? .copy : .cancel)
+        let (valid, preview) = updatePreview(info: info)
+        switch CanvasDropAcceptance.resolve(valid: valid, preview: preview) {
+        case .copy: return DropProposal(operation: .copy)
+        case .cancel: return DropProposal(operation: .cancel)
+        case .forbidden: return DropProposal(operation: .forbidden)
+        }
     }
 
     func performDrop(info: DropInfo) -> Bool {
@@ -184,10 +190,11 @@ struct CanvasFileDropDelegate: DropDelegate {
     /// Updates `dropPreview` from the best hint available WITHOUT decoding
     /// the provider (type presence, and the same-window `activeEditorDrag`/
     /// `activeEnsembleDragHint` caches `validateDrop` already uses) and
-    /// returns whether the drag validates. The real drop always decodes at
-    /// `performDrop`; this never drives acceptance, only the label.
+    /// returns whether the drag validates, with the preview it drew. The
+    /// real drop always decodes at `performDrop`; a warn-tone preview
+    /// refuses it (`dropUpdated`).
     @discardableResult
-    private func updatePreview(info: DropInfo) -> Bool {
+    private func updatePreview(info: DropInfo) -> (valid: Bool, preview: CanvasDropPreview?) {
         let kind = hoverKind(info)
         let valid = accepts(kind, fileCount: kind == .files ? hoverFileCount() : 0)
         let preview: CanvasDropPreview? =
@@ -198,7 +205,7 @@ struct CanvasFileDropDelegate: DropDelegate {
                     session: session)
             } : nil
         board?.updateDropPreview(preview)
-        return valid
+        return (valid, preview)
     }
 
     /// What this drag probably carries, from type presence and same-window
@@ -318,21 +325,32 @@ enum CanvasFileDrop {
     ) -> Bool {
         // A decoded drop ends the drag session for this board, whatever
         // happens next (a card, a refusal notice, a forwarded tab).
-        session.canvas.boards[boardID]?.clearDropPreview()
+        let board = session.canvas.boards[boardID]
+        board?.clearDropPreview()
         guard accepts(content, boardID: boardID, session: session) else { return false }
+        let landingBefore = board?.landing?.token
+        let result: Bool
         switch content {
         case .files(let urls, let fromFilesTree):
+            // Files land later (after the off-actor plan, or the consent
+            // sheet); `placeCanvasDroppedFiles` plays their haptic.
             return perform(
                 urls, fromFilesTree: fromFilesTree, boardID: boardID, at: location,
                 session: session)
         case .agentSession(let key):
-            return session.dropAgentSessionOnCanvas(key, boardID: boardID, at: location)
+            result = session.dropAgentSessionOnCanvas(key, boardID: boardID, at: location)
         case .tab(let id):
-            return session.dropEditorTabOnCanvas(
+            result = session.dropEditorTabOnCanvas(
                 id, boardID: boardID, at: location, surface: surface)
         case .terminalGroup(let id):
-            return session.dropTerminalGroupOnCanvas(id, boardID: boardID, at: location)
+            result = session.dropTerminalGroupOnCanvas(id, boardID: boardID, at: location)
         }
+        // One set-down haptic when the drop landed a card (S1); a refusal
+        // notice or a tab forwarded to the editor group plays none.
+        if let board, let landing = board.landing, landing.token != landingBefore {
+            RafuHaptics.alignment(channel: CanvasLanding.hapticChannel)
+        }
+        return result
     }
 
     /// Adds the dropped files as cards at `location` (board view space).
@@ -368,6 +386,13 @@ enum CanvasFileDrop {
             boardFull: board.cards.count >= CanvasLimits.cards,
             rootPath: session.rootURL?.standardizedFileURL.path,
             occupied: CanvasBoardDropGeometry.obstacles(in: board.cards))
+        if case .files = content, let root = session.rootURL {
+            // A few `lstat` calls on the root path, once per hover update,
+            // so a workspace opened through a symlink still accepts the
+            // real paths Finder sends (a warn preview refuses the drop).
+            let resolved = root.standardizedFileURL.resolvingSymlinksInPath().path
+            if resolved != context.rootPath { context.resolvedRootPath = resolved }
+        }
         var groupID: TerminalGroupID?
         if case .terminalGroup(let id) = content {
             groupID = id

@@ -1574,7 +1574,7 @@ final class WorkspaceTerminalController: Identifiable {
 
     /// 16-entry ANSI palette derived from theme tokens. Black/white anchor on
     /// text/background tokens so both light and dark themes stay readable.
-    private static func ansiPalette(for theme: RafuTheme) -> [SwiftTerm.Color] {
+    static func ansiPalette(for theme: RafuTheme) -> [SwiftTerm.Color] {
         let ui = theme.ui
         let git = theme.git
         let dark = theme.isDark
@@ -1582,7 +1582,7 @@ final class WorkspaceTerminalController: Identifiable {
         let white = dark ? ui.textPrimary : ui.appBackground
         let red = ui.error ?? "#E06C75"
         let green = ui.success ?? "#7CC08A"
-        let yellow = ui.warning ?? "#D4A24E"
+        let yellow = git?.modified ?? ui.warning ?? "#D4A24E"
         let blue = ui.info ?? "#82A7F0"
         let magenta = git?.conflict ?? "#C678DD"
         let cyan = ui.remoteIndicator ?? "#74BFCB"

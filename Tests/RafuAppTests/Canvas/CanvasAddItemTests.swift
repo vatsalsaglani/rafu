@@ -106,6 +106,13 @@ struct CanvasAddItemTests {
         }
         let pane = try #require(session.terminal.terminalGroup(groupID)?.panes.first)
         #expect(pane.launchProfile?.shell == .approvedShellPath(zsh.path))
+
+        // The keyboard path (N, T) adds with no motion and leaves the
+        // board's creation motion on for the next pointer add.
+        CanvasAddKind.note.perform(on: board, session: session, animated: false)
+        CanvasAddKind.terminal.perform(on: board, session: session, animated: false)
+        #expect(board.cards.count == 4)
+        #expect(board.creationIsAnimated)
         #expect(await session.canvas.flushAll())
     }
 }

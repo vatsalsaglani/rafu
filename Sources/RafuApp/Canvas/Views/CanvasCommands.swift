@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CanvasCommands: Commands {
     @FocusedValue(\.workspaceSession) private var session
+    @AppStorage(CanvasOverviewPreference.pinnedKey) private var overviewPinned = false
     private var board: CanvasBoardState? { session?.selectedCanvas }
 
     var body: some Commands {
@@ -39,7 +40,13 @@ struct CanvasCommands: Commands {
                 .keyboardShortcut("0", modifiers: .command)
                 .disabled(board == nil)
             Button("Zoom In") { board?.zoom(1.2) }.disabled(board == nil)
-            Button("Zoom Out") { board?.zoom(1 / 1.2) }.disabled(board == nil)
+            Button("Zoom Out") { board?.zoom(1 / 1.2) }
+                .disabled(
+                    board.map { CanvasZoomMetrics.isAtInteractiveFloor($0.viewport.scale) } ?? true)
+            // ⌥⌘M is the system's Minimize All, and ⌃⌥M (no ⌘) would take a
+            // key from a focused terminal card, so the overview uses ⌃⌘M.
+            Toggle("Show Overview", isOn: $overviewPinned)
+                .keyboardShortcut("m", modifiers: [.control, .command])
             Divider()
             Menu("Arrange") {
                 Button("Tidy Up") {

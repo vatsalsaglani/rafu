@@ -43,6 +43,8 @@ struct CanvasDropActionResolveTests {
         }
         #expect(rect.width == 380)
         #expect(rect.height == 260)
+        #expect(preview.glyph == "doc")
+        #expect(preview.name == "a.swift")
     }
 
     @Test("A single image file previews an image card")
@@ -53,9 +55,31 @@ struct CanvasDropActionResolveTests {
                 at: centre, surface: surface, viewport: viewport, context: context()))
         #expect(preview.label == "Add image card")
         #expect(preview.tone == .accept)
+        #expect(preview.glyph == "photo")
+        #expect(preview.name == "a.png")
     }
 
-    @Test("Multiple files preview a whole-board batch, not a precise ghost")
+    @Test("A hover that does not name its file shows no name")
+    func unknownFileHasNoName() throws {
+        let preview = try #require(
+            CanvasDropAction.resolve(
+                content: .files([CanvasDropAction.unknownFileURL], fromFilesTree: true),
+                at: centre, surface: surface, viewport: viewport, context: context()))
+        #expect(preview.name == nil)
+        #expect(preview.glyph == "doc")
+    }
+
+    @Test("A warn preview refuses the drop; accept copies; an unknown drag cancels")
+    func acceptance() {
+        let warn = CanvasDropPreview(label: "This Ensemble is full", tone: .warn, shape: .board)
+        let accept = CanvasDropPreview(label: "Add image card", tone: .accept, shape: .board)
+        #expect(CanvasDropAcceptance.resolve(valid: true, preview: warn) == .forbidden)
+        #expect(CanvasDropAcceptance.resolve(valid: true, preview: accept) == .copy)
+        #expect(CanvasDropAcceptance.resolve(valid: true, preview: nil) == .copy)
+        #expect(CanvasDropAcceptance.resolve(valid: false, preview: accept) == .cancel)
+    }
+
+    @Test("Multiple files preview one ghost per file, in the grid the drop uses")
     func multipleFiles() throws {
         let urls = (0..<3).map { URL(fileURLWithPath: "/a\($0).swift") }
         let preview = try #require(
@@ -64,7 +88,12 @@ struct CanvasDropActionResolveTests {
                 viewport: viewport, context: context()))
         #expect(preview.label == "Add 3 cards")
         #expect(preview.tone == .accept)
-        #expect(preview.shape == .board)
+        #expect(preview.glyph == "doc.on.doc")
+        #expect(preview.name == "a0.swift")
+        let expected = CanvasBoardDropGeometry.batchRects(
+            for: urls.map { .file(path: $0.lastPathComponent) }, centeredAt: centre, avoiding: []
+        ).map(\.cgRect)
+        #expect(preview.shape == .cards(expected))
     }
 
     @Test("A batch that would not fit previews the full-board warning")
@@ -77,6 +106,7 @@ struct CanvasDropActionResolveTests {
         #expect(preview.label == "This Ensemble is full")
         #expect(preview.tone == .warn)
         #expect(preview.shape == .board)
+        #expect(preview.glyph == nil)
     }
 
     @Test("An Agent History row previews resuming into a new terminal card")
@@ -88,6 +118,7 @@ struct CanvasDropActionResolveTests {
                 at: centre, surface: surface, viewport: viewport, context: context()))
         #expect(preview.label == "Resume chat in a new terminal")
         #expect(preview.tone == .accept)
+        #expect(preview.glyph == "terminal")
         guard case .card(let rect) = preview.shape else {
             Issue.record("Expected a card shape")
             return
@@ -278,7 +309,11 @@ struct CanvasDropPreviewOutsideTests {
         let result = try #require(preview(urls))
         #expect(result.label == "Copy and add 11 image cards")
         #expect(result.tone == .accept)
-        #expect(result.shape == .board)
+        guard case .cards(let rects) = result.shape else {
+            Issue.record("Expected one ghost per image")
+            return
+        }
+        #expect(rects.count == 11)
         let single = try #require(preview([urls[0]]))
         #expect(single.label == "Copy and add image card")
         guard case .card = single.shape else {
@@ -324,6 +359,20 @@ struct CanvasDropPreviewOutsideTests {
         #expect(
             try #require(preview([URL(fileURLWithPath: "/work/application/a.txt")])).tone
                 == .warn)
+    }
+
+    @Test("A workspace opened through a symlink accepts the resolved paths")
+    func resolvedRootIsInside() throws {
+        var linked = context
+        linked.resolvedRootPath = "/private/work/app"
+        let result = try #require(
+            CanvasDropAction.resolve(
+                content: .files(
+                    [URL(fileURLWithPath: "/private/work/app/a.txt")], fromFilesTree: false),
+                at: centre, surface: surface, viewport: viewport, context: linked))
+        #expect(result.tone == .accept)
+        #expect(
+            try #require(preview([URL(fileURLWithPath: "/private/work/app/a.txt")])).tone == .warn)
     }
 
     @Test("Unknown hover files and Files-list drags are never called outside")

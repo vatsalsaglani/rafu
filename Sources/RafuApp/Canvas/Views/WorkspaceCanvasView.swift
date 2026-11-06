@@ -12,6 +12,7 @@ extension EnvironmentValues {
 struct WorkspaceCanvasView: View {
     @Environment(\.rafuTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
     let board: CanvasBoardState
     let session: WorkspaceSession
     @State private var connectionDrag = CanvasConnectionDrag()
@@ -32,7 +33,8 @@ struct WorkspaceCanvasView: View {
     @GestureState private var gridDragIsLive = false
     @GestureState private var boardDragIsLive = false
     @FocusState private var boardHasKeyboardFocus: Bool
-    @AppStorage("canvasEmptyBoardTipDismissed") private var tipDismissed = false
+    /// Ensemble ▸ Show Overview: keeps the board overview on screen.
+    @AppStorage(CanvasOverviewPreference.pinnedKey) private var overviewPinned = false
     @State private var showsRestoredLinksNotice = false
     /// Rotor targets: every rendered card shell registers here, so the
     /// "Cards" rotor gives VoiceOver the list-like path the List view had.
@@ -110,9 +112,6 @@ struct WorkspaceCanvasView: View {
             board.resumeAttention()
             // A drag that ended in another app cannot leave a preview behind.
             board.clearDropPreview()
-        }
-        .onChange(of: board.cards.count) { _, count in
-            if count > 0 { tipDismissed = true }
         }
         // Last safety net for the hover preview: some drag destinations
         // under the board (a card's text view, the editor group) can end a
@@ -218,6 +217,11 @@ struct WorkspaceCanvasView: View {
                     }
                 )
                 .pointerStyle(pan.isPanning ? .grabActive : .grabIdle)
+            // An empty board's first moves, on the board itself. After the
+            // grid, so pan and double-click still work around the seeds.
+            if board.cards.isEmpty, board.dropPreview == nil {
+                CanvasSeedLayer(board: board, session: session, interaction: interaction)
+            }
             CanvasEdgeLayer(
                 board: board, session: session, focusBoard: { boardHasKeyboardFocus = true })
             ForEach(visibleCards(in: geometry.size)) { card in
@@ -253,6 +257,7 @@ struct WorkspaceCanvasView: View {
                 .transition(cardTransition)
                 .accessibilityRotorEntry(id: card.id, in: cardRotorNamespace)
             }
+            CanvasSetDownRing(board: board)
             CanvasEdgeOverlay(board: board, session: session, drag: connectionDrag)
             // X5 whiteboard
             CanvasWhiteboardCreationLayer(
@@ -274,9 +279,6 @@ struct WorkspaceCanvasView: View {
                         RafuMotion.resolve(RafuMotion.targetHighlight, reduceMotion: reduceMotion),
                         value: dropPreview)
             }
-            if board.cards.isEmpty, !tipDismissed {
-                emptyBoardTip
-            }
             // The tool palette is NOT a layer here: it is an overlay of the
             // gesture-carrying board (`boardChrome`), so no board gesture
             // (pan, Hand, drawing tool, magnify) can take a palette click.
@@ -291,6 +293,15 @@ struct WorkspaceCanvasView: View {
             $0.size
         } action: {
             board.visibleSize = $0
+            // The first real size fits a board that would open with nothing
+            // in view (UX Round A, B1). Runs once per board object.
+            board.arriveIfNeeded()
+        }
+        // A reload installs a new board object under the same view identity
+        // (`.id(board.id)`); the size does not change, so hand it over here.
+        .onChange(of: ObjectIdentifier(board)) { _, _ in
+            board.visibleSize = geometry.size
+            board.arriveIfNeeded()
         }
         // `clipped()` clips drawing only. Without the content shape, a card
         // that extends past the board edge still takes clicks meant for the
@@ -344,6 +355,7 @@ struct WorkspaceCanvasView: View {
                         viewport.x = min(100_000, max(-100_000, viewport.x - dx))
                         viewport.y = min(100_000, max(-100_000, viewport.y - dy))
                         board.setViewport(viewport)
+                        interaction.holdOverviewAfterPan()
                     },
                     zoom: { factor, point in
                         setScale(
@@ -368,7 +380,9 @@ struct WorkspaceCanvasView: View {
                         magnifyLastScale = board.viewport.scale
                     }
                     guard let start = magnifyStart else { return }
-                    let raw = CanvasZoomMetrics.clamped(start.scale * value.magnification)
+                    // Hand zoom stops at 25 % (B2); Fit may have gone lower.
+                    let raw = CanvasZoomMetrics.interactiveClamped(
+                        start.scale * value.magnification, from: start.scale)
                     if CanvasZoomDetent.crossed(from: magnifyLastScale, to: raw) {
                         RafuHaptics.alignment(channel: "zoom")
                     }
@@ -378,9 +392,7 @@ struct WorkspaceCanvasView: View {
                         anchor: value.startLocation)
                 }.onEnded { _ in magnifyStart = nil }
             )
-            .overlay(alignment: .bottomTrailing) {
-                CanvasZoomCapsule(board: board).padding(12)
-            }
+            .overlay(alignment: .bottomTrailing) { zoomCorner }
             // Above every board layer and outside every board gesture, in
             // every tool. Inside `.focusable()`, so the palette still reads
             // the board's focus for its letter keys.
@@ -442,12 +454,12 @@ struct WorkspaceCanvasView: View {
             }
             .onKeyPress("n", phases: .down) { event in
                 guard boardTakesKeys, event.modifiers.isEmpty else { return .ignored }
-                CanvasAddKind.note.perform(on: board, session: session)
+                CanvasAddKind.note.perform(on: board, session: session, animated: false)
                 return .handled
             }
             .onKeyPress("t", phases: .down) { event in
                 guard boardTakesKeys, event.modifiers.isEmpty else { return .ignored }
-                CanvasAddKind.terminal.perform(on: board, session: session)
+                CanvasAddKind.terminal.perform(on: board, session: session, animated: false)
                 return .handled
             }
             .onKeyPress(keys: [.delete, .deleteForward]) { _ in
@@ -565,121 +577,166 @@ struct WorkspaceCanvasView: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// A small, quiet panel with the board's first moves.
-    private var emptyBoardTip: some View {
-        VStack(spacing: 14) {
-            VStack(spacing: 6) {
-                Image(systemName: CanvasBoardState.ensembleSymbol)
-                    .font(.system(size: 24, weight: .light))
-                    .foregroundStyle(theme.palette.textSecondary)
-                    .accessibilityHidden(true)
-                Text("An empty Ensemble")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(theme.palette.textPrimary)
-            }
-            VStack(alignment: .leading, spacing: 7) {
-                tipRow("cursorarrow.click.2", "Double-click the board to add a card")
-                tipRow("doc.on.doc", "Drag files here from the Files list or Finder")
-                tipRow("terminal", "Drag a History chat or a terminal tab here")
-                tipRow("hand.draw", "Drag the board to pan; Shift-drag to select")
-                tipRow(
-                    "point.3.connected.trianglepath.dotted", "Drag from a card's edge to connect")
-            }
-            HStack(spacing: 8) {
-                Button("Add Note") { CanvasAddKind.note.perform(on: board, session: session) }
-                    .buttonStyle(RafuProminentButtonStyle(compact: true))
-                Button("Got It") { tipDismissed = true }
-                    .buttonStyle(RafuSecondaryButtonStyle(compact: true))
-            }
-        }
-        .padding(20)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(theme.palette.elevatedBackground.opacity(0.92))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(theme.palette.borderSubtle)
-        )
-        .fixedSize()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityElement(children: .contain)
-    }
-
-    private func tipRow(_ symbol: String, _ text: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: symbol)
-                .font(.system(size: 12))
-                .foregroundStyle(theme.palette.textSecondary)
-                .frame(width: 18)
-                .accessibilityHidden(true)
-            Text(text)
-                .font(.system(size: 12))
-                .foregroundStyle(theme.palette.textSecondary)
-        }
-    }
-
-    /// The board's hover drop preview: a ghost card, an edge split band, or a
-    /// generic board highlight, each with its one-line label. `.card`'s rect
-    /// is board-space; it is projected through the viewport here (`project`)
-    /// so a hover label and the eventual drop it describes never disagree on
-    /// where the card lands.
+    /// The board's hover drop preview (UX Round A, B5). Accept and refuse
+    /// differ by shape, glyph and cursor, not by hue alone:
+    /// - accept: a solid ring ghost (or one per card of a batch) with the
+    ///   kind's glyph and the file name, and the label pill below it;
+    /// - refuse (warn tone): no ghost and no outline, a 3 pt bar on the
+    ///   board's top edge, and an octagon pill below the tool palette;
+    /// - a tab split: the edge band, unchanged.
+    /// Rects are board-space; they are projected through the viewport here
+    /// (`project`), so a ghost and the drop it describes never disagree.
     @ViewBuilder
     private func dropPreviewOverlay(_ preview: CanvasDropPreview, in size: CGSize) -> some View {
-        let color = preview.tone == .warn ? theme.palette.warning : theme.palette.accent
         switch preview.shape {
         case .card(let rect):
-            let origin = project(rect.origin)
-            ZStack(alignment: .top) {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(color.opacity(0.1))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(color, style: StrokeStyle(lineWidth: 2, dash: [8, 5]))
-                    )
-                    .frame(
-                        width: rect.width * board.viewport.scale,
-                        height: rect.height * board.viewport.scale)
-                dropPreviewLabel(preview.label, tone: preview.tone)
-                    .offset(y: -22)
+            dropGhost(rect, preview: preview, isFirst: true)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        case .cards(let rects):
+            // The label already says the count; at most 24 ghosts draw.
+            ZStack(alignment: .topLeading) {
+                ForEach(Array(rects.prefix(24).enumerated()), id: \.offset) { index, rect in
+                    dropGhost(rect, preview: preview, isFirst: index == 0)
+                }
             }
-            .offset(x: origin.x, y: origin.y)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
         case .edge(let edge):
             ZStack(alignment: edgeAlignment(edge)) {
-                edgeBand(edge, color: color, in: size)
-                dropPreviewLabel(preview.label, tone: preview.tone)
+                edgeBand(edge, color: theme.palette.accent, in: size)
+                dropPreviewLabel(preview.label)
                     .padding(14)
             }
             .allowsHitTesting(false)
             .accessibilityHidden(true)
+        case .board where preview.tone == .warn:
+            // The refusal is read aloud by the notice path, not here.
+            ZStack(alignment: .top) {
+                Rectangle()
+                    .fill(theme.palette.warning)
+                    .frame(height: 3)
+                    .frame(maxWidth: .infinity)
+                dropRefusalPill(preview.label)
+                    .padding(.top, CanvasBoardTopOverlayMetrics.belowPalette)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         case .board:
+            // A tab moving into the editor group under the board.
             ZStack(alignment: .top) {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(color.opacity(0.06))
+                    .fill(theme.palette.accent.opacity(0.06))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(color, style: StrokeStyle(lineWidth: 2, dash: [8, 5]))
+                            .strokeBorder(theme.palette.accent, lineWidth: ringWidth)
                     )
                     .padding(6)
-                dropPreviewLabel(preview.label, tone: preview.tone)
-                    .padding(.top, 14)
+                dropPreviewLabel(preview.label)
+                    .padding(.top, CanvasBoardTopOverlayMetrics.belowPalette)
             }
             .allowsHitTesting(false)
             .accessibilityHidden(true)
         }
     }
 
-    private func dropPreviewLabel(_ text: String, tone: CanvasDropPreview.Tone) -> some View {
+    /// The accept ring: 1.5 pt, 2.5 pt under Increase Contrast. Solid, so
+    /// it never reads as the old dashed "maybe".
+    private var ringWidth: CGFloat { contrast == .increased ? 2.5 : 1.5 }
+
+    /// One ghost card at `rect` (board units): the solid accept ring, the
+    /// glyph, the name on the first ghost when it fits, and the label pill
+    /// below the first ghost.
+    private func dropGhost(_ rect: CGRect, preview: CanvasDropPreview, isFirst: Bool)
+        -> some View
+    {
+        let origin = project(rect.origin)
+        let width = rect.width * board.viewport.scale
+        let height = rect.height * board.viewport.scale
+        let name = isFirst && width >= 120 ? preview.name : nil
+        return RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(theme.palette.accent.opacity(0.08))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(theme.palette.accent, lineWidth: ringWidth)
+            )
+            .overlay {
+                VStack(spacing: 6) {
+                    if let glyph = preview.glyph, height >= 36 {
+                        Image(systemName: glyph)
+                            .font(.system(size: 20))
+                            .foregroundStyle(theme.palette.textSecondary)
+                    }
+                    if let name {
+                        Text(name)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(theme.palette.textPrimary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .padding(.horizontal, 10)
+                    }
+                }
+            }
+            .frame(width: width, height: height)
+            .overlay(alignment: .bottom) {
+                if isFirst {
+                    dropPreviewLabel(preview.label)
+                        .alignmentGuide(.bottom) { $0[.top] - 8 }
+                }
+            }
+            .offset(x: origin.x, y: origin.y)
+    }
+
+    /// The accept label: the accent capsule.
+    private func dropPreviewLabel(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(theme.palette.onAccent)
             .padding(.horizontal, 8).padding(.vertical, 4)
-            .background(
-                Capsule().fill(tone == .warn ? theme.palette.warning : theme.palette.accent)
-            )
+            .background(Capsule().fill(theme.palette.accent))
             .fixedSize()
+    }
+
+    /// The refusal pill: an octagon glyph in the warning hue and the reason
+    /// in primary text on the card surface. Shape and words carry the state.
+    private func dropRefusalPill(_ text: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "xmark.octagon")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(theme.palette.warning)
+            Text(text)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(theme.palette.textPrimary)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 5)
+        .background(Capsule().fill(theme.palette.cardBackground))
+        .overlay(Capsule().strokeBorder(theme.palette.borderSubtle))
+        .fixedSize()
+    }
+
+    /// The zoom capsule and, above it, the board overview (B3). The overview
+    /// shows while the pointer is over this corner, while a pan runs and a
+    /// moment after it, or always with Show Overview. It hides during a drop
+    /// and on an empty board.
+    private var zoomCorner: some View {
+        let showsOverview =
+            !board.cards.isEmpty && board.dropPreview == nil
+            && (overviewPinned || interaction.overviewHover || pan.isPanning
+                || interaction.overviewPanHold)
+        return VStack(alignment: .trailing, spacing: 8) {
+            if showsOverview {
+                CanvasMinimapView(board: board)
+                    .transition(.opacity)
+            }
+            CanvasZoomCapsule(board: board)
+        }
+        .contentShape(.rect)
+        .onHover { interaction.overviewHover = $0 }
+        .padding(12)
+        .animation(
+            RafuMotion.resolve(RafuMotion.panelToggle, reduceMotion: reduceMotion),
+            value: showsOverview)
     }
 
     /// A thin band along one edge of a `size` surface, for the "this tab
@@ -846,6 +903,8 @@ struct WorkspaceCanvasView: View {
     private func endBackgroundDrag() {
         interaction.marquee = nil
         marqueeStart = nil
+        // The overview stays a moment after a pan (B3).
+        if pan.isPanning { interaction.holdOverviewAfterPan() }
         pan.end()
         dragOrigin = nil
     }
@@ -875,9 +934,11 @@ struct WorkspaceCanvasView: View {
     }
 
     /// Pinch and scroll zoom set the viewport directly, 1:1 with the pointer.
+    /// Both stop at the hand-zoom floor (25 %).
     private func setScale(
         _ scale: Double, from start: CanvasViewport, size: CGSize, anchor: CGPoint? = nil
     ) {
+        let scale = CanvasZoomMetrics.interactiveClamped(scale, from: start.scale)
         board.setViewport(
             CanvasZoomMetrics.viewport(scaling: start, to: scale, in: size, anchor: anchor))
     }
@@ -954,4 +1015,13 @@ nonisolated enum CanvasDropPreviewWatchdog {
 nonisolated enum CanvasBoardTopOverlayMetrics {
     static let topInset: CGFloat = 10
     static let spacing: CGFloat = 8
+    /// The tool palette's height: 26 pt buttons and 4 pt padding.
+    static let paletteHeight: CGFloat = 34
+    /// The first free line below the palette, for the drop labels.
+    static let belowPalette: CGFloat = topInset + paletteHeight + spacing
+}
+
+/// Ensemble ▸ Show Overview (UX Round A, B3). One app-wide choice.
+nonisolated enum CanvasOverviewPreference {
+    static let pinnedKey = "canvasOverviewPinned"
 }

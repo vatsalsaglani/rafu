@@ -166,8 +166,9 @@ struct CanvasBoardLayoutTests {
         #expect(board.viewport.scale == 1)
         board.fitAll()
         #expect(board.viewport.scale == 1)
+        // Hand zoom stops at the 25 % floor (UX Round A, B2).
         board.zoom(toScale: 0.01)
-        #expect(board.viewport.scale == CanvasZoomMetrics.minimumScale)
+        #expect(board.viewport.scale == CanvasZoomMetrics.interactiveMinimumScale)
         board.zoom(toScale: 99)
         #expect(board.viewport.scale == CanvasZoomMetrics.maximumScale)
     }

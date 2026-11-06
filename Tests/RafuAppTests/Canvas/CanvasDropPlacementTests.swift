@@ -148,3 +148,58 @@ struct CanvasDropPlacementTests {
                 covered))
     }
 }
+
+/// UX Round A, B5: a batch drop lands in a grid whose anchor is G10's
+/// `freeRect`, and its hover ghosts use the same call.
+@Suite("Ensemble batch drop placement")
+struct CanvasBatchDropPlacementTests {
+    private let gap = CanvasBoardDropGeometry.placementGap
+
+    private func contents(_ count: Int) -> [CanvasCardContent] {
+        (0..<count).map { $0 % 2 == 0 ? .image(path: "s\($0).png") : .file(path: "f\($0).txt") }
+    }
+
+    @Test("The first rect is freeRect of the first content; one rect per content")
+    func anchorIsFreeRect() {
+        let centre = CGPoint(x: 500, y: 400)
+        let obstacle = CanvasBoardDropGeometry.defaultRect(
+            for: .file(path: "x"), centeredAt: centre)
+        let batch = contents(11)
+        let rects = CanvasBoardDropGeometry.batchRects(
+            for: batch, centeredAt: centre, avoiding: [obstacle])
+        #expect(rects.count == 11)
+        #expect(
+            rects[0]
+                == CanvasBoardDropGeometry.freeRect(
+                    for: batch[0], centeredAt: centre, avoiding: [obstacle]))
+        #expect(rects[0] != CanvasBoardDropGeometry.defaultRect(for: batch[0], centeredAt: centre))
+    }
+
+    @Test("Cells form a 3-column grid that never overlaps itself")
+    func gridNoSelfOverlap() {
+        let rects = CanvasBoardDropGeometry.batchRects(
+            for: contents(11), centeredAt: CGPoint(x: 0, y: 0), avoiding: [])
+        for i in rects.indices {
+            for j in rects.indices where j > i {
+                #expect(!rects[i].cgRect.intersects(rects[j].cgRect), "\(i) and \(j)")
+            }
+        }
+        #expect(rects[1].y == rects[0].y)
+        #expect(rects[3].x == rects[0].x)
+        #expect(rects[3].y == rects[0].y + rects[0].height + gap)
+        #expect(rects[1].x == rects[0].x + rects[0].width + gap)
+    }
+
+    @Test("Cells clamp to ±50,000 and the result is deterministic")
+    func clampedAndDeterministic() {
+        let centre = CGPoint(x: 49_900, y: 49_900)
+        let first = CanvasBoardDropGeometry.batchRects(
+            for: contents(7), centeredAt: centre, avoiding: [])
+        let second = CanvasBoardDropGeometry.batchRects(
+            for: contents(7), centeredAt: centre, avoiding: [])
+        #expect(first == second)
+        #expect(first.allSatisfy { abs($0.x) <= 50_000 && abs($0.y) <= 50_000 })
+        #expect(
+            CanvasBoardDropGeometry.batchRects(for: [], centeredAt: centre, avoiding: []).isEmpty)
+    }
+}
