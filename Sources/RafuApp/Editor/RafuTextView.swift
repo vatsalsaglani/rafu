@@ -117,6 +117,10 @@ final class RafuTextView: NSTextView {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if acceptsMarkdownImageDrop(sender) {
+            _ = super.draggingEntered(sender)
+            return .copy
+        }
         if Self.shouldForward(draggingKind(sender)), let forwardingScrollView {
             return forwardingScrollView.draggingEntered(sender)
         }
@@ -124,6 +128,10 @@ final class RafuTextView: NSTextView {
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if acceptsMarkdownImageDrop(sender) {
+            _ = super.draggingUpdated(sender)
+            return .copy
+        }
         if Self.shouldForward(draggingKind(sender)), let forwardingScrollView {
             return forwardingScrollView.draggingUpdated(sender)
         }
@@ -131,7 +139,9 @@ final class RafuTextView: NSTextView {
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
-        if let sender, Self.shouldForward(draggingKind(sender)), let forwardingScrollView {
+        if let sender, !acceptsMarkdownImageDrop(sender), Self.shouldForward(draggingKind(sender)),
+            let forwardingScrollView
+        {
             forwardingScrollView.draggingExited(sender)
             return
         }
@@ -139,6 +149,7 @@ final class RafuTextView: NSTextView {
     }
 
     override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        if acceptsMarkdownImageDrop(sender) { return true }
         if Self.shouldForward(draggingKind(sender)), let forwardingScrollView {
             return forwardingScrollView.prepareForDragOperation(sender)
         }
@@ -146,10 +157,138 @@ final class RafuTextView: NSTextView {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        if acceptsMarkdownImageDrop(sender), let markdownImageAction {
+            let point = convert(sender.draggingLocation, from: nil)
+            let index = characterIndexForInsertion(at: point)
+            markdownImageAction(
+                Self.fileURLs(on: sender.draggingPasteboard).map { .fileURL($0) },
+                NSRange(location: index, length: 0))
+            return true
+        }
         if Self.shouldForward(draggingKind(sender)), let forwardingScrollView {
             return forwardingScrollView.performDragOperation(sender)
         }
         return super.performDragOperation(sender)
+    }
+
+    // MARK: - Markdown image paste and drop
+
+    /// Stores pasted or dropped images beside the Markdown document and
+    /// inserts their references, replacing `range`. Wired by
+    /// `CodeEditorView.Coordinator`; `nil` keeps every paste and drop as
+    /// before.
+    var markdownImageAction: (@MainActor ([MarkdownImageSource], NSRange) -> Void)?
+
+    /// Whether this editor takes images now: a saved Markdown document in an
+    /// editable view. Asked at paste and drop time, because a document can
+    /// be saved or renamed after the editor is made.
+    var markdownImageEligibility: (@MainActor () -> Bool)?
+
+    var canAcceptMarkdownImages: Bool {
+        isEditable && markdownImageAction != nil && (markdownImageEligibility?() ?? false)
+    }
+
+    /// Drop rule as a pure predicate for `EditorDragAndDropTests`: an
+    /// `.externalFiles` drag goes into the Markdown text only when every
+    /// URL is an image file and the editor accepts images. Anything else
+    /// keeps the forwarding behavior (open the files as editors).
+    nonisolated static func insertsMarkdownImageDrop(
+        kind: EditorDragKind, fileURLs: [URL], canAcceptImages: Bool
+    ) -> Bool {
+        kind == .externalFiles
+            && MarkdownImagePastePolicy.acceptsDrop(
+                fileURLs: fileURLs, canAcceptImages: canAcceptImages)
+    }
+
+    private func acceptsMarkdownImageDrop(_ sender: NSDraggingInfo) -> Bool {
+        let kind = draggingKind(sender)
+        guard kind == .externalFiles, canAcceptMarkdownImages else { return false }
+        return Self.insertsMarkdownImageDrop(
+            kind: kind, fileURLs: Self.fileURLs(on: sender.draggingPasteboard),
+            canAcceptImages: true)
+    }
+
+    private static func fileURLs(on pasteboard: NSPasteboard) -> [URL] {
+        (pasteboard.readObjects(
+            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+    }
+
+    /// The paste decision for the general pasteboard, or `.defaultPaste`
+    /// when this editor does not take images. Reads the text only when the
+    /// pasteboard also offers image data.
+    private func markdownImagePasteDecision(
+        _ pasteboard: NSPasteboard
+    ) -> MarkdownImagePastePolicy.Decision {
+        guard canAcceptMarkdownImages else { return .defaultPaste }
+        let types = Set((pasteboard.types ?? []).map(\.rawValue))
+        let offersImageData = !types.isDisjoint(
+            with: MarkdownImagePastePolicy.imageDataTypeIdentifiers)
+        let fileURLs =
+            types.contains(NSPasteboard.PasteboardType.fileURL.rawValue)
+            ? Self.fileURLs(on: pasteboard) : []
+        guard offersImageData || !fileURLs.isEmpty else { return .defaultPaste }
+        return MarkdownImagePastePolicy.decide(
+            typeIdentifiers: types,
+            fileURLs: fileURLs,
+            plainText: fileURLs.isEmpty ? pasteboard.string(forType: .string) : nil,
+            isMarkdown: true,
+            hasDirectory: true
+        )
+    }
+
+    /// Handles an image paste. Returns `false` when the paste is ordinary
+    /// text and the caller must run the normal paste.
+    private func pasteMarkdownImagesIfNeeded(from pasteboard: NSPasteboard) -> Bool {
+        guard let markdownImageAction else { return false }
+        switch markdownImagePasteDecision(pasteboard) {
+        case .defaultPaste:
+            return false
+        case .copyFiles(let urls):
+            markdownImageAction(urls.map { .fileURL($0) }, primaryCaretRange)
+        case .insertImageData(let typeIdentifier):
+            guard
+                let data = pasteboard.data(
+                    forType: NSPasteboard.PasteboardType(typeIdentifier))
+            else { return false }
+            markdownImageAction([.imageData(data)], primaryCaretRange)
+        }
+        return true
+    }
+
+    /// A plain-text view disables Paste when the pasteboard holds only image
+    /// data. Enable it when this Markdown editor would take that image.
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(paste(_:)), !hasMarkedText(),
+            markdownImagePasteDecision(.general) != .defaultPaste
+        {
+            return true
+        }
+        return super.validateUserInterfaceItem(item)
+    }
+
+    /// Replaces `range` with one `![Image](path)` line per stored image as a
+    /// single undoable edit, then places the caret after it. Undo removes
+    /// the text only; the stored image files stay on disk.
+    func insertMarkdownImageReferences(_ relativePaths: [String], replacing range: NSRange) {
+        guard isEditable, !relativePaths.isEmpty, let textStorage, !hasMarkedText() else {
+            return
+        }
+        let text = string as NSString
+        let location = min(max(range.location, 0), text.length)
+        let target = NSRange(
+            location: location, length: min(max(range.length, 0), text.length - location))
+        if hasMultipleCarets { applyCaretRanges([target]) }
+        let previous = location > 0 ? text.character(at: location - 1) : nil
+        let atLineStart = previous == nil || previous == 0x0A || previous == 0x0D
+        let insertion = MarkdownImagePastePolicy.insertionText(
+            relativePaths: relativePaths, atLineStart: atLineStart)
+        guard shouldChangeText(in: target, replacementString: insertion) else { return }
+        textStorage.replaceCharacters(in: target, with: insertion)
+        didChangeText()
+        undoManager?.setActionName(relativePaths.count == 1 ? "Insert Image" : "Insert Images")
+        let caret = NSRange(location: location + (insertion as NSString).length, length: 0)
+        setSelectedRange(caret)
+        scrollRangeToVisible(caret)
     }
 
     var currentLineHighlightColor: NSColor? {
@@ -728,6 +867,7 @@ final class RafuTextView: NSTextView {
     }
 
     override func paste(_ sender: Any?) {
+        if !hasMarkedText(), pasteMarkdownImagesIfNeeded(from: .general) { return }
         guard hasMultipleCarets, !hasMarkedText() else {
             super.paste(sender)
             return

@@ -30,6 +30,9 @@
   SVG renders natively via `NSImage(contentsOf:)`. A decode failure shows a
   placeholder glyph, never the raw source path, so a missing/corrupt local
   image degrades quietly instead of breaking the render.
+- Pasted and dropped images are stored beside the document and linked with
+  a relative, percent-encoded path, so they resolve through this same path
+  with no preview change. See [`markdown-image-paste.md`](markdown-image-paste.md).
 
 ## Why it matters
 
