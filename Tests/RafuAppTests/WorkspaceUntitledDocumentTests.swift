@@ -52,6 +52,19 @@ struct WorkspaceUntitledDocumentSessionTests {
         #expect(session.selectedDocument === session.openDocuments.last)
     }
 
+    @Test("A lone new untitled tab is \"Untitled\" after earlier ones closed")
+    func closedUntitledFreesItsNumber() {
+        let session = WorkspaceSession()
+        session.newUntitledDocument()
+        session.newUntitledDocument()
+        let first = session.openDocuments[0]
+        session.close(first)
+
+        session.newUntitledDocument()
+
+        #expect(session.openDocuments.map(\.displayName) == ["Untitled 2", "Untitled"])
+    }
+
     @Test("Save routes a normal document straight through its save action")
     func saveSelectedDocumentUsesSaveActionForNormalDocument() {
         let session = WorkspaceSession()
@@ -110,5 +123,33 @@ struct WorkspaceUntitledDocumentSessionTests {
 
         #expect(first.isSidebarCollapsed)
         #expect(!second.isSidebarCollapsed)
+    }
+}
+
+@Suite("Lowest free untitled number")
+struct LowestFreeUntitledNumberTests {
+    @Test("No open untitled document gives 1")
+    func none() {
+        #expect(EditorDocument.lowestFreeUntitledNumber(among: []) == 1)
+    }
+
+    @Test("Untitled 2 alone leaves 1 free")
+    func oneFree() {
+        #expect(EditorDocument.lowestFreeUntitledNumber(among: ["Untitled 2"]) == 1)
+    }
+
+    @Test("A gap is filled before the count grows")
+    func gap() {
+        #expect(
+            EditorDocument.lowestFreeUntitledNumber(among: ["Untitled", "Untitled 3"]) == 2)
+        #expect(
+            EditorDocument.lowestFreeUntitledNumber(among: ["Untitled", "Untitled 2"]) == 3)
+    }
+
+    @Test("Other names do not use a number")
+    func otherNames() {
+        #expect(
+            EditorDocument.lowestFreeUntitledNumber(among: ["notes.md", "Untitled 1x", "Untitled "])
+                == 1)
     }
 }

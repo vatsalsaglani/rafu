@@ -319,7 +319,9 @@ struct RafuAppCommands: Commands {
             if let shells = workspaceSession?.availableTerminalShells, shells.count >= 2 {
                 Menu("New Terminal With Shell") {
                     ForEach(shells) { shell in
-                        Button("\(shell.name) — \(shell.path)") {
+                        Button(
+                            "\(TerminalNaming.shellMenuTitle(for: shell, among: shells)) — \(shell.path)"
+                        ) {
                             workspaceSession?.newTerminalTab(shell: shell)
                         }
                     }

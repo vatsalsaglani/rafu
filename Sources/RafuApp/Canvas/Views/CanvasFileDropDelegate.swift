@@ -366,7 +366,8 @@ enum CanvasFileDrop {
         var context = CanvasDropAction.Context(
             hasWorkspace: session.rootURL != nil, cardCount: board.cards.count,
             boardFull: board.cards.count >= CanvasLimits.cards,
-            rootPath: session.rootURL?.standardizedFileURL.path)
+            rootPath: session.rootURL?.standardizedFileURL.path,
+            occupied: CanvasBoardDropGeometry.obstacles(in: board.cards))
         var groupID: TerminalGroupID?
         if case .terminalGroup(let id) = content {
             groupID = id

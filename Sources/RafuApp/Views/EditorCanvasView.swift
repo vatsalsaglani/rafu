@@ -182,7 +182,9 @@ private struct EditorGroupView: View {
                 )
                 GeometryReader { proxy in
                     VStack(spacing: 0) {
-                        if let document = selectedDocument {
+                        // An untitled document has no path; the row would only
+                        // repeat the tab title.
+                        if let document = selectedDocument, !document.isUntitled {
                             EditorBreadcrumbView(session: session, document: document)
                         }
                         if isFindPresented, let document = selectedDocument {
@@ -1387,13 +1389,15 @@ private struct EditorGroupTabBar: View {
     }
 
     /// Whether the group shows a breadcrumb under this shelf: the same rule
-    /// the group body uses (the selected tab is a document, whether or not
-    /// an auxiliary tab is on top), so the header always has one hairline.
+    /// the group body uses (the selected tab is a saved document, whether or
+    /// not an auxiliary tab is on top; an untitled one has no path row), so
+    /// the header always has one hairline.
     private var breadcrumbFollows: Bool {
         guard let selectedTabID = group.selectedTabID,
             let tab = group.tabs.first(where: { $0.id == selectedTabID })
         else { return false }
-        return session.document(for: tab) != nil
+        guard let document = session.document(for: tab) else { return false }
+        return !document.isUntitled
     }
 
     private var selectedDocument: EditorDocument? {

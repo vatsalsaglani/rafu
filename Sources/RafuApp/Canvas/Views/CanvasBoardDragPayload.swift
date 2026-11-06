@@ -151,6 +151,79 @@ nonisolated enum CanvasBoardDropGeometry {
         rect.y = min(50_000, max(-50_000, (Double(center.y) - rect.height / 2).rounded()))
         return rect
     }
+
+    /// The clear space kept between a dropped card and its neighbours.
+    static let placementGap = 16.0
+    /// The search step, and the most rings the search walks. 24 rings of 40
+    /// board units reach 960 units from the drop point and test at most
+    /// 2,400 positions against at most `CanvasLimits.cards` rects.
+    static let placementStep = 40.0
+    static let placementMaxRings = 24
+
+    /// The rects of the cards that take up room on the board. Frames hold
+    /// other cards, and shapes and strokes are drawing marks, so a card may
+    /// land on them.
+    static func obstacles(in cards: [CanvasCard]) -> [CanvasRect] {
+        var rects: [CanvasRect] = []
+        rects.reserveCapacity(cards.count)
+        for card in cards {
+            switch card.content {
+            case .frame, .shape, .stroke: continue
+            default: rects.append(card.rect)
+            }
+        }
+        return rects
+    }
+
+    /// Where a dropped card lands: `defaultRect` when it keeps `placementGap`
+    /// clear of every obstacle, otherwise the nearest free position found by
+    /// a bounded square-ring search around it. The ghost and the real drop
+    /// both call this with the same inputs, so they always agree. When no
+    /// free position is inside the search range, the card keeps the original
+    /// position. Pure, with no allocation.
+    static func freeRect(
+        for content: CanvasCardContent, centeredAt center: CGPoint, avoiding obstacles: [CanvasRect]
+    ) -> CanvasRect {
+        let desired = defaultRect(for: content, centeredAt: center)
+        guard !obstacles.isEmpty, collides(desired, with: obstacles) else { return desired }
+        for ring in 1...placementMaxRings {
+            var best: CanvasRect?
+            var bestDistance = Double.infinity
+            // Walk the square ring of Chebyshev radius `ring`; keep the
+            // candidate nearest to the drop point (strictly nearer wins, so
+            // the first one found breaks ties).
+            for column in -ring...ring {
+                let onEdge = abs(column) == ring
+                for row in stride(from: -ring, through: ring, by: onEdge ? 1 : 2 * ring) {
+                    var candidate = desired
+                    let dx = Double(column) * placementStep
+                    let dy = Double(row) * placementStep
+                    candidate.x = min(50_000, max(-50_000, desired.x + dx))
+                    candidate.y = min(50_000, max(-50_000, desired.y + dy))
+                    let distance = dx * dx + dy * dy
+                    guard distance < bestDistance, !collides(candidate, with: obstacles) else {
+                        continue
+                    }
+                    best = candidate
+                    bestDistance = distance
+                }
+            }
+            if let best { return best }
+        }
+        return desired
+    }
+
+    private static func collides(_ rect: CanvasRect, with obstacles: [CanvasRect]) -> Bool {
+        let gap = placementGap
+        for other in obstacles {
+            if rect.x < other.x + other.width + gap && other.x < rect.x + rect.width + gap
+                && rect.y < other.y + other.height + gap && other.y < rect.y + rect.height + gap
+            {
+                return true
+            }
+        }
+        return false
+    }
 }
 
 /// What a drag over the board carries, after decoding. The SwiftUI delegate

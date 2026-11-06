@@ -219,6 +219,25 @@ final class EditorDocument: Identifiable {
         isUntitled = true
     }
 
+    /// The lowest number that no open untitled document uses: 1 is
+    /// "Untitled", 2 is "Untitled 2", and so on. `names` are the display
+    /// names of the open untitled documents. A closed one frees its number.
+    nonisolated static func lowestFreeUntitledNumber(among names: [String]) -> Int {
+        var used = Set<Int>()
+        for name in names {
+            if name == "Untitled" {
+                used.insert(1)
+            } else if name.hasPrefix("Untitled "), let number = Int(name.dropFirst(9)),
+                number >= 2
+            {
+                used.insert(number)
+            }
+        }
+        var candidate = 1
+        while used.contains(candidate) { candidate += 1 }
+        return candidate
+    }
+
     /// A synthetic identity URL rooted under the temporary directory so it
     /// can never collide with a real workspace file (and so this document is
     /// naturally skipped by workspace restoration, which only reopens paths

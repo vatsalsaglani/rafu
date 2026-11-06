@@ -119,10 +119,14 @@ struct TerminalNamingTests {
         let system = TerminalShell(path: "/bin/zsh", name: "zsh", isDefault: false)
         let brewed = TerminalShell(path: "/opt/homebrew/bin/zsh", name: "zsh", isDefault: false)
         let fish = TerminalShell(
-            path: "/opt/homebrew/bin/fish", name: "Default (fish)", isDefault: true)
+            path: "/opt/homebrew/bin/fish", name: "fish", isDefault: true)
         let all = [fish, system, brewed]
 
-        #expect(TerminalNaming.shellMenuTitle(for: fish, among: all) == "Default (fish)")
+        #expect(TerminalNaming.shellMenuTitle(for: fish, among: all) == "fish (default)")
+        // A tile shows the marker on its own, so its name stays whole.
+        #expect(TerminalNaming.shellChipName(for: fish, among: all) == "fish")
+        #expect(
+            TerminalNaming.shellChipName(for: system, among: all) == "zsh — /bin/zsh")
         #expect(TerminalNaming.shellMenuTitle(for: system, among: all) == "zsh — /bin/zsh")
         #expect(
             TerminalNaming.shellMenuTitle(for: brewed, among: all)

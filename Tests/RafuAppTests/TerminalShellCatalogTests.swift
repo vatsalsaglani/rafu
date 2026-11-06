@@ -44,7 +44,7 @@ struct TerminalShellCatalogTests {
         #expect(shells.count == 1)
         #expect(shells.first?.path == "/bin/zsh")
         #expect(shells.first?.isDefault == true)
-        #expect(shells.first?.name == "Default (zsh)")
+        #expect(shells.first?.name == "zsh")
     }
 
     // MARK: - C3: executability filter
@@ -174,7 +174,8 @@ struct TerminalShellCatalogTests {
         let shells = catalog.shells()
 
         #expect(shells.map(\.path) == ["/opt/homebrew/bin/fish"])
-        #expect(shells.first?.name == "Default (fish)")
+        #expect(shells.first?.name == "fish")
+        #expect(shells.first?.isDefault == true)
     }
 
     // MARK: - C7/C8: PreferredShellStore

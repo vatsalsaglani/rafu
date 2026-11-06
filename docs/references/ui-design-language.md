@@ -168,6 +168,10 @@ build and tests only (GUI checks are manual).
 - A borderless `Menu` keeps only the text and image of its label. A shape
   label (the old Style ink circle) draws nothing; draw extras as an
   `.overlay` on the menu, not inside its label.
+- A plain `TextField` still draws the system focus ring on macOS.
+  `RafuPopupSearchField` draws its own 2 pt `focusRing` stroke, so the field
+  also sets `.focusEffectDisabled()`; without it the popup shows a second,
+  system-blue ring (seen on Open Ensemble, 2026-11-06).
 - `.focused(_:)` belongs on the `TextField` itself; `RafuPopupSearchField`
   takes a `FocusState<Bool>.Binding` for that reason. `onSubmit` and
   `onKeyPress` on the wrapper still receive the field's events.

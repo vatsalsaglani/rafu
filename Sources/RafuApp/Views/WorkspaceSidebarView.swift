@@ -462,6 +462,8 @@ struct WorkspaceFileTreeItem: View {
                     TapGesture().onEnded { activateRow() }
                 )
                 .focusable(interactions: .activate)
+                .focused($isRowFocused)
+                .focusEffectDisabled()
                 .onKeyPress(keys: [.return, .space, .leftArrow, .rightArrow]) { press in
                     switch press.key {
                     case .leftArrow: expandedBinding.wrappedValue = false
@@ -492,6 +494,8 @@ struct WorkspaceFileTreeItem: View {
             rowLabel
                 .onTapGesture(perform: activateRow)
                 .focusable(interactions: .activate)
+                .focused($isRowFocused)
+                .focusEffectDisabled()
                 .onKeyPress(keys: [.return, .space]) { _ in
                     activateRow(.none)
                     return .handled
@@ -511,6 +515,7 @@ struct WorkspaceFileTreeItem: View {
             isSelected: session.selectedTreePaths.contains(node.url.path),
             isSelectionAnchor: node.url.path == session.selectedTreePath,
             isDropTarget: isDropTargeted,
+            isFocused: isRowFocused,
             gitBadge: session.gitTreeBadge(forRelativePath: node.relativePath, rootID: rootTree?.id)
         )
         .contentShape(.rect)
@@ -534,6 +539,10 @@ struct WorkspaceFileTreeItem: View {
     }
 
     @State private var isDropTargeted = false
+    /// Keyboard focus of this row. The system ring is off
+    /// (`focusEffectDisabled`); `FileTreeRow` draws the focus ring in the
+    /// selection pill's own shape.
+    @FocusState private var isRowFocused: Bool
     /// This row's own identity for the dimmed source ghost while it is
     /// being dragged — stable for the row's lifetime, compared against
     /// `session.dragInFlight`.
@@ -749,6 +758,9 @@ private struct FileTreeRow: View {
     /// so a multi-selection does not draw a strong guide on every row.
     var isSelectionAnchor: Bool = false
     var isDropTarget: Bool = false
+    /// Keyboard focus. Drawn as a rounded ring on the selection pill, never
+    /// by colour alone: it is a 2 pt stroke on top of the fill.
+    var isFocused: Bool = false
     var gitBadge: GitTreeBadge?
     @Environment(\.rafuTheme) private var theme
 
@@ -804,8 +816,10 @@ private struct FileTreeRow: View {
             .overlay(
                 RoundedRectangle(cornerRadius: FileTreeMetrics.selectionRadius, style: .continuous)
                     .strokeBorder(
-                        theme.palette.accent.opacity(isDropTarget ? 0.6 : 0),
-                        lineWidth: 1
+                        isFocused
+                            ? theme.palette.focusRing
+                            : theme.palette.accent.opacity(isDropTarget ? 0.6 : 0),
+                        lineWidth: isFocused ? 2 : 1
                     )
             )
         }

@@ -457,7 +457,17 @@ struct CanvasAddPopover: View {
                     .font(.system(size: 12))
                     .foregroundStyle(theme.palette.textPrimary)
                     .lineLimit(1)
-                    .truncationMode(.middle)
+                    .truncationMode(.tail)
+                    .layoutPriority(2)
+                if isDefaultShell(entry) {
+                    // The marker is its own text, so a narrow chip never cuts
+                    // the shell name in the middle to make room for it.
+                    Text("default")
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.palette.textMuted)
+                        .lineLimit(1)
+                        .accessibilityHidden(true)
+                }
                 Spacer(minLength: 4)
                 if let hint = shortcutHint(of: entry) {
                     Text(hint)
@@ -517,7 +527,12 @@ struct CanvasAddPopover: View {
 
     private func shellName(of entry: CanvasAddPaletteEntry) -> String {
         guard case .item(.terminalShell(let shell)) = entry else { return title(of: entry) }
-        return TerminalNaming.shellMenuTitle(for: shell, among: shells)
+        return TerminalNaming.shellChipName(for: shell, among: shells)
+    }
+
+    private func isDefaultShell(_ entry: CanvasAddPaletteEntry) -> Bool {
+        guard case .item(.terminalShell(let shell)) = entry else { return false }
+        return shell.isDefault
     }
 
     /// "⌃⌥3" for the third shell in the catalog; nothing past the ninth.

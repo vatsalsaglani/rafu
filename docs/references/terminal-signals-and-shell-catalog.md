@@ -195,3 +195,15 @@ loops.
   (2026-10-19 amendment: chosen shells on Ensemble terminal cards)
 - Ensemble side: [`canvas-interaction.md`](canvas-interaction.md), "Shell choice
   and card navigation"
+
+## Shell labels (2026-11-06)
+
+`TerminalShell.name` is the bare basename ("zsh") for every entry, also for
+`$SHELL`; `isDefault` marks the default. The catalog used to build
+"Default (zsh)", and a narrow Ensemble Add-palette chip cut it in the middle
+("Def...zsh)"). `TerminalNaming.shellMenuTitle` adds " (default)" for menus
+and lists ("zsh (default)": Terminals "+" menu, File > New Terminal With Shell,
+Ensemble add rows, command palette). The Add-palette chip uses
+`shellChipName` (the name alone, tail truncation) plus a separate small
+"default" text, and the shell picker keeps its "Default" chip. Verification:
+`swift test --filter "TerminalShellCatalogTests|TerminalNamingTests|CanvasAddItemTests"`.

@@ -368,6 +368,50 @@ the sheet next time; drop a Desktop `.txt` (a warn notice, no save banner);
 press Escape mid-drag; drag out of the window and release elsewhere; drag a
 workspace image; repeat in a second window; VoiceOver reads the notice.
 
+### Drop placement avoids existing cards (2026-11-06)
+
+Applies to `CanvasBoardDropGeometry` (`CanvasBoardDragPayload.swift`),
+`CanvasDropAction.Context.occupied`, `CanvasBoardState.add(center:)`, and
+`WorkspaceSession.placeCanvasDroppedFiles`. Last verified: Apple Swift 6.4.2,
+macOS 27.0.1, by build and the parallel suite. Real mouse drags were not
+driven; the manual checks below are open.
+
+The user saw the "Resume chat in a new terminal" ghost sit on top of an agent
+terminal card, and the dropped card land overlapping it.
+
+**One placement rule.** A card dropped at a board point (History chat, file,
+image, Terminals-panel row, one-pane terminal tab) lands on
+`CanvasBoardDropGeometry.freeRect(for:centeredAt:avoiding:)`. It returns the
+centred `defaultRect` when that keeps `placementGap` (16 board units) clear of
+every obstacle. Otherwise it walks square rings of Chebyshev radius 1 to 24
+around the drop point, 40 board units per step, and returns the nearest free
+position of the first ring that has one (strictly nearer wins; the first found
+breaks ties). When no ring has a free position, it returns the original
+`defaultRect`. The function is pure, `nonisolated`, and allocates nothing: at
+most 2,400 positions against at most `CanvasLimits.cards` (100) rects.
+
+**The ghost uses the same function.** `CanvasDropAction.Context.occupied`
+carries `CanvasBoardDropGeometry.obstacles(in: board.cards)`; the ghost is
+drawn at `freeRect` with it, and the drop uses the same call with the board's
+cards at that moment. So ghost and result match, unless the board changed
+between the hover and the drop (an outside image waits for the copy sheet).
+The hover builds one small `[CanvasRect]` per tick; there is no other
+per-tick allocation.
+
+**What is an obstacle.** Every card except `.frame`, `.shape`, and `.stroke`.
+A frame holds other cards, and shapes and strokes are drawing marks, so a card
+may land on them.
+
+**Not changed.** `add(center:)` applies `freeRect` only when the caller passes
+an explicit centre (a drop). The Add menu's `creationCenter`, the toolbar add,
+and the centre-of-view cascade keep their exact position. A batch of files
+still cascades from the drop point and its ghost is the whole-board highlight.
+
+Verification: `swift test --filter CanvasDropPlacementTests`. Manual checks:
+drag a History chat onto an agent terminal card (the ghost moves beside it and
+the card lands there); drop a file onto a card; drop on empty space (no
+change); drop on a frame (no change).
+
 ### Shell choice and card navigation (2026-10-19)
 
 Verified on `main` by lint, build, and the full suite in both modes
