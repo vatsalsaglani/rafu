@@ -69,12 +69,8 @@ struct CommandPaletteView: View {
             paletteFooterHints
         }
         .frame(width: 580, height: 400)
-        .background(paletteBackground)
-        .clipShape(RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: RafuMetrics.radiusPanel, style: .continuous)
-                .strokeBorder(theme.palette.borderStrong.opacity(0.5))
-        )
+        // The shared Rafu popup container (ADR 0033).
+        .rafuPopupSurface(.floating)
         .onKeyPress(.downArrow) {
             moveSelection(1)
             return .handled
@@ -250,10 +246,6 @@ struct CommandPaletteView: View {
                 proxy.scrollTo(rows[newValue].id, anchor: nil)
             }
         }
-    }
-
-    private var paletteBackground: some View {
-        theme.palette.cardBackground
     }
 
     /// A trailing capsule chip for a genuine keyboard-shortcut hint (e.g.

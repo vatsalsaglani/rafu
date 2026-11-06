@@ -9,31 +9,93 @@ final class CanvasIconLibraryTarget {
     weak var session: WorkspaceSession?
 }
 
-/// Searchable icon grid. Click an icon to add it to the Canvas.
+/// Arrow-key movement over the Icon Library's fixed-column grid. Pure, so
+/// it is unit-tested.
+nonisolated enum CanvasIconLibraryNavigation {
+    static let columns = 4
+
+    enum Direction { case left, right, up, down }
+
+    static func move(_ index: Int, _ direction: Direction, count: Int) -> Int {
+        guard count > 0 else { return 0 }
+        let index = min(max(index, 0), count - 1)
+        switch direction {
+        case .left: return max(index - 1, 0)
+        case .right: return min(index + 1, count - 1)
+        case .up: return index - columns >= 0 ? index - columns : index
+        case .down: return index + columns < count ? index + columns : index
+        }
+    }
+}
+
+/// Searchable icon grid in the Rafu popup language. Click an icon, or move
+/// with the arrow keys and press Return, to add it to the Ensemble.
 struct CanvasIconLibraryView: View {
     @Environment(\.rafuTheme) private var theme
     let target: CanvasIconLibraryTarget
+    var close: () -> Void = {}
     @State private var library = CanvasIconPackLibrary.shared
     @State private var query = ""
     @State private var packID = Self.allPacks
     @State private var results: [CanvasServiceIconMatch] = []
+    @State private var highlighted = 0
+    @FocusState private var searchFocused: Bool
 
     private static let allPacks = "*"
-    private let columns = [GridItem(.adaptive(minimum: 84, maximum: 110), spacing: 8)]
+    private let columns = Array(
+        repeating: GridItem(.flexible(), spacing: 8), count: CanvasIconLibraryNavigation.columns)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            CanvasIconLibraryHeader(
-                query: $query, packID: $packID, packs: library.packs, allPacks: Self.allPacks)
-            Divider()
+            RafuPopupHeader(
+                symbol: "square.grid.3x3", title: "Icon Library", subtitle: subtitle
+            ) {
+                Picker("Pack", selection: $packID) {
+                    Text("All Packs").tag(Self.allPacks)
+                    ForEach(library.packs) { pack in Text(pack.name).tag(pack.id) }
+                }
+                .labelsHidden()
+                .fixedSize()
+                .help("Show one icon pack")
+            }
+            RafuPopupSearchField(
+                prompt: "Search icons", text: $query,
+                hint: CanvasBoardKeyMap.serviceIconKey.map(CanvasBoardKeyMap.display),
+                focus: $searchFocused
+            )
+            .onSubmit(addHighlighted)
+            .onKeyPress(.downArrow) { move(.down) }
+            .onKeyPress(.upArrow) { move(.up) }
+            .onKeyPress(.leftArrow) {
+                guard query.isEmpty else { return .ignored }
+                return move(.left)
+            }
+            .onKeyPress(.rightArrow) {
+                guard query.isEmpty else { return .ignored }
+                return move(.right)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            RafuPopupDivider()
             grid
-            Divider()
-            footer
+            RafuPopupFooter(hints: [("↑↓←→", "Move"), ("↩", "Add"), ("esc", "Close")]) {
+                Button("Import Pack…") { CanvasDiagramPanels.showImport() }
+                    .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+            }
         }
-        .frame(minWidth: 340, minHeight: 380, alignment: .top)
-        .background(theme.palette.elevatedBackground)
+        .frame(minWidth: 360, minHeight: 400, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .rafuPopupEntrance()
+        .onAppear { searchFocused = true }
+        .onExitCommand(perform: close)
         .task { await library.loadIfNeeded() }
         .task(id: searchKey) { refresh() }
+    }
+
+    private var subtitle: String {
+        if let notice = library.notice { return notice }
+        guard let board = target.board else { return "Open an Ensemble to add icons." }
+        return "Click an icon to add it to “\(board.title)”."
     }
 
     private var searchKey: String {
@@ -45,45 +107,46 @@ struct CanvasIconLibraryView: View {
         results =
             packID == Self.allPacks
             ? matches : Array(matches.filter { $0.packID == packID }.prefix(240))
+        highlighted = 0
+    }
+
+    private func move(_ direction: CanvasIconLibraryNavigation.Direction) -> KeyPress.Result {
+        highlighted = CanvasIconLibraryNavigation.move(highlighted, direction, count: results.count)
+        return .handled
     }
 
     @ViewBuilder private var grid: some View {
         if results.isEmpty {
-            Text(query.isEmpty ? "No icons installed." : "No icons match “\(query)”.")
-                .font(.callout)
-                .foregroundStyle(theme.palette.textSecondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            RafuEmptyState(
+                symbol: "square.grid.3x3",
+                message: query.isEmpty ? "No icons installed." : "No icons match “\(query)”.",
+                actionTitle: query.isEmpty ? "Import Pack…" : nil,
+                action: query.isEmpty ? { CanvasDiagramPanels.showImport() } : nil)
         } else {
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: 8) {
-                    ForEach(results) { match in
-                        CanvasIconLibraryTile(match: match) { add(match) }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: 8) {
+                        ForEach(Array(results.enumerated()), id: \.element.id) { index, match in
+                            CanvasIconLibraryTile(
+                                match: match, isHighlighted: index == highlighted
+                            ) { add(match) }
+                            .id(match.id)
+                        }
                     }
+                    .padding(10)
                 }
-                .padding(10)
+                .onChange(of: highlighted) { _, index in
+                    guard results.indices.contains(index) else { return }
+                    proxy.scrollTo(results[index].id, anchor: nil)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
     }
 
-    private var footer: some View {
-        HStack(spacing: 8) {
-            Text(footerText)
-                .font(.caption)
-                .foregroundStyle(theme.palette.textSecondary)
-                .lineLimit(2)
-            Spacer(minLength: 8)
-            Button("Import Icon Pack…") { CanvasDiagramPanels.showImport() }
-                .controlSize(.small)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-    }
-
-    private var footerText: String {
-        if let notice = library.notice { return notice }
-        guard let board = target.board else { return "Open an Ensemble to add icons." }
-        return "Click an icon to add it to “\(board.title)”."
+    private func addHighlighted() {
+        guard results.indices.contains(highlighted) else { return }
+        add(results[highlighted])
     }
 
     private func add(_ match: CanvasServiceIconMatch) {
@@ -92,47 +155,11 @@ struct CanvasIconLibraryView: View {
     }
 }
 
-private struct CanvasIconLibraryHeader: View {
-    @Environment(\.rafuTheme) private var theme
-    @Binding var query: String
-    @Binding var packID: String
-    let packs: [CanvasIconPack]
-    let allPacks: String
-    @FocusState private var searchFocused: Bool
-
-    var body: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(theme.palette.textSecondary)
-                    .accessibilityHidden(true)
-                TextField("Search icons", text: $query)
-                    .textFieldStyle(.plain)
-                    .focused($searchFocused)
-                    .accessibilityLabel("Search icons")
-            }
-            .padding(.horizontal, 8)
-            .frame(height: 26)
-            .background(
-                RoundedRectangle(cornerRadius: RafuMetrics.radiusWorkbenchField)
-                    .fill(theme.palette.fieldBackground)
-            )
-            Picker("Pack", selection: $packID) {
-                Text("All Packs").tag(allPacks)
-                ForEach(packs) { pack in Text(pack.name).tag(pack.id) }
-            }
-            .labelsHidden()
-            .fixedSize()
-            .help("Show one icon pack")
-        }
-        .padding(10)
-        .onAppear { searchFocused = true }
-    }
-}
-
 private struct CanvasIconLibraryTile: View {
     @Environment(\.rafuTheme) private var theme
+    @Environment(\.colorSchemeContrast) private var contrast
     let match: CanvasServiceIconMatch
+    let isHighlighted: Bool
     let add: () -> Void
     @State private var isHovering = false
 
@@ -152,7 +179,11 @@ private struct CanvasIconLibraryTile: View {
             .frame(maxWidth: .infinity, minHeight: 84)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isHovering ? theme.palette.hover : Color.clear)
+                    .fill(fill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(isHighlighted ? border : .clear, lineWidth: 1)
             )
             .contentShape(.rect)
         }
@@ -161,6 +192,16 @@ private struct CanvasIconLibraryTile: View {
         .help("\(match.entry.name) — \(match.packName), \(match.entry.category)")
         .accessibilityLabel("Add \(match.entry.name)")
         .accessibilityHint("\(match.packName) icon, \(match.entry.category)")
+        .accessibilityAddTraits(isHighlighted ? .isSelected : [])
+    }
+
+    private var fill: Color {
+        if isHighlighted { return theme.palette.selection }
+        return isHovering ? theme.palette.hover : .clear
+    }
+
+    private var border: Color {
+        contrast == .increased ? theme.palette.borderStrong : theme.palette.borderSubtle
     }
 }
 
@@ -170,8 +211,46 @@ struct CanvasIconPackImportView: View {
     @Environment(\.rafuTheme) private var theme
     let dismiss: () -> Void
     @State private var library = CanvasIconPackLibrary.shared
+    /// The download waiting for the user's confirmation.
+    @State private var pendingDownload: CanvasIconPackSource?
 
     var body: some View {
+        if let source = pendingDownload {
+            downloadConfirmation(source)
+        } else {
+            content
+        }
+    }
+
+    /// The user sees the vendor, the exact source, the size and the terms
+    /// before anything is fetched.
+    private func downloadConfirmation(_ source: CanvasIconPackSource) -> some View {
+        let vendor = source.vendor.title
+        let size = CanvasIconPackDownloads.approximateSize(source.approximateBytes)
+        return RafuConfirmPopup(
+            symbol: "arrow.down.circle", title: "Download \(vendor) icons?",
+            message: """
+                Source: \(source.url.absoluteString)
+                Size: about \(size)
+
+                Rafu checks the file, then copies its SVG and PNG icons into its support folder. \
+                Use the icons under \(vendor)'s terms: \(source.pageURL.absoluteString)
+                """,
+            actions: [
+                .init("View Terms") { NSWorkspace.shared.open(source.pageURL) },
+                .init("Download") {
+                    pendingDownload = nil
+                    library.startDownload(source)
+                },
+            ],
+            defaultActionID: "Download"
+        ) {
+            pendingDownload = nil
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Import Icon Pack")
                 .font(.headline)
@@ -212,7 +291,9 @@ struct CanvasIconPackImportView: View {
     private var sources: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach([CanvasIconPackVendor.aws, .azure, .googleCloud], id: \.self) { vendor in
-                CanvasIconPackSourceRow(vendor: vendor, library: library)
+                CanvasIconPackSourceRow(vendor: vendor, library: library) { source in
+                    pendingDownload = source
+                }
             }
             if let download = library.download {
                 HStack(spacing: 8) {
@@ -271,6 +352,8 @@ private struct CanvasIconPackSourceRow: View {
     @Environment(\.rafuTheme) private var theme
     let vendor: CanvasIconPackVendor
     let library: CanvasIconPackLibrary
+    /// Asks the import view to confirm the download first.
+    let confirm: (CanvasIconPackSource) -> Void
 
     var body: some View {
         HStack(spacing: 8) {
@@ -289,38 +372,6 @@ private struct CanvasIconPackSourceRow: View {
                         "Download \(CanvasIconPackDownloads.approximateSize(source.approximateBytes)) from \(source.url.host() ?? "the vendor")"
                     )
                     .accessibilityLabel("Download \(vendor.title) icons")
-            }
-        }
-    }
-
-    /// The user sees the vendor, the exact source, the size and the terms
-    /// before anything is fetched.
-    private func confirm(_ source: CanvasIconPackSource) {
-        let alert = NSAlert()
-        alert.messageText = "Download \(vendor.title) icons?"
-        let size = CanvasIconPackDownloads.approximateSize(source.approximateBytes)
-        alert.informativeText = """
-            Source: \(source.url.absoluteString)
-            Size: about \(size)
-
-            Rafu checks the file, then copies its SVG and PNG icons into its support folder. \
-            Use the icons under \(vendor.title)'s terms: \(source.pageURL.absoluteString)
-            """
-        alert.addButton(withTitle: "Download")
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "View Terms")
-        let window = NSApp.keyWindow
-        Task {
-            let response: NSApplication.ModalResponse
-            if let window {
-                response = await alert.beginSheetModal(for: window)
-            } else {
-                response = alert.runModal()
-            }
-            switch response {
-            case .alertFirstButtonReturn: library.startDownload(source)
-            case .alertThirdButtonReturn: NSWorkspace.shared.open(source.pageURL)
-            default: break
             }
         }
     }

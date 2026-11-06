@@ -44,24 +44,12 @@ enum CanvasWhiteboardToolKind: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    var key: Character {
-        switch self {
-        case .select: "v"
-        case .hand: "h"
-        case .rectangle: "r"
-        case .ellipse: "o"
-        case .diamond: "d"
-        case .arrow: "a"
-        case .line: "l"
-        case .pen: "p"
-        case .text: "x"
-        case .mermaid: "m"
-        case .image: "i"
-        }
-    }
+    /// The single-letter shortcut, from the one board key table
+    /// (`CanvasBoardKeyMap.toolKeys`).
+    var key: Character { CanvasBoardKeyMap.toolKeys[self] ?? "?" }
 
     /// "Rectangle (R)" for help tags and menus.
-    var helpText: String { "\(title) (\(String(key).uppercased()))" }
+    var helpText: String { CanvasBoardKeyMap.helpText(title, key: key) }
 
     /// Image is an action (it opens a panel), not a mode that stays selected.
     var isMode: Bool { self != .image }

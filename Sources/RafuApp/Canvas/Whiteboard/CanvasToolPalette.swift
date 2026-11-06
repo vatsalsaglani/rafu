@@ -23,9 +23,7 @@ struct CanvasToolPaletteItem: Identifiable {
         self.perform = perform
     }
 
-    var helpText: String {
-        key.map { "\(title) (\(String($0).uppercased()))" } ?? title
-    }
+    var helpText: String { CanvasBoardKeyMap.helpText(title, key: key) }
 }
 
 /// The compact floating whiteboard palette, centred at the top of the board:
@@ -101,12 +99,12 @@ struct CanvasToolPalette: View {
             Menu {
                 ForEach(CanvasWhiteboardToolKind.allCases.filter { $0 != .select && $0 != .hand }) {
                     kind in
-                    Button(kind.title, systemImage: kind.symbol) { choose(kind) }
+                    Button(kind.helpText, systemImage: kind.symbol) { choose(kind) }
                 }
                 if !Self.extraItems.isEmpty {
                     Divider()
                     ForEach(Self.extraItems) { item in
-                        Button(item.title, systemImage: item.symbol) {
+                        Button(item.helpText, systemImage: item.symbol) {
                             item.perform(board, session)
                         }
                     }
@@ -145,6 +143,9 @@ struct CanvasToolPalette: View {
                 .font(.system(size: 13, weight: .medium))
                 .frame(width: 28, height: 26)
                 .foregroundStyle(isOn ? theme.palette.textPrimary : theme.palette.textSecondary)
+                .overlay(alignment: .bottomTrailing) {
+                    CanvasToolKeyBadge(key: kind.key, isSelected: isOn)
+                }
                 .background(
                     isOn ? theme.palette.accentSoft : Color.clear, in: .rect(cornerRadius: 6)
                 )
@@ -153,6 +154,7 @@ struct CanvasToolPalette: View {
         .buttonStyle(.plain)
         .help(kind.helpText)
         .accessibilityLabel(kind.title)
+        .accessibilityHint("Shortcut \(CanvasBoardKeyMap.display(kind.key))")
         .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 
@@ -164,14 +166,28 @@ struct CanvasToolPalette: View {
                 .font(.system(size: 13, weight: .medium))
                 .frame(width: 28, height: 26)
                 .foregroundStyle(theme.palette.textSecondary)
+                .overlay(alignment: .bottomTrailing) {
+                    if let key = item.key { CanvasToolKeyBadge(key: key, isSelected: false) }
+                }
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .help(item.helpText)
         .accessibilityLabel(item.title)
+        .accessibilityHint(item.key.map { "Shortcut \(CanvasBoardKeyMap.display($0))" } ?? "")
     }
 
     private func choose(_ kind: CanvasWhiteboardToolKind) {
+        Self.choose(kind, tool: tool, board: board, session: session)
+        if kind != .image { focusBoard() }
+    }
+
+    /// Picks `kind` for `board`. The palette and the Ensemble ▸ Tools menu
+    /// share it. Image is an action: it opens the image chooser.
+    static func choose(
+        _ kind: CanvasWhiteboardToolKind, tool: CanvasWhiteboardTool, board: CanvasBoardState,
+        session: WorkspaceSession
+    ) {
         if kind == .image {
             tool.kind = .select
             session.chooseCanvasFile(board.id, imageOnly: true)
@@ -183,22 +199,47 @@ struct CanvasToolPalette: View {
         // terminal or note still active, Escape and V went to that card and
         // the Hand tool could not be left from the keyboard.
         if board.contentIsActive { board.backToBoard() }
-        focusBoard()
     }
 
-    /// Returns true when the key was used.
+    /// Returns true when the key was used. N and T are left to the board
+    /// view (`CanvasBoardKeyMap.boardHandledAddKinds`), so they run once.
     private func handle(_ key: CanvasToolKey) -> Bool {
         if let kind = CanvasWhiteboardToolKind.resolve(key, from: tool.kind) {
             choose(kind)
             return true
         }
-        if case .character(let character) = key,
-            let item = Self.extraItems.first(where: { $0.key == character })
-        {
+        guard case .character(let character) = key else { return false }
+        if let item = Self.extraItems.first(where: { $0.key == character }) {
             item.perform(board, session)
             return true
         }
+        if let kind = CanvasBoardKeyMap.monitorAddKind(for: character) {
+            kind.perform(on: board, session: session)
+            return true
+        }
         return false
+    }
+}
+
+/// The shortcut letter at the bottom-right of a tool button, as in Figma and
+/// Excalidraw. VoiceOver reads the shortcut from the button's hint instead.
+struct CanvasToolKeyBadge: View {
+    let key: Character
+    let isSelected: Bool
+    @Environment(\.rafuTheme) private var theme
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    var body: some View {
+        Text(CanvasBoardKeyMap.display(key))
+            .font(.system(size: 9, weight: .medium, design: .rounded).monospaced())
+            .foregroundStyle(
+                isSelected || contrast == .increased
+                    ? theme.palette.textSecondary : theme.palette.textMuted
+            )
+            .padding(.trailing, 2)
+            .padding(.bottom, 1)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
@@ -225,15 +266,28 @@ struct CanvasWhiteboardStyleMenu: View {
                 ForEach(CanvasTextSize.allCases, id: \.self) { Text($0.title).tag($0) }
             }
         } label: {
-            Circle()
-                .fill(tool.ink.color(in: theme.palette))
-                .frame(width: 14, height: 14)
-                .overlay { Circle().strokeBorder(theme.palette.borderStrong) }
+            // A borderless menu keeps only the text and image of its label:
+            // the old ink-circle label drew nothing and left an empty slot
+            // in the tool bar. The label is a symbol; the ink dot is drawn
+            // over the menu, outside its label.
+            Image(systemName: "paintpalette")
+                .font(.system(size: 13, weight: .medium))
                 .frame(width: 28, height: 26)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
+        .tint(theme.palette.textSecondary)
         .fixedSize()
+        .overlay(alignment: .bottomTrailing) {
+            Circle()
+                .fill(tool.ink.color(in: theme.palette))
+                .frame(width: 6, height: 6)
+                .overlay { Circle().strokeBorder(theme.palette.borderStrong, lineWidth: 0.5) }
+                .padding(.trailing, 3)
+                .padding(.bottom, 3)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
         .help("Style")
         .accessibilityLabel("Style")
         .accessibilityValue(tool.ink.title)
@@ -292,8 +346,9 @@ enum CanvasToolKey: Equatable {
 
 /// Sees palette keys before the board's own key handlers. It acts only while
 /// `isActive` (the board has focus), only for its own key window, only for
-/// a lowercase letter or Escape with no modifiers, and never while a text
-/// view (a field editor, note or source editor) is the first responder.
+/// a lowercase letter or Escape with no modifiers, and never while text
+/// input (a field editor, note, source editor or terminal) is the first
+/// responder.
 struct CanvasToolKeyMonitor: NSViewRepresentable {
     let isActive: Bool
     let perform: (CanvasToolKey) -> Bool
@@ -311,6 +366,13 @@ struct CanvasToolKeyMonitor: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ view: Host, coordinator: ()) { view.detach() }
+
+    /// False while text input has the keys (a field editor, a note, a
+    /// source editor, or a terminal, which is an `NSTextInputClient`), so a
+    /// letter types there instead of picking a tool.
+    static func responderAllowsBoardKeys(_ responder: NSResponder?) -> Bool {
+        CanvasEdgeDeleteKeyMonitor.Host.responderAllowsEdgeDelete(responder)
+    }
 
     static func key(for event: NSEvent) -> CanvasToolKey? {
         let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
@@ -336,7 +398,7 @@ struct CanvasToolKeyMonitor: NSViewRepresentable {
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self, isActive, let window = self.window, event.window === window,
                     window.isKeyWindow, window.attachedSheet == nil,
-                    !(window.firstResponder is NSText),
+                    CanvasToolKeyMonitor.responderAllowsBoardKeys(window.firstResponder),
                     let key = CanvasToolKeyMonitor.key(for: event),
                     perform?(key) == true
                 else { return event }

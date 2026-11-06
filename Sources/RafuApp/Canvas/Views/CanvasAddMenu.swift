@@ -24,6 +24,10 @@ enum CanvasAddKind: CaseIterable, Identifiable {
         }
     }
 
+    /// The board letter (`CanvasBoardKeyMap.addKeys`), shown on the Add
+    /// palette tile.
+    var key: Character? { CanvasBoardKeyMap.addKeys[self] }
+
     var symbol: String {
         switch self {
         case .note: "note.text"
@@ -342,41 +346,26 @@ struct CanvasAddPopover: View {
     private func searchField(
         _ entries: [CanvasAddPaletteEntry], tileCount: Int, chipCount: Int
     ) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 11))
-                .foregroundStyle(theme.palette.textSecondary)
-                .accessibilityHidden(true)
-            TextField("Add a card", text: $query)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .focused($queryFocused)
-                .onSubmit {
-                    if entries.indices.contains(highlighted) { choose(entries[highlighted]) }
-                }
-                .onKeyPress(.downArrow) {
-                    move(.down, tileCount: tileCount, chipCount: chipCount)
-                }
-                .onKeyPress(.upArrow) {
-                    move(.up, tileCount: tileCount, chipCount: chipCount)
-                }
-                // Left and Right move the highlight only while the field is
-                // empty; once there is text they edit it as usual.
-                .onKeyPress(.leftArrow) {
-                    guard query.isEmpty else { return .ignored }
-                    return move(.left, tileCount: tileCount, chipCount: chipCount)
-                }
-                .onKeyPress(.rightArrow) {
-                    guard query.isEmpty else { return .ignored }
-                    return move(.right, tileCount: tileCount, chipCount: chipCount)
-                }
-                .accessibilityLabel("Add a card")
-        }
-        .padding(.horizontal, 8).padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: RafuMetrics.radiusWorkbenchField)
-                .fill(theme.palette.fieldBackground)
-        )
+        RafuPopupSearchField(prompt: "Add a card", text: $query, hint: "↩", focus: $queryFocused)
+            .onSubmit {
+                if entries.indices.contains(highlighted) { choose(entries[highlighted]) }
+            }
+            .onKeyPress(.downArrow) {
+                move(.down, tileCount: tileCount, chipCount: chipCount)
+            }
+            .onKeyPress(.upArrow) {
+                move(.up, tileCount: tileCount, chipCount: chipCount)
+            }
+            // Left and Right move the highlight only while the field is
+            // empty; once there is text they edit it as usual.
+            .onKeyPress(.leftArrow) {
+                guard query.isEmpty else { return .ignored }
+                return move(.left, tileCount: tileCount, chipCount: chipCount)
+            }
+            .onKeyPress(.rightArrow) {
+                guard query.isEmpty else { return .ignored }
+                return move(.right, tileCount: tileCount, chipCount: chipCount)
+            }
     }
 
     private func move(
@@ -420,13 +409,36 @@ struct CanvasAddPopover: View {
                     .strokeBorder(
                         isHighlighted ? theme.palette.borderStrong : Color.clear, lineWidth: 1)
             )
+            .overlay(alignment: .topTrailing) {
+                if let key = Self.key(of: entry) {
+                    RafuKeyHint(CanvasBoardKeyMap.display(key)).padding(4)
+                }
+            }
             .contentShape(.rect(cornerRadius: 8))
         }
         .buttonStyle(.plain)
         .onHover { hover(entry, inside: $0) }
-        .help(entry == .serviceIcon ? "Open the icon library" : "Add \(title)")
+        .help(Self.helpText(of: entry, title: title))
         .accessibilityLabel(title)
+        .accessibilityHint(
+            Self.key(of: entry).map { "Shortcut \(CanvasBoardKeyMap.display($0))" } ?? ""
+        )
         .accessibilityAddTraits(isHighlighted ? .isSelected : [])
+    }
+
+    /// The board letter of a tile: N, T, F, I, W, and S for Service Icon….
+    static func key(of entry: CanvasAddPaletteEntry) -> Character? {
+        switch entry {
+        case .item(.kind(let kind)): kind.key
+        case .item(.terminalShell): nil
+        case .serviceIcon: CanvasBoardKeyMap.serviceIconKey
+        }
+    }
+
+    /// "Add Note (N)", or "Open the icon library (S)".
+    static func helpText(of entry: CanvasAddPaletteEntry, title: String) -> String {
+        let text = entry == .serviceIcon ? "Open the icon library" : "Add \(title)"
+        return CanvasBoardKeyMap.helpText(text, key: key(of: entry))
     }
 
     /// A shell chip: terminal glyph, shell name, and its ⌃⌥n shortcut for the

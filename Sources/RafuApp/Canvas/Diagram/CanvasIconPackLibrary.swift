@@ -38,7 +38,27 @@ final class CanvasIconPackLibrary {
         let common = CanvasCommonIconPack.load()
         packs = [common]
         searchIndex = CanvasIconSearchIndex(packs: [common])
-        images.countLimit = 400
+        images.countLimit = Self.imageCountLimit
+        images.totalCostLimit = Self.imageCostLimit
+    }
+
+    /// The decoded-icon cache bounds (E-fix 1): at most 300 images and about
+    /// 16 MiB of pixels. NSCache also drops entries under memory pressure.
+    nonisolated static let imageCountLimit = 300
+    nonisolated static let imageCostLimit = 16 * 1024 * 1024
+
+    /// The limits the cache actually uses, for tests.
+    var imageCacheLimits: (count: Int, cost: Int) {
+        (images.countLimit, images.totalCostLimit)
+    }
+
+    /// An estimate of an image's decoded size in bytes: the largest bitmap
+    /// representation, or its point size at 2x for a vector (SVG/PDF) image.
+    nonisolated static func cacheCost(pixelsWide: Int, pixelsHigh: Int, pointSize: CGSize) -> Int {
+        if pixelsWide > 0, pixelsHigh > 0 { return pixelsWide * pixelsHigh * 4 }
+        let width = max(1, Int(pointSize.width * 2))
+        let height = max(1, Int(pointSize.height * 2))
+        return width * height * 4
     }
 
     var importedPacks: [CanvasIconPack] { packs.filter { $0.vendor != .common } }
@@ -77,7 +97,13 @@ final class CanvasIconPackLibrary {
         let key = url.path as NSString
         if let cached = images.object(forKey: key) { return cached }
         guard let image = NSImage(contentsOf: url), image.isValid else { return nil }
-        images.setObject(image, forKey: key)
+        let largest = image.representations.max {
+            $0.pixelsWide * $0.pixelsHigh < $1.pixelsWide * $1.pixelsHigh
+        }
+        let cost = Self.cacheCost(
+            pixelsWide: largest?.pixelsWide ?? 0, pixelsHigh: largest?.pixelsHigh ?? 0,
+            pointSize: image.size)
+        images.setObject(image, forKey: key, cost: cost)
         return image
     }
 

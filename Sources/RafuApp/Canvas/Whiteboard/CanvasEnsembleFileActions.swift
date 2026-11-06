@@ -93,17 +93,19 @@ extension WorkspaceSession {
 
     /// Asks before writing any embedded image into the workspace. Only paths
     /// that do not exist are written.
+    /// A Rafu popup (ADR 0033); with no workspace window to host it, nothing
+    /// is written.
     private func offerEmbeddedImageRestore(_ images: [String: Data]) async {
-        let alert = NSAlert()
-        alert.messageText =
+        let count =
             images.count == 1
             ? "This file contains 1 image that is not in the workspace."
             : "This file contains \(images.count) images that are not in the workspace."
-        alert.informativeText =
-            "Rafu can write them to the paths saved in the file. Existing files are not replaced."
-        alert.addButton(withTitle: "Restore Images")
-        alert.addButton(withTitle: "Not Now")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let restore = await CanvasDiagramPanels.confirm(
+            symbol: "photo.on.rectangle", title: "Restore Images?",
+            message: count
+                + " Rafu can write them to the paths saved in the file. Existing files are not replaced.",
+            actionTitle: "Restore Images")
+        guard restore else { return }
         do {
             _ = try await canvas.restoreEmbeddedImages(images)
         } catch {
@@ -111,6 +113,7 @@ extension WorkspaceSession {
         }
     }
 
+    /// A system error alert: ADR 0033 keeps error alerts native.
     private func presentEnsembleFileError(_ message: String) {
         let alert = NSAlert()
         alert.alertStyle = .warning
