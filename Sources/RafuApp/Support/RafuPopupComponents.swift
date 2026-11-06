@@ -264,7 +264,8 @@ struct RafuPopupSearchField: View {
 }
 
 /// One 32 pt popup row: a 16 pt icon slot, a 13 pt title, an optional 11 pt
-/// caption, and an optional trailing text or key hint. Hover uses `hover`;
+/// caption, and an optional trailing text or key hint. An optional `leading`
+/// view (Open Ensemble's board silhouette) replaces the icon slot. Hover uses `hover`;
 /// the selected row uses `selection` plus a hairline, and adds the
 /// `.isSelected` trait, so selection never relies on colour alone.
 struct RafuPopupRow: View {
@@ -274,19 +275,25 @@ struct RafuPopupRow: View {
     var trailing: String?
     var keyHint: String?
     let isSelected: Bool
+    /// Drawn instead of the symbol when present.
+    var leading: AnyView?
     @Environment(\.rafuTheme) private var theme
     @Environment(\.colorSchemeContrast) private var contrast
     @State private var isHovering = false
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: symbol)
-                .font(.system(size: 13))
-                .foregroundStyle(
-                    isSelected ? theme.palette.textPrimary : theme.palette.textSecondary
-                )
-                .frame(width: 16)
-                .accessibilityHidden(true)
+            if let leading {
+                leading
+            } else {
+                Image(systemName: symbol)
+                    .font(.system(size: 13))
+                    .foregroundStyle(
+                        isSelected ? theme.palette.textPrimary : theme.palette.textSecondary
+                    )
+                    .frame(width: 16)
+                    .accessibilityHidden(true)
+            }
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(.system(size: 13))

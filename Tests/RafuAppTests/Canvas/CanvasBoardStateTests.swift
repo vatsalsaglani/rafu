@@ -61,6 +61,38 @@ struct CanvasBoardStateTests {
         #expect(board.revision == 1)
     }
 
+    @Test("A save that leaves the board clean stamps lastSavedAt; a viewport-only save does not")
+    func lastSavedAtFollowsCleanContentSaves() throws {
+        let board = CanvasBoardState(document: CanvasDocument(title: "Task"))
+        #expect(board.lastSavedAt == nil)
+        try board.add(title: "Note", content: .note(snapshot: "one"))
+        let first = Date(timeIntervalSince1970: 1_000)
+        board.acceptSaved(try board.snapshot(), stamp: board.changeStamp, at: first)
+        #expect(board.lastSavedAt == first)
+        #expect(!board.isDirty)
+
+        // A stale stamp (an edit landed during the write) changes nothing.
+        let stale = board.changeStamp
+        try board.add(title: "Second", content: .note(snapshot: "two"))
+        board.acceptSaved(
+            try board.snapshot(), stamp: stale, at: Date(timeIntervalSince1970: 2_000))
+        #expect(board.lastSavedAt == first)
+        #expect(board.isDirty)
+
+        // A pan or zoom also saves, but shows no tick.
+        board.acceptSaved(
+            try board.snapshot(), stamp: board.changeStamp, at: Date(timeIntervalSince1970: 3_000))
+        let afterContent = board.lastSavedAt
+        #expect(afterContent == Date(timeIntervalSince1970: 3_000))
+        var viewport = CanvasViewport()
+        viewport.x += 120
+        board.setViewport(viewport)
+        board.acceptSaved(
+            try board.snapshot(), stamp: board.changeStamp, at: Date(timeIntervalSince1970: 4_000))
+        #expect(board.lastSavedAt == afterContent)
+        #expect(!board.isDirty)
+    }
+
     @Test("Native note edits are snapshotted only for save and changes during writes stay dirty")
     func noteSnapshotsAndSaveGeneration() throws {
         var document = CanvasDocument(title: "Task")

@@ -37,10 +37,14 @@ struct TitlebarRowSourceTests {
         #expect(!menu.contains("AgentIconView"))
     }
 
-    @Test("The titlebar shows the branch and a words-first agent capsule")
+    @Test("The titlebar shows a words-first agent capsule; the branch is in the status bar only")
     func titlebarBranchAndActivity() throws {
         let source = try Self.source("Sources/RafuApp/Views/WorkspaceTitlebarRow.swift")
-        #expect(source.contains("StatusBarBranchFormatter.present(snapshot)"))
+        // UX Round C (W3): the branch shows once, where it also switches.
+        #expect(!source.contains("StatusBarBranchFormatter"))
+        #expect(!source.contains("branchChip"))
+        let status = try Self.source("Sources/RafuApp/Views/WorkspaceStatusBar.swift")
+        #expect(status.contains("branchControl(branchSnapshot)"))
         #expect(source.contains("AgentActivitySummary(sessions: session.terminal.sessions)"))
         #expect(source.contains("summary.label"))
         #expect(source.contains("session.showCommandPalette(seed: \"\")"))

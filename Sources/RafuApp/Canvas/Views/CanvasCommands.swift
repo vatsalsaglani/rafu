@@ -4,6 +4,9 @@ struct CanvasCommands: Commands {
     @FocusedValue(\.workspaceSession) private var session
     @AppStorage(CanvasOverviewPreference.pinnedKey) private var overviewPinned = false
     private var board: CanvasBoardState? { session?.selectedCanvas }
+    private var recentCanvases: [CanvasSummary] {
+        CanvasRecentBoards.recents(session?.canvas.library ?? [], excluding: board?.id)
+    }
 
     var body: some Commands {
         CommandGroup(after: .newItem) {
@@ -12,6 +15,26 @@ struct CanvasCommands: Commands {
                 .disabled(session?.rootURL == nil)
             Button("Open Ensemble…") { session?.requestCanvasLibrary() }.disabled(
                 session?.rootURL == nil)
+            // The bar has no name menu (UX Round C, W1): recents, rename,
+            // duplicate and close are here and in the tab's context menu.
+            Menu("Open Recent Ensemble") {
+                ForEach(recentCanvases) { item in
+                    Button(item.title) { Task { await session?.openCanvas(item.id) } }
+                }
+            }
+            .disabled(recentCanvases.isEmpty)
+            Button("Rename Ensemble…") {
+                if let board { session?.canvasDialog = .renameBoard(board.id) }
+            }
+            .disabled(board == nil)
+            Button("Duplicate Ensemble") {
+                if let board { session?.saveCanvasCopy(board.id) }
+            }
+            .disabled(board == nil || session?.rootURL == nil)
+            Button("Close Ensemble") {
+                if let board { session?.closeCanvas(board.id) }
+            }
+            .disabled(board == nil)
             CanvasEnsembleFileCommandItems(session: session, board: board)  // X5 ensemble file
         }
         CommandMenu("Ensemble") {
@@ -245,5 +268,15 @@ struct CanvasCommands: Commands {
         case .down: paneDirection = .down
         }
         return session.terminalGroupPresentationAvailability(.focus(paneDirection)).isEnabled
+    }
+}
+
+/// The saved Ensembles a "Recent" list offers: the library minus the board
+/// already shown, at most `limit`.
+nonisolated enum CanvasRecentBoards {
+    static let limit = 8
+
+    static func recents(_ library: [CanvasSummary], excluding id: CanvasID?) -> [CanvasSummary] {
+        Array(library.filter { $0.id != id }.prefix(limit))
     }
 }

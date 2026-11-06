@@ -618,7 +618,7 @@ struct FirstLaunchExperienceView: View {
             return false
         }()
         return HStack(spacing: RafuMetrics.space2 + 2) {
-            FileIconView(icon: option.icon, size: 20)
+            FileIconView(icon: option.icon, size: 20, isAgentMark: true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(option.displayName)
                     .font(.system(size: 12.5, weight: .medium))

@@ -59,7 +59,9 @@ struct WorkspaceCanvasView: View {
                 .padding(10)
                 .background(theme.palette.sidebarBackground)
             }
-            CanvasBar(board: board, session: session)
+            CanvasBar(
+                board: board, session: session, interaction: interaction,
+                focusBoard: { boardHasKeyboardFocus = true })
             Divider()
             // The board is the only surface. The restored-links notice stacks
             // below the tool palette (`boardTopOverlay`).
@@ -394,9 +396,20 @@ struct WorkspaceCanvasView: View {
             )
             .overlay(alignment: .bottomTrailing) { zoomCorner }
             // Above every board layer and outside every board gesture, in
-            // every tool. Inside `.focusable()`, so the palette still reads
-            // the board's focus for its letter keys.
+            // every tool. A wide bar hosts the palette instead (UX Round C).
             .overlay(alignment: .top) { boardTopOverlay }
+            // The palette's letter keys belong to the board, so they work
+            // with the palette floating here or hosted in the bar. The
+            // monitor reads the board's own focus state, never `isFocused`.
+            .background(
+                CanvasToolKeyMonitor(
+                    isActive: CanvasToolKeyHandler.keysActive(
+                        boardFocused: boardHasKeyboardFocus, board: board)
+                ) { key in
+                    CanvasToolKeyHandler.handle(
+                        key, tool: .forBoard(board.id), board: board, session: session)
+                }
+            )
             .onChange(of: gridDragIsLive || boardDragIsLive) { _, live in
                 if !live { endBackgroundDrag() }
             }
@@ -524,12 +537,15 @@ struct WorkspaceCanvasView: View {
 
     /// The X5 whiteboard tool palette and, below it, the paused-links notice.
     /// Both are top-centre overlays; one stack keeps the notice under the
-    /// palette at every board width, so they never overlap.
+    /// palette at every board width, so they never overlap. A wide bar hosts
+    /// the palette (`CanvasBarLayout`); then the notices start at the top.
     private var boardTopOverlay: some View {
         VStack(spacing: CanvasBoardTopOverlayMetrics.spacing) {
-            CanvasToolPalette(
-                board: board, session: session, tool: .forBoard(board.id),
-                focusBoard: { boardHasKeyboardFocus = true })
+            if !interaction.paletteHostedInBar {
+                CanvasToolPalette(
+                    board: board, session: session, tool: .forBoard(board.id),
+                    focusBoard: { boardHasKeyboardFocus = true })
+            }
             // A compact capsule over the board, not a full-width strip.
             if showsRestoredLinksNotice && pausedLinkCount > 0 {
                 pausedLinksNotice
@@ -618,7 +634,10 @@ struct WorkspaceCanvasView: View {
                     .frame(height: 3)
                     .frame(maxWidth: .infinity)
                 dropRefusalPill(preview.label)
-                    .padding(.top, CanvasBoardTopOverlayMetrics.belowPalette)
+                    .padding(
+                        .top,
+                        CanvasBoardTopOverlayMetrics.belowPalette(
+                            hosted: interaction.paletteHostedInBar))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .allowsHitTesting(false)
@@ -634,7 +653,10 @@ struct WorkspaceCanvasView: View {
                     )
                     .padding(6)
                 dropPreviewLabel(preview.label)
-                    .padding(.top, CanvasBoardTopOverlayMetrics.belowPalette)
+                    .padding(
+                        .top,
+                        CanvasBoardTopOverlayMetrics.belowPalette(
+                            hosted: interaction.paletteHostedInBar))
             }
             .allowsHitTesting(false)
             .accessibilityHidden(true)
@@ -1017,8 +1039,11 @@ nonisolated enum CanvasBoardTopOverlayMetrics {
     static let spacing: CGFloat = 8
     /// The tool palette's height: 26 pt buttons and 4 pt padding.
     static let paletteHeight: CGFloat = 34
-    /// The first free line below the palette, for the drop labels.
-    static let belowPalette: CGFloat = topInset + paletteHeight + spacing
+    /// The first free line below the palette, for the drop labels. With the
+    /// palette hosted in the bar it is the top inset.
+    static func belowPalette(hosted: Bool) -> CGFloat {
+        hosted ? topInset : topInset + paletteHeight + spacing
+    }
 }
 
 /// Ensemble ▸ Show Overview (UX Round A, B3). One app-wide choice.

@@ -52,9 +52,26 @@ struct EnsembleBarRedesignTests {
         #expect(!bar.contains("overflowMenu"))
         #expect(bar.contains("Label(\"Export Ensemble…\", systemImage: \"square.and.arrow.up\")"))
         #expect(bar.contains(".disabled(board.cards.isEmpty || session.rootURL == nil)"))
-        // Double-click renames through one tap handler.
-        #expect(bar.contains("TabClickIntent.current() == .selectAndRename"))
-        #expect(!bar.contains("onTapGesture(count: 2)"))
+        // UX Round C (W1): the tab names the board; the bar has no title
+        // and no name menu, and is 30 pt.
+        #expect(!bar.contains("nameMenu"))
+        #expect(!bar.contains("Text(board.title)"))
+        #expect(bar.contains(".frame(height: CanvasBarLayout.height)"))
+        // Double-click on the tab renames through one tap handler.
+        let tab = try Self.source("Sources/RafuApp/Canvas/Views/CanvasEditorTabItem.swift")
+        #expect(tab.contains("TabClickIntent.current() == .selectAndRename"))
+        #expect(!tab.contains("onTapGesture(count: 2)"))
+        #expect(tab.contains(".accessibilityAction(named: \"Rename\")"))
+        for item in [
+            "Button(\"Rename Ensemble…\")", "Button(\"Duplicate Ensemble\")",
+            "Button(\"Open Ensemble…\")", "Button(\"Close Ensemble\")",
+        ] {
+            #expect(tab.contains(item), Comment(rawValue: item))
+        }
+        // W2: an autosaving board shows a saved tick, not a dirty dot.
+        #expect(tab.contains("Image(systemName: \"checkmark.circle\")"))
+        #expect(!tab.contains("Image(systemName: \"circle.fill\")"))
+        #expect(tab.contains("RafuMotion.successHold"))
         let links = try Self.source("Sources/RafuApp/Canvas/Views/CanvasSessionLinksBar.swift")
         #expect(links.contains("items: CanvasLinkVisibility.allCases, selection: linkVisibility,"))
 
@@ -64,9 +81,44 @@ struct EnsembleBarRedesignTests {
             "Menu(\"Show Links\")", "Button(\"Pause All Links\")", "Button(\"Resume All Links\")",
             "Button(\"Select All Cards\")",
             "CanvasDiagramMenuItems(board: board, session: session, showsShortcut: true)",
+            "Menu(\"Open Recent Ensemble\")", "Button(\"Rename Ensemble…\")",
+            "Button(\"Duplicate Ensemble\")", "Button(\"Close Ensemble\")",
         ] {
             #expect(commands.contains(item), Comment(rawValue: item))
         }
+    }
+
+    @Test("The board owns the palette's letter keys, so the palette can sit in the bar")
+    func paletteKeysLiveOnTheBoard() throws {
+        let canvas = try Self.source("Sources/RafuApp/Canvas/Views/WorkspaceCanvasView.swift")
+        let palette = try Self.source("Sources/RafuApp/Canvas/Whiteboard/CanvasToolPalette.swift")
+        let bar = try Self.source("Sources/RafuApp/Canvas/Views/CanvasBar.swift")
+        // The monitor is installed on the board, before `.focusable()`, and
+        // reads the board's own focus state.
+        let chromeStart = try #require(canvas.range(of: "private func boardChrome("))
+        let keysStart = try #require(canvas.range(of: "private func boardKeys("))
+        let chrome = String(canvas[chromeStart.upperBound..<keysStart.lowerBound])
+        let monitor = try #require(chrome.range(of: "CanvasToolKeyMonitor("))
+        let focusable = try #require(chrome.range(of: ".focusable()\n"))
+        #expect(monitor.lowerBound < focusable.lowerBound)
+        #expect(chrome.contains("boardFocused: boardHasKeyboardFocus, board: board"))
+        #expect(chrome.contains("CanvasToolKeyHandler.handle("))
+        // The palette reads no keys and no focus environment.
+        let paletteView = try #require(palette.range(of: "struct CanvasToolPalette: View"))
+        let paletteEnd = try #require(
+            palette.range(
+                of: "enum CanvasToolKeyHandler", range: paletteView.upperBound..<palette.endIndex))
+        let paletteBody = String(palette[paletteView.upperBound..<paletteEnd.lowerBound])
+        #expect(!paletteBody.contains("CanvasToolKeyMonitor("))
+        #expect(!paletteBody.contains("\\.isFocused"))
+        // One floating shadow; the hosted placement draws none.
+        #expect(palette.components(separatedBy: ".shadow(").count - 1 == 1)
+        // The bar hosts the palette only when wide, and the board then omits it.
+        #expect(bar.contains("if interaction.paletteHostedInBar {"))
+        #expect(bar.contains("placement: .hosted"))
+        #expect(canvas.contains("if !interaction.paletteHostedInBar {"))
+        #expect(!canvas.contains("CanvasBoardTopOverlayMetrics.belowPalette)"))
+        #expect(!bar.contains(".shadow("))
     }
 
     @Test("Add palette entries: kinds, the icon library, then shell chips")

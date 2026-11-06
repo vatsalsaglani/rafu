@@ -32,7 +32,8 @@ actor CanvasPersistenceStore {
                     result.boards.append(
                         .init(
                             id: document.id, title: document.title, revision: document.revision,
-                            cardCount: document.cards.count, modified: modified))
+                            cardCount: document.cards.count, modified: modified,
+                            silhouette: CanvasBoardSilhouette(cards: document.cards.map(\.rect))))
                 } catch { result.unavailableCount += 1 }
             }
             result.boards.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }

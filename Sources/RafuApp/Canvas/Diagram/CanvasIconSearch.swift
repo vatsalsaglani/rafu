@@ -176,3 +176,37 @@ nonisolated enum CanvasIconSearch {
         return gaps
     }
 }
+
+/// The bold part of an Icon Library name (UX Round C). Pure, so it is
+/// unit-tested.
+nonisolated enum CanvasIconNameHighlight {
+    /// Ranges in `name` of each query word, case- and diacritic-insensitive,
+    /// in name order. Empty for an empty query.
+    static func ranges(in name: String, query: String) -> [Range<String.Index>] {
+        let tokens = CanvasIconSearch.words(String(query.prefix(200)))
+        var result: [Range<String.Index>] = []
+        for token in tokens {
+            var start = name.startIndex
+            while start < name.endIndex,
+                let found = name.range(
+                    of: token, options: [.caseInsensitive, .diacriticInsensitive],
+                    range: start..<name.endIndex)
+            {
+                result.append(found)
+                start = found.upperBound
+            }
+        }
+        return result.sorted { $0.lowerBound < $1.lowerBound }
+    }
+
+    /// `name` with every match strongly emphasized: bold in the label's own
+    /// font and colour.
+    static func attributed(_ name: String, query: String) -> AttributedString {
+        var text = AttributedString(name)
+        for range in ranges(in: name, query: query) {
+            guard let attributed = Range(range, in: text) else { continue }
+            text[attributed].inlinePresentationIntent = .stronglyEmphasized
+        }
+        return text
+    }
+}

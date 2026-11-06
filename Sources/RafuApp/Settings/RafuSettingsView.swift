@@ -12,6 +12,7 @@ struct RafuSettingsView: View {
     @AppStorage("terminalAttentionSurface") private var terminalAttentionSurface =
         TerminalAttentionSurface.both.rawValue
     @AppStorage(RafuHaptics.canvasHapticsDefaultsKey) private var canvasHapticsEnabled = true
+    @AppStorage(FileIconProvider.colouredFileIconsKey) private var colouredFileIcons = false
     @Environment(\.colorScheme) private var systemScheme
 
     @State private var pane: SettingsPane = .general
@@ -110,6 +111,11 @@ struct RafuSettingsView: View {
 
         Section("Workspace") {
             Toggle("Show process memory in status bar", isOn: $showsProcessMemory)
+
+            Toggle("Coloured file icons", isOn: $colouredFileIcons)
+                .help(
+                    "Show file-type colours in the Files list and tabs. Off keeps icons quiet; Git state and selection still use colour and a letter."
+                )
 
             LabeledContent("Terminal attention") {
                 Picker("Terminal attention", selection: $terminalAttentionSurface) {

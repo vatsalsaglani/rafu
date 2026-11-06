@@ -62,7 +62,7 @@ pending).
     with an edge selected and no card content active. Plain Backspace is never
     a menu key equivalent: it would take the key from text input. **Escape** clears the edge selection and deselects
   cards (in content, Escape goes to the content).
-- **Zoom:** one 36 pt bar with a zoom capsule. Cmd-9 zooms to fit all cards,
+- **Zoom:** one 30 pt bar (UX Round C; 36 pt before) with a zoom capsule. Cmd-9 zooms to fit all cards,
   Opt-Cmd-9 fits the selection, Cmd-0 is actual size (100%); the percentage
   menu also offers 50% and 200%. Viewport scale is 25% to 400% by hand
   (buttons, menu, pinch, scroll); Fit may reach 10%, and a stored 10%
@@ -358,8 +358,9 @@ the size on a no-follow descriptor, decodes the thumbnail with
 deeper than 32 bits per pixel is redrawn into 8-bit sRGB, so
 `CanvasImagePool`'s 4-bytes-per-pixel budget stays true.
 
-Not changed: `setViewport` still marks a board dirty on every pan or zoom, so
-the tab's dirty dot appears after a pan.
+Not changed: `setViewport` still marks a board dirty on every pan or zoom.
+Since UX Round C the tab shows no dirty dot; a saved tick shows only after a
+save that changed cards, links or the name (below).
 
 Verification: `swift test --filter CanvasBoardNoticeTests`,
 `--filter CanvasAssetImportTests`, `--filter CanvasDropPreviewOutsideTests`,
@@ -520,8 +521,13 @@ macOS 27.0.1, arm64, headless only (no live Lightning run).
   `.overlay(alignment: .top)` applied after `.highPriorityGesture` and the
   magnify gesture and before `.focusable()`, not a `boardLayers` ZStack child.
   A palette click that moves 5 pt in Hand selects the tool and does not pan.
-  It stays inside `.focusable()` so `@Environment(\.isFocused)` still gates
-  the letter keys.
+  **Since UX Round C the palette reads no keys.** The board installs
+  `CanvasToolKeyMonitor` in `boardChrome`, before `.focusable()`, gated by
+  `CanvasToolKeyHandler.keysActive(boardFocused: boardHasKeyboardFocus, …)`:
+  the board's own `@FocusState`, not `@Environment(\.isFocused)`, which a
+  palette hosted in the bar (outside `.focusable()`) cannot see. A wide bar
+  hosts the palette (`CanvasBarLayout`, 980 pt); the bar is a sibling of
+  `boardSurface`, so the hosted palette is also outside every board gesture.
 - **Choosing a tool returns the keys to the board.** `choose` calls
   `board.backToBoard()` when content is active, then `focusBoard()`. Before,
   with a terminal or note active, Escape and V reached the card, and Hand could
@@ -1111,6 +1117,62 @@ of view; the overview on capsule hover, during and after a pan, pinned with
 versus bar, pill and not-allowed cursor; a refused release does nothing); 11
 screenshots land in the ghost grid with one haptic; N and T add with no
 motion; seeds with Tab and VoiceOver; Increase Contrast and Reduce Motion.
+
+## 2026-11-07: UX Round C — bar, hosted palette, saved tick, silhouettes
+
+Applies to `CanvasBar` (`CanvasBarLayout`), `CanvasToolPalette`
+(`Placement`, `CanvasToolKeyHandler`), `CanvasInteractionState.paletteHostedInBar`,
+`WorkspaceCanvasView` (`boardChrome`, `boardTopOverlay`,
+`CanvasBoardTopOverlayMetrics.belowPalette(hosted:)`), `CanvasEditorTabItem`,
+`CanvasCommands` (`CanvasRecentBoards`), `CanvasBoardState.lastSavedAt`,
+`CanvasBoardSilhouette` (`Canvas/Domain/`), `CanvasSummary.silhouette`,
+`CanvasBoardSilhouetteView` and the Open Ensemble rows. Last verified: Apple
+Swift 6.4.2, macOS 27.0.1, by build and the parallel suite; the GUI checks
+are manual and open.
+
+- **Bar.** 30 pt, no title, no name menu: the Ensemble tab names the board
+  (ADR 0031 §h). Rename: double-click the tab, its context menu, its
+  VoiceOver "Rename" action, File ▸ Rename Ensemble…. Duplicate, Open Recent
+  Ensemble (`CanvasRecentBoards`: the library minus the shown board, at most
+  8), Open Ensemble… and Close are in the tab context menu and the File menu.
+  The bar still runs `prepareCanvasLibrary()`, which those recents read.
+- **Palette placement.** The bar measures its width with
+  `onGeometryChange(for: Bool.self)` and writes
+  `interaction.paletteHostedInBar` only when the 980 pt rule flips, so a
+  resize near the threshold does not invalidate the board each frame. Hosted:
+  `expandedTools` only, no card, no shadow; the selected tool's `accentSoft`
+  fill gains a `borderStrong` edge under Increase Contrast. Floating: as
+  before. Never animated.
+- **Keys.** The monitor lives on the board (see "Hand tool and palette
+  layering"). Its other gates are unchanged: own key window, no sheet, and a
+  first responder that is not text input, so a note, a terminal, a card
+  title field or the Find field keeps its letters. Escape and V return a
+  drawing tool to Select in both placements. Choosing a tool by click still
+  calls `focusBoard()`.
+- **Labels below the palette.** The drop refusal pill and the tab-move label
+  use `CanvasBoardTopOverlayMetrics.belowPalette(hosted:)`: the top inset when
+  the bar hosts the palette, otherwise below the floating palette. The
+  paused-links notice and `CanvasBoardNoticeView` sit in the same top stack,
+  so they move up by themselves when the floating palette is gone.
+- **Saved tick.** `acceptSaved` sets `lastSavedAt` only when the stamp
+  matches **and** the saved title, cards or connections differ from the last
+  saved ones. A pan or zoom saves (`setViewport` marks dirty) but shows no
+  tick. The tab runs `.task(id: board.lastSavedAt)` and shows the tick only
+  when the save is newer than `successHold`, so a tab that reappears does not
+  replay an old tick.
+- **Silhouettes.** `CanvasBoardSilhouette(cards:)` keeps the first 64 card
+  rects as unit rects relative to their bounds plus the bounds' aspect;
+  `rects(in:inset:)` fits that aspect into a 56 × 36 pt box with a 3 pt inset,
+  centred. The persistence index fills it while it already decodes each
+  board; the store refreshes it after a save. Frames, shapes and strokes
+  count. An empty board shows an empty frame.
+
+Verification: `swift test --filter "CanvasBarLayoutTests|CanvasBoardSilhouetteTests|CanvasBoardStateTests|EnsembleBarRedesignTests|CanvasHandToolTests|CanvasBoardKeyMapTests|WorkbenchChromeRedesignTests"`.
+Manual checks: see the Round C hand-off (bar without a title; double-click
+rename; tick after a shape, none after a pan; palette in the bar at ≥ 980 pt
+and floating below; V/H/R/O and Escape in both placements; no letters while a
+note, terminal or Find field has focus; drop labels just under the bar on a
+wide window; silhouettes in Open Ensemble).
 
 ## Why it matters
 

@@ -139,7 +139,8 @@ enum CanvasDiagramPanels {
             return
         }
         let panel = CanvasIconLibraryPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 440, height: 540),
+            contentRect: NSRect(
+                x: 0, y: 0, width: CanvasIconLibraryMetrics.minimumPanelWidth, height: 540),
             styleMask: [.borderless, .nonactivatingPanel, .utilityWindow, .resizable],
             backing: .buffered, defer: true)
         panel.title = "Icon Library"
@@ -151,7 +152,7 @@ enum CanvasDiagramPanels {
         panel.hasShadow = true
         panel.isMovableByWindowBackground = true
         panel.titleVisibility = .hidden
-        panel.minSize = NSSize(width: 360, height: 400)
+        panel.minSize = NSSize(width: CanvasIconLibraryMetrics.minimumPanelWidth, height: 400)
         panel.setAccessibilityTitle("Icon Library")
         panel.contentView = NSHostingView(
             rootView: CanvasIconLibraryView(
