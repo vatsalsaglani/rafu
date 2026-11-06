@@ -601,12 +601,23 @@ nonisolated enum TabHoverPreviewContentBuilder {
         )
     }
 
-    /// An Ensemble tab: the only status word this board-level preview ever
-    /// shows is "Needs approval", and only when some card does.
-    static func ensemble(title: String, hasCardNeedingApproval: Bool) -> TabHoverPreviewContent {
-        TabHoverPreviewContent(
+    /// An Ensemble tab: the status word is the agent counts ("1 needs you ·
+    /// 1 failed") when there are any, else "Needs approval" when some card
+    /// waits, else nothing.
+    static func ensemble(
+        title: String, hasCardNeedingApproval: Bool, needsYou: Int = 0, failed: Int = 0
+    ) -> TabHoverPreviewContent {
+        let counts = [
+            needsYou > 0 ? EnsembleTabPill.word(.needsYou, count: needsYou) : nil,
+            failed > 0 ? EnsembleTabPill.word(.failed, count: failed) : nil,
+        ].compactMap(\.self)
+        let statusWord =
+            counts.isEmpty
+            ? (hasCardNeedingApproval ? "Needs approval" : nil)
+            : counts.joined(separator: " · ")
+        return TabHoverPreviewContent(
             title: title,
-            statusWord: hasCardNeedingApproval ? "Needs approval" : nil,
+            statusWord: statusWord,
             subtitle: "Ensemble",
             elapsedLabel: nil
         )

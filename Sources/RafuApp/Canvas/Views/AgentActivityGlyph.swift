@@ -29,6 +29,9 @@ struct AgentActivityGlyph: View {
     /// must stay still; Reduce Motion, a hidden window and a locked screen
     /// stop the spin regardless.
     var animates = true
+    /// The glyph's size in the view's own units: 9 in a header, larger on a
+    /// zoomed-out face so it stays 9 screen points there too.
+    var size: Double = 9
     @State private var isSpinning = false
 
     /// Whether a `.working` arc spins. Pure, so the gate is testable.
@@ -48,7 +51,7 @@ struct AgentActivityGlyph: View {
                 arc
             } else if let symbol = status.symbolName {
                 Image(systemName: symbol)
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: size, weight: .semibold))
                     .foregroundStyle(color)
             }
         }
@@ -62,8 +65,8 @@ struct AgentActivityGlyph: View {
     private var arc: some View {
         Circle()
             .trim(from: 0, to: 0.75)
-            .stroke(color, style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
-            .frame(width: 9, height: 9)
+            .stroke(color, style: StrokeStyle(lineWidth: 1.4 * size / 9, lineCap: .round))
+            .frame(width: size, height: size)
             .rotationEffect(.degrees(isSpinning ? 360 : 0))
             .onAppear { setSpinning(spins) }
             .onChange(of: spins) { _, spins in setSpinning(spins) }
@@ -96,21 +99,25 @@ struct AgentStatusPill: View {
     /// (`CanvasCardShell.minimumAgentElapsedWidth`) before truncating the
     /// title.
     var elapsed: String?
+    /// The word's size in the view's own units. A zoomed-out card face passes
+    /// `CanvasCompactFaceMetrics.pillFont` so the pill stays 11 screen points.
+    var fontSize: Double = 11
 
     var body: some View {
-        HStack(spacing: 4) {
-            AgentActivityGlyph(status: status)
+        let unit = fontSize / 11
+        HStack(spacing: 4 * unit) {
+            AgentActivityGlyph(status: status, size: 9 * unit)
             Text(status.word)
                 .fontWeight(status.readsTitleBold ? .semibold : .regular)
             if let elapsed {
                 Text(elapsed).foregroundStyle(theme.palette.textMuted)
             }
         }
-        .font(.system(size: 11))
+        .font(.system(size: fontSize))
         .foregroundStyle(theme.palette.textPrimary)
         .lineLimit(1)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 2)
+        .padding(.horizontal, 7 * unit)
+        .padding(.vertical, 2 * unit)
         .background(Capsule().fill(background))
         .fixedSize()
         .layoutPriority(-1)
@@ -123,5 +130,32 @@ struct AgentStatusPill: View {
         case .failed: theme.palette.error.opacity(0.18)
         default: theme.palette.chipBackground
         }
+    }
+}
+
+/// The status dot on a silhouette card face: the status colour inside a
+/// ring of the card's own surface, so it reads on any face. Decorative and
+/// not interactive — the card's accessibility value speaks the status, and
+/// the silhouette keeps its full-rect gesture.
+struct AgentStatusDot: View {
+    @Environment(\.rafuTheme) private var theme
+    @Environment(\.colorSchemeContrast) private var contrast
+    let status: AgentCardStatus
+    /// The diameter in the view's own units.
+    let size: Double
+
+    var body: some View {
+        let ring = contrast == .increased ? 1.5 : 1.0
+        Circle()
+            .fill(AgentCardStatusTint.color(for: status, palette: theme.palette))
+            .frame(width: size, height: size)
+            .padding(ring * size / CanvasCompactFaceMetrics.statusDot)
+            .background(
+                Circle().fill(
+                    contrast == .increased
+                        ? theme.palette.borderStrong : theme.palette.elevatedBackground)
+            )
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }

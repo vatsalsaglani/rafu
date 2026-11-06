@@ -32,8 +32,75 @@ nonisolated struct WorkspaceContentMetrics: Sendable, Equatable {
     var fileIndexEntries: Int?
     var isFileIndexTruncated = false
     var hasOpenDiff = false
+    /// One per open Ensemble in this window, in title order.
+    var ensembles: [EnsembleContentMetric] = []
 
     var totalDocuments: Int { mountedDocuments + hibernatedDocuments }
+}
+
+/// Round B (R2): what one open Ensemble holds — counts, plus the bytes the
+/// image pool has reserved. Counts only; never card text.
+nonisolated struct EnsembleContentMetric: Equatable, Sendable, Identifiable {
+    let id: String
+    let title: String
+    var cards = 0
+    var imageCards = 0
+    var terminalCards = 0
+    var webCards = 0
+    /// Web cards whose `WKWebView` exists now.
+    var liveWebSurfaces = 0
+    var reservedImageBytes: UInt64 = 0
+    /// The image pool belongs to the window, not to one Ensemble; its bytes
+    /// sit on the first row and say "shared" when other Ensembles use it too.
+    var imagePoolIsShared = false
+
+    init(id: String, title: String) {
+        self.id = id
+        self.title = title
+    }
+
+    init(
+        id: String, title: String, contents: [CanvasCardContent], liveWebSurfaces: Int,
+        reservedImageBytes: UInt64, imagePoolIsShared: Bool
+    ) {
+        self.init(id: id, title: title)
+        cards = contents.count
+        for content in contents {
+            switch content {
+            case .image: imageCards += 1
+            case .terminal: terminalCards += 1
+            case .web: webCards += 1
+            default: break
+            }
+        }
+        self.liveWebSurfaces = liveWebSurfaces
+        self.reservedImageBytes = reservedImageBytes
+        self.imagePoolIsShared = imagePoolIsShared
+    }
+
+    /// "4 cards".
+    var value: String { cards == 1 ? "1 card" : "\(cards) cards" }
+
+    /// "2 images · 1 terminal · 1 web live · ≈ 4.2 MB images (shared)", with
+    /// every zero part left out.
+    var note: String {
+        var parts: [String] = []
+        if imageCards > 0 { parts.append(imageCards == 1 ? "1 image" : "\(imageCards) images") }
+        if terminalCards > 0 {
+            parts.append(terminalCards == 1 ? "1 terminal" : "\(terminalCards) terminals")
+        }
+        if liveWebSurfaces > 0 {
+            parts.append("\(liveWebSurfaces) web live")
+        } else if webCards > 0 {
+            parts.append("\(webCards) web")
+        }
+        if reservedImageBytes > 0 {
+            parts.append(
+                "≈ \(ResourceMemoryFormat.label(reservedImageBytes)) images"
+                    + (imagePoolIsShared ? " (shared)" : ""))
+        }
+        return parts.joined(separator: " · ")
+    }
 }
 
 /// A single rendered line of the content section.
@@ -170,6 +237,17 @@ nonisolated enum MemoryComposition {
                     value: "\(metrics.terminalSessions)",
                     symbol: "terminal",
                     note: ""
+                ))
+        }
+        // Every open Ensemble, even an empty one: it is an open tab.
+        for ensemble in metrics.ensembles {
+            rows.append(
+                ContentMetricRow(
+                    id: "ensemble-\(ensemble.id)",
+                    label: ensemble.title,
+                    value: ensemble.value,
+                    symbol: "circle.hexagongrid",
+                    note: ensemble.note
                 ))
         }
         if let entries = metrics.fileIndexEntries {

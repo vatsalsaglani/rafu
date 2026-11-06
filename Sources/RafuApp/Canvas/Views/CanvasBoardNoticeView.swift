@@ -37,13 +37,18 @@ struct CanvasBoardNoticeView: View {
                 .fixedSize(horizontal: false, vertical: true)
             if let action = notice.action {
                 Text("·").foregroundStyle(theme.palette.textMuted).accessibilityHidden(true)
+                // An agent edit's Undo is enabled only while no later edit
+                // exists (`CanvasAgentUndoGate`); every other action is always on.
+                let isEnabled = CanvasAgentProvenanceStore.shared.allowsAction(
+                    noticeID: notice.id, board: board)
                 Button(action.title) {
                     action.perform()
                     board.dismissNotice()
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(theme.palette.textPrimary)
+                .foregroundStyle(isEnabled ? theme.palette.textPrimary : theme.palette.textMuted)
+                .disabled(!isEnabled)
             }
             Button {
                 board.dismissNotice()

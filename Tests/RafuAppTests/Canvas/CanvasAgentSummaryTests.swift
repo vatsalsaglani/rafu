@@ -58,4 +58,41 @@ struct CanvasAgentSummaryTests {
         #expect(summary.needsYou.isEmpty)
         #expect(summary.failed.isEmpty)
     }
+
+    // MARK: Round B (E1): the Ensemble tab pill
+
+    @Test("The tab pill is hidden at zero, and failed outranks needs you")
+    func tabPillPrecedence() throws {
+        let quiet = CanvasAgentSummaryItem(cards: [terminalCard("Shell")]) { _ in .working }
+        #expect(EnsembleTabPill.resolve(quiet) == nil)
+
+        let waiting = terminalCard("Alpha")
+        let waiting2 = terminalCard("Bravo")
+        let failed = terminalCard("Charlie")
+        let needsOnly = CanvasAgentSummaryItem(cards: [waiting, waiting2]) { _ in
+            .needsYou(.approval)
+        }
+        let pill = try #require(EnsembleTabPill.resolve(needsOnly))
+        #expect(pill.kind == .needsYou)
+        #expect(pill.count == 2)
+        #expect(pill.word == "2 need you")
+
+        let statuses: [CanvasCardID: AgentCardStatus] = [
+            waiting.id: .needsYou(.input), failed.id: .failed,
+        ]
+        let mixed = CanvasAgentSummaryItem(cards: [waiting, failed]) { statuses[$0.id] }
+        let mixedPill = EnsembleTabPill.resolve(mixed)
+        #expect(mixedPill?.kind == .failed)
+        #expect(mixedPill?.word == "1 failed")
+        #expect(mixedPill?.accessibilityValue == "1 failed · 1 needs you")
+    }
+
+    @Test("The tab pill words are singular and plural")
+    func tabPillWords() {
+        #expect(EnsembleTabPill.word(.needsYou, count: 1) == "1 needs you")
+        #expect(EnsembleTabPill.word(.needsYou, count: 3) == "3 need you")
+        #expect(EnsembleTabPill.word(.failed, count: 2) == "2 failed")
+        #expect(
+            EnsembleTabPill.resolve(needsYou: 1, failed: 0)?.accessibilityValue == "1 needs you")
+    }
 }
