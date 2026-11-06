@@ -279,6 +279,10 @@ strings /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoo
 - [`docs/plans/phases/lsp-production-readiness.md`](../plans/phases/lsp-production-readiness.md) (P1–P5 increments, exit criteria)
 - [`docs/decisions/0005-language-intelligence-and-lsp.md`](../decisions/0005-language-intelligence-and-lsp.md)
 
+### LanguageServerManager status ordering in tests (2026-11-06)
+
+`LanguageServerManager.pushStatus` (`Sources/RafuApp/LanguageIntelligence/LanguageServerManager.swift`) hands each status to the sink in a new unstructured `Task`. These Tasks have no ordering guarantee. An earlier `.starting` or `.running` push can arrive after a later `.backingOff` push and stay the newest collected entry until the next spawn. So a test must not wait on `statuses.last?.phase`. It must wait for a status that matches by content, for example `phase == .backingOff && consecutiveCrashes == crash`, as `fastCrashesEscalateToManualRestart` does in `Tests/RafuAppTests/LanguageServerManagerTests.swift`. Reading `.last` made that test time out in the v0.1.14-beta release run (commit 6012db8). The general rule (poll for the specific status) is also in `lane-2-lsp-plan.md`. Verified on Apple Swift 6.4.2 / macOS 27.0.1. Check with `swift test --filter fastCrashesEscalateToManualRestart`.
+
 ### Lane 2 seam: session lifecycle only
 
 The seam between lane 1 (`WorkspaceSession`) and lane 2 (Language Intelligence)

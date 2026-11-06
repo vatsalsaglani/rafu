@@ -874,6 +874,25 @@ with undo; edge layering with overlapping cards; inline rename (double-click,
 type, Return / click away / Esc) on a terminal, note, and file card; the
 paused-links notice below the palette at a narrow split width.
 
+## Terminal card and tab titles
+
+A Terminal Group shows one title on its Ensemble card, its editor tab, and the
+tab switcher, resolved by `TerminalNaming.resolvedGroupTitle` (verified
+2026-10, c6b0c3b):
+
+- A name the user gave the group or the card always wins.
+- An automatic name ("Terminal", "Terminal Group 1") carries no information.
+  It gives way first to the focused pane's explicit user name, then to the
+  agent title, then stays as stored.
+- The card stores the group name unchanged, so undo and redo do not touch it.
+  Only the shown title is resolved.
+- The card rename field starts with the shown title. Saving it unchanged is a
+  no-op, so opening and closing the field does not turn an automatic name into
+  a stored user name.
+- The tab switcher passes no agent title, so it falls back to the pane name or
+  the stored name.
+- Tests: `TerminalNamingTests`, `CanvasBoardDropTests`.
+
 ## Related
 
 - Code: `Sources/RafuApp/Canvas/` (views, `CanvasSnapper`, `CanvasZoomFace`,
