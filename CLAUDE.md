@@ -30,4 +30,19 @@ The advisor must never edit implementation files.
 The implementor must not begin until it has received the advisor brief.
 The documentor must never edit implementation files and must not begin until implementation has been verified.
 
+## Model routing for subagents
+
+The coordinator chooses the model and effort by the size of the work:
+
+| Work | Who does it |
+|---|---|
+| Guidance, planning, design ideas, final read-only review | `advisor` subagent on **Fable**. Always. It never writes code. |
+| Work that touches multiple parts of the app (several subsystems, shared models, cross-cutting UI) | `implementor` on **Opus, medium effort** |
+| Smaller tasks, docs, and test updates that change **more than 4** things (files, tests to run, or distinct edits) | `implementor` or `documentor` on **Sonnet, high effort** |
+| Smaller tasks with **4 or fewer** things | The coordinator does it directly, quickly. No subagent. |
+
+For a worktree fan-out, group the issues that share files or a subsystem into
+one agent, and run independent groups in parallel worktrees. The coordinator
+merges, runs both test modes on `main`, and owns shared indexes.
+
 
