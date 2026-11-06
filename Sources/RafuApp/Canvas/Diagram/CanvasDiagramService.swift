@@ -33,7 +33,7 @@ enum CanvasDiagramService {
         do {
             return try board.createFrame(title: title, memberIDs: memberIDs)
         } catch {
-            board.errorMessage = error.localizedDescription
+            board.showNotice(error.localizedDescription)
             return nil
         }
     }
@@ -51,7 +51,7 @@ enum CanvasDiagramService {
         do {
             return try board.addServiceIcon(icon, center: center)
         } catch {
-            board.errorMessage = error.localizedDescription
+            board.showNotice(error.localizedDescription)
             return nil
         }
     }

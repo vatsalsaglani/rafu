@@ -21,7 +21,7 @@ struct WorkspaceCanvasStoreTests {
         #expect(await a.save(original.id))
         try other.add(title: "Two", content: .note(snapshot: "second window"))
         #expect(!(await b.save(other.id)))
-        #expect(other.isDirty && other.errorMessage != nil)
+        #expect(other.isDirty && other.saveFailureMessage != nil)
         let copy = try #require(await b.saveCopy(other.id))
         #expect(copy.id != original.id)
         #expect(copy.cards[0].content == .note(snapshot: "second window"))

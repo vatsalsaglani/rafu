@@ -59,7 +59,7 @@ struct CanvasQuickOpenAddTests {
         #expect(board.selection == [card.id])
         #expect(board.focusedCardID == card.id)
         #expect(!board.contentIsActive)
-        #expect(board.errorMessage == nil)
+        #expect(board.notice?.message == nil)
 
         board.performUndo()
         #expect(board.cards.isEmpty, "The add is exactly one undo step")
@@ -112,7 +112,7 @@ struct CanvasQuickOpenAddTests {
         session.addFileToSelectedCanvas(outside)
 
         #expect(board.cards.isEmpty)
-        #expect(board.errorMessage == WorkspaceSession.canvasFileOutsideFolderMessage)
+        #expect(board.notice?.message == WorkspaceSession.canvasFileOutsideFolderMessage)
         #expect(await session.canvas.flushAll())
     }
 
@@ -131,7 +131,7 @@ struct CanvasQuickOpenAddTests {
         session.addFileToSelectedCanvas(try match(session, "README.md"))
 
         #expect(board.cards.count == CanvasLimits.cards)
-        #expect(board.errorMessage == CanvasError.capacity.localizedDescription)
+        #expect(board.notice?.message == CanvasError.capacity.localizedDescription)
         #expect(await session.canvas.flushAll())
     }
 
@@ -146,7 +146,7 @@ struct CanvasQuickOpenAddTests {
         session.addFileToSelectedCanvas(try match(session, "README.md"))
 
         #expect(board.cards.isEmpty)
-        #expect(board.errorMessage == nil)
+        #expect(board.notice?.message == nil)
         #expect(await session.canvas.flushAll())
     }
 

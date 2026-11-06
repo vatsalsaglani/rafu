@@ -33,7 +33,24 @@ final class CanvasBoardState: Identifiable {
     private(set) var changeStamp: UInt64 = 0
     private(set) var isDirty = false
     var isSaving = false
-    var errorMessage: String?
+    /// Why the last save, reload, or Save Copy failed. Only the store's save
+    /// paths write it; the save-failure banner (Save Again, Save Copy,
+    /// Reload) is its only reader. Every other message is a `notice`.
+    var saveFailureMessage: String?
+    /// A short message about the last action (a refused drop, a failed edit,
+    /// copied images). View state, never saved. One at a time: a new notice
+    /// replaces the old one. The next successful edit, a click, Escape, or
+    /// the view's timer dismisses it.
+    var notice: CanvasBoardNotice?
+    /// The hover preview of the drag that is over this board now: a ghost
+    /// card, an edge band, or a board highlight. View state, never saved.
+    /// The ONE owner for both drop halves (the SwiftUI delegate and the
+    /// AppKit `CanvasScrollBridge`): each writes here, and every way a drag
+    /// session ends calls `clearDropPreview()`.
+    var dropPreview: CanvasDropPreview?
+    /// External images that wait for the user's consent before Rafu copies
+    /// them into the workspace. The board view shows the confirmation.
+    var pendingAssetImport: CanvasAssetImportRequest?
     /// A non-empty card selection always clears the edge selection, by any
     /// path (a marquee, Select All, an agent), so Delete never acts on a
     /// stale edge and a cleared selection never brings an old edge back.
@@ -192,8 +209,44 @@ final class CanvasBoardState: Identifiable {
         revokeChangedLinks(replacing: changed)
         document = changed
         prunePendingTerminalLines()
+        notice = nil
+        clearDropPreview()
         markDirty()
         requestSave?()
+    }
+
+    /// Ends the drop hover preview. Idempotent, so every end-of-drag hook
+    /// can call it without checking which half drew the preview.
+    func clearDropPreview() {
+        if dropPreview != nil { dropPreview = nil }
+    }
+
+    /// Writes the hover preview only when it changed, so a drag that hovers
+    /// in one place does not invalidate the board view on every tick.
+    func updateDropPreview(_ preview: CanvasDropPreview?) {
+        if CanvasDropPreview.changed(from: dropPreview, to: preview) { dropPreview = preview }
+    }
+
+    /// Shows `message` as the board's notice, replacing any other notice.
+    func showNotice(
+        _ message: String, tone: CanvasBoardNotice.Tone = .warn,
+        action: CanvasBoardNotice.Action? = nil
+    ) {
+        notice = CanvasBoardNotice(message: message, tone: tone, action: action)
+    }
+
+    func dismissNotice() {
+        if notice != nil { notice = nil }
+    }
+
+    /// The name older code (and code owned by other work) still writes.
+    /// Writing it shows a warning notice; it never reaches the save-failure
+    /// banner. New code calls `showNotice` or sets `saveFailureMessage`.
+    var errorMessage: String? {
+        get { notice?.message }
+        set {
+            if let newValue { showNotice(newValue) } else { dismissNotice() }
+        }
     }
 
     /// Adds a card. With `center` (board units) the card appears centred on
@@ -569,6 +622,7 @@ final class CanvasBoardState: Identifiable {
         document = previous
         selection.formIntersection(Set(document.cards.map(\.id)))
         focusedCardID = nil
+        dismissNotice()
         markDirty()
         requestSave?()
         notifyUndoRedo(before: before, after: document.cards)
@@ -585,6 +639,7 @@ final class CanvasBoardState: Identifiable {
         document = next
         selection.formIntersection(Set(document.cards.map(\.id)))
         focusedCardID = nil
+        dismissNotice()
         markDirty()
         requestSave?()
         notifyUndoRedo(before: before, after: document.cards)
@@ -654,4 +709,33 @@ final class CanvasBoardState: Identifiable {
     /// The edge whose label popover is open, and whether it was just created.
     var labelEditorConnectionID: UUID?
     var labelEditorIsForNewConnection = false
+}
+
+/// A short, dismissible message over the board, separate from the save-failure
+/// banner. Identity is per posting, so the same text posted twice restarts the
+/// auto-dismiss timer.
+nonisolated struct CanvasBoardNotice: Identifiable, Equatable, Sendable {
+    enum Tone: Equatable, Sendable { case info, warn }
+
+    /// One optional button, such as "Show in Finder".
+    struct Action: Sendable {
+        let title: String
+        let perform: @MainActor @Sendable () -> Void
+    }
+
+    let id = UUID()
+    let message: String
+    let tone: Tone
+    let action: Action?
+
+    /// How long the notice stays when nothing else dismisses it.
+    static let lifetime: Duration = .seconds(8)
+
+    init(message: String, tone: Tone = .warn, action: Action? = nil) {
+        self.message = message
+        self.tone = tone
+        self.action = action
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
 }

@@ -28,21 +28,27 @@ struct CanvasFileDropDelegate: DropDelegate {
     /// The board surface, in the same space as `DropInfo.location`. The edge
     /// bands of a dropped tab are measured against it.
     var surfaceSize: CGSize = .zero
-    /// The board's hover preview: a tinted highlight and a one-line label
-    /// for what a drop here would do, or `nil` to show nothing.
-    var dropPreview: Binding<CanvasDropPreview?> = .constant(nil)
+
+    /// The board that owns the hover preview (`CanvasBoardState.dropPreview`).
+    /// Both drop halves write the same value, so either half's end-of-drag
+    /// hook clears what the other drew.
+    private var board: CanvasBoardState? { session.canvas.boards[boardID] }
 
     func dropEntered(info: DropInfo) {
         updatePreview(info: info)
     }
 
     func dropExited(info: DropInfo) {
-        dropPreview.wrappedValue = nil
+        board?.clearDropPreview()
     }
 
     func validateDrop(info: DropInfo) -> Bool {
         let kind = hoverKind(info)
-        return accepts(kind, fileCount: kind == .files ? hoverFileCount() : 0)
+        let valid = accepts(kind, fileCount: kind == .files ? hoverFileCount() : 0)
+        // SwiftUI sends no `dropExited` or `performDrop` for a drop it does
+        // not validate, so a refused drop clears here.
+        if !valid { board?.clearDropPreview() }
+        return valid
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
@@ -51,7 +57,7 @@ struct CanvasFileDropDelegate: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        dropPreview.wrappedValue = nil
+        board?.clearDropPreview()
         // `performDrop` runs inside `performDragOperation`, the one phase in
         // which decoding item providers (and so receiving a file promise)
         // is legal. Every provider read in this type lives below this line.
@@ -71,8 +77,8 @@ struct CanvasFileDropDelegate: DropDelegate {
             let action: @MainActor @Sendable (CanvasBoardDragPayload?) -> Void = {
                 [session, boardID] payload in
                 guard let payload else {
-                    session.canvas.boards[boardID]?.errorMessage =
-                        "Rafu could not read what was dropped."
+                    session.canvas.boards[boardID]?.showNotice(
+                        "Rafu could not read what was dropped.")
                     return
                 }
                 switch payload {
@@ -191,9 +197,7 @@ struct CanvasFileDropDelegate: DropDelegate {
                     for: $0, at: info.location, surface: surfaceSize, boardID: boardID,
                     session: session)
             } : nil
-        if CanvasDropPreview.changed(from: dropPreview.wrappedValue, to: preview) {
-            dropPreview.wrappedValue = preview
-        }
+        board?.updateDropPreview(preview)
         return valid
     }
 
@@ -214,11 +218,11 @@ struct CanvasFileDropDelegate: DropDelegate {
             {
                 return .files([url], fromFilesTree: true)
             }
-            return .files([URL(fileURLWithPath: "/")], fromFilesTree: true)
+            return .files([CanvasDropAction.unknownFileURL], fromFilesTree: true)
         case .files:
             let urls = CanvasBoardDropHoverKind.dragPasteboardFileURLs()
             guard !urls.isEmpty else {
-                return .files([URL(fileURLWithPath: "/placeholder")], fromFilesTree: false)
+                return .files([CanvasDropAction.unknownFileURL], fromFilesTree: false)
             }
             return .files(urls, fromFilesTree: false)
         case .none:
@@ -312,6 +316,9 @@ enum CanvasFileDrop {
         _ content: CanvasBoardDropContent, at location: CGPoint, surface: CGSize,
         boardID: CanvasID, session: WorkspaceSession
     ) -> Bool {
+        // A decoded drop ends the drag session for this board, whatever
+        // happens next (a card, a refusal notice, a forwarded tab).
+        session.canvas.boards[boardID]?.clearDropPreview()
         guard accepts(content, boardID: boardID, session: session) else { return false }
         switch content {
         case .files(let urls, let fromFilesTree):
@@ -329,7 +336,9 @@ enum CanvasFileDrop {
     }
 
     /// Adds the dropped files as cards at `location` (board view space).
-    /// Folders are ignored; files outside the workspace reject the batch.
+    /// Folders are ignored. Images from outside the workspace are copied in
+    /// after consent; any other file from outside refuses the batch with a
+    /// notice (`WorkspaceSession.addCanvasDroppedFiles`).
     @discardableResult
     static func perform(
         _ urls: [URL], fromFilesTree: Bool, boardID: CanvasID, at location: CGPoint,
@@ -356,7 +365,8 @@ enum CanvasFileDrop {
         }
         var context = CanvasDropAction.Context(
             hasWorkspace: session.rootURL != nil, cardCount: board.cards.count,
-            boardFull: board.cards.count >= CanvasLimits.cards)
+            boardFull: board.cards.count >= CanvasLimits.cards,
+            rootPath: session.rootURL?.standardizedFileURL.path)
         var groupID: TerminalGroupID?
         if case .terminalGroup(let id) = content {
             groupID = id
@@ -393,10 +403,9 @@ enum CanvasFileDrop {
             context: context)
     }
 
-    /// The AppKit half of the drop target for one board.
-    static func target(
-        boardID: CanvasID, session: WorkspaceSession, dropPreview: Binding<CanvasDropPreview?>
-    ) -> CanvasBoardDropTarget {
+    /// The AppKit half of the drop target for one board. It writes the same
+    /// board-owned preview as the SwiftUI delegate.
+    static func target(boardID: CanvasID, session: WorkspaceSession) -> CanvasBoardDropTarget {
         CanvasBoardDropTarget(
             accepts: { [weak session] content in
                 guard let session else { return false }
@@ -407,10 +416,8 @@ enum CanvasFileDrop {
                 return preview(
                     for: content, at: point, surface: surface, boardID: boardID, session: session)
             },
-            update: { value in
-                if CanvasDropPreview.changed(from: dropPreview.wrappedValue, to: value) {
-                    dropPreview.wrappedValue = value
-                }
+            update: { [weak session] value in
+                session?.canvas.boards[boardID]?.updateDropPreview(value)
             },
             perform: { [weak session] content, point, surface in
                 guard let session else { return false }
@@ -428,6 +435,13 @@ nonisolated enum CanvasDroppedFileKind {
     static let imageExtensions: Set<String> = [
         "png", "jpg", "jpeg", "gif", "heic", "heif", "tif", "tiff", "bmp", "webp",
     ]
+
+    /// Whether `url` names a raster image the image card decodes, by its
+    /// extension (case-insensitive). The only kind Rafu copies in from
+    /// outside the workspace.
+    static func isImage(_ url: URL) -> Bool {
+        if case .image = content(forRelativePath: url.lastPathComponent) { true } else { false }
+    }
 
     static func content(forRelativePath path: String) -> CanvasCardContent {
         let name = path.split(separator: "/").last.map(String.init) ?? path
@@ -521,7 +535,8 @@ private final class CanvasFileDropCollector {
         if clearsEditorDrag { session.clearEditorDrag() }
         let files = urls.compactMap { $0 }
         guard files.count == urls.count else {
-            board.errorMessage = CanvasError.invalidPath.localizedDescription
+            board.clearDropPreview()
+            board.showNotice("Rafu could not read every dropped file. Nothing was added.")
             return
         }
         Task { [weak session] in

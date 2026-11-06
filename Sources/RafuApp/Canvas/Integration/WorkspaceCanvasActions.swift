@@ -105,7 +105,9 @@ extension WorkspaceSession {
 
     func revealCanvasSaveFailure() {
         guard
-            let board = canvas.boards.values.first(where: { $0.isDirty && $0.errorMessage != nil })
+            let board = canvas.boards.values.first(where: {
+                $0.isDirty && $0.saveFailureMessage != nil
+            })
         else { return }
         presentCanvasBoard(board)
         _ = WorkspaceWindowRegistry.shared.focus(session: self)
@@ -115,7 +117,7 @@ extension WorkspaceSession {
         Task(name: "Save Ensemble copy") { [weak self] in
             guard let self else { return }
             guard let board = await canvas.saveCopy(id) else {
-                canvas.boards[id]?.errorMessage =
+                canvas.boards[id]?.saveFailureMessage =
                     canvas.libraryNotice ?? "The Ensemble copy could not be saved."
                 return
             }
@@ -174,7 +176,7 @@ extension WorkspaceSession {
     }
 
     func performCanvasEdit(_ board: CanvasBoardState, _ operation: () throws -> Void) {
-        do { try operation() } catch { board.errorMessage = error.localizedDescription }
+        do { try operation() } catch { board.showNotice(error.localizedDescription) }
     }
 
     func addCanvasNote(_ id: CanvasID) {
@@ -273,7 +275,7 @@ extension WorkspaceSession {
             // callback cannot find a card that is already being removed.
             try board.removeSelection()
         } catch {
-            board.errorMessage = error.localizedDescription
+            board.showNotice(error.localizedDescription)
             return
         }
         canvasResources[id]?.stop(cards: selected)
@@ -313,64 +315,158 @@ extension WorkspaceSession {
         }
     }
 
-    /// A drop adds references only. Validation is off-main and the edit is one
-    /// transaction, so a rejected batch cannot leave a partially added board.
-    func addCanvasDroppedFiles(_ urls: [URL], to id: CanvasID, at location: CGPoint) async {
+    /// A drop adds references to workspace files. Images from outside the
+    /// workspace are copied in first, after the user's consent (or at once
+    /// when this workspace says "always copy"); any other outside file
+    /// refuses the batch with a notice. Validation is off-main and the edit
+    /// is one transaction, so a rejected batch never leaves a partly added
+    /// board. Every exit clears the board's drop preview.
+    func addCanvasDroppedFiles(
+        _ urls: [URL], to id: CanvasID, at location: CGPoint,
+        preferences: CanvasAssetImportPreferences = CanvasAssetImportPreferences()
+    ) async {
+        canvas.boards[id]?.clearDropPreview()
         guard let root = rootURL, let board = canvas.boards[id], !urls.isEmpty else { return }
         guard urls.count <= CanvasLimits.cards - board.cards.count else {
-            board.errorMessage = CanvasError.capacity.localizedDescription
+            board.showNotice(CanvasError.capacity.localizedDescription)
             return
         }
-        let viewport = board.viewport
         do {
-            let paths = try await Self.canvasDroppedPaths(urls, root: root)
-            guard !Task.isCancelled, rootURL == root, canvas.boards[id] === board,
-                !paths.isEmpty
-            else { return }
-            let x = (location.x - viewport.x) / viewport.scale
-            let y = (location.y - viewport.y) / viewport.scale
-            let cards = paths.enumerated().map { index, path in
-                CanvasCard(
-                    title: String(URL(fileURLWithPath: path).lastPathComponent.prefix(120)),
-                    rect: CanvasRect(
-                        x: min(50_000, max(-50_000, x + Double(index) * 24)),
-                        y: min(50_000, max(-50_000, y + Double(index) * 24))),
-                    content: CanvasDroppedFileKind.content(forRelativePath: path))
+            let plan = try await Self.canvasDropPlan(urls, root: root)
+            guard !Task.isCancelled, rootURL == root, canvas.boards[id] === board else { return }
+            guard plan.refused.isEmpty else {
+                board.showNotice(CanvasAssetImportPlan.refusalMessage(for: plan.refused))
+                return
             }
-            try board.edit { document in
-                guard document.cards.count + cards.count <= CanvasLimits.cards else {
-                    throw CanvasError.capacity
+            guard plan.externalImages.isEmpty else {
+                let entry = preferences.entry(forRootPath: root.path)
+                let request = CanvasAssetImportRequest(
+                    boardID: id, plan: plan, location: location,
+                    folder: CanvasAssetImporter.folder(
+                        parent: entry.ensembleAssetFolder, boardTitle: board.title))
+                if entry.alwaysCopy {
+                    await importCanvasAssets(request)
+                } else {
+                    board.pendingAssetImport = request
                 }
-                document.cards.append(contentsOf: cards)
+                return
             }
-            board.backToBoard()
-            board.selection = Set(cards.map(\.id))
+            try placeCanvasDroppedFiles(plan.insidePaths, on: board, at: location)
         } catch is CancellationError {
             return
         } catch {
             guard rootURL == root, canvas.boards[id] === board else { return }
-            board.errorMessage = error.localizedDescription
+            board.showNotice(error.localizedDescription)
         }
     }
 
-    @concurrent
-    private static func canvasDroppedPaths(_ urls: [URL], root: URL) async throws -> [String] {
-        var paths: [String] = []
-        for url in urls {
-            try Task.checkCancellation()
-            guard url.isFileURL else { throw CanvasError.invalidPath }
-            // A dropped folder is ignored, not an error: the rest of the batch
-            // still lands, and a folder-only drop adds nothing.
-            if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
-                continue
-            }
-            let path = try await CanvasPreviewLoader.relativePath(for: url, root: root)
-            let checked = root.appending(path: path)
-            let metadata = try checked.resourceValues(forKeys: [.isRegularFileKey])
-            guard metadata.isRegularFile == true else { throw CanvasError.invalidPath }
-            paths.append(path)
+    /// "Copy" in the consent sheet. `alwaysCopy` remembers the choice for
+    /// this workspace only.
+    func confirmCanvasAssetImport(
+        _ request: CanvasAssetImportRequest, alwaysCopy: Bool,
+        preferences: CanvasAssetImportPreferences = CanvasAssetImportPreferences()
+    ) async {
+        guard let board = canvas.boards[request.boardID],
+            board.pendingAssetImport?.id == request.id
+        else { return }
+        board.pendingAssetImport = nil
+        if alwaysCopy, let root = rootURL {
+            preferences.setAlwaysCopy(true, forRootPath: root.path)
         }
-        return paths
+        await importCanvasAssets(request)
+    }
+
+    /// "Cancel" in the consent sheet: nothing is copied or added.
+    func cancelCanvasAssetImport(_ request: CanvasAssetImportRequest) {
+        guard let board = canvas.boards[request.boardID],
+            board.pendingAssetImport?.id == request.id
+        else { return }
+        board.pendingAssetImport = nil
+    }
+
+    /// Copies the request's external images into the workspace, then adds
+    /// the whole batch in drop order as one undoable edit.
+    private func importCanvasAssets(_ request: CanvasAssetImportRequest) async {
+        guard let root = rootURL, let board = canvas.boards[request.boardID] else { return }
+        let id = request.boardID
+        guard request.plan.items.count <= CanvasLimits.cards - board.cards.count else {
+            board.showNotice(CanvasError.capacity.localizedDescription)
+            return
+        }
+        do {
+            let copied = try await CanvasAssetImporter.copy(
+                request.plan.externalImages, into: request.folder, root: root)
+            guard rootURL == root, canvas.boards[id] === board else { return }
+            var next = copied.makeIterator()
+            let paths = request.plan.items.compactMap { item -> String? in
+                switch item {
+                case .inside(let path): path
+                case .externalImage: next.next()
+                }
+            }
+            try placeCanvasDroppedFiles(paths, on: board, at: request.location)
+            let folderURL = root.appending(path: request.folder)
+            let copiedURLs = copied.map { root.appending(path: $0) }
+            let noun = copied.count == 1 ? "1 image" : "\(copied.count) images"
+            board.showNotice(
+                "Copied \(noun) into \(request.folder).", tone: .info,
+                action: CanvasBoardNotice.Action(title: "Show in Finder") {
+                    let existing = copiedURLs.filter {
+                        FileManager.default.fileExists(atPath: $0.path)
+                    }
+                    if existing.isEmpty {
+                        NSWorkspace.shared.open(folderURL)
+                    } else {
+                        NSWorkspace.shared.activateFileViewerSelecting(existing)
+                    }
+                })
+        } catch is CancellationError {
+            return
+        } catch {
+            guard rootURL == root, canvas.boards[id] === board else { return }
+            board.showNotice(error.localizedDescription)
+        }
+    }
+
+    /// Adds one card per workspace-relative path as one edit, then selects
+    /// them. One file is centred on the drop point, exactly where its hover
+    /// ghost was (`CanvasBoardDropGeometry.defaultRect`). A batch cascades
+    /// down and right from the drop point.
+    private func placeCanvasDroppedFiles(
+        _ paths: [String], on board: CanvasBoardState, at location: CGPoint
+    ) throws {
+        guard !paths.isEmpty else { return }
+        let point = CanvasBoardDropGeometry.boardPoint(location, viewport: board.viewport)
+        let cards = paths.enumerated().map { index, path in
+            let content = CanvasDroppedFileKind.content(forRelativePath: path)
+            let rect: CanvasRect
+            if paths.count == 1 {
+                rect = CanvasBoardDropGeometry.defaultRect(for: content, centeredAt: point)
+            } else {
+                rect = CanvasRect(
+                    x: min(50_000, max(-50_000, point.x + Double(index) * 24)),
+                    y: min(50_000, max(-50_000, point.y + Double(index) * 24)))
+            }
+            return CanvasCard(
+                title: String(URL(fileURLWithPath: path).lastPathComponent.prefix(120)),
+                rect: rect, content: content)
+        }
+        try board.edit { document in
+            guard document.cards.count + cards.count <= CanvasLimits.cards else {
+                throw CanvasError.capacity
+            }
+            document.cards.append(contentsOf: cards)
+        }
+        board.backToBoard()
+        board.selection = Set(cards.map(\.id))
+    }
+
+    @concurrent
+    private static func canvasDropPlan(_ urls: [URL], root: URL) async throws
+        -> CanvasAssetImportPlan
+    {
+        try Task.checkCancellation()
+        return try CanvasAssetImportPlan.resolve(urls: urls, root: root)
     }
 
     func chooseCanvasFile(_ id: CanvasID, imageOnly: Bool) {
@@ -392,7 +488,7 @@ extension WorkspaceSession {
                     try board.add(
                         title: url.lastPathComponent,
                         content: imageOnly ? .image(path: path) : .file(path: path))
-                } catch { board.errorMessage = error.localizedDescription }
+                } catch { board.showNotice(error.localizedDescription) }
             }
         }
     }
@@ -406,7 +502,7 @@ extension WorkspaceSession {
     func addFileToSelectedCanvas(_ match: WorkspaceFileMatch) {
         guard let board = selectedCanvas, !isTerminalGroupModalInputBlocked else { return }
         guard match.rootID == descriptor?.id else {
-            board.errorMessage = Self.canvasFileOutsideFolderMessage
+            board.showNotice(Self.canvasFileOutsideFolderMessage)
             return
         }
         if let existing = CanvasFileCardLookup.existingCard(
@@ -424,7 +520,7 @@ extension WorkspaceSession {
                 content: CanvasDroppedFileKind.content(forRelativePath: match.relativePath))
             focusCanvasCard(id, in: board)
         } catch {
-            board.errorMessage = error.localizedDescription
+            board.showNotice(error.localizedDescription)
         }
     }
 
@@ -439,7 +535,7 @@ extension WorkspaceSession {
                     for: rootURL.appending(path: path), root: rootURL)
                 guard let self, self.rootURL == rootURL else { return }
                 openFile(atRelativePath: path)
-            } catch { self?.selectedCanvas?.errorMessage = error.localizedDescription }
+            } catch { self?.selectedCanvas?.showNotice(error.localizedDescription) }
         }
     }
 }

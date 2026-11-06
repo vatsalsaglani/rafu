@@ -276,7 +276,7 @@ struct CanvasIntegrationTests {
         proxy.attach(window)
         #expect(!proxy.windowShouldClose(window))
         await proxy.waitForPendingSave()
-        #expect(board.isDirty && board.errorMessage != nil)
+        #expect(board.isDirty && board.saveFailureMessage != nil)
         #expect(original.closeCount == 0)
         var denied = false
         var approved = false

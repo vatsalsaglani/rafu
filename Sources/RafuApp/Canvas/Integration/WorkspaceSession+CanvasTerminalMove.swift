@@ -50,11 +50,11 @@ extension WorkspaceSession {
             let tab = editorLayout.tab(matching: .terminalGroup(groupID: groupID)),
             let sourceGroupID = editorLayout.group(containing: tab.id)?.id
         else {
-            board.errorMessage = "Drag a terminal onto an Ensemble in its own window."
+            board.showNotice("Drag a terminal onto an Ensemble in its own window.")
             return false
         }
         guard group.panes.count == 1 else {
-            board.errorMessage = "Only a terminal with one pane can move to an Ensemble."
+            board.showNotice("Only a terminal with one pane can move to an Ensemble.")
             return false
         }
         let content = CanvasCardContent.terminal(groupID: groupID)
@@ -63,11 +63,11 @@ extension WorkspaceSession {
                 loaded.cards.contains { $0.content == content }
             })
         else {
-            board.errorMessage = "This terminal is already on an Ensemble."
+            board.showNotice("This terminal is already on an Ensemble.")
             return false
         }
         guard board.cards.count < CanvasLimits.cards else {
-            board.errorMessage = "This Ensemble is full. Remove a card, then try again."
+            board.showNotice("This Ensemble is full. Remove a card, then try again.")
             return false
         }
         var cardID: CanvasCardID?
@@ -143,11 +143,12 @@ extension WorkspaceSession {
     ) -> Bool {
         clearEditorDrag()
         guard let board = canvas.boards[boardID] else { return false }
+        board.clearDropPreview()
         guard let uuid = UUID(uuidString: value) else { return true }
         let tabID = EditorTabID(rawValue: uuid)
         guard let tab = editorLayout.group(containing: tabID)?.tabs.first(where: { $0.id == tabID })
         else {
-            board.errorMessage = "Drag a tab onto an Ensemble in its own window."
+            board.showNotice("Drag a tab onto an Ensemble in its own window.")
             return true
         }
         var terminalGroupID: TerminalGroupID?
@@ -180,6 +181,7 @@ extension WorkspaceSession {
         _ groupID: TerminalGroupID, boardID: CanvasID, at point: CGPoint
     ) -> Bool {
         guard let board = canvas.boards[boardID] else { return false }
+        board.clearDropPreview()
         let center = CanvasBoardDropGeometry.boardPoint(point, viewport: board.viewport)
         if moveTerminalGroupToEnsemble(groupID, board: board, center: center) {
             presentCanvasBoard(board)

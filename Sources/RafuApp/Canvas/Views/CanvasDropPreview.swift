@@ -24,15 +24,10 @@ nonisolated struct CanvasDropPreview: Equatable, Sendable {
     let tone: Tone
     let shape: Shape
 
-    /// Whether writing `next` over `current` is a real change. Every call
-    /// site that drives a drop-preview `@State`/`Binding` — `dropEntered`,
-    /// `dropUpdated`, `dropExited`, `performDrop`, and the AppKit bridge's
-    /// `draggingUpdated`/`draggingExited`/`concludeDragOperation` — checks
-    /// this before writing, so a drag hovering the same spot twice (or an
-    /// exit/perform/conclude after the preview is already `nil`) never
-    /// triggers an extra view update. `dropExited`/`performDrop`/
-    /// `concludeDragOperation` always pass `next: nil`, so this is also
-    /// exactly the "does this clear the preview" check for those three.
+    /// Whether writing `next` over `current` is a real change.
+    /// `CanvasBoardState.updateDropPreview` checks this before it writes, so
+    /// a drag hovering the same spot twice never triggers an extra view
+    /// update. Clearing goes through `CanvasBoardState.clearDropPreview()`.
     static func changed(from current: CanvasDropPreview?, to next: CanvasDropPreview?) -> Bool {
         current != next
     }
@@ -56,10 +51,16 @@ nonisolated enum CanvasDropAction {
         var paneCount: Int
         var alreadyOnABoard: Bool
         var boardFull: Bool
+        /// The standardized primary workspace root path, so a file preview
+        /// can tell a file inside the workspace from one outside it. `nil`
+        /// skips that check. The check is lexical (no symlink resolution on
+        /// the main actor); the drop itself resolves symlinks.
+        var rootPath: String?
 
         init(
             hasWorkspace: Bool, cardCount: Int = 0, isTerminalGroupTab: Bool = false,
-            paneCount: Int = 1, alreadyOnABoard: Bool = false, boardFull: Bool = false
+            paneCount: Int = 1, alreadyOnABoard: Bool = false, boardFull: Bool = false,
+            rootPath: String? = nil
         ) {
             self.hasWorkspace = hasWorkspace
             self.cardCount = cardCount
@@ -67,8 +68,14 @@ nonisolated enum CanvasDropAction {
             self.paneCount = paneCount
             self.alreadyOnABoard = alreadyOnABoard
             self.boardFull = boardFull
+            self.rootPath = rootPath
         }
     }
+
+    /// Stands for a hovering file the drag does not name yet (a promise, or
+    /// a SwiftUI drag with no same-window hint). Never classified as inside
+    /// or outside the workspace.
+    static let unknownFileURL = URL(fileURLWithPath: "/.rafu-unknown-dropped-file")
 
     static func resolve(
         content: CanvasBoardDropContent, at location: CGPoint, surface: CGSize,
@@ -77,8 +84,9 @@ nonisolated enum CanvasDropAction {
         guard context.hasWorkspace else { return nil }
         let boardPoint = CanvasBoardDropGeometry.boardPoint(location, viewport: viewport)
         switch content {
-        case .files(let urls, _):
-            return filesPreview(urls, at: boardPoint, context: context)
+        case .files(let urls, let fromFilesTree):
+            return filesPreview(
+                urls, fromFilesTree: fromFilesTree, at: boardPoint, context: context)
         case .agentSession:
             return cardOrFullPreview(
                 label: "Resume chat in a new terminal", at: boardPoint, context: context)
@@ -122,15 +130,32 @@ nonisolated enum CanvasDropAction {
             label: "Move terminal here — keeps running", at: boardPoint, context: context)
     }
 
+    /// Mirrors `WorkspaceSession.addCanvasDroppedFiles`: a full board
+    /// refuses; a file from outside the workspace that is not an image
+    /// refuses the batch with a notice; images from outside are copied in
+    /// (after consent); files inside are referenced in place.
     private static func filesPreview(
-        _ urls: [URL], at boardPoint: CGPoint, context: Context
+        _ urls: [URL], fromFilesTree: Bool, at boardPoint: CGPoint, context: Context
     ) -> CanvasDropPreview {
         let count = max(urls.count, 1)
         guard CanvasDroppedFileKind.fits(count: count, existing: context.cardCount) else {
             return CanvasDropPreview(label: "This Ensemble is full", tone: .warn, shape: .board)
         }
+        let outside = fromFilesTree ? [] : outsideFiles(urls, rootPath: context.rootPath)
+        if outside.contains(where: { !CanvasDroppedFileKind.isImage($0) }) {
+            return CanvasDropPreview(
+                label: "Needs a file inside this workspace", tone: .warn, shape: .board)
+        }
+        let copies = !outside.isEmpty
         if urls.count > 1 {
-            return CanvasDropPreview(label: "Add \(urls.count) cards", tone: .accept, shape: .board)
+            guard copies else {
+                return CanvasDropPreview(
+                    label: "Add \(urls.count) cards", tone: .accept, shape: .board)
+            }
+            let allImages = urls.allSatisfy(CanvasDroppedFileKind.isImage)
+            return CanvasDropPreview(
+                label: "Copy and add \(urls.count) \(allImages ? "image cards" : "cards")",
+                tone: .accept, shape: .board)
         }
         guard let url = urls.first else {
             return CanvasDropPreview(label: "Add cards", tone: .accept, shape: .board)
@@ -140,9 +165,19 @@ nonisolated enum CanvasDropAction {
             if case .image = content { true } else { false }
         }()
         let rect = CanvasBoardDropGeometry.defaultRect(for: content, centeredAt: boardPoint)
-        return CanvasDropPreview(
-            label: isImage ? "Add image card" : "Open as file card", tone: .accept,
-            shape: .card(rect.cgRect))
+        let label =
+            copies ? "Copy and add image card" : isImage ? "Add image card" : "Open as file card"
+        return CanvasDropPreview(label: label, tone: .accept, shape: .card(rect.cgRect))
+    }
+
+    /// The named files that are not lexically inside `rootPath`. Unknown
+    /// placeholders and a missing root give none.
+    static func outsideFiles(_ urls: [URL], rootPath: String?) -> [URL] {
+        guard let rootPath else { return [] }
+        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        return urls.filter { url in
+            url != unknownFileURL && !url.standardizedFileURL.path.hasPrefix(prefix)
+        }
     }
 
     private static func tabPreview(

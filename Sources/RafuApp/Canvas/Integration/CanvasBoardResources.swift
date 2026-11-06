@@ -146,8 +146,8 @@ extension WorkspaceSession {
             $0 + $1.webs.values.filter { $0.webView != nil }.count
         }
         guard count < CanvasLimits.webSurfaces else {
-            canvas.boards[boardID]?.errorMessage =
-                "Two web previews are already open. Stop one first."
+            canvas.boards[boardID]?.showNotice(
+                "Two web previews are already open. Stop one first.")
             return
         }
         web.connect()

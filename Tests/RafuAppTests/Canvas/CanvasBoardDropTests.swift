@@ -412,24 +412,24 @@ struct CanvasBoardDropSessionTests {
         // More than one pane.
         let multi = try openStoppedGroup(session, panes: 2)
         #expect(!session.moveTerminalGroupToEnsemble(multi, board: board, center: nil))
-        #expect(board.errorMessage == "Only a terminal with one pane can move to an Ensemble.")
+        #expect(board.notice?.message == "Only a terminal with one pane can move to an Ensemble.")
         #expect(tabID(of: multi, in: session) != nil)
         #expect(board.cards.isEmpty)
-        board.errorMessage = nil
+        board.dismissNotice()
 
         // Already on a loaded Ensemble.
         let single = try openStoppedGroup(session)
         try board.add(title: "Existing", content: .terminal(groupID: single))
         #expect(!session.moveTerminalGroupToEnsemble(single, board: board, center: nil))
-        #expect(board.errorMessage == "This terminal is already on an Ensemble.")
+        #expect(board.notice?.message == "This terminal is already on an Ensemble.")
         #expect(tabID(of: single, in: session) != nil)
         #expect(board.cards.count == 1)
-        board.errorMessage = nil
+        board.dismissNotice()
 
         // A group that is not open in this window.
         #expect(!session.moveTerminalGroupToEnsemble(TerminalGroupID(), board: board, center: nil))
-        #expect(board.errorMessage == "Drag a terminal onto an Ensemble in its own window.")
-        board.errorMessage = nil
+        #expect(board.notice?.message == "Drag a terminal onto an Ensemble in its own window.")
+        board.dismissNotice()
 
         // A full board.
         let other = try openStoppedGroup(session)
@@ -439,7 +439,7 @@ struct CanvasBoardDropSessionTests {
             }
         }
         #expect(!session.moveTerminalGroupToEnsemble(other, board: board, center: nil))
-        #expect(board.errorMessage == "This Ensemble is full. Remove a card, then try again.")
+        #expect(board.notice?.message == "This Ensemble is full. Remove a card, then try again.")
         #expect(tabID(of: other, in: session) != nil)
         #expect(board.cards.count == CanvasLimits.cards)
     }
@@ -505,7 +505,7 @@ struct CanvasBoardDropSessionTests {
             surface: CGSize(width: 1_000, height: 800))
 
         #expect(handled)
-        #expect(board.errorMessage == "Drag a tab onto an Ensemble in its own window.")
+        #expect(board.notice?.message == "Drag a tab onto an Ensemble in its own window.")
         #expect(board.cards.isEmpty)
         #expect(session.editorLayout.groupIDs.count == before)
     }
@@ -563,7 +563,7 @@ struct CanvasBoardDropSessionTests {
             multi, boardID: board.id, at: CGPoint(x: 500, y: 400))
 
         #expect(handled)
-        #expect(board.errorMessage == "Only a terminal with one pane can move to an Ensemble.")
+        #expect(board.notice?.message == "Only a terminal with one pane can move to an Ensemble.")
         #expect(board.cards.isEmpty)
         #expect(tabID(of: multi, in: session) != nil)
     }

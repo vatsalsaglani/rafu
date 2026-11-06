@@ -42,7 +42,7 @@ struct CanvasEnsembleFileStoreTests {
         try outside.encoded().write(to: url)
         try bound.add(title: "More", content: .text(CanvasText(text: "Again")))
         #expect(!(await store.save(bound.id)))
-        #expect(bound.errorMessage != nil)
+        #expect(bound.saveFailureMessage != nil)
         #expect(await store.reload(bound.id))
         #expect(store.boards[bound.id]?.cards.count == 1)
     }

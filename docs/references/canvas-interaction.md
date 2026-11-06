@@ -216,7 +216,7 @@ parallel suite 250 + 2631 tests passed; `--no-parallel` (CI mode) 250 + 2631
 passed; `./script/build_and_run.sh --verify` launched Rafu Lightning. Real
 mouse drags were not driven by UI automation; the manual checks below are
 open. (The stale "File drops" wording in `CanvasScrollBridge.swift`'s header
-comment is still there; only this document was corrected.)
+comment was corrected on 2026-11-06; see the next section.)
 
 **Preview contract.** The board's drop contract widened from a boolean
 `targeted` to `update(CanvasDropPreview?)` plus a preview closure. A pure
@@ -266,6 +266,107 @@ focuses (acquire + reveal) instead of taking the lease only.
 Open manual checks: a real-mouse drag of each source onto each target; the
 source ghost clears on drop and on Escape; undo and redo of a move; every
 placement label; the orphaned-card path after a reopen.
+
+### Drop preview ownership, board notices, and outside images (2026-11-06)
+
+Applies to `CanvasBoardState`, `CanvasFileDropDelegate`, `CanvasScrollBridge`,
+`WorkspaceCanvasView`, `WorkspaceCanvasActions.addCanvasDroppedFiles`, and
+`CanvasAssetImport.swift`. Last verified: Apple Swift 6.4.2
+(swiftlang-6.4.2.1.9), macOS 27.0.1 (26A434), by build and the parallel suite.
+Real mouse drags were not driven; the manual checks below are open.
+
+The user saw the dashed drop outline stay on the board after dropping a
+History chat and after dropping 11 Desktop screenshots, and the screenshots
+showed "Choose a file inside this workspace." inside the save-failure banner.
+
+**One owner for the hover preview.** The preview was a `@State` in the board
+view, written by two drop halves (the SwiftUI `.onDrop` delegate and the
+AppKit `CanvasScrollBridge.Host`), and cleared only by the half that got the
+exit or the drop. Other drag destinations sit under the board (card text
+views, the editor group's `.onDrop`, opacity-0 editor `NSTextView`s;
+`allowsHitTesting(false)` does not stop AppKit drag routing), so a session
+could end without either half hearing it. The preview is now
+`CanvasBoardState.dropPreview` (view state, never saved). Both halves write it
+through `updateDropPreview`, and `clearDropPreview()` (idempotent) runs on:
+`dropExited`, `validateDrop` returning false, `performDrop`, `draggingExited`,
+`prepareForDragOperation` returning false, `performDragOperation`,
+`concludeDragOperation`, the new `draggingEnded` (AppKit sends it to every
+destination the session visited, also when the drop lands elsewhere or Escape
+cancels), every `CanvasFileDrop.perform`, `dropAgentSessionOnCanvas`,
+`dropTerminalGroupOnCanvas`, `dropEditorTabOnCanvas`, the start of
+`addCanvasDroppedFiles`, every successful board edit, the board view's
+`onDisappear`, and `NSApplication.didBecomeActiveNotification`. A last safety
+net in the view, `CanvasDropPreviewWatchdog`, checks every 0.5 s while a
+preview shows and clears it once the primary mouse button is up: no mouse
+drag runs without it. (A VoiceOver drag holds no button; its preview can
+flicker, but the drop still works.)
+
+**Notice versus save failure.** `errorMessage` was one string for every
+failure, and its only renderer was the save-failure banner (Save Again, Save
+Copy, Reload). It is split: `saveFailureMessage` is written only by the
+store's save, reload and Save Copy paths and by `saveCanvasCopy`; every other
+message is a `CanvasBoardNotice` (message, info or warn tone, one optional
+action) shown by `CanvasBoardNoticeView` as a capsule under the tool palette.
+A new notice replaces the old one. A click, its close button, Escape on the
+board, the next successful edit or undo, or 8 s dismisses it. VoiceOver
+announces it once. `CanvasBoardState.errorMessage` remains only as a routing
+shim for files another workstream owned at the time (`CanvasToolPalette.swift`,
+`CanvasWhiteboardCardFace.swift`); writing it shows a warn notice.
+`CanvasBoardNoticeTests.saveFailureWriters` lists those files and fails on any
+new writer.
+
+**Outside images are copied in with consent** (ADR 0025, Amendment 4). A card
+never references a path outside the workspace root. `CanvasAssetImportPlan`
+classifies a drop off the main actor (symlinks resolved): a regular file
+inside is referenced in place; a folder inside is ignored; a raster image
+outside (`CanvasDroppedFileKind.imageExtensions`) is copied; anything else
+outside, folders included, refuses the whole batch with a notice that names
+the file. Copies go to `<root>/.rafu/ensemble-assets/<board-slug>/` (the
+per-workspace `ensembleAssetFolder` value in `CanvasAssetImportPreferences`
+replaces the parent; there is no settings UI for it yet). A sheet asks first
+("Copy 11 images into …?", Copy / Cancel, "Always copy without asking in this
+workspace", remembered per workspace root in `UserDefaults`). The copier is
+`@concurrent`, reads each file through an `O_NOFOLLOW` descriptor with a
+16 MiB cap checked by `fstat` before any read, writes a temporary file in the
+target folder and renames it with `renamex_np(RENAME_EXCL)`, so it never
+overwrites (collisions become `name-2.png`, `name-3.png`) and a reader never
+sees half an image. A batch is all or nothing: on failure the files it wrote
+are removed. The target folder must resolve inside the root, also through
+existing symlinks. Rafu never edits `.gitignore`.
+
+**Hover labels agree with the outcome.** `CanvasDropAction.Context.rootPath`
+lets the preview classify files lexically (no file-system call on the main
+actor): outside images read "Copy and add 11 image cards" (accept tone);
+an outside non-image reads "Needs a file inside this workspace" (warn tone;
+the drop is still accepted so the notice can explain). Placeholder hover
+files (`CanvasDropAction.unknownFileURL`) and Files-list drags are never
+classified as outside. A workspace root reached through a symlink can make
+the hover label say "Copy" for a file that the drop then references in place.
+
+**Where a card lands.** One dropped file is now centred on the drop point
+with `CanvasBoardDropGeometry.defaultRect`, exactly the ghost's rect (it used
+to put its top-left corner there). A batch still cascades from the drop point.
+A History chat already used `defaultRect`; the "card below the ghost" report
+was the stale ghost.
+
+**Image decode memory (E-fix 3).** `CanvasPreviewLoader.decodeImage` no longer
+reads up to 16 MiB into a `Data` and then draws a second bitmap. It checks
+the size on a no-follow descriptor, decodes the thumbnail with
+`CGImageSourceCreateWithURL`, and returns ImageIO's thumbnail. Only an image
+deeper than 32 bits per pixel is redrawn into 8-bit sRGB, so
+`CanvasImagePool`'s 4-bytes-per-pixel budget stays true.
+
+Not changed: `setViewport` still marks a board dirty on every pan or zoom, so
+the tab's dirty dot appears after a pan.
+
+Verification: `swift test --filter CanvasBoardNoticeTests`,
+`--filter CanvasAssetImportTests`, `--filter CanvasDropPreviewOutsideTests`,
+then `./script/test.sh`. Open manual checks: drag a History chat onto a board
+(the outline clears, the card lands on the ghost); drag 11 Desktop PNGs (the
+sheet asks, Copy adds 11 image cards and an info notice); "Always copy" skips
+the sheet next time; drop a Desktop `.txt` (a warn notice, no save banner);
+press Escape mid-drag; drag out of the window and release elsewhere; drag a
+workspace image; repeat in a second window; VoiceOver reads the notice.
 
 ### Shell choice and card navigation (2026-10-19)
 
