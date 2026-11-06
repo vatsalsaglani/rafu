@@ -5,11 +5,13 @@ struct WorkspaceSidebarView: View {
     @Bindable var session: WorkspaceSession
     @State private var renameNode: WorkspaceFileNode?
     @State private var renameText = ""
-    /// Root sections the user collapsed (multi-folder workspaces only).
-    /// Ephemeral window state; every root starts expanded.
-    @State private var collapsedRootIDs: Set<UUID> = []
+    /// Mirrors the List's keyboard focus into `session.isFilesTreeFocused`,
+    /// which gates File > Move to Trash (⌘⌫) and the ⇧⌘C/⌥⌘C target.
+    @FocusState private var isTreeFocused: Bool
 
     @Environment(\.rafuTheme) private var theme
+    /// The window's undo manager: Edit > Undo puts trashed items back.
+    @Environment(\.undoManager) private var undoManager
 
     /// The Files header row: the 24 pt icon buttons set its height.
     static let headerRowHeight: CGFloat = 24
@@ -67,21 +69,51 @@ struct WorkspaceSidebarView: View {
             // the workspace root; folder rows below claim their own drops.
             .dropDestination(for: URL.self) { urls, _ in
                 guard let root = session.rootURL else { return false }
-                Task { await session.handleTreeDrop(urls, into: root) }
+                let items = session.expandedTreeDrop(urls, into: root)
+                Task { await session.handleTreeDrop(items, into: root) }
                 return true
             }
-            // ⌘C copies the selected tree item as a real file reference;
+            // ⌘C copies the selected tree items as real file references;
             // ⌘V pastes copied files or a clipboard image (screenshot) into
             // the selected folder. Both also exist as menu/context paths.
             .onCopyCommand {
-                guard let path = session.selectedTreePath else { return [] }
-                return [NSItemProvider(object: URL(filePath: path) as NSURL)]
+                session.orderedSelectedTreePaths.map {
+                    NSItemProvider(object: URL(filePath: $0) as NSURL)
+                }
             }
             .onPasteCommand(of: [.fileURL, .png, .tiff, .image]) { _ in
                 session.pasteIntoSelectedFolder()
             }
+            // Rows never keep focus after a click (activation-only focus),
+            // so the List owns ⇧↑/⇧↓, which grow or shrink the selection
+            // range from its anchor. Plain arrows keep their List behaviour.
+            .onKeyPress(keys: [.upArrow, .downArrow]) { press in
+                guard press.modifiers == .shift else { return .ignored }
+                session.extendTreeSelection(by: press.key == .upArrow ? -1 : 1)
+                return .handled
+            }
+            .focused($isTreeFocused)
+            .onChange(of: isTreeFocused, initial: true) { _, isFocused in
+                session.isFilesTreeFocused = isFocused
+            }
+            .onDisappear { session.isFilesTreeFocused = false }
         }
         .background(theme.palette.sidebarBackground)
+        .alert(
+            session.pendingTrashRequest?.title ?? "Move to Trash?",
+            isPresented: trashBinding,
+            presenting: session.pendingTrashRequest
+        ) { _ in
+            // Cancel is the default button, so Return never trashes.
+            Button("Cancel", role: .cancel) { session.pendingTrashRequest = nil }
+                .keyboardShortcut(.defaultAction)
+            Button("Move to Trash", role: .destructive) {
+                let undoManager = undoManager
+                Task { await session.performPendingTrash(undoManager: undoManager) }
+            }
+        } message: { request in
+            Text(request.message)
+        }
         .alert("Rename File", isPresented: renameBinding) {
             TextField("Name", text: $renameText)
             Button("Cancel", role: .cancel) { renameNode = nil }
@@ -183,16 +215,25 @@ struct WorkspaceSidebarView: View {
         }
     }
 
+    /// Collapsed roots live on the session (still ephemeral window state)
+    /// so a Shift range skips the rows of a collapsed root.
     private func rootExpandedBinding(_ id: UUID) -> Binding<Bool> {
         Binding(
-            get: { !collapsedRootIDs.contains(id) },
+            get: { !session.collapsedTreeRootIDs.contains(id) },
             set: { isExpanded in
                 if isExpanded {
-                    collapsedRootIDs.remove(id)
+                    session.collapsedTreeRootIDs.remove(id)
                 } else {
-                    collapsedRootIDs.insert(id)
+                    session.collapsedTreeRootIDs.insert(id)
                 }
             }
+        )
+    }
+
+    private var trashBinding: Binding<Bool> {
+        Binding(
+            get: { session.pendingTrashRequest != nil },
+            set: { if !$0 { session.pendingTrashRequest = nil } }
         )
     }
 
@@ -377,6 +418,7 @@ struct WorkspaceFileTreeItem: View {
                 .onDrag(
                     {
                         session.beginDragSourceTracking(dragToken)
+                        session.noteTreeDragStart(node.url.path)
                         return NSItemProvider(object: node.url as NSURL)
                     },
                     preview: {
@@ -384,7 +426,8 @@ struct WorkspaceFileTreeItem: View {
                     }
                 )
                 .dropDestination(for: URL.self) { urls, _ in
-                    Task { await session.handleTreeDrop(urls, into: node.url) }
+                    let items = session.expandedTreeDrop(urls, into: node.url)
+                    Task { await session.handleTreeDrop(items, into: node.url) }
                     return true
                 } isTargeted: {
                     isDropTargeted = $0
@@ -393,6 +436,7 @@ struct WorkspaceFileTreeItem: View {
             base.onDrag(
                 {
                     session.beginDragSourceTracking(dragToken)
+                    session.noteTreeDragStart(node.url.path)
                     let provider = session.beginEditorDrag(.file(path: node.url.path))
                     provider.registerObject(node.url as NSURL, visibility: .all)
                     return provider
@@ -433,7 +477,7 @@ struct WorkspaceFileTreeItem: View {
                 .accessibilityAction(named: isExpanded ? "Collapse" : "Expand") {
                     toggleExpansion()
                 }
-                .accessibilityAction(named: "Select") { activateRow() }
+                .accessibilityAction(named: "Select") { activateRow(.none) }
         } else {
             // Not a `Button`: its press tracking competes with the row's
             // `.onDrag` lift gesture for the same mouse-down, and a Button
@@ -449,12 +493,12 @@ struct WorkspaceFileTreeItem: View {
                 .onTapGesture(perform: activateRow)
                 .focusable(interactions: .activate)
                 .onKeyPress(keys: [.return, .space]) { _ in
-                    activateRow()
+                    activateRow(.none)
                     return .handled
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(.isButton)
-                .accessibilityAction { activateRow() }
+                .accessibilityAction { activateRow(.none) }
         }
     }
 
@@ -464,7 +508,8 @@ struct WorkspaceFileTreeItem: View {
             depth: depth,
             isExpanded: node.isDirectory ? expandedBinding.wrappedValue : nil,
             onToggleDisclosure: toggleExpansion,
-            isSelected: node.url.path == session.selectedTreePath,
+            isSelected: session.selectedTreePaths.contains(node.url.path),
+            isSelectionAnchor: node.url.path == session.selectedTreePath,
             isDropTarget: isDropTargeted,
             gitBadge: session.gitTreeBadge(forRelativePath: node.relativePath, rootID: rootTree?.id)
         )
@@ -473,10 +518,19 @@ struct WorkspaceFileTreeItem: View {
 
     /// Only an explicit row action opens a file. Tree selection also changes
     /// during editor navigation and reveal, so observing that value would
-    /// create a second, unwanted editor-navigation action.
+    /// create a second, unwanted editor-navigation action. ⌘ and ⇧ change
+    /// only the selection.
+    func activateRow(_ modifier: FileTreeClickModifier) {
+        session.activateTreeRow(node, modifier: modifier)
+    }
+
+    /// The pointer click: ⌘ toggles, ⇧ extends, and Control (the
+    /// context-menu click) changes nothing. Keyboard and VoiceOver
+    /// activation call `activateRow(.none)` instead, so held keys never
+    /// turn them into a selection change.
     func activateRow() {
-        session.selectedTreePath = node.url.path
-        if !node.isDirectory { session.open(node) }
+        guard let modifier = FileTreeClickModifier(flags: NSEvent.modifierFlags) else { return }
+        activateRow(modifier)
     }
 
     @State private var isDropTargeted = false
@@ -500,25 +554,38 @@ struct WorkspaceFileTreeItem: View {
             renameText = node.name
         }
         Divider()
-        Button("Copy Relative Path") { copyString(node.relativePath) }
-        Button("Copy Absolute Path") { copyString(node.url.path) }
-        Button("Copy File") { copyFile(node.url) }
+        // The whole selection when this row is in it, else only this row
+        // (Finder's rule). Titles turn plural for more than one item.
+        // Only the count is read here; the ordered targets are built when
+        // an item is chosen, so a row's body never walks the tree.
+        let selected = session.selectedTreePaths
+        let count = selected.contains(node.url.path) ? selected.count : 1
+        Button(count > 1 ? "Copy Relative Paths" : "Copy Relative Path") {
+            session.copyPaths(contextTargets(), style: .relative)
+        }
+        Button(count > 1 ? "Copy Absolute Paths" : "Copy Absolute Path") {
+            session.copyPaths(contextTargets(), style: .absolute)
+        }
+        Button(count > 1 ? "Copy Files" : "Copy File") { copyFiles(contextTargets()) }
         Divider()
         Button("Paste") {
             session.pasteIntoSelectedFolder(
                 target: node.isDirectory ? node.url : node.url.deletingLastPathComponent()
             )
         }
+        Divider()
+        Button(count > 1 ? "Move \(count) Items to Trash" : "Move to Trash") {
+            session.requestTrash(paths: contextTargets().map(\.path))
+        }
     }
 
-    private func copyString(_ value: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(value, forType: .string)
+    private func contextTargets() -> [URL] {
+        session.treeContextTargets(for: node.url.path).map { URL(filePath: $0) }
     }
 
-    private func copyFile(_ url: URL) {
+    private func copyFiles(_ urls: [URL]) {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.writeObjects([url as NSURL])
+        NSPasteboard.general.writeObjects(urls.map { $0 as NSURL })
     }
 }
 
@@ -678,6 +745,9 @@ private struct FileTreeRow: View {
     var isExpanded: Bool?
     var onToggleDisclosure: () -> Void = {}
     var isSelected: Bool = false
+    /// The selection's anchor row; only it emphasizes its innermost guide,
+    /// so a multi-selection does not draw a strong guide on every row.
+    var isSelectionAnchor: Bool = false
     var isDropTarget: Bool = false
     var gitBadge: GitTreeBadge?
     @Environment(\.rafuTheme) private var theme
@@ -685,7 +755,7 @@ private struct FileTreeRow: View {
     var body: some View {
         let icon = FileIconProvider.icon(for: node.url, isDirectory: node.isDirectory)
         HStack(spacing: 0) {
-            FileTreeIndentGuides(depth: depth, emphasizesInnermost: isSelected)
+            FileTreeIndentGuides(depth: depth, emphasizesInnermost: isSelected && isSelectionAnchor)
             HStack(spacing: 0) {
                 // A file keeps the empty chevron cell, so file and folder
                 // icons at one depth share a column.

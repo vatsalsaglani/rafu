@@ -55,6 +55,32 @@ struct RafuAppCommands: Commands {
 
             Divider()
             WorkspaceSaveCommandItems(session: workspaceSession)
+
+            Divider()
+            // ⇧⌘C / ⌥⌘C (VS Code's Copy Path pair). No other menu, the
+            // editor, the terminal, or an Ensemble board binds these keys.
+            // See files-tree-selection-and-trash.md.
+            Button("Copy Relative Path") {
+                workspaceSession?.copyPathOfActiveItem(.relative)
+            }
+            .keyboardShortcut("c", modifiers: [.command, .shift])
+            .disabled(workspaceSession?.pathCopyTarget == nil)
+            Button("Copy Absolute Path") {
+                workspaceSession?.copyPathOfActiveItem(.absolute)
+            }
+            .keyboardShortcut("c", modifiers: [.command, .option])
+            .disabled(workspaceSession?.pathCopyTarget == nil)
+            // ⌘⌫ is shared with Ensemble > Delete Link. This item is on only
+            // while the Files List has keyboard focus, so ⌘⌫ still deletes to
+            // the line start in an editor or a terminal, and still deletes a
+            // selected link on a board. Plain ⌫ is never bound.
+            Button("Move to Trash") {
+                guard let session = workspaceSession, session.canMoveTreeSelectionToTrash
+                else { return }
+                session.requestTrash(paths: session.orderedSelectedTreePaths)
+            }
+            .keyboardShortcut(.delete, modifiers: .command)
+            .disabled(workspaceSession?.canMoveTreeSelectionToTrash != true)
         }
 
         // Replaces the default File > Print… so ⌘P owns Go to File.

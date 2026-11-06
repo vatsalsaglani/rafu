@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import RafuCore
 
 nonisolated struct WorkspaceFileService: Sendable {
     static let maximumEditorBytes = 16 * 1_024 * 1_024
@@ -161,6 +162,83 @@ nonisolated struct WorkspaceFileService: Sendable {
         return destination
     }
 
+    /// Moves workspace items to the Trash (never `removeItem`). A workspace
+    /// root and any item outside every root are refused; an item under
+    /// another selected folder is skipped, because the folder takes it
+    /// along. Stops at the first failure (for example a volume without a
+    /// Trash) and reports it with the items already moved, so the caller
+    /// can still offer Undo for those.
+    @concurrent
+    func trash(_ urls: [URL], roots: [WorkspaceRoot]) async -> WorkspaceTrashOutcome {
+        var outcome = WorkspaceTrashOutcome()
+        for url in Self.topLevelWorkspaceItems(urls, roots: roots) {
+            do {
+                try Task.checkCancellation()
+                var resulting: NSURL?
+                try FileManager.default.trashItem(at: url, resultingItemURL: &resulting)
+                let trashed = (resulting as URL?) ?? url
+                outcome.items.append(WorkspaceTrashedItem(original: url, trashed: trashed))
+            } catch {
+                outcome.failureMessage =
+                    "\(url.lastPathComponent) could not be moved to the Trash. "
+                    + error.localizedDescription
+                break
+            }
+        }
+        return outcome
+    }
+
+    /// Undo of `trash`: moves each item back to its original path when that
+    /// path is still free. An item whose path is taken stays in the Trash
+    /// and is named in the failure message.
+    @concurrent
+    func restoreFromTrash(_ items: [WorkspaceTrashedItem]) async -> WorkspaceTrashOutcome {
+        var outcome = WorkspaceTrashOutcome()
+        var skipped: [String] = []
+        for item in items {
+            guard !FileManager.default.fileExists(atPath: item.original.path),
+                FileManager.default.fileExists(atPath: item.trashed.path)
+            else {
+                skipped.append(item.original.lastPathComponent)
+                continue
+            }
+            do {
+                try FileManager.default.moveItem(at: item.trashed, to: item.original)
+                outcome.items.append(item)
+            } catch {
+                skipped.append(item.original.lastPathComponent)
+            }
+        }
+        if !skipped.isEmpty {
+            outcome.failureMessage =
+                "These items stay in the Trash because their place is taken or they are gone: "
+                + skipped.joined(separator: ", ") + "."
+        }
+        return outcome
+    }
+
+    /// The items `trash` and multi-item tree drags act on: no duplicates, no
+    /// workspace root, nothing outside the roots, and nothing under another
+    /// listed folder. Paths compare after standardization. Order is kept.
+    nonisolated static func topLevelWorkspaceItems(_ urls: [URL], roots: [WorkspaceRoot]) -> [URL] {
+        let candidates = urls.compactMap { url -> (url: URL, path: String)? in
+            let path = WorkspaceRootList.normalizedPath(url.standardizedFileURL.path)
+            guard let found = WorkspaceRootList.locate(absolutePath: path, in: roots),
+                !found.relativePath.isEmpty
+            else { return nil }
+            return (url, path)
+        }
+        let paths = Set(candidates.map(\.path))
+        var seen: Set<String> = []
+        return candidates.compactMap { candidate in
+            let isNested = paths.contains { other in
+                other != candidate.path && candidate.path.hasPrefix(other + "/")
+            }
+            guard !isNested, seen.insert(candidate.path).inserted else { return nil }
+            return candidate.url
+        }
+    }
+
     /// "name.ext" → "name 2.ext" → "name 3.ext"… until unused.
     nonisolated static func uniqueDestination(forName name: String, in directory: URL) -> URL {
         let base = (name as NSString).deletingPathExtension
@@ -203,6 +281,19 @@ nonisolated struct WorkspaceFileService: Sendable {
             return $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
     }
+}
+
+/// One item moved to the Trash: where it was, and where the Trash put it.
+nonisolated struct WorkspaceTrashedItem: Equatable, Sendable {
+    let original: URL
+    let trashed: URL
+}
+
+/// The result of a Move to Trash or its Undo. `items` lists what moved;
+/// `failureMessage` is set when something did not.
+nonisolated struct WorkspaceTrashOutcome: Equatable, Sendable {
+    var items: [WorkspaceTrashedItem] = []
+    var failureMessage: String?
 }
 
 enum WorkspaceFileError: LocalizedError {
