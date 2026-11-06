@@ -63,5 +63,17 @@ lists its manual steps.
 | G1 | merged (a8b89f8) |
 | G2 | merged (50429ac) |
 | G3 | merged (9b2e9f1, + validateMenuItem 71238a9) |
-| G4–G7 | planned |
-| G8 | running: probe output cap through pipes (disk-fill incident 2026-11-06 17:00) |
+| G4 | merged (34f3950, + review fixes F1/F3 dec163e) |
+| G5 | merged (2a7aa1d) |
+| G6 | merged (a66ede5) |
+| G7 | merged (94d8729): no behaviour change; the newest-8 grace keeps the document under a board loaded, so hiding it saves nothing. S0–S6 table awaits the user's measurements |
+| G8 | merged (7244528): probe output through pipes, child killed at the cap (disk-fill incident 2026-11-06 17:00) |
+
+### Open follow-ups
+
+- N and T board keys still live in `WorkspaceCanvasView.swift`; move them to `CanvasBoardKeyMap` (G5).
+- `errorMessage` shim writers in `CanvasToolPalette.swift` and `CanvasWhiteboardCardFace.swift` move to `showNotice` (G4/G5).
+- G4 review F2 (symlinked root mislabels the hover), F4 (empty folder after rollback, stale `.rafu-import-*`), F5 (raw Cocoa error), F6 (persistent notice for Save As/export failures), F7 (settings row for "always copy" and the asset folder), F8 (decode tests' file).
+- G6: unclosed-tag scan is quadratic in document size; Ensemble cards show `.mdx` tags as text.
+- G8: Gemini and Cursor adapters keep the `readabilityHandler` + `readDataToEndOfFile` capture race.
+- `LauncherRequestRouterTests.listenerRestartsAfterStop` and `AgentActivityStoreTests.watchSpool` fail under heavy parallel load only (pass alone and serially).

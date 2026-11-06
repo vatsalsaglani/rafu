@@ -21,7 +21,7 @@
 | Decode source | Decoded from a file URL; no 16 MiB `Data` copy (E-fix 3, G4). The 16 MiB file cap stays | `CanvasPreviewLoader.swift` (`maxImageBytes`) |
 | Terminal scrollback | SwiftTerm default, 500 lines per terminal | `memory-caps-and-pressure.md` |
 | Editor undo | 200 levels per document | `CodeEditorView.swift` (`undoLevelCap`) |
-| Ensemble undo cap (32 steps / 2 MiB) | Quoted from the advisor brief; not located in source at dec163e, so not verified here | n/a |
+| Ensemble undo cap | 32 steps or 2 MiB of estimated snapshot cost per board, whichever is reached first | `CanvasBoardState.swift` (`remember(_:in:)`) |
 
 "The GPU does not reduce RAM." Metal textures and IOSurface backing stores are
 charged to the same process `phys_footprint` on Apple silicon (unified
