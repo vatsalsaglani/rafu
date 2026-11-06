@@ -138,6 +138,9 @@ describe. The authority is
 | Scrollers | Editor: `EditorThemedScroller` — theme track and knob, `isCompatibleWithOverlayScrollers` overridden, `scrollerStyle` never written. Files `List`: `OverlayScrollerConfigurator` forces overlay style on that one scroll view (round 4) |
 | Ensemble symbol | `circle.hexagongrid` everywhere |
 | Warning hue | Indigo `#E8894A`, Khadi `#9E4A14` (UX Round A, ADR 0031 §g); 10.8° (Indigo) and 13.6° (Khadi) of HSB hue from the accent, toward orange, and 4.5:1 on app, elevated and card. ANSI yellow derives from `git.modified` first, not from `warning` |
+| Files icons | Monochrome at rest (UX Round C, ADR 0031 §h): `textSecondary`, `textPrimary` on the selected row (`FileIconMonochrome`); a coloured SVG draws as a template copy (`FileIconAssets.templateImage`, so the shared coloured image is never mutated). Settings "Coloured file icons" (`colouredFileIcons`, default off) restores the hues through `\.rafuColouredFileIcons`, set once at the window root. Agent marks keep their colour (`isAgentMark`). Git badge letter and colour, selection pill and focus ring unchanged |
+| Ensemble bar | 30 pt, no title; the tool palette sits flat in the bar from 980 pt, no shadow (`CanvasBarLayout`) |
+| Branch | Once, in the status bar (the switcher); no titlebar chip |
 | Ensemble drop grammar | Accept: solid `accent` ring 1.5 pt (2.5 pt Increase Contrast), 8 % fill, 20 pt glyph in `textSecondary`, 12 pt medium name in `textPrimary`, accent label pill below. Refuse: no ring; a 3 pt `warning` bar on the board's top edge and a `cardBackground` pill (`xmark.octagon` 12 pt `warning`, 12 pt semibold `textPrimary`, `borderSubtle` hairline) below the tool palette; "not allowed" cursor. See `canvas-interaction.md`, UX Round A |
 
 Increase Contrast now does three things in the workbench: promotes the tab
@@ -198,6 +201,19 @@ build and tests only (GUI checks are manual).
 - A sheet shown over another sheet from the same view may not appear. A popup
   that can fail after submit shows the error inline (`RafuTextFieldPopup`
   `errorMessage`) instead of opening a second popup (Duplicate Theme).
+- **Leading slot (UX Round C).** `RafuPopupRow(leading:)` takes an optional
+  `AnyView` drawn instead of the 16 pt symbol; it defaults to `nil`, so every
+  other row is unchanged. Open Ensemble passes
+  `CanvasBoardSilhouetteView`: 56 × 36 pt, card rects filled
+  `textSecondary` at 35 % with a 0.5 pt `textSecondary` stroke, on an
+  `elevatedBackground` rounded rect (radius 4) with a `borderSubtle` hairline
+  (`borderStrong` under Increase Contrast); `accessibilityHidden`; no shadow.
+- **Icon Library (UX Round C).** `CanvasIconLibraryMetrics`: 5 columns of
+  fixed 72 pt tiles, 8 pt spacing, 12 pt padding, 32 pt icons, 11 pt labels
+  (2 lines); panel and view minimum width 416 + 24 pt for a scroller. The
+  matched part of a name is bold (`CanvasIconNameHighlight`,
+  `inlinePresentationIntent = .stronglyEmphasized`), never a colour change.
+  Arrow keys move by five rows.
 - `.focused(_:)` belongs on the `TextField` itself; `RafuPopupSearchField`
   takes a `FocusState<Bool>.Binding` for that reason. `onSubmit` and
   `onKeyPress` on the wrapper still receive the field's events.

@@ -417,7 +417,8 @@ final class WorkspaceCanvasStore {
             item.id == board.id
                 ? CanvasSummary(
                     id: board.id, title: board.title, revision: board.revision,
-                    cardCount: board.cards.count, modified: Date()) : item
+                    cardCount: board.cards.count, modified: Date(),
+                    silhouette: CanvasBoardSilhouette(cards: board.cards.map(\.rect))) : item
         }
         return true
     }

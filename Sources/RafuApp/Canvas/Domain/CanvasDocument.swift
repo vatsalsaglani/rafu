@@ -437,4 +437,6 @@ nonisolated struct CanvasSummary: Identifiable, Equatable, Sendable {
     let revision: UInt64
     var cardCount = 0
     var modified: Date?
+    /// The Open Ensemble row's outline of the board (UX Round C, P1).
+    var silhouette = CanvasBoardSilhouette.empty
 }

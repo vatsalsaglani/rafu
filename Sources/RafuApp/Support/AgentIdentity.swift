@@ -298,7 +298,7 @@ struct AgentIconView: View {
     var size: CGFloat = 16
 
     var body: some View {
-        FileIconView(icon: ConductorCLIIcons.icon(for: cli), size: size)
+        FileIconView(icon: ConductorCLIIcons.icon(for: cli), size: size, isAgentMark: true)
             .frame(width: size, height: size)
             .accessibilityLabel(cli.displayName)
     }

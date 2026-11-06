@@ -9,10 +9,27 @@ final class CanvasIconLibraryTarget {
     weak var session: WorkspaceSession?
 }
 
+/// The Icon Library grid (UX Round C): five 72 pt tiles with 32 pt icons and
+/// 11 pt labels. The panel width follows from them.
+nonisolated enum CanvasIconLibraryMetrics {
+    static let columns = 5
+    static let tile: CGFloat = 72
+    static let icon: CGFloat = 32
+    static let label: CGFloat = 11
+    static let spacing: CGFloat = 8
+    static let padding: CGFloat = 12
+    /// The grid's own width: 5 × 72 + 4 × 8 + 2 × 12 = 416 pt.
+    static var panelWidth: CGFloat {
+        CGFloat(columns) * tile + CGFloat(columns - 1) * spacing + 2 * padding
+    }
+    /// The panel and view minimum: the grid plus room for a scroller.
+    static var minimumPanelWidth: CGFloat { panelWidth + 24 }
+}
+
 /// Arrow-key movement over the Icon Library's fixed-column grid. Pure, so
 /// it is unit-tested.
 nonisolated enum CanvasIconLibraryNavigation {
-    static let columns = 4
+    static let columns = CanvasIconLibraryMetrics.columns
 
     enum Direction { case left, right, up, down }
 
@@ -43,7 +60,9 @@ struct CanvasIconLibraryView: View {
 
     private static let allPacks = "*"
     private let columns = Array(
-        repeating: GridItem(.flexible(), spacing: 8), count: CanvasIconLibraryNavigation.columns)
+        repeating: GridItem(
+            .fixed(CanvasIconLibraryMetrics.tile), spacing: CanvasIconLibraryMetrics.spacing),
+        count: CanvasIconLibraryMetrics.columns)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -83,7 +102,9 @@ struct CanvasIconLibraryView: View {
                     .buttonStyle(RafuSecondaryButtonStyle(compact: true))
             }
         }
-        .frame(minWidth: 360, minHeight: 400, alignment: .top)
+        .frame(
+            minWidth: CanvasIconLibraryMetrics.minimumPanelWidth, minHeight: 400, alignment: .top
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .rafuPopupEntrance()
         .onAppear { searchFocused = true }
@@ -125,15 +146,15 @@ struct CanvasIconLibraryView: View {
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVGrid(columns: columns, spacing: 8) {
+                    LazyVGrid(columns: columns, spacing: CanvasIconLibraryMetrics.spacing) {
                         ForEach(Array(results.enumerated()), id: \.element.id) { index, match in
                             CanvasIconLibraryTile(
-                                match: match, isHighlighted: index == highlighted
+                                match: match, query: query, isHighlighted: index == highlighted
                             ) { add(match) }
                             .id(match.id)
                         }
                     }
-                    .padding(10)
+                    .padding(CanvasIconLibraryMetrics.padding)
                 }
                 .onChange(of: highlighted) { _, index in
                     guard results.indices.contains(index) else { return }
@@ -159,6 +180,8 @@ private struct CanvasIconLibraryTile: View {
     @Environment(\.rafuTheme) private var theme
     @Environment(\.colorSchemeContrast) private var contrast
     let match: CanvasServiceIconMatch
+    /// The search text; the matched part of the name is bold.
+    let query: String
     let isHighlighted: Bool
     let add: () -> Void
     @State private var isHovering = false
@@ -167,16 +190,19 @@ private struct CanvasIconLibraryTile: View {
         Button(action: add) {
             VStack(spacing: 4) {
                 CanvasServiceIconImage(icon: match.icon)
-                    .frame(width: 40, height: 40)
-                Text(match.entry.name)
-                    .font(.system(size: 11))
+                    .frame(
+                        width: CanvasIconLibraryMetrics.icon, height: CanvasIconLibraryMetrics.icon)
+                // Weight, not colour, marks the match.
+                Text(CanvasIconNameHighlight.attributed(match.entry.name, query: query))
+                    .font(.system(size: CanvasIconLibraryMetrics.label))
                     .foregroundStyle(theme.palette.textPrimary)
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity)
             }
-            .padding(6)
-            .frame(maxWidth: .infinity, minHeight: 84)
+            .padding(4)
+            .frame(width: CanvasIconLibraryMetrics.tile)
+            .frame(minHeight: CanvasIconLibraryMetrics.tile)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(fill)

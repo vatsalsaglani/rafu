@@ -373,7 +373,8 @@ struct CanvasLibrarySheet: View {
             RafuPopupRow(
                 symbol: "square.on.square.dashed", title: item.title, caption: detail(item),
                 trailing: openLabel(item.id, openElsewhere: openElsewhere),
-                isSelected: item.id == selection)
+                isSelected: item.id == selection,
+                leading: AnyView(CanvasBoardSilhouetteView(silhouette: item.silhouette)))
         }
         .buttonStyle(.plain)
         .simultaneousGesture(TapGesture(count: 2).onEnded { open(item.id) })

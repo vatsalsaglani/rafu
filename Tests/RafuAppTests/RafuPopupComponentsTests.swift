@@ -22,6 +22,29 @@ struct RafuPopupComponentsTests {
         #expect(RafuKeyHint.text(for: KeyboardShortcut(.escape, modifiers: [])) == "esc")
     }
 
+    @Test("A row's leading view replaces the symbol; existing rows keep the symbol")
+    func rowLeadingSlot() throws {
+        let plain = RafuPopupRow(symbol: "doc", title: "Plain", isSelected: false)
+        #expect(plain.leading == nil)
+        let outlined = RafuPopupRow(
+            symbol: "doc", title: "Outlined", isSelected: false,
+            leading: AnyView(CanvasBoardSilhouetteView(silhouette: .empty)))
+        #expect(outlined.leading != nil)
+        let source = try CanvasBoardKeyMapTests.source(
+            "Sources/RafuApp/Support/RafuPopupComponents.swift")
+        let row = try #require(source.range(of: "struct RafuPopupRow: View"))
+        let rowSource = String(source[row.upperBound...])
+        let leading = try #require(rowSource.range(of: "if let leading {"))
+        let symbol = try #require(rowSource.range(of: "Image(systemName: symbol)"))
+        #expect(leading.lowerBound < symbol.lowerBound)
+        let dialogs = try CanvasBoardKeyMapTests.source(
+            "Sources/RafuApp/Canvas/Views/CanvasDialogView.swift")
+        #expect(dialogs.contains("CanvasBoardSilhouetteView(silhouette: item.silhouette)"))
+        let silhouette = try CanvasBoardKeyMapTests.source(
+            "Sources/RafuApp/Canvas/Views/CanvasBoardSilhouetteView.swift")
+        #expect(!silhouette.contains(".shadow("))
+    }
+
     @Test("A selected row carries the isSelected trait, not only a colour")
     func rowSelectionTrait() {
         #expect(RafuPopupRow.accessibilityTraits(isSelected: true).contains(.isSelected))
@@ -140,11 +163,13 @@ struct RafuPopupComponentsTests {
     @Test("Icon Library arrow keys stay inside the grid")
     func iconLibraryNavigation() {
         typealias Nav = CanvasIconLibraryNavigation
+        // Five columns (UX Round C).
         #expect(Nav.move(0, .left, count: 10) == 0)
         #expect(Nav.move(0, .right, count: 10) == 1)
-        #expect(Nav.move(1, .down, count: 10) == 5)
+        #expect(Nav.move(1, .down, count: 10) == 6)
+        #expect(Nav.move(4, .down, count: 10) == 9)
         #expect(Nav.move(7, .down, count: 10) == 7)
-        #expect(Nav.move(5, .up, count: 10) == 1)
+        #expect(Nav.move(5, .up, count: 10) == 0)
         #expect(Nav.move(2, .up, count: 10) == 2)
         #expect(Nav.move(9, .right, count: 10) == 9)
         #expect(Nav.move(3, .down, count: 0) == 0)

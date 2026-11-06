@@ -197,6 +197,44 @@ holds.
   (`TerminalAnsiPaletteTests`). Every `palette.warning` surface (agent "needs
   you" pill, notices, Git chips, the drop refusal bar) changes hue by design.
 
+### h. Ensemble bar and quiet chrome (UX Round C amendment, 2026-11-07)
+
+- **The tab names the board.** `CanvasBar` has no title and no name pull-down
+  and is **30 pt** (`CanvasBarLayout.height`, from 36). Rename is a
+  double-click on the Ensemble tab (one tap handler with `TabClickIntent`,
+  as on Terminal Group tabs), the tab's context menu, the tab's VoiceOver
+  "Rename" action, and File ▸ Rename Ensemble…. Duplicate, Open Recent
+  Ensemble, Open Ensemble… and Close Ensemble are in the tab's context menu
+  and the File menu beside Open Ensemble….
+- **Autosaving boards show no dirty dot.** A 10 pt `checkmark.circle` in
+  `textSecondary` shows on the tab for `RafuMotion.successHold` (1.2 s) after
+  a save that changed the cards, links or name (`CanvasBoardState.lastSavedAt`;
+  a pan or zoom also saves but shows no tick). It fades with
+  `stateCrossFade`, and appears and goes with no fade under Reduce Motion. The
+  tab's VoiceOver value says "Saving" while dirty or saving, "Saved" while the
+  tick shows. The save-failure banner is unchanged.
+- **The tool palette sits in a wide bar.** From a bar width of **980 pt**
+  (`CanvasBarLayout.hostsPalette`), the palette is the bar's leading item
+  with no background, hairline, padding or shadow (`placement: .hosted`);
+  narrower, it floats on the board as before, with its one shadow. The
+  placement is a plain `if`, never animated. The palette's letter-key monitor
+  moved from the palette to the board (`WorkspaceCanvasView.boardChrome`,
+  `CanvasToolKeyHandler`), so the keys work in both placements. The
+  two-shadow workbench budget is unchanged.
+- **Files icons are monochrome at rest.** `textSecondary`, `textPrimary` on
+  the selected row (`FileIconMonochrome`); a coloured SVG asset draws as a
+  template. Settings ▸ General ▸ Workspace ▸ "Coloured file icons"
+  (`colouredFileIcons`, default off) restores the file-type colours. Git
+  badge letters and colours, the selection pill and the focus ring do not
+  change. Agent identity marks (`AgentIconView`, the agent pickers) keep
+  their colour (`FileIconView(isAgentMark: true)`).
+- **The branch shows once**, in the status bar, which also switches
+  branches. The titlebar has no branch chip.
+
+Not adopted: a thumbnail in the tab hover preview (a contract test forbids a
+fabricated thumbnail) and in menus (an `NSMenu` item cannot host a view). Open
+Ensemble rows draw a vector silhouette instead (`ui-design-language.md`).
+
 ## Alternatives considered
 
 ### Keep ADR 0030's outlined selected tab and filled inactive tabs

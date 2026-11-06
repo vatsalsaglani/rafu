@@ -33,6 +33,10 @@ final class CanvasBoardState: Identifiable {
     private(set) var changeStamp: UInt64 = 0
     private(set) var isDirty = false
     var isSaving = false
+    /// When the last save that left the board clean finished. The tab shows
+    /// a brief saved tick for each new value (UX Round C, W2).
+    private(set) var lastSavedAt: Date?
+    @ObservationIgnored private var lastSavedContent: SavedContent
     /// Why the last save, reload, or Save Copy failed. Only the store's save
     /// paths write it; the save-failure banner (Save Again, Save Copy,
     /// Reload) is its only reader. Every other message is a `notice`.
@@ -136,6 +140,21 @@ final class CanvasBoardState: Identifiable {
         // that no longer fits. This is not an edit: the next save keeps it.
         CanvasBoardState.normalizeFrames(&value, previous: nil)
         self.document = value
+        lastSavedContent = SavedContent(value)
+    }
+
+    /// What the saved tick compares: everything but the viewport and the
+    /// revision.
+    private struct SavedContent: Equatable {
+        let title: String
+        let cards: [CanvasCard]
+        let connections: [CanvasConnection]
+
+        init(_ document: CanvasDocument) {
+            title = document.title
+            cards = document.cards
+            connections = document.connections
+        }
     }
 
     var title: String {
@@ -195,11 +214,18 @@ final class CanvasBoardState: Identifiable {
         }
     }
 
-    func acceptSaved(_ saved: CanvasDocument, stamp: UInt64) {
+    func acceptSaved(_ saved: CanvasDocument, stamp: UInt64, at date: Date = Date()) {
         document.revision = saved.revision
         if changeStamp == stamp {
             document = saved
             isDirty = false
+            // A pan or zoom also saves; only a change the user made to the
+            // cards, links or name shows the saved tick.
+            let content = SavedContent(saved)
+            if content != lastSavedContent {
+                lastSavedContent = content
+                lastSavedAt = date
+            }
         }
         isSaving = false
     }

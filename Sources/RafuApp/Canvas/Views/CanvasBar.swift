@@ -1,18 +1,38 @@
 import SwiftUI
 
-/// The one 36 pt Ensemble bar: the name (double-click renames) with its
-/// pull-down, the link status, the agent summary, Find, Add, Arrange and Export.
-/// There is no overflow menu: every action it held is in the name menu, the
-/// link popover, the Add palette, a card's context menu, or the menu bar's
-/// Ensemble menu.
+/// The width rule for the 30 pt Ensemble bar (UX Round C). Pure, so it is
+/// unit-tested.
+nonisolated enum CanvasBarLayout {
+    static let height: CGFloat = 30
+    /// The expanded tool palette (about 450 pt) plus the right-hand cluster
+    /// (at most about 530 pt). From this width the palette sits in the bar.
+    static let paletteHostWidth: CGFloat = 980
+
+    static func hostsPalette(barWidth: CGFloat) -> Bool { barWidth >= paletteHostWidth }
+}
+
+/// The one 30 pt Ensemble bar: the tool palette when the bar is wide enough
+/// (`CanvasBarLayout`), then the link status, the agent summary, Find, Add,
+/// Arrange and Export. The board's name is on its tab only: rename,
+/// duplicate, recents, Open Ensemble… and Close are in the tab's context menu
+/// and the menu bar's Ensemble menu. There is no overflow menu.
 struct CanvasBar: View {
     @Environment(\.rafuTheme) private var theme
     let board: CanvasBoardState
     let session: WorkspaceSession
+    let interaction: CanvasInteractionState
+    /// Gives the board keyboard focus; a palette tool choice calls it.
+    var focusBoard: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 8) {
-            nameArea
+            // A plain `if`, never animated: the placement only follows the
+            // window width (Reduce Motion needs nothing more).
+            if interaction.paletteHostedInBar {
+                CanvasToolPalette(
+                    board: board, session: session, tool: .forBoard(board.id),
+                    focusBoard: focusBoard, placement: .hosted)
+            }
             Spacer(minLength: 8)
             CanvasLinkStatusItem(board: board)
             CanvasAgentSummaryBar(board: board, session: session)
@@ -22,71 +42,16 @@ struct CanvasBar: View {
             exportButton
         }
         .padding(.horizontal, 12)
-        .frame(height: 36)
+        .frame(height: CanvasBarLayout.height)
+        .onGeometryChange(for: Bool.self) {
+            CanvasBarLayout.hostsPalette(barWidth: $0.size.width)
+        } action: { hosts in
+            // Only a change writes, so a resize near the threshold does not
+            // invalidate the board on every frame.
+            if interaction.paletteHostedInBar != hosts { interaction.paletteHostedInBar = hosts }
+        }
+        // The tab's context menu and the Ensemble menu list recents.
         .task { await session.prepareCanvasLibrary() }
-    }
-
-    /// The title and, beside it, the name menu. They are two controls
-    /// because a pull-down opens on mouse-down, so a double-click on a menu
-    /// label can never reach a tap handler.
-    private var nameArea: some View {
-        HStack(spacing: 2) {
-            title
-            nameMenu
-        }
-    }
-
-    /// One tap handler, never a second count-2 tap gesture beside it (that
-    /// holds every click for the double-click interval; see
-    /// docs/references/swiftui-macos-click-latency.md). A single click does
-    /// nothing; the second click of a double-click renames.
-    private var title: some View {
-        Text(board.title)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(theme.palette.textPrimary)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .contentShape(.rect)
-            .onTapGesture {
-                if TabClickIntent.current() == .selectAndRename { rename() }
-            }
-            .help("Double-click to rename")
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Ensemble \(board.title)")
-            .accessibilityAddTraits(.isHeader)
-            .accessibilityAction(named: "Rename") { rename() }
-    }
-
-    private func rename() {
-        session.canvasDialog = .renameBoard(board.id)
-    }
-
-    private var nameMenu: some View {
-        Menu {
-            Button("Rename…", systemImage: "pencil") { rename() }
-            Button("Duplicate Ensemble", systemImage: "plus.square.on.square") {
-                session.saveCanvasCopy(board.id)
-            }
-            Divider()
-            ForEach(recentCanvases) { item in
-                Button(item.title) { Task { await session.openCanvas(item.id) } }
-            }
-            Button("Open Ensemble…") { session.requestCanvasLibrary() }
-            Divider()
-            Button("Close Ensemble", systemImage: "xmark") { session.closeCanvas(board.id) }
-        } label: {
-            Image(systemName: "chevron.down")
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(theme.palette.textSecondary)
-                .frame(width: 18, height: 22)
-                .contentShape(.rect)
-        }
-        .menuStyle(.borderlessButton)
-        .tint(theme.palette.textSecondary)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Ensemble actions: rename, duplicate, open, close")
-        .accessibilityLabel("Ensemble actions")
     }
 
     /// Find in Ensemble. The same state as the menu bar's Find in Ensemble…
@@ -116,10 +81,6 @@ struct CanvasBar: View {
         .disabled(board.cards.isEmpty || session.rootURL == nil)
         .help("Export Ensemble…")
         .accessibilityLabel("Export Ensemble…")
-    }
-
-    private var recentCanvases: [CanvasSummary] {
-        Array(session.canvas.library.filter { $0.id != board.id }.prefix(8))
     }
 
     private var arrangeMenu: some View {

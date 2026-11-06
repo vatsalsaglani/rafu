@@ -201,7 +201,7 @@ private struct AgentTerminalPickerRow: View {
     var body: some View {
         Button(action: select) {
             HStack(spacing: 10) {
-                FileIconView(icon: option.icon, size: 18)
+                FileIconView(icon: option.icon, size: 18, isAgentMark: true)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(option.displayName)

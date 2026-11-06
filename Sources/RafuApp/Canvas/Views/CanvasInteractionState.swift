@@ -16,6 +16,9 @@ final class CanvasInteractionState {
     /// The pointer is over the zoom capsule (or the overview above it), so
     /// the overview shows (UX Round A, B3).
     var overviewHover = false
+    /// The Ensemble bar is wide enough to host the tool palette
+    /// (`CanvasBarLayout`); the board then shows no floating palette.
+    var paletteHostedInBar = false
     /// True for `RafuMotion.overviewPanHold` after the last pan step, so the
     /// overview stays a moment after a pan ends.
     private(set) var overviewPanHold = false

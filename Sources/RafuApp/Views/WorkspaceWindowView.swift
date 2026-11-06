@@ -9,6 +9,9 @@ struct WorkspaceWindowView: View {
     /// The standard close / minimise / zoom buttons are always visible
     /// outside full screen; `WindowTitlebarRow` reserves their space.
     @State private var isWindowFullScreen = false
+    /// Settings → Workspace → "Coloured file icons": read once per window
+    /// and handed down, never per row.
+    @AppStorage(FileIconProvider.colouredFileIconsKey) private var colouredFileIcons = false
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -67,6 +70,8 @@ struct WorkspaceWindowView: View {
             session.teardownTerminalGroups()
         }
         .modifier(WorkspaceWindowPresentations(session: session))
+        // Outermost, so sheets and popovers inherit it too.
+        .environment(\.rafuColouredFileIcons, colouredFileIcons)
     }
 
     private var showsWelcome: Bool {

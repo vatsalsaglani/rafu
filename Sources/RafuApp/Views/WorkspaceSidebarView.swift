@@ -773,7 +773,7 @@ private struct FileTreeRow: View {
                 }
                 // A fixed icon slot, so every name at one depth starts at the
                 // same x whatever the icon's own width.
-                FileIconView(icon: icon, size: 12)
+                FileIconView(icon: icon, size: 12, isSelected: isSelected)
                     .frame(width: FileTreeMetrics.iconSlot)
                     .accessibilityHidden(true)
                 // Middle truncation keeps the extension visible when a long

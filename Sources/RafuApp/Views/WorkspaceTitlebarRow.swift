@@ -8,8 +8,9 @@ import SwiftUI
 ///   AppKit; no space is reserved in full screen) and the one sidebar toggle.
 /// - Centre: the workspace name as a menu (saved workspaces, recent folders,
 ///   Open Folder, Open Workspace, Add Folder to Workspace, Save Workspace As,
-///   Show All Workspaces, Reveal in Finder), the current branch, and, only
-///   while agents run, an activity capsule that opens the Terminals panel.
+///   Show All Workspaces, Reveal in Finder) and, only while agents run, an
+///   activity capsule that opens the Terminals panel. The branch is in the
+///   status bar only.
 /// - Trailing: a "Search" button that opens the palette in file mode.
 /// - Everything else is a window-move surface. A double-click there performs
 ///   the action chosen in System Settings (zoom, minimise, or nothing).
@@ -90,15 +91,10 @@ struct WindowTitlebarRow: View {
     }
 
     private var titleCluster: some View {
+        // The branch shows once, in the status bar, where it also switches
+        // branches (UX Round C, W3).
         HStack(spacing: RafuMetrics.space2) {
             workspaceMenu
-            if let snapshot = session.gitBranchSnapshot {
-                branchChip(StatusBarBranchFormatter.present(snapshot))
-            } else if let summary = session.sourceControlBranchSummary {
-                // Before Source Control loads branches, the status snapshot
-                // from opening the workspace names the branch.
-                branchChip(StatusBarBranchFormatter.present(summary: summary))
-            }
             agentActivity
         }
         .lineLimit(1)
@@ -193,25 +189,6 @@ struct WindowTitlebarRow: View {
             }
             session.openWorkspaceFile(at: url)
         }
-    }
-
-    private func branchChip(_ branch: StatusBarBranchFormatter.Presentation) -> some View {
-        HStack(spacing: 3) {
-            Image(systemName: "arrow.triangle.branch")
-                .font(.system(size: 10, weight: .medium))
-                .accessibilityHidden(true)
-            Text(branch.label)
-                .font(.system(size: 11, weight: .medium))
-                .truncationMode(.middle)
-        }
-        .foregroundStyle(theme.palette.textSecondary)
-        .padding(.horizontal, 7)
-        .frame(height: 18)
-        .background(Capsule().fill(theme.palette.chipBackground))
-        .help(branch.isDetached ? "Detached HEAD at \(branch.label)" : "Branch \(branch.label)")
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(
-            branch.isDetached ? "Detached HEAD at \(branch.label)" : "Branch \(branch.label)")
     }
 
     /// Shown only while at least one agent session runs. Live means gold, but

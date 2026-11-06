@@ -26,22 +26,28 @@ struct CanvasToolPaletteItem: Identifiable {
     var helpText: String { CanvasBoardKeyMap.helpText(title, key: key) }
 }
 
-/// The compact floating whiteboard palette, centred at the top of the board:
-/// Select, Hand, Rectangle, Ellipse, Diamond, Arrow, Line, Pen, Text, Mermaid,
-/// Image…, then a style menu and any registered extra items.
+/// The whiteboard palette: Select, Hand, Rectangle, Ellipse, Diamond, Arrow,
+/// Line, Pen, Text, Mermaid, Image…, then a style menu and any registered
+/// extra items. `.floating` is the compact card centred at the top of the
+/// board; `.hosted` sits flat in a wide Ensemble bar (UX Round C, B7).
 ///
-/// Single-letter shortcuts work only while the board itself has keyboard
-/// focus (`isFocused` of the board's focusable ancestor) and no card content
-/// is active. Escape returns a drawing tool to Select.
+/// The palette does not read keys. The board installs the letter-key
+/// monitor (`CanvasToolKeyHandler`, `WorkspaceCanvasView.boardChrome`), so
+/// the shortcuts work in both placements, only while the board itself has
+/// keyboard focus and no card content is active. Escape returns a drawing
+/// tool to Select.
 struct CanvasToolPalette: View {
+    enum Placement { case floating, hosted }
+
     @Environment(\.rafuTheme) private var theme
-    @Environment(\.isFocused) private var boardIsFocused
+    @Environment(\.colorSchemeContrast) private var contrast
     let board: CanvasBoardState
     let session: WorkspaceSession
     let tool: CanvasWhiteboardTool
     /// Gives the board keyboard focus. Choosing a tool calls it, so Escape
     /// and the tool letters work next even when card content had the keys.
     var focusBoard: () -> Void = {}
+    var placement: Placement = .floating
 
     private(set) static var extraItems: [CanvasToolPaletteItem] = []
 
@@ -53,24 +59,31 @@ struct CanvasToolPalette: View {
     }
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
+        switch placement {
+        case .hosted:
+            // The bar guarantees the width (`CanvasBarLayout`). No card: no
+            // padding, background, hairline or shadow.
             expandedTools
                 .fixedSize(horizontal: true, vertical: false)
-            compactTools
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Whiteboard tools")
+        case .floating:
+            // The board places the palette (`WorkspaceCanvasView.boardTopOverlay`)
+            // so the paused-links notice can stack below it.
+            ViewThatFits(in: .horizontal) {
+                expandedTools
+                    .fixedSize(horizontal: true, vertical: false)
+                compactTools
+            }
+            .padding(4)
+            .background(theme.palette.elevatedBackground, in: .rect(cornerRadius: 10))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10).strokeBorder(theme.palette.borderSubtle)
+            }
+            .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Whiteboard tools")
         }
-        .padding(4)
-        .background(theme.palette.elevatedBackground, in: .rect(cornerRadius: 10))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10).strokeBorder(theme.palette.borderSubtle)
-        }
-        .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
-        .background(
-            CanvasToolKeyMonitor(isActive: keysActive) { key in handle(key) }
-        )
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Whiteboard tools")
-        // The board places the palette (`WorkspaceCanvasView.boardTopOverlay`)
-        // so the paused-links notice can stack below it.
     }
 
     private var expandedTools: some View {
@@ -123,10 +136,6 @@ struct CanvasToolPalette: View {
         }
     }
 
-    private var keysActive: Bool {
-        boardIsFocused && !board.contentIsActive && board.renamingCardID == nil
-    }
-
     private var separator: some View {
         Rectangle().fill(theme.palette.borderSubtle)
             .frame(width: 1, height: 18)
@@ -149,6 +158,14 @@ struct CanvasToolPalette: View {
                 .background(
                     isOn ? theme.palette.accentSoft : Color.clear, in: .rect(cornerRadius: 6)
                 )
+                .overlay {
+                    // Flat in the bar, the selected tool has no card behind
+                    // it; Increase Contrast gives its fill an edge.
+                    if isOn, placement == .hosted, contrast == .increased {
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(theme.palette.borderStrong)
+                    }
+                }
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -200,16 +217,32 @@ struct CanvasToolPalette: View {
         // the Hand tool could not be left from the keyboard.
         if board.contentIsActive { board.backToBoard() }
     }
+}
+
+/// The palette's single-letter keys, owned by the board (UX Round C, B7):
+/// the board's `CanvasToolKeyMonitor` calls `handle`, so the keys work
+/// whether the palette floats on the board or sits in the bar.
+@MainActor
+enum CanvasToolKeyHandler {
+    /// The letters act only while the board itself has keyboard focus, no
+    /// card content is active and no card title is being renamed.
+    static func keysActive(boardFocused: Bool, board: CanvasBoardState) -> Bool {
+        boardFocused && !board.contentIsActive && board.renamingCardID == nil
+    }
 
     /// Returns true when the key was used. N and T are left to the board
     /// view (`CanvasBoardKeyMap.boardHandledAddKinds`), so they run once.
-    private func handle(_ key: CanvasToolKey) -> Bool {
+    static func handle(
+        _ key: CanvasToolKey, tool: CanvasWhiteboardTool, board: CanvasBoardState,
+        session: WorkspaceSession
+    ) -> Bool {
         if let kind = CanvasWhiteboardToolKind.resolve(key, from: tool.kind) {
-            choose(kind)
+            // The board already has the keys, so no focus hand-off is needed.
+            CanvasToolPalette.choose(kind, tool: tool, board: board, session: session)
             return true
         }
         guard case .character(let character) = key else { return false }
-        if let item = Self.extraItems.first(where: { $0.key == character }) {
+        if let item = CanvasToolPalette.extraItems.first(where: { $0.key == character }) {
             item.perform(board, session)
             return true
         }

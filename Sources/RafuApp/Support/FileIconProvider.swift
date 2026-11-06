@@ -18,6 +18,7 @@ nonisolated enum FileIconProvider {
     /// Tints are semantic (resolved against the active theme palette) or
     /// fixed brand colors chosen to read on both light and dark surfaces.
     nonisolated enum Tint: Sendable, Hashable {
+        case primary
         case secondary
         case muted
         case accent
@@ -27,6 +28,10 @@ nonisolated enum FileIconProvider {
         case error
         case fixed(String)
     }
+
+    /// Settings → Workspace → "Coloured file icons" (UX Round C, F1). Off by
+    /// default: file icons are monochrome at rest.
+    static let colouredFileIconsKey = "colouredFileIcons"
 
     static func icon(for url: URL, isDirectory: Bool) -> Icon {
         isDirectory
@@ -195,9 +200,34 @@ nonisolated enum FileIconProvider {
     ]
 }
 
+/// The Files icon rule (UX Round C, F1): monochrome at rest, `textPrimary`
+/// on the selected row, the icon's own colour only when the preference is
+/// on. Git state keeps its coloured letter, so meaning never rests on an
+/// icon hue. Pure, so it is unit-tested.
+nonisolated enum FileIconMonochrome {
+    static func tint(_ icon: FileIconProvider.Icon, coloured: Bool, isSelected: Bool)
+        -> FileIconProvider.Tint
+    {
+        if coloured { return icon.tint }
+        return isSelected ? .primary : .secondary
+    }
+
+    /// A coloured (non-template) asset is drawn as a template, tinted like a
+    /// symbol, in monochrome mode.
+    static func drawsAssetAsTemplate(_ icon: FileIconProvider.Icon, coloured: Bool) -> Bool {
+        icon.assetIsTemplate || !coloured
+    }
+}
+
+extension EnvironmentValues {
+    /// The window's "Coloured file icons" choice, set once at the window root.
+    @Entry var rafuColouredFileIcons = false
+}
+
 extension RafuThemePalette {
     nonisolated func color(for tint: FileIconProvider.Tint) -> Color {
         switch tint {
+        case .primary: textPrimary
         case .secondary: textSecondary
         case .muted: textMuted
         case .accent: accent
@@ -228,24 +258,49 @@ enum FileIconAssets {
         cache[name] = image
         return image
     }
+
+    private static var templateCache: [String: NSImage] = [:]
+
+    /// A template copy of the asset, so tinting a coloured asset never
+    /// changes the shared image the coloured path draws.
+    static func templateImage(named name: String) -> NSImage? {
+        if let cached = templateCache[name] { return cached }
+        guard let image = image(named: name), let copy = image.copy() as? NSImage else {
+            return nil
+        }
+        copy.isTemplate = true
+        templateCache[name] = copy
+        return copy
+    }
 }
 
 /// Renders a `FileIconProvider.Icon`: the bundled asset when available
-/// (template assets tinted like symbols), otherwise the SF Symbol.
+/// (template assets tinted like symbols), otherwise the SF Symbol. File
+/// icons follow `FileIconMonochrome` and the window's
+/// `rafuColouredFileIcons`; an agent's identity mark (`isAgentMark`) always
+/// keeps its own colour.
 struct FileIconView: View {
     let icon: FileIconProvider.Icon
     var size: CGFloat = 12
+    /// The Files row is selected: a monochrome icon brightens to `textPrimary`.
+    var isSelected = false
+    /// An agent CLI mark, not a file type: never monochrome.
+    var isAgentMark = false
     @Environment(\.rafuTheme) private var theme
+    @Environment(\.rafuColouredFileIcons) private var colouredFileIcons
 
     var body: some View {
-        if let assetName = icon.assetName, let image = FileIconAssets.image(named: assetName) {
-            if icon.assetIsTemplate {
-                Image(nsImage: template(image))
+        let coloured = colouredFileIcons || isAgentMark
+        let tint = theme.palette.color(
+            for: FileIconMonochrome.tint(icon, coloured: coloured, isSelected: isSelected))
+        if let assetName = icon.assetName, let image = asset(assetName, coloured: coloured) {
+            if image.isTemplate {
+                Image(nsImage: image)
                     .renderingMode(.template)
                     .resizable()
                     .scaledToFit()
                     .frame(width: size, height: size)
-                    .foregroundStyle(theme.palette.color(for: icon.tint))
+                    .foregroundStyle(tint)
             } else {
                 Image(nsImage: image)
                     .resizable()
@@ -259,13 +314,19 @@ struct FileIconView: View {
             // clip, so a wide glyph still draws in full.
             Image(systemName: icon.symbol)
                 .font(.system(size: size, weight: .medium))
-                .foregroundStyle(theme.palette.color(for: icon.tint))
+                .foregroundStyle(tint)
                 .frame(width: size, height: size)
         }
     }
 
-    private func template(_ image: NSImage) -> NSImage {
-        image.isTemplate = true
-        return image
+    /// The template copy in monochrome mode or for a template asset (tinted
+    /// like a symbol); the shared coloured image otherwise.
+    private func asset(_ name: String, coloured: Bool) -> NSImage? {
+        templateDrawn(coloured: coloured)
+            ? FileIconAssets.templateImage(named: name) : FileIconAssets.image(named: name)
+    }
+
+    private func templateDrawn(coloured: Bool) -> Bool {
+        FileIconMonochrome.drawsAssetAsTemplate(icon, coloured: coloured)
     }
 }
