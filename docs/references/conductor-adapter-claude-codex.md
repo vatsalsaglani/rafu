@@ -5,7 +5,8 @@
 - Applies to: `ClaudeCodeAdapter`, `CodexAdapter`, their shared bounded
   metadata-probe support, and C1 code that probes and invokes these adapters
 - Last verified: Claude Code 2.1.218, codex-cli 0.146.0-alpha.3, Swift 6.2.4,
-  Xcode 26.3, macOS 26.5.2 (arm64), 2026-07-24
+  Xcode 26.3, macOS 26.5.2 (arm64), 2026-07-24; bounded probe lifecycle
+  re-verified Swift 6.4.2 (language mode 6.2), macOS 27.0.1, 2026-11-06
 
 ## Verified invocation rules
 
@@ -109,7 +110,28 @@ inference. The installed Codex build rejects both `codex help models` and
 
 Probe work is explicitly `@concurrent`, keeping process launch and polling
 off the main actor under Swift 6.2. Captured version/discovery output is
-file-backed and bounded to 256 KiB per stream; auth output is discarded.
+pipe-backed and bounded to 256 KiB in total across stdout and stderr; auth
+output is discarded. The C3 adapters (`C3AdapterProcess.run`) delegate to
+the same runner, so there is one capture implementation.
+
+- The output cap is enforced by the reader, not by the poll loop.
+  `ConductorProbePipeCapture` reads both pipes with `DispatchSourceRead` on a
+  private serial GCD queue. `ConductorProbeOutputCollector` counts every byte
+  and sends `SIGKILL` to the child the moment the count passes the cap. This
+  works when the cooperative pool is saturated.
+- Worst case memory is the cap plus one 64 KiB kernel pipe buffer. Nothing
+  goes to disk. If the reader is starved, the child blocks in `write(2)`. If
+  the parent dies, the child gets `SIGPIPE`.
+- `withTaskCancellationHandler` sends `SIGTERM` to the child at once when the
+  task is cancelled, including a Swift Testing `.timeLimit` cancellation.
+- The runner clears the pid from the collector and the cancellation box
+  before it reaps, and both send their signal while they hold their lock. A
+  late reader or cancellation therefore never signals a reaped pid.
+- After the reap, the runner drains each pipe without blocking (it stops at
+  EOF, at `EAGAIN`, or at the cap) and closes the read ends in the source
+  cancel handlers. Never `readDataToEndOfFile()`: a grandchild that holds the
+  write end would block it forever.
+
 Every child has a five-second timeout and is registered with
 `ProcessResourceRegistry` for its complete live interval. Cancellation,
 timeout, and output overflow use bounded direct-child `SIGTERM`/`SIGKILL`
@@ -198,13 +220,14 @@ Both builds completed with zero warnings; both full-suite modes passed all
 - C1 integration can fail closed if it constructs a new adapter between probe
   and invocation.
 - Direct-child signal handling does not clean up unexpected grandchildren.
-- A child can overshoot the 256 KiB file cap during the 20 ms polling
-  interval, although the retained/read output remains bounded.
 - Static model lists can drift as vendors revise their catalogs.
 
 ## Related code, ADRs, and phases
 
 - `Sources/RafuApp/Conductor/Adapters/ClaudeCodeAdapter.swift`
+- `Sources/RafuApp/Conductor/Adapters/ConductorProbeOutputCapture.swift`
+- [`conductor-pty-spawn-and-child-environment.md`](conductor-pty-spawn-and-child-environment.md)
+  — finding 4, the 2026-11-06 disk-fill incident
 - `Sources/RafuApp/Conductor/Adapters/CodexAdapter.swift`
 - `Tests/RafuAppTests/Conductor/ClaudeCodeAdapterTests.swift`
 - `Tests/RafuAppTests/Conductor/CodexAdapterTests.swift`

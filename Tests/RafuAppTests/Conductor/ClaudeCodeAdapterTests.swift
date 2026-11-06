@@ -701,10 +701,21 @@ func conductorProbeRunnerCancels() async {
     #expect(errno == ESRCH)
 }
 
-@Test("The real adapter probe runner rejects captured output over its cap")
+/// `/usr/bin/yes` never stops writing. On 2026-11-06 this test wrote a
+/// 107 GB capture file in 8 minutes: the child wrote to a regular file and
+/// only a starved poller could stop it. Output now goes through a pipe whose
+/// GCD reader kills the child at the cap, so the test is disk-safe by
+/// construction. The 5 s timeout ensures the deadline cannot be what wins.
+@Test("The real adapter probe runner kills a child that passes its output cap")
 func conductorProbeRunnerCapsOutput() async {
+    let registrationLatch = ClaudeProbeRegistrationLatch()
     let runner = ConductorProbeProcessRunner(
-        timeout: .seconds(1), maximumOutputBytes: 64)
+        timeout: .seconds(5),
+        maximumOutputBytes: 64,
+        registry: ProcessResourceRegistry(),
+        onRegistered: { processIdentifier in
+            await registrationLatch.signal(processIdentifier: processIdentifier)
+        })
     let outcome = await runner.run(
         executableURL: URL(fileURLWithPath: "/usr/bin/yes"),
         arguments: [],
@@ -712,7 +723,98 @@ func conductorProbeRunnerCapsOutput() async {
         outputPolicy: .capture)
 
     guard case .outputLimitExceeded = outcome else {
-        Issue.record("Expected the bounded probe to reject oversized output")
+        Issue.record("Expected the bounded probe to reject oversized output, got \(outcome)")
         return
     }
+    let processIdentifier = await registrationLatch.wait()
+    #expect(kill(processIdentifier, 0) == -1)
+    #expect(errno == ESRCH)
+}
+
+@Test("A probe child whose bounded output fits the cap completes with all of it")
+func conductorProbeRunnerKeepsBoundedOutputUnderCap() async {
+    let runner = ConductorProbeProcessRunner(
+        timeout: .seconds(5), maximumOutputBytes: 8_192)
+    let outcome = await runner.run(
+        executableURL: URL(fileURLWithPath: "/usr/bin/head"),
+        arguments: ["-c", "4096", "/dev/zero"],
+        environment: ["PATH": "/usr/bin:/bin"],
+        outputPolicy: .capture)
+
+    guard case .completed(let completion) = outcome else {
+        Issue.record("Expected a completed probe, got \(outcome)")
+        return
+    }
+    #expect(completion.terminationStatus == 0)
+    #expect(completion.standardOutput.count == 4_096)
+    #expect(completion.standardError.isEmpty)
+}
+
+@Test("A probe child that exits after writing past the cap is still rejected")
+func conductorProbeRunnerRejectsBoundedOutputOverCap() async {
+    let runner = ConductorProbeProcessRunner(
+        timeout: .seconds(5), maximumOutputBytes: 1_024)
+    let outcome = await runner.run(
+        executableURL: URL(fileURLWithPath: "/usr/bin/head"),
+        arguments: ["-c", "4096", "/dev/zero"],
+        environment: ["PATH": "/usr/bin:/bin"],
+        outputPolicy: .capture)
+
+    guard case .outputLimitExceeded = outcome else {
+        Issue.record("Expected the bounded probe to reject oversized output, got \(outcome)")
+        return
+    }
+}
+
+private final class ClaudeProbeSignalRecorder: Sendable {
+    private let storage = Mutex<[pid_t]>([])
+
+    var pids: [pid_t] { storage.withLock { $0 } }
+
+    func record(_ processIdentifier: pid_t) {
+        storage.withLock { $0.append(processIdentifier) }
+    }
+}
+
+/// The cap is enforced where the bytes arrive, not by a poller: no process
+/// and no scheduler are involved here.
+@Test("The probe output collector signals the child exactly once at its cap")
+func conductorProbeOutputCollectorKillsAtCapWithoutPolling() {
+    let signalled = ClaudeProbeSignalRecorder()
+    let collector = ConductorProbeOutputCollector(
+        limit: 64,
+        onOverflow: { processIdentifier in
+            signalled.record(processIdentifier)
+        })
+    collector.install(pid: 4242)
+
+    collector.append(Data(repeating: 0x79, count: 40), to: .standardOutput)
+    #expect(signalled.pids.isEmpty)
+    #expect(!collector.overflowed)
+
+    collector.append(Data(repeating: 0x79, count: 40), to: .standardError)
+    #expect(signalled.pids == [4242])
+    #expect(collector.overflowed)
+    let snapshot = collector.snapshot()
+    #expect(snapshot.receivedBytes == 80)
+    #expect(snapshot.standardOutput.count + snapshot.standardError.count <= 65)
+
+    collector.append(Data(repeating: 0x79, count: 40), to: .standardOutput)
+    #expect(signalled.pids == [4242])
+}
+
+@Test("The probe output collector never signals after its pid is cleared")
+func conductorProbeOutputCollectorIgnoresClearedPid() {
+    let signalled = ClaudeProbeSignalRecorder()
+    let collector = ConductorProbeOutputCollector(
+        limit: 8,
+        onOverflow: { processIdentifier in
+            signalled.record(processIdentifier)
+        })
+    collector.install(pid: 4242)
+    collector.clear()
+
+    collector.append(Data(repeating: 0x79, count: 16), to: .standardOutput)
+    #expect(collector.overflowed)
+    #expect(signalled.pids.isEmpty)
 }

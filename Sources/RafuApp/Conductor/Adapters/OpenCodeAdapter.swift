@@ -177,117 +177,33 @@ nonisolated enum C3AdapterProcess {
             return failed(.launchFailed)
         }
 
-        let fileManager = FileManager.default
-        let captureDirectory = fileManager.temporaryDirectory.appending(
-            path: "rafu-conductor-probe-\(UUID().uuidString)",
-            directoryHint: .isDirectory)
-        do {
-            try fileManager.createDirectory(
-                at: captureDirectory, withIntermediateDirectories: true)
-        } catch {
-            return failed(.launchFailed)
-        }
-        defer { try? fileManager.removeItem(at: captureDirectory) }
+        // One bounded runner for every probe: pipe capture read off the
+        // cooperative pool, a kill at the cap from the reader, and an
+        // immediate signal on cancellation. The cap here is the total of both
+        // streams, as before.
+        let runner = ConductorProbeProcessRunner(
+            timeout: timeout, maximumOutputBytes: maximumOutputBytes)
+        let outcome = await runner.run(
+            executableURL: executableURL,
+            arguments: arguments,
+            environment: environment,
+            outputPolicy: .capture)
 
-        let stdoutURL = captureDirectory.appending(path: "stdout")
-        let stderrURL = captureDirectory.appending(path: "stderr")
-        guard fileManager.createFile(atPath: stdoutURL.path, contents: nil),
-            fileManager.createFile(atPath: stderrURL.path, contents: nil)
-        else {
-            return failed(.launchFailed)
-        }
-
-        let stdoutHandle: FileHandle
-        let stderrHandle: FileHandle
-        do {
-            stdoutHandle = try FileHandle(forWritingTo: stdoutURL)
-            stderrHandle = try FileHandle(forWritingTo: stderrURL)
-        } catch {
-            return failed(.launchFailed)
-        }
-        defer {
-            try? stdoutHandle.close()
-            try? stderrHandle.close()
-        }
-
-        let process = Process()
-        process.executableURL = executableURL
-        process.arguments = arguments
-        process.environment = environment
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = stdoutHandle
-        process.standardError = stderrHandle
-
-        do {
-            try process.run()
-        } catch {
-            return failed(.launchFailed)
-        }
-
-        let registryID = UUID()
-        await ProcessResourceRegistry.shared.register(
-            id: registryID,
-            name: "\(executableURL.lastPathComponent) probe",
-            kind: .other,
-            pid: process.processIdentifier)
-
-        let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: timeout)
-        var completion: C3AdapterCommandResult.Completion?
-
-        while process.isRunning {
-            if Task.isCancelled {
-                completion = .cancelled
-                await stop(process)
-                break
-            }
-            let capturedBytes =
-                fileByteCount(at: stdoutURL, fileManager: fileManager)
-                + fileByteCount(at: stderrURL, fileManager: fileManager)
-            if capturedBytes > maximumOutputBytes {
-                completion = .outputTooLarge
-                await stop(process)
-                break
-            }
-            if clock.now >= deadline {
-                completion = .timedOut
-                await stop(process)
-                break
-            }
-            do {
-                try await Task.sleep(for: .milliseconds(20))
-            } catch {
-                completion = .cancelled
-                await stop(process)
-                break
-            }
-        }
-
-        if process.isRunning {
-            await stop(process)
-        }
-        await ProcessResourceRegistry.shared.unregister(id: registryID)
-
-        try? stdoutHandle.close()
-        try? stderrHandle.close()
-
-        let finalByteCount =
-            fileByteCount(at: stdoutURL, fileManager: fileManager)
-            + fileByteCount(at: stderrURL, fileManager: fileManager)
-        if finalByteCount > maximumOutputBytes {
-            completion = .outputTooLarge
-        }
-
-        guard completion != .outputTooLarge else {
+        switch outcome {
+        case .completed(let completion):
+            return C3AdapterCommandResult(
+                completion: .exited(completion.terminationStatus),
+                standardOutput: completion.standardOutput,
+                standardError: completion.standardError)
+        case .timedOut:
+            return failed(.timedOut)
+        case .cancelled:
+            return failed(.cancelled)
+        case .outputLimitExceeded:
             return failed(.outputTooLarge)
+        case .couldNotLaunch:
+            return failed(.launchFailed)
         }
-
-        let stdout = (try? Data(contentsOf: stdoutURL, options: .mappedIfSafe)) ?? Data()
-        let stderr = (try? Data(contentsOf: stderrURL, options: .mappedIfSafe)) ?? Data()
-        return C3AdapterCommandResult(
-            completion: completion ?? .exited(process.terminationStatus),
-            standardOutput: stdout,
-            standardError: stderr)
     }
 
     static func probeEnvironment(for executableURL: URL) -> [String: String] {
@@ -332,34 +248,6 @@ nonisolated enum C3AdapterProcess {
             .map(String.init)
         guard !components.contains(executableDirectory) else { return curated }
         return executableDirectory + ":" + curated
-    }
-
-    private static func stop(_ process: Process) async {
-        guard process.isRunning else { return }
-        process.terminate()
-
-        let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: .milliseconds(250))
-        while process.isRunning, clock.now < deadline {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        if process.isRunning {
-            Darwin.kill(process.processIdentifier, SIGKILL)
-        }
-        // Bounded reap rather than `process.waitUntilExit()`, which takes no
-        // deadline and is documented to block after a forced termination —
-        // the same trap that hung the serial suite through the Claude probe
-        // (`conductor-pty-spawn-and-child-environment.md`, finding 3).
-        _ = ConductorProbeProcessRunner.reap(
-            process.processIdentifier, before: clock.now.advanced(by: .seconds(1)))
-    }
-
-    private static func fileByteCount(
-        at url: URL,
-        fileManager: FileManager
-    ) -> Int {
-        let attributes = try? fileManager.attributesOfItem(atPath: url.path)
-        return (attributes?[.size] as? NSNumber)?.intValue ?? 0
     }
 
     private static func failed(

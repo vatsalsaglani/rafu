@@ -35,8 +35,8 @@ nonisolated protocol ConductorProbeCommandRunning: Sendable {
     ) async -> ConductorProbeCommandOutcome
 }
 
-/// The one bounded `Process` implementation used by the two C2 adapters.
-/// It lives in this phase-owned file so C2 does not need a shared-file edit.
+/// The one bounded `Process` implementation used by the C2 adapters and,
+/// through `C3AdapterProcess.run`, by the C3 adapters.
 nonisolated struct ConductorProbeProcessRunner: ConductorProbeCommandRunning {
     static let defaultTimeout = Duration.seconds(5)
     static let defaultMaximumOutputBytes = 256 * 1_024
@@ -60,6 +60,13 @@ nonisolated struct ConductorProbeProcessRunner: ConductorProbeCommandRunning {
 
     /// Swift 6.2 plain `nonisolated async` stays on the caller's executor.
     /// `@concurrent` is therefore required to keep Settings probes off-main.
+    ///
+    /// Captured output goes through pipes whose reader runs on a private GCD
+    /// queue and kills the child the moment the byte count passes
+    /// `maximumOutputBytes` (`ConductorProbePipeCapture`). The poll loop below
+    /// only enforces the deadline and reports outcomes; it no longer bounds
+    /// output, so a starved cooperative pool cannot let a child fill the disk
+    /// (`conductor-pty-spawn-and-child-environment.md`, finding 4).
     @concurrent
     func run(
         executableURL: URL,
@@ -69,53 +76,41 @@ nonisolated struct ConductorProbeProcessRunner: ConductorProbeCommandRunning {
     ) async -> ConductorProbeCommandOutcome {
         guard !Task.isCancelled else { return .cancelled }
 
-        let fileManager = FileManager.default
-        let captureDirectory = fileManager.temporaryDirectory.appending(
-            path: "rafu-conductor-probe-\(UUID().uuidString)",
-            directoryHint: .isDirectory)
-        var outputURL: URL?
-        var errorURL: URL?
-        var outputHandle: FileHandle?
-        var errorHandle: FileHandle?
-
-        if outputPolicy == .capture {
-            do {
-                try fileManager.createDirectory(
-                    at: captureDirectory, withIntermediateDirectories: true)
-                let stdoutURL = captureDirectory.appending(path: "stdout")
-                let stderrURL = captureDirectory.appending(path: "stderr")
-                guard
-                    fileManager.createFile(atPath: stdoutURL.path, contents: nil),
-                    fileManager.createFile(atPath: stderrURL.path, contents: nil)
-                else {
-                    try? fileManager.removeItem(at: captureDirectory)
-                    return .couldNotLaunch
-                }
-                outputURL = stdoutURL
-                errorURL = stderrURL
-                outputHandle = try FileHandle(forWritingTo: stdoutURL)
-                errorHandle = try FileHandle(forWritingTo: stderrURL)
-            } catch {
-                try? fileManager.removeItem(at: captureDirectory)
-                return .couldNotLaunch
-            }
+        // Cancellation signals the child at once, from whatever thread
+        // cancels the task, instead of waiting for the poll loop to run.
+        let cancellation = ConductorProbeCancellation()
+        return await withTaskCancellationHandler {
+            await runBounded(
+                executableURL: executableURL,
+                arguments: arguments,
+                environment: environment,
+                outputPolicy: outputPolicy,
+                cancellation: cancellation)
+        } onCancel: {
+            cancellation.cancel()
         }
+    }
 
-        defer {
-            try? outputHandle?.close()
-            try? errorHandle?.close()
-            if outputPolicy == .capture {
-                try? fileManager.removeItem(at: captureDirectory)
-            }
-        }
+    private func runBounded(
+        executableURL: URL,
+        arguments: [String],
+        environment: [String: String],
+        outputPolicy: ConductorProbeOutputPolicy,
+        cancellation: ConductorProbeCancellation
+    ) async -> ConductorProbeCommandOutcome {
+        let capture: ConductorProbePipeCapture? =
+            outputPolicy == .capture
+            ? ConductorProbePipeCapture(
+                collector: ConductorProbeOutputCollector(limit: maximumOutputBytes))
+            : nil
 
         let process = Process()
         process.executableURL = executableURL
         process.arguments = arguments
         process.environment = environment
         process.standardInput = FileHandle.nullDevice
-        process.standardOutput = outputHandle ?? FileHandle.nullDevice
-        process.standardError = errorHandle ?? FileHandle.nullDevice
+        process.standardOutput = capture?.standardOutput ?? FileHandle.nullDevice
+        process.standardError = capture?.standardError ?? FileHandle.nullDevice
 
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: timeout)
@@ -125,13 +120,17 @@ nonisolated struct ConductorProbeProcessRunner: ConductorProbeCommandRunning {
             return .couldNotLaunch
         }
 
+        let processIdentifier = process.processIdentifier
+        cancellation.install(pid: processIdentifier)
+        capture?.start(pid: processIdentifier)
+
         let resourceID = UUID()
         await registry.register(
             id: resourceID,
             name: "\(executableURL.lastPathComponent) probe",
             kind: .other,
-            pid: process.processIdentifier)
-        await onRegistered(process.processIdentifier)
+            pid: processIdentifier)
+        await onRegistered(processIdentifier)
 
         var forcedOutcome: ConductorProbeCommandOutcome?
 
@@ -140,10 +139,7 @@ nonisolated struct ConductorProbeProcessRunner: ConductorProbeCommandRunning {
                 forcedOutcome = .cancelled
                 break
             }
-            if let outputURL, let errorURL,
-                Self.fileSize(at: outputURL) > maximumOutputBytes
-                    || Self.fileSize(at: errorURL) > maximumOutputBytes
-            {
+            if capture?.collector.overflowed == true {
                 forcedOutcome = .outputLimitExceeded
                 break
             }
@@ -162,6 +158,16 @@ nonisolated struct ConductorProbeProcessRunner: ConductorProbeCommandRunning {
                 break
             }
         }
+        // The cancellation handler may have ended the child before the loop
+        // looked; report the cancellation, not the signal's exit status.
+        if forcedOutcome == nil, Task.isCancelled {
+            forcedOutcome = .cancelled
+        }
+
+        // Forget the pid before reaping, so neither the output reader nor a
+        // late cancellation can signal a pid the system may recycle.
+        cancellation.clear()
+        capture?.collector.clear()
 
         if forcedOutcome != nil {
             Self.stopAndReap(process)
@@ -187,43 +193,21 @@ nonisolated struct ConductorProbeProcessRunner: ConductorProbeCommandRunning {
         }
         await registry.unregister(id: resourceID)
 
-        try? outputHandle?.close()
-        try? errorHandle?.close()
+        // Non-blocking final drain, then close the read ends. Never
+        // `readDataToEndOfFile()`: a grandchild that inherited the write end
+        // would block it forever.
+        await capture?.finish()
 
-        let wasCancelled = if case .cancelled? = forcedOutcome { true } else { false }
-        if !wasCancelled, let outputURL, let errorURL,
-            Self.fileSize(at: outputURL) > maximumOutputBytes
-                || Self.fileSize(at: errorURL) > maximumOutputBytes
-        {
-            forcedOutcome = .outputLimitExceeded
-        }
+        if case .cancelled? = forcedOutcome { return .cancelled }
+        if capture?.collector.overflowed == true { return .outputLimitExceeded }
         if let forcedOutcome { return forcedOutcome }
 
-        guard let outputURL, let errorURL else {
-            return .completed(
-                ConductorProbeCompletion(
-                    terminationStatus: process.terminationStatus,
-                    standardOutput: Data(),
-                    standardError: Data()))
-        }
-        guard
-            Self.fileSize(at: outputURL) <= maximumOutputBytes,
-            Self.fileSize(at: errorURL) <= maximumOutputBytes,
-            let standardOutput = try? Data(contentsOf: outputURL, options: .mappedIfSafe),
-            let standardError = try? Data(contentsOf: errorURL, options: .mappedIfSafe)
-        else {
-            return .outputLimitExceeded
-        }
+        let output = capture?.collector.snapshot()
         return .completed(
             ConductorProbeCompletion(
                 terminationStatus: process.terminationStatus,
-                standardOutput: standardOutput,
-                standardError: standardError))
-    }
-
-    private static func fileSize(at url: URL) -> Int {
-        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
-        return (attributes?[.size] as? NSNumber)?.intValue ?? 0
+                standardOutput: output?.standardOutput ?? Data(),
+                standardError: output?.standardError ?? Data()))
     }
 
     /// Probe children are short-lived metadata commands. Reap through
@@ -240,9 +224,9 @@ nonisolated struct ConductorProbeProcessRunner: ConductorProbeCommandRunning {
         _ = reap(processIdentifier, before: killDeadline)
     }
 
-    /// Bounded `waitpid(WNOHANG)` reap. Shared with the other adapters that
-    /// terminate probe children, so there is exactly one implementation of
-    /// "collect this child without ever blocking indefinitely".
+    /// Bounded `waitpid(WNOHANG)` reap: the one implementation of "collect
+    /// this child without ever blocking indefinitely". The C3 adapters reach
+    /// it through `C3AdapterProcess.run`, which delegates to this runner.
     static func reap(_ processIdentifier: pid_t, before deadline: ContinuousClock.Instant)
         -> Bool
     {

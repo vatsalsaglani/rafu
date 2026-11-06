@@ -1,6 +1,6 @@
 # Ensemble PTY spawn: `forkpty` under parallel tests, and the child's missing `PATH`
 
-> **Status (2026-10-18): Retired.** The feature this note describes was removed in the round-2 redesign (see docs/plans/phases/ensemble-canvas.md). Kept for history; do not use it as current guidance. A grep of `Sources/` finds no `forkpty` use.
+> **Status (2026-10-18): Retired.** The feature this note describes was removed in the round-2 redesign (see docs/plans/phases/ensemble-canvas.md). Kept for history; do not use it as current guidance. A grep of `Sources/` finds no `forkpty` use. **Exception (2026-11-06):** findings 3 and 4 stay current for the adapter probe runner (`ConductorProbeProcessRunner`).
 
 - Applies to: `Sources/RafuApp/Conductor/` (adapter `invocation(...)` and
   `RafuConductorEnvironment`), `Sources/RafuApp/Terminal/`
@@ -8,7 +8,8 @@
   phase that spawns an external agent CLI through the PTY rather than the
   login shell
 - Last verified: Swift 6.2 / macOS 26 / SwiftTerm 1.14.0 / 2026-07-24 (phase C0);
-  finding 3 added 2026-07-26 (C8-02 integration)
+  finding 3 added 2026-07-26 (C8-02 integration); finding 4 added
+  2026-11-06 (Swift 6.4.2 / macOS 27.0.1)
 
 ## Rule or observed behavior
 
@@ -155,6 +156,41 @@ removing the wait did not cost the child's real exit status.
 `kill -9` the helper, clear the lock (`./script/await_build_lock.sh`), and
 report the blocking frame rather than retrying.
 
+### 4. Never capture a bounded child's output into a regular file
+
+**Rule.** Never point a bounded child's stdout/stderr at a regular file in a
+runner that enforces the bound by polling. A file has no back-pressure and
+no `SIGPIPE`; a starved poller or a dead parent lets the child fill the disk
+(107 GB in 8 min, 2026-11-06). Capture through a pipe read off the
+cooperative pool, kill at the cap from the reader, and install
+`withTaskCancellationHandler` so a time-limit cancellation signals the child
+immediately.
+
+**Incident.** The `/usr/bin/yes` test `conductorProbeRunnerCapsOutput`
+(cap 64 bytes) wrote `$TMPDIR/rafu-conductor-probe-<UUID>/stdout` to
+107,783,282,880 bytes of `y\n` in 8 minutes. Every concurrent build and
+test failed with `ENOSPC`. Causes, all in the old runner:
+
+- The child wrote to a file from `FileHandle(forWritingTo:)`, so it wrote
+  at disk speed and never blocked.
+- Only a 20 ms `Task.sleep` poll loop on the cooperative pool checked the
+  file size. Three concurrent SwiftPM suites saturated the pool, and the
+  runner itself blocks pool threads with `usleep`, so the poll did not run.
+- There was no `withTaskCancellationHandler`. A `.timeLimit` cancellation
+  only set a flag that the starved task did not read.
+- If the test host died, the cleanup `defer` did not run, and a child that
+  writes to a file gets no `SIGPIPE`.
+
+**Fix.** `ConductorProbePipeCapture` and `ConductorProbeOutputCollector`
+(`Sources/RafuApp/Conductor/Adapters/ConductorProbeOutputCapture.swift`).
+Both streams are pipes. A `DispatchSourceRead` on a private serial queue
+reads them and the collector sends `SIGKILL` the moment the byte count
+passes the cap. The poll loop now only enforces the deadline.
+`C3AdapterProcess.run` delegates to the same runner. Do not use
+`FileHandle.readabilityHandler` with a later non-blocking drain: setting the
+handler to `nil` does not wait for a handler that is running, and
+`availableData` raises an Objective-C exception on `EAGAIN`.
+
 ## Why it matters
 
 C1's entire mission is spawning through the `TerminalProcessSpec` seam, and
@@ -169,6 +205,12 @@ cost hours to rediscover, and finding 2 has a security-shaped wrong answer
 - Finding 1: a real PTY spawn test run 3× under plain `swift test` hung at
   30 s each time with `shellPid` set and `running == true`; the same test
   passed in isolation and under `swift test --no-parallel`.
+- Finding 4: the 2026-11-06 incident above; the regression tests are
+  `conductorProbeRunnerCapsOutput`,
+  `conductorProbeRunnerKeepsBoundedOutputUnderCap`,
+  `conductorProbeRunnerRejectsBoundedOutputOverCap`, and
+  `conductorProbeOutputCollectorKillsAtCapWithoutPolling` in
+  `Tests/RafuAppTests/Conductor/ClaudeCodeAdapterTests.swift`.
 - Finding 2: read directly from the pinned SwiftTerm 1.14.0 sources —
   `Terminal.swift:5872` (commented-out `PATH`) and
   `LocalProcess.swift:499-511` (`argv[0]` insertion).
@@ -191,6 +233,9 @@ rg -n "/bin/sh|bash -c|NSTask" Sources/RafuApp/Conductor   # expect 0 hits
 # No unbounded child waits (finding 3) — reap via the bounded helper.
 # `| grep -v //` so the comments explaining the ban do not match themselves:
 rg -n "waitUntilExit" Sources/RafuApp/Conductor | grep -v "//"   # expect 0 hits
+
+# No file-backed capture of a bounded child (finding 4):
+rg -n "FileHandle\(forWritingTo" Sources/RafuApp/Conductor   # expect 0 hits
 ```
 
 ## Related code, ADRs, and phases
