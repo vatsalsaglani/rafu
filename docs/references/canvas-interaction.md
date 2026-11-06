@@ -64,7 +64,9 @@ pending).
   cards (in content, Escape goes to the content).
 - **Zoom:** one 36 pt bar with a zoom capsule. Cmd-9 zooms to fit all cards,
   Opt-Cmd-9 fits the selection, Cmd-0 is actual size (100%); the percentage
-  menu also offers 50% and 200%. Viewport scale is 10% to 400%.
+  menu also offers 50% and 200%. Viewport scale is 25% to 400% by hand
+  (buttons, menu, pinch, scroll); Fit may reach 10%, and a stored 10%
+  viewport still decodes (UX Round A, below).
   Cmd + scroll zooms about the pointer.
 - **Return to Board is Ctrl-Tab**, handled by a local key monitor. Ctrl-Tab is
   also Next Tab in the app commands. The monitor wins only while a card's
@@ -406,6 +408,8 @@ may land on them.
 an explicit centre (a drop). The Add menu's `creationCenter`, the toolbar add,
 and the centre-of-view cascade keep their exact position. A batch of files
 still cascades from the drop point and its ghost is the whole-board highlight.
+(Superseded 2026-11-07 by UX Round A: a batch lands in a grid from
+`batchRects`, whose anchor is this `freeRect`, and draws one ghost per file.)
 
 Verification: `swift test --filter CanvasDropPlacementTests`. Manual checks:
 drag a History chat onto an agent terminal card (the ghost moves beside it and
@@ -1000,6 +1004,113 @@ Build and unit tests only; the card was not driven with a real pointer.
   Show Source colours Markdown only; resize and zoom faces keep the borders;
   a save in the editor refreshes the card; Reduce Motion and VoiceOver; reopen
   the board and see Preview again with no new keys in the `.rafuensemble` file.
+
+## 2026-11-07: UX Round A — arrival, zoom floor, overview, drop grammar, landing, seeds
+
+Applies to `CanvasArrival`, `CanvasMinimapLayout`, `CanvasSeedLayout`
+(`Canvas/Domain/`), `CanvasBoardDropGeometry.batchRects`, `CanvasDropPreview`
+(`.cards`, `glyph`, `name`), `CanvasDropAcceptance`, `CanvasBoardState`
+(`arriveIfNeeded`, `landing`, `withoutCreationMotion`), `CanvasZoomCapsule`,
+`CanvasMinimapView`, `CanvasSeedLayer`, `CanvasSetDownRing`, and the board view.
+Last verified: Apple Swift 6.4.2, macOS 27.0.1, by build and the parallel
+suite. Real mouse drags, trackpad pinches and haptics were not driven; the
+manual checks below are open.
+
+**Arrival (B1).** A board fits on its first non-zero `visibleSize` when it
+opens zoomed out below 25 % or with no card in view. A card is "in view" when
+at least 25 % of its width and 25 % of its height show. A board with a card in
+view keeps the viewport the user parked; an empty board below 25 % resets to
+the identity viewport. This runs once per `CanvasBoardState` object
+(`arrivalPending`), so open, window restore and reload (a new object; the view
+hands the size over in `onChange(of: ObjectIdentifier(board))`) all arrive; a
+later resize never refits. **Arrival never dirties the board:**
+`applyArrivalViewport` writes the viewport and moves `changeStamp` so views
+redraw, but does not set `isDirty` or request a save, so opening a
+`.rafuensemble` file never makes it Git-modified. The next real edit saves the
+fitted viewport with it.
+
+**Zoom floor (B2).** `CanvasZoomMetrics.interactiveMinimumScale` is 25 %.
+Buttons, menu, pinch and scroll clamp with `interactiveClamped(_:from:)`;
+`fitAll`, `zoomToSelection` and `zoomToCard` keep the 10 % floor, and
+`CanvasViewport.isValid` still admits 10 %, so old files decode. A board that
+Fit left below 25 % does not jump: hand zoom cannot go further out than the
+current scale, and zooming in is smooth. Zoom Out (capsule and menu) disables
+at the floor. The capsule shows `Fit` while any card is out of view
+(`CanvasArrival.anyCardOutOfView`, O(cards) on each viewport change).
+
+**Overview (B3).** A 140 × 90 pt vector map: one `Canvas` that fills card
+rects and strokes the visible board, from `CanvasMinimapLayout` (the union of
+the cards and the visible board, padded 10 %, aspect kept). The board and
+viewport are read in `body`, not in the renderer (the dot-grid rule). No
+bitmap, no per-card view, no shadow. It shows while the pointer is over the
+zoom corner, while a pan runs (drag or scroll), for 1.5 s after the last pan
+step (`CanvasInteractionState.holdOverviewAfterPan`, one sleeping task,
+restarted per step), or always with **Ensemble ▸ Show Overview** (⌃⌘M,
+`@AppStorage("canvasOverviewPinned")`, also in the capsule menu). It hides
+during a drop and on an empty board. A drag in the overview keeps the mapping
+from its start, because moving the board changes the mapped area. ⌥⌘M was not
+used: it is the system's Minimize All; ⌃⌥M (no ⌘) was not used because a menu
+key equivalent without ⌘ takes the key from a focused terminal card.
+
+**Drop grammar (B5).** Accept and refuse now differ by shape, glyph and
+cursor, not by hue alone:
+
+- Accept: a solid accent ring (1.5 pt; 2.5 pt under Increase Contrast) with an
+  8 % fill, the kind's glyph (`doc`, `photo`, `terminal`, `doc.on.doc`) and the
+  name (`lastPathComponent`, or "Chat"/"Terminal"; never content; hidden below
+  120 pt of ghost width), and the accent label pill below the ghost.
+- Batch: one ghost per file (`.cards`), at most 24 drawn, the name and pill on
+  the first only. The grid is `batchRects`: the anchor is G10's `freeRect` for
+  the first file; the rest is a plain 3-column grid with `placementGap`, no
+  search. The drop (`placeCanvasDroppedFiles`) calls the same function, so the
+  ghosts and the landing match. A promise drag that does not name its files
+  uses file sizes on hover; the drop uses the real kinds (all file and image
+  cards share one default size, so they agree today).
+- Refuse (warn tone): no ghost, no outline; a 3 pt `warning` bar on the
+  board's top edge and an `xmark.octagon` pill below the tool palette
+  (`CanvasBoardTopOverlayMetrics.belowPalette`).
+- **A refusal no longer performs.** `CanvasDropAcceptance` maps a warn preview
+  to `.forbidden` in the SwiftUI delegate (`dropUpdated`) and to `[]` in the
+  AppKit bridge (`draggingUpdated`), so the cursor shows "not allowed" and the
+  drop never runs. The perform-time notice stays for refusals the hover cannot
+  see (an unnamed promise file, a symlink to outside). Because a lexical hover
+  refusal now blocks the drop, the hover also accepts paths inside the root
+  with symlinks resolved (`Context.resolvedRootPath`, a few `lstat` calls per
+  hover tick on the main actor).
+- Hover cost limit: one `obstacles` array (at most 100 rects), one `freeRect`
+  (at most 2,400 × 100 comparisons), one O(N) grid, no decode, no image, and no
+  allocation beyond the rect array.
+
+**Set-down (S1).** A drop sets `CanvasBoardState.landing` (ids and a token):
+`add(center:)` for one card, `placeCanvasDroppedFiles` for a batch (which now
+also uses the `nodeCreate` spring). `CanvasSetDownRing` draws one hairline ring
+per landed card (at most 12) that grows 6 pt and fades in 0.24 s, then clears
+`landing` after 300 ms. Reduce Motion draws no ring. One alignment haptic on
+channel `landing` plays for a user drop that landed a card: in
+`CanvasFileDrop.perform` (sync paths, when the landing token changed) and in
+`placeCanvasDroppedFiles`; the channel throttles, so a batch plays once. A tab
+forwarded to the editor group, or a refusal notice, plays none. Keyboard
+creation (N, T) runs inside `withoutCreationMotion`: no spring, no transition.
+
+**Seeds (O1/S3).** An empty board without a drop preview shows three dashed
+seeds on the board (Note, Terminal, Drop files or a chat) at the size and
+place of the card each makes (`CanvasSeedLayout`, centred in the visible
+board; one row, or two when the row is wider than the visible board), and the
+caption "Double-click the board for more". Note and Terminal add their card at
+the seed's centre (pointer path, with the spring); Drop opens the Add palette.
+Seeds are plain buttons (Full Keyboard Access, VoiceOver "Add Note, Shortcut
+N"); solid under Increase Contrast; title only when zoomed far out. The old
+tip panel and its `canvasEmptyBoardTipDismissed` default are gone.
+
+Verification: `swift test --filter "CanvasArrivalTests|CanvasMinimapLayoutTests|CanvasSeedLayoutTests|CanvasBatchDropPlacementTests|CanvasDropActionResolveTests|CanvasBoardArrivalTests|CanvasDropHoverSafetyTests|EnsembleBarRedesignTests|TerminalAnsiPaletteTests"`.
+Manual checks (Rafu Lightning, Indigo and Khadi, a second window): a board
+saved at 10 % opens fitted, and a board with a parked visible card keeps its
+view; Zoom Out stops at 25 % and disables; `Fit` appears only with a card out
+of view; the overview on capsule hover, during and after a pan, pinned with
+⌃⌘M, and not during a drop; accept versus refuse drags (ring, glyph and name
+versus bar, pill and not-allowed cursor; a refused release does nothing); 11
+screenshots land in the ghost grid with one haptic; N and T add with no
+motion; seeds with Tab and VoiceOver; Increase Contrast and Reduce Motion.
 
 ## Why it matters
 

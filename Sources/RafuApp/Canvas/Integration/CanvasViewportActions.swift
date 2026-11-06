@@ -67,7 +67,10 @@ extension CanvasBoardState {
         zoom(toScale: viewport.scale * factor)
     }
 
+    /// Button, menu and shortcut zoom stop at the hand-zoom floor (25 %).
+    /// Fit, Zoom to Selection and Zoom to Card may go lower (10 %).
     func zoom(toScale scale: Double) {
+        let scale = CanvasZoomMetrics.interactiveClamped(scale, from: viewport.scale)
         setViewport(
             animated: CanvasZoomMetrics.viewport(scaling: viewport, to: scale, in: visibleSize),
             animation: RafuMotion.zoomStep)

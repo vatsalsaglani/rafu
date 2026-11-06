@@ -184,6 +184,18 @@ holds.
   `NavigatorPanelHeaderPlacementTests` maps every `WorkspaceNavigatorMode` to
   its panel source (an exhaustive switch, so a new rail mode must join the
   check) and fails if a panel aligns its header by hand.
+- **Warning hue (UX Round A, 2026-11-07).** Indigo `warning` `#D4A24E` →
+  **`#E8894A`**; Khadi `warning` `#8F6A10` → **`#9E4A14`**; the palette
+  fallback and the AI theme prompt example follow Indigo. The old warning sat
+  2.9° (Indigo) and 5.4° (Khadi) of HSB hue from the gold accent, so an accept
+  surface and a warn surface differed in brightness only. The new values sit
+  10.8° and 13.6° from the accent, toward orange (the drop grammar adds shape,
+  glyph and cursor, so hue is not the only signal), and keep 4.5:1 on the app, elevated and card surfaces in both themes
+  (`RafuThemeTests.warningIsDistinctFromAccent`, `warningTextContrast`). ANSI
+  terminal yellow no longer follows `warning`: it derives from `git.modified`
+  first (Indigo `#D2B958`, Khadi `#8F6A10`), so terminal output keeps a yellow
+  (`TerminalAnsiPaletteTests`). Every `palette.warning` surface (agent "needs
+  you" pill, notices, Git chips, the drop refusal bar) changes hue by design.
 
 ## Alternatives considered
 

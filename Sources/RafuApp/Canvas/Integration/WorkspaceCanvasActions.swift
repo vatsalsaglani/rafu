@@ -436,39 +436,37 @@ extension WorkspaceSession {
     }
 
     /// Adds one card per workspace-relative path as one edit, then selects
-    /// them. One file is centred on the drop point, or on the nearest free
-    /// spot when that would cover a card, exactly where its hover ghost was
-    /// (`CanvasBoardDropGeometry.freeRect`). A batch cascades
-    /// down and right from the drop point.
+    /// them. The cards land exactly where their hover ghosts were
+    /// (`CanvasBoardDropGeometry.batchRects`): the first on the drop point,
+    /// or on the nearest free spot when that would cover a card
+    /// (`freeRect`), the rest in a 3-column grid from it. They land with the
+    /// set-down ring and one haptic (UX Round A, S1).
     private func placeCanvasDroppedFiles(
         _ paths: [String], on board: CanvasBoardState, at location: CGPoint
     ) throws {
         guard !paths.isEmpty else { return }
         let point = CanvasBoardDropGeometry.boardPoint(location, viewport: board.viewport)
         let obstacles = CanvasBoardDropGeometry.obstacles(in: board.cards)
-        let cards = paths.enumerated().map { index, path in
-            let content = CanvasDroppedFileKind.content(forRelativePath: path)
-            let rect: CanvasRect
-            if paths.count == 1 {
-                rect = CanvasBoardDropGeometry.freeRect(
-                    for: content, centeredAt: point, avoiding: obstacles)
-            } else {
-                rect = CanvasRect(
-                    x: min(50_000, max(-50_000, point.x + Double(index) * 24)),
-                    y: min(50_000, max(-50_000, point.y + Double(index) * 24)))
-            }
-            return CanvasCard(
+        let contents = paths.map(CanvasDroppedFileKind.content(forRelativePath:))
+        let rects = CanvasBoardDropGeometry.batchRects(
+            for: contents, centeredAt: point, avoiding: obstacles)
+        let cards = zip(paths, zip(contents, rects)).map { path, placed in
+            CanvasCard(
                 title: String(URL(fileURLWithPath: path).lastPathComponent.prefix(120)),
-                rect: rect, content: content)
+                rect: placed.1, content: placed.0)
         }
-        try board.edit { document in
-            guard document.cards.count + cards.count <= CanvasLimits.cards else {
-                throw CanvasError.capacity
+        try CanvasMotion.animateThrowing(RafuMotion.nodeCreate) {
+            try board.edit { document in
+                guard document.cards.count + cards.count <= CanvasLimits.cards else {
+                    throw CanvasError.capacity
+                }
+                document.cards.append(contentsOf: cards)
             }
-            document.cards.append(contentsOf: cards)
         }
         board.backToBoard()
         board.selection = Set(cards.map(\.id))
+        board.landing = CanvasLanding(ids: cards.map(\.id))
+        RafuHaptics.alignment(channel: CanvasLanding.hapticChannel)
     }
 
     @concurrent

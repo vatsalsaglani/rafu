@@ -15,14 +15,24 @@ nonisolated struct CanvasDropPreview: Equatable, Sendable {
         /// A directional split band, forwarded to the editor group under
         /// the board.
         case edge(EditorSplitEdge)
-        /// A generic whole-board highlight, for a multi-file batch or a
-        /// refusal with no single precise rect.
+        /// One ghost per card of a batch drop, in board-space units, in
+        /// the grid the drop uses (`CanvasBoardDropGeometry.batchRects`).
+        case cards([CGRect])
+        /// A whole-board highlight: a refusal (warn tone, drawn as a bar on
+        /// the board's top edge and a pill), or a tab moving into the
+        /// editor group under the board (accept tone).
         case board
     }
 
     let label: String
     let tone: Tone
     let shape: Shape
+    /// An SF Symbol for the ghost (`doc`, `photo`, `terminal`,
+    /// `doc.on.doc`). Nil for a refusal.
+    var glyph: String?
+    /// What lands: a file's last path component or a short noun. Never
+    /// file content. Nil when the drag does not name its file yet.
+    var name: String?
 
     /// Whether writing `next` over `current` is a real change.
     /// `CanvasBoardState.updateDropPreview` checks this before it writes, so
@@ -36,9 +46,10 @@ nonisolated struct CanvasDropPreview: Equatable, Sendable {
 /// Resolves what a drop on an Ensemble board WOULD do, from the exact same
 /// rules the real drop uses (`CanvasBoardTabDrop.decide`,
 /// `CanvasBoardDropGeometry`, `CanvasDroppedFileKind.fits`), so a hover label
-/// and the drop it describes cannot disagree. A warn-tone result never
-/// changes whether the drop is ACCEPTED — the drop still runs and shows its
-/// existing error; this only previews which message that would be.
+/// and the drop it describes cannot disagree. A warn-tone result REFUSES
+/// the drop (UX Round A): the cursor shows "not allowed" and the drop does
+/// not run (`CanvasDropAcceptance`). Refusals the hover cannot see (an
+/// unnamed file, a symlink) still end in the drop's notice.
 nonisolated enum CanvasDropAction {
     /// A snapshot of board/session state the resolver needs but cannot read
     /// itself (this type is `nonisolated`; the board and session are
@@ -56,6 +67,9 @@ nonisolated enum CanvasDropAction {
         /// skips that check. The check is lexical (no symlink resolution on
         /// the main actor); the drop itself resolves symlinks.
         var rootPath: String?
+        /// `rootPath` with symlinks resolved, or nil when it is the same.
+        /// A file inside either path is inside the workspace.
+        var resolvedRootPath: String?
         /// The rects of the cards a dropped card must not cover
         /// (`CanvasBoardDropGeometry.obstacles`). The ghost lands where the
         /// card lands: on the nearest free position.
@@ -94,7 +108,8 @@ nonisolated enum CanvasDropAction {
                 urls, fromFilesTree: fromFilesTree, at: boardPoint, context: context)
         case .agentSession:
             return cardOrFullPreview(
-                label: "Resume chat in a new terminal", at: boardPoint, context: context)
+                label: "Resume chat in a new terminal", name: "Chat", at: boardPoint,
+                context: context)
         case .terminalGroup:
             return terminalMovePreview(at: boardPoint, context: context)
         case .tab:
@@ -106,7 +121,7 @@ nonisolated enum CanvasDropAction {
     /// A terminal/web-sized ghost card at `boardPoint`, or the full-board
     /// warning when the board has no room.
     private static func cardOrFullPreview(
-        label: String, at boardPoint: CGPoint, context: Context
+        label: String, name: String, at boardPoint: CGPoint, context: Context
     ) -> CanvasDropPreview {
         guard !context.boardFull else {
             return CanvasDropPreview(label: "This Ensemble is full", tone: .warn, shape: .board)
@@ -114,7 +129,8 @@ nonisolated enum CanvasDropAction {
         let rect = CanvasBoardDropGeometry.freeRect(
             for: .terminal(groupID: TerminalGroupID()), centeredAt: boardPoint,
             avoiding: context.occupied)
-        return CanvasDropPreview(label: label, tone: .accept, shape: .card(rect.cgRect))
+        return CanvasDropPreview(
+            label: label, tone: .accept, shape: .card(rect.cgRect), glyph: "terminal", name: name)
     }
 
     /// Shared by a Terminals-panel row (`.terminalGroup`) and a one-pane
@@ -133,7 +149,8 @@ nonisolated enum CanvasDropAction {
                 label: "Needs a single-pane terminal", tone: .warn, shape: .board)
         }
         return cardOrFullPreview(
-            label: "Move terminal here — keeps running", at: boardPoint, context: context)
+            label: "Move terminal here — keeps running", name: "Terminal", at: boardPoint,
+            context: context)
     }
 
     /// Mirrors `WorkspaceSession.addCanvasDroppedFiles`: a full board
@@ -147,21 +164,35 @@ nonisolated enum CanvasDropAction {
         guard CanvasDroppedFileKind.fits(count: count, existing: context.cardCount) else {
             return CanvasDropPreview(label: "This Ensemble is full", tone: .warn, shape: .board)
         }
-        let outside = fromFilesTree ? [] : outsideFiles(urls, rootPath: context.rootPath)
+        let outside =
+            fromFilesTree
+            ? []
+            : outsideFiles(
+                urls, rootPath: context.rootPath, resolvedRootPath: context.resolvedRootPath)
         if outside.contains(where: { !CanvasDroppedFileKind.isImage($0) }) {
             return CanvasDropPreview(
                 label: "Needs a file inside this workspace", tone: .warn, shape: .board)
         }
         let copies = !outside.isEmpty
         if urls.count > 1 {
+            let contents = urls.map { url in
+                url == unknownFileURL
+                    ? CanvasCardContent.file(path: "")
+                    : CanvasDroppedFileKind.content(forRelativePath: url.lastPathComponent)
+            }
+            let rects = CanvasBoardDropGeometry.batchRects(
+                for: contents, centeredAt: boardPoint, avoiding: context.occupied
+            ).map(\.cgRect)
+            let firstName = urls[0] == unknownFileURL ? nil : urls[0].lastPathComponent
             guard copies else {
                 return CanvasDropPreview(
-                    label: "Add \(urls.count) cards", tone: .accept, shape: .board)
+                    label: "Add \(urls.count) cards", tone: .accept, shape: .cards(rects),
+                    glyph: "doc.on.doc", name: firstName)
             }
             let allImages = urls.allSatisfy(CanvasDroppedFileKind.isImage)
             return CanvasDropPreview(
                 label: "Copy and add \(urls.count) \(allImages ? "image cards" : "cards")",
-                tone: .accept, shape: .board)
+                tone: .accept, shape: .cards(rects), glyph: "doc.on.doc", name: firstName)
         }
         guard let url = urls.first else {
             return CanvasDropPreview(label: "Add cards", tone: .accept, shape: .board)
@@ -174,16 +205,26 @@ nonisolated enum CanvasDropAction {
             for: content, centeredAt: boardPoint, avoiding: context.occupied)
         let label =
             copies ? "Copy and add image card" : isImage ? "Add image card" : "Open as file card"
-        return CanvasDropPreview(label: label, tone: .accept, shape: .card(rect.cgRect))
+        return CanvasDropPreview(
+            label: label, tone: .accept, shape: .card(rect.cgRect),
+            glyph: isImage ? "photo" : "doc",
+            name: url == unknownFileURL ? nil : url.lastPathComponent)
     }
 
-    /// The named files that are not lexically inside `rootPath`. Unknown
-    /// placeholders and a missing root give none.
-    static func outsideFiles(_ urls: [URL], rootPath: String?) -> [URL] {
+    /// The named files that are not lexically inside `rootPath` nor inside
+    /// `resolvedRootPath` (the root with symlinks resolved, so a workspace
+    /// opened through a symlink does not refuse the real paths Finder
+    /// sends). Unknown placeholders and a missing root give none.
+    static func outsideFiles(
+        _ urls: [URL], rootPath: String?, resolvedRootPath: String? = nil
+    ) -> [URL] {
         guard let rootPath else { return [] }
-        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        let prefixes = [rootPath, resolvedRootPath].compactMap { $0 }.map {
+            $0.hasSuffix("/") ? $0 : $0 + "/"
+        }
         return urls.filter { url in
-            url != unknownFileURL && !url.standardizedFileURL.path.hasPrefix(prefix)
+            let path = url.standardizedFileURL.path
+            return url != unknownFileURL && !prefixes.contains { path.hasPrefix($0) }
         }
     }
 
@@ -211,5 +252,23 @@ nonisolated enum CanvasDropAction {
         case .top: "up"
         case .bottom: "down"
         }
+    }
+}
+
+/// What a hovering drag is told (UX Round A, B5). Both drop halves map this
+/// to their own type: SwiftUI's `DropOperation` and AppKit's
+/// `NSDragOperation` (`[]` for both refusals). A warn-tone preview refuses
+/// the drop, so the cursor shows "not allowed" and the drop never runs.
+nonisolated enum CanvasDropAcceptance: Equatable, Sendable {
+    case copy
+    /// The board does not take this kind of drag at all.
+    case cancel
+    /// The board takes this kind of drag, but not this one (full, outside
+    /// the workspace, already on a board, more than one pane).
+    case forbidden
+
+    static func resolve(valid: Bool, preview: CanvasDropPreview?) -> Self {
+        guard valid else { return .cancel }
+        return preview?.tone == .warn ? .forbidden : .copy
     }
 }

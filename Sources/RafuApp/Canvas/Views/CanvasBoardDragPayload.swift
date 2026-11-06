@@ -213,6 +213,49 @@ nonisolated enum CanvasBoardDropGeometry {
         return desired
     }
 
+    /// The columns of a batch drop's grid.
+    static let batchColumns = 3
+
+    /// Where a batch of dropped cards lands (UX Round A, B5): a grid of
+    /// `batchColumns` columns. The anchor (cell 0) is
+    /// `freeRect(contents[0], center, obstacles)`, so a batch starts where a
+    /// single drop would. Cell (c, r) is at anchor + (c × (w + gap),
+    /// r × (h + gap)), with w × h the largest default size in the batch.
+    /// Cells after the first do not search; they are a plain grid, so the
+    /// cost is one `freeRect` plus O(N). Clamped to ±50,000. The hover ghosts
+    /// and the drop both call this with the same inputs.
+    static func batchRects(
+        for contents: [CanvasCardContent], centeredAt center: CGPoint,
+        avoiding obstacles: [CanvasRect]
+    ) -> [CanvasRect] {
+        guard let first = contents.first else { return [] }
+        let anchor = freeRect(for: first, centeredAt: center, avoiding: obstacles)
+        var cellWidth = 0.0
+        var cellHeight = 0.0
+        for content in contents {
+            let size = defaultSize(for: content)
+            cellWidth = max(cellWidth, Double(size.width))
+            cellHeight = max(cellHeight, Double(size.height))
+        }
+        var rects: [CanvasRect] = []
+        rects.reserveCapacity(contents.count)
+        for (index, content) in contents.enumerated() {
+            guard index > 0 else {
+                rects.append(anchor)
+                continue
+            }
+            let size = defaultSize(for: content)
+            let column = Double(index % batchColumns)
+            let row = Double(index / batchColumns)
+            rects.append(
+                CanvasRect(
+                    x: min(50_000, max(-50_000, anchor.x + column * (cellWidth + placementGap))),
+                    y: min(50_000, max(-50_000, anchor.y + row * (cellHeight + placementGap))),
+                    width: Double(size.width), height: Double(size.height)))
+        }
+        return rects
+    }
+
     private static func collides(_ rect: CanvasRect, with obstacles: [CanvasRect]) -> Bool {
         let gap = placementGap
         for other in obstacles {

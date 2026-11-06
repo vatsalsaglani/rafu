@@ -28,8 +28,26 @@ nonisolated enum CanvasZoomFace: Equatable, Sendable {
 }
 
 nonisolated enum CanvasZoomMetrics {
+    /// The smallest stored scale (`CanvasViewport.isValid`) and the floor of
+    /// Zoom to Fit, so a large board still fits.
     static let minimumScale = 0.1
+    /// The floor of hand zoom: buttons, menu, pinch and scroll stop here
+    /// (UX Round A, B2). Below it every card is a silhouette.
+    static let interactiveMinimumScale = 0.25
     static let maximumScale = 4.0
+
+    /// `scale` clamped to the hand-zoom range (25 % to 400 %). A board that
+    /// Fit left below the floor (`current` < 25 %) does not jump: hand zoom
+    /// cannot go further out than `current`, and zooming in is smooth.
+    static func interactiveClamped(_ scale: Double, from current: Double) -> Double {
+        let floor = min(interactiveMinimumScale, max(minimumScale, current))
+        return min(maximumScale, max(floor, scale))
+    }
+
+    /// True when hand zoom cannot go further out from `scale`.
+    static func isAtInteractiveFloor(_ scale: Double) -> Bool {
+        scale <= interactiveMinimumScale + 0.001
+    }
     static let minimumTitleScreenPoints = 11.0
     static let baseTitlePoints = 13.0
 

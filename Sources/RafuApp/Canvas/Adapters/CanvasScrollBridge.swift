@@ -110,8 +110,15 @@ struct CanvasScrollBridge: NSViewRepresentable {
                 return []
             }
             let point = dropPoint(sender)
-            drop.update(drop.preview(content, point, bounds.size))
-            return .copy
+            let preview = drop.preview(content, point, bounds.size)
+            drop.update(preview)
+            // A warn-tone preview refuses the drop (UX Round A): AppKit
+            // shows no copy badge and never calls perform. The preview stays
+            // drawn until the drag leaves or ends, so the reason is visible.
+            switch CanvasDropAcceptance.resolve(valid: true, preview: preview) {
+            case .copy: return .copy
+            case .cancel, .forbidden: return []
+            }
         }
 
         override func draggingExited(_ sender: NSDraggingInfo?) {

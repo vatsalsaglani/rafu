@@ -97,6 +97,17 @@ final class CanvasBoardState: Identifiable {
     /// Board-space point for the next added card, set by the Add popover and
     /// consumed by `add`. Any other path to add a card clears it first.
     @ObservationIgnored var creationCenter: CGPoint?
+    /// False while a keyboard add (N, T) runs, so its card appears with no
+    /// spring (`withoutCreationMotion`). Never saved.
+    @ObservationIgnored private(set) var creationIsAnimated = true
+    /// True until the board view first reports a non-zero size; then
+    /// `arriveIfNeeded` fits a board that would open with nothing in view
+    /// (UX Round A, B1). A new board object (open, restore, reload) starts
+    /// true.
+    @ObservationIgnored var arrivalPending = true
+    /// The cards that just landed by a drop. The board view draws one
+    /// set-down ring around each and clears it (S1). View state, never saved.
+    var landing: CanvasLanding?
     @ObservationIgnored private var lastCreatedOrigin: CGPoint?
     @ObservationIgnored var noteSnapshots: [CanvasCardID: @MainActor () throws -> String] = [:]
     @ObservationIgnored var requestSave: (@MainActor () -> Void)?
@@ -250,13 +261,15 @@ final class CanvasBoardState: Identifiable {
     }
 
     /// Adds a card. With `center` (board units) the card appears centred on
-    /// that point. Otherwise it appears at the middle of the visible board,
-    /// stepping 24 pt from the previous new card; a board that has not been laid
-    /// out yet keeps the older cascade. Returns the new card's id.
+    /// that point, and lands with the set-down ring (`landing`). Otherwise it
+    /// appears at the middle of the visible board, stepping 24 pt from the
+    /// previous new card; a board that has not been laid out yet keeps the
+    /// older cascade. `animated` false (or `withoutCreationMotion`) skips the
+    /// creation spring. Returns the new card's id.
     @discardableResult
-    func add(title: String, content: CanvasCardContent, center: CGPoint? = nil) throws
-        -> CanvasCardID
-    {
+    func add(
+        title: String, content: CanvasCardContent, center: CGPoint? = nil, animated: Bool = true
+    ) throws -> CanvasCardID {
         guard cards.count < CanvasLimits.cards else { throw CanvasError.capacity }
         // An explicit centre is a drop: it lands on the nearest free spot,
         // where its ghost was. A menu's `creationCenter` is exact.
@@ -296,15 +309,55 @@ final class CanvasBoardState: Identifiable {
             rect.y = min(50_000, max(-50_000, rect.y.rounded()))
         }
         let card = CanvasCard(title: title, rect: rect, content: content)
-        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        try withAnimation(
-            RafuMotion.resolve(
-                RafuMotion.nodeCreate, reduceMotion: reduceMotion, reduced: RafuMotion.reducedFade)
-        ) {
+        if animated, creationIsAnimated {
+            let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            try withAnimation(
+                RafuMotion.resolve(
+                    RafuMotion.nodeCreate, reduceMotion: reduceMotion,
+                    reduced: RafuMotion.reducedFade)
+            ) {
+                try edit { $0.cards.append(card) }
+            }
+        } else {
+            // Keyboard creation (N, T) is immediate: no spring, no transition.
             try edit { $0.cards.append(card) }
         }
+        if isDrop { landing = CanvasLanding(ids: [card.id]) }
         select([card.id])
         return card.id
+    }
+
+    /// Runs `body` (a keyboard add) so the card it adds appears with no
+    /// motion. The add paths are synchronous, so the flag never outlives it.
+    func withoutCreationMotion(_ body: () -> Void) {
+        creationIsAnimated = false
+        defer { creationIsAnimated = true }
+        body()
+    }
+
+    /// Fits a board that just opened with nothing to look at: zoomed out past
+    /// the hand-zoom floor, or with every card out of view (UX Round A, B1).
+    /// Runs once per board object, on the first non-zero `visibleSize`. A
+    /// board with a card in view keeps the viewport the user parked.
+    func arriveIfNeeded() {
+        guard arrivalPending, visibleSize.width > 0, visibleSize.height > 0 else { return }
+        arrivalPending = false
+        let rects = document.cards.map(\.rect)
+        guard
+            CanvasArrival.needsFit(
+                cards: rects, viewport: document.viewport, visible: visibleSize)
+        else { return }
+        applyArrivalViewport(CanvasArrival.fittedViewport(cards: rects, visible: visibleSize))
+    }
+
+    /// Writes the arrival viewport WITHOUT marking the board dirty and
+    /// without a save: opening a `.rafuensemble` file board must never make
+    /// it Git-modified. The change stamp still moves so views redraw; the
+    /// next real edit saves the fitted viewport with it.
+    private func applyArrivalViewport(_ value: CanvasViewport) {
+        guard value.isValid, value != document.viewport else { return }
+        document.viewport = value
+        changeStamp &+= 1
     }
 
     func removeSelection() throws {
@@ -746,4 +799,21 @@ nonisolated struct CanvasBoardNotice: Identifiable, Equatable, Sendable {
     }
 
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+}
+
+/// The cards one drop just landed, for the set-down ring (UX Round A, S1).
+/// A new token restarts the ring, also for the same ids.
+nonisolated struct CanvasLanding: Equatable, Sendable {
+    /// The haptic channel of a landing; it throttles, so a batch plays once.
+    static let hapticChannel = "landing"
+    /// The most rings one landing draws.
+    static let maximumRings = 12
+
+    let ids: [CanvasCardID]
+    let token: UUID
+
+    init(ids: [CanvasCardID], token: UUID = UUID()) {
+        self.ids = ids
+        self.token = token
+    }
 }

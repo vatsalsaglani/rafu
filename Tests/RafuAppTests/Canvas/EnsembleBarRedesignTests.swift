@@ -15,7 +15,10 @@ struct EnsembleBarRedesignTests {
         // The rotor replaces the List's enumerable path through the cards.
         #expect(canvas.contains(".accessibilityRotor(\"Cards\")"))
         #expect(canvas.contains(".accessibilityRotorEntry(id: card.id, in: cardRotorNamespace)"))
-        #expect(canvas.contains("Image(systemName: CanvasBoardState.ensembleSymbol)"))
+        // UX Round A: an empty board shows seeds on the board, not a tip panel.
+        #expect(canvas.contains("CanvasSeedLayer(board: board, session: session"))
+        #expect(!canvas.contains("emptyBoardTip"))
+        #expect(!canvas.contains("canvasEmptyBoardTipDismissed"))
         #expect(CanvasBoardState.ensembleSymbol == "circle.hexagongrid")
         let bar = try Self.source("Sources/RafuApp/Canvas/Views/CanvasBar.swift")
         #expect(!bar.contains("CanvasModeControl"))
@@ -139,6 +142,28 @@ struct EnsembleBarRedesignTests {
         #expect(cardSource.contains(".opacity(isHovering || isFocused ? 1 : 0)"))
         // One tap handler: double-click renames without delaying a click.
         #expect(cardSource.contains("TabClickIntent.current() == .selectAndRename"))
+    }
+
+    @Test("The zoom capsule offers Fit and Show Overview; the Ensemble menu has Show Overview")
+    func zoomCapsuleFitAndOverview() throws {
+        let bar = try Self.source("Sources/RafuApp/Canvas/Views/CanvasBar.swift")
+        let capsule = try #require(bar.range(of: "struct CanvasZoomCapsule: View"))
+        let capsuleSource = String(bar[capsule.lowerBound...])
+        #expect(capsuleSource.contains("Button(\"Fit\") { board.fitAll() }"))
+        #expect(capsuleSource.contains("CanvasArrival.anyCardOutOfView("))
+        #expect(capsuleSource.contains("Toggle(\"Show Overview\", isOn: $overviewPinned)"))
+        #expect(capsuleSource.contains("CanvasZoomMetrics.isAtInteractiveFloor("))
+        let commands = try Self.source("Sources/RafuApp/Canvas/Views/CanvasCommands.swift")
+        #expect(commands.contains("Toggle(\"Show Overview\", isOn: $overviewPinned)"))
+        #expect(commands.contains(".keyboardShortcut(\"m\", modifiers: [.control, .command])"))
+        // No new shadow in the Round A board views (two-shadow budget).
+        for path in [
+            "Sources/RafuApp/Canvas/Views/CanvasMinimapView.swift",
+            "Sources/RafuApp/Canvas/Views/CanvasSeedLayer.swift",
+            "Sources/RafuApp/Canvas/Views/CanvasSetDownRing.swift",
+        ] {
+            #expect(!(try Self.source(path)).contains(".shadow("), "\(path)")
+        }
     }
 
     private static func root(file: StaticString = #filePath) -> URL? {

@@ -214,7 +214,7 @@ struct CanvasToolPalette: View {
             return true
         }
         if let kind = CanvasBoardKeyMap.monitorAddKind(for: character) {
-            kind.perform(on: board, session: session)
+            kind.perform(on: board, session: session, animated: false)
             return true
         }
         return false

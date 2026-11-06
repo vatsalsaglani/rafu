@@ -19,6 +19,13 @@ enum RafuMotion {
     static let lift: Animation = .easeOut(duration: 0.12)
     static let setDown: Animation = .easeOut(duration: 0.16)
     static let resizeReturn: Animation = .spring(response: 0.25, dampingFraction: 0.85)
+    /// The set-down ring of a dropped card (UX Round A, S1): one hairline
+    /// ring that grows by `landingRingSpread` points and fades out. Reduce
+    /// Motion draws no ring.
+    static let landingRing: Animation = .easeOut(duration: 0.24)
+    static let landingRingSpread: CGFloat = 6
+    /// How long the overview stays after a pan ends (UX Round A, B3).
+    static let overviewPanHold: Duration = .milliseconds(1_500)
 
     // Connections and edges.
     static let targetHighlight: Animation = .easeOut(duration: 0.10)

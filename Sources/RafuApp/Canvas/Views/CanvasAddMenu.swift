@@ -40,16 +40,29 @@ enum CanvasAddKind: CaseIterable, Identifiable {
 
     /// Adds the card. With `center` (board units) it appears there; otherwise
     /// at the middle of the visible board. Nothing starts: a terminal is made
-    /// stopped, a web app unloaded.
+    /// stopped, a web app unloaded. `animated` false is the keyboard path
+    /// (N, T): the card appears at once, with no spring.
     @MainActor
-    func perform(on board: CanvasBoardState, session: WorkspaceSession, center: CGPoint? = nil) {
+    func perform(
+        on board: CanvasBoardState, session: WorkspaceSession, center: CGPoint? = nil,
+        animated: Bool = true
+    ) {
         board.creationCenter = center
+        guard animated else {
+            board.withoutCreationMotion { perform(session: session, boardID: board.id) }
+            return
+        }
+        perform(session: session, boardID: board.id)
+    }
+
+    @MainActor
+    private func perform(session: WorkspaceSession, boardID: CanvasID) {
         switch self {
-        case .note: session.addCanvasNote(board.id)
-        case .terminal: session.addCanvasStoppedTerminal(board.id)
-        case .file: session.chooseCanvasFile(board.id, imageOnly: false)
-        case .image: session.chooseCanvasFile(board.id, imageOnly: true)
-        case .webApp: session.canvasDialog = .web(board.id)
+        case .note: session.addCanvasNote(boardID)
+        case .terminal: session.addCanvasStoppedTerminal(boardID)
+        case .file: session.chooseCanvasFile(boardID, imageOnly: false)
+        case .image: session.chooseCanvasFile(boardID, imageOnly: true)
+        case .webApp: session.canvasDialog = .web(boardID)
         }
     }
 }

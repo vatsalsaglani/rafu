@@ -37,8 +37,15 @@ struct CanvasNodeInteractionTests {
         await session.addCanvasDroppedFiles(
             [first, second], to: board.id, at: CGPoint(x: 300, y: 250))
         #expect(board.cards.map(\.content) == [.file(path: "one.swift"), .file(path: "two.md")])
-        #expect(board.cards[0].rect.x == 100 && board.cards[0].rect.y == 100)
-        #expect(board.cards[1].rect.x == 124 && board.cards[1].rect.y == 124)
+        // UX Round A: a batch lands in the `batchRects` grid, the first card
+        // centred on the drop point (board 100, 100), the next one column right.
+        let expected = CanvasBoardDropGeometry.batchRects(
+            for: [.file(path: "one.swift"), .file(path: "two.md")],
+            centeredAt: CGPoint(x: 100, y: 100), avoiding: [])
+        #expect(board.cards.map(\.rect) == expected)
+        #expect(board.cards[0].rect.x == -90 && board.cards[0].rect.y == -30)
+        #expect(board.cards[1].rect.x == 306 && board.cards[1].rect.y == -30)
+        #expect(board.landing?.ids == board.cards.map(\.id))
         #expect(board.selection == Set(board.cards.map(\.id)))
         #expect(session.terminal.sessions.isEmpty)
         board.performUndo()

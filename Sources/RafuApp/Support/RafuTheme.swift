@@ -237,7 +237,7 @@ nonisolated struct RafuTheme: Decodable, Sendable {
         }
 
         let errorHex = ui.error ?? "#E06C75"
-        let warningHex = ui.warning ?? "#D4A24E"
+        let warningHex = ui.warning ?? "#E8894A"
         let infoHex = ui.info ?? "#82A7F0"
         let successHex = ui.success ?? "#7CC08A"
         let accentHex = ui.accent

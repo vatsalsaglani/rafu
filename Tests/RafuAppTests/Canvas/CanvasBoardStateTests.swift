@@ -98,3 +98,75 @@ struct CanvasBoardStateTests {
         #expect(board.focusedCardID == nil)
     }
 }
+
+/// UX Round A: arrival (B1), landing (S1) and keyboard creation without motion.
+@Suite("Ensemble arrival and landing")
+@MainActor
+struct CanvasBoardArrivalTests {
+    private func board(scale: Double, x: Double = 0, y: Double = 0, cards: Int = 2)
+        -> CanvasBoardState
+    {
+        var document = CanvasDocument(title: "Arrival")
+        document.cards = (0..<cards).map {
+            CanvasCard(
+                title: "C\($0)", rect: CanvasRect(x: Double($0) * 500, y: 0),
+                content: .note(snapshot: ""))
+        }
+        document.viewport = CanvasViewport(scale: scale, x: x, y: y)
+        return CanvasBoardState(document: document)
+    }
+
+    @Test("A board saved at 10 % fits once on its first size and stays clean")
+    func arrivalFitsOnceWithoutDirtying() {
+        let board = board(scale: 0.1)
+        var saves = 0
+        board.requestSave = { saves += 1 }
+        #expect(board.arrivalPending)
+        board.arriveIfNeeded()  // no size yet: nothing happens
+        #expect(board.arrivalPending)
+        #expect(board.viewport.scale == 0.1)
+        board.visibleSize = CGSize(width: 1_200, height: 800)
+        board.arriveIfNeeded()
+        #expect(!board.arrivalPending)
+        #expect(board.viewport.scale > 0.25)
+        #expect(
+            !CanvasArrival.anyCardOutOfView(
+                cards: board.cards.map(\.rect), viewport: board.viewport,
+                visible: board.visibleSize))
+        #expect(board.isDirty == false)
+        #expect(saves == 0)
+        // A second call is a no-op, even after the user zooms out again.
+        board.setViewport(CanvasViewport(scale: 0.1, x: 0, y: 0))
+        board.arriveIfNeeded()
+        #expect(board.viewport.scale == 0.1)
+    }
+
+    @Test("A board with a card in view keeps its parked viewport")
+    func parkedViewportKept() {
+        let board = board(scale: 0.8, x: 40, y: 30)
+        board.visibleSize = CGSize(width: 1_200, height: 800)
+        board.arriveIfNeeded()
+        #expect(board.viewport == CanvasViewport(scale: 0.8, x: 40, y: 30))
+        #expect(board.isDirty == false)
+    }
+
+    @Test("A drop sets the landing; a menu add does not; animated false still adds")
+    func landing() throws {
+        let board = board(scale: 1, cards: 0)
+        let dropped = try board.add(
+            title: "Dropped", content: .note(snapshot: ""), center: CGPoint(x: 300, y: 300))
+        #expect(board.landing?.ids == [dropped])
+        board.landing = nil
+        try board.add(title: "Menu", content: .note(snapshot: ""))
+        #expect(board.landing == nil)
+        try board.add(title: "Key", content: .note(snapshot: ""), animated: false)
+        #expect(board.cards.count == 3)
+        var added = 0
+        board.withoutCreationMotion {
+            #expect(!board.creationIsAnimated)
+            added += 1
+        }
+        #expect(added == 1)
+        #expect(board.creationIsAnimated)
+    }
+}

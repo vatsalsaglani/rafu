@@ -13,7 +13,29 @@ final class CanvasInteractionState {
     var addPopoverAnchor: CGPoint?
     /// Board-space point where a card made from that popover is centred.
     var addPopoverBoardPoint: CGPoint?
+    /// The pointer is over the zoom capsule (or the overview above it), so
+    /// the overview shows (UX Round A, B3).
+    var overviewHover = false
+    /// True for `RafuMotion.overviewPanHold` after the last pan step, so the
+    /// overview stays a moment after a pan ends.
+    private(set) var overviewPanHold = false
+    @ObservationIgnored private var overviewHoldTask: Task<Void, Never>?
     @ObservationIgnored private var guideKeys: Set<String> = []
+
+    /// Shows the overview now and keeps it for `RafuMotion.overviewPanHold`
+    /// after the last call. One sleeping task at a time; each call restarts it.
+    func holdOverviewAfterPan() {
+        if !overviewPanHold { overviewPanHold = true }
+        overviewHoldTask?.cancel()
+        overviewHoldTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: RafuMotion.overviewPanHold)
+            } catch {
+                return
+            }
+            self?.overviewPanHold = false
+        }
+    }
 
     var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 

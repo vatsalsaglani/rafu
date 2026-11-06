@@ -360,3 +360,39 @@ func decorativeHairlinesRemainExempt() {
         }
     )
 }
+
+/// HSB hue angle in degrees for a theme hex string.
+@MainActor
+private func hueDegrees(_ hex: String) -> CGFloat {
+    let color = NSColor(rafuHex: hex).usingColorSpace(.sRGB) ?? .black
+    return color.hueComponent * 360
+}
+
+/// The coordinator fixed the hues (`#E8894A`, `#9E4A14`). Measured HSB hue
+/// distance from the accent: Indigo 10.8° (was 2.9°), Khadi 13.6° (was 5.4°).
+/// Shape, glyph and cursor carry accept versus refuse; hue is the backup.
+@Test("Warning is a different hue from the accent in Indigo and Khadi (UX Round A)")
+@MainActor
+func warningIsDistinctFromAccent() throws {
+    for theme in [RafuThemeCatalog.indigo, RafuThemeCatalog.khadi] {
+        let warning = try #require(theme.ui.warning)
+        let difference = abs(hueDegrees(warning) - hueDegrees(theme.ui.accent))
+        let angle = min(difference, 360 - difference)
+        #expect(angle >= 10, "\(theme.name) warning \(warning) vs accent \(theme.ui.accent)")
+    }
+    #expect(RafuThemeCatalog.indigo.ui.warning == "#E8894A")
+    #expect(RafuThemeCatalog.khadi.ui.warning == "#9E4A14")
+}
+
+@Test("Warning text meets 4.5 to 1 on app, elevated and card surfaces (UX Round A)")
+@MainActor
+func warningTextContrast() {
+    for theme in [RafuThemeCatalog.indigo, RafuThemeCatalog.khadi] {
+        let palette = theme.palette
+        for surface in [palette.appBackground, palette.elevatedBackground, palette.cardBackground] {
+            #expect(
+                contrastRatio(palette.warning, against: surface) >= 4.5,
+                "\(theme.name) warning contrast")
+        }
+    }
+}

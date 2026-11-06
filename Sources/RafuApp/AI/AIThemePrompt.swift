@@ -53,7 +53,7 @@ nonisolated enum AIThemePrompt {
             "textSecondary": "#9AA3B8", "textMuted": "#67718A",
             "accent": "#E3A857", "accentHover": "#EDB96F",
             "onAccent": "#201709", "focusRing": "#E3A85766",
-            "error": "#E06C75", "warning": "#D4A24E",
+            "error": "#E06C75", "warning": "#E8894A",
             "info": "#82A7F0", "success": "#7CC08A",
             "remoteIndicator": "#74BFCB"
           },
