@@ -60,8 +60,8 @@ lists its manual steps.
 
 | ID | Status |
 |---|---|
-| G1 | running |
+| G1 | merged (a8b89f8) |
 | G2 | merged (50429ac) |
 | G3 | merged (9b2e9f1, + validateMenuItem 71238a9) |
 | G4–G7 | planned |
-| G8 | new: probe output cap (disk-fill incident 2026-11-06 17:00) — advisor brief pending |
+| G8 | running: probe output cap through pipes (disk-fill incident 2026-11-06 17:00) |
