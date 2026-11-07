@@ -1190,6 +1190,18 @@ final class WorkspaceTerminalController: Identifiable {
         return true
     }
 
+    /// Sends one Return (`"\r"`) and nothing else to the live pty. The only
+    /// caller is the channel-prompt confirmer (`CanvasChannelPromptConfirmer`),
+    /// which answers Claude's development-channel dialog for Rafu's own
+    /// channel. Returns `false` when no process runs.
+    @discardableResult
+    func sendReturn() -> Bool {
+        guard let terminalView, terminalView.process.running else { return false }
+        if case .exited = status { return false }
+        terminalView.send(txt: "\r")
+        return true
+    }
+
     /// Bounded read of recent on-screen output for an attention
     /// notification's body (terminal-manager.md T-E) — `""` when there is
     /// no live view (e.g. a race where the shell exited between the bell

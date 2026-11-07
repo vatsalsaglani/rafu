@@ -14,6 +14,7 @@ final class CanvasLiveBridge {
     typealias ActivityEnd = @MainActor (any NSObjectProtocol) -> Void
     @ObservationIgnored private let beginActivity: ActivityBegin
     @ObservationIgnored private let endActivity: ActivityEnd
+    @ObservationIgnored private let channelPrompt: CanvasChannelPromptConfirmer
     /// Held only while at least one terminal has a live agent route. See `updateActivity`.
     @ObservationIgnored private var activity: (any NSObjectProtocol)?
 
@@ -24,12 +25,14 @@ final class CanvasLiveBridge {
         beginActivity: @escaping ActivityBegin = {
             ProcessInfo.processInfo.beginActivity(options: $0, reason: $1)
         },
-        endActivity: @escaping ActivityEnd = { ProcessInfo.processInfo.endActivity($0) }
+        endActivity: @escaping ActivityEnd = { ProcessInfo.processInfo.endActivity($0) },
+        channelPrompt: CanvasChannelPromptConfirmer = .shared
     ) {
         resolveLocation = location
         self.now = now
         self.beginActivity = beginActivity
         self.endActivity = endActivity
+        self.channelPrompt = channelPrompt
     }
     private enum SuspensionReason: String {
         case sessionChanged
@@ -181,6 +184,7 @@ final class CanvasLiveBridge {
     }
 
     func remove(_ controller: WorkspaceTerminalController) {
+        channelPrompt.cancel(controllerID: controller.id)
         let tokens = Set(
             endpoints.compactMap { $0.value.controller?.id == controller.id ? $0.key : nil })
         for delivery in deliveries.values
@@ -377,10 +381,13 @@ final class CanvasLiveBridge {
         guard
             [
                 "bind", "suspend", "release", "register", "list", "send", "receive", "unregister",
-                "tool",
+                "tool", CanvasChannelPrompt.launchOperation,
             ].contains(request.operation)
         else {
             return .init(error: "Unsupported bridge request.")
+        }
+        if request.operation == CanvasChannelPrompt.launchOperation {
+            return recordClaudeLaunch(request, controller: controller)
         }
         if request.operation == "suspend" {
             guard request.provider == "codex", source.provider == "codex",
@@ -674,6 +681,29 @@ final class CanvasLiveBridge {
     }
 
     // MARK: Agent tools (X4)
+
+    /// Rafu's own `claude` launcher announces a start that carries the Rafu
+    /// channel flag. This is the only trigger for `CanvasChannelPromptConfirmer`.
+    /// The launcher sends no terminal content, and a launch announcement from any
+    /// other provider is ignored.
+    private func recordClaudeLaunch(
+        _ request: CanvasBridgeRequest, controller: WorkspaceTerminalController
+    ) -> CanvasBridgeResponse {
+        guard request.provider == "claude", let place = location(of: controller.id) else {
+            return .init()
+        }
+        let board = place.board
+        channelPrompt.recordLaunch(
+            controllerID: controller.id,
+            hooks: .init(
+                mode: { [weak board] in board?.agentControlMode ?? .off },
+                settingOn: { CanvasChannelPromptPreference.isOn() },
+                read: { [weak controller] in controller?.recentOutputLines(maxLines: 40) },
+                sendReturn: { [weak controller] in controller?.sendReturn() ?? false },
+                notice: { [weak board] message, tone in board?.showNotice(message, tone: tone) }
+            ))
+        return .init()
+    }
 
     /// True when a Live message link connects the caller's node to `cardID`.
     func hasLiveRoute(from controllerID: UUID, to cardID: String) -> Bool {

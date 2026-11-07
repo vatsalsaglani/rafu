@@ -71,6 +71,8 @@ public nonisolated enum CanvasBridgeLaunch {
         do {
             let launch = try plan(
                 provider: provider, arguments: arguments, environment: environment)
+            announceClaudeLaunch(
+                provider: provider, arguments: arguments, environment: environment)
             if provider == "codex", shouldAttach(provider: provider, arguments: arguments) {
                 return CanvasCodexSession.run(
                     executable: launch.executable, arguments: arguments,
@@ -102,6 +104,22 @@ public nonisolated enum CanvasBridgeLaunch {
                 Data("Rafu: The Ensemble agent launch could not be prepared.\n".utf8))
             return 127
         }
+    }
+
+    /// Tells the app that this terminal is about to run Claude with Rafu's channel
+    /// flag, so the app can watch for Claude's channel dialog (`CanvasChannelPrompt`).
+    /// Best effort: a closed app, a refusal, or a slow answer (one second at most)
+    /// is ignored and never changes the launch. It sends no terminal content.
+    private static func announceClaudeLaunch(
+        provider: String, arguments: [String], environment: [String: String]
+    ) {
+        guard
+            let request = CanvasChannelPrompt.launchRequest(
+                provider: provider, arguments: arguments, environment: environment),
+            let socket = environment["RAFU_CANVAS_SOCKET"], socket.hasPrefix("/")
+        else { return }
+        let client = LauncherIPCClient(socketURL: URL(fileURLWithPath: socket), timeoutSeconds: 1)
+        _ = try? client.exchange(LauncherIPCEnvelope(kind: .canvasBridge, canvasBridge: request))
     }
 
     /// Claude's `--mcp-config` and `--dangerously-load-development-channels` are variadic.
