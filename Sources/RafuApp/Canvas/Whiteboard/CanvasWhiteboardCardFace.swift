@@ -15,7 +15,7 @@ struct CanvasWhiteboardCardFace: View {
     static func usesCardChrome(_ content: CanvasCardContent) -> Bool {
         switch content {
         case .shape, .stroke, .text, .serviceIcon, .frame: false
-        case .mermaid: true
+        case .mermaid, .generatedView: true
         case .file, .image, .note, .terminal, .web: true
         }
     }
@@ -23,7 +23,7 @@ struct CanvasWhiteboardCardFace: View {
     /// Whether this face renders `content`; the shell keeps every other kind.
     static func renders(_ content: CanvasCardContent) -> Bool {
         switch content {
-        case .mermaid, .shape, .stroke, .text, .frame, .serviceIcon: true
+        case .mermaid, .shape, .stroke, .text, .frame, .serviceIcon, .generatedView: true
         case .file, .image, .note, .terminal, .web: false
         }
     }
@@ -40,6 +40,9 @@ struct CanvasWhiteboardCardFace: View {
             CanvasTextFace(card: card, text: text, board: board)
         case .frame, .serviceIcon:
             CanvasDiagramCardFace(card: card, board: board)
+        case .generatedView:
+            // jr-4a replaces the placeholder with the rendered view.
+            CanvasGeneratedViewPlaceholder()
         case .file, .image, .note, .terminal, .web:
             EmptyView()
         }

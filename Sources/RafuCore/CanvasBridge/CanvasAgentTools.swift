@@ -124,6 +124,8 @@ public nonisolated enum CanvasAgentTool: String, CaseIterable, Codable, Sendable
     case frameCreate = "frame_create"
     case export = "export"
     case diagramBuild = "diagram_build"
+    case viewRender = "view_render"
+    case viewUpdate = "view_update"
 
     /// The words shown in the approval and the activity log.
     public var actionTitle: String {
@@ -147,6 +149,8 @@ public nonisolated enum CanvasAgentTool: String, CaseIterable, Codable, Sendable
         case .frameCreate: "Add a frame"
         case .export: "Export to a file"
         case .diagramBuild: "Build a diagram"
+        case .viewRender: "Show a view"
+        case .viewUpdate: "Change a view"
         }
     }
 }
@@ -199,8 +203,24 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
     public var seconds: Double?
     public var fps: Int?
     public var diagram: CanvasAgentDiagramSpec?
+    /// `view_render` / `view_update`: the spec as canonical JSON text (the
+    /// server re-serialises the `spec` object with sorted keys), at most
+    /// `maximumViewBytes` per call.
+    public var viewSpec: String?
+    /// `view_update`: JSONL SpecStream patches, at most `maximumViewBytes` and
+    /// `maximumViewPatchLines` lines.
+    public var viewPatches: String?
+    /// `view_update`: restore the view's initial state (Reset View).
+    public var reset: Bool?
 
     public init(tool: CanvasAgentTool) { self.tool = tool }
+
+    /// One MCP frame is 64 KiB (`CanvasBridgeMCPServer.maximumFrameBytes`), so
+    /// one call carries at most 48 KiB of view JSON. A card holds up to 256 KiB,
+    /// reachable through `view_update` patches.
+    public static let maximumViewBytes = 48 * 1_024
+    public static let maximumViewPatchLines = 2_000
+    public static let maximumViewElements = 2_000
 
     public static let nodeKinds = [
         "note", "terminal", "file", "image", "web", "mermaid", "shape", "text",
@@ -277,6 +297,12 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
             lines.append("Diagram: \(diagram.nodes.count) nodes, \(diagram.edges.count) links")
             add("Frame", diagram.frame)
         }
+        if let viewSpec { lines.append("View: \(CanvasAgentViewSummary.line(specJSON: viewSpec))") }
+        if let viewPatches {
+            let count = viewPatches.split(whereSeparator: \.isNewline).count
+            lines.append("Patches: \(count) \(count == 1 ? "line" : "lines")")
+        }
+        if reset == true { lines.append("Reset the view's state") }
         if let prompt { lines.append("Task: \(CanvasAgentText.singleLine(prompt, limit: 240))") }
         if let text {
             if tool == .terminalSend {
@@ -316,6 +342,8 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         case .frameCreate: return ["title", "member_ids"]
         case .export: return ["target", "frame_id", "format", "scale", "seconds", "fps"]
         case .diagramBuild: return placement.union(["spec"])
+        case .viewRender: return placement.union(["title", "spec"])
+        case .viewUpdate: return ["node_id", "spec", "patches", "reset"]
         }
     }
 
@@ -402,8 +430,19 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         call.seconds = try number("seconds")
         call.fps = try integer("fps")
         if let value = arguments["spec"] {
-            guard let object = value as? [String: Any] else { throw .invalidArgument("spec") }
-            call.diagram = try CanvasAgentDiagramSpec.parse(object)
+            if tool == .viewRender || tool == .viewUpdate {
+                call.viewSpec = try CanvasAgentViewSpec.canonicalText(value)
+            } else {
+                guard let object = value as? [String: Any] else {
+                    throw .invalidArgument("spec")
+                }
+                call.diagram = try CanvasAgentDiagramSpec.parse(object)
+            }
+        }
+        call.viewPatches = try string("patches")
+        if let value = arguments["reset"] {
+            guard let flag = value as? Bool else { throw .invalidArgument("reset") }
+            call.reset = flag
         }
         if call.label == nil, call.tool == .nodeCreate, let text = call.title,
             call.kind == "service_icon"
@@ -521,6 +560,11 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
         }
         if let fps, !(1...30).contains(fps) { throw .invalidArgument("fps") }
         if let diagram { try diagram.validate() }
+        if let viewSpec, viewSpec.utf8.count > Self.maximumViewBytes {
+            throw .invalidArgumentReason(
+                key: "spec", reason: CanvasAgentViewSpec.tooLargeReason(bytes: viewSpec.utf8.count))
+        }
+        if let viewPatches { try CanvasAgentViewSpec.validatePatches(viewPatches) }
     }
 
     private func validateRequirements() throws(CanvasAgentToolError) {
@@ -594,6 +638,15 @@ public nonisolated struct CanvasAgentToolCall: Codable, Hashable, Sendable {
             if scale != nil, format != "png" { throw .invalidArgument("scale") }
             if seconds != nil || fps != nil, format != "gif" { throw .invalidArgument("seconds") }
         case .diagramBuild: try require(diagram, "spec")
+        case .viewRender: try require(viewSpec, "spec")
+        case .viewUpdate:
+            try require(nodeID, "node_id")
+            let given = [viewSpec != nil, viewPatches != nil, reset == true].filter { $0 }.count
+            if given == 0 { throw .missingArgument("spec") }
+            if given > 1 {
+                throw .invalidArgumentReason(
+                    key: "spec", reason: "give spec, patches or reset, not two")
+            }
         }
     }
 
@@ -1309,7 +1362,40 @@ public nonisolated enum CanvasAgentToolCatalog {
                     ["request_id": property("string", "The request_id you received.")],
                     required: ["request_id"])
             )
+        case .viewRender, .viewUpdate: return viewDefinition(for: tool)
         default: return diagramDefinition(for: tool)
+        }
+    }
+
+    private static func viewDefinition(for tool: CanvasAgentTool) -> (String, [String: Any]) {
+        switch tool {
+        case .viewRender:
+            return (
+                "Show a generated view on the Ensemble: a small native UI (cards, tables, charts, "
+                    + "stats, file links, checklists) described as JSON. Put data in state and bind "
+                    + "it. At most \(CanvasAgentToolCall.maximumViewBytes / 1_024) KiB of spec per "
+                    + "call; add more with view_update patches. Asks the user unless Agent control "
+                    + "is Allow. " + CanvasAgentViewVocabulary.text,
+                schema(
+                    [
+                        "title": title, "near": near, "x": x, "y": y,
+                        "spec": CanvasAgentViewVocabulary.specSchema,
+                    ], required: ["spec"])
+            )
+        default:
+            return (
+                "Change a view. Give spec to replace it, patches (JSON Lines, one {op, path, value} "
+                    + "per line against the current spec) to edit it, or reset true to restore its "
+                    + "initial state. A changed spec resets the view's state.",
+                schema(
+                    [
+                        "node_id": nodeID, "spec": CanvasAgentViewVocabulary.specSchema,
+                        "patches": property(
+                            "string", "JSON Lines of SpecStream patches.",
+                            ["maxLength": CanvasAgentToolCall.maximumViewBytes]),
+                        "reset": property("boolean", "Restore the view's initial state."),
+                    ], required: ["node_id"])
+            )
         }
     }
 
@@ -1373,6 +1459,111 @@ public nonisolated enum CanvasAgentToolCatalog {
                         "near": near, "x": x, "y": y,
                     ], required: ["spec"])
             )
+        }
+    }
+}
+
+// MARK: Views
+
+/// One approval line for a view spec: the element count and up to eight
+/// distinct component types, sorted. Never a prop value or any other text
+/// from the spec.
+public nonisolated enum CanvasAgentViewSummary {
+    public static let maximumTypes = 8
+
+    public static func line(specJSON: String) -> String {
+        guard
+            let object = try? JSONSerialization.jsonObject(with: Data(specJSON.utf8))
+                as? [String: Any],
+            let elements = object["elements"] as? [String: Any]
+        else { return "invalid spec" }
+        let types = Set(
+            elements.values.compactMap { ($0 as? [String: Any])?["type"] as? String }
+                .filter { $0.utf8.count <= 40 && CanvasAgentText.validIdentifier($0) })
+        let shown = types.sorted().prefix(maximumTypes)
+        let noun = elements.count == 1 ? "element" : "elements"
+        var line = "\(elements.count) \(noun)"
+        if !shown.isEmpty { line += "; " + shown.joined(separator: ", ") }
+        if types.count > maximumTypes { line += ", …" }
+        return line
+    }
+}
+
+/// Parses and bounds the `spec` argument of `view_render` / `view_update`.
+/// RafuCore checks the shape and size only; the app decodes the spec and
+/// validates it against the Rafu catalog. Error reasons are fixed text and
+/// numbers, never spec content.
+public nonisolated enum CanvasAgentViewSpec {
+    static let shapeReason = "spec must be an object with root (string) and elements (object)"
+
+    static func tooLargeReason(bytes: Int) -> String {
+        "spec is \(CanvasAgentShellRefusal.grouped(bytes)) bytes; at most "
+            + "\(CanvasAgentToolCall.maximumViewBytes / 1_024) KiB per call; "
+            + "add more with view_update patches"
+    }
+
+    /// The canonical text of a spec object: sorted keys, no escaped slashes.
+    public static func canonicalText(_ value: Any) throws(CanvasAgentToolError) -> String {
+        guard let object = value as? [String: Any], object["root"] is String,
+            let elements = object["elements"] as? [String: Any]
+        else { throw .invalidArgumentReason(key: "spec", reason: shapeReason) }
+        guard elements.count <= CanvasAgentToolCall.maximumViewElements else {
+            throw .invalidArgumentReason(
+                key: "spec",
+                reason: "spec has \(elements.count) elements; at most "
+                    + "\(CanvasAgentToolCall.maximumViewElements)")
+        }
+        guard !containsForbiddenKey(object, depth: 0) else {
+            throw .invalidArgumentReason(key: "spec", reason: "spec contains a forbidden key")
+        }
+        guard JSONSerialization.isValidJSONObject(object),
+            let data = try? JSONSerialization.data(
+                withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes]),
+            let text = String(data: data, encoding: .utf8)
+        else { throw .invalidArgumentReason(key: "spec", reason: shapeReason) }
+        guard data.count <= CanvasAgentToolCall.maximumViewBytes else {
+            throw .invalidArgumentReason(key: "spec", reason: tooLargeReason(bytes: data.count))
+        }
+        return text
+    }
+
+    /// `__proto__` anywhere, or nesting deeper than 64 levels, is refused.
+    private static func containsForbiddenKey(_ value: Any, depth: Int) -> Bool {
+        if depth > 64 { return true }
+        if let object = value as? [String: Any] {
+            return object.contains { key, item in
+                key == "__proto__" || containsForbiddenKey(item, depth: depth + 1)
+            }
+        }
+        if let array = value as? [Any] {
+            return array.contains { containsForbiddenKey($0, depth: depth + 1) }
+        }
+        return false
+    }
+
+    /// Bounds the `patches` text: bytes, line count, and each non-blank line
+    /// starts with `{`. The app applies and validates the patches.
+    static func validatePatches(_ text: String) throws(CanvasAgentToolError) {
+        guard text.utf8.count <= CanvasAgentToolCall.maximumViewBytes else {
+            throw .invalidArgumentReason(
+                key: "patches",
+                reason: "patches are \(CanvasAgentShellRefusal.grouped(text.utf8.count)) bytes; "
+                    + "at most \(CanvasAgentToolCall.maximumViewBytes / 1_024) KiB per call")
+        }
+        guard !text.contains("\0") else { throw .invalidArgument("patches") }
+        let lines = text.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard !lines.isEmpty else { throw .invalidArgument("patches") }
+        guard lines.count <= CanvasAgentToolCall.maximumViewPatchLines else {
+            throw .invalidArgumentReason(
+                key: "patches",
+                reason: "\(lines.count) lines; at most \(CanvasAgentToolCall.maximumViewPatchLines)"
+            )
+        }
+        guard lines.allSatisfy({ $0.hasPrefix("{") }) else {
+            throw .invalidArgumentReason(
+                key: "patches", reason: "each line must be one JSON object {op, path, value}")
         }
     }
 }

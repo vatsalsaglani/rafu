@@ -132,6 +132,18 @@ struct CanvasDocumentTests {
             .serviceIcon(CanvasServiceIcon(packID: "aws", iconID: "s3", label: "Bucket")),
             #"{"serviceIcon":{"_0":{"iconID":"s3","label":"Bucket","packID":"aws"}}}"#
         ),
+        (
+            .generatedView(
+                CanvasGeneratedView(
+                    specJSON:
+                        #"{"elements":{"r":{"props":{"text":"x"},"type":"Text"}},"root":"r"}"#,
+                    catalogVersion: "0.22.0-alpha.1+rafu.1",
+                    provenance: CanvasGeneratedViewProvenance(
+                        creator: "Claude", provider: "claude",
+                        createdAt: Date(timeIntervalSinceReferenceDate: 0), admission: "allow",
+                        journal: []))),
+            #"{"generatedView":{"_0":{"catalogVersion":"0.22.0-alpha.1+rafu.1","provenance":{"admission":"allow","createdAt":0,"creator":"Claude","journal":[],"provider":"claude"},"specJSON":"{\"elements\":{\"r\":{\"props\":{\"text\":\"x\"},\"type\":\"Text\"}},\"root\":\"r\"}"}}}"#
+        ),
     ]
 
     @Test("Every live content case keeps its saved JSON shape and round-trips")

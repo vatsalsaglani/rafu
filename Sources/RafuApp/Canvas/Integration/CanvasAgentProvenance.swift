@@ -69,7 +69,8 @@ nonisolated enum CanvasAgentNoticeText {
         switch call.tool {
         case .noteCreate, .nodeCreate, .terminalCreate, .frameCreate: return "added"
         case .noteWrite: return "wrote"
-        case .mermaidSet: return "changed"
+        case .mermaidSet, .viewUpdate: return "changed"
+        case .viewRender: return "added"
         case .nodeUpdate: return updateVerb(call)
         case .ensembleDescribe, .noteRead, .nodeRemove, .terminalStart, .terminalSend,
             .edgeCreate, .edgeRemove, .linkSetState, .actionStatus, .iconSearch, .export,

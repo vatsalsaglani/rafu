@@ -31,7 +31,16 @@ public nonisolated enum VoiceToolSchema {
         "list_ensembles", "ensemble_open", "ensemble_create", "handoff_to_agent", "take_back",
         "cross_board_summary", "voice_status",
     ]
-    public static let viewNames = ["view_focus", "view_zoom", "view_find", "view_tidy"]
+    public static let viewNames = [
+        "view_focus", "view_zoom", "view_find", "view_tidy", "show_view",
+    ]
+    /// Ensemble tools the voice backend does not see under their MCP names.
+    /// Voice gets `show_view` instead: one tool for render and update, with a
+    /// flat spec so its arguments can stream into a spec decoder.
+    public static let hiddenEnsembleTools: Set<String> = [
+        CanvasAgentTool.viewRender.rawValue, CanvasAgentTool.viewUpdate.rawValue,
+    ]
+    public static let showViewName = "show_view"
     public static let workOrderNames = ["work_order_create", "work_order_status"]
     /// The four VPLAN meta tools plus `voice_latch` ("Rafu, stay with me").
     public static let metaNames = [
@@ -57,7 +66,8 @@ public nonisolated enum VoiceToolSchema {
         definitions.compactMap { definition in
             guard let name = definition["name"] as? String,
                 let description = definition["description"] as? String,
-                let schema = definition["inputSchema"]
+                let schema = definition["inputSchema"],
+                !hiddenEnsembleTools.contains(name)
             else { return nil }
             var parameters = VoiceJSON(any: schema)
             if name == CanvasAgentTool.ensembleDescribe.rawValue,
@@ -130,7 +140,36 @@ public nonisolated enum VoiceToolSchema {
             tool(
                 "view_tidy",
                 "Tidy Up: group related nodes into clusters and fit the view. One undo step."),
+            showViewTool,
         ]
+    }
+
+    /// Shows or changes a generated view. The spec keys (`root`, `elements`,
+    /// `state`) sit at the top level beside `title`, `node` and `reset`. jr-4c
+    /// owns the description and the parameter text after the contract commit.
+    public static var showViewTool: VoiceFunctionTool {
+        VoiceFunctionTool(
+            name: showViewName,
+            description:
+                "Show the user a small native view on the visible Ensemble (a table, chart, stat, "
+                + "checklist, file list…). Put the data in state and bind it. Give node to change "
+                + "an existing view instead. " + CanvasAgentViewVocabulary.text,
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "title": property("string", "Card title, at most 120 characters."),
+                    "node": property(
+                        "string", "Optional. A view node id or title to update; omit to create."),
+                    "reset": property(
+                        "boolean",
+                        "Optional. Restore that view's initial state; nothing else changes."),
+                    "root": property("string", "The id of the root element."),
+                    "elements": VoiceJSON(any: CanvasAgentViewVocabulary.elementsSchema),
+                    "state": property("object", "Optional initial state object."),
+                ]),
+                "required": .array(["title", "root", "elements"]),
+                "additionalProperties": .bool(false),
+            ]))
     }
 
     public static var workOrderTools: [VoiceFunctionTool] {
@@ -197,7 +236,7 @@ public nonisolated enum VoiceToolSchema {
             "view_find":
             return .read
         case "ensemble_open", "ensemble_create", "view_focus", "view_zoom", "view_tidy",
-            "handoff_to_agent", "take_back":
+            "handoff_to_agent", "take_back", "show_view":
             return .edit
         case "work_order_create": return .sensitive
         default: return nil

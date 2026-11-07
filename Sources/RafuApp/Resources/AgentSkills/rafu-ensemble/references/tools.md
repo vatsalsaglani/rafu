@@ -31,6 +31,8 @@ Off blocks edit and sensitive tools.
 | `frame_create` | edit | `title`, `member_ids` (≤ 100) |
 | `diagram_build` | edit | `spec` {`nodes` (≤ 40), `edges` (≤ 80), `frame`?, `direction`?}, `near`?, `x`?, `y`? |
 | `export` | sensitive | `format` (png, pdf, gif), `target`? (board, selection, frame), `frame_id`?, `scale`? (png 0.5–4), `seconds`? (gif 1–10), `fps`? (gif 1–30) |
+| `view_render` | edit | `spec` {`root`, `elements`, `state`?} (≤ 48 KiB per call), `title`?, `near`?, `x`?, `y`? |
+| `view_update` | edit | `node_id`, and one of `spec`, `patches` (JSON Lines), `reset` (true) |
 | `action_status` | read | `request_id` |
 
 ## Limits

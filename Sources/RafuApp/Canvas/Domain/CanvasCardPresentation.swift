@@ -62,6 +62,8 @@ nonisolated enum CanvasCardPresentation {
             return frame.title
         case .serviceIcon(let icon):
             return icon.label
+        case .generatedView:
+            return "View"
         }
     }
 }

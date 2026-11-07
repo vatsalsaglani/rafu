@@ -30,6 +30,14 @@ nonisolated enum CanvasLimits {
     static let ensembleAssets = 64
     static let embeddedAssetBytes = 512 * 1_024
     static let embeddedAssetsTotalBytes = 1_536 * 1_024
+    /// Generated views (wave 3): the spec text, the persisted state snapshot,
+    /// one persisted value, the number of view cards per board, and the
+    /// provenance journal lines.
+    static let generatedViewSpecBytes = 256 * 1_024
+    static let generatedViewStateBytes = 64 * 1_024
+    static let generatedViewStateValueBytes = 4 * 1_024
+    static let generatedViewCards = 50
+    static let generatedViewJournalEntries = 20
 }
 
 nonisolated enum CanvasError: Error, LocalizedError, Equatable, Sendable {
@@ -142,6 +150,8 @@ nonisolated enum CanvasCardContent: Equatable, Sendable {
     /// Diagram kinds (X9 defines the value types in `Canvas/Diagram/`).
     case frame(CanvasFrame)
     case serviceIcon(CanvasServiceIcon)
+    /// A generated view (wave 3): a declarative spec rendered natively.
+    case generatedView(CanvasGeneratedView)
 
     var kindName: String {
         switch self {
@@ -156,6 +166,7 @@ nonisolated enum CanvasCardContent: Equatable, Sendable {
         case .text: "Text"
         case .frame: "Frame"
         case .serviceIcon: "Icon"
+        case .generatedView: "View"
         }
     }
 
@@ -182,6 +193,7 @@ nonisolated enum CanvasCardContent: Equatable, Sendable {
         case .text: "textformat"
         case .frame: "rectangle.dashed"
         case .serviceIcon: "cube"
+        case .generatedView: "rectangle.3.group"
         }
     }
 
@@ -203,6 +215,7 @@ nonisolated enum CanvasCardContent: Equatable, Sendable {
         // X9 owns the frame and icon value types and their bounds.
         case .frame(let frame): try frame.validate()
         case .serviceIcon(let icon): try icon.validate()
+        case .generatedView(let view): try view.validate()
         }
     }
 
@@ -242,6 +255,7 @@ nonisolated extension CanvasCardContent: Codable {
         case text(CanvasText)
         case frame(CanvasFrame)
         case serviceIcon(CanvasServiceIcon)
+        case generatedView(CanvasGeneratedView)
     }
 
     /// The note text for a removed Mac App card. The bundle identifier is
@@ -272,6 +286,7 @@ nonisolated extension CanvasCardContent: Codable {
         case .text(let text): self = .text(text)
         case .frame(let frame): self = .frame(frame)
         case .serviceIcon(let icon): self = .serviceIcon(icon)
+        case .generatedView(let view): self = .generatedView(view)
         }
     }
 
@@ -289,6 +304,7 @@ nonisolated extension CanvasCardContent: Codable {
             case .text(let text): .text(text)
             case .frame(let frame): .frame(frame)
             case .serviceIcon(let icon): .serviceIcon(icon)
+            case .generatedView(let view): .generatedView(view)
             }
         try stored.encode(to: encoder)
     }
@@ -369,6 +385,9 @@ nonisolated struct CanvasDocument: Codable, Equatable, Identifiable, Sendable {
     var terminalGroups: TerminalGroupWorkspaceRestoration?
     /// X4: per-Ensemble Agent control. Absent means the default, Ask.
     var agentControl: CanvasAgentControl?
+    /// Wave 3: per-Ensemble permissions (images from the web). Absent means
+    /// nothing is granted. Never written to a `.rafuensemble` file.
+    var permissions: CanvasPermissions?
 
     init(title: String, id: CanvasID = CanvasID()) {
         self.title = title
@@ -377,7 +396,7 @@ nonisolated struct CanvasDocument: Codable, Equatable, Identifiable, Sendable {
 
     private enum CodingKeys: CodingKey {
         case version, id, revision, title, cards, connections, viewport, terminalGroups
-        case agentControl
+        case agentControl, permissions
     }
 
     init(from decoder: any Decoder) throws {
@@ -399,6 +418,8 @@ nonisolated struct CanvasDocument: Codable, Equatable, Identifiable, Sendable {
             TerminalGroupWorkspaceRestoration.self, forKey: .terminalGroups)
         agentControl = try container.decodeIfPresent(
             CanvasAgentControl.self, forKey: .agentControl)
+        permissions = try container.decodeIfPresent(
+            CanvasPermissions.self, forKey: .permissions)
         try validate()
     }
 
@@ -409,6 +430,12 @@ nonisolated struct CanvasDocument: Codable, Equatable, Identifiable, Sendable {
             Set(cards.map(\.id)).count == cards.count,
             Set(connections.map(\.id)).count == connections.count
         else { throw CanvasError.invalidDocument }
+        guard
+            cards.count(where: {
+                if case .generatedView = $0.content { true } else { false }
+            }) <= CanvasLimits.generatedViewCards
+        else { throw CanvasError.capacity }
+        try permissions?.validate()
         for card in cards {
             guard Self.validTitle(card.title), card.rect.isValid else {
                 throw CanvasError.invalidDocument

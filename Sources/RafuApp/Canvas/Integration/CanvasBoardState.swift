@@ -114,6 +114,11 @@ final class CanvasBoardState: Identifiable {
     var landing: CanvasLanding?
     @ObservationIgnored private var lastCreatedOrigin: CGPoint?
     @ObservationIgnored var noteSnapshots: [CanvasCardID: @MainActor () throws -> String] = [:]
+    /// Generated views write their state snapshot through here (debounced by
+    /// the card model); `snapshot()` folds it into the saved document without
+    /// an undo step, like `noteSnapshots`.
+    @ObservationIgnored var generatedViewStateSnapshots:
+        [CanvasCardID: @MainActor () -> CanvasGeneratedViewState?] = [:]
     @ObservationIgnored var requestSave: (@MainActor () -> Void)?
     @ObservationIgnored var revokeSessionLinks: (([UUID]) -> Void)?
     @ObservationIgnored var stopLiveContent: (@MainActor () -> Void)?
@@ -200,6 +205,12 @@ final class CanvasBoardState: Identifiable {
             if case .note = card.content, let takeSnapshot = noteSnapshots[card.id] {
                 value.cards[index].content = .note(snapshot: try takeSnapshot())
             }
+            if case .generatedView(var view) = card.content,
+                let takeState = generatedViewStateSnapshots[card.id]
+            {
+                view.state = takeState()
+                value.cards[index].content = .generatedView(view)
+            }
         }
         try value.validate()
         return value
@@ -231,6 +242,12 @@ final class CanvasBoardState: Identifiable {
     }
 
     func markNoteEdited() {
+        markDirty()
+        requestSave?()
+    }
+
+    /// A generated view's state changed: save it, but record no undo step.
+    func markGeneratedViewStateEdited() {
         markDirty()
         requestSave?()
     }
@@ -778,8 +795,15 @@ final class CanvasBoardState: Identifiable {
         history.append(value)
         func cost(_ item: CanvasDocument) -> Int {
             item.cards.reduce(1_024 + item.connections.count * 256) { sum, card in
-                if case .note(let text) = card.content { return sum + 1_024 + text.utf8.count }
-                return sum + 5_120
+                switch card.content {
+                case .note(let text): return sum + 1_024 + text.utf8.count
+                case .generatedView(let view):
+                    // A view's spec and state can be far larger than the
+                    // flat estimate; count their real bytes.
+                    return sum + 1_024 + view.specJSON.utf8.count
+                        + (view.state?.stateJSON.utf8.count ?? 0)
+                default: return sum + 5_120
+                }
             }
         }
         var bytes = history.reduce(0) { $0 + cost($1) }

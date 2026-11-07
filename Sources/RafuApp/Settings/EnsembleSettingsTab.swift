@@ -119,6 +119,8 @@ struct EnsembleSettingsSection: View {
                 }
             }
         }
+
+        ImageTrustSettingsSection()
     }
 
     private var pendingReplacementPresented: Binding<Bool> {

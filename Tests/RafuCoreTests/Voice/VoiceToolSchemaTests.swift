@@ -8,7 +8,12 @@ struct VoiceToolSchemaTests {
     @Test("Every CanvasAgentTool has exactly one function tool with a closed schema")
     func ensembleToolsMirrorTheCatalog() {
         let tools = VoiceToolSchema.ensembleTools(from: CanvasAgentToolCatalog.definitions)
-        #expect(tools.map(\.name) == CanvasAgentTool.allCases.map(\.rawValue))
+        #expect(
+            tools.map(\.name)
+                == CanvasAgentTool.allCases.map(\.rawValue).filter {
+                    !VoiceToolSchema.hiddenEnsembleTools.contains($0)
+                })
+        #expect(!tools.contains { $0.name == "view_render" || $0.name == "view_update" })
         for tool in tools {
             #expect(tool.type == "function")
             #expect(tool.parameters["type"] == "object", Comment(rawValue: tool.name))
@@ -34,7 +39,8 @@ struct VoiceToolSchemaTests {
         #expect(Set(rafu).count == rafu.count)
         #expect(
             rafu.count
-                == CanvasAgentTool.allCases.count + 7 + VoiceToolSchema.viewNames.count
+                == CanvasAgentTool.allCases.count - VoiceToolSchema.hiddenEnsembleTools.count
+                + 7 + VoiceToolSchema.viewNames.count
                 + VoiceToolSchema.workOrderNames.count + VoiceToolSchema.metaNames.count)
         let ensemble = VoiceToolSchema.tools(for: .ensemble(boardID: "x")).map(\.name)
         #expect(!ensemble.contains("list_ensembles"))
@@ -54,6 +60,19 @@ struct VoiceToolSchemaTests {
         #expect(VoiceToolSchema.extraRisk(of: "work_order_create") == .sensitive)
         #expect(VoiceToolSchema.extraRisk(of: "list_ensembles") == .read)
         #expect(VoiceToolSchema.extraRisk(of: "view_tidy") == .edit)
+        #expect(VoiceToolSchema.extraRisk(of: "show_view") == .edit)
+    }
+
+    @Test("show_view replaces the two MCP view tools with a flat spec")
+    func showView() {
+        let names = VoiceToolSchema.tools(for: .rafu).map(\.name)
+        #expect(names.contains(VoiceToolSchema.showViewName))
+        #expect(VoiceToolSchema.hiddenEnsembleTools.isDisjoint(with: names))
+        let tool = VoiceToolSchema.showViewTool
+        #expect(tool.parameters["additionalProperties"] == false)
+        #expect(tool.parameters["properties"]?["elements"]?["type"] == "object")
+        #expect(tool.parameters["properties"]?["root"]?["type"] == "string")
+        #expect(tool.parameters["required"] == ["title", "root", "elements"])
     }
 
     @Test("Literal schemas convert without turning booleans into numbers")

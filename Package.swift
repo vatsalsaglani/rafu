@@ -84,6 +84,13 @@ let package = Package(
             url: "https://github.com/lukilabs/beautiful-mermaid-swift",
             exact: "1.0.4"
         ),
+        // Declarative generated views on the Ensemble board (ADR pending, wave 3).
+        // Apache-2.0. Pre-release pin; move to the 0.22.0 release tag in wave 4.
+        // Its macro target pulls swift-syntax (a longer cold build).
+        .package(
+            url: "https://github.com/vatsalsaglani/swift-json-render.git",
+            exact: "0.22.0-alpha.1"
+        ),
         // NOTE: elk-swift (the ELK layout port) is a transitive dependency of
         // beautiful-mermaid-swift and is deliberately NOT declared here.
         // Declaring it produces "dependency 'elk-swift' is not used by any
@@ -118,6 +125,16 @@ let package = Package(
                 .product(name: "TreeSitterMarkdown", package: "tree-sitter-markdown"),
                 .product(name: "TreeSitterDockerfile", package: "tree-sitter-dockerfile"),
                 .product(name: "BeautifulMermaid", package: "beautiful-mermaid-swift"),
+                // Generated views (wave 3). JSONRenderClient carries the
+                // `@JRComponent` macro for Rafu's own components. The
+                // package's JSONRenderRemoteImages target is a placeholder at
+                // 0.22.0-alpha.1; Rafu implements `JRRemoteImageProvider`
+                // (from JSONRenderSwiftUI) itself.
+                .product(name: "JSONRenderCore", package: "swift-json-render"),
+                .product(name: "JSONRenderClient", package: "swift-json-render"),
+                .product(name: "JSONRenderSwiftUI", package: "swift-json-render"),
+                .product(name: "JSONRenderStandardCatalog", package: "swift-json-render"),
+                .product(name: "JSONRenderCharts", package: "swift-json-render"),
             ],
             resources: [
                 // Vendored tree-sitter `highlights.scm` queries (lane-1
@@ -132,6 +149,9 @@ let package = Package(
                 .copy("Resources/DiagramPacks"),
                 // The Rafu Ensemble agent skill (X4), installed from Settings.
                 .copy("Resources/AgentSkills"),
+                // Public Suffix List (MPL-2.0 data file) for the image host
+                // trust list (wave 3); read lazily. See its README.md.
+                .copy("Resources/PublicSuffix"),
             ],
             swiftSettings: [
                 .defaultIsolation(MainActor.self)

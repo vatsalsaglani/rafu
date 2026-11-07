@@ -12,6 +12,7 @@ nonisolated enum CanvasSearchCategory: String, CaseIterable, Sendable {
     case web
     case frame
     case drawing
+    case view
 
     var title: String {
         switch self {
@@ -24,6 +25,7 @@ nonisolated enum CanvasSearchCategory: String, CaseIterable, Sendable {
         case .web: "Local Web App"
         case .frame: "Frame"
         case .drawing: "Shape & Text"
+        case .view: "View"
         }
     }
 
@@ -37,6 +39,7 @@ nonisolated enum CanvasSearchCategory: String, CaseIterable, Sendable {
         case .web: .web
         case .frame: .frame
         case .shape, .stroke, .text, .serviceIcon: .drawing
+        case .generatedView: .view
         }
     }
 }
@@ -193,6 +196,9 @@ nonisolated struct CanvasBoardSearchIndex: Sendable {
             return (icon.label, [])
         case .note, .stroke:
             // A note body can be 64 KiB and its saved text can be stale.
+            return ("", [])
+        case .generatedView:
+            // The title only: never index spec text or state.
             return ("", [])
         }
     }

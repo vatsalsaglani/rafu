@@ -303,6 +303,7 @@ extension CanvasCardContent {
         case .terminal: CGSize(width: 320, height: 180)
         case .web: CGSize(width: 320, height: 220)
         case .mermaid, .frame: CGSize(width: 200, height: 140)
+        case .generatedView: CGSize(width: 240, height: 160)
         // Whiteboard items stay light: only the stored card minimum applies.
         case .shape, .stroke, .text, .serviceIcon:
             CGSize(width: CanvasRect.absoluteMinimumWidth, height: CanvasRect.absoluteMinimumHeight)
@@ -314,7 +315,7 @@ extension CanvasCardContent {
     nonisolated var isWhiteboardDrawing: Bool {
         switch self {
         case .shape, .stroke, .text, .serviceIcon: true
-        case .file, .image, .note, .terminal, .web, .mermaid, .frame: false
+        case .file, .image, .note, .terminal, .web, .mermaid, .frame, .generatedView: false
         }
     }
 
@@ -322,7 +323,8 @@ extension CanvasCardContent {
     nonisolated var keepsAspect: Bool {
         switch self {
         case .image, .serviceIcon: true
-        case .file, .note, .terminal, .web, .mermaid, .shape, .stroke, .text, .frame:
+        case .file, .note, .terminal, .web, .mermaid, .shape, .stroke, .text, .frame,
+            .generatedView:
             false
         }
     }

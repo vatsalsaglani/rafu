@@ -414,6 +414,8 @@ enum CanvasAgentActions {
         case .frameCreate: return try frameCreate(call, caller: caller)
         case .export: return try await export(call, caller: caller)
         case .diagramBuild: return try diagramBuild(call, caller: caller)
+        // jr-4a adds the two bodies (CanvasAgentActions+Views.swift).
+        case .viewRender, .viewUpdate: return .init(error: GeneratedViewCopy.unavailable)
         case .actionStatus: return .init(error: "No action matches that request_id.")
         }
     }
@@ -1243,6 +1245,7 @@ enum CanvasAgentKinds {
         if case .text = content { return "text" }
         if case .frame = content { return "frame" }
         if case .serviceIcon = content { return "service_icon" }
+        if case .generatedView = content { return "view" }
         return "other"
     }
 
@@ -1259,6 +1262,7 @@ enum CanvasAgentKinds {
         switch kind {
         case "mermaid": CanvasLimits.mermaidSourceBytes
         case "text": CanvasLimits.whiteboardTextBytes
+        case "view": CanvasLimits.generatedViewSpecBytes
         default: nil
         }
     }
