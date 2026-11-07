@@ -9,6 +9,7 @@ struct VoiceStatusItem: View {
     let session: VoiceSession
     @Environment(\.rafuTheme) private var theme
     @Environment(\.openSettings) private var openSettings
+    @State private var showsTimeline = false
 
     private var state: VoiceBlobState { session.blobState }
 
@@ -27,8 +28,9 @@ struct VoiceStatusItem: View {
             if case .error = state {
                 Button("Dismiss") { session.dismissError() }
             }
+            Button("Show Voice Timeline") { showsTimeline = true }
             Divider()
-            Text("Hold ⌃⌥Space to talk while Rafu is in front")
+            Text(VoiceStatusItem.chordHint)
             Button("Voice Settings…") {
                 SettingsPaneRouter.shared.request(.voice)
                 openSettings()
@@ -52,6 +54,17 @@ struct VoiceStatusItem: View {
         .help(helpText)
         .accessibilityLabel("Rafu voice")
         .accessibilityValue(state.accessibilityLabel)
+        .accessibilityAction(named: "Show Voice Timeline") { showsTimeline = true }
+        .popover(isPresented: $showsTimeline, arrowEdge: .top) {
+            VoiceTimelinePopover(session: session)
+        }
+    }
+
+    /// Where ⌃⌥Space works: in any app with the global hot key, else only
+    /// while Rafu is in front.
+    static var chordHint: String {
+        VoiceHotkey.shared.isGlobal
+            ? "Hold ⌃⌥Space to talk, in any app" : "Hold ⌃⌥Space to talk while Rafu is in front"
     }
 
     private var isListening: Bool {
@@ -61,7 +74,7 @@ struct VoiceStatusItem: View {
     private var helpText: String {
         if case .error(let reason) = state { return "Rafu voice: \(reason)" }
         return state == .idle
-            ? "Rafu voice. Hold ⌃⌥Space to talk, or choose Start Listening."
+            ? "Rafu voice. \(Self.chordHint), or choose Start Listening."
             : "Rafu voice: \(state.word)"
     }
 }

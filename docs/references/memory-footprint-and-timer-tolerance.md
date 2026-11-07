@@ -50,7 +50,7 @@ Lightning. Unit test: `Tests/RafuAppTests/ProcessMemorySamplerTests.swift`.
 ## Verification
 
 ```bash
-footprint "$(pgrep -x 'Rafu Lightning')" | head
+footprint "$(pgrep -x RafuLightning)" | head
 swift test --filter ProcessMemorySamplerTests
 ```
 

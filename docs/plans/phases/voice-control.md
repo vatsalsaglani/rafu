@@ -1,7 +1,8 @@
 # Rafu Voice — GPT-Live control of the Ensemble
 
-- Status: **Phase 1a implemented** on `voice/phase-1a` (2026-11-07), awaiting
-  merge and the manual microphone checks below. Phase 1b starts from that merge.
+- Status: **Phase 1a merged** to `main` (2cbf3aa). **Phase 1b implemented**
+  on `voice/phase-1b` (2026-11-07), awaiting review, merge and the manual
+  microphone checks below.
 - Decision: [ADR 0035](../../decisions/0035-voice-through-gpt-live.md).
 - Reference: [`gpt-live-protocol.md`](../../references/gpt-live-protocol.md).
 - Plan: the voice VPLAN, revision 3 (kept outside the repository). Phase 2
@@ -20,8 +21,10 @@
   `NotchCompanionView.swift` (blob in the left wing), `WorkspaceStatusBar.swift`
   (voice item), `SettingsPaneNavigation.swift` and `RafuSettingsView.swift`
   (Voice pane), `RafuAppCommands.swift` (menu items), `ExternalOpenRequests.swift`
-  (hotkey install), `script/build_and_run.sh` (microphone usage string),
-  `SettingsPresentationTests.swift`.
+  (hotkey install; 1b: voice close on quit), `script/build_and_run.sh`
+  (microphone usage string), `SettingsPresentationTests.swift`.
+- Phase 1b needed no Canvas change: the landing ring sets the existing
+  `CanvasBoardState.landing`, which `CanvasSetDownRing` already draws.
 - No change: `Package.swift`, `Sources/RafuCore/CanvasBridge/*`,
   `CanvasLiveBridge.swift`, `Sources/RafuApp/Conductor/**`,
   `Sources/RafuApp/AI/**`.
@@ -49,17 +52,36 @@
   personalization toggle with View and Reset (store only), monthly cap,
   cost readout, microphone status.
 
-### Phase 1b (next agent, after the 1a merge)
+### Phase 1b (done on the branch)
 
-- Confirm card (`RafuConfirmPopup` through `RafuPopupPresenter.presentSheet`,
-  "Allow once", destructive variant for removals, Return never removes) and
-  sensitive tools under Ask and Allow; `voice_confirm` / `voice_cancel`.
-- Global ⌃⌥Space through Carbon `RegisterEventHotKey` (press and release, no
-  Accessibility permission); mark unverified until it compiles.
-- Timeline popover from the status item and the blob; landing ring on a card
-  changed by voice (`RafuMotion.landingRing`).
-- Verify the check-in audio path; Release memory and CPU measurement, recorded
-  in `gpt-live-protocol.md`.
+- [x] Confirm card for sensitive calls in Ask mode (`VoiceConfirm.swift`):
+      "Allow Once" (default), "Allow for This Session" (in memory, not for
+      removals), Cancel; removals show one destructive "Remove" and Return
+      never removes. `voice_confirm` / `voice_cancel` resolve the same card;
+      60 s timeout; closing the session cancels it. Allow runs sensitive
+      calls with the badge and no card. A spoken `voice_confirm` counts only
+      in a later user turn (`not_heard` otherwise); no window means
+      `no_window` at once. Voice may type into any terminal card after
+      consent. `needs_phase_2` stays for hand-off,
+      take back, focus, find, plan preview and work orders.
+- [x] Global ⌃⌥Space through Carbon `RegisterEventHotKey` (press and
+      release); the local monitor stays as the fallback. Settings ▸ Voice
+      shows a one-line notice with ⌃⌥⇧Space when macOS's input-source
+      shortcut owns the chord. It compiles; the press/release in another app
+      is a manual check.
+- [x] Voice Timeline popover from the status item menu and the blob's
+      context menu (also a VoiceOver action): lanes You, Rafu, Delegations,
+      Tools, Board effects, with ids, start offsets and durations; live;
+      empty after close.
+- [x] Landing ring on every card voice adds or changes (the Round A
+      set-down ring; no haptic for voice). The trail from the blob was not
+      built (optional; not small across the notch panel and the board).
+- [x] Review items: rate limit on voice calls; engine stop after 10 quiet
+      seconds in a session that is not latched; `session.close` on quit
+      (≤ 2 s) plus a synchronous socket drop; a second press while
+      connecting keeps the first press's frames.
+- [ ] Release memory/CPU measurement with an open session (manual; method and
+      the idle numbers in `gpt-live-protocol.md`).
 
 ## Exit checklist (VPLAN Phase 1)
 
@@ -68,7 +90,7 @@
 - [ ] Utterances 1, 2, 7, 9, 10, 11, 13, 14, 15, 16, 18, 19, 21, 22, 29, 30
       work; "Rafu (voice)" notice and badge (manual; executor paths tested).
 - [x] Off denies, Ask runs edits with a notice, Allow runs; sensitive calls
-      return `needs_phase_2` (tests).
+      wait on the Confirm card in Ask and run with the badge in Allow (tests).
 - [x] Backend picker, voice picker, cost meter, cap, tail toggle,
       personalization toggle/View/Reset in Settings ▸ Voice.
 - [x] Source-policy test: no logging in `Voice/`; the key only in the
@@ -101,3 +123,33 @@
    Settings ▸ Voice offers "Open System Settings".
 9. Allow mode with "Share terminal output" on: ask "What is the terminal
    doing?"; the reply reflects the visible lines.
+
+Phase 1b additions:
+
+10. Ask mode: say "Remove the Review note". A Confirm card shows "Remove"
+    (red) and Cancel; Return does nothing destructive. Say "yes" (hold the
+    key again if not latched). Record whether the spoken yes resolves the
+    card (it needs GPT-Live to start a second delegation while the first
+    waits); clicking Remove always works. Also ask Rafu to "remove it and confirm
+    it yourself": the node must stay until you answer. Leave a card alone for 60 s: it
+    closes and Rafu says it did not happen.
+11. Ask mode: "Start a Claude terminal". The card offers Allow Once (default,
+    Return) and Allow for This Session. Choose the session grant, then ask
+    for a second one: no card. Close the session; the next request shows the
+    card again.
+11b. Allow mode: with a terminal card you made (a plain shell), say "run ls in
+    Shell". Rafu types it with the voice badge. In Ask mode the card comes
+    first.
+12. With another app in front, hold ⌃⌥Space and speak; release. Rafu hears
+    it and the blob shows listening. With two input sources on, Settings ▸
+    Voice shows the input-source notice.
+13. Hold-to-talk once, then wait 10 s after the reply: the macOS microphone
+    indicator goes out while the blob still shows Paused. Press again: it
+    comes back and speech goes through (note any clipped first word).
+14. Open the Voice Timeline from the status item menu during a session: rows
+    appear live in the five lanes; after the session closes it is empty.
+    VoiceOver reads each row (id, title, detail, time).
+15. A note created by voice shows the set-down ring once (none under Reduce
+    Motion).
+16. Quit Rafu Lightning during a session: it quits within about 2 s, and
+    Settings ▸ Voice counts the minutes.

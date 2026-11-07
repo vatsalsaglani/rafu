@@ -6,9 +6,10 @@
 - **Last verified:** protocol facts 2026-11-07 against the live service with
   the user's key (Phase 0 spike, native Swift `URLSessionWebSocketTask`).
   Implementation facts 2026-11-07, Apple Swift 6.4.2 (swiftlang-6.4.2.1.9),
-  macOS 27 SDK 27.2, deployment target macOS 15. The microphone, echo
-  cancellation and spoken check-in are **not** verified yet (manual checks
-  below).
+  macOS 27 SDK 27.2, deployment target macOS 15. Phase 1b facts the same
+  day and toolchain. The microphone, echo cancellation, spoken check-in,
+  spoken confirm and the global hot key at run time are **not** verified yet
+  (manual checks below).
 
 ## Rule or observed behaviour
 
@@ -154,6 +155,67 @@ other than `response.output_item.done` with `item.type == "function_call"` and
 - **⌃⌥Space** is macOS's "Select next source in Input menu" when more than one
   input source is enabled; the system then takes the chord before Rafu. The
   menu item uses ⌃⌥⇧Space so it never competes with push-to-talk.
+
+### Implementation nuances found while building Phase 1b
+
+- **Carbon hot key from Swift 6.** `import Carbon.HIToolbox` compiles on this
+  toolchain with no package change. `InstallEventHandler` on
+  `GetApplicationEventTarget()` for `kEventHotKeyPressed` and
+  `kEventHotKeyReleased`, and `RegisterEventHotKey` on
+  `GetEventDispatcherTarget()`, give press and release in any app with no
+  Accessibility permission. The handler is a file-private `nonisolated func`
+  (a closure literal in the default-`MainActor` target fails the
+  `@convention(c)` conversion, as with FSEvents); Carbon calls it on the main
+  thread, so it enters the main actor with `MainActor.assumeIsolated`. Match
+  the event by its `EventHotKeyID.signature` ("RfVc"). Runtime press/release
+  in another app is a manual check.
+- **Detecting the input-source collision.** Read
+  `CFPreferencesCopyAppValue("AppleSymbolicHotKeys", "com.apple.symbolichotkeys")`.
+  Ids 60 and 61 are "previous" and "next input source"; each entry is
+  `{enabled, value: {parameters: [char, keyCode, modifiers]}}` with
+  `NSEvent.ModifierFlags` raw values (⌃⌥ = `0xC0000`). A missing "61" means
+  the default, which is ⌃⌥Space and on. The shortcut only acts when
+  `TISCreateInputSourceList` (keyboard sources, select-capable) has more than
+  one entry, so Rafu shows the notice only then.
+- **Confirm card and the call queue.** Voice tool calls run one at a time, in
+  order. A sensitive call waits on the card inside that queue, so
+  `voice_confirm` / `voice_cancel` bypass the queue and resolve the waiting
+  continuation directly; otherwise the answer would wait behind the call it
+  answers until the 60 s timeout. The session clock does not run while a card
+  waits (the card's own timeout ends it). Whether GPT-Live starts a second
+  delegation while the first waits for a function output is unverified; the
+  card works by click regardless.
+- **`RafuPopupPresenter.presentSheet` returns nothing.** Its content closure
+  receives the dismiss closure; keep it in a small box so a spoken answer or
+  the timeout can close a card the user did not click.
+- **Engine restart.** Stopping the engine (`stopAll`) and building a new one
+  (`startPlayback`) is how a quiet session puts the microphone indicator out;
+  the next press, a delegation, or the first audible delta restarts it. While
+  stopped, the server's continuous silence deltas are dropped, not queued.
+  Measured output-only restart cost is below (Measurements).
+- **A spoken confirmation counts only in a later user turn.** A single
+  backend response can hold a sensitive call and `voice_confirm` together.
+  Rafu counts `session.delegation.created` and accepts `voice_confirm` only
+  from a turn that started after the card appeared (`not_heard` otherwise);
+  `voice_cancel` counts in any turn. Residual risk, accepted: a latched
+  session can get a server-detected turn on noise.
+- **`parallel_tool_calls: false`** is sent inside `delegation.responses`.
+  Verified 2026-11-07: the server accepts it and `session.started` echoes
+  `"parallel_tool_calls":false` (spike probe `probes/ptc.json`). The server
+  rejects unknown fields, so if `session.start` starts failing with
+  `responses_validation_failed`, this key is the first suspect. The turn rule above is
+  the gate, not this flag. `VoiceDelegationConfig.parallelToolCalls = nil`
+  omits it.
+- **Source-policy scan is a substring match.** `VoiceSourcePolicyTests` bans
+  the text `TimelineView` anywhere in `Voice/`, so a type named
+  `VoiceTimelineView` fails it. The popover is `VoiceTimelinePopover`.
+- **Quit.** `applicationShouldTerminate` already replies later; voice chains
+  `closeForQuit(limit: 2 s)` before the persistence flush. A watchdog drops
+  the socket at the limit, so a `send` that never returns cannot hold quit.
+  `applicationWillTerminate` calls the synchronous `terminateNow()`, which
+  keeps a reference to the transport because the client actor cannot be
+  awaited there; `URLSessionWebSocketTask.cancel(with: .normalClosure)` sends
+  the close frame.
 - **Spoken check-in is unverified.** `session.commentary.append` without a
   `delegation_id` was tested only under client delegation. Under Responses
   delegation Rafu sends it with the key omitted; on an `error` reply only the
@@ -191,16 +253,55 @@ plutil -extract NSMicrophoneUsageDescription raw "dist/Rafu Lightning.app/Conten
 
 Manual (Rafu Lightning, real microphone): see
 [`voice-control.md`](../plans/phases/voice-control.md) "Manual checks".
-Measure memory and CPU on a Release staged bundle, idle vs. latched:
-`top -l 5 -pid "$(pgrep -x 'Rafu Lightning')" -stats pid,cpu,mem` (Phase 1b
-records the numbers here).
+
+### Measurements (Phase 1b)
+
+Measured 2026-11-07 on this 8 GB Mac, macOS 27, Swift 6.4.2, with no GUI
+input (agents never speak or click; ADR and AGENTS.md rules).
+
+- **Release bundle: not built.** `script/build_and_run.sh` stages only the
+  debug configuration (it runs `swift build` without `-c release`), and a
+  release build of the whole app on this machine would hold the build lock
+  for many minutes during the gates. The numbers below are Debug; the
+  session numbers need the user.
+- **Idle, Debug, staged Rafu Lightning** (`./script/build_and_run.sh
+  --verify`, no workspace interaction): `top -l 6 -s 3 -pid <pid> -stats
+  pid,cpu,mem` showed 0.0 % CPU for five samples and 0.7 % on the sixth;
+  `vmmap --summary` physical footprint 77.2 MB (peak 103.7 MB during launch).
+  Voice adds nothing to idle by construction: no engine, socket, task or
+  timer before the first press; the Carbon hot key and the key monitor are
+  passive registrations.
+- **Engine restart cost (output-only lower bound).** A standalone
+  `AVAudioEngine` with one `AVAudioSourceNode` → main mixer, built,
+  prepared and started 8 times in one process (`swiftc -O`, no input node,
+  so no microphone prompt and no voice processing): first start in a fresh
+  process 93 ms (2.56 s on the very first run after the audio server was
+  cold), warm restarts median 17.5–18.2 ms, max 19.4 ms. Rafu restarts a
+  warm engine, so the output side costs about 18 ms; voice processing on
+  the input node adds an unmeasured amount (manual check 13 in
+  `voice-control.md` asks whether a first word is clipped).
+- **Open session (to do, manual).** Process name is `RafuLightning` (no
+  space; `pgrep -x 'Rafu Lightning'` finds nothing). With a session latched
+  and silent, then while talking:
+
+  ```bash
+  P=$(pgrep -x RafuLightning)
+  top -l 10 -s 2 -pid "$P" -stats pid,cpu,mem
+  vmmap --summary "$P" | grep -i "physical footprint"
+  ```
+
+  Budget: session ≤ +25 MB over idle, listening ≤ 8 % CPU. For a Release
+  number, build with `swift build -c release --product RafuApp` and run the
+  same commands against that binary inside a staged bundle; the script has
+  no release mode today.
 
 ## Related code, ADRs, and phases
 
 - `VoiceLiveEvents.swift`, `VoiceSessionConfig.swift`, `VoiceToolSchema.swift`,
   `VoiceAudioLevel.swift` (RafuCore); `VoiceLiveTransport.swift`,
   `VoiceLiveClient.swift`, `VoiceAudioIO.swift`, `VoiceSession.swift`,
-  `VoiceHotkey.swift` (RafuApp).
+  `VoiceHotkey.swift`, `VoiceConfirm.swift`, `VoiceTimelinePopover.swift`
+  (RafuApp); the quit hooks in `App/ExternalOpenRequests.swift`.
 - [ADR 0035](../decisions/0035-voice-through-gpt-live.md),
   [`voice-control.md`](../plans/phases/voice-control.md),
   [`concurrency.md`](concurrency.md),

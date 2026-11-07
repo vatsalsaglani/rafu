@@ -51,11 +51,12 @@ actor VoiceLiveClient {
     }
 
     /// Sends `session.close` and waits for `session.closed` (Phase 0: 0.5–1 s)
-    /// for at most `closeTimeout`, then drops the socket. Safe to call twice.
-    func close() async {
+    /// for at most `timeout` (default `closeTimeout`), then drops the socket.
+    /// Safe to call twice.
+    func close(timeout: Duration? = nil) async {
         guard !isClosed else { return }
         if !receivedClosed, (try? await send(.sessionClose)) != nil {
-            await waitForClosed()
+            await waitForClosed(timeout: timeout ?? closeTimeout)
         }
         isClosed = true
         transport.cancel()
@@ -74,9 +75,8 @@ actor VoiceLiveClient {
         continuation.finish()
     }
 
-    private func waitForClosed() async {
+    private func waitForClosed(timeout: Duration) async {
         guard !receivedClosed else { return }
-        let timeout = closeTimeout
         let timer = Task {
             try? await Task.sleep(for: timeout)
             self.resumeCloseWaiter()
