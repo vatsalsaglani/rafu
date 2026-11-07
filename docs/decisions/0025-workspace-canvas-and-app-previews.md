@@ -18,6 +18,12 @@ WebKit use for a user-connected loopback web application only. ADR 0019 and
 0020 keep document/media/Markdown/Mermaid rendering native. No extension host,
 embedded coding agent, task runner, or inference credential authority is added.
 
+Amendment (2026-11-07, [ADR 0035](0035-voice-through-gpt-live.md)): Ensemble
+agents never receive Rafu-held credentials; Rafu features may use the user's
+provider key from Keychain. Rafu Voice is such a feature: it reads the OpenAI
+key into one request header and acts on boards only through the same undoable
+board tools, marked "Rafu (voice)".
+
 Native app cards use public NSWorkspace activation and ScreenCaptureKit's
 single-window system picker. Captured frames are temporary, local previews.
 Keyboard and pointer input belong to the actual app after Open App. No foreign

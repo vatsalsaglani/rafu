@@ -25,6 +25,8 @@ struct CanvasAgentCaller {
         @MainActor (_ destination: String, _ text: String) async -> CanvasBridgeResponse
 
     var agentName: String {
+        // A voice call is the user speaking through Rafu, not a terminal agent.
+        if provider == "voice" { return "Rafu (voice)" }
         let vendor = provider == "codex" ? "Codex" : "Claude"
         return "\(vendor) — \(CanvasAgentText.singleLine(card.title, limit: 40))"
     }

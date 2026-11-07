@@ -182,4 +182,22 @@ final class RafuTerminalView: LocalProcessTerminalView {
         }
         return TerminalAttentionPolicy.snippet(from: lines, maxLines: maxLines, maxBytes: maxBytes)
     }
+
+    /// The same VIEWPORT-only read as `recentOutputSnippet`, as raw lines,
+    /// for Rafu Voice's `ensemble_describe` in Allow mode only. The caller
+    /// scrubs and bounds them (`VoiceOutputScrubber`) before they leave the
+    /// app; never log or persist them.
+    func recentOutputLines(maxLines: Int = 40) -> [String] {
+        let terminal = getTerminal()
+        let cursor = terminal.getCursorLocation()
+        let topRow = max(0, min(cursor.y, terminal.rows - 1))
+        var lines: [String] = []
+        for row in 0...topRow {
+            guard let line = terminal.getLine(row: row) else { continue }
+            lines.append(
+                line.translateToString(
+                    trimRight: true, characterProvider: terminal.getCharacter(for:)))
+        }
+        return Array(lines.suffix(max(0, maxLines)))
+    }
 }

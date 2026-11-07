@@ -184,6 +184,22 @@ struct RafuAppCommands: Commands {
 
             Divider()
 
+            // Rafu Voice (ADR 0035). The menu chord adds ⇧ so it never
+            // competes with push-to-talk ⌃⌥Space, which a key monitor owns.
+            Button(
+                VoiceSession.shared.machine.mic == .latched ? "Stop Listening" : "Start Listening"
+            ) {
+                VoiceSession.shared.toggleLatched()
+            }
+            .keyboardShortcut(.space, modifiers: [.control, .option, .shift])
+
+            Button("Stop Speaking") {
+                VoiceSession.shared.stopSpeaking()
+            }
+            .disabled(VoiceSession.shared.blobState != .speaking)
+
+            Divider()
+
             Button("Stage Hunk") {
                 guard let session = workspaceSession,
                     let hunk = soleHunk(in: session, scope: .workingTree)

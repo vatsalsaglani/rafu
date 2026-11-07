@@ -111,6 +111,9 @@ struct NotchCompanionView: View {
 struct CompanionWingsView: View {
     let model: NotchCompanionModel
     @Environment(\.rafuTheme) private var theme
+    private var voice = VoiceSession.shared
+
+    init(model: NotchCompanionModel) { self.model = model }
 
     private var ink: NotchInk { NotchInk(theme: theme) }
 
@@ -135,7 +138,11 @@ struct CompanionWingsView: View {
     /// strip is wide enough that the indicator is not behind the housing.
     private var leftWing: some View {
         HStack(spacing: RafuMetrics.space1) {
-            if model.isMascotEnabled {
+            // An open voice session takes the mascot's place, so the strip
+            // keeps its width (voice-control.md).
+            if voice.blobState != .idle {
+                VoiceBlobView(session: voice)
+            } else if model.isMascotEnabled {
                 RafuMascotView(
                     state: model.mascotState, engaged: model.isStripExpanded, size: 20,
                     claimBounce: model.claimMascotBounce)

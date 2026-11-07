@@ -8,9 +8,9 @@ import RafuCore
 nonisolated struct CanvasAgentProvenanceRecord: Equatable, Sendable {
     let boardID: CanvasID
     let cardID: CanvasCardID
-    /// "Claude" or "Codex".
+    /// "Claude", "Codex" or "Rafu (voice)".
     let agentName: String
-    /// The caller's provider id: "claude" or "codex".
+    /// The caller's provider id: "claude", "codex" or "voice".
     let provider: String
     /// `CanvasAgentTool.actionTitle`, as the activity log shows it.
     let action: String
@@ -34,8 +34,18 @@ nonisolated struct CanvasAgentProvenanceRecord: Equatable, Sendable {
     /// True only while nothing else changed the board after this edit.
     func canUndo(currentStamp: UInt64) -> Bool { currentStamp == changeStamp }
 
-    /// The vendor mark for the badge.
-    var cli: ConductorCLIID { provider == "codex" ? .codex : .claudeCode }
+    /// The vendor mark for the badge; `nil` for a voice edit, which shows
+    /// `symbol` instead.
+    var cli: ConductorCLIID? {
+        switch provider {
+        case "voice": nil
+        case "codex": .codex
+        default: .claudeCode
+        }
+    }
+
+    /// The SF Symbol for a badge without a vendor mark.
+    var symbol: String? { provider == "voice" ? "waveform" : nil }
 
     /// "Added by Claude".
     var byline: String { "\(verb.prefix(1).uppercased())\(verb.dropFirst()) by \(agentName)" }
@@ -43,8 +53,14 @@ nonisolated struct CanvasAgentProvenanceRecord: Equatable, Sendable {
 
 /// The words of an agent-edit notice. Names only.
 nonisolated enum CanvasAgentNoticeText {
-    /// "Claude" or "Codex", from the caller's provider id.
-    static func vendor(provider: String) -> String { provider == "codex" ? "Codex" : "Claude" }
+    /// "Claude", "Codex" or "Rafu (voice)", from the caller's provider id.
+    static func vendor(provider: String) -> String {
+        switch provider {
+        case "voice": "Rafu (voice)"
+        case "codex": "Codex"
+        default: "Claude"
+        }
+    }
 
     /// The verb for a call that changed one card, or `nil` for a call that
     /// leaves no card to mark: a read, a removal, a link, typing, a start, an
