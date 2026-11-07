@@ -12,3 +12,15 @@ Rafu reads it lazily for the image host trust list (Settings ▸ Ensemble ▸
 Images from the web). To refresh it, download the file again from the URL
 above, replace it unchanged, and update the date, version, commit, and size
 here.
+
+## How Rafu reads it
+
+`PublicSuffixList` (`Sources/RafuApp/Canvas/RemoteImages/PublicSuffixList.swift`)
+parses the file once, off the main actor, when the image trust model loads.
+Both the ICANN and the PRIVATE section count, so `github.io` is a public
+suffix. Rules with Unicode labels are matched in punycode. The list decides
+two things: a wildcard such as `*.com`, `*.co.uk` or `*.github.io` is never a
+valid trust-list entry, and the consent card offers `*.` plus the registrable
+domain of a host (`raw.githubusercontent.com` offers `*.githubusercontent.com`).
+Tests inject a tiny list through `PublicSuffixProviding`; one test reads this
+file and checks it is a plausible size (100 KB to 400 KB).
