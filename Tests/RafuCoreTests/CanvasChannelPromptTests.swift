@@ -167,6 +167,21 @@ struct CanvasChannelPromptTests {
         }
     }
 
+    @Test func dialogFollowedByAnotherPromptDoesNotMatch() {
+        // An agent prints the dialog text, then asks for a tool permission: the
+        // dialog is no longer the last thing on the screen.
+        let toolPermission = [
+            "Bash command", "", "  rm -rf build", "",
+            "Do you want to proceed?",
+            "❯ 1. Yes", "  2. Yes, and don't ask again for rm commands", "  3. No", "",
+            "Esc to cancel",
+        ]
+        #expect(!CanvasChannelPrompt.matches(Self.dialog() + toolPermission))
+        #expect(!CanvasChannelPrompt.matches(Self.dialog() + ["", "Done.", ""]))
+        // Blank rows after the dialog are fine; they are not content.
+        #expect(CanvasChannelPrompt.matches(Self.dialog() + ["", "   ", ""]))
+    }
+
     @Test func quotedWarningTextDoesNotMatch() {
         // Ordinary output that quotes the warning text in a code block.
         let quoted =

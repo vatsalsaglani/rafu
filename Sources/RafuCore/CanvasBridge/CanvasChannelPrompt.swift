@@ -35,6 +35,10 @@ public nonisolated enum CanvasChannelPrompt {
     /// - "I am using this for local development" as the selected option (`❯ 1.`);
     /// - the "Enter to confirm" hint.
     ///
+    /// The "Enter to confirm" row must also be the last non-empty row of the
+    /// sample: the dialog sits at the bottom of the screen, so anything shown
+    /// below it (a tool-permission prompt, an agent's text) gives no match.
+    ///
     /// Wrapped rows are joined before the title, flag, and hint are searched, so a
     /// dialog wrapped at 60 or 80 columns still matches. The `Channels:` line and
     /// the option line must start their row, so output that merely quotes them
@@ -48,7 +52,9 @@ public nonisolated enum CanvasChannelPrompt {
         guard flat.contains(title), flat.contains(flag), flat.contains(confirmHint) else {
             return false
         }
-        guard rows.filter({ normalized($0) == normalized(selectedOption) }).count == 1,
+        guard let last = rows.last(where: { !$0.isEmpty }),
+            normalized(last).hasPrefix("Enter to confirm"),
+            rows.filter({ normalized($0) == normalized(selectedOption) }).count == 1,
             channels(in: rows) == [channelEntry]
         else { return false }
         return true

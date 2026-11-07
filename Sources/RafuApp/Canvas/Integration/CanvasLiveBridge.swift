@@ -387,7 +387,7 @@ final class CanvasLiveBridge {
             return .init(error: "Unsupported bridge request.")
         }
         if request.operation == CanvasChannelPrompt.launchOperation {
-            return recordClaudeLaunch(request, controller: controller)
+            return recordClaudeLaunch(request, controller: controller, source: source)
         }
         if request.operation == "suspend" {
             guard request.provider == "codex", source.provider == "codex",
@@ -686,11 +686,22 @@ final class CanvasLiveBridge {
     /// channel flag. This is the only trigger for `CanvasChannelPromptConfirmer`.
     /// The launcher sends no terminal content, and a launch announcement from any
     /// other provider is ignored.
+    ///
+    /// The wrapper sends this before `execve`, so no Claude client is registered
+    /// yet. A `launch` while a Claude client is bound and fresh (the same
+    /// freshness rule as `register`) is refused: an agent in the terminal can read
+    /// the token and must not be able to open a new watch for its own Claude.
     private func recordClaudeLaunch(
-        _ request: CanvasBridgeRequest, controller: WorkspaceTerminalController
+        _ request: CanvasBridgeRequest, controller: WorkspaceTerminalController,
+        source: Endpoint
     ) -> CanvasBridgeResponse {
         guard request.provider == "claude", let place = location(of: controller.id) else {
             return .init()
+        }
+        if source.clientID != nil,
+            now().timeIntervalSince(source.lastSeen) < Self.routeFreshness
+        {
+            return .init(error: "Another agent is already connected in this terminal.")
         }
         let board = place.board
         channelPrompt.recordLaunch(

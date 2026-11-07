@@ -10,7 +10,13 @@ import Testing
 @MainActor
 struct CanvasChannelPromptLaunchTests {
     @MainActor
+    private final class Clock {
+        var date = Date(timeIntervalSince1970: 1_000)
+    }
+
+    @MainActor
     private struct Fixture {
+        let clock = Clock()
         let session: WorkspaceSession
         let board: CanvasBoardState
         let controller: WorkspaceTerminalController
@@ -19,6 +25,7 @@ struct CanvasChannelPromptLaunchTests {
         let token = "channel-prompt-private-capability"
 
         init() throws {
+            let clock = self.clock
             let session = WorkspaceSession(
                 restorationStore: WorkspaceRestorationStore(
                     defaultsSuiteName: TestDefaultsSuite.name("dev.rafu.channel-prompt-tests"),
@@ -41,7 +48,8 @@ struct CanvasChannelPromptLaunchTests {
                     try? await Task.sleep(for: .seconds(3600))
                 })
             let bridge = CanvasLiveBridge(
-                location: { $0 == id ? (session, board, card) : nil }, channelPrompt: confirmer)
+                location: { $0 == id ? (session, board, card) : nil }, now: { clock.date },
+                channelPrompt: confirmer)
             bridge.install(controller: controller, token: token)
             self.session = session
             self.board = board
@@ -77,6 +85,38 @@ struct CanvasChannelPromptLaunchTests {
         fixture.board.setAgentControlMode(mode)
         #expect(await fixture.launch().error == nil)
         #expect(!fixture.confirmer.isWatching(fixture.controller.id))
+    }
+
+    @Test func aLaunchWhileAFreshClaudeClientIsRegisteredStartsNothing() async throws {
+        let fixture = try Fixture()
+        defer { fixture.confirmer.cancel(controllerID: fixture.controller.id) }
+        fixture.board.setAgentControlMode(.allow)
+        let client = UUID().uuidString
+        let registration = CanvasBridgeRequest(
+            token: fixture.token, operation: "register", clientID: client, provider: "claude")
+        #expect(await fixture.bridge.handle(registration).error == nil)
+        // An agent that reads the token cannot open a watch for its own Claude.
+        #expect(await fixture.launch().error != nil)
+        #expect(!fixture.confirmer.isWatching(fixture.controller.id))
+        // A repeated attempt changes nothing.
+        #expect(await fixture.launch().error != nil)
+        #expect(!fixture.confirmer.isWatching(fixture.controller.id))
+    }
+
+    @Test func aLaunchAfterTheRegisteredClientWentStaleStartsAWatch() async throws {
+        let fixture = try Fixture()
+        defer { fixture.confirmer.cancel(controllerID: fixture.controller.id) }
+        fixture.board.setAgentControlMode(.allow)
+        let registration = CanvasBridgeRequest(
+            token: fixture.token, operation: "register", clientID: UUID().uuidString,
+            provider: "claude")
+        #expect(await fixture.bridge.handle(registration).error == nil)
+        // Fresh for 15 s, the same rule as `register`.
+        fixture.clock.date.addTimeInterval(14)
+        #expect(await fixture.launch().error != nil)
+        fixture.clock.date.addTimeInterval(2)
+        #expect(await fixture.launch().error == nil)
+        #expect(fixture.confirmer.isWatching(fixture.controller.id))
     }
 
     @Test func aCodexLaunchStartsNothing() async throws {

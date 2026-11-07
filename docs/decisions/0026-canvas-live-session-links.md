@@ -116,6 +116,14 @@ Rules:
   to answer it.
 - Terminal content is read for this match only. It is never logged, stored, or
   sent anywhere.
+- Token holders: an agent in the terminal can read the private token, so
+  (1) a `launch` request is refused while a Claude client is bound and fresh on
+  that terminal (the `register` freshness rule, 15 s), and (2) the matcher needs
+  the "Enter to confirm" row to be the last non-empty row of the sample. An
+  agent therefore cannot open or replace a watch for its own Claude, and dialog
+  text it prints above a tool-permission prompt does not match.
+- If the folder-trust dialog comes first and the user takes more than 30 s, the
+  window ends and the channel dialog is not answered.
 
 The bridge gains one operation, `launch`, sent by the `claude` wrapper before it
 replaces itself with Claude. Existing operations and their shapes are unchanged.

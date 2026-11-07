@@ -477,9 +477,24 @@ Why this is safe. The answer covers Rafu's own channel only. It runs only in
 Allow, which already lets agents act on the board. It is one keypress for the
 option the user would choose, with a visible notice, and the setting turns it
 off. It does not change tool permissions: Claude's own approvals stay with the
-user. A process in the terminal that knows the private token can send a `launch`
-request, but that only starts the same bounded watch; the gates and the exact
-matcher still apply.
+user.
+
+An agent in the terminal can read `RAFU_CANVAS_TOKEN` and the socket path, so
+two rules stop it from steering the watch toward its own Claude:
+
+1. A `launch` request is refused while a Claude client is already bound and
+   fresh on that terminal (`clientID` set and `lastSeen` under 15 s old, the
+   same rule as `register`). The wrapper sends `launch` before `execve`, so no
+   client is registered at that time. A running Claude cannot open a new watch,
+   and a repeated `launch` cannot replace one.
+2. The matcher needs the "Enter to confirm" row to be the last non-empty row of
+   the sample. The real dialog sits at the bottom of the screen. Dialog text
+   that an agent prints, followed by a tool-permission prompt or any other
+   output, does not match.
+
+If the folder-trust dialog comes first and the user takes more than 30 s to
+answer it, the window ends and Rafu does not answer the channel dialog; the user
+answers it in the terminal.
 
 Verification:
 
