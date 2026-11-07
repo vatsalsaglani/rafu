@@ -56,6 +56,8 @@ Agents build, launch, inspect, and stop only **Rafu Lightning**. Never run
 release editor. Release builds are a CI action, not a normal local workflow.
 The only exception is a phase contract that explicitly requires non-launching
 release-package validation.
+The Rafu Lightning process name is `RafuLightning` (no space); find it with
+`pgrep -x RafuLightning`.
 
 ### Build lock: check it before you conclude "the build hung"
 

@@ -200,9 +200,10 @@ other than `response.output_item.done` with `item.type == "function_call"` and
   `voice_cancel` counts in any turn. Residual risk, accepted: a latched
   session can get a server-detected turn on noise.
 - **`parallel_tool_calls: false`** is sent inside `delegation.responses`.
-  Sent, server acceptance unverified (the server rejects unknown fields; if
-  `session.start` starts failing with `responses_validation_failed`, this key
-  is the first suspect); the Phase 0 spike can check. The turn rule above is
+  Verified 2026-11-07: the server accepts it and `session.started` echoes
+  `"parallel_tool_calls":false` (spike probe `probes/ptc.json`). The server
+  rejects unknown fields, so if `session.start` starts failing with
+  `responses_validation_failed`, this key is the first suspect. The turn rule above is
   the gate, not this flag. `VoiceDelegationConfig.parallelToolCalls = nil`
   omits it.
 - **Source-policy scan is a substring match.** `VoiceSourcePolicyTests` bans
