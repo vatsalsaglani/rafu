@@ -31,6 +31,12 @@ protocol VoiceToolHost: AnyObject {
     func grantForSession(_ key: String)
     /// A Board effects row on the timeline (counts only).
     func noteBoardEffect(_ title: String, detail: String)
+    /// The generated-view card implementation; nil until one is installed.
+    var generatedViewHost: (any GeneratedViewHost)? { get }
+    /// The skeleton card a streaming `show_view` started for this call, if any.
+    func viewStreamHandle(for callID: String) -> (any GeneratedViewStreamHandle)?
+    /// Forgets that handle: the call finished or cancelled it.
+    func takeViewStreamHandle(for callID: String)
 }
 
 /// One tool result: the JSON for the backend, and a counts-only line for the
@@ -100,9 +106,11 @@ enum VoiceToolExecutor {
         .noteCreate, .nodeCreate, .terminalCreate, .diagramBuild,
     ]
 
-    static func run(name: String, argumentsJSON: String, host: any VoiceToolHost) async
-        -> VoiceToolOutcome
-    {
+    /// `callID` lets `show_view` find the skeleton card its streamed
+    /// arguments started.
+    static func run(
+        name: String, argumentsJSON: String, callID: String? = nil, host: any VoiceToolHost
+    ) async -> VoiceToolOutcome {
         let arguments: [String: Any]
         if argumentsJSON.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             arguments = [:]
@@ -143,12 +151,13 @@ enum VoiceToolExecutor {
                 summary: "latched")
         case "view_zoom": return viewZoom(arguments, host: host)
         case "view_tidy": return viewTidy(host: host)
+        case "show_view": return await showView(arguments, callID: callID, host: host)
         default:
             return failure("unknown_tool", "Rafu has no tool with that name.")
         }
     }
 
-    private static func failure(_ code: String, _ message: String) -> VoiceToolOutcome {
+    static func failure(_ code: String, _ message: String) -> VoiceToolOutcome {
         VoiceToolOutcome(output: VoiceJSON.toolError(code, message), summary: code)
     }
 
@@ -313,7 +322,7 @@ enum VoiceToolExecutor {
 
     /// The set-down ring on every card voice added or changed (no haptic for
     /// voice), and a counts-only Board effects row on the timeline.
-    private static func noteEffect(
+    static func noteEffect(
         on board: CanvasBoardState, before: [CanvasCard], connectionsBefore: Int,
         host: any VoiceToolHost
     ) {
@@ -385,7 +394,7 @@ enum VoiceToolExecutor {
         return VoiceToolOutcome(output: output, summary: summary)
     }
 
-    private static func showUndoNotice(_ message: String, board: CanvasBoardState) {
+    static func showUndoNotice(_ message: String, board: CanvasBoardState) {
         let gate = CanvasAgentUndoGate(
             boardID: board.id, cards: board.cards, connections: board.connections)
         board.showNotice(

@@ -145,15 +145,21 @@ public nonisolated enum VoiceToolSchema {
     }
 
     /// Shows or changes a generated view. The spec keys (`root`, `elements`,
-    /// `state`) sit at the top level beside `title`, `node` and `reset`. jr-4c
-    /// owns the description and the parameter text after the contract commit.
+    /// `state`) sit at the top level beside `title`, `node` and `reset`, so the
+    /// arguments text can stream into a spec decoder while the model speaks.
+    /// Not strict-mode: `elements` is a map with free-form `props`.
     public static var showViewTool: VoiceFunctionTool {
         VoiceFunctionTool(
             name: showViewName,
             description:
                 "Show the user a small native view on the visible Ensemble (a table, chart, stat, "
-                + "checklist, file list…). Put the data in state and bind it. Give node to change "
-                + "an existing view instead. " + CanvasAgentViewVocabulary.text,
+                + "checklist, file list…). Put the data in state and bind it. Write title first, "
+                + "then root, then elements, then state. Give node to replace an existing view's "
+                + "spec instead. To restore a view's initial state give node and reset true, with "
+                + "root \"\" and elements {}. Put root, elements and state at the top level, not "
+                + "under a spec key. In Ask mode the view appears at once with an Undo notice. "
+                + "When it succeeds, say \"Showing\" and the title in a few words. "
+                + CanvasAgentViewVocabulary.text,
             parameters: .object([
                 "type": .string("object"),
                 "properties": .object([

@@ -43,7 +43,11 @@ func ensembleSettingsInstallResultState() async throws {
     #expect(!model.isInstalling)
     #expect(
         model.operationMessage
-            == "Installed at \(expected.path): 4 written, 0 replaced, 0 skipped.")
+            == "Installed at \(expected.path) and 1 more beside it: 6 written, 0 replaced, 0 skipped."
+    )
+    #expect(
+        FileManager.default.fileExists(
+            atPath: destination.appending(path: "rafu-view/SKILL.md").path))
     #expect(model.pendingReplacement == nil)
     #expect(model.errorMessage == nil)
 }
@@ -62,6 +66,9 @@ func ensembleSettingsInstallsForCodex() async throws {
 
     let skill = home.appending(path: ".codex/skills/rafu-ensemble/SKILL.md")
     #expect(FileManager.default.fileExists(atPath: skill.path))
+    #expect(
+        FileManager.default.fileExists(
+            atPath: home.appending(path: ".codex/skills/rafu-view/references/examples.md").path))
     #expect(!FileManager.default.fileExists(atPath: home.appending(path: ".claude").path))
     #expect(model.errorMessage == nil)
 }
@@ -71,4 +78,30 @@ func ensembleSkillCopyNamesVerifiedFolders() {
     #expect(EnsembleSkillCopy.footer.contains("~/.claude/skills/rafu-ensemble"))
     #expect(EnsembleSkillCopy.footer.contains("~/.codex/skills/rafu-ensemble"))
     #expect(!EnsembleSkillCopy.summary.contains("Conductor"))
+}
+
+@MainActor
+@Test("A conflict in any skill writes nothing until the user confirms")
+func ensembleSettingsAsksBeforeAnySkillIsWritten() async throws {
+    let destination = FileManager.default.temporaryDirectory
+        .appending(path: "rafu-settings-conflict-\(UUID().uuidString)", directoryHint: .isDirectory)
+    let view = destination.appending(path: "rafu-view", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: view, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: destination) }
+    try Data("user-authored".utf8).write(to: view.appending(path: "SKILL.md"))
+    let model = EnsembleSettingsModel()
+
+    await model.load()
+    #expect(model.skillNames == ["rafu-ensemble", "rafu-view"])
+    await model.install(at: .custom(destination))
+    #expect(model.pendingReplacement?.conflicts == ["rafu-view/SKILL.md"])
+    #expect(
+        !FileManager.default.fileExists(
+            atPath: destination.appending(path: "rafu-ensemble").path))
+
+    await model.install(at: .custom(destination), replaceConfirmed: true)
+    #expect(model.errorMessage == nil)
+    #expect(
+        try String(contentsOf: view.appending(path: "SKILL.md"), encoding: .utf8)
+            .hasPrefix("---\nname: rafu-view"))
 }

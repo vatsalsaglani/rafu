@@ -39,9 +39,16 @@ nonisolated enum ConductorBundledSkillError: Error, Equatable, LocalizedError, S
     }
 }
 
-/// Code-declared manifest for the agent skill. Rafu never trusts a
+/// One bundled skill: its folder name and its code-declared files.
+nonisolated struct ConductorBundledSkill: Equatable, Sendable {
+    let identifier: String
+    let files: [ConductorBundledSkillFile]
+}
+
+/// Code-declared manifest for one agent skill. Rafu never trusts a
 /// resource-directory listing when deciding what to install.
 nonisolated struct ConductorBundledSkillCatalog: Sendable {
+    /// The first skill: the Ensemble tools. Settings shows its metadata.
     static let skillIdentifier = "rafu-ensemble"
     static let resourceDirectory = "AgentSkills"
     static let maximumSkillFileBytes = 1_048_576
@@ -51,16 +58,31 @@ nonisolated struct ConductorBundledSkillCatalog: Sendable {
         .init(pathComponents: ["references", "recipes.md"]),
         .init(pathComponents: ["references", "codex-agents-snippet.md"]),
     ]
+    /// Every skill one install writes, first skill first. Each goes into its
+    /// own folder beside the others.
+    static let skills: [ConductorBundledSkill] = [
+        ConductorBundledSkill(identifier: skillIdentifier, files: files),
+        ConductorBundledSkill(
+            identifier: "rafu-view",
+            files: [
+                .init(pathComponents: ["SKILL.md"]),
+                .init(pathComponents: ["references", "examples.md"]),
+            ]),
+    ]
 
     let resourceRootURL: URL
     let manifest: [ConductorBundledSkillFile]
+    /// The skill folder name, for example "rafu-ensemble".
+    let skill: String
 
     init(
         resourceRootURL: URL,
-        manifest: [ConductorBundledSkillFile] = Self.files
+        manifest: [ConductorBundledSkillFile] = Self.files,
+        skill: String = Self.skillIdentifier
     ) {
         self.resourceRootURL = resourceRootURL
         self.manifest = manifest
+        self.skill = skill
     }
 
     /// `Bundle.module` is main-actor isolated in the default-isolated app
@@ -78,8 +100,18 @@ nonisolated struct ConductorBundledSkillCatalog: Sendable {
         return ConductorBundledSkillCatalog(resourceRootURL: root)
     }
 
+    /// One catalog per bundled skill, in `skills` order.
+    @MainActor
+    static func bundledSkills() throws -> [ConductorBundledSkillCatalog] {
+        let root = try bundled().resourceRootURL
+        return skills.map {
+            ConductorBundledSkillCatalog(
+                resourceRootURL: root, manifest: $0.files, skill: $0.identifier)
+        }
+    }
+
     func data(for file: ConductorBundledSkillFile) throws -> Data {
-        let allComponents = [Self.skillIdentifier] + file.pathComponents
+        let allComponents = [skill] + file.pathComponents
         guard allComponents.allSatisfy(Self.isSafePathComponent) else {
             throw ConductorBundledSkillError.unsafeResourcePath(
                 allComponents.joined(separator: "/"))
@@ -154,12 +186,13 @@ nonisolated struct ConductorBundledSkillCatalog: Sendable {
 }
 
 nonisolated enum ConductorSkillDestination: Equatable, Sendable {
-    /// `~/.claude/skills/rafu-ensemble`, Claude Code's user skills folder.
+    /// `~/.claude/skills/<skill>`, Claude Code's user skills folder.
     case claudeCode
-    /// `~/.codex/skills/rafu-ensemble`, Codex's user skills folder
+    /// `~/.codex/skills/<skill>`, Codex's user skills folder
     /// (verified in this repository's planning notes, 2026-10-17).
     case codex
-    /// A user-selected skills directory. Rafu creates `rafu-ensemble/` inside it.
+    /// A user-selected skills directory. Rafu creates one folder per skill
+    /// (`rafu-ensemble/`, `rafu-view/`) inside it.
     case custom(URL)
 }
 
@@ -220,11 +253,38 @@ nonisolated struct ConductorSkillInstaller: Sendable {
         return try catalog.metadata()
     }
 
+    /// The skill folder name this installer writes.
+    var skillIdentifier: String { catalog.skill }
+
     /// The skill folder a destination resolves to.
     func destinationRootURL(for destination: ConductorSkillDestination) -> URL {
         skillsDirectory(for: destination).appending(
-            path: ConductorBundledSkillCatalog.skillIdentifier,
+            path: catalog.skill,
             directoryHint: .isDirectory)
+    }
+
+    /// The files that differ from the bundled ones at `destination`. Writes
+    /// nothing, so a multi-skill install can ask before it writes any skill.
+    @concurrent
+    func conflicts(at destination: ConductorSkillDestination) async throws -> [String] {
+        try Task.checkCancellation()
+        let root = destinationRootURL(for: destination)
+        for directory in destinationDirectories(for: destination, root: root) {
+            try validateDirectoryIfPresent(directory)
+        }
+        var conflicts: [String] = []
+        for file in catalog.manifest {
+            try Task.checkCancellation()
+            let url = file.pathComponents.reduce(root) { partial, component in
+                partial.appending(path: component, directoryHint: .notDirectory)
+            }
+            if try classifyExistingFile(at: url, expected: try catalog.data(for: file))
+                == .different
+            {
+                conflicts.append(file.relativePath)
+            }
+        }
+        return conflicts.sorted()
     }
 
     @concurrent

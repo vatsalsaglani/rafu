@@ -97,8 +97,8 @@ public nonisolated enum VoiceLiveClientEvent: Equatable, Sendable {
 }
 
 /// One message GPT-Live sends, reduced to what Rafu uses. Nested
-/// `response.event`s other than a finished function call and a completed
-/// response are dropped, so reasoning blobs and config echoes never reach the
+/// `response.event`s other than a function call (added, argument deltas,
+/// done) and a completed response are dropped, so reasoning blobs and config echoes never reach the
 /// app (they decode to `.other`).
 public nonisolated enum VoiceLiveServerEvent: Decodable, Equatable, Sendable {
     case sessionStarted(id: String, expiresAt: Int?)
@@ -107,6 +107,13 @@ public nonisolated enum VoiceLiveServerEvent: Decodable, Equatable, Sendable {
     case outputTranscriptDelta(String)
     case delegationCreated(id: String, target: String?)
     case functionCall(callID: String, name: String, argumentsJSON: String)
+    /// `response.output_item.added` for a function call: the arguments follow
+    /// as deltas (if the backend streams them) and then the finished call.
+    /// `callID` may be absent at this point.
+    case functionCallStarted(itemID: String, callID: String?, name: String)
+    /// `response.function_call_arguments.delta`: a fragment of the arguments
+    /// JSON text of the output item `itemID`. Unverified for GPT-Live.
+    case functionCallArgumentsDelta(itemID: String, delta: String)
     case responseCompleted(inputTokens: Int?, outputTokens: Int?)
     case sessionUpdated
     case commentaryAppended
@@ -147,14 +154,23 @@ public nonisolated enum VoiceLiveServerEvent: Decodable, Equatable, Sendable {
         let type: String?
         let item: Item?
         let response: Response?
+        /// `response.function_call_arguments.delta` only.
+        let itemID: String?
+        let delta: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case type, item, response, delta
+            case itemID = "item_id"
+        }
 
         struct Item: Decodable {
+            let id: String?
             let type: String?
             let name: String?
             let callID: String?
             let arguments: String?
             private enum CodingKeys: String, CodingKey {
-                case type, name, arguments
+                case id, type, name, arguments
                 case callID = "call_id"
             }
         }
@@ -223,6 +239,16 @@ public nonisolated enum VoiceLiveServerEvent: Decodable, Equatable, Sendable {
                 let name = item.name
             else { return .other("response.event/\(type)") }
             return .functionCall(callID: callID, name: name, argumentsJSON: item.arguments ?? "{}")
+        case "response.output_item.added":
+            guard let item = event.item, item.type == "function_call", let itemID = item.id,
+                let name = item.name
+            else { return .other("response.event/\(type)") }
+            return .functionCallStarted(itemID: itemID, callID: item.callID, name: name)
+        case "response.function_call_arguments.delta":
+            guard let itemID = event.itemID, let delta = event.delta else {
+                return .other("response.event/\(type)")
+            }
+            return .functionCallArgumentsDelta(itemID: itemID, delta: delta)
         case "response.completed":
             return .responseCompleted(
                 inputTokens: event.response?.usage?.inputTokens,
@@ -241,6 +267,8 @@ public nonisolated enum VoiceLiveServerEvent: Decodable, Equatable, Sendable {
         case .outputTranscriptDelta: "session.output_transcript.delta"
         case .delegationCreated: "session.delegation.created"
         case .functionCall: "function_call"
+        case .functionCallStarted: "function_call.started"
+        case .functionCallArgumentsDelta: "function_call.delta"
         case .responseCompleted: "response.completed"
         case .sessionUpdated: "session.updated"
         case .commentaryAppended: "session.commentary.appended"

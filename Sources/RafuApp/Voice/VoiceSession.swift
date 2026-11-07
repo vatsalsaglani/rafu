@@ -46,6 +46,11 @@ final class VoiceSession {
         var engineIdleAfter: Duration = .seconds(10)
         /// Off in tests, which drive `tick(at:)` directly.
         var runsClock = true
+        /// The generated-view card implementation (`show_view`). Tests give a
+        /// double instead of the process-wide registry.
+        var viewHost: @MainActor () -> (any GeneratedViewHost)? = {
+            GeneratedViewHostRegistry.shared.host
+        }
 
         static var live: Dependencies {
             Dependencies(
@@ -125,6 +130,9 @@ final class VoiceSession {
     @ObservationIgnored private var replyCharacters = 0
     @ObservationIgnored private var checkInPending = false
     @ObservationIgnored private weak var lastKeySession: WorkspaceSession?
+    /// Function calls whose arguments may stream, by output item id.
+    @ObservationIgnored private var argumentStreams: [String: ArgumentStream] = [:]
+    @ObservationIgnored private var argumentStreamOrder = 0
 
     init(dependencies: Dependencies = .live) {
         self.dependencies = dependencies
@@ -414,6 +422,7 @@ final class VoiceSession {
 
     /// Forgets every per-session resource and counter. Idle again after it.
     private func releaseSession() {
+        cancelViewStreams()
         callChain = nil
         client = nil
         transport = nil
@@ -578,9 +587,15 @@ final class VoiceSession {
             timeline.append(
                 lane: .delegation, startMS: milliseconds(elapsed()), delegationID: id,
                 persona: personaName, title: "Delegation")
+        case .functionCallStarted(let itemID, let callID, let name):
+            functionCallStarted(itemID: itemID, callID: callID, name: name)
+        case .functionCallArgumentsDelta(let itemID, let delta):
+            functionCallArgumentsDelta(itemID: itemID, delta: delta)
         case .functionCall(let callID, let name, let arguments):
-            runCall(callID: callID, name: name, arguments: arguments)
+            let measure = functionCallFinished(callID: callID, name: name)
+            runCall(callID: callID, name: name, arguments: arguments, measure: measure)
         case .responseCompleted:
+            cancelOrphanViewStreams()
             if inFlightCalls > 0 {
                 completedWhileInFlight = true
             } else {
@@ -651,7 +666,7 @@ final class VoiceSession {
 
     /// Calls run one after another, in arrival order: "make three terminals"
     /// then "link them" must not interleave.
-    private func runCall(callID: String, name: String, arguments: String) {
+    private func runCall(callID: String, name: String, arguments: String, measure: String?) {
         inFlightCalls += 1
         clock.noteServerActivity(at: elapsed())
         noteEngineUse()
@@ -662,8 +677,9 @@ final class VoiceSession {
             // The answer to a waiting card: run now, not behind that call.
             Task {
                 let outcome = await VoiceToolExecutor.run(
-                    name: name, argumentsJSON: arguments, host: self)
-                await self.finishCall(callID: callID, row: row, outcome: outcome, ticket: ticket)
+                    name: name, argumentsJSON: arguments, callID: callID, host: self)
+                await self.finishCall(
+                    callID: callID, row: row, outcome: outcome, measure: measure, ticket: ticket)
             }
             return
         }
@@ -671,18 +687,26 @@ final class VoiceSession {
         callChain = Task {
             await previous?.value
             let outcome = await VoiceToolExecutor.run(
-                name: name, argumentsJSON: arguments, host: self)
-            await self.finishCall(callID: callID, row: row, outcome: outcome, ticket: ticket)
+                name: name, argumentsJSON: arguments, callID: callID, host: self)
+            await self.finishCall(
+                callID: callID, row: row, outcome: outcome, measure: measure, ticket: ticket)
         }
     }
 
-    private func finishCall(callID: String, row: String, outcome: VoiceToolOutcome, ticket: Int)
-        async
-    {
+    private func finishCall(
+        callID: String, row: String, outcome: VoiceToolOutcome, measure: String?, ticket: Int
+    ) async {
+        // A skeleton the call did not finish (refused before it reached the
+        // view code) never stays on the board.
+        if let handle = viewStreamHandle(for: callID) {
+            handle.cancel()
+            takeViewStreamHandle(for: callID)
+        }
         // A call still running when the session closed: the board change
         // stands (like a late MCP approval); its result is dropped.
         guard ticket == generation, let client else { return }
-        timeline.finish(row, endMS: milliseconds(elapsed()), detail: outcome.summary)
+        let detail = measure.map { "\(outcome.summary); \($0)" } ?? outcome.summary
+        timeline.finish(row, endMS: milliseconds(elapsed()), detail: detail)
         clock.noteServerActivity(at: elapsed())
         try? await client.send(
             .responseItemCreateFunctionOutput(callID: callID, output: outcome.output))
@@ -701,6 +725,103 @@ final class VoiceSession {
         guard outputsAwaitingCreate > 0, let client else { return }
         outputsAwaitingCreate = 0
         Task { try? await client.send(.responseCreate) }
+    }
+
+    // MARK: View streaming
+
+    /// One function call whose arguments may arrive as deltas. Counts only;
+    /// the text is kept only for `show_view`, and only until its skeleton
+    /// card starts (at most `titleWindowBytes`).
+    private struct ArgumentStream {
+        let name: String
+        let order: Int
+        var callID: String?
+        var deltas = 0
+        var bytes = 0
+        var pending = ""
+        var decided = false
+        var handle: (any GeneratedViewStreamHandle)?
+    }
+
+    static let maximumArgumentStreams = 16
+    /// How much `show_view` text to wait for while looking for the title.
+    static let titleWindowBytes = 512
+
+    private func functionCallStarted(itemID: String, callID: String?, name: String) {
+        guard argumentStreams[itemID] == nil,
+            argumentStreams.count < Self.maximumArgumentStreams
+        else { return }
+        argumentStreamOrder += 1
+        argumentStreams[itemID] = ArgumentStream(
+            name: name, order: argumentStreamOrder, callID: callID)
+    }
+
+    /// Runs on the main actor at once, not behind the call chain: the
+    /// skeleton must appear while the model still speaks.
+    private func functionCallArgumentsDelta(itemID: String, delta: String) {
+        guard var stream = argumentStreams[itemID] else { return }
+        stream.deltas += 1
+        stream.bytes += delta.utf8.count
+        if stream.name == VoiceToolSchema.showViewName {
+            if let handle = stream.handle {
+                handle.push(delta)
+            } else if !stream.decided {
+                stream.pending += delta
+                let title = VoiceViewStreamTitle.title(in: stream.pending)
+                if title != nil || VoiceViewStreamTitle.isPastTitle(stream.pending)
+                    || stream.pending.utf8.count > Self.titleWindowBytes
+                {
+                    stream.decided = true
+                    stream.handle = VoiceToolExecutor.beginShowView(
+                        title: title ?? VoiceToolExecutor.defaultViewTitle, host: self)
+                    stream.handle?.push(stream.pending)
+                    stream.pending = ""
+                }
+            }
+        }
+        argumentStreams[itemID] = stream
+    }
+
+    /// Matches the finished call to its started item (by call id, else the
+    /// oldest unmatched item with the same name) and returns the timeline's
+    /// measure: "deltas: N, size". Always present for `show_view`, so the
+    /// user can read whether GPT-Live streams arguments.
+    private func functionCallFinished(callID: String, name: String) -> String? {
+        let itemID =
+            argumentStreams.first(where: { $0.value.callID == callID })?.key
+            ?? argumentStreams.filter { $0.value.callID == nil && $0.value.name == name }
+            .min(by: { $0.value.order < $1.value.order })?.key
+        guard let itemID, var stream = argumentStreams[itemID] else {
+            return name == VoiceToolSchema.showViewName ? "deltas: 0" : nil
+        }
+        stream.callID = callID
+        if stream.handle == nil {
+            argumentStreams.removeValue(forKey: itemID)
+        } else {
+            argumentStreams[itemID] = stream
+        }
+        guard stream.deltas > 0 || name == VoiceToolSchema.showViewName else { return nil }
+        return "deltas: \(stream.deltas), \(Self.byteText(stream.bytes))"
+    }
+
+    private static func byteText(_ bytes: Int) -> String {
+        bytes < 1_024
+            ? "\(bytes) B" : String(format: "%.1f KiB", Double(bytes) / 1_024)
+    }
+
+    /// A response ended without finishing some started call: its skeleton goes.
+    private func cancelOrphanViewStreams() {
+        for (itemID, stream) in argumentStreams where stream.callID == nil {
+            stream.handle?.cancel()
+            argumentStreams.removeValue(forKey: itemID)
+        }
+    }
+
+    /// Session close or a new session: every skeleton goes; nothing is saved.
+    private func cancelViewStreams() {
+        for stream in argumentStreams.values { stream.handle?.cancel() }
+        argumentStreams.removeAll()
+        argumentStreamOrder = 0
     }
 
     // MARK: Timers
@@ -836,6 +957,18 @@ extension VoiceSession: VoiceToolHost {
             }
         activeBoardID = board?.id
         return VoiceTarget(session: session, board: board)
+    }
+
+    var generatedViewHost: (any GeneratedViewHost)? { dependencies.viewHost() }
+
+    func viewStreamHandle(for callID: String) -> (any GeneratedViewStreamHandle)? {
+        argumentStreams.values.first { $0.callID == callID }?.handle
+    }
+
+    func takeViewStreamHandle(for callID: String) {
+        guard let itemID = argumentStreams.first(where: { $0.value.callID == callID })?.key
+        else { return }
+        argumentStreams.removeValue(forKey: itemID)
     }
 
     func voiceWorkspaces() -> [WorkspaceSession] {

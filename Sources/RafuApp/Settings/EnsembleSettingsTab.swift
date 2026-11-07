@@ -24,7 +24,7 @@ struct EnsembleSettingsSection: View {
 
         Section {
             VStack(alignment: .leading, spacing: 3) {
-                Text(model.metadata?.name ?? ConductorBundledSkillCatalog.skillIdentifier)
+                Text(model.skillNames.joined(separator: ", "))
                     .font(.body.weight(.medium))
                 Text(
                     model.loadState == .ready
@@ -44,15 +44,17 @@ struct EnsembleSettingsSection: View {
                 Button("Install for Claude Code") {
                     startInstall(at: .claudeCode)
                 }
-                .help("Writes ~/.claude/skills/rafu-ensemble")
+                .help("Writes ~/.claude/skills/rafu-ensemble and ~/.claude/skills/rafu-view")
                 Button("Install for Codex") {
                     startInstall(at: .codex)
                 }
-                .help("Writes ~/.codex/skills/rafu-ensemble")
+                .help("Writes ~/.codex/skills/rafu-ensemble and ~/.codex/skills/rafu-view")
                 Button("Install to Folder…") {
                     isFolderImporterPresented = true
                 }
-                .help("Choose another skills folder. Rafu creates rafu-ensemble inside it.")
+                .help(
+                    "Choose another skills folder. Rafu creates rafu-ensemble and rafu-view inside it."
+                )
                 if model.isInstalling {
                     ProgressView()
                         .controlSize(.small)
@@ -92,14 +94,16 @@ struct EnsembleSettingsSection: View {
                 model.reportFileImporterError(error)
             }
         }
-        .fileDialogMessage("Choose a skills folder. Rafu creates rafu-ensemble inside it.")
+        .fileDialogMessage(
+            "Choose a skills folder. Rafu creates rafu-ensemble and rafu-view inside it."
+        )
         .fileDialogConfirmationLabel("Install Here")
         .sheet(isPresented: pendingReplacementPresented) {
             if let pending = model.pendingReplacement {
                 RafuConfirmPopup(
                     title: "Replace existing skill files?",
                     message:
-                        "Rafu replaces only the rafu-ensemble skill files after this confirmation.",
+                        "Rafu replaces only the rafu-ensemble and rafu-view skill files after this confirmation.",
                     actions: [
                         .init(
                             "Replace \(pending.conflicts.count) Existing File(s)",
@@ -177,16 +181,17 @@ nonisolated enum EnsembleChannelPromptCopy {
 /// Plain-words copy for the agent skill section.
 nonisolated enum EnsembleSkillCopy {
     static let summary =
-        "Teaches Claude Code and Codex to use an Ensemble: read the board, start a peer agent, link it, delegate work, share notes, draw and export diagrams, and open and check apps."
+        "Teaches Claude Code and Codex to use an Ensemble: read the board, start a peer agent, link it, delegate work, share notes, draw and export diagrams, open and check apps, and show native views."
 
     static let footer =
-        "Claude Code reads ~/.claude/skills/rafu-ensemble and Codex reads ~/.codex/skills/rafu-ensemble. For another agent, choose its skills folder; Rafu does not guess other vendor folders. Install again after a Rafu update to refresh the skill."
+        "One install writes two skills, rafu-ensemble and rafu-view. Claude Code reads ~/.claude/skills/rafu-ensemble and ~/.claude/skills/rafu-view; Codex reads ~/.codex/skills/rafu-ensemble and ~/.codex/skills/rafu-view. For another agent, choose its skills folder; Rafu does not guess other vendor folders. Install again after a Rafu update to refresh the skills."
 }
 
 @MainActor
 @Observable
 final class EnsembleSettingsModel {
     typealias CatalogProvider = @MainActor () throws -> ConductorBundledSkillCatalog
+    typealias CatalogsProvider = @MainActor () throws -> [ConductorBundledSkillCatalog]
 
     enum LoadState: Equatable {
         case idle
@@ -209,31 +214,45 @@ final class EnsembleSettingsModel {
     private(set) var pendingReplacement: PendingReplacement?
 
     @ObservationIgnored private let catalogProvider: CatalogProvider
+    @ObservationIgnored private let otherCatalogsProvider: CatalogsProvider
     @ObservationIgnored private let homeDirectory: URL
-    @ObservationIgnored private var installer: ConductorSkillInstaller?
+    /// The first skill's installer first, then the others.
+    @ObservationIgnored private var installers: [ConductorSkillInstaller] = []
 
-    /// Construction is presentation-state only. `catalogProvider` is not
+    /// The skill folders one install writes.
+    var skillNames: [String] { ConductorBundledSkillCatalog.skills.map(\.identifier) }
+
+    /// Construction is presentation-state only. The providers are not
     /// called until the Settings section's `.task` invokes `load()`.
+    /// `catalogProvider` gives the first skill (its metadata is shown);
+    /// `otherCatalogsProvider` gives the skills installed beside it.
     init(
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
         catalogProvider: @escaping CatalogProvider = {
             try ConductorBundledSkillCatalog.bundled()
+        },
+        otherCatalogsProvider: @escaping CatalogsProvider = {
+            Array(try ConductorBundledSkillCatalog.bundledSkills().dropFirst())
         }
     ) {
         self.homeDirectory = homeDirectory
         self.catalogProvider = catalogProvider
+        self.otherCatalogsProvider = otherCatalogsProvider
     }
 
     func load() async {
-        guard installer == nil, loadState != .loading else { return }
+        guard installers.isEmpty, loadState != .loading else { return }
         loadState = .loading
         errorMessage = nil
         do {
-            let installer = ConductorSkillInstaller(
-                catalog: try catalogProvider(), homeDirectory: homeDirectory)
-            let metadata = try await installer.metadata()
+            let catalogs = [try catalogProvider()] + (try otherCatalogsProvider())
+            let installers = catalogs.map {
+                ConductorSkillInstaller(catalog: $0, homeDirectory: homeDirectory)
+            }
+            let metadata = try await installers[0].metadata()
+            for other in installers.dropFirst() { _ = try await other.metadata() }
             try Task.checkCancellation()
-            self.installer = installer
+            self.installers = installers
             self.metadata = metadata
             loadState = .ready
         } catch is CancellationError {
@@ -251,7 +270,7 @@ final class EnsembleSettingsModel {
         replaceConfirmed: Bool = false,
         requiresSecurityScope: Bool = false
     ) async {
-        guard !isInstalling, let installer else { return }
+        guard !isInstalling, !installers.isEmpty else { return }
         isInstalling = true
         operationMessage = nil
         errorMessage = nil
@@ -271,25 +290,43 @@ final class EnsembleSettingsModel {
         }
 
         do {
-            let result = try await installer.install(
-                at: destination,
-                existingFilePolicy: replaceConfirmed
-                    ? .replaceConfirmed
-                    : .requireConfirmation)
-            try Task.checkCancellation()
-            if result.requiresConfirmation {
-                pendingReplacement = PendingReplacement(
-                    destination: destination,
-                    conflicts: result.conflicts,
-                    requiresSecurityScope: requiresSecurityScope)
-                return
+            // Ask about every skill before writing any of them.
+            if !replaceConfirmed {
+                var conflicts: [String] = []
+                for installer in installers {
+                    conflicts += try await installer.conflicts(at: destination).map {
+                        "\(installer.skillIdentifier)/\($0)"
+                    }
+                }
+                try Task.checkCancellation()
+                if !conflicts.isEmpty {
+                    pendingReplacement = PendingReplacement(
+                        destination: destination,
+                        conflicts: conflicts,
+                        requiresSecurityScope: requiresSecurityScope)
+                    return
+                }
+            }
+            var results: [ConductorSkillInstallationResult] = []
+            for installer in installers {
+                let result = try await installer.install(
+                    at: destination,
+                    existingFilePolicy: replaceConfirmed
+                        ? .replaceConfirmed
+                        : .requireConfirmation)
+                try Task.checkCancellation()
+                if result.requiresConfirmation {
+                    // A file appeared after the check above.
+                    pendingReplacement = PendingReplacement(
+                        destination: destination,
+                        conflicts: result.conflicts.map { "\(installer.skillIdentifier)/\($0)" },
+                        requiresSecurityScope: requiresSecurityScope)
+                    return
+                }
+                results.append(result)
             }
             pendingReplacement = nil
-            operationMessage =
-                "Installed at \(result.destinationDescription): "
-                + "\(result.created.count) written, "
-                + "\(result.replaced.count) replaced, "
-                + "\(result.unchanged.count) skipped."
+            operationMessage = Self.installedMessage(results)
         } catch is CancellationError {
             return
         } catch {
@@ -297,6 +334,17 @@ final class EnsembleSettingsModel {
                 (error as? LocalizedError)?.errorDescription
                 ?? "Rafu could not install the agent skill."
         }
+    }
+
+    /// "Installed at <first skill folder> and 1 more beside it: N written, …".
+    static func installedMessage(_ results: [ConductorSkillInstallationResult]) -> String {
+        let place = results.first?.destinationDescription ?? ""
+        let others = results.count - 1
+        let beside = others > 0 ? " and \(others) more beside it" : ""
+        return "Installed at \(place)\(beside): "
+            + "\(results.reduce(0) { $0 + $1.created.count }) written, "
+            + "\(results.reduce(0) { $0 + $1.replaced.count }) replaced, "
+            + "\(results.reduce(0) { $0 + $1.unchanged.count }) skipped."
     }
 
     func clearPendingReplacement() {
