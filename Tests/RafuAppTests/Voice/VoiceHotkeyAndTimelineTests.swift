@@ -38,6 +38,20 @@ struct VoiceHotkeyAndTimelineTests {
             ]))
     }
 
+    @Test("The hot key installs and uninstalls cleanly, and can install again")
+    func installUninstall() {
+        let hotkey = VoiceHotkey()
+        hotkey.install()
+        #expect(hotkey.isInstalled)
+        hotkey.uninstall()
+        #expect(!hotkey.isInstalled)
+        #expect(!hotkey.isGlobal)
+        hotkey.install()
+        #expect(hotkey.isInstalled)
+        hotkey.uninstall()
+        #expect(!hotkey.isInstalled)
+    }
+
     @Test("Timeline rows read as text: id, title, start and duration")
     func timelineFormat() {
         let done = VoiceTimelineEvent(

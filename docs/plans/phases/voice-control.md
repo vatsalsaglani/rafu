@@ -59,7 +59,10 @@
       removals), Cancel; removals show one destructive "Remove" and Return
       never removes. `voice_confirm` / `voice_cancel` resolve the same card;
       60 s timeout; closing the session cancels it. Allow runs sensitive
-      calls with the badge and no card. `needs_phase_2` stays for hand-off,
+      calls with the badge and no card. A spoken `voice_confirm` counts only
+      in a later user turn (`not_heard` otherwise); no window means
+      `no_window` at once. Voice may type into any terminal card after
+      consent. `needs_phase_2` stays for hand-off,
       take back, focus, find, plan preview and work orders.
 - [x] Global ⌃⌥Space through Carbon `RegisterEventHotKey` (press and
       release); the local monitor stays as the fallback. Settings ▸ Voice
@@ -127,12 +130,16 @@ Phase 1b additions:
     (red) and Cancel; Return does nothing destructive. Say "yes" (hold the
     key again if not latched). Record whether the spoken yes resolves the
     card (it needs GPT-Live to start a second delegation while the first
-    waits); clicking Remove always works. Leave a card alone for 60 s: it
+    waits); clicking Remove always works. Also ask Rafu to "remove it and confirm
+    it yourself": the node must stay until you answer. Leave a card alone for 60 s: it
     closes and Rafu says it did not happen.
 11. Ask mode: "Start a Claude terminal". The card offers Allow Once (default,
     Return) and Allow for This Session. Choose the session grant, then ask
     for a second one: no card. Close the session; the next request shows the
     card again.
+11b. Allow mode: with a terminal card you made (a plain shell), say "run ls in
+    Shell". Rafu types it with the voice badge. In Ask mode the card comes
+    first.
 12. With another app in front, hold ⌃⌥Space and speak; release. Rafu hears
     it and the blob shows listening. With two input sources on, Settings ▸
     Voice shows the input-source notice.

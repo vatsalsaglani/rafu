@@ -15,6 +15,17 @@ enum VoiceConfirmAnswer: Equatable {
     case timedOut
     /// Another card was already waiting.
     case busy
+    /// No workspace window could hold the card; nothing runs.
+    case noWindow
+}
+
+/// How a spoken `voice_confirm` / `voice_cancel` landed.
+enum VoiceConfirmResolution: Equatable {
+    case resolved
+    case nothingPending
+    /// A confirmation from the same backend turn that asked: the user has
+    /// not spoken since the card appeared.
+    case notHeard
 }
 
 /// What one Confirm card shows. Built from the parsed call, so it carries
@@ -51,8 +62,8 @@ struct VoiceConfirmRequest: Equatable {
 }
 
 /// Shows a card and reports one answer. Returns a closure that removes the
-/// card, or nil when no window could hold it (the spoken answer and the
-/// timeout still work then).
+/// card, or nil when no window could hold it; the call is then refused at
+/// once (`noWindow`) instead of waiting unseen.
 typealias VoiceConfirmPresenter =
     @MainActor (
         _ request: VoiceConfirmRequest, _ answer: @escaping @MainActor (VoiceConfirmAnswer) -> Void
@@ -85,6 +96,10 @@ final class VoiceConfirmGate {
             // A presenter that answered at once already resumed the waiter.
             guard waiter != nil else {
                 dismissal?()
+                return
+            }
+            guard let dismissal else {
+                resolve(.noWindow)
                 return
             }
             dismiss = dismissal

@@ -988,9 +988,12 @@ enum CanvasAgentActions {
             if let error = response.error { return .init(error: error) }
             return ok("Message sent over the Live link to \"\(card.title)\".", node: card.id)
         }
-        guard let creator = CanvasAgentCenter.shared.creator(of: card.id),
-            creator.caller == caller.controllerID
-        else {
+        // Rafu voice acts for the user, who may type into any terminal card;
+        // its call was confirmed (Ask) or allowed (Allow) before it got here
+        // (ADR 0035). MCP agents keep the creator rule.
+        let creator = CanvasAgentCenter.shared.creator(of: card.id)
+        let isVoice = caller.provider == "voice"
+        guard isVoice || creator?.caller == caller.controllerID else {
             return .init(
                 error:
                     "Connect a Live message link to that terminal, or type only into terminals you created."
@@ -1017,7 +1020,7 @@ enum CanvasAgentActions {
             let connected = pane?.sessionID.flatMap {
                 CanvasLiveBridge.shared.connectedProvider(controllerID: $0)
             }
-            guard creator.agent != nil || connected != nil, let text = call.text else {
+            guard creator?.agent != nil || connected != nil, let text = call.text else {
                 return .init(error: Self.noAgentTextMessage)
             }
             line = CanvasAgentText.singleLine(

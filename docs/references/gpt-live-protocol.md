@@ -193,6 +193,18 @@ other than `response.output_item.done` with `item.type == "function_call"` and
   the next press, a delegation, or the first audible delta restarts it. While
   stopped, the server's continuous silence deltas are dropped, not queued.
   Measured output-only restart cost is below (Measurements).
+- **A spoken confirmation counts only in a later user turn.** A single
+  backend response can hold a sensitive call and `voice_confirm` together.
+  Rafu counts `session.delegation.created` and accepts `voice_confirm` only
+  from a turn that started after the card appeared (`not_heard` otherwise);
+  `voice_cancel` counts in any turn. Residual risk, accepted: a latched
+  session can get a server-detected turn on noise.
+- **`parallel_tool_calls: false`** is sent inside `delegation.responses`.
+  Sent, server acceptance unverified (the server rejects unknown fields; if
+  `session.start` starts failing with `responses_validation_failed`, this key
+  is the first suspect); the Phase 0 spike can check. The turn rule above is
+  the gate, not this flag. `VoiceDelegationConfig.parallelToolCalls = nil`
+  omits it.
 - **Source-policy scan is a substring match.** `VoiceSourcePolicyTests` bans
   the text `TimelineView` anywhere in `Voice/`, so a type named
   `VoiceTimelineView` fails it. The popover is `VoiceTimelinePopover`.

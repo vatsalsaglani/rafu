@@ -72,8 +72,8 @@ Raw traces and `top` captures are in the session scratchpad under `perf/`
 ## Verification
 
 ```bash
-top -l 5 -pid "$(pgrep -x 'Rafu Lightning')" -stats pid,cpu,idlew
-xctrace record --template 'SwiftUI' --attach 'Rafu Lightning' --output /tmp/rafu.trace
+top -l 5 -pid "$(pgrep -x RafuLightning)" -stats pid,cpu,idlew
+xctrace record --template 'SwiftUI' --attach RafuLightning --output /tmp/rafu.trace
 ```
 
 Read `RootDisplayList` update counts from the SwiftUI template. Lock the screen

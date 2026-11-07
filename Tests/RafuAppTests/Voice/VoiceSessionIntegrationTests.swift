@@ -634,10 +634,11 @@ struct VoiceToolExecutorTests {
         #expect(fixture.confirm.requests.count == 2)
     }
 
-    @Test("A spoken voice_confirm resolves the waiting card; voice_cancel with none waiting")
+    @Test("A spoken voice_confirm in a later user turn resolves the waiting card")
     func spokenConfirm() async throws {
         let fixture = try await VoiceFixture()
         defer { TestDefaultsSuite.remove(fixture.suite) }
+        try await fixture.openLatched()
         let idle = await fixture.run("voice_confirm")
         #expect(idle.output.contains("nothing_pending"))
         let pending = Task { await fixture.run("node_remove", #"{"node_id":"Review"}"#) }
@@ -646,6 +647,13 @@ struct VoiceToolExecutorTests {
         let busy = await fixture.run(
             "edge_remove", #"{"edge_id":"\#(UUID().uuidString)"}"#)
         #expect(busy.output.contains("confirm_busy"))
+        // The user speaks: GPT-Live starts a new backend turn.
+        fixture.transport.push(
+            #"{"type":"session.delegation.created","delegation":{"id":"del_yes","target":"responses"}}"#
+        )
+        try await until("turn") {
+            fixture.voice.timeline.rows(lane: .delegation).count == 1
+        }
         let spoken = await fixture.run("voice_confirm", #"{"always":true}"#)
         #expect(!spoken.isError)
         let removal = await pending.value
@@ -657,6 +665,73 @@ struct VoiceToolExecutorTests {
         #expect(!fixture.voice.hasSessionGrant(request.grantKey))
         let none = await fixture.run("voice_cancel")
         #expect(none.output.contains("nothing_pending"))
+        await fixture.voice.close()
+    }
+
+    @Test("The backend cannot confirm its own call in the same turn; a cancel counts")
+    func sameTurnConfirmRefused() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        try await fixture.openLatched()
+        fixture.transport.push(
+            #"{"type":"session.delegation.created","delegation":{"id":"del_1","target":"responses"}}"#
+        )
+        try await until("turn") { fixture.voice.timeline.rows(lane: .delegation).count == 1 }
+        let pending = Task { await fixture.run("node_remove", #"{"node_id":"Review"}"#) }
+        try await until("card") { fixture.voice.confirmGate.isPending }
+        let selfConfirm = await fixture.run("voice_confirm")
+        #expect(selfConfirm.output.contains("not_heard"))
+        #expect(fixture.voice.confirmGate.isPending)
+        #expect(fixture.board.cards.count == 2)
+        let cancel = await fixture.run("voice_cancel")
+        #expect(!cancel.isError)
+        #expect(await pending.value.output.contains("cancelled"))
+        #expect(fixture.board.cards.count == 2)
+        await fixture.voice.close()
+    }
+
+    @Test("Without a window for the card, a sensitive call is refused at once")
+    func noWindowRefuses() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        let gate = VoiceConfirmGate()
+        let call = try CanvasAgentToolCall.parse(
+            tool: "node_remove", arguments: ["node_id": UUID().uuidString])
+        let answer = await gate.ask(
+            VoiceConfirmRequest(call: call, board: fixture.board), timeout: .seconds(30),
+            present: { _, _ in nil })
+        #expect(answer == .noWindow)
+        #expect(!gate.isPending)
+    }
+
+    @Test("Voice may type into a terminal card the user made: Allow, and Ask after Confirm")
+    func voiceTypesIntoUserTerminal() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        // A card with no live group: nothing starts, but the creator rule is
+        // checked first, so the error shows which rule stopped the call.
+        try fixture.board.add(title: "Shell", content: .terminal(groupID: TerminalGroupID()))
+        let creatorError = "type only into terminals you created"
+        fixture.board.setAgentControlMode(.allow)
+        let allowed = await fixture.run("terminal_send", #"{"node_id":"Shell","text":"hi"}"#)
+        #expect(!allowed.output.contains(creatorError))
+        #expect(allowed.output.contains("no connected agent"))
+        #expect(fixture.confirm.requests.isEmpty)
+        fixture.board.setAgentControlMode(.ask)
+        fixture.confirm.autoAnswer = .allowOnce
+        let asked = await fixture.run("terminal_send", #"{"node_id":"Shell","text":"hi"}"#)
+        #expect(!asked.output.contains(creatorError))
+        #expect(fixture.confirm.requests.map(\.tool) == [.terminalSend])
+        // An MCP agent keeps the creator rule.
+        let card = try #require(fixture.board.cards.first { $0.title == "Shell" })
+        let agent = CanvasAgentCaller(
+            session: fixture.workspace, board: fixture.board, card: card,
+            controllerID: UUID(), provider: "claude", sendMessage: { _, _ in .init() })
+        var send = CanvasAgentToolCall(tool: .terminalSend)
+        send.nodeID = card.id.rawValue.uuidString
+        send.text = "hi"
+        let refused = await CanvasAgentActions.perform(send, caller: agent)
+        #expect(refused.error?.contains(creatorError) == true)
     }
 
     @Test("An unanswered card times out and nothing runs")

@@ -24,8 +24,8 @@ protocol VoiceToolHost: AnyObject {
     func latchFromTool()
     /// Shows the Confirm card for a sensitive call and waits for one answer.
     func confirm(_ request: VoiceConfirmRequest) async -> VoiceConfirmAnswer
-    /// A spoken `voice_confirm` / `voice_cancel`. False when nothing waits.
-    func resolveConfirm(_ answer: VoiceConfirmAnswer) -> Bool
+    /// A spoken `voice_confirm` / `voice_cancel`.
+    func resolveConfirm(_ answer: VoiceConfirmAnswer) -> VoiceConfirmResolution
     /// "Allow for This Session" was given for this tool on this Ensemble.
     func hasSessionGrant(_ key: String) -> Bool
     func grantForSession(_ key: String)
@@ -90,6 +90,9 @@ enum VoiceToolExecutor {
     static let busyMessage =
         "Another action is waiting for the user's confirmation. Ask about that one first."
     static let nothingPendingMessage = "No action is waiting for confirmation."
+    static let notHeardMessage =
+        "Rafu did not hear the user answer. Wait for the user to say yes or no."
+    static let noWindowMessage = "No Rafu window is open to show the confirmation."
 
     /// Keys that hold a node reference the resolver may turn into an id.
     private static let nodeKeys = ["node_id", "from", "to"]
@@ -286,6 +289,7 @@ enum VoiceToolExecutor {
         case .cancel: refusal = ("cancelled", cancelledMessage, "Cancelled by the user")
         case .timedOut: refusal = ("confirm_timeout", timedOutMessage, "Not confirmed in time")
         case .busy: return failure("confirm_busy", busyMessage)
+        case .noWindow: refusal = ("no_window", noWindowMessage, "No window for the confirmation")
         }
         CanvasAgentCenter.shared.record(
             caller.board.id, agent: caller.agentName, action: call.tool.actionTitle,
@@ -296,8 +300,10 @@ enum VoiceToolExecutor {
     private static func resolveConfirm(_ answer: VoiceConfirmAnswer, host: any VoiceToolHost)
         -> VoiceToolOutcome
     {
-        guard host.resolveConfirm(answer) else {
-            return failure("nothing_pending", nothingPendingMessage)
+        switch host.resolveConfirm(answer) {
+        case .resolved: break
+        case .nothingPending: return failure("nothing_pending", nothingPendingMessage)
+        case .notHeard: return failure("not_heard", notHeardMessage)
         }
         let message = answer == .cancel ? "Cancelled." : "Confirmed."
         return VoiceToolOutcome(

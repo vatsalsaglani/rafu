@@ -83,15 +83,33 @@ URL and header, the exact `session.start` shape, the event table, the mandatory
    the same waiting card; a 60 s timeout and closing the session cancel it.
    The backend receives the answer as that call's `function_call_output`
    (`cancelled`, `confirm_timeout`, or the tool result). At most one card
-   waits; a second sensitive call meanwhile answers `confirm_busy`. Allow
+   waits; a second sensitive call meanwhile answers `confirm_busy`. With no
+   workspace window to hold the card, the call is refused at once
+   (`no_window`) instead of waiting unseen. Allow
    mode runs sensitive calls at once with the "Rafu (voice)" badge and no
    card. Off denies them.
    - **"Allow for This Session"** is a deliberate, small part of the user's
      "Always allow" request: an in-memory grant for one tool on one Ensemble,
      cleared when the voice session closes, never for a removal. The
      persisted "Always allow" needs document persistence and stays Phase 2.
+   - **A spoken confirmation counts only in a later user turn.** Rafu counts
+     `session.delegation.created` events; `voice_confirm` resolves a card
+     only when a backend turn started after the card appeared, so the
+     backend can never confirm its own call (for example `node_remove` and
+     `voice_confirm` in one response). Otherwise it answers `not_heard`.
+     `voice_cancel` counts in any turn, because cancelling is always safe. A
+     click on the card is not affected. Rafu also sends
+     `parallel_tool_calls: false` in the delegation; the turn rule alone is
+     the gate. Accepted residual risk: in a latched session GPT-Live may
+     detect a turn on background noise and the backend may then confirm;
+     the card stays visible throughout.
    - Voice calls pass the same 30-per-minute limit as an agent
      (`CanvasAgentCenter.admit`) before they run or ask.
+   - **Voice may type into any terminal card on the board** after consent
+     (Confirm in Ask, Allow), because the user is the actor (user request
+     2026-11-07). MCP agents keep the creator rule. Text input still needs an
+     agent Rafu knows in that terminal; a `command` still passes
+     `CanvasAgentShell.refusal`.
 10. **Global push-to-talk (Phase 1b).** ⌃⌥Space is a Carbon
     `RegisterEventHotKey` hot key with press and release events, so it works
     in any app with no Accessibility permission. The local `NSEvent` monitor
@@ -112,10 +130,9 @@ URL and header, the exact `session.start` shape, the event table, the mandatory
 
 A voice `terminal_send` or work order counts as the user's consent after a
 Confirm card in Ask mode, or by a standing Allow or "Always allow" grant on
-that Ensemble. From Phase 1b, voice may type into a terminal only after that
-consent and only into a terminal that voice itself created in this run of
-Rafu (the existing `CanvasAgentActions` creator rule; voice holds no Live
-message link). Work orders stay Phase 2.
+that Ensemble. From Phase 1b, voice may type into any terminal card on the
+board after that consent, including cards the user made; MCP agents keep the
+creator rule. Work orders stay Phase 2.
 
 ## Alternatives considered
 
@@ -140,6 +157,10 @@ server for the key; a wake word or always-on listening.
   1b, a session that is not latched stops the engine after 10 quiet seconds,
   so the indicator goes out; a latched session keeps it on, visibly, until
   the pause or the idle close.
+- Quit closes the voice session before the persistence flush
+  (`closeForQuit` runs first in `applicationShouldTerminate`). When a save
+  then fails and quit is cancelled, the voice session is already closed; the
+  user presses the key again.
 - A Confirm card blocks the voice call queue, so the user's spoken "yes"
   reaches Rafu only when GPT-Live starts a second delegation while the first
   waits for its function output. That is unverified with the real server;

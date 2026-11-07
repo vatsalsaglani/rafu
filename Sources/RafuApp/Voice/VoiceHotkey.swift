@@ -53,6 +53,24 @@ final class VoiceHotkey {
         }
     }
 
+    var isInstalled: Bool { monitor != nil }
+
+    /// Removes the hot key, its handler, the monitor and the observer. Ends a
+    /// hold that is in progress. `install` may run again after it.
+    func uninstall() {
+        release()
+        if let hotKey { UnregisterEventHotKey(hotKey) }
+        if let handler { RemoveEventHandler(handler) }
+        hotKey = nil
+        handler = nil
+        isGlobal = false
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+        resignObserver = nil
+        session = nil
+    }
+
     /// Whether an event is the push-to-talk chord. Pure, for tests.
     nonisolated static func isChord(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
         keyCode == Self.keyCode

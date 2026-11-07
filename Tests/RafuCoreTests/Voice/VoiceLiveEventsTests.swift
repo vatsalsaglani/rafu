@@ -24,7 +24,7 @@ struct VoiceLiveEventsTests {
                 model: "gpt-6.1-terra", instructions: "…", tools: [Self.noteTool]))
         let text = try VoiceLiveClientEvent.sessionStart(config).json(eventID: "evt_x")
         let expected = """
-            {"event_id":"evt_x","session":{"audio":{"output":{"voice":"marin"}},"delegation":{"responses":{"instructions":"…","model":"gpt-6.1-terra","tool_choice":"auto","tools":[{"description":"…","name":"note_create","parameters":{"additionalProperties":false,"properties":{"title":{"type":"string"}},"required":["title"],"type":"object"},"type":"function"}]},"type":"responses"},"instructions":"…","model":"gpt-live-1"},"type":"session.start"}
+            {"event_id":"evt_x","session":{"audio":{"output":{"voice":"marin"}},"delegation":{"responses":{"instructions":"…","model":"gpt-6.1-terra","parallel_tool_calls":false,"tool_choice":"auto","tools":[{"description":"…","name":"note_create","parameters":{"additionalProperties":false,"properties":{"title":{"type":"string"}},"required":["title"],"type":"object"},"type":"function"}]},"type":"responses"},"instructions":"…","model":"gpt-live-1"},"type":"session.start"}
             """
         #expect(text == expected)
     }

@@ -102,7 +102,7 @@ release editor. No GUI automation: the user performs the steps by hand.
 Each step: let the app idle for about 20 seconds, then run
 
 ```sh
-pid=$(pgrep -x "Rafu Lightning")
+pid=$(pgrep -x RafuLightning)
 footprint "$pid" | head -40
 vmmap --summary "$pid" | grep -E "CoreAnimation|CG raster|CG image|IOSurface|MALLOC_LARGE|MALLOC_SMALL|TOTAL"
 heap -s "$pid" | sort -k2 -n -r | head -40

@@ -81,6 +81,11 @@ final class VoiceSession {
     @ObservationIgnored let confirmGate = VoiceConfirmGate()
     /// "Allow for This Session" grants: tool and Ensemble. Cleared on close.
     @ObservationIgnored private var sessionGrants: Set<String> = []
+    /// Backend turns (`session.delegation.created`) in this session. A spoken
+    /// `voice_confirm` counts only in a later turn than the card's, so the
+    /// backend can never confirm its own call (ADR 0035, decision 9).
+    @ObservationIgnored private var delegationCount = 0
+    @ObservationIgnored private var cardDelegationIndex = 0
     @ObservationIgnored private let dependencies: Dependencies
     @ObservationIgnored private var client: VoiceLiveClient?
     /// Kept for `terminateNow`, which cannot wait for the client actor.
@@ -416,6 +421,8 @@ final class VoiceSession {
         playback = nil
         sessionID = nil
         sessionGrants.removeAll()
+        delegationCount = 0
+        cardDelegationIndex = 0
         isEngineSuspended = false
         lastEngineUse = .zero
         startErrorCode = nil
@@ -563,6 +570,7 @@ final class VoiceSession {
             replyCharacters += text.count
         case .delegationCreated(let id, _):
             youRow = nil
+            delegationCount += 1
             // A reply is coming: have the engine ready before its audio.
             _ = resumeEngineIfSuspended()
             clock.noteServerActivity(at: elapsed())
@@ -755,6 +763,7 @@ final class VoiceSession {
             lane: .tool, startMS: milliseconds(elapsed()), persona: personaName,
             title: "Confirm \(request.tool.rawValue)")
         machine.apply(.needsConfirm)
+        cardDelegationIndex = delegationCount
         let answer = await confirmGate.ask(
             request, timeout: dependencies.confirmTimeout, present: dependencies.presentConfirm)
         machine.apply(.confirmResolved)
@@ -764,7 +773,15 @@ final class VoiceSession {
         return answer
     }
 
-    func resolveConfirm(_ answer: VoiceConfirmAnswer) -> Bool { confirmGate.resolve(answer) }
+    /// A spoken answer. A cancel counts at once (cancelling is always safe);
+    /// a confirmation counts only from a backend turn that started after the
+    /// card appeared, that is, after the user spoke. A click on the card goes
+    /// straight to the gate and is not affected.
+    func resolveConfirm(_ answer: VoiceConfirmAnswer) -> VoiceConfirmResolution {
+        guard confirmGate.isPending else { return .nothingPending }
+        if answer != .cancel, delegationCount <= cardDelegationIndex { return .notHeard }
+        return confirmGate.resolve(answer) ? .resolved : .nothingPending
+    }
 
     func hasSessionGrant(_ key: String) -> Bool { sessionGrants.contains(key) }
 
@@ -787,6 +804,7 @@ extension VoiceConfirmAnswer {
         case .cancel: "cancelled"
         case .timedOut: "timed out"
         case .busy: "busy"
+        case .noWindow: "no window"
         }
     }
 }

@@ -88,3 +88,10 @@ names define readable aliases in the bridge tools; exact card UUIDs remain the
 routing identity. Alias lookup is restricted to current authorized peers and
 rejects ambiguity. Native CLI input and file mention controls remain owned by
 the CLI. No terminal text is intercepted to implement routing.
+
+## Rafu voice typing (2026-11-07)
+
+Rafu voice acts for the user, so it may type into any terminal card on the
+board after the user's consent: a Confirm card in Ask mode, or Allow. MCP
+agents keep the rule that they type only into terminals they created or over
+a live message link. See [ADR 0035](0035-voice-through-gpt-live.md).

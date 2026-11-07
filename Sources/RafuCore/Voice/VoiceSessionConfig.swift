@@ -52,15 +52,20 @@ public nonisolated struct VoiceDelegationConfig: Encodable, Equatable, Sendable 
     public var model: String
     public var instructions: String
     public var toolChoice: String
+    /// One tool call per backend turn, so a sensitive call and a confirmation
+    /// cannot arrive together. Sent from Phase 1b; server acceptance is
+    /// unverified (gpt-live-protocol.md). `nil` omits the key.
+    public var parallelToolCalls: Bool?
     public var tools: [VoiceFunctionTool]
 
     public init(
         model: String, instructions: String, toolChoice: String = "auto",
-        tools: [VoiceFunctionTool]
+        parallelToolCalls: Bool? = false, tools: [VoiceFunctionTool]
     ) {
         self.model = model
         self.instructions = instructions
         self.toolChoice = toolChoice
+        self.parallelToolCalls = parallelToolCalls
         self.tools = tools
     }
 
@@ -68,6 +73,7 @@ public nonisolated struct VoiceDelegationConfig: Encodable, Equatable, Sendable 
     private enum InnerKeys: String, CodingKey {
         case model, instructions, tools
         case toolChoice = "tool_choice"
+        case parallelToolCalls = "parallel_tool_calls"
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -77,6 +83,7 @@ public nonisolated struct VoiceDelegationConfig: Encodable, Equatable, Sendable 
         try inner.encode(model, forKey: .model)
         try inner.encode(instructions, forKey: .instructions)
         try inner.encode(toolChoice, forKey: .toolChoice)
+        try inner.encodeIfPresent(parallelToolCalls, forKey: .parallelToolCalls)
         try inner.encode(tools, forKey: .tools)
     }
 }
