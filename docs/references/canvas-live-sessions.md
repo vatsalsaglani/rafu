@@ -6,6 +6,7 @@
   (swiftlang-6.4.0.34.1), Claude Code 2.1.303, Codex CLI 0.163.0. Source checks are distinct from live model verification.
   The Claude launch argument form was re-verified on 2026-10-21 against Claude
   Code 2.1.304 (see "Claude bridge flags are variadic").
+  The automatic answer to the channel dialog was added on 2026-11-07.
 
 ## Rules and verified provider interfaces
 
@@ -406,6 +407,109 @@ Do not retain or print notification bodies while checking those diagnostics.
 The Rafu connection status proves local bridge registration only. Claude login
 and a live model response require separate checks. No inference request was
 made for this investigation.
+
+## Automatic answer to the development-channel dialog (2026-11-07)
+
+- Applies to: `CanvasChannelPrompt`, `CanvasChannelPromptWatch`
+  (`Sources/RafuCore/CanvasBridge/CanvasChannelPrompt.swift`),
+  `CanvasChannelPromptConfirmer`
+  (`Sources/RafuApp/Canvas/Integration/CanvasChannelPromptConfirmer.swift`),
+  the launch announcement in `CanvasBridgeLaunch.run`, and the `launch`
+  operation in `CanvasLiveBridge`.
+- Dialog text last seen: Claude Code 2.1.304 (screenshot from the user,
+  2026-11-07). The dialog is not a Rafu string; if Claude Code changes it, the
+  matcher stops matching and the user answers the dialog by hand.
+
+User decision, 2026-11-07: "When we open Claude session on a terminal we see
+that allow thing. Can we write one automation for that terminal where if that
+pop up is visible we select yes in allow mode." Because Rafu starts Claude with
+`--dangerously-load-development-channels=server:rafu`, Claude asks on every
+start:
+
+```text
+WARNING: Loading development channels
+--dangerously-load-development-channels is for local channel development only. ...
+Channels: server:rafu
+❯ 1. I am using this for local development
+  2. Exit
+Enter to confirm · Esc to cancel
+```
+
+Rafu now presses Return once on this dialog, and only on this dialog.
+
+Gates. All must hold, and Rafu checks them on every sample:
+
+1. Rafu launched this Claude. The `claude` wrapper (`rafu _canvas-agent claude`)
+   sends one `launch` bridge request with the terminal's private token, only when
+   it adds Rafu's channel flag (`CanvasBridgeLaunch.shouldAttach`). The app
+   records the launch from that request. Nothing starts from terminal output, so
+   a Claude the user starts by hand, `codex`, `claude -p`, and `claude mcp` are
+   never watched. A newer launch in the same terminal replaces the older watch.
+2. The Ensemble's Agent control is Allow. In Off or Ask the watch never starts
+   and Rafu reads nothing from the terminal.
+3. Settings ▸ Ensemble ▸ "Confirm Rafu's development-channel prompt
+   automatically" is on (`ensemble.confirmChannelPrompt`, default on).
+
+Window and sampling. There is no terminal content hook, so after the launch one
+task samples the visible rows (`WorkspaceTerminalController.recentOutputLines`
+with `fullViewport: true`: every viewport row, also rows below the cursor, never
+scrollback) at most four times a second for at most
+30 s. It stops at the first match or when the window ends. No timer runs outside
+that window.
+
+Matcher (`CanvasChannelPrompt.matches`, pure). Every part must be present:
+a "Loading development channels" title; the
+`--dangerously-load-development-channels` flag name; one `Channels:` row, at the
+start of its row, whose only entry is exactly `server:rafu` (a second entry, a
+`plugin:` entry, or another name gives no match); "I am using this for local
+development" as the selected option (`❯ 1.`); and "Enter to confirm". Wrapped
+rows are joined, so 60 and 80 column terminals match. Any code fence in view
+gives no match. The folder-trust dialog, the "New MCP server found" consent, and
+tool-permission prompts lack these parts and never match.
+
+Action. Exactly one `"\r"` goes to the terminal's pty through
+`WorkspaceTerminalController.sendReturn`. There is one attempt per launch. When
+the dialog is gone, the board shows the info notice "Rafu confirmed the
+development-channel prompt for server:rafu." When it is still visible 2 s
+later, Rafu does nothing more and shows "Rafu could not confirm the channel
+prompt; answer it in the terminal." Rafu never logs or keeps terminal content.
+
+Why this is safe. The answer covers Rafu's own channel only. It runs only in
+Allow, which already lets agents act on the board. It is one keypress for the
+option the user would choose, with a visible notice, and the setting turns it
+off. It does not change tool permissions: Claude's own approvals stay with the
+user.
+
+An agent in the terminal can read `RAFU_CANVAS_TOKEN` and the socket path, so
+two rules stop it from steering the watch toward its own Claude:
+
+1. A `launch` request is refused while a Claude client is already bound and
+   fresh on that terminal (`clientID` set and `lastSeen` under 15 s old, the
+   same rule as `register`). The wrapper sends `launch` before `execve`, so no
+   client is registered at that time. A running Claude cannot open a new watch,
+   and a repeated `launch` cannot replace one.
+2. The matcher needs the "Enter to confirm" row to be the last non-empty row of
+   the sample. The sample includes rows below the cursor, so this rule does not
+   depend on where Claude leaves the cursor. The real dialog sits at the bottom
+   of the screen. Dialog text
+   that an agent prints, followed by a tool-permission prompt or any other
+   output, does not match.
+
+If the folder-trust dialog comes first and the user takes more than 30 s to
+answer it, the window ends and Rafu does not answer the channel dialog; the user
+answers it in the terminal.
+
+Verification:
+
+```bash
+swift test --filter CanvasChannelPromptTests
+swift test --filter CanvasChannelPromptConfirmerTests
+swift test --filter CanvasChannelPromptLaunchTests
+```
+
+Manual check: set an Ensemble to Allow, start `claude` in one of its terminals,
+and watch the dialog answer itself with the notice. Set Agent control to Ask, or
+turn the setting off, and start `claude` again: the dialog waits for you.
 
 ## Terminal click focus and Canvas selection
 

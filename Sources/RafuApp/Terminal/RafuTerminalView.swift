@@ -187,10 +187,17 @@ final class RafuTerminalView: LocalProcessTerminalView {
     /// for Rafu Voice's `ensemble_describe` in Allow mode only. The caller
     /// scrubs and bounds them (`VoiceOutputScrubber`) before they leave the
     /// app; never log or persist them.
-    func recentOutputLines(maxLines: Int = 40) -> [String] {
+    ///
+    /// `fullViewport: true` reads every viewport row, also rows below the
+    /// cursor. The channel-prompt confirmer uses it so its "Enter to confirm
+    /// is the last non-empty row" rule does not depend on where the program
+    /// leaves the cursor.
+    func recentOutputLines(maxLines: Int = 40, fullViewport: Bool = false) -> [String] {
         let terminal = getTerminal()
         let cursor = terminal.getCursorLocation()
-        let topRow = max(0, min(cursor.y, terminal.rows - 1))
+        let topRow =
+            fullViewport
+            ? max(0, terminal.rows - 1) : max(0, min(cursor.y, terminal.rows - 1))
         var lines: [String] = []
         for row in 0...topRow {
             guard let line = terminal.getLine(row: row) else { continue }

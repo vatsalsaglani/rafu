@@ -7,8 +7,21 @@ struct EnsembleSettingsSection: View {
     @State private var model = EnsembleSettingsModel()
     @State private var isFolderImporterPresented = false
     @State private var installTask: Task<Void, Never>?
+    @AppStorage(CanvasChannelPromptPreference.key) private var confirmsChannelPrompt = true
 
     var body: some View {
+        Section {
+            Toggle(
+                "Confirm Rafu's development-channel prompt automatically",
+                isOn: $confirmsChannelPrompt
+            )
+            .help(EnsembleChannelPromptCopy.help)
+        } header: {
+            Text("Claude Code Prompt")
+        } footer: {
+            Text(EnsembleChannelPromptCopy.footer)
+        }
+
         Section {
             VStack(alignment: .leading, spacing: 3) {
                 Text(model.metadata?.name ?? ConductorBundledSkillCatalog.skillIdentifier)
@@ -147,6 +160,16 @@ private struct EnsembleSettingsNotice: View {
         .foregroundStyle(.secondary)
         .accessibilityElement(children: .combine)
     }
+}
+
+/// Plain-words copy for the Claude Code prompt setting. It says exactly what
+/// Rafu answers (ADR 0026).
+nonisolated enum EnsembleChannelPromptCopy {
+    static let help =
+        "Presses Return once on Claude Code's \"Loading development channels\" dialog for server:rafu."
+
+    static let footer =
+        "When Rafu starts Claude Code in an Ensemble terminal, Claude asks you to confirm Rafu's own channel, server:rafu. With this on and the Ensemble's Agent control set to Allow, Rafu presses Return once to choose \"I am using this for local development\" and shows a notice. Rafu never answers any other prompt, such as folder trust, new MCP servers, or tool permissions. In Ask or Off, you answer the dialog yourself."
 }
 
 /// Plain-words copy for the agent skill section.

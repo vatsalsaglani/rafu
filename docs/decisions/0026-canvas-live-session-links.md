@@ -95,3 +95,43 @@ Rafu voice acts for the user, so it may type into any terminal card on the
 board after the user's consent: a Confirm card in Ask mode, or Allow. MCP
 agents keep the rule that they type only into terminals they created or over
 a live message link. See [ADR 0035](0035-voice-through-gpt-live.md).
+
+## Amendment (2026-11-07): Rafu answers its own development-channel dialog
+
+The user asked for an automation that selects "yes" when Claude Code shows
+"Loading development channels" in an Ensemble terminal in Allow mode. Rafu
+starts Claude with `--dangerously-load-development-channels=server:rafu`, so the
+dialog appears on every start. This amendment allows one keypress for that one
+dialog. The decision above still holds: no terminal text is intercepted to
+implement routing, and the amendment does not change tool permissions.
+
+Rules:
+
+- Gates: Rafu's own launcher started this Claude with the Rafu channel flag
+  (a `launch` bridge request over the terminal's private token, never an
+  inference from output); the Ensemble's Agent control is Allow; and Settings ▸
+  Ensemble ▸ "Confirm Rafu's development-channel prompt automatically" is on
+  (default on).
+- Watch: at most 30 s after the launch, at most four samples a second of the
+  visible rows only. No timer runs after the window. One attempt per launch.
+- Match: the exact dialog for the single channel `server:rafu` with option 1
+  selected. Any other channel, extra entry, selected option, or dialog gives no
+  match. Folder trust, MCP consent, and tool permission prompts are never
+  answered.
+- Action: exactly one Return through the existing terminal input path, then a
+  visible board notice. If the dialog stays 2 s, Rafu stops and tells the user
+  to answer it.
+- Terminal content is read for this match only. It is never logged, stored, or
+  sent anywhere.
+- Token holders: an agent in the terminal can read the private token, so
+  (1) a `launch` request is refused while a Claude client is bound and fresh on
+  that terminal (the `register` freshness rule, 15 s), and (2) the matcher needs
+  the "Enter to confirm" row to be the last non-empty row of the sample. An
+  agent therefore cannot open or replace a watch for its own Claude, and dialog
+  text it prints above a tool-permission prompt does not match.
+- If the folder-trust dialog comes first and the user takes more than 30 s, the
+  window ends and the channel dialog is not answered.
+
+The bridge gains one operation, `launch`, sent by the `claude` wrapper before it
+replaces itself with Claude. Existing operations and their shapes are unchanged.
+See [`../references/canvas-live-sessions.md`](../references/canvas-live-sessions.md).
