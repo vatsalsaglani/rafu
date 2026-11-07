@@ -1,4 +1,6 @@
 import Foundation
+import JSONRenderCore
+import os
 
 /// Inputs the segment parser needs to resolve MDX components (ADR 0034).
 nonisolated struct MDXParseContext: Sendable {
@@ -18,6 +20,12 @@ nonisolated struct MDXBlock: Sendable, Identifiable {
     let propsLine: String
     let body: Body
     let children: [MDXBlockChild]
+    /// The json-render spec for this block and everything inside it, built
+    /// off the main actor with the block (`MDXCatalogBridge`). Set only on a
+    /// block that is drawn by itself: a top-level block, or a block inside an
+    /// unbridged fallback. Nil for a nested block (its parent's spec holds it),
+    /// for a fallback block, and for a block whose spec failed validation.
+    var catalogSpec: Spec?
 
     enum Body: Sendable {
         case callout(MDXCalloutTone)
@@ -29,9 +37,30 @@ nonisolated struct MDXBlock: Sendable, Identifiable {
         /// Empty when the children are not a plain list.
         case fileTree([MDXFileTreeEntry])
         case svg(MDXImageSource, caption: String?)
+        /// A single figure: label, value, and optional change (`<Stat>`).
+        case stat(MDXStatProps)
+        /// `<Matrix>` / `<Compare>`: the first GFM table in the children, or
+        /// nil when there is none (the view then shows the children).
+        case matrix(MDXTable?)
         /// No renderer: a labelled block that still shows the children.
         case fallback
     }
+}
+
+/// The props of a `<Stat>` component, as display text.
+nonisolated struct MDXStatProps: Sendable, Equatable {
+    let label: String
+    let value: String
+    let delta: String?
+    let unit: String?
+    /// `neutral`, `good`, `warning`, or `critical`; nil when absent or unknown.
+    let intent: String?
+}
+
+/// A GFM pipe table lifted out of a component's Markdown children.
+nonisolated struct MDXTable: Sendable, Equatable {
+    let columns: [String]
+    let rows: [[String]]
 }
 
 nonisolated struct MDXBlockChild: Sendable, Identifiable {
@@ -115,12 +144,22 @@ nonisolated struct MDXBlockBuilder {
 
     static let maxListEntries = 500
 
+    private static let logger = Logger(
+        subsystem: "dev.vatsalsaglani.rafu", category: "MDXCatalogBridge")
+
+    /// Resolves one component and everything inside it, and builds the
+    /// block's json-render spec. Blocking work: call it off the main actor.
     mutating func build(_ node: MDXComponentNode) -> MDXBlock {
+        build(node, parentIsBridged: false)
+    }
+
+    private mutating func build(_ node: MDXComponentNode, parentIsBridged: Bool) -> MDXBlock {
         let id = takeID()
         let title = node.prop("title")?.text
-        let children = buildChildren(node.children)
+        let renderer = context.registry.renderer(for: node.name)
+        let children = buildChildren(node.children, parentIsBridged: renderer != nil)
         let body: MDXBlock.Body
-        switch context.registry.renderer(for: node.name) {
+        switch renderer {
         case .callout:
             body = .callout(MDXCalloutTone(typeName: node.prop("type")?.text))
         case .card:
@@ -136,17 +175,40 @@ nonisolated struct MDXBlockBuilder {
             body = .svg(
                 Self.imageSource(node.prop("src")?.text, baseURL: context.baseURL),
                 caption: node.prop("caption")?.text)
+        case .stat:
+            body = .stat(Self.statProps(of: node))
+        case .matrix:
+            body = .matrix(MDXTableParser.firstTable(in: Self.markdownText(of: node.children)))
         case nil:
             body = .fallback
         }
-        return MDXBlock(
+        var block = MDXBlock(
             id: id, name: node.name, title: title,
             propsLine: node.props.map { "\($0.name)=\(Self.quoted($0.value))" }
                 .joined(separator: "  "),
             body: body, children: children)
+        if renderer != nil, !parentIsBridged {
+            block.catalogSpec = Self.validatedSpec(for: block)
+        }
+        return block
     }
 
-    private mutating func buildChildren(_ contents: [MDXContent]) -> [MDXBlockChild] {
+    /// The bridged spec, or nil (after one log line with the block id only)
+    /// when it does not validate against `RafuCatalog.rafu`. A failure is a
+    /// bridge bug that `MDXCatalogBridgeTests` catches; the view then draws
+    /// the plain fallback block.
+    private static func validatedSpec(for block: MDXBlock) -> Spec? {
+        let spec = MDXCatalogBridge.spec(for: block)
+        guard RafuCatalog.rafu.validate(spec).valid else {
+            logger.error("An MDX component produced an invalid view spec. block=\(block.id)")
+            return nil
+        }
+        return spec
+    }
+
+    private mutating func buildChildren(_ contents: [MDXContent], parentIsBridged: Bool)
+        -> [MDXBlockChild]
+    {
         var children: [MDXBlockChild] = []
         for content in contents {
             switch content {
@@ -160,7 +222,7 @@ nonisolated struct MDXBlockBuilder {
                     }
                 }
             case .component(let node):
-                let block = build(node)
+                let block = build(node, parentIsBridged: parentIsBridged)
                 children.append(.init(id: takeID(), content: .component(block)))
             }
         }
@@ -195,6 +257,19 @@ nonisolated struct MDXBlockBuilder {
             parts.append(text)
         }
         return parts.joined(separator: "\n")
+    }
+
+    static let statIntents: Set<String> = ["neutral", "good", "warning", "critical"]
+
+    /// `label` falls back to `title`, then the component name.
+    static func statProps(of node: MDXComponentNode) -> MDXStatProps {
+        let intent = node.prop("intent")?.text.lowercased()
+        return MDXStatProps(
+            label: node.prop("label")?.text ?? node.prop("title")?.text ?? node.name,
+            value: node.prop("value")?.text ?? "",
+            delta: node.prop("delta")?.text,
+            unit: node.prop("unit")?.text,
+            intent: intent.flatMap { statIntents.contains($0) ? $0 : nil })
     }
 
     static func checklistCounts(_ text: String) -> (done: Int, total: Int) {

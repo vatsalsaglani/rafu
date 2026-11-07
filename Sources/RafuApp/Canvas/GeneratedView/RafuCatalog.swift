@@ -21,7 +21,18 @@ nonisolated enum RafuCatalog {
     /// Document components (jr-4d): Markdown, Mermaid, Code, Callout,
     /// Checklist, Questions, FileTree, Figure. Append-only; one line per
     /// component file.
-    static var documentEntries: [Entry] { [] }
+    static var documentEntries: [Entry] {
+        [
+            registerRafuDocMarkdown,
+            registerRafuDocMermaid,
+            registerRafuDocCode,
+            registerRafuDocCallout,
+            registerRafuDocChecklist,
+            registerRafuDocQuestions,
+            registerRafuDocFileTree,
+            registerRafuDocFigure,
+        ]
+    }
 
     static let rafu: Catalog = build()
 
