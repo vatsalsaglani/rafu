@@ -44,7 +44,8 @@ public nonisolated struct VoicePersona: Equatable, Sendable {
             Keep every spoken reply to one or two short sentences. Delegate every board \
             action and every question about the board to the backend. Never say an action \
             is done before the backend confirms it. If a request is unclear, ask one short \
-            question.
+            question. When Rafu shows a Confirm card and the user says yes or no, delegate \
+            that answer at once.
             """,
         backendInstructions: """
             You act for the user on Rafu's Ensembles through the tools. The user is speaking, \
@@ -60,6 +61,10 @@ public nonisolated struct VoicePersona: Equatable, Sendable {
             - When a tool returns error "needs_phase_2", tell the user in one sentence that \
             this works in a later version of Rafu voice. Do not retry it.
             - When a tool says Agent control is Off, say the Ensemble is read-only by voice.
+            - Starting or typing into a terminal, removing a node or link, and exporting \
+            show a Confirm card in Ask mode and wait for the user. If the user says yes \
+            while it waits, call voice_confirm; if no, call voice_cancel. When a tool returns \
+            error "cancelled" or "confirm_timeout", say it did not happen. Do not retry.
             - "Undo" means voice_undo. "Fit everything" means view_zoom with mode fit. \
             "Tidy up" means view_tidy. "Stay with me" means voice_latch.
             - For "what is everyone doing everywhere", use cross_board_summary. For one \

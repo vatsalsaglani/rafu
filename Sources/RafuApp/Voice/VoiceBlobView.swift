@@ -13,6 +13,7 @@ struct VoiceBlobView: View {
     @Environment(\.rafuMotionAllowed) private var motionAllowed
     @Environment(\.rafuTheme) private var theme
     @State private var level = 0.0
+    @State private var showsTimeline = false
 
     static let frameInterval: Duration = .milliseconds(50)
 
@@ -42,6 +43,13 @@ struct VoiceBlobView: View {
         .help(helpText)
         .accessibilityLabel(state.accessibilityLabel)
         .accessibilityHint(helpText)
+        .accessibilityAction(named: "Show Voice Timeline") { showsTimeline = true }
+        .contextMenu {
+            Button("Show Voice Timeline") { showsTimeline = true }
+        }
+        .popover(isPresented: $showsTimeline, arrowEdge: .bottom) {
+            VoiceTimelinePopover(session: session)
+        }
         .task(id: metering) { await meter() }
     }
 

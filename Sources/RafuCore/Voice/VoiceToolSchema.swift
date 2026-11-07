@@ -42,8 +42,12 @@ public nonisolated enum VoiceToolSchema {
     /// `needs_phase_2` in Phase 1.
     public static let phaseTwoNames: Set<String> = [
         "handoff_to_agent", "take_back", "view_focus", "view_find", "plan_preview",
-        "work_order_create", "work_order_status", "voice_confirm", "voice_cancel",
+        "work_order_create", "work_order_status",
     ]
+
+    /// Meta tools that answer a waiting Confirm card. They run at once, beside
+    /// the call that waits, never queued behind it.
+    public static let confirmNames: Set<String> = ["voice_confirm", "voice_cancel"]
 
     /// The Ensemble tools, one per `CanvasAgentTool`, from MCP `definitions`
     /// (`name`, `description`, `inputSchema`). `ensemble_describe` gains an
@@ -148,9 +152,17 @@ public nonisolated enum VoiceToolSchema {
     public static var metaTools: [VoiceFunctionTool] {
         [
             tool(
-                "voice_confirm", "Confirm the waiting action. Not available yet.",
-                ["always": property("boolean", "Remember the answer for this tool.")]),
-            tool("voice_cancel", "Cancel the waiting action. Not available yet."),
+                "voice_confirm",
+                "The user said yes to the action waiting on a Confirm card. Call it only after the user agreed out loud.",
+                [
+                    "always": property(
+                        "boolean",
+                        "The user said to allow this kind of action for the rest of this voice session. Never applies to removals."
+                    )
+                ]),
+            tool(
+                "voice_cancel",
+                "The user said no to the action waiting on a Confirm card, or asked to stop it."),
             tool(
                 "voice_undo",
                 "Undo the newest change made by voice on the visible Ensemble, when nothing changed after it."

@@ -55,8 +55,9 @@ URL and header, the exact `session.start` shape, the event table, the mandatory
    voice. Ask runs edits at once with an undo notice (the voice actor is the
    user, so there is no question for an edit) and confirms sensitive calls.
    Allow runs everything. A remembered "Always allow" may cover a sensitive
-   tool for voice (unlike the MCP rule), from Phase 2. Phase 1a answers every
-   sensitive call with `needs_phase_2`.
+   tool for voice (unlike the MCP rule), from Phase 2. Phase 1a answered every
+   sensitive call with `needs_phase_2`; Phase 1b replaces that with the
+   Confirm card (decision 9).
 6. **Cost and idle.** An open session bills like talking, so a 90 s idle close
    (10 minutes with an open work order) is the net; the $5 monthly soft cap
    stops new sessions, never a running one.
@@ -71,11 +72,50 @@ URL and header, the exact `session.start` shape, the event table, the mandatory
    scalars of the user's own words and is cleared on close). The style profile
    holds preferences only, 0600, at most 4 KiB, never synced or exported.
 
+9. **Confirm card for sensitive calls (Phase 1b).** In Ask mode a sensitive
+   voice call (`terminal_create` with an agent or command, `terminal_start`,
+   `terminal_send`, `node_remove`, `edge_remove`, `export`) waits on one
+   `RafuConfirmPopup` sheet (ADR 0033) on the workspace window. The card names
+   the Ensemble and the bounded approval summary. Buttons: "Allow Once" (the
+   default for a non-destructive call), "Allow for This Session", and Cancel.
+   A removal shows one destructive "Remove" button and no session grant;
+   Return never removes. The spoken `voice_confirm` / `voice_cancel` resolve
+   the same waiting card; a 60 s timeout and closing the session cancel it.
+   The backend receives the answer as that call's `function_call_output`
+   (`cancelled`, `confirm_timeout`, or the tool result). At most one card
+   waits; a second sensitive call meanwhile answers `confirm_busy`. Allow
+   mode runs sensitive calls at once with the "Rafu (voice)" badge and no
+   card. Off denies them.
+   - **"Allow for This Session"** is a deliberate, small part of the user's
+     "Always allow" request: an in-memory grant for one tool on one Ensemble,
+     cleared when the voice session closes, never for a removal. The
+     persisted "Always allow" needs document persistence and stays Phase 2.
+   - Voice calls pass the same 30-per-minute limit as an agent
+     (`CanvasAgentCenter.admit`) before they run or ask.
+10. **Global push-to-talk (Phase 1b).** ⌃⌥Space is a Carbon
+    `RegisterEventHotKey` hot key with press and release events, so it works
+    in any app with no Accessibility permission. The local `NSEvent` monitor
+    stays as the fallback when registration fails. When macOS's own
+    "Select next source in Input menu" owns ⌃⌥Space and more than one input
+    source is on, Settings ▸ Voice says so and offers ⌃⌥⇧Space
+    (Start Listening). The chord is not configurable in Phase 1.
+11. **Microphone indicator and quit (Phase 1b).** A session that is not
+    latched stops its audio engine after 10 s with the microphone off, no
+    audible reply, no running call and no waiting card; the macOS
+    microphone indicator then goes out while the session stays open. The
+    next press, a delegation, or audible reply audio restarts it. Quitting
+    Rafu sends `session.close` and waits at most 2 s
+    (`applicationShouldTerminate`); `applicationWillTerminate` drops a socket
+    that is still open, synchronously.
+
 ### ADR 0026 amendment (Phase 2 wording)
 
 A voice `terminal_send` or work order counts as the user's consent after a
 Confirm card in Ask mode, or by a standing Allow or "Always allow" grant on
-that Ensemble. Until Phase 2 ships, voice never types into a terminal.
+that Ensemble. From Phase 1b, voice may type into a terminal only after that
+consent and only into a terminal that voice itself created in this run of
+Rafu (the existing `CanvasAgentActions` creator rule; voice holds no Live
+message link). Work orders stay Phase 2.
 
 ## Alternatives considered
 
@@ -94,9 +134,16 @@ server for the key; a wake word or always-on listening.
   idle close. The check-in and pause make the open microphone visible.
 - No reconnect in Phase 1: a lost connection ends the session with "Voice
   disconnected"; the user presses the key again.
-- The macOS microphone indicator is on while a session is open, because one
-  engine carries echo cancellation for both directions; audio is captured
-  only while the key is held or the session is latched.
+- The macOS microphone indicator is on while a session's audio engine runs,
+  because one engine carries echo cancellation for both directions; audio is
+  captured only while the key is held or the session is latched. From Phase
+  1b, a session that is not latched stops the engine after 10 quiet seconds,
+  so the indicator goes out; a latched session keeps it on, visibly, until
+  the pause or the idle close.
+- A Confirm card blocks the voice call queue, so the user's spoken "yes"
+  reaches Rafu only when GPT-Live starts a second delegation while the first
+  waits for its function output. That is unverified with the real server;
+  the card, Escape and the 60 s timeout work regardless.
 - A hardened-runtime (notarized) build will need the
   `com.apple.security.device.audio-input` entitlement; Rafu Lightning is
   ad-hoc signed without hardened runtime and needs only

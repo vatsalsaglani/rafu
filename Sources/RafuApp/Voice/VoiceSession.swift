@@ -35,6 +35,15 @@ final class VoiceSession {
         var workspaces: (() -> [WorkspaceSession])?
         var startTimeout: Duration = .seconds(10)
         var closeTimeout: Duration = .seconds(15)
+        /// The Confirm card for a sensitive call. Tests answer it themselves.
+        var presentConfirm: VoiceConfirmPresenter = { request, answer in
+            VoiceConfirmCard.present(request, answer: answer)
+        }
+        var confirmTimeout: Duration = VoiceConfirmGate.timeout
+        /// With the microphone off and nothing audible for this long, a
+        /// session that is not latched stops its audio engine, so the macOS
+        /// microphone indicator goes out. The next key press restarts it.
+        var engineIdleAfter: Duration = .seconds(10)
         /// Off in tests, which drive `tick(at:)` directly.
         var runsClock = true
 
@@ -69,12 +78,18 @@ final class VoiceSession {
 
     @ObservationIgnored let callerID = UUID()
     @ObservationIgnored let undoLedger = VoiceUndoLedger()
+    @ObservationIgnored let confirmGate = VoiceConfirmGate()
+    /// "Allow for This Session" grants: tool and Ensemble. Cleared on close.
+    @ObservationIgnored private var sessionGrants: Set<String> = []
     @ObservationIgnored private let dependencies: Dependencies
     @ObservationIgnored private var client: VoiceLiveClient?
+    /// Kept for `terminateNow`, which cannot wait for the client actor.
+    @ObservationIgnored private var transport: (any VoiceLiveTransport)?
     @ObservationIgnored private var capture: (any VoiceAudioCapturing)?
     @ObservationIgnored private var playback: (any VoiceAudioPlaying)?
-    /// The capture stream not yet handed to a sender (while connecting).
-    @ObservationIgnored private var frames: AsyncStream<Data>?
+    /// Capture streams not yet handed to a sender (while connecting). A
+    /// second press during the connect adds a stream; none is dropped.
+    @ObservationIgnored private var pendingFrames: [AsyncStream<Data>] = []
     @ObservationIgnored private var isCapturing = false
     @ObservationIgnored private var openTask: Task<Void, Never>?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
@@ -95,6 +110,9 @@ final class VoiceSession {
     @ObservationIgnored private var outputsAwaitingCreate = 0
     @ObservationIgnored private var completedWhileInFlight = false
     @ObservationIgnored private var lastAudibleAt: Duration?
+    /// The engine was stopped after a quiet spell (`engineIdleAfter`).
+    @ObservationIgnored private(set) var isEngineSuspended = false
+    @ObservationIgnored private var lastEngineUse: Duration = .zero
     @ObservationIgnored private var speechFrames = 0
     @ObservationIgnored private var levelFrames = 0
     @ObservationIgnored private var youRow: String?
@@ -113,6 +131,9 @@ final class VoiceSession {
     }
 
     private func elapsed() -> Duration { ContinuousClock.now - openedAt }
+
+    /// Time since the session opened. Tests add to it for `tick(at:)`.
+    var sessionElapsed: Duration { elapsed() }
 
     private func milliseconds(_ duration: Duration) -> Int {
         Int(
@@ -171,14 +192,59 @@ final class VoiceSession {
         if case .error = blobState { machine.apply(.reset) }
     }
 
-    /// Closes the session and releases everything it held.
-    func close(reason: VoiceCloseReason = .user) async {
-        guard blobState.isOpen || client != nil || openTask != nil else { return }
+    /// True while a session holds or is opening a socket.
+    var hasOpenSession: Bool { blobState.isOpen || client != nil || openTask != nil }
+
+    /// Closes the session and releases everything it held. `closeTimeout`
+    /// bounds the wait for `session.closed` (default: the dependency's 15 s).
+    func close(reason: VoiceCloseReason = .user, closeTimeout: Duration? = nil) async {
+        guard hasOpenSession else { return }
         generation += 1
         openTask?.cancel()
         openTask = nil
-        await teardown(sendClose: isStarted)
+        await teardown(sendClose: isStarted, closeTimeout: closeTimeout)
         if reason != .failure { machine.apply(.closed) }
+    }
+
+    /// Quit, from `applicationShouldTerminate`: sends `session.close` and
+    /// waits at most `limit`. A send that does not return is cut off by
+    /// dropping the socket at the same limit.
+    func closeForQuit(limit: Duration = .seconds(2)) async {
+        guard hasOpenSession else { return }
+        let transport = transport
+        let watchdog = Task {
+            try? await Task.sleep(for: limit)
+            guard !Task.isCancelled else { return }
+            transport?.cancel()
+        }
+        await close(reason: .user, closeTimeout: limit)
+        watchdog.cancel()
+    }
+
+    /// Quit, from `applicationWillTerminate`: synchronous. Stops capture and
+    /// playback, drops the socket with a close frame, and books the minutes.
+    /// The server ends the session when the socket goes.
+    func terminateNow() {
+        guard hasOpenSession else { return }
+        generation += 1
+        openTask?.cancel()
+        openTask = nil
+        isClosing = true
+        resumeStart(false)
+        confirmGate.resolve(.cancel)
+        stopCapture()
+        audioTask?.cancel()
+        clockTask?.cancel()
+        eventTask?.cancel()
+        transport?.cancel()
+        playback?.stopAll()
+        if let sessionID { costStore.finish(sessionID: sessionID) }
+        audioTask = nil
+        clockTask = nil
+        eventTask = nil
+        pendingFrames = []
+        releaseSession()
+        machine.apply(.closed)
     }
 
     // MARK: Open
@@ -220,8 +286,9 @@ final class VoiceSession {
         // Speech said while the socket connects is buffered and sent after
         // `session.started`.
         if machine.mic != .off { startCapture() }
-        let client = VoiceLiveClient(
-            transport: dependencies.makeTransport(key), closeTimeout: dependencies.closeTimeout)
+        let transport = dependencies.makeTransport(key)
+        self.transport = transport
+        let client = VoiceLiveClient(transport: transport, closeTimeout: dependencies.closeTimeout)
         self.client = client
         let events = client.events
         eventTask = Task {
@@ -251,7 +318,7 @@ final class VoiceSession {
         isStarted = true
         openTask = nil
         machine.apply(.connected)
-        if frames != nil {
+        if !pendingFrames.isEmpty {
             // Sends what was said while connecting; a stream that already
             // ended (key released early) drains and then mutes.
             startSendingAudio()
@@ -271,7 +338,8 @@ final class VoiceSession {
             self.client = nil
             self.capture = nil
             self.playback = nil
-            frames = nil
+            self.transport = nil
+            pendingFrames = []
             eventTask?.cancel()
             eventTask = nil
         }
@@ -313,27 +381,43 @@ final class VoiceSession {
 
     /// Order: stop capture, close the socket (waiting for `session.closed`),
     /// end the streams, release the engine.
-    private func teardown(sendClose: Bool) async {
+    private func teardown(sendClose: Bool, closeTimeout: Duration? = nil) async {
         isClosing = true
         resumeStart(false)
+        // A waiting Confirm card is cancelled; its call then finds the
+        // session gone and drops its result.
+        confirmGate.resolve(.cancel)
         stopCapture()
         audioTask?.cancel()
         audioTask = nil
-        frames = nil
+        pendingFrames = []
         clockTask?.cancel()
         clockTask = nil
         if let client {
-            if sendClose { await client.close() } else { await client.cancel() }
+            if sendClose {
+                await client.close(timeout: closeTimeout)
+            } else {
+                await client.cancel()
+            }
         }
         eventTask?.cancel()
         eventTask = nil
-        callChain = nil
         playback?.stopAll()
         if let sessionID { costStore.finish(sessionID: sessionID) }
+        releaseSession()
+    }
+
+    /// Forgets every per-session resource and counter. Idle again after it.
+    private func releaseSession() {
+        callChain = nil
         client = nil
+        transport = nil
         capture = nil
         playback = nil
         sessionID = nil
+        sessionGrants.removeAll()
+        isEngineSuspended = false
+        lastEngineUse = .zero
         startErrorCode = nil
         streamEndedBeforeStart = false
         isStarted = false
@@ -360,10 +444,41 @@ final class VoiceSession {
         Task { await self.fail(.disconnected, ticket: ticket) }
     }
 
+    /// Restarts an engine stopped after a quiet spell. False when the audio
+    /// device refused; the session then fails like a refused start.
+    private func resumeEngineIfSuspended() -> Bool {
+        noteEngineUse()
+        guard isEngineSuspended, let playback else { return true }
+        do {
+            try playback.startPlayback()
+        } catch {
+            Task { await self.fail(.audioUnavailable, ticket: self.generation) }
+            return false
+        }
+        isEngineSuspended = false
+        return true
+    }
+
+    private func noteEngineUse() { lastEngineUse = max(lastEngineUse, elapsed()) }
+
+    /// Stops the engine in a session that is not latched, after
+    /// `engineIdleAfter` with the microphone off, nothing audible, no call
+    /// running and no card waiting. The socket and the session stay open.
+    private func suspendEngineIfQuiet(at now: Duration) {
+        guard !isEngineSuspended, let playback, machine.mic == .off, lastAudibleAt == nil,
+            inFlightCalls == 0, !confirmGate.isPending, blobState != .speaking,
+            now - lastEngineUse >= dependencies.engineIdleAfter
+        else { return }
+        stopCapture()
+        playback.stopAll()
+        isEngineSuspended = true
+    }
+
     // MARK: Microphone
 
     private func micOpened() {
         guard capture != nil, !isCapturing else { return }
+        guard resumeEngineIfSuspended() else { return }
         startCapture()
         if isStarted { startSendingAudio() }
     }
@@ -372,29 +487,37 @@ final class VoiceSession {
     /// its sender then sends `mute`, so `mute` never overtakes speech.
     private func micClosed() {
         stopCapture()
+        noteEngineUse()
     }
 
     private func startCapture() {
         guard let capture else { return }
-        frames = try? capture.startCapture()
-        isCapturing = frames != nil
         speechFrames = 0
+        guard let stream = try? capture.startCapture() else {
+            isCapturing = false
+            return
+        }
+        pendingFrames.append(stream)
+        isCapturing = true
     }
 
     /// One sender per capture stream, chained so the order on the socket is
     /// always unmute, frames, mute.
     private func startSendingAudio() {
-        guard let stream = frames, let client else { return }
-        frames = nil
-        let previous = audioTask
-        audioTask = Task {
-            await previous?.value
-            try? await client.send(.inputAudioUnmute)
-            for await frame in stream {
-                self.handleFrame(frame)
-                try? await client.send(.inputAudioAppend(frame))
+        guard !pendingFrames.isEmpty, let client else { return }
+        let streams = pendingFrames
+        pendingFrames = []
+        for stream in streams {
+            let previous = audioTask
+            audioTask = Task {
+                await previous?.value
+                try? await client.send(.inputAudioUnmute)
+                for await frame in stream {
+                    self.handleFrame(frame)
+                    try? await client.send(.inputAudioAppend(frame))
+                }
+                try? await client.send(.inputAudioMute)
             }
-            try? await client.send(.inputAudioMute)
         }
     }
 
@@ -440,6 +563,8 @@ final class VoiceSession {
             replyCharacters += text.count
         case .delegationCreated(let id, _):
             youRow = nil
+            // A reply is coming: have the engine ready before its audio.
+            _ = resumeEngineIfSuspended()
             clock.noteServerActivity(at: elapsed())
             machine.apply(.delegationStarted)
             timeline.append(
@@ -479,9 +604,16 @@ final class VoiceSession {
     }
 
     private func handleOutputAudio(_ pcm: Data) {
-        playback?.enqueue(pcm)
         let now = elapsed()
-        if VoiceAudioLevel.rms(pcm16: pcm) > VoiceAudioFormat.audibleOutputRMS {
+        let audible = VoiceAudioLevel.rms(pcm16: pcm) > VoiceAudioFormat.audibleOutputRMS
+        // The server streams silence while the session is open; a stopped
+        // engine skips it and restarts on the first audible delta.
+        if isEngineSuspended {
+            guard audible, resumeEngineIfSuspended() else { return }
+        }
+        playback?.enqueue(pcm)
+        if audible {
+            noteEngineUse()
             if lastAudibleAt == nil, blobState != .checkIn {
                 machine.apply(.replyStarted)
                 replyCharacters = 0
@@ -514,9 +646,19 @@ final class VoiceSession {
     private func runCall(callID: String, name: String, arguments: String) {
         inFlightCalls += 1
         clock.noteServerActivity(at: elapsed())
+        noteEngineUse()
         let ticket = generation
         let row = timeline.append(
             lane: .tool, startMS: milliseconds(elapsed()), persona: personaName, title: name)
+        if VoiceToolSchema.confirmNames.contains(name) {
+            // The answer to a waiting card: run now, not behind that call.
+            Task {
+                let outcome = await VoiceToolExecutor.run(
+                    name: name, argumentsJSON: arguments, host: self)
+                await self.finishCall(callID: callID, row: row, outcome: outcome, ticket: ticket)
+            }
+            return
+        }
         let previous = callChain
         callChain = Task {
             await previous?.value
@@ -573,6 +715,9 @@ final class VoiceSession {
     /// with chosen instants.
     func tick(at now: Duration) {
         guard isStarted else { return }
+        // A waiting Confirm card holds the clock; its own 60 s timeout ends it.
+        guard !confirmGate.isPending else { return }
+        suspendEngineIfQuiet(at: now)
         switch clock.nextAction(at: now) {
         case .checkIn:
             clock.checkedIn = true
@@ -602,6 +747,47 @@ final class VoiceSession {
         machine.apply(.latchToggled)
         clock.setLatched(true, at: elapsed())
         micOpened()
+    }
+
+    func confirm(_ request: VoiceConfirmRequest) async -> VoiceConfirmAnswer {
+        guard !confirmGate.isPending else { return .busy }
+        let row = timeline.append(
+            lane: .tool, startMS: milliseconds(elapsed()), persona: personaName,
+            title: "Confirm \(request.tool.rawValue)")
+        machine.apply(.needsConfirm)
+        let answer = await confirmGate.ask(
+            request, timeout: dependencies.confirmTimeout, present: dependencies.presentConfirm)
+        machine.apply(.confirmResolved)
+        timeline.finish(row, endMS: milliseconds(elapsed()), detail: answer.timelineWord)
+        if isStarted { clock.noteServerActivity(at: elapsed()) }
+        noteEngineUse()
+        return answer
+    }
+
+    func resolveConfirm(_ answer: VoiceConfirmAnswer) -> Bool { confirmGate.resolve(answer) }
+
+    func hasSessionGrant(_ key: String) -> Bool { sessionGrants.contains(key) }
+
+    func grantForSession(_ key: String) { sessionGrants.insert(key) }
+
+    func noteBoardEffect(_ title: String, detail: String) {
+        let row = timeline.append(
+            lane: .board, startMS: milliseconds(elapsed()), persona: personaName, title: title,
+            detail: detail)
+        timeline.finish(row, endMS: milliseconds(elapsed()))
+    }
+}
+
+extension VoiceConfirmAnswer {
+    /// The timeline's word for an answer.
+    var timelineWord: String {
+        switch self {
+        case .allowOnce: "allowed once"
+        case .allowForSession: "allowed for the session"
+        case .cancel: "cancelled"
+        case .timedOut: "timed out"
+        case .busy: "busy"
+        }
     }
 }
 

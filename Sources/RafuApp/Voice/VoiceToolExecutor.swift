@@ -22,6 +22,15 @@ protocol VoiceToolHost: AnyObject {
     func voiceStatus() -> VoiceJSON
     /// "Stay with me": latch the microphone.
     func latchFromTool()
+    /// Shows the Confirm card for a sensitive call and waits for one answer.
+    func confirm(_ request: VoiceConfirmRequest) async -> VoiceConfirmAnswer
+    /// A spoken `voice_confirm` / `voice_cancel`. False when nothing waits.
+    func resolveConfirm(_ answer: VoiceConfirmAnswer) -> Bool
+    /// "Allow for This Session" was given for this tool on this Ensemble.
+    func hasSessionGrant(_ key: String) -> Bool
+    func grantForSession(_ key: String)
+    /// A Board effects row on the timeline (counts only).
+    func noteBoardEffect(_ title: String, detail: String)
 }
 
 /// One tool result: the JSON for the backend, and a counts-only line for the
@@ -73,6 +82,14 @@ enum VoiceToolExecutor {
         "No Ensemble is showing in the front Rafu window. Ask the user to open one, or call ensemble_open."
     static let undoRefusedMessage =
         "Nothing to undo by voice: the newest change on this Ensemble was not made by voice, or something changed after it."
+    static let rateLimitedMessage = "Too many Ensemble changes. Wait one minute."
+    static let cancelledMessage =
+        "The user cancelled. It did not happen. Do not retry unless asked."
+    static let timedOutMessage =
+        "Nobody confirmed within a minute, so it did not happen. Do not retry unless asked."
+    static let busyMessage =
+        "Another action is waiting for the user's confirmation. Ask about that one first."
+    static let nothingPendingMessage = "No action is waiting for confirmation."
 
     /// Keys that hold a node reference the resolver may turn into an id.
     private static let nodeKeys = ["node_id", "from", "to"]
@@ -104,6 +121,10 @@ enum VoiceToolExecutor {
             return await ensembleTool(name, arguments: arguments, host: host)
         }
         switch name {
+        case "voice_confirm":
+            let always = arguments["always"] as? Bool ?? false
+            return resolveConfirm(always ? .allowForSession : .allowOnce, host: host)
+        case "voice_cancel": return resolveConfirm(.cancel, host: host)
         case "list_ensembles": return await listEnsembles(host: host)
         case "ensemble_open": return await ensembleOpen(arguments, host: host)
         case "ensemble_create": return await ensembleCreate(arguments, host: host)
@@ -215,30 +236,99 @@ enum VoiceToolExecutor {
                 board.id, agent: caller.agentName, action: call.tool.actionTitle,
                 outcome: "Blocked: Agent control is Off")
             return failure("agent_control_off", reason)
-        case .confirm:
-            return VoiceToolOutcome(
-                output: VoiceJSON.toolError("needs_phase_2", needsPhaseTwoMessage),
-                summary: "later version")
-        case .run, .runWithNotice:
-            // Phase 1a: sensitive tools (start, send, remove, export, a
-            // terminal with a command) wait for the Phase 1b Confirm card.
-            guard call.risk != .sensitive else {
-                return VoiceToolOutcome(
-                    output: VoiceJSON.toolError("needs_phase_2", needsPhaseTwoMessage),
-                    summary: "later version")
+        case .confirm, .run, .runWithNotice:
+            break
+        }
+        // The same 30-per-minute limit as an agent (`CanvasAgentActions.handle`):
+        // a looping backend cannot flood the board.
+        if call.risk != .read, !CanvasAgentCenter.shared.admit(host.callerID) {
+            return failure("rate_limited", rateLimitedMessage)
+        }
+        if case .confirm = decision {
+            let request = VoiceConfirmRequest(call: call, board: board)
+            if !host.hasSessionGrant(request.grantKey) {
+                if let refused = await askConfirm(request, call: call, caller: caller, host: host) {
+                    return refused
+                }
             }
         }
         let before = CanvasAgentProvenanceStore.Before(board)
+        let connectionsBefore = before.connections.count
         let response = await CanvasAgentActions.perform(call, caller: caller)
         let changed = board.cards != before.cards || board.connections != before.connections
-        if response.error == nil, call.risk != .read, changed, board.canUndo {
-            host.undoLedger.record(board)
-            if CanvasAgentNoticeText.verb(for: call) == nil {
-                // Links and builds leave no card mark; the notice still offers Undo.
-                showUndoNotice("Rafu (voice): \(call.tool.actionTitle)", board: board)
+        if response.error == nil, call.risk != .read, changed {
+            noteEffect(
+                on: board, before: before.cards, connectionsBefore: connectionsBefore, host: host)
+            if board.canUndo {
+                host.undoLedger.record(board)
+                if CanvasAgentNoticeText.verb(for: call) == nil {
+                    // Links and builds leave no card mark; the notice still offers Undo.
+                    showUndoNotice("Rafu (voice): \(call.tool.actionTitle)", board: board)
+                }
             }
         }
         return outcome(response, call: call)
+    }
+
+    /// Shows the Confirm card and waits. Returns the error outcome when the
+    /// call must not run; nil when the user allowed it.
+    private static func askConfirm(
+        _ request: VoiceConfirmRequest, call: CanvasAgentToolCall, caller: CanvasAgentCaller,
+        host: any VoiceToolHost
+    ) async -> VoiceToolOutcome? {
+        let answer = await host.confirm(request)
+        let refusal: (code: String, message: String, log: String)
+        switch answer {
+        case .allowOnce: return nil
+        case .allowForSession:
+            host.grantForSession(request.grantKey)
+            return nil
+        case .cancel: refusal = ("cancelled", cancelledMessage, "Cancelled by the user")
+        case .timedOut: refusal = ("confirm_timeout", timedOutMessage, "Not confirmed in time")
+        case .busy: return failure("confirm_busy", busyMessage)
+        }
+        CanvasAgentCenter.shared.record(
+            caller.board.id, agent: caller.agentName, action: call.tool.actionTitle,
+            outcome: refusal.log)
+        return failure(refusal.code, refusal.message)
+    }
+
+    private static func resolveConfirm(_ answer: VoiceConfirmAnswer, host: any VoiceToolHost)
+        -> VoiceToolOutcome
+    {
+        guard host.resolveConfirm(answer) else {
+            return failure("nothing_pending", nothingPendingMessage)
+        }
+        let message = answer == .cancel ? "Cancelled." : "Confirmed."
+        return VoiceToolOutcome(
+            output: VoiceJSON.object(["status": "ok", "message": .string(message)]).jsonString(),
+            summary: answer == .cancel ? "cancel" : "confirm")
+    }
+
+    /// The set-down ring on every card voice added or changed (no haptic for
+    /// voice), and a counts-only Board effects row on the timeline.
+    private static func noteEffect(
+        on board: CanvasBoardState, before: [CanvasCard], connectionsBefore: Int,
+        host: any VoiceToolHost
+    ) {
+        let old = Dictionary(before.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let added = board.cards.filter { old[$0.id] == nil }.map(\.id)
+        let changed = board.cards.filter { card in old[card.id].map { $0 != card } ?? false }
+            .map(\.id)
+        let kept = Set(board.cards.map(\.id))
+        let removed = before.count(where: { !kept.contains($0.id) })
+        let touched = added + changed
+        if !touched.isEmpty { board.landing = CanvasLanding(ids: touched) }
+        var parts: [String] = []
+        if !added.isEmpty { parts.append("\(added.count) added") }
+        if !changed.isEmpty { parts.append("\(changed.count) changed") }
+        if removed > 0 { parts.append("\(removed) removed") }
+        let links = board.connections.count - connectionsBefore
+        if links != 0 { parts.append("links \(links > 0 ? "+" : "")\(links)") }
+        if parts.isEmpty { parts.append("links changed") }
+        host.noteBoardEffect(
+            CanvasAgentText.singleLine(board.title, limit: 40),
+            detail: parts.joined(separator: ", "))
     }
 
     private static func outcome(_ response: CanvasBridgeResponse, call: CanvasAgentToolCall)
@@ -351,15 +441,23 @@ enum VoiceToolExecutor {
             return failure("no_ensemble", noBoardMessage)
         }
         if let refused = viewDecision(board, risk: .edit) { return refused }
+        guard CanvasAgentCenter.shared.admit(host.callerID) else {
+            return failure("rate_limited", rateLimitedMessage)
+        }
         let before = CanvasAgentProvenanceStore.Before(board)
         do {
             try board.arrange()
         } catch {
             return failure("failed", error.localizedDescription)
         }
-        if board.cards != before.cards, board.canUndo {
-            host.undoLedger.record(board)
-            showUndoNotice("Rafu (voice) tidied up", board: board)
+        if board.cards != before.cards {
+            noteEffect(
+                on: board, before: before.cards, connectionsBefore: board.connections.count,
+                host: host)
+            if board.canUndo {
+                host.undoLedger.record(board)
+                showUndoNotice("Rafu (voice) tidied up", board: board)
+            }
         }
         return VoiceToolOutcome(
             output: VoiceJSON.object(["status": "ok", "message": "Tidied and fitted."])

@@ -49,6 +49,8 @@ struct VoiceToolSchemaTests {
         let names = Set(VoiceToolSchema.tools(for: .rafu).map(\.name))
         #expect(VoiceToolSchema.phaseTwoNames.isSubset(of: names))
         #expect(!VoiceToolSchema.phaseTwoNames.contains("voice_undo"))
+        #expect(VoiceToolSchema.confirmNames.isSubset(of: names))
+        #expect(VoiceToolSchema.confirmNames.isDisjoint(with: VoiceToolSchema.phaseTwoNames))
         #expect(VoiceToolSchema.extraRisk(of: "work_order_create") == .sensitive)
         #expect(VoiceToolSchema.extraRisk(of: "list_ensembles") == .read)
         #expect(VoiceToolSchema.extraRisk(of: "view_tidy") == .edit)

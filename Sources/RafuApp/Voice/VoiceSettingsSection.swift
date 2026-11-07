@@ -14,6 +14,7 @@ struct VoiceSettingsSection: View {
         VoiceCostMeter.defaultCapDollars)
     @State private var microphone = VoiceMicrophonePermission.access
     @State private var isResetPresented = false
+    @State private var chordConflict = false
 
     private let costs = VoiceSession.shared.costStore
     private let profileStore = VoiceStyleProfileStore()
@@ -23,7 +24,18 @@ struct VoiceSettingsSection: View {
 
     var body: some View {
         Section {
-            LabeledContent("Push to talk", value: "⌃⌥Space while Rafu is in front")
+            LabeledContent(
+                "Push to talk",
+                value: VoiceHotkey.shared.isGlobal
+                    ? "⌃⌥Space, in any app" : "⌃⌥Space while Rafu is in front")
+            if chordConflict {
+                Label(
+                    "macOS uses ⌃⌥Space to switch input sources on this Mac. Use ⌃⌥⇧Space (Start Listening), or turn off that shortcut in Keyboard Shortcuts ▸ Input Sources.",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
             Text(
                 "Click the voice blob or choose Start Listening to keep the microphone open. Rafu checks in after 45 seconds of silence, pauses at 60, and closes the session after 90."
             )
@@ -104,7 +116,10 @@ struct VoiceSettingsSection: View {
             LabeledContent("Access", value: microphoneText)
             Button("Open System Settings") { NSWorkspace.shared.open(Self.privacyURL) }
         }
-        .onAppear { microphone = VoiceMicrophonePermission.access }
+        .onAppear {
+            microphone = VoiceMicrophonePermission.access
+            chordConflict = VoiceHotkeyConflict.isActive()
+        }
     }
 
     private func menuPicker<Content: View>(

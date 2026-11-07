@@ -82,8 +82,8 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
         MemoryPressureMonitor.shared.start()
         // Before any window or the notch strip appears: loops read it.
         RafuMotionGate.shared.start()
-        // Push-to-talk ⌃⌥Space while Rafu is in front. Only a key monitor:
-        // no engine, socket or timer exists until the key is pressed.
+        // Push-to-talk ⌃⌥Space: a Carbon hot key plus a local key monitor.
+        // No engine, socket or timer exists until the key is pressed.
         VoiceHotkey.shared.install()
         LauncherIPCServer.shared.start()
         // Registering the reply-capable notification category and
@@ -108,18 +108,32 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
         // charge of their decisions. This hook first flushes Canvas content,
         // then completes workspace metadata saves.
         // The registry orders the key window first; the helper saves it last.
-        let sessions = WorkspaceWindowRegistry.shared.sessionSnapshots().map(\.session)
-        terminationPersistence.request(
-            sessions: sessions,
-            onSaveFailure: {
-                sender.reply(toApplicationShouldTerminate: false)
-            },
-            reply: { sender.reply(toApplicationShouldTerminate: true) }
-        )
+        let persist = { [terminationPersistence] in
+            let sessions = WorkspaceWindowRegistry.shared.sessionSnapshots().map(\.session)
+            terminationPersistence.request(
+                sessions: sessions,
+                onSaveFailure: {
+                    sender.reply(toApplicationShouldTerminate: false)
+                },
+                reply: { sender.reply(toApplicationShouldTerminate: true) }
+            )
+        }
+        // An open voice session first sends `session.close`, waiting at most
+        // 2 s, so OpenAI stops billing at once (ADR 0035).
+        guard VoiceSession.shared.hasOpenSession else {
+            persist()
+            return .terminateLater
+        }
+        Task {
+            await VoiceSession.shared.closeForQuit(limit: .seconds(2))
+            persist()
+        }
         return .terminateLater
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // Synchronous backstop: drops a voice socket that is still open.
+        VoiceSession.shared.terminateNow()
         LauncherIPCServer.shared.stop()
     }
 

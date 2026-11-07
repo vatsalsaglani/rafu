@@ -90,6 +90,28 @@ final class FakeVoiceAudio: VoiceAudioCapturing, VoiceAudioPlaying {
     func push(_ frame: Data) { continuation?.yield(frame) }
 }
 
+/// Stands in for the Confirm card: records each request, and answers when
+/// the test says so (or at once with `autoAnswer`).
+@MainActor
+final class ConfirmProbe {
+    private(set) var requests: [VoiceConfirmRequest] = []
+    private(set) var dismissals = 0
+    var autoAnswer: VoiceConfirmAnswer?
+    private var answer: (@MainActor (VoiceConfirmAnswer) -> Void)?
+
+    var presenter: VoiceConfirmPresenter {
+        { [self] request, answer in
+            requests.append(request)
+            self.answer = answer
+            if let autoAnswer { answer(autoAnswer) }
+            return { [self] in dismissals += 1 }
+        }
+    }
+
+    /// A click on the card.
+    func click(_ value: VoiceConfirmAnswer) { answer?(value) }
+}
+
 /// Removes the fixture's temporary workspace.
 private final class VoiceScratchFolder: Sendable {
     let url = FileManager.default.temporaryDirectory.appending(
@@ -106,13 +128,15 @@ private struct VoiceFixture {
     let board: CanvasBoardState
     let transport: ScriptedLiveTransport
     let audio = FakeVoiceAudio()
+    let confirm = ConfirmProbe()
     let voice: VoiceSession
     let suite: String
     private let scratch = VoiceScratchFolder()
 
     init(
         key: String? = "test-key", microphone: Bool = true, capDollars: Int? = nil,
-        transport: ScriptedLiveTransport = ScriptedLiveTransport()
+        transport: ScriptedLiveTransport = ScriptedLiveTransport(),
+        confirmTimeout: Duration = .seconds(30)
     ) async throws {
         let scratch = scratch
         suite = TestDefaultsSuite.name("dev.rafu.voice-tests")
@@ -152,6 +176,8 @@ private struct VoiceFixture {
         dependencies.runsClock = false
         dependencies.startTimeout = .seconds(5)
         dependencies.closeTimeout = .seconds(5)
+        dependencies.presentConfirm = confirm.presenter
+        dependencies.confirmTimeout = confirmTimeout
         voice = VoiceSession(dependencies: dependencies)
     }
 
@@ -381,6 +407,118 @@ struct VoiceSessionIntegrationTests {
         await fixture.voice.close()
     }
 
+    @Test("A second press while connecting keeps the first press's frames")
+    func rePressWhileConnecting() async throws {
+        let transport = ScriptedLiveTransport(answersStart: false)
+        let fixture = try await VoiceFixture(transport: transport)
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        let frame = Data(count: VoiceAudioFormat.inputFrameBytes)
+        fixture.voice.beginHold()
+        try await until("capturing") { fixture.audio.isCapturing }
+        fixture.audio.push(frame)
+        fixture.audio.push(frame)
+        fixture.voice.endHold()
+        fixture.voice.beginHold()
+        #expect(fixture.audio.isCapturing)
+        fixture.audio.push(frame)
+        fixture.voice.endHold()
+        try await until("start sent") { !transport.sent(type: "session.start").isEmpty }
+        transport.push(#"{"type":"session.started","session":{"id":"sess_twice"}}"#)
+        try await until("two mutes") { transport.sent(type: "session.input_audio.mute").count == 2 }
+        #expect(transport.sent(type: "session.input_audio.append").count == 3)
+        await fixture.voice.close()
+    }
+
+    @Test("Not latched: the engine stops after a quiet spell and restarts on the next press")
+    func engineSuspends() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        let voice = fixture.voice
+        voice.beginHold()
+        try await until("listening") { voice.blobState == .listeningHeld }
+        voice.tick(at: .seconds(30))
+        #expect(!voice.isEngineSuspended)
+        voice.endHold()
+        // The quiet spell counts from real session time; anchor to it.
+        voice.tick(at: voice.sessionElapsed + .seconds(5))
+        #expect(!voice.isEngineSuspended)
+        voice.tick(at: voice.sessionElapsed + .seconds(11))
+        #expect(voice.isEngineSuspended)
+        #expect(!fixture.audio.playing)
+        #expect(voice.blobState.isOpen)
+        voice.beginHold()
+        #expect(!voice.isEngineSuspended)
+        #expect(fixture.audio.playing)
+        #expect(fixture.audio.isCapturing)
+        voice.endHold()
+        voice.tick(at: voice.sessionElapsed + .seconds(30))
+        #expect(voice.isEngineSuspended)
+        // Audible output restarts it; silence alone does not.
+        fixture.transport.push(
+            #"{"type":"session.output_audio.delta","delta":"\#(Data(count: 4_800).base64EncodedString())"}"#
+        )
+        var loud = Data()
+        for _ in 0..<2_400 { loud.append(contentsOf: [0x00, 0x10]) }
+        fixture.transport.push(
+            #"{"type":"session.output_audio.delta","delta":"\#(loud.base64EncodedString())"}"#)
+        try await until("restarted") { fixture.audio.playing }
+        #expect(fixture.audio.enqueued == 1)
+        await voice.close()
+    }
+
+    @Test("Latched: the engine never stops for silence")
+    func latchedKeepsEngine() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        try await fixture.openLatched()
+        fixture.voice.tick(at: fixture.voice.sessionElapsed + .seconds(20))
+        #expect(!fixture.voice.isEngineSuspended)
+        #expect(fixture.audio.playing)
+        await fixture.voice.close()
+    }
+
+    @Test("Quit: terminateNow drops the socket and closes at once")
+    func terminateNow() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        try await fixture.openLatched()
+        fixture.transport.push(#"{"type":"session.usage.updated","usage":{"seconds":4}}"#)
+        try await until("usage") { fixture.voice.costStore.monthlySeconds == 4 }
+        fixture.voice.terminateNow()
+        #expect(fixture.voice.blobState == .idle)
+        #expect(!fixture.voice.hasOpenSession)
+        #expect(fixture.transport.isCancelled)
+        #expect(!fixture.audio.playing)
+        #expect(fixture.transport.sent(type: "session.close").isEmpty)
+        #expect(fixture.voice.costStore.monthlySeconds == 4)
+    }
+
+    @Test("Quit: closeForQuit sends session.close within the limit")
+    func closeForQuit() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        try await fixture.openLatched()
+        await fixture.voice.closeForQuit(limit: .seconds(2))
+        #expect(fixture.voice.blobState == .idle)
+        #expect(fixture.transport.sent(type: "session.close").count == 1)
+        #expect(fixture.transport.isCancelled)
+    }
+
+    @Test("A waiting card blocks the clock and closing cancels it")
+    func closeCancelsCard() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        try await fixture.openLatched()
+        let pending = Task { await fixture.run("node_remove", #"{"node_id":"Review"}"#) }
+        try await until("card") { fixture.voice.confirmGate.isPending }
+        #expect(fixture.voice.blobState == .needsConfirm)
+        fixture.voice.tick(at: .seconds(120))
+        #expect(fixture.voice.blobState == .needsConfirm)
+        await fixture.voice.close()
+        #expect(await pending.value.output.contains("cancelled"))
+        #expect(fixture.board.cards.count == 2)
+    }
+
     @Test("A socket that drops before start reports Voice disconnected")
     func dropBeforeStart() async throws {
         let transport = ScriptedLiveTransport(answersStart: false)
@@ -470,23 +608,152 @@ struct VoiceToolExecutorTests {
         #expect(tidy.output.contains("agent_control_off"))
     }
 
-    @Test("Sensitive tools answer needs_phase_2 in Ask and Allow")
-    func sensitiveWaits() async throws {
+    @Test("Ask: a removal waits on a destructive Confirm card; Cancel keeps the node")
+    func confirmCancelAndAllow() async throws {
         let fixture = try await VoiceFixture()
         defer { TestDefaultsSuite.remove(fixture.suite) }
-        for mode in [CanvasAgentControlMode.ask, .allow] {
-            fixture.board.setAgentControlMode(mode)
-            let removal = await fixture.run("node_remove", #"{"node_id":"Review"}"#)
-            #expect(removal.output.contains("needs_phase_2"), "\(mode)")
-            let start = await fixture.run(
-                "terminal_create", #"{"title":"Agent","agent":"claude"}"#)
-            #expect(start.output.contains("needs_phase_2"), "\(mode)")
-        }
+        fixture.confirm.autoAnswer = .cancel
+        let cancelled = await fixture.run("node_remove", #"{"node_id":"Review"}"#)
+        #expect(cancelled.output.contains("\"cancelled\""))
         #expect(fixture.board.cards.count == 2)
-        for name in ["handoff_to_agent", "work_order_create", "view_find", "voice_confirm"] {
+        let request = try #require(fixture.confirm.requests.first)
+        #expect(request.tool == .nodeRemove)
+        #expect(request.isDestructive)
+        #expect(!request.offersSessionGrant)
+        #expect(request.actionTitle == "Remove")
+        #expect(request.message.contains("Voice test"))
+        #expect(fixture.confirm.dismissals == 1)
+        #expect(
+            CanvasAgentCenter.shared.log(for: fixture.board.id).last?.outcome
+                == "Cancelled by the user")
+
+        fixture.confirm.autoAnswer = .allowOnce
+        let removed = await fixture.run("node_remove", #"{"node_id":"Review"}"#)
+        #expect(!removed.isError)
+        #expect(fixture.board.cards.map(\.title) == ["Plan"])
+        #expect(fixture.confirm.requests.count == 2)
+    }
+
+    @Test("A spoken voice_confirm resolves the waiting card; voice_cancel with none waiting")
+    func spokenConfirm() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        let idle = await fixture.run("voice_confirm")
+        #expect(idle.output.contains("nothing_pending"))
+        let pending = Task { await fixture.run("node_remove", #"{"node_id":"Review"}"#) }
+        try await until("card") { fixture.voice.confirmGate.isPending }
+        // A second sensitive call while one waits does not stack a card.
+        let busy = await fixture.run(
+            "edge_remove", #"{"edge_id":"\#(UUID().uuidString)"}"#)
+        #expect(busy.output.contains("confirm_busy"))
+        let spoken = await fixture.run("voice_confirm", #"{"always":true}"#)
+        #expect(!spoken.isError)
+        let removal = await pending.value
+        #expect(!removal.isError)
+        #expect(fixture.board.cards.count == 1)
+        #expect(fixture.confirm.dismissals == 1)
+        // "always" never grants a removal.
+        let request = try #require(fixture.confirm.requests.first)
+        #expect(!fixture.voice.hasSessionGrant(request.grantKey))
+        let none = await fixture.run("voice_cancel")
+        #expect(none.output.contains("nothing_pending"))
+    }
+
+    @Test("An unanswered card times out and nothing runs")
+    func confirmTimeout() async throws {
+        let fixture = try await VoiceFixture(confirmTimeout: .milliseconds(50))
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        let outcome = await fixture.run("node_remove", #"{"node_id":"Review"}"#)
+        #expect(outcome.output.contains("confirm_timeout"))
+        #expect(fixture.board.cards.count == 2)
+        #expect(fixture.confirm.dismissals == 1)
+    }
+
+    @Test("Allow runs a sensitive call with the badge and no card; Off denies it")
+    func allowAndOffSensitive() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        fixture.board.setAgentControlMode(.off)
+        let denied = await fixture.run("node_remove", #"{"node_id":"Review"}"#)
+        #expect(denied.output.contains("agent_control_off"))
+        fixture.board.setAgentControlMode(.allow)
+        let removed = await fixture.run("node_remove", #"{"node_id":"Review"}"#)
+        #expect(!removed.isError)
+        #expect(fixture.board.cards.count == 1)
+        #expect(fixture.confirm.requests.isEmpty)
+        for name in ["handoff_to_agent", "work_order_create", "view_find", "plan_preview"] {
             #expect(
                 await fixture.run(name).output.contains("needs_phase_2"), Comment(rawValue: name))
         }
+    }
+
+    @Test("Session grants: once for a removal, kept for other tools until close")
+    func sessionGrants() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        let gate = VoiceConfirmGate()
+        let probe = ConfirmProbe()
+        probe.autoAnswer = .allowForSession
+        let export = try CanvasAgentToolCall.parse(tool: "export", arguments: ["format": "png"])
+        let exportRequest = VoiceConfirmRequest(call: export, board: fixture.board)
+        #expect(!exportRequest.isDestructive)
+        #expect(await gate.ask(exportRequest, present: probe.presenter) == .allowForSession)
+        let removal = try CanvasAgentToolCall.parse(
+            tool: "node_remove", arguments: ["node_id": UUID().uuidString])
+        let removalRequest = VoiceConfirmRequest(call: removal, board: fixture.board)
+        #expect(await gate.ask(removalRequest, present: probe.presenter) == .allowOnce)
+        #expect(!gate.isPending)
+
+        try await fixture.openLatched()
+        fixture.voice.grantForSession(exportRequest.grantKey)
+        #expect(fixture.voice.hasSessionGrant(exportRequest.grantKey))
+        await fixture.voice.close()
+        #expect(!fixture.voice.hasSessionGrant(exportRequest.grantKey))
+    }
+
+    @Test("The card's buttons: Remove is destructive and never the default")
+    func cardActions() throws {
+        let fixture = VoiceConfirmCard.self
+        let removal = try CanvasAgentToolCall.parse(
+            tool: "edge_remove", arguments: ["edge_id": UUID().uuidString])
+        let start = try CanvasAgentToolCall.parse(
+            tool: "terminal_start", arguments: ["node_id": UUID().uuidString])
+        let board = CanvasBoardState(document: CanvasDocument(title: "Cards"))
+        let destructive = fixture.actions(
+            for: VoiceConfirmRequest(call: removal, board: board), answer: { _ in })
+        #expect(destructive.map(\.title) == ["Remove"])
+        #expect(destructive.first?.isDestructive == true)
+        #expect(RafuConfirmPopup.defaultActionIndex(destructive, preferred: "Remove") == nil)
+        let plain = fixture.actions(
+            for: VoiceConfirmRequest(call: start, board: board), answer: { _ in })
+        #expect(plain.map(\.title) == ["Allow for This Session", "Allow Once"])
+        #expect(RafuConfirmPopup.defaultActionIndex(plain, preferred: "Allow Once") == 1)
+    }
+
+    @Test("The rate limit applies to voice changes")
+    func rateLimit() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        for _ in 0..<30 { _ = CanvasAgentCenter.shared.admit(fixture.voice.callerID) }
+        let limited = await fixture.run("note_create", #"{"title":"Flood"}"#)
+        #expect(limited.output.contains("rate_limited"))
+        #expect(fixture.board.cards.count == 2)
+        let read = await fixture.run("note_read", #"{"node_id":"Plan"}"#)
+        #expect(!read.isError)
+    }
+
+    @Test("A voice change lands with the set-down ring and a Board effects row")
+    func landingAndBoardLane() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        _ = await fixture.run("note_create", #"{"title":"Landed"}"#)
+        let card = try #require(fixture.board.cards.first { $0.title == "Landed" })
+        #expect(fixture.board.landing?.ids == [card.id])
+        let effect = try #require(fixture.voice.timeline.rows(lane: .board).last)
+        #expect(effect.title == "Voice test")
+        #expect(effect.detail == "1 added")
+        _ = await fixture.run("node_update", #"{"node_id":"Plan","title":"Plan A"}"#)
+        #expect(fixture.voice.timeline.rows(lane: .board).last?.detail == "1 changed")
     }
 
     @Test("Titles and \"this\" resolve; a shared prefix asks instead of guessing")
