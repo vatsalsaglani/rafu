@@ -1,0 +1,46 @@
+import Foundation
+import RafuCore
+
+/// Settings ▸ Voice values. Plain `UserDefaults`, never a secret.
+nonisolated struct VoicePreferences: Sendable {
+    static let backendKey = "voice.backend"
+    static let voiceKey = "voice.voice"
+    static let shareTerminalTailKey = "voice.shareTerminalTail"
+    static let personalizationKey = "voice.personalization"
+    static let monthlyCapKey = "voice.monthlyCapUSD"
+
+    static let capRange = 1...50
+
+    /// `nil` means `.standard`. `UserDefaults` is not `Sendable`, so the
+    /// suite name is stored and the defaults opened per read.
+    let suiteName: String?
+
+    init(suiteName: String? = nil) { self.suiteName = suiteName }
+
+    private var defaults: UserDefaults {
+        suiteName.flatMap(UserDefaults.init(suiteName:)) ?? .standard
+    }
+
+    var backend: VoiceBackendModel {
+        defaults.string(forKey: Self.backendKey).flatMap(VoiceBackendModel.init(rawValue:))
+            ?? .default
+    }
+
+    var voice: VoiceVoice {
+        defaults.string(forKey: Self.voiceKey).flatMap(VoiceVoice.init(rawValue:)) ?? .default
+    }
+
+    /// Default on: the tail is shared only in Allow mode anyway.
+    var sharesTerminalTail: Bool {
+        defaults.object(forKey: Self.shareTerminalTailKey) as? Bool ?? true
+    }
+
+    /// Default off (opt-in).
+    var personalization: Bool { defaults.bool(forKey: Self.personalizationKey) }
+
+    var monthlyCapDollars: Double {
+        let stored = defaults.object(forKey: Self.monthlyCapKey) as? Int
+        let value = stored ?? Int(VoiceCostMeter.defaultCapDollars)
+        return Double(min(Self.capRange.upperBound, max(Self.capRange.lowerBound, value)))
+    }
+}

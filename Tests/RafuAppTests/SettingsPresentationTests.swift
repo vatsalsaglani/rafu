@@ -9,11 +9,13 @@ struct SettingsPresentationTests {
     func paneMetadataIsComplete() {
         #expect(
             SettingsPane.allCases == [
-                .general, .appearance, .ai, .languageServers, .usage, .agents, .ensemble,
+                .general, .appearance, .ai, .voice, .languageServers, .usage, .agents,
+                .ensemble,
             ])
         #expect(
             SettingsPane.allCases.map(\.title) == [
-                "General", "Appearance", "AI", "Language Servers", "Usage", "Agents", "Ensemble",
+                "General", "Appearance", "AI", "Voice", "Language Servers", "Usage", "Agents",
+                "Ensemble",
             ])
         #expect(SettingsPane.allCases.allSatisfy { !$0.title.isEmpty })
         #expect(SettingsPane.allCases.allSatisfy { !$0.systemImage.isEmpty })

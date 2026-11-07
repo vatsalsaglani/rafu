@@ -527,7 +527,7 @@ struct CanvasAgentProvenanceBadge: View {
     let record: CanvasAgentProvenanceRecord
 
     var body: some View {
-        CanvasHeaderBadge(text: record.agentName, icon: record.cli)
+        CanvasHeaderBadge(text: record.agentName, symbol: record.symbol, icon: record.cli)
             .help(
                 "\(record.byline) · \(record.date.formatted(date: .omitted, time: .shortened))"
             )

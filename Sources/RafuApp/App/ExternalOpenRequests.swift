@@ -82,6 +82,9 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
         MemoryPressureMonitor.shared.start()
         // Before any window or the notch strip appears: loops read it.
         RafuMotionGate.shared.start()
+        // Push-to-talk ⌃⌥Space while Rafu is in front. Only a key monitor:
+        // no engine, socket or timer exists until the key is pressed.
+        VoiceHotkey.shared.install()
         LauncherIPCServer.shared.start()
         // Registering the reply-capable notification category and
         // delegate never prompts for permission — safe unconditionally, at

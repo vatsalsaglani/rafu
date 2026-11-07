@@ -56,6 +56,8 @@ struct WorkspaceStatusBar: View {
 
             agentActivity
 
+            VoiceStatusItem(session: VoiceSession.shared)
+
             GitHubAccountStatusView(session: session)
 
             if showsProcessMemory, let sample = memory.sample {

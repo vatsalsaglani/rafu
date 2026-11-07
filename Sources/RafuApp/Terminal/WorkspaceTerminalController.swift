@@ -1201,6 +1201,13 @@ final class WorkspaceTerminalController: Identifiable {
         terminalView?.recentOutputSnippet() ?? ""
     }
 
+    /// Viewport lines for Rafu Voice (`RafuTerminalView.recentOutputLines`);
+    /// `nil` when no view is mounted. Called only from `ensemble_describe` by
+    /// voice in Allow mode with the Settings toggle on.
+    func recentOutputLines(maxLines: Int = 40) -> [String]? {
+        terminalView?.recentOutputLines(maxLines: maxLines)
+    }
+
     /// Returns the live terminal view, creating it and spawning the login
     /// shell on first use.
     func makeOrReuseView(theme: RafuTheme) -> LocalProcessTerminalView {

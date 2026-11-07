@@ -1,0 +1,661 @@
+import Foundation
+import Observation
+import RafuCore
+
+/// Why a voice session closed.
+enum VoiceCloseReason: Equatable {
+    case user
+    case idle
+    case remote
+    case failure
+}
+
+/// Rafu Voice: one GPT-Live session at a time, app-wide. Idle Rafu holds no
+/// socket, no engine, no task and no timer; everything below is created by
+/// the first key press or blob click and released by `close`.
+///
+/// Observation exposes small metadata only. The key, audio and transcripts
+/// never reach observable state (the timeline keeps at most 120 scalars of
+/// the user's own words, in memory, cleared on close).
+@MainActor
+@Observable
+final class VoiceSession {
+    static let shared = VoiceSession()
+
+    /// Seams for tests: no network, no microphone, no Keychain.
+    struct Dependencies {
+        var makeTransport: (_ apiKey: String) -> any VoiceLiveTransport
+        var openAIKey: () async throws -> String
+        var requestMicrophone: () async -> Bool
+        var makeAudio: () -> (any VoiceAudioCapturing, any VoiceAudioPlaying)
+        var preferences: VoicePreferences
+        var costSuiteName: String?
+        /// `nil` resolves the key workspace window through the registry.
+        var target: (() -> VoiceTarget?)?
+        var workspaces: (() -> [WorkspaceSession])?
+        var startTimeout: Duration = .seconds(10)
+        var closeTimeout: Duration = .seconds(15)
+        /// Off in tests, which drive `tick(at:)` directly.
+        var runsClock = true
+
+        static var live: Dependencies {
+            Dependencies(
+                makeTransport: { URLSessionWebSocketTransport(apiKey: $0) },
+                openAIKey: { try await VoiceKeyResolver.openAIKey() },
+                requestMicrophone: { await VoiceMicrophonePermission.request() },
+                makeAudio: {
+                    let audio = VoiceAudioIO()
+                    return (audio, audio)
+                },
+                preferences: VoicePreferences(), costSuiteName: nil)
+        }
+    }
+
+    // MARK: Observable metadata
+
+    private(set) var machine = VoiceBlobMachine()
+    private(set) var personaName = VoicePersona.rafu.name
+    private(set) var activeBoardID: CanvasID?
+    /// 0…1, written at most about 17 times a second while capturing.
+    private(set) var inputLevel = 0.0
+    private(set) var timeline = VoiceTimeline()
+    private(set) var lastError: String?
+    let costStore: VoiceCostStore
+
+    var blobState: VoiceBlobState { machine.state }
+    var isMicOpen: Bool { machine.isMicOpen }
+
+    // MARK: Session resources (none while idle)
+
+    @ObservationIgnored let callerID = UUID()
+    @ObservationIgnored let undoLedger = VoiceUndoLedger()
+    @ObservationIgnored private let dependencies: Dependencies
+    @ObservationIgnored private var client: VoiceLiveClient?
+    @ObservationIgnored private var capture: (any VoiceAudioCapturing)?
+    @ObservationIgnored private var playback: (any VoiceAudioPlaying)?
+    /// The capture stream not yet handed to a sender (while connecting).
+    @ObservationIgnored private var frames: AsyncStream<Data>?
+    @ObservationIgnored private var isCapturing = false
+    @ObservationIgnored private var openTask: Task<Void, Never>?
+    @ObservationIgnored private var eventTask: Task<Void, Never>?
+    @ObservationIgnored private var audioTask: Task<Void, Never>?
+    @ObservationIgnored private var clockTask: Task<Void, Never>?
+    @ObservationIgnored private var callChain: Task<Void, Never>?
+    @ObservationIgnored private var startWaiter: CheckedContinuation<Bool, Never>?
+    @ObservationIgnored private var startErrorCode: String?
+    @ObservationIgnored private var streamEndedBeforeStart = false
+    @ObservationIgnored private var sessionID: String?
+    @ObservationIgnored private var isStarted = false
+    @ObservationIgnored private var isClosing = false
+    /// Bumped by every open and close, so a stale async step drops its result.
+    @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var openedAt = ContinuousClock.now
+    @ObservationIgnored private var clock = VoiceActivityClock()
+    @ObservationIgnored private var inFlightCalls = 0
+    @ObservationIgnored private var outputsAwaitingCreate = 0
+    @ObservationIgnored private var completedWhileInFlight = false
+    @ObservationIgnored private var lastAudibleAt: Duration?
+    @ObservationIgnored private var speechFrames = 0
+    @ObservationIgnored private var levelFrames = 0
+    @ObservationIgnored private var youRow: String?
+    @ObservationIgnored private var replyRow: String?
+    @ObservationIgnored private var replyCharacters = 0
+    @ObservationIgnored private var checkInPending = false
+    @ObservationIgnored private weak var lastKeySession: WorkspaceSession?
+
+    init(dependencies: Dependencies = .live) {
+        self.dependencies = dependencies
+        costStore = VoiceCostStore(suiteName: dependencies.costSuiteName)
+    }
+
+    private var persona: VoicePersona {
+        VoicePersona.rafu.with(voice: dependencies.preferences.voice)
+    }
+
+    private func elapsed() -> Duration { ContinuousClock.now - openedAt }
+
+    private func milliseconds(_ duration: Duration) -> Int {
+        Int(
+            duration.components.seconds * 1_000 + duration.components.attoseconds
+                / 1_000_000_000_000_000)
+    }
+
+    // MARK: Public API
+
+    /// ⌃⌥Space down, or the blob held.
+    func beginHold() {
+        if case .error = blobState { machine.apply(.reset) }
+        let wasOpen = blobState.isOpen
+        machine.apply(.holdBegan)
+        guard machine.mic == .held else { return }
+        if wasOpen {
+            clock.noteSpeech(at: elapsed())
+            micOpened()
+        } else {
+            open()
+        }
+    }
+
+    /// ⌃⌥Space up. The session stays open; the microphone stops.
+    func endHold() {
+        guard machine.mic == .held else { return }
+        machine.apply(.holdEnded)
+        youRow = nil
+        if isStarted { clock.noteSpeech(at: elapsed()) }
+        micClosed()
+    }
+
+    /// The blob click and Start/Stop Listening: keep the microphone open
+    /// without the key, visibly, until the check-in, a pause, or a click.
+    func toggleLatched() {
+        if case .error = blobState { machine.apply(.reset) }
+        let wasOpen = blobState.isOpen
+        machine.apply(.latchToggled)
+        let latched = machine.mic == .latched
+        if wasOpen {
+            clock.setLatched(latched, at: elapsed())
+            if latched { micOpened() } else { micClosed() }
+        } else if latched {
+            open()
+        }
+    }
+
+    /// Stop Speaking, or a blob click while Rafu speaks. Backend work goes on.
+    func stopSpeaking() {
+        playback?.flush()
+        endReply()
+    }
+
+    /// Clears a shown error; the blob returns to idle.
+    func dismissError() {
+        if case .error = blobState { machine.apply(.reset) }
+    }
+
+    /// Closes the session and releases everything it held.
+    func close(reason: VoiceCloseReason = .user) async {
+        guard blobState.isOpen || client != nil || openTask != nil else { return }
+        generation += 1
+        openTask?.cancel()
+        openTask = nil
+        await teardown(sendClose: isStarted)
+        if reason != .failure { machine.apply(.closed) }
+    }
+
+    // MARK: Open
+
+    private func open() {
+        generation += 1
+        let ticket = generation
+        openedAt = ContinuousClock.now
+        clock = VoiceActivityClock()
+        clock.setLatched(machine.mic == .latched, at: .zero)
+        lastError = nil
+        timeline.clear()
+        openTask = Task { await self.runOpen(ticket) }
+    }
+
+    private func runOpen(_ ticket: Int) async {
+        let key: String
+        do {
+            key = try await dependencies.openAIKey()
+        } catch {
+            return await fail(.noOpenAIKey, ticket: ticket)
+        }
+        guard ticket == generation else { return }
+        guard await dependencies.requestMicrophone() else {
+            return await fail(.microphoneDenied, ticket: ticket)
+        }
+        guard ticket == generation else { return }
+        guard costStore.allowsNewSession(cap: dependencies.preferences.monthlyCapDollars) else {
+            return await fail(.monthlyCapReached, ticket: ticket)
+        }
+        let (capture, playback) = dependencies.makeAudio()
+        self.capture = capture
+        self.playback = playback
+        do {
+            try playback.startPlayback()
+        } catch {
+            return await fail(.audioUnavailable, ticket: ticket)
+        }
+        // Speech said while the socket connects is buffered and sent after
+        // `session.started`.
+        if machine.mic != .off { startCapture() }
+        let client = VoiceLiveClient(
+            transport: dependencies.makeTransport(key), closeTimeout: dependencies.closeTimeout)
+        self.client = client
+        let events = client.events
+        eventTask = Task {
+            for await event in events { self.handle(event) }
+            self.eventsEnded(ticket)
+        }
+        let target = voiceTarget()
+        activeBoardID = target?.board?.id
+        let config = VoiceSessionPlan.start(
+            persona: persona, backend: dependencies.preferences.backend,
+            tools: VoiceToolSchema.tools(for: .rafu))
+        do {
+            try await client.start()
+            guard ticket == generation else { return await abandon(client, playback) }
+            try await client.send(.sessionStart(config))
+        } catch {
+            return await fail(.disconnected, ticket: ticket)
+        }
+        guard ticket == generation else { return await abandon(client, playback) }
+        guard await waitForStart() else {
+            let error: VoiceError =
+                startErrorCode.map { .refused(code: $0) }
+                ?? (streamEndedBeforeStart ? .disconnected : .startTimedOut)
+            return await fail(error, ticket: ticket)
+        }
+        guard ticket == generation else { return await abandon(client, playback) }
+        isStarted = true
+        openTask = nil
+        machine.apply(.connected)
+        if frames != nil {
+            // Sends what was said while connecting; a stream that already
+            // ended (key released early) drains and then mutes.
+            startSendingAudio()
+        } else {
+            try? await client.send(.inputAudioMute)
+        }
+        if dependencies.runsClock { startClock() }
+    }
+
+    /// A close arrived while this open was still connecting, and the
+    /// teardown may have run before these objects existed: drop them.
+    private func abandon(_ client: VoiceLiveClient, _ playback: any VoiceAudioPlaying) async {
+        await client.cancel()
+        playback.stopAll()
+        if self.client === client {
+            stopCapture()
+            self.client = nil
+            self.capture = nil
+            self.playback = nil
+            frames = nil
+            eventTask?.cancel()
+            eventTask = nil
+        }
+    }
+
+    private func waitForStart() async -> Bool {
+        let timeout = dependencies.startTimeout
+        let timer = Task {
+            try? await Task.sleep(for: timeout)
+            self.resumeStart(false)
+        }
+        let started = await withCheckedContinuation { waiter in
+            if sessionID != nil {
+                waiter.resume(returning: true)
+            } else if startErrorCode != nil || streamEndedBeforeStart {
+                waiter.resume(returning: false)
+            } else {
+                startWaiter = waiter
+            }
+        }
+        timer.cancel()
+        return started
+    }
+
+    private func resumeStart(_ value: Bool) {
+        let waiter = startWaiter
+        startWaiter = nil
+        waiter?.resume(returning: value)
+    }
+
+    private func fail(_ error: VoiceError, ticket: Int) async {
+        guard ticket == generation else { return }
+        generation += 1
+        openTask = nil
+        lastError = error.blobReason
+        machine.apply(.failed(error.blobReason))
+        await teardown(sendClose: isStarted)
+    }
+
+    /// Order: stop capture, close the socket (waiting for `session.closed`),
+    /// end the streams, release the engine.
+    private func teardown(sendClose: Bool) async {
+        isClosing = true
+        resumeStart(false)
+        stopCapture()
+        audioTask?.cancel()
+        audioTask = nil
+        frames = nil
+        clockTask?.cancel()
+        clockTask = nil
+        if let client {
+            if sendClose { await client.close() } else { await client.cancel() }
+        }
+        eventTask?.cancel()
+        eventTask = nil
+        callChain = nil
+        playback?.stopAll()
+        if let sessionID { costStore.finish(sessionID: sessionID) }
+        client = nil
+        capture = nil
+        playback = nil
+        sessionID = nil
+        startErrorCode = nil
+        streamEndedBeforeStart = false
+        isStarted = false
+        inFlightCalls = 0
+        outputsAwaitingCreate = 0
+        completedWhileInFlight = false
+        lastAudibleAt = nil
+        checkInPending = false
+        youRow = nil
+        replyRow = nil
+        inputLevel = 0
+        timeline.clear()
+        isClosing = false
+    }
+
+    private func eventsEnded(_ ticket: Int) {
+        guard ticket == generation, !isClosing else { return }
+        guard isStarted else {
+            // Still opening: `runOpen` reports it (a refusal code wins).
+            streamEndedBeforeStart = true
+            resumeStart(false)
+            return
+        }
+        Task { await self.fail(.disconnected, ticket: ticket) }
+    }
+
+    // MARK: Microphone
+
+    private func micOpened() {
+        guard capture != nil, !isCapturing else { return }
+        startCapture()
+        if isStarted { startSendingAudio() }
+    }
+
+    /// Stops the tap. The stream ends, its buffered frames still go out, and
+    /// its sender then sends `mute`, so `mute` never overtakes speech.
+    private func micClosed() {
+        stopCapture()
+    }
+
+    private func startCapture() {
+        guard let capture else { return }
+        frames = try? capture.startCapture()
+        isCapturing = frames != nil
+        speechFrames = 0
+    }
+
+    /// One sender per capture stream, chained so the order on the socket is
+    /// always unmute, frames, mute.
+    private func startSendingAudio() {
+        guard let stream = frames, let client else { return }
+        frames = nil
+        let previous = audioTask
+        audioTask = Task {
+            await previous?.value
+            try? await client.send(.inputAudioUnmute)
+            for await frame in stream {
+                self.handleFrame(frame)
+                try? await client.send(.inputAudioAppend(frame))
+            }
+            try? await client.send(.inputAudioMute)
+        }
+    }
+
+    private func stopCapture() {
+        if isCapturing { capture?.stopCapture() }
+        isCapturing = false
+        inputLevel = 0
+    }
+
+    private func handleFrame(_ frame: Data) {
+        let rms = VoiceAudioLevel.rms(pcm16: frame)
+        levelFrames += 1
+        if levelFrames % 3 == 0 { inputLevel = VoiceAudioLevel.meterLevel(rms: rms) }
+        speechFrames = rms >= VoiceAudioFormat.localSpeechRMS ? speechFrames + 1 : 0
+        guard speechFrames >= VoiceAudioFormat.localSpeechFrames else { return }
+        clock.noteSpeech(at: elapsed())
+        if blobState == .checkIn { machine.apply(.speechDetected) }
+        // Barge-in: the user talks over Rafu; cut the reply locally at once.
+        if lastAudibleAt != nil, capture?.supportsBargeIn == true {
+            playback?.flush()
+            endReply()
+        }
+    }
+
+    // MARK: Events
+
+    private func handle(_ event: VoiceLiveServerEvent) {
+        switch event {
+        case .sessionStarted(let id, _):
+            sessionID = id.isEmpty ? UUID().uuidString : id
+            resumeStart(true)
+        case .outputAudioDelta(let pcm):
+            handleOutputAudio(pcm)
+        case .inputTranscriptDelta(let text):
+            if let youRow {
+                timeline.appendDetail(text, to: youRow)
+            } else {
+                youRow = timeline.append(
+                    lane: .you, startMS: milliseconds(elapsed()), persona: personaName,
+                    title: "You", detail: text)
+            }
+        case .outputTranscriptDelta(let text):
+            replyCharacters += text.count
+        case .delegationCreated(let id, _):
+            youRow = nil
+            clock.noteServerActivity(at: elapsed())
+            machine.apply(.delegationStarted)
+            timeline.append(
+                lane: .delegation, startMS: milliseconds(elapsed()), delegationID: id,
+                persona: personaName, title: "Delegation")
+        case .functionCall(let callID, let name, let arguments):
+            runCall(callID: callID, name: name, arguments: arguments)
+        case .responseCompleted:
+            if inFlightCalls > 0 {
+                completedWhileInFlight = true
+            } else {
+                sendResponseCreateIfNeeded()
+            }
+        case .usageUpdated(let seconds, _):
+            if let sessionID { costStore.recordUsage(sessionID: sessionID, seconds: seconds) }
+        case .sessionClosed(_, let seconds):
+            if let sessionID, let seconds {
+                costStore.recordUsage(sessionID: sessionID, seconds: Double(seconds))
+            }
+            if !isClosing, isStarted { Task { await self.close(reason: .remote) } }
+        case .error(let code, _):
+            if !isStarted {
+                startErrorCode = code ?? "error"
+                resumeStart(false)
+            } else if checkInPending {
+                // The spoken check-in is untested under Responses delegation;
+                // the glyph alone stays (gpt-live-protocol.md).
+                checkInPending = false
+            } else {
+                lastError = "GPT-Live error \(code ?? "unknown")"
+            }
+        case .commentaryAppended:
+            checkInPending = false
+        case .sessionUpdated, .other:
+            break
+        }
+    }
+
+    private func handleOutputAudio(_ pcm: Data) {
+        playback?.enqueue(pcm)
+        let now = elapsed()
+        if VoiceAudioLevel.rms(pcm16: pcm) > VoiceAudioFormat.audibleOutputRMS {
+            if lastAudibleAt == nil, blobState != .checkIn {
+                machine.apply(.replyStarted)
+                replyCharacters = 0
+                replyRow = timeline.append(
+                    lane: .voice, startMS: milliseconds(now), persona: personaName,
+                    title: "\(personaName) reply")
+            }
+            lastAudibleAt = now
+            // The check-in's own prompt does not reset the silence clock.
+            if blobState != .checkIn { clock.noteServerActivity(at: now) }
+        } else if let last = lastAudibleAt, now - last > .milliseconds(600) {
+            endReply()
+        }
+    }
+
+    private func endReply() {
+        lastAudibleAt = nil
+        if let replyRow {
+            timeline.finish(
+                replyRow, endMS: milliseconds(elapsed()), detail: "\(replyCharacters) characters")
+        }
+        replyRow = nil
+        machine.apply(.replyEnded)
+    }
+
+    // MARK: Tool calls
+
+    /// Calls run one after another, in arrival order: "make three terminals"
+    /// then "link them" must not interleave.
+    private func runCall(callID: String, name: String, arguments: String) {
+        inFlightCalls += 1
+        clock.noteServerActivity(at: elapsed())
+        let ticket = generation
+        let row = timeline.append(
+            lane: .tool, startMS: milliseconds(elapsed()), persona: personaName, title: name)
+        let previous = callChain
+        callChain = Task {
+            await previous?.value
+            let outcome = await VoiceToolExecutor.run(
+                name: name, argumentsJSON: arguments, host: self)
+            await self.finishCall(callID: callID, row: row, outcome: outcome, ticket: ticket)
+        }
+    }
+
+    private func finishCall(callID: String, row: String, outcome: VoiceToolOutcome, ticket: Int)
+        async
+    {
+        // A call still running when the session closed: the board change
+        // stands (like a late MCP approval); its result is dropped.
+        guard ticket == generation, let client else { return }
+        timeline.finish(row, endMS: milliseconds(elapsed()), detail: outcome.summary)
+        clock.noteServerActivity(at: elapsed())
+        try? await client.send(
+            .responseItemCreateFunctionOutput(callID: callID, output: outcome.output))
+        guard ticket == generation else { return }
+        outputsAwaitingCreate += 1
+        inFlightCalls = max(0, inFlightCalls - 1)
+        if inFlightCalls == 0, completedWhileInFlight {
+            completedWhileInFlight = false
+            sendResponseCreateIfNeeded()
+        }
+    }
+
+    /// `response.create` is mandatory after function outputs (Phase 0); one
+    /// per finished response, after all of its calls answered.
+    private func sendResponseCreateIfNeeded() {
+        guard outputsAwaitingCreate > 0, let client else { return }
+        outputsAwaitingCreate = 0
+        Task { try? await client.send(.responseCreate) }
+    }
+
+    // MARK: Timers
+
+    private func startClock() {
+        clockTask?.cancel()
+        clockTask = Task {
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(1), tolerance: .milliseconds(250))
+                } catch {
+                    return
+                }
+                self.tick(at: self.elapsed())
+            }
+        }
+    }
+
+    /// One clock step at `now` (offset from the session start). Tests call it
+    /// with chosen instants.
+    func tick(at now: Duration) {
+        guard isStarted else { return }
+        switch clock.nextAction(at: now) {
+        case .checkIn:
+            clock.checkedIn = true
+            machine.apply(.checkIn)
+            checkInPending = true
+            if let client {
+                Task {
+                    try? await client.send(
+                        .commentaryAppend(delegationID: nil, "Shall I keep listening?"))
+                }
+            }
+        case .pause:
+            clock.paused = true
+            machine.apply(.pause)
+            micClosed()
+        case .close:
+            Task { await self.close(reason: .idle) }
+        case nil:
+            break
+        }
+    }
+
+    // MARK: Tool host
+
+    func latchFromTool() {
+        guard machine.mic != .latched else { return }
+        machine.apply(.latchToggled)
+        clock.setLatched(true, at: elapsed())
+        micOpened()
+    }
+}
+
+extension VoiceSession: VoiceToolHost {
+    var voicePreferences: VoicePreferences { dependencies.preferences }
+
+    /// The key workspace window and its Ensemble. With no key window (only
+    /// the notch strip in front), the last key window still counts.
+    func voiceTarget() -> VoiceTarget? {
+        if let target = dependencies.target {
+            let resolved = target()
+            activeBoardID = resolved?.board?.id
+            return resolved
+        }
+        let snapshots = WorkspaceWindowRegistry.shared.sessionSnapshots()
+        if let key = snapshots.first(where: \.isKeyWindow)?.session { lastKeySession = key }
+        let remembered = lastKeySession.flatMap { session in
+            snapshots.contains { $0.session === session } ? session : nil
+        }
+        guard let session = remembered ?? snapshots.first?.session else {
+            activeBoardID = nil
+            return nil
+        }
+        let board =
+            session.selectedCanvas
+            ?? session.canvas.boards.values.first {
+                session.canvasResources[$0.id]?.isPresented == true
+            }
+        activeBoardID = board?.id
+        return VoiceTarget(session: session, board: board)
+    }
+
+    func voiceWorkspaces() -> [WorkspaceSession] {
+        if let workspaces = dependencies.workspaces { return workspaces() }
+        return WorkspaceWindowRegistry.shared.sessionSnapshots().map(\.session)
+    }
+
+    func voiceStatus() -> VoiceJSON {
+        let preferences = dependencies.preferences
+        let board = voiceTarget()?.board
+        var status: [String: VoiceJSON] = [
+            "persona": .string(personaName),
+            "backend": .string(preferences.backend.rawValue),
+            "voice": .string(preferences.voice.rawValue),
+            "month_minutes": .number((costStore.monthlySeconds / 60 * 10).rounded() / 10),
+            "month_cost_usd": .number((costStore.monthlyCost * 100).rounded() / 100),
+            "monthly_cap_usd": .number(preferences.monthlyCapDollars),
+            "session_seconds": .integer(Int(elapsed().components.seconds)),
+            "microphone": .string(machine.isMicOpen ? "open" : "off"),
+        ]
+        if let board {
+            status["ensemble"] = .string(CanvasAgentText.singleLine(board.title, limit: 80))
+            status["agent_control"] = .string(board.agentControlMode.rawValue)
+        }
+        return .object(status)
+    }
+}

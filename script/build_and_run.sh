@@ -151,6 +151,8 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$VERSION</string>
   <key>CFBundleVersion</key>
   <string>1</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Rafu listens only while you hold ⌃⌥Space or keep a voice session open. Audio goes to OpenAI GPT-Live with your own API key.</string>
   <key>NSAppleEventsUsageDescription</key>
   <string>Rafu asks Music and Spotify what is playing, and sends them play, pause, next, and previous, only when you use Now Playing in the notch.</string>
   <key>LSMinimumSystemVersion</key>

@@ -71,6 +71,8 @@ struct RafuSettingsView: View {
                 AIThemeGeneratorSection()
             case .ai:
                 AIProviderSettingsSection()
+            case .voice:
+                VoiceSettingsSection()
             case .languageServers:
                 LanguageServersSettingsSection()
             case .usage:
