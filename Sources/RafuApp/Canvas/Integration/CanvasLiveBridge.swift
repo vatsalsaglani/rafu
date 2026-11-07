@@ -709,7 +709,9 @@ final class CanvasLiveBridge {
             hooks: .init(
                 mode: { [weak board] in board?.agentControlMode ?? .off },
                 settingOn: { CanvasChannelPromptPreference.isOn() },
-                read: { [weak controller] in controller?.recentOutputLines(maxLines: 40) },
+                read: { [weak controller] in
+                    controller?.recentOutputLines(maxLines: 40, fullViewport: true)
+                },
                 sendReturn: { [weak controller] in controller?.sendReturn() ?? false },
                 notice: { [weak board] message, tone in board?.showNotice(message, tone: tone) }
             ))

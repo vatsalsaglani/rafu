@@ -1214,10 +1214,11 @@ final class WorkspaceTerminalController: Identifiable {
     }
 
     /// Viewport lines for Rafu Voice (`RafuTerminalView.recentOutputLines`);
-    /// `nil` when no view is mounted. Called only from `ensemble_describe` by
-    /// voice in Allow mode with the Settings toggle on.
-    func recentOutputLines(maxLines: Int = 40) -> [String]? {
-        terminalView?.recentOutputLines(maxLines: maxLines)
+    /// `nil` when no view is mounted. Called from `ensemble_describe` by
+    /// voice in Allow mode with the Settings toggle on, and by the
+    /// channel-prompt confirmer (`fullViewport: true`) in Allow mode.
+    func recentOutputLines(maxLines: Int = 40, fullViewport: Bool = false) -> [String]? {
+        terminalView?.recentOutputLines(maxLines: maxLines, fullViewport: fullViewport)
     }
 
     /// Returns the live terminal view, creating it and spawning the login

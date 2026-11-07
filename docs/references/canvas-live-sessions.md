@@ -451,8 +451,9 @@ Gates. All must hold, and Rafu checks them on every sample:
    automatically" is on (`ensemble.confirmChannelPrompt`, default on).
 
 Window and sampling. There is no terminal content hook, so after the launch one
-task samples the visible rows (`WorkspaceTerminalController.recentOutputLines`,
-the viewport only, never scrollback) at most four times a second for at most
+task samples the visible rows (`WorkspaceTerminalController.recentOutputLines`
+with `fullViewport: true`: every viewport row, also rows below the cursor, never
+scrollback) at most four times a second for at most
 30 s. It stops at the first match or when the window ends. No timer runs outside
 that window.
 
@@ -488,7 +489,9 @@ two rules stop it from steering the watch toward its own Claude:
    client is registered at that time. A running Claude cannot open a new watch,
    and a repeated `launch` cannot replace one.
 2. The matcher needs the "Enter to confirm" row to be the last non-empty row of
-   the sample. The real dialog sits at the bottom of the screen. Dialog text
+   the sample. The sample includes rows below the cursor, so this rule does not
+   depend on where Claude leaves the cursor. The real dialog sits at the bottom
+   of the screen. Dialog text
    that an agent prints, followed by a tool-permission prompt or any other
    output, does not match.
 
