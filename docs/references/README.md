@@ -140,7 +140,7 @@ Keep one focused subject per note. Add it to this index. Use an ADR instead when
 
 - [Canvas native boundaries and initial evidence](canvas-native-boundaries.md) — C0 probes, Swift picker value semantics, and bounded persistence; the native app node was removed 2026-11-06 and is kept as history.
 
-- [Canvas live sessions](canvas-live-sessions.md): provider interfaces, Claude bridge flags in the single-token `=` form (variadic options), per-shell bridge strategies, host-environment scrub, and live connection checks.
+- [Canvas live sessions](canvas-live-sessions.md): provider interfaces, Claude bridge flags in the single-token `=` form (variadic options), per-shell bridge strategies, host-environment scrub, live connection checks, and the automatic answer to Claude's development-channel dialog in Allow mode (2026-11-07: `launch` bridge request, gates, exact matcher with the dialog as the last row, one Return, Settings toggle).
 
 - [Ensemble bridge resilience](ensemble-bridge-resilience.md): the MCP bridge never exits on a link failure, bounded reconnect backoff, the `unregistered` response code, route-scoped suspension with `release` and rebind, the App Nap activity option set, and the off-screen mutation guard.
 
