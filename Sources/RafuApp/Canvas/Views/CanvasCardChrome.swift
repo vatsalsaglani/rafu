@@ -254,6 +254,7 @@ struct CanvasCardMenuContent: View {
         }
         AgentHandoffCardMenuItems(card: card, board: board, session: session)
         CanvasDiagramCardMenuItems(card: card, board: board, session: session)  // X9 diagrams
+        GeneratedViewCardMenuItems(card: card, board: board)
         Divider()
         Button("Rename…", systemImage: "pencil") { board.renamingCardID = card.id }
         Button("Duplicate", systemImage: "plus.square.on.square") {

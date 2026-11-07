@@ -211,11 +211,8 @@ struct CanvasDiagramStaticCard: View {
                         text: mermaidSnapshot?.failure ?? "Diagram not rendered", lines: 4)
                 }
             }
-        case .generatedView:
-            // A labelled rectangle until jr-4a adds the rasteriser.
-            CanvasDiagramStaticChrome(card: card) {
-                CanvasDiagramSummaryText(text: "View", lines: 1)
-            }
+        case .generatedView(let view):
+            CanvasDiagramStaticChrome(card: card) { GeneratedViewExportFace(view: view) }
         default:
             CanvasWhiteboardCardFace(card: card, board: board)
         }
