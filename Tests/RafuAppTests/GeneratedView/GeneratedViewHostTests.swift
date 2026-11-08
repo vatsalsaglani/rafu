@@ -212,4 +212,40 @@ struct GeneratedViewHostTests {
         handle.cancel()
         #expect(board.cards.isEmpty && !board.canUndo)
     }
+
+    @Test("A rename during a stream keeps the rename; finish adds its own undo step")
+    func streamFinishAfterRename() async throws {
+        let board = board()
+        let handle = try host.beginStreaming(
+            title: "Voice", rect: fixtures.rect, provenance: fixtures.provenance(), on: board)
+        try board.edit { $0.title = "Renamed" }
+        let arguments =
+            #"{"title":"Voice","root":"r","elements":{"r":{"type":"Text","props":{"text":"Hello"}}}}"#
+        let result = await handle.finish(specJSON: arguments)
+        #expect((try? result.get())?.elementCount == 1)
+        #expect(board.cards.map(\.id) == [handle.cardID])
+        #expect(board.title == "Renamed")
+        #expect(fixtures.view(on: board, handle.cardID)?.specJSON == fixtures.textSpec)
+        // Steps: skeleton, rename, final spec. The voice request is two of them.
+        board.performUndo()
+        #expect(
+            fixtures.view(on: board, handle.cardID)?.specJSON
+                == GeneratedViewStreamSession.skeletonSpec)
+        #expect(board.title == "Renamed")
+        board.performUndo()
+        #expect(board.title == "Views" && board.cards.count == 1)
+        board.performUndo()
+        #expect(board.cards.isEmpty && !board.canUndo)
+    }
+
+    @Test("A rename during a stream survives cancel")
+    func streamCancelAfterRename() throws {
+        let board = board()
+        let handle = try host.beginStreaming(
+            title: "Voice", rect: fixtures.rect, provenance: fixtures.provenance(), on: board)
+        try board.edit { $0.title = "Renamed" }
+        handle.cancel()
+        #expect(board.cards.isEmpty)
+        #expect(board.title == "Renamed")
+    }
 }

@@ -529,6 +529,55 @@ struct VoiceShowViewStreamingTests {
         await voice.close()
     }
 
+    @Test("A response that ends before the done event cancels a skeleton that has a call id")
+    func sessionInterruptedWithCallID() async throws {
+        let scratch = ShowViewScratchFolder()
+        let suite = TestDefaultsSuite.name("dev.rafu.show-view-session")
+        defer { TestDefaultsSuite.remove(suite) }
+        let workspace = WorkspaceSession(
+            restorationStore: WorkspaceRestorationStore(
+                defaultsSuiteName: TestDefaultsSuite.name("dev.rafu.show-view-session-restore"),
+                bookmarkMaker: { _ in throw CancellationError() }),
+            closeSaveTracker: WorkspaceCloseSaveTracker(),
+            canvasStore: WorkspaceCanvasStore(
+                persistence: CanvasPersistenceStore(directory: scratch.url.appending(path: "state"))
+            ))
+        #expect(await workspace.canvas.configure(root: scratch.url))
+        let board = try #require(await workspace.canvas.create(title: "Interrupted"))
+        board.setAgentControlMode(.allow)
+        let viewHost = FakeGeneratedViewHost()
+        let transport = ScriptedLiveTransport()
+        let audio = FakeVoiceAudio()
+        var dependencies = VoiceSession.Dependencies(
+            makeTransport: { _ in transport }, openAIKey: { "test-key" },
+            requestMicrophone: { true }, makeAudio: { (audio, audio) },
+            preferences: VoicePreferences(suiteName: suite), costSuiteName: suite)
+        dependencies.target = { VoiceTarget(session: workspace, board: board) }
+        dependencies.workspaces = { [workspace] }
+        dependencies.runsClock = false
+        dependencies.startTimeout = .seconds(5)
+        dependencies.closeTimeout = .seconds(5)
+        dependencies.viewHost = { viewHost }
+        let voice = VoiceSession(dependencies: dependencies)
+        voice.toggleLatched()
+        try await waitUntil { voice.blobState == .listeningLatched }
+
+        transport.push(
+            #"{"type":"response.event","event":{"type":"response.output_item.added","item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"show_view","arguments":""}}}"#
+        )
+        transport.push(
+            #"{"type":"response.event","event":{"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\"title\":\"Half\",\"root\":"}}"#
+        )
+        try await waitUntil { viewHost.handles.count == 1 }
+        #expect(voice.argumentStreamCount == 1)
+        // Barge-in: the response ends without the function_call done event.
+        transport.push(#"{"type":"response.event","event":{"type":"response.completed"}}"#)
+        try await waitUntil { viewHost.handles.first?.cancelled == true }
+        #expect(viewHost.handles.first?.finished == false)
+        #expect(voice.argumentStreamCount == 0)
+        await voice.close()
+    }
+
     @Test("Without deltas the call creates the card on completion and reports zero deltas")
     func sessionWithoutDeltas() async throws {
         let scratch = ShowViewScratchFolder()

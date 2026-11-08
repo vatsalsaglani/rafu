@@ -3,12 +3,12 @@ import JSONRenderStandardCatalog
 import JSONRenderSwiftUI
 import SwiftUI
 
-/// The theme every MDX block renders with. Until the Rafu theme mapping
-/// lands, the package's native theme stands in; this is the one place to
-/// change it.
+/// The theme every MDX block renders with: the Rafu (Indigo or Khadi)
+/// mapping that generated view cards use. The mapping runs contrast passes,
+/// so it comes from `GeneratedViewThemeCache`, never fresh in `body`.
 enum MDXCatalogTheme {
-    static func current(_ palette: RafuThemePalette) -> JSONRenderTheme {
-        .native
+    static func current(_ theme: RafuTheme) -> JSONRenderTheme {
+        GeneratedViewThemeCache.theme(for: theme)
     }
 }
 
@@ -25,7 +25,7 @@ struct MDXCatalogBlockView: View {
     var body: some View {
         if let spec = block.catalogSpec {
             JSONRenderView(spec: spec, catalog: .rafu)
-                .jsonRenderTheme(MDXCatalogTheme.current(theme.palette))
+                .jsonRenderTheme(MDXCatalogTheme.current(theme))
                 .jrCardStyle(MDXCardStyle())
                 .environment(\.rafuDocumentBaseURL, baseURL)
                 // A document may show any local image, as the preview always did.
