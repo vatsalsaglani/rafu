@@ -147,3 +147,13 @@ Test counts for wave 3 were not part of the handoff.
 - [`canvas-drag-observation.md`](canvas-drag-observation.md) (never write the
   document per frame)
 - Phase: [`../plans/phases/ensemble-canvas.md`](../plans/phases/ensemble-canvas.md)
+
+## Rule: only the newest apply sets the baseline (`applyGeneration`)
+
+`GeneratedViewCardModel.apply` increments `applyGeneration` before it awaits the store, and only the apply whose
+generation is still the newest sets `baselineVersion` and clears `isApplying`. `resetStore` goes through the same
+`apply`. Do not replace this with a `Task.isCancelled` early return: `.task(id:)` is also cancelled when the card
+view leaves, and an early return there would leave `isApplying == true` with no newer apply to clear it, so no state
+would save again for that card. Residual: two `replaceAll` calls from two main-actor tasks are not strictly FIFO on
+the store actor; the window is one hop and the cost is a stale seed until the next content change. Evidence: wave 3
+fix round (`728bc1e`), advisor round 2, 2026-11-08.
