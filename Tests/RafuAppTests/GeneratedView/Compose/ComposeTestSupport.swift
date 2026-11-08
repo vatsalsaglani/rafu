@@ -85,7 +85,9 @@ actor ComposeEvaluatorDouble: DecisionEvaluator {
 }
 
 extension GeneratedViewComposeEnvironment {
-    /// A key check that passes, and the given evaluator.
+    /// A key check that passes, and the given evaluator. `@MainActor` because the
+    /// memberwise init is main-actor isolated in RafuApp (Swift 6.3 enforces it).
+    @MainActor
     static func double(_ evaluator: any DecisionEvaluator, hasKey: Bool = true)
         -> GeneratedViewComposeEnvironment
     {
