@@ -75,6 +75,24 @@ struct VoiceToolSchemaTests {
         #expect(tool.parameters["required"] == ["title", "root", "elements"])
     }
 
+    @Test("show_view appears once in both scopes; the MCP view tools never")
+    func showViewInBothScopes() {
+        for scope in [VoiceToolScope.rafu, .ensemble(boardID: "x")] {
+            let names = VoiceToolSchema.tools(for: scope).map(\.name)
+            #expect(names.filter { $0 == "show_view" }.count == 1)
+            #expect(!names.contains("view_render"))
+            #expect(!names.contains("view_update"))
+        }
+        let tool = VoiceToolSchema.showViewTool
+        #expect(tool.description.contains(CanvasAgentViewVocabulary.text))
+        #expect(tool.description.contains("reset true"))
+        #expect(tool.parameters["properties"]?["node"]?["type"] == "string")
+        #expect(tool.parameters["properties"]?["reset"]?["type"] == "boolean")
+        #expect(
+            tool.parameters["properties"]?["elements"]?["additionalProperties"]?["required"]
+                == ["type"])
+    }
+
     @Test("Literal schemas convert without turning booleans into numbers")
     func jsonConversion() {
         let value = VoiceJSON(any: ["a": true, "b": 1, "c": 1.5, "d": ["x"]] as [String: Any])

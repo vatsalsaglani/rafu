@@ -152,4 +152,47 @@ struct VoiceLiveEventsTests {
             ) == .other("response.event/response.created"))
         #expect(VoiceLiveServerEvent.decode("not json") == nil)
     }
+
+    @Test("A function call item that starts decodes with its item id, call id and name")
+    func functionCallStarted() {
+        let event = VoiceLiveServerEvent.decode(
+            #"{"type":"response.event","event":{"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_9","name":"show_view","arguments":""}}}"#
+        )
+        #expect(event == .functionCallStarted(itemID: "fc_1", callID: "call_9", name: "show_view"))
+        #expect(event?.kind == "function_call.started")
+        let withoutCall = VoiceLiveServerEvent.decode(
+            #"{"type":"response.event","event":{"type":"response.output_item.added","item":{"id":"fc_2","type":"function_call","name":"note_create"}}}"#
+        )
+        #expect(
+            withoutCall == .functionCallStarted(itemID: "fc_2", callID: nil, name: "note_create"))
+    }
+
+    @Test("An argument delta decodes with its item id and text")
+    func functionCallArgumentsDelta() {
+        let event = VoiceLiveServerEvent.decode(
+            #"{"type":"response.event","event":{"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":0,"delta":"{\"title\":\"Te"}}"#
+        )
+        #expect(event == .functionCallArgumentsDelta(itemID: "fc_1", delta: #"{"title":"Te"#))
+        #expect(event?.kind == "function_call.delta")
+        #expect(
+            VoiceLiveServerEvent.decode(
+                #"{"type":"response.event","event":{"type":"response.function_call_arguments.delta","delta":"x"}}"#
+            ) == .other("response.event/response.function_call_arguments.delta"))
+    }
+
+    @Test("An added message item, or a function call item without an id, stays other")
+    func otherAddedItems() {
+        #expect(
+            VoiceLiveServerEvent.decode(
+                #"{"type":"response.event","event":{"type":"response.output_item.added","item":{"id":"msg_1","type":"message","role":"assistant"}}}"#
+            ) == .other("response.event/response.output_item.added"))
+        #expect(
+            VoiceLiveServerEvent.decode(
+                #"{"type":"response.event","event":{"type":"response.output_item.added","item":{"type":"function_call","name":"show_view"}}}"#
+            ) == .other("response.event/response.output_item.added"))
+        #expect(
+            VoiceLiveServerEvent.decode(
+                #"{"type":"response.event","event":{"type":"response.function_call_arguments.done","item_id":"fc_1","arguments":"{}"}}"#
+            ) == .other("response.event/response.function_call_arguments.done"))
+    }
 }
