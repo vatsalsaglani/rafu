@@ -132,6 +132,13 @@ Rules:
 - If the folder-trust dialog comes first and the user takes more than 30 s, the
   window ends and the channel dialog is not answered.
 
+## Cross-reference (2026-11-08): view tools
+
+The MCP server `instructions` string gained one sentence about `view_render` and
+`view_update`. It adds no new bridge capability and no new permission rule; both
+tools follow the same Off / Ask / Allow rules as the other edit tools. See
+[ADR 0036](0036-generated-views-on-the-ensemble-board.md).
+
 The bridge gains one operation, `launch`, sent by the `claude` wrapper before it
 replaces itself with Claude. Existing operations and their shapes are unchanged.
 See [`../references/canvas-live-sessions.md`](../references/canvas-live-sessions.md).

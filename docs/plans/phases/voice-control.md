@@ -83,6 +83,22 @@
 - [ ] Release memory/CPU measurement with an open session (manual; method and
       the idle numbers in `gpt-live-protocol.md`).
 
+### Wave 3 addition: `show_view` (2026-11-08)
+
+| Tool | Behaviour | Status |
+|---|---|---|
+| `show_view` | One tool to show, replace or reset a generated view. Flat spec (`root`, `elements`, `state`) beside `title`, `node`, `reset`. Ask runs at once with an Undo notice; Off refuses; Allow runs. Skeleton card on the first useful argument delta. `view_render` and `view_update` are hidden from voice. | Merged to `main`; the orphan rule and undo collapse corrections are on `fix/voice-mic-allow` (not merged) |
+
+- [ ] **Pending manual measurement:** whether GPT-Live sends argument deltas.
+      Run one `show_view` on Rafu Lightning and report the timeline row's
+      "deltas: N, size". Not done. See
+      [`voice-delta-streaming.md`](../../references/voice-delta-streaming.md).
+- [ ] Pending manual checks: Ask, Off, interrupt, rename during the stream; and
+      Settings ▸ Voice "Allow Microphone…" (see the Generated views section of
+      [`ensemble-canvas.md`](ensemble-canvas.md)). Not done.
+- Decision: [ADR 0035 amendment](../../decisions/0035-voice-through-gpt-live.md)
+  and [ADR 0036](../../decisions/0036-generated-views-on-the-ensemble-board.md).
+
 ## Exit checklist (VPLAN Phase 1)
 
 - [ ] Hold-to-talk, latched, check-in, pause and idle close work with a real

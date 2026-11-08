@@ -111,6 +111,13 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`test-source-policy-and-bookmark-isolation.md`](test-source-policy-and-bookmark-isolation.md) | Source-policy test limits, real bookmark assertions, and isolated preferences |
 | [`agent-history.md`](agent-history.md) | Changing Agent History: Claude Code and Codex transcript locations and line formats, title and injected-context rules, read bounds, the summary cache, the resume command quoting, Resume in Terminal (direct Agent Terminal launch) and Resume in Ensemble, Open Project Folder's new-window request, or the agent handoff ("Continue in Codex / Claude Code": handoff file format and limits, image and attachment extraction, launch arguments) |
 
+| [`generated-view-card-and-state.md`](generated-view-card-and-state.md) | Changing the generated-view card: model lifecycle and registry, the 500 ms debounce, the snapshot filter order and caps, `specVersion`, Reset View, the stream undo-collapse rule (`changeStamp`), the 1 MiB board budget, the Rafu theme mapping and contrast fallback chain, export, and the 20-view memory fixture command |
+| [`remote-image-consent-and-trust.md`](remote-image-consent-and-trust.md) | Changing images from the web: the Off/Ask/Always decision table, host-pattern grammar and IDNA traps, the Public Suffix List (`githubusercontent.com` is a suffix), the trust file format and quarantine, revocation by grant, loader limits, the `URLProtocol` test stub, and the consent-Undo limit |
+| [`voice-delta-streaming.md`](voice-delta-streaming.md) | Changing voice `show_view` streaming: the two server events, hand-off order, the title window, the corrected orphan rule (`finished`), and the pending "deltas: N" measurement |
+| [`view-tools-and-vocabulary.md`](view-tools-and-vocabulary.md) | Changing `view_render` / `view_update`: MCP shapes and caps, the 48 KiB rule, why the schema is not strict, how to regenerate the vocabulary constant, and the two-skill install |
+| [`swift-6-4-2-catalog-registration-traps.md`](swift-6-4-2-catalog-registration-traps.md) | Registering json-render catalog entries: the Swift 6.4.2 SILGen crash with `inout Catalog` plus typed throws in a `@Sendable` closure, `nonisolated` component shells, and the `JSONRenderCore.JSONValue` name clash |
+| [`microphone-permission-listing.md`](microphone-permission-listing.md) | Why Rafu is absent from Privacy ▸ Microphone until `requestAccess` runs, and the "Allow Microphone…" button in Settings ▸ Voice |
+
 ## Reference-note template
 
 ```markdown

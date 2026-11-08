@@ -2,7 +2,9 @@
 
 - Applies to: `.mdx` routing, `MDXBlockScanner`, `MDXComponentRegistry`,
   `MDXBlockBuilder`, and `MDXComponentView` under `Sources/RafuApp/Markdown/`.
-- Last verified: Swift 6.2, macOS 26, 2026-11-06.
+- Last verified: Swift 6.2, macOS 26, 2026-11-06. The catalog bridge section
+  was added 2026-11-08 (Swift 6.4.2, macOS 27); the theme cache part describes
+  branch `fix/voice-mic-allow`, not merged when written.
 
 ## Rule or observed behavior
 
@@ -85,6 +87,39 @@ Rendering (`MDXComponentView`):
 - Unknown names: `MDXFallbackBlock` shows `<Name>`, the props, and the
   children. Nothing is hidden.
 
+### Catalog bridge (2026-11-08, ADR 0034 amendment)
+
+Rendering above now goes through the Rafu json-render catalog
+([ADR 0036](../decisions/0036-generated-views-on-the-ensemble-board.md)). The
+scanner, the builder grammar and the registry file shape are unchanged.
+
+- `MDXCatalogBridge` (`nonisolated`, pure) turns one resolved `MDXBlock` tree
+  into a `Spec`. The bridge runs off the main actor, inside
+  `MarkdownPreviewSegmentParser.parse`, when the builder resolves a block.
+  `build` then validates the spec against `RafuCatalog.rafu` and stores it in
+  `MDXBlock.catalogSpec`. The view never builds a spec in `body`.
+- `catalogSpec` is set only on a block that is drawn by itself: a top-level block,
+  or a block inside an unbridged fallback. It is nil for a nested block (its
+  parent's spec holds it), for a fallback block, and for a block whose spec failed
+  validation (one log line with the block id; the view draws `MDXFallbackBlock`).
+- New renderer kinds: `stat` and `matrix` (built-ins `Stat`, `Matrix`,
+  `Compare`). `.rafu/mdx-components.json` keeps its shape and trust rules.
+- `MDXCatalogBlockView` renders `catalogSpec` with `JSONRenderView`, the theme
+  from `MDXCatalogTheme.current(theme)`, which reads
+  `GeneratedViewThemeCache` (one mapped theme per Rafu theme; the contrast
+  report is not measured per render), and `MDXCardStyle`, a `JRCardStyle`
+  that keeps the document's card look.
+- Unknown names still render `MDXFallbackBlock`: `<Name>`, props, children.
+- `Figure` never fetches a remote `src`; it is independent of the remote image
+  policy.
+- Guard: `Tests/RafuAppTests/MDXWireframeTests.swift` scans, builds and bridges
+  fixture copies of `canvas-plan.mdx` and `execution-plan.mdx` and compares each
+  block's outline (name, body case, child count, element types) with a
+  checked-in outline. It guards the data only. A changed outline needs a human
+  look at the rendered preview in Indigo and Khadi and with Increase Contrast.
+  `MDXCatalogBridgeTests` checks one case per body, nesting, row caps, and that
+  every bridged spec validates.
+
 ## Why it matters
 
 A real MDX runtime would need a per-document web view or an embedded
@@ -120,6 +155,9 @@ labels on callouts, and an invalid `.rafu/mdx-components.json`.
 - `Sources/RafuApp/Markdown/MDXComponentBlock.swift`
 - `Sources/RafuApp/Markdown/MDXComponentView.swift`
 - `Sources/RafuApp/Markdown/MarkdownPreviewView.swift`
+- `Sources/RafuApp/Markdown/MDXCatalogBridge.swift`,
+  `MDXCatalogBlockView.swift`, `Sources/RafuApp/Canvas/GeneratedView/Components/Document/`
+- [ADR 0036](../decisions/0036-generated-views-on-the-ensemble-board.md)
 - [ADR 0034](../decisions/0034-mdx-native-component-rendering.md)
 - [`markdown-frontmatter-preview.md`](markdown-frontmatter-preview.md)
 - `docs/plans/phases/issues-2026-11-06-fanout.md` (G6)

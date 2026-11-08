@@ -566,3 +566,65 @@ Uncommitted on `main` at the time of writing.
   undo of a Tidy; zoom-to-fit with Reduce Motion; the sidecar file on disk;
   cluster spacing with 640 × 420 pt terminals at 16:10; the quit-path
   `flushAll`.
+
+## Generated views (wave 3)
+
+Status (2026-11-08): wave 3 of the swift-json-render integration is merged on
+`main` (09faf7d) except the fix round on branch `fix/voice-mic-allow`, which is
+not merged when this section was written. Docs written on `docs/wave3`. No manual
+check below has been done by a person.
+
+- **Decision:** [ADR 0036](../../decisions/0036-generated-views-on-the-ensemble-board.md);
+  amendments to ADRs 0034, 0035, 0026 and 0028.
+- **References:**
+  [`generated-view-card-and-state.md`](../../references/generated-view-card-and-state.md),
+  [`remote-image-consent-and-trust.md`](../../references/remote-image-consent-and-trust.md),
+  [`view-tools-and-vocabulary.md`](../../references/view-tools-and-vocabulary.md),
+  [`voice-delta-streaming.md`](../../references/voice-delta-streaming.md),
+  [`mdx-preview.md`](../../references/mdx-preview.md),
+  [`swift-6-4-2-catalog-registration-traps.md`](../../references/swift-6-4-2-catalog-registration-traps.md).
+- **Delivered (by area):**
+  - Card and state: `Canvas/GeneratedView/**`, `Tests/RafuAppTests/GeneratedView/**`;
+    touch points in `CanvasCardViews`, `CanvasCardChrome`, `CanvasCommands`,
+    `CanvasDiagramExportView`, `CanvasAgentActions` (+ `CanvasAgentActions+Views`).
+  - Images: `Canvas/RemoteImages/**`, `Settings/ImageTrustSettingsSection.swift`,
+    `Resources/PublicSuffix/`, `Tests/RafuAppTests/RemoteImages/**`.
+  - Tools: `RafuCore/CanvasBridge/CanvasAgentViewVocabulary.swift`, the MCP
+    `instructions` sentence, `Voice/VoiceToolExecutor+Views.swift`,
+    `Resources/AgentSkills/rafu-view/`, the two-skill installer.
+  - MDX: `Markdown/MDX*.swift`, `Components/Document/**`, `Tests/RafuAppTests/MDX*`.
+  - Contract commit: `Package.swift` (git URL, exact tag, `RafuApp` only),
+    `CanvasDocument` (`generatedView` case, `permissions`), view tools in
+    `CanvasAgentTools.swift`.
+- **Fix round (branch `fix/voice-mic-allow`, not merged):** stream undo collapse
+  also checks `board.changeStamp`; the orphan rule uses `ArgumentStream.finished`;
+  the MDX and card themes come from `GeneratedViewThemeCache`; `Task.isCancelled`
+  is checked after `apply` in `GeneratedViewCardModel`; Settings ▸ Voice gets
+  "Allow Microphone…"; the package pin moves to `0.22.0-alpha.2`.
+- **Exit status:** code and unit tests are in; gate results (test counts per mode,
+  `build_and_run.sh --verify`) were not part of the documentation handoff and are
+  not recorded here. Open follow-ups: narrow `Figure` roots for documents; report
+  the voice "deltas: N" value; undo of a consent grant does not bump the image
+  provider revision (cosmetic); the cold-build cost of `swift-syntax` is not
+  recorded.
+- **Manual checks (the user; Rafu Lightning only; no synthetic input). None done.**
+  - [ ] Voice: Ask, Off, an interrupt, and a card rename during the stream.
+  - [ ] MCP Ask from Claude Code and MCP Allow from Codex, with a `view_update`
+        patch and a reset.
+  - [ ] State persists across relaunch; Reset View from the header menu, the
+        context menu and ⌥⌘R, and Undo; the saved file has no `_draft` and no
+        password value.
+  - [ ] Images: placeholder, consent card, load; trust list in Settings; revoke in
+        two Ensembles; `*.com` refused; the consent card offers only the exact
+        host for `raw.githubusercontent.com` (`githubusercontent.com` is a public
+        suffix); keyboard and VoiceOver.
+  - [ ] MDX wireframes in Indigo, Khadi and Increase Contrast; unknown component
+        fallback; Stat and Compare.
+  - [ ] A second window shows the same view card (state is last write wins).
+  - [ ] PNG export draws the card.
+  - [ ] Install for Claude Code writes `rafu-ensemble` and `rafu-view`; the
+        conflict prompt.
+  - [ ] Memory with the 20-view fixture: under 40 MB above empty, under 2 MB per
+        idle card.
+  - [ ] Microphone: press "Allow Microphone…", then Rafu Lightning appears under
+        Privacy ▸ Microphone.
