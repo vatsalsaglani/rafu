@@ -9,6 +9,8 @@ nonisolated enum MDXRendererKind: String, Sendable, CaseIterable, Equatable {
     case questions
     case fileTree
     case svg
+    case stat
+    case matrix
 }
 
 /// Maps MDX component names to native renderers.
@@ -37,6 +39,9 @@ nonisolated struct MDXComponentRegistry: Sendable, Equatable {
         "Questions": .questions,
         "FileTree": .fileTree,
         "Svg": .svg,
+        "Stat": .stat,
+        "Matrix": .matrix,
+        "Compare": .matrix,
     ])
 
     let entries: [String: MDXRendererKind]
