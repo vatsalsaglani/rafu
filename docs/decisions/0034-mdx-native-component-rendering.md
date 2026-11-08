@@ -71,10 +71,30 @@ natively and runs no JavaScript.
 - Props that need evaluation (computed values, imported data) show as text.
 - Ensemble file cards treat `.mdx` as Markdown but parse it without MDX mode;
   component tags there show as text.
-- Later work, out of scope for this decision: `Stat`, `Compare` / `Matrix`
-  (table), `Chart`, `Math` (currently the fallback), registry prop mapping
-  (`"props": { "title": "$name" }`), and MDX mode in Ensemble cards.
-  `DiffCues` is not planned.
+- Later work, out of scope for this decision: `Chart`, `Math` (currently the
+  fallback), registry prop mapping (`"props": { "title": "$name" }`), and MDX
+  mode in Ensemble cards. `DiffCues` is not planned. (`Stat` and `Compare` /
+  `Matrix` shipped in the 2026-11-08 amendment below.)
+
+## Amendment (2026-11-08): one renderer through the Rafu catalog
+
+[ADR 0036](0036-generated-views-on-the-ensemble-board.md) puts generated views
+on the Ensemble board. MDX now renders through the same catalog, so documents,
+cards and voice use one renderer.
+
+- The renderer set is the Rafu catalog's document components: `Markdown`,
+  `Mermaid`, `Code`, `Callout`, `Checklist`, `Questions`, `FileTree` and
+  `Figure`. `card` maps to the standard `Card`. `Stat` and `Matrix` / `Compare`
+  are added.
+- `.rafu/mdx-components.json` keeps its shape and its trust rules. Two kind
+  names are new: `stat` and `matrix`. An entry still picks a renderer from a
+  fixed set and never code. Built-ins add `Stat` and `Matrix` / `Compare`.
+- `Figure` never fetches a remote `src`. It is independent of the remote image
+  policy of ADR 0036; a generated card that wants a web image uses `Image`.
+- The unknown-component fallback is unchanged: `<Name>`, its props and its
+  children as Markdown. Content is never hidden.
+- The scanner, `MDXBlock` and the builder are unchanged in behaviour. See
+  [`mdx-preview.md`](../references/mdx-preview.md) for the bridge.
 
 ## Alternatives considered
 

@@ -175,6 +175,20 @@ implementor's parallel load and with no code change in that area; it passed
 alone, so it stays row two. A test that repeats this across rounds is
 time-sensitive, not broken.
 
+**Added 2026-11-08: `WorkspaceCloseSaveOrderingRepairTests`.** It failed in a
+parallel run under load. It passed alone in 0.03 s and passed in `--no-parallel`
+mode. By the triage table that is row two (scheduler starvation): not a failure,
+not a clean pass, no code change. Suspect it, with the tests above, when a
+parallel run fails only under machine load. The handoff did not state the
+parallel test count of that run.
+
+**A background wrapper can exit while its SwiftPM child keeps running (2026-11-08).**
+A backgrounded Bash wrapper around `swift build` or `swift test` can report
+"failed" or "completed" while the SwiftPM child process still runs and still holds
+`.build/.lock`. A "failed" notification is therefore a lock question first: run
+`./script/await_build_lock.sh` and check `lsof -t .build/.lock` before reading it
+as a test failure or starting a second run.
+
 **Fixed 2026-10-20 (`CanvasBridgeIPCTests`).** The `EAGAIN` was not a
 non-blocking read. The client socket is blocking. On Darwin, `read` returns -1
 with `EAGAIN` (35) when the `SO_RCVTIMEO` bound expires with no data. The test

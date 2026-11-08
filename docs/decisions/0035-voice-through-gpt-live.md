@@ -134,6 +134,35 @@ that Ensemble. From Phase 1b, voice may type into any terminal card on the
 board after that consent, including cards the user made; MCP agents keep the
 creator rule. Work orders stay Phase 2.
 
+### Amendment (2026-11-08): `show_view` and argument streaming
+
+[ADR 0036](0036-generated-views-on-the-ensemble-board.md) adds generated views.
+
+- **Tool.** The voice backend gets one tool, `show_view`, for create, replace
+  and reset. The spec is flat (`root`, `elements`, `state`) beside `title`,
+  `node` and `reset`. A nested `spec` object is accepted as an alias; that call
+  does not stream. `view_render` and `view_update` are hidden from voice
+  (`hiddenEnsembleTools`).
+- **Policy.** Ask runs at once with an Undo notice, because the voice actor is
+  the user. Off refuses with the Off message. Allow runs. The call passes the
+  same 30-per-minute limit as other voice calls; a streamed call is counted once,
+  when its skeleton starts.
+- **Server events.** Two nested `response.event` types are now decoded:
+  `response.output_item.added` for a `function_call` item, and
+  `response.function_call_arguments.delta`.
+- **Skeleton first.** The session keeps argument text for `show_view` only until
+  it knows the title: the title string, the first spec key (`root`, `elements` or
+  `state`), or 512 bytes, whichever comes first. Then it adds a skeleton card
+  and pushes the text into a stream that fills the card.
+- **Orphan rule.** When a response completes, any started call that never
+  received its finished `function_call` event has its skeleton cancelled. The
+  finished flag is set by that event, not by the presence of a `call_id`,
+  because a started call can carry its `call_id` early.
+- **Measurement pending.** Whether GPT-Live sends argument deltas is unverified.
+  The timeline row of every `show_view` call shows "deltas: N, size". The user
+  reports the number; until then the streaming hand-off stays in the code and the
+  card appears on completion if no deltas arrive.
+
 ## Alternatives considered
 
 From VPLAN section 17: on-device SpeechAnalyzer plus Foundation Models; the

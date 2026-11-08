@@ -93,6 +93,12 @@ A shell changes its startup order or adds a documented post-config hook (notably
 elvish), or an execution check on nu, xonsh, mksh, or elvish contradicts the
 table.
 
+## Cross-reference (2026-11-08)
+
+The MCP server `instructions` string gained one sentence about the view tools.
+It does not change the shell strategies. See
+[ADR 0036](0036-generated-views-on-the-ensemble-board.md).
+
 ## Related plan, reference, and implementation paths
 
 - Phase: [`../plans/phases/ensemble-canvas.md`](../plans/phases/ensemble-canvas.md)
