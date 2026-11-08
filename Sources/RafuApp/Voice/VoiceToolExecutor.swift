@@ -152,6 +152,7 @@ enum VoiceToolExecutor {
         case "view_zoom": return viewZoom(arguments, host: host)
         case "view_tidy": return viewTidy(host: host)
         case "show_view": return await showView(arguments, callID: callID, host: host)
+        case "compose_view": return await composeView(arguments, host: host)
         default:
             return failure("unknown_tool", "Rafu has no tool with that name.")
         }

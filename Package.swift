@@ -135,6 +135,7 @@ let package = Package(
                 .product(name: "JSONRenderSwiftUI", package: "swift-json-render"),
                 .product(name: "JSONRenderStandardCatalog", package: "swift-json-render"),
                 .product(name: "JSONRenderCharts", package: "swift-json-render"),
+                .product(name: "JSONRenderCompose", package: "swift-json-render"),
             ],
             resources: [
                 // Vendored tree-sitter `highlights.scm` queries (lane-1

@@ -12,6 +12,7 @@ Read the `json-render-swift-use` skill for the spec language, the standard compo
 - `view_render { title?, spec, near? | x?, y? }` adds a view card. `spec` is `{root, elements, state?}`, at most 48 KiB per call; grow it with `view_update` patches. The result has `node_id`.
 - `view_update { node_id, spec | patches | reset: true }`. Give exactly one. `patches` is JSON Lines, one `{op, path, value}` per line, against the current spec. A changed spec resets the view's state. Use `node_update` to rename or move the card.
 - Voice: `show_view` takes the same spec keys flat beside `title`, `node` and `reset`.
+- Voice: `compose_view { prompt, context?, title?, near? }` asks Rafu to compose a view from the board data it already has; Rafu picks and arranges its own parts with the OpenAI Decisions API and the user's key. It runs only when called, never after a failed `show_view`. Agents in terminals do not have it.
 - A card holds at most 256 KiB of spec and an Ensemble at most 50 views.
 
 ## Rafu components
