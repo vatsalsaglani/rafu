@@ -111,7 +111,10 @@ extension VoiceToolExecutor {
                     switch applied {
                     case .collapsed, .updated: elements = spec.elements.count
                     case .unchanged: break
-                    case .removed, .refused: finalDropped = true
+                    case .refused: finalDropped = true
+                    case .removed:
+                        // The user removed the preview between the rounds: say so, never "Showing".
+                        return failure("removed", "The view was removed before it finished.")
                     }
                 } else {
                     let before = board.cards

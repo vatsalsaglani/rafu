@@ -206,6 +206,17 @@ server for the key; a wake word or always-on listening.
 - Terra stops being accepted as a delegation backend: fall back to Luna.
 - OpenAI ships a client-secret flow for Live, or a Swift SDK.
 
+## Amendment (2026-11-08): `compose_view`
+
+The voice backend may call `compose_view { prompt, context?, title?, near? }`. Risk `.edit`, the same Off, Ask and
+Allow rules as `show_view` (Ask runs at once with an Undo notice; Off refuses; the rate limit applies). It makes a
+second provider call type, the OpenAI Decisions API (`POST /v1/decisions`, model `gpt-6-luna`), with the same
+OpenAI key from Settings ▸ AI (`KeychainAISecretStore` through `VoiceKeyResolver`). The key is read once per
+request inside the `OpenAIDecisionsEvaluator` key provider and goes only into that request's `Authorization`
+header; a non-https base URL is refused before the key is read. It runs only when the backend calls it, never as a
+fallback after `show_view` validation fails. Ensemble agents in terminals do not have this tool and never receive
+the key. See [`voice-compose-view.md`](../references/voice-compose-view.md).
+
 ## Related
 
 - Code: `Sources/RafuCore/Voice/`, `Sources/RafuApp/Voice/`,

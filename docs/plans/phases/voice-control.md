@@ -87,7 +87,7 @@
 
 | Tool | Behaviour | Status |
 |---|---|---|
-| `show_view` | One tool to show, replace or reset a generated view. Flat spec (`root`, `elements`, `state`) beside `title`, `node`, `reset`. Ask runs at once with an Undo notice; Off refuses; Allow runs. Skeleton card on the first useful argument delta. `view_render` and `view_update` are hidden from voice. | Merged to `main`; the orphan rule and undo collapse corrections are on `fix/voice-mic-allow` (not merged) |
+| `show_view` | One tool to show, replace or reset a generated view. Flat spec (`root`, `elements`, `state`) beside `title`, `node`, `reset`. Ask runs at once with an Undo notice; Off refuses; Allow runs. Skeleton card on the first useful argument delta. `view_render` and `view_update` are hidden from voice. | Merged to `main` with the orphan rule and undo collapse corrections |
 
 - [ ] **Pending manual measurement:** whether GPT-Live sends argument deltas.
       Run one `show_view` on Rafu Lightning and report the timeline row's
@@ -169,3 +169,18 @@ Phase 1b additions:
     Motion).
 16. Quit Rafu Lightning during a session: it quits within about 2 s, and
     Settings ▸ Voice counts the minutes.
+
+### Addition: `compose_view` (2026-11-08)
+
+Delivered on `main`: the voice backend tool `compose_view` composes a view from Rafu-owned candidates with the OpenAI
+Decisions API (see [`voice-compose-view.md`](../../references/voice-compose-view.md)). Owned paths:
+`Sources/RafuApp/Voice/VoiceToolExecutor+Compose.swift`, `Sources/RafuApp/Canvas/GeneratedView/Compose/`.
+
+Open manual checks (Rafu Lightning, not done):
+- [ ] Allow mode with "Share terminal output" and a terminal with failing tests: "Rafu, compose a view of the test
+      results" shows a preview, then the final layout; record the round-trip time from the timeline row.
+- [ ] Ask mode: card and Undo notice; "undo that" removes it in one step.
+- [ ] Off mode: refused, nothing appears.
+- [ ] No OpenAI key: "Add an OpenAI key in Settings ▸ AI".
+- [ ] Network off: the service sentence, no card.
+- [ ] The saved Ensemble file has no key and no prompt text.
