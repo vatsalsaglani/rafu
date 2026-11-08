@@ -169,6 +169,17 @@ voice view tools, and MDX documents on the same catalog.
 - A second consumer of the catalog appears.
 - A change to the stream undo gate so it sees more than cards and connections.
 
+## Amendment (2026-11-08): composed views
+
+A generated view can also be composed: `JSONRenderCompose` picks and arranges Rafu-owned candidates (data in
+`state`, `$state` bindings) with `ComposeLimits(maxElements: 12, maxDepth: 2, maxRounds: 2)`. Depth 2 keeps parts
+flat under the root, because a `Table` default slot repeats its children for each row. The preview card shows after
+round 1; the final layout is written into the same undo step when nothing else touched the board (the stream
+undo-collapse rule: `canUndo`, no active content, unchanged `changeStamp`, `CanvasAgentUndoGate`), otherwise as an
+ordinary update (two honest undo steps). If the user removes the preview between the rounds, the tool answers
+"The view was removed before it finished." Props, bindings, state, terminal text and file contents never leave the
+app; candidate descriptions carry counts and titles only.
+
 ## Related
 
 - Code: `Sources/RafuApp/Canvas/GeneratedView/`,

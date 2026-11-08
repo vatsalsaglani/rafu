@@ -32,7 +32,7 @@ public nonisolated enum VoiceToolSchema {
         "cross_board_summary", "voice_status",
     ]
     public static let viewNames = [
-        "view_focus", "view_zoom", "view_find", "view_tidy", "show_view",
+        "view_focus", "view_zoom", "view_find", "view_tidy", "show_view", "compose_view",
     ]
     /// Ensemble tools the voice backend does not see under their MCP names.
     /// Voice gets `show_view` instead: one tool for render and update, with a
@@ -41,6 +41,7 @@ public nonisolated enum VoiceToolSchema {
         CanvasAgentTool.viewRender.rawValue, CanvasAgentTool.viewUpdate.rawValue,
     ]
     public static let showViewName = "show_view"
+    public static let composeViewName = "compose_view"
     public static let workOrderNames = ["work_order_create", "work_order_status"]
     /// The four VPLAN meta tools plus `voice_latch` ("Rafu, stay with me").
     public static let metaNames = [
@@ -141,6 +142,7 @@ public nonisolated enum VoiceToolSchema {
                 "view_tidy",
                 "Tidy Up: group related nodes into clusters and fit the view. One undo step."),
             showViewTool,
+            composeViewTool,
         ]
     }
 
@@ -176,6 +178,32 @@ public nonisolated enum VoiceToolSchema {
                 "required": .array(["title", "root", "elements"]),
                 "additionalProperties": .bool(false),
             ]))
+    }
+
+    /// Asks Rafu to compose a view from the board data it already has. Rafu
+    /// picks and arranges its own parts; the backend writes no spec. Only the
+    /// backend starts it: Rafu never runs it after a `show_view` failure.
+    public static var composeViewTool: VoiceFunctionTool {
+        tool(
+            composeViewName,
+            "Ask Rafu to compose a native view for the visible Ensemble from the data it already has "
+                + "(card counts, terminals, agents, files, and test output when shared). Use it when "
+                + "show_view would need you to invent the layout; Rafu picks and arranges the parts. "
+                + "Describe what the user wants in prompt. Never put secrets in context. In Ask mode "
+                + "the view appears at once with an Undo notice. When it succeeds, say \"Showing\" "
+                + "and the title in a few words.",
+            [
+                "prompt": property(
+                    "string",
+                    "What the user wants to see, in one or two sentences (at most 400 characters)."),
+                "context": property(
+                    "string",
+                    "Optional. Extra facts the user said, at most 1,000 characters. No file contents, no terminal text."
+                ),
+                "title": property("string", "Optional card title, at most 120 characters."),
+                "near": property(
+                    "string", "Optional. A node id or title to place the card beside."),
+            ], required: ["prompt"])
     }
 
     public static var workOrderTools: [VoiceFunctionTool] {
@@ -242,7 +270,7 @@ public nonisolated enum VoiceToolSchema {
             "view_find":
             return .read
         case "ensemble_open", "ensemble_create", "view_focus", "view_zoom", "view_tidy",
-            "handoff_to_agent", "take_back", "show_view":
+            "handoff_to_agent", "take_back", "show_view", "compose_view":
             return .edit
         case "work_order_create": return .sensitive
         default: return nil

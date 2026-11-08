@@ -93,6 +93,26 @@ struct VoiceToolSchemaTests {
                 == ["type"])
     }
 
+    @Test("compose_view appears once in both scopes, is an edit, and needs only prompt")
+    func composeView() {
+        for scope in [VoiceToolScope.rafu, .ensemble(boardID: "x")] {
+            let names = VoiceToolSchema.tools(for: scope).map(\.name)
+            #expect(names.filter { $0 == VoiceToolSchema.composeViewName }.count == 1)
+        }
+        #expect(VoiceToolSchema.viewNames.contains("compose_view"))
+        #expect(VoiceToolSchema.extraRisk(of: "compose_view") == .edit)
+        let tool = VoiceToolSchema.composeViewTool
+        #expect(tool.name == "compose_view")
+        #expect(tool.parameters["additionalProperties"] == false)
+        #expect(tool.parameters["required"] == ["prompt"])
+        for key in ["prompt", "context", "title", "near"] {
+            #expect(
+                tool.parameters["properties"]?[key]?["type"] == "string", Comment(rawValue: key))
+        }
+        #expect(!tool.description.contains("Canvas"))
+        #expect(!tool.description.contains("Conductor"))
+    }
+
     @Test("Literal schemas convert without turning booleans into numbers")
     func jsonConversion() {
         let value = VoiceJSON(any: ["a": true, "b": 1, "c": 1.5, "d": ["x"]] as [String: Any])
