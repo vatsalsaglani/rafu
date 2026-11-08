@@ -1,5 +1,5 @@
 {
-  "originHash" : "93b5bbdafacbb775a783c78f143615e483671e19a53bd2b59750bf51eac67245",
+  "originHash" : "af46fc466ace33e9203faf6dc2d929779fe079af74ee3d18ca2ee100c40dd986",
   "pins" : [
     {
       "identity" : "beautiful-mermaid-swift",
@@ -69,8 +69,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/vatsalsaglani/swift-json-render.git",
       "state" : {
-        "revision" : "3f6a888c5b406e2ab7aabb76b7ec86805c117090",
-        "version" : "0.22.0-alpha.1"
+        "revision" : "5d1bdce52686b3b56c7802f16db72a81ef50e15b",
+        "version" : "0.22.0-alpha.2"
       }
     },
     {

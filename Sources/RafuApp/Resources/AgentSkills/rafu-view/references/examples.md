@@ -31,7 +31,7 @@ Three complete `spec` objects for `view_render`. Each is valid against the Rafu 
       "children": []
     }
   },
-  "state": { "rows": [["Voice", "2"], ["Canvas", "1"]] }
+  "state": { "rows": [["Voice", "2"], ["Board", "1"]] }
 }
 ```
 

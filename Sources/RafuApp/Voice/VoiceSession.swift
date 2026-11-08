@@ -133,6 +133,8 @@ final class VoiceSession {
     /// Function calls whose arguments may stream, by output item id.
     @ObservationIgnored private var argumentStreams: [String: ArgumentStream] = [:]
     @ObservationIgnored private var argumentStreamOrder = 0
+    /// How many function calls are tracked now. Tests read it.
+    var argumentStreamCount: Int { argumentStreams.count }
 
     init(dependencies: Dependencies = .live) {
         self.dependencies = dependencies
@@ -740,6 +742,9 @@ final class VoiceSession {
         var bytes = 0
         var pending = ""
         var decided = false
+        /// The function_call done event arrived. A started call can carry its
+        /// `call_id` early, so `callID` alone does not prove the call finished.
+        var finished = false
         var handle: (any GeneratedViewStreamHandle)?
     }
 
@@ -795,6 +800,7 @@ final class VoiceSession {
             return name == VoiceToolSchema.showViewName ? "deltas: 0" : nil
         }
         stream.callID = callID
+        stream.finished = true
         if stream.handle == nil {
             argumentStreams.removeValue(forKey: itemID)
         } else {
@@ -811,7 +817,7 @@ final class VoiceSession {
 
     /// A response ended without finishing some started call: its skeleton goes.
     private func cancelOrphanViewStreams() {
-        for (itemID, stream) in argumentStreams where stream.callID == nil {
+        for (itemID, stream) in argumentStreams where !stream.finished {
             stream.handle?.cancel()
             argumentStreams.removeValue(forKey: itemID)
         }

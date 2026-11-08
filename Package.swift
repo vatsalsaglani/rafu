@@ -89,7 +89,7 @@ let package = Package(
         // Its macro target pulls swift-syntax (a longer cold build).
         .package(
             url: "https://github.com/vatsalsaglani/swift-json-render.git",
-            exact: "0.22.0-alpha.1"
+            exact: "0.22.0-alpha.2"
         ),
         // NOTE: elk-swift (the ELK layout port) is a transitive dependency of
         // beautiful-mermaid-swift and is deliberately NOT declared here.

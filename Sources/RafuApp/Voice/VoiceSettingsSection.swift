@@ -114,7 +114,18 @@ struct VoiceSettingsSection: View {
 
         Section("Microphone") {
             LabeledContent("Access", value: microphoneText)
-            Button("Open System Settings") { NSWorkspace.shared.open(Self.privacyURL) }
+            // macOS lists an app under Privacy ▸ Microphone only after the app asks, so
+            // "Open System Settings" cannot help before the first request.
+            if microphone == .notAsked {
+                Button("Allow Microphone…") {
+                    Task {
+                        _ = await VoiceMicrophonePermission.request()
+                        microphone = VoiceMicrophonePermission.access
+                    }
+                }
+            } else {
+                Button("Open System Settings") { NSWorkspace.shared.open(Self.privacyURL) }
+            }
         }
         .onAppear {
             microphone = VoiceMicrophonePermission.access

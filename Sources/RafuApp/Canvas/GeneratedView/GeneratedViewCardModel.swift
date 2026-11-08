@@ -64,6 +64,10 @@ final class GeneratedViewCardModel {
     /// Store versions at or below this are the model's own resets.
     @ObservationIgnored private var baselineVersion: UInt64 = 0
     @ObservationIgnored private var isApplying = false
+    /// Counts `apply` calls. `sync` is reentrant across the store's awaits
+    /// (`.task(id:)` starts a new one before the old one resumes); only the
+    /// newest `apply` may set `baselineVersion` and clear `isApplying`.
+    @ObservationIgnored private var applyGeneration: UInt64 = 0
     @ObservationIgnored private var pendingState: JSONRenderCore.JSONValue?
     @ObservationIgnored private var changedOrder: [JSONPointer] = []
     @ObservationIgnored private var follow: Task<Void, Never>?
@@ -202,12 +206,17 @@ final class GeneratedViewCardModel {
     }
 
     private func apply(_ value: JSONRenderCore.JSONValue?) async {
+        applyGeneration &+= 1
+        let generation = applyGeneration
         isApplying = true
         debounce?.cancel()
         pendingState = nil
         changedOrder = []
         await store.replaceAll(value ?? .object([:]))
-        baselineVersion = await store.snapshot.version
+        let version = await store.snapshot.version
+        // A newer apply started during the awaits: it owns the baseline.
+        guard generation == applyGeneration else { return }
+        baselineVersion = version
         isApplying = false
     }
 

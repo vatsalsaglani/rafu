@@ -11,8 +11,9 @@ import Observation
 /// which the card renders while it streams.
 ///
 /// Undo collapse rule for `finish`: when nothing else changed the board's
-/// cards or links since the skeleton was added, no card content is active,
-/// and the skeleton step is still the newest undo step, `finish` undoes the
+/// cards or links since the skeleton was added, the board's change stamp has
+/// not moved (no rename, consent change or other step), no card content is
+/// active, and the skeleton step is still the newest undo step, `finish` undoes the
 /// skeleton step and adds the final card with the same id. The whole voice
 /// request is then one undo step. Otherwise the final spec is written as an
 /// update of the skeleton card (two undo steps, both honest). An invalid
@@ -30,6 +31,10 @@ final class GeneratedViewStreamSession: GeneratedViewStreamHandle {
     private let provenance: CanvasGeneratedViewProvenance
     private let host: GeneratedViewActions
     private let gate: CanvasAgentUndoGate
+    /// The board's change stamp just after the skeleton step. The gate compares
+    /// only cards and links; a rename or a consent change is also an undo step,
+    /// and the stamp catches it.
+    private let skeletonStamp: UInt64
     private var continuation: AsyncThrowingStream<String, any Error>.Continuation?
     private var run: Task<Void, Never>?
     private var received = 0
@@ -46,6 +51,7 @@ final class GeneratedViewStreamSession: GeneratedViewStreamHandle {
         self.host = host
         gate = CanvasAgentUndoGate(
             boardID: board.id, cards: board.cards, connections: board.connections)
+        skeletonStamp = board.changeStamp
         model = StreamModel(catalog: RafuCatalog.rafu)
         let (stream, continuation) = AsyncThrowingStream.makeStream(of: String.self)
         self.continuation = continuation
@@ -119,7 +125,7 @@ final class GeneratedViewStreamSession: GeneratedViewStreamHandle {
     }
 
     private func canCollapse(_ board: CanvasBoardState) -> Bool {
-        board.canUndo && !board.contentIsActive
+        board.canUndo && !board.contentIsActive && board.changeStamp == skeletonStamp
             && gate.allows(cards: board.cards, connections: board.connections)
     }
 
