@@ -28,6 +28,12 @@ struct GeneratedViewCard: View {
         .background(jsonTheme.color.surface)
         .jsonRenderTheme(jsonTheme)
         .environment(\.generatedViewBoardContext, model.boardContext)
+        // Web images: the board's provider, scoped to this card (jr-4b). Nothing is fetched
+        // without the Ensemble's image mode, consent or trust list allowing the host.
+        .environment(
+            \.jrRemoteImageProvider,
+            session.canvasResources[board.id]?.remoteImages.scoped(to: card.id)
+        )
         .task(id: content) { await model.sync(content) }
         .onDisappear { GeneratedViewModels.shared.prune() }
         .sheet(item: confirmBinding(model)) { request in
