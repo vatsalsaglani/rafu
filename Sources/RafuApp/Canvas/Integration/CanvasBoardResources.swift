@@ -15,12 +15,16 @@ final class CanvasBoardResources {
     /// state only: it is never saved, so every reopen starts from the default.
     private(set) var markdownCardShowsSource: [CanvasCardID: Bool] = [:]
     private(set) var isWindowAvailable = true
+    /// Images from the web for this Ensemble's generated views (wave 3). It
+    /// makes no network session until the first allowed image asks.
+    @ObservationIgnored let remoteImages: RemoteImageProvider
     var isPresented: Bool { owner != nil }
     var permitsLiveContent: Bool { isPresented && isWindowAvailable }
 
     init(board: CanvasBoardState, session: WorkspaceSession) {
         self.board = board
         self.session = session
+        self.remoteImages = RemoteImageProvider(board: board)
         board.stopLiveContent = { [weak self] in self?.leaveInteractiveContent() }
     }
     func canPresent(owner: UUID?) -> Bool { owner != nil && self.owner == owner }
@@ -87,6 +91,7 @@ final class CanvasBoardResources {
     }
     func windowBecameAvailable() { isWindowAvailable = true }
     func stopAll() {
+        remoteImages.cancelInFlight()
         if let session, let board {
             let owned = session.canvasTerminalOwners.filter { $0.value == board.id }.map(\.key)
             for id in owned {

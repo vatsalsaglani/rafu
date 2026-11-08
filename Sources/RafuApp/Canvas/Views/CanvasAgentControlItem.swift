@@ -98,6 +98,8 @@ private struct CanvasAgentControlPanel: View {
         let log = center.log(for: board.id).suffix(8)
         VStack(alignment: .leading, spacing: 12) {
             CanvasAgentControlPicker(board: board)
+            Divider()
+            CanvasImagesFromTheWebRow(board: board)
             if !approvals.isEmpty {
                 Divider()
                 Text("Waiting for you").font(.headline)
@@ -127,6 +129,44 @@ private struct CanvasAgentControlPanel: View {
         }
         .padding(14)
         .frame(width: 360, alignment: .topLeading)
+    }
+}
+
+/// "Images from the web: Allowed · Revoke" / "Not allowed", for this Ensemble.
+/// Only the user can grant it (the consent card); this row can take it back.
+private struct CanvasImagesFromTheWebRow: View {
+    @Environment(\.rafuTheme) private var theme
+    let board: CanvasBoardState
+
+    var body: some View {
+        let allowed = Self.isAllowed(board)
+        HStack(spacing: 8) {
+            Text("Images from the web")
+                .font(.system(size: 12, weight: .medium))
+            Spacer(minLength: 8)
+            Text(allowed ? "Allowed" : "Not allowed")
+                .font(.system(size: 12))
+                .foregroundStyle(theme.palette.textSecondary)
+            if allowed {
+                Button("Revoke") {
+                    if let provider = RemoteImageRevocation.shared.provider(for: board.id) {
+                        provider.revokeConsent()
+                    } else {
+                        try? RemoteImageConsentWriter.revoke(on: board)
+                    }
+                }
+                .buttonStyle(RafuSecondaryButtonStyle(compact: true))
+                .accessibilityHint("Stops images from the web in this Ensemble")
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .help("Whether generated views in this Ensemble may load images from the web.")
+    }
+
+    /// Reading the stamp makes this row redraw after a grant, a revoke, or an undo.
+    private static func isAllowed(_ board: CanvasBoardState) -> Bool {
+        _ = board.changeStamp
+        return board.remoteImageConsent?.allowed == true
     }
 }
 

@@ -785,6 +785,14 @@ final class CanvasBoardState: Identifiable {
         requestSave?()
     }
 
+    // MARK: Images from the web (wave 3)
+
+    /// The user's consent for images from the web in this Ensemble, if any.
+    /// Not observed (the image provider bumps its own revision when it grants
+    /// or revokes); read it, never write it: `RemoteImageConsentWriter` writes
+    /// it through `edit`, so a grant is one undo step.
+    var remoteImageConsent: CanvasRemoteImageConsent? { document.permissions?.remoteImages }
+
     private func markDirty() {
         changeStamp &+= 1
         isDirty = true
