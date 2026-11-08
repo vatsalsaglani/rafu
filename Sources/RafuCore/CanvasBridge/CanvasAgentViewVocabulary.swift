@@ -69,11 +69,11 @@ public nonisolated enum CanvasAgentViewVocabulary {
     public static let text = #"""
         VOCABULARY (Rafu catalog 0.22.0-alpha.1+rafu.1). Use only these component types.
         COMPONENTS (type: props):
-        - Card: { title?: string, description?: string, maxWidth?: "sm" | "md" | "lg" | "full", centered?: boolean, className?: string, variant?: "outlined" | "plain" | "elevated" } [accepts children; slots: h…
-        - Stack: { direction?: "horizontal" | "vertical", gap?: "none" | "sm" | "md" | "lg" | "xl", align?: "start" | "center" | "end" | "stretch", justify?: "start" | "center" | "end" | "between" | "around", …
+        - Card: { title?: string, description?: string, maxWidth?: "sm" | "md" | "lg" | "full", centered?: boolean, className?: string, variant?: "outlined" | "plain" | …
+        - Stack: { direction?: "horizontal" | "vertical", gap?: "none" | "sm" | "md" | "lg" | "xl", align?: "start" | "center" | "end" | "stretch", justify?: "start" | "…
         - Grid: { columns?: number, gap?: "sm" | "md" | "lg" | "xl", className?: string } [accepts children]
         - Separator: { orientation?: "horizontal" | "vertical" }
-        - Tabs: { tabs: Array<{ label: string, value: string }>, defaultValue?: string, value?: string, variant?: "underline" | "segmented" } [accepts children] [events: change]
+        - Tabs: { tabs: Array<{ label: string, value: string }>, defaultValue?: string, value?: string, variant?: "underline" | "segmented" } [accepts children] [events:…
         - Accordion: { items: Array<{ title: string, content: string }>, type?: "single" | "multiple" }
         - Collapsible: { title: string, defaultOpen?: boolean, open?: boolean } [accepts children]
         - Pagination: { totalPages: number, page?: number } [events: change]
@@ -93,20 +93,37 @@ public nonisolated enum CanvasAgentViewVocabulary {
         - Table: { columns: Array<string>, rows: Array<Array<string>>, caption?: string, sortable?: boolean } [accepts children; slots: empty, loading]
         - Progress: { value: number, max?: number, label?: string }
         - Spinner: { size?: "sm" | "md" | "lg", label?: string }
-        - Button: { label: string, variant?: "primary" | "secondary" | "danger" | "destructive" | "plain", disabled?: boolean, size?: "sm" | "md" | "lg", icon?: string } [events: press]
+        - Button: { label: string, variant?: "primary" | "secondary" | "danger" | "destructive" | "plain", disabled?: boolean, size?: "sm" | "md" | "lg", icon?: string }…
         - Link: { label: string, href: string } [events: press]
-        - Input: { label: string, name: string, type?: "text" | "email" | "password" | "number", placeholder?: string, value?: string, checks?: Array<{ type: string, message: string, args?: Record<string, unkn…
-        - Textarea: { label: string, name: string, placeholder?: string, rows?: number, value?: string, checks?: Array<{ type: string, message: string, args?: Record<string, unknown> }>, validateOn?: "change" …
-        - Select: { label: string, name: string, options: Array<string>, placeholder?: string, value?: string, checks?: Array<{ type: string, message: string, args?: Record<string, unknown> }>, validateOn?: "c…
-        - Checkbox: { label: string, name: string, checked?: boolean, checks?: Array<{ type: string, message: string, args?: Record<string, unknown> }>, validateOn?: "change" | "blur" | "submit" } [events: cha…
-        - Radio: { label: string, name: string, options: Array<string>, value?: string, checks?: Array<{ type: string, message: string, args?: Record<string, unknown> }>, validateOn?: "change" | "blur" | "subm…
-        - Switch: { label: string, name: string, checked?: boolean, checks?: Array<{ type: string, message: string, args?: Record<string, unknown> }>, validateOn?: "change" | "blur" | "submit" } [events: chang…
+        - Input: { label: string, name: string, type?: "text" | "email" | "password" | "number", placeholder?: string, value?: string, checks?: Array<{ type: string, mes…
+        - Textarea: { label: string, name: string, placeholder?: string, rows?: number, value?: string, checks?: Array<{ type: string, message: string, args?: Record<str…
+        - Select: { label: string, name: string, options: Array<string>, placeholder?: string, value?: string, checks?: Array<{ type: string, message: string, args?: Rec…
+        - Checkbox: { label: string, name: string, checked?: boolean, checks?: Array<{ type: string, message: string, args?: Record<string, unknown> }>, validateOn?: "ch…
+        - Radio: { label: string, name: string, options: Array<string>, value?: string, checks?: Array<{ type: string, message: string, args?: Record<string, unknown> }>…
+        - Switch: { label: string, name: string, checked?: boolean, checks?: Array<{ type: string, message: string, args?: Record<string, unknown> }>, validateOn?: "chan…
         - Slider: { label?: string, min?: number, max?: number, step?: number, value?: number } [events: change]
         - Toggle: { label: string, pressed?: boolean, variant?: "default" | "outline" } [events: change]
         - ToggleGroup: { items: Array<{ label: string, value: string }>, type?: "single" | "multiple", value?: string } [events: change]
         - ButtonGroup: { buttons: Array<{ label: string, value: string }>, selected?: string } [events: change]
+        - FileLink: { path: string, line?: number, label?: string }
+        - CardLink: { node: string, label?: string }
+        - TerminalStatus: { node: string, title?: string }
+        - AgentStatus: { node: string, agent?: string }
+        - DiffSummary: { files: Array<unknown> }
+        - IconLibraryIcon: { pack: string, icon: string, size?: "sm" | "md" | "lg" }
+        - KeyValue: { items: Array<unknown> }
+        - Timeline: { events: Array<unknown> }
+        - Stat: { label: string, value: unknown, delta?: string, unit?: string, intent?: "neutral" | "info" | "good" | "warning" | "critical" }
+        - Markdown: { text: string }
+        - Mermaid: { source: string }
+        - Code: { text: string, language?: string }
+        - Callout: { kind?: "note" | "tip" | "info" | "warning" | "risk" | "decision", title?: string, text?: string } [accepts children]
+        - Checklist: { title?: string, items: Array<unknown> } [accepts children]
+        - Questions: { title?: string, items: Array<unknown> } [accepts children]
+        - FileTree: { title?: string, entries: Array<unknown> } [accepts children]
+        - Figure: { src?: string, caption?: string, title?: string }
         CHARTS (props: see the json-render-swift-use skill): BarChart, LineChart, AreaChart, PieChart, Gauge, Sparkline, ScatterChart, Heatmap, Histogram, ComboChart, Waterfall, Funnel, BoxPlot, Candlestick, Treemap
-        ACTIONS (on.<event>: {action, params}): setState, pushState, removeState, validateForm, toggleState, incrementState
+        ACTIONS (on.<event>: {action, params}): setState, pushState, removeState, validateForm, toggleState, incrementState, open_file, focus_node, open_url
         VISIBILITY (visible on the element, never in props): true, false, {"$state": "/path"} truthy, add one of eq, neq, gt, gte, lt, lte, or "not": true; an array is AND; {"$and": […]}, {"$or": […]}.
         DYNAMIC PROPS: {"$state": "/path"} reads, {"$bindState": "/path"} binds an input, {"$item": "field"}, {"$index": true} and {"$bindItem": "field"} inside repeat, {"$cond": …, "$then": …, "$else": …}, {"$template": "Hi ${/name}"}, {"$computed": name, "args": {…}} with groupSum, countBy, topN, bucket.
         """#
