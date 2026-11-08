@@ -150,6 +150,13 @@ struct CanvasCommands: Commands {
                 if let id = board?.selection.first { board?.zoomToCard(id) }
             }
             .disabled(board?.selection.count != 1)
+            Button("Reset View") {
+                if let board, let id = GeneratedViewActions.resetTarget(on: board) {
+                    GeneratedViewActions.reset(id, on: board)
+                }
+            }
+            .keyboardShortcut("r", modifiers: [.command, .option])
+            .disabled(board.flatMap(GeneratedViewActions.resetTarget(on:)) == nil)
             Button("Return to Board") {
                 board?.backToBoard()
             }

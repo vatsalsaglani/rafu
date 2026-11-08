@@ -79,6 +79,7 @@ final class RafuAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         CanvasDiagramPanels.registerPaletteItems()  // X9 diagrams
+        GeneratedViewActions.install()  // wave 3: generated view cards
         MemoryPressureMonitor.shared.start()
         // Before any window or the notch strip appears: loops read it.
         RafuMotionGate.shared.start()

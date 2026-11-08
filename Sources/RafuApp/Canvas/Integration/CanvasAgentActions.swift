@@ -414,8 +414,8 @@ enum CanvasAgentActions {
         case .frameCreate: return try frameCreate(call, caller: caller)
         case .export: return try await export(call, caller: caller)
         case .diagramBuild: return try diagramBuild(call, caller: caller)
-        // jr-4a adds the two bodies (CanvasAgentActions+Views.swift).
-        case .viewRender, .viewUpdate: return .init(error: GeneratedViewCopy.unavailable)
+        case .viewRender: return try viewRender(call, caller: caller)
+        case .viewUpdate: return try await viewUpdate(call, caller: caller)
         case .actionStatus: return .init(error: "No action matches that request_id.")
         }
     }

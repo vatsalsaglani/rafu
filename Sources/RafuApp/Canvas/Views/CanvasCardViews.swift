@@ -504,6 +504,8 @@ struct CanvasCardShell: View {
                 isCurrentPresentation: session.canvasResources[board.id]?.canPresent(
                     owner: presentationID) == true,
                 scale: board.viewport.scale, showsInlineChrome: false)
+        } else if case .generatedView(let view) = card.content {
+            GeneratedViewCard(card: card, content: view, board: board, session: session)
         } else if case .image(let path) = card.content {
             Button(action: activateCard) {
                 CanvasImageContent(path: path, session: session, pixels: 256).padding(12)
