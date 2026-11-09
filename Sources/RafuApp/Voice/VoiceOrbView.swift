@@ -639,7 +639,26 @@ struct VoiceLiveOrb: View {
     @State private var showsDone = false
 
     private var face: VoiceOrbFace {
-        VoiceOrbFace.face(for: session.blobState).withDone(showsDone)
+        let base: VoiceOrbFace = VoiceOrbFace.face(for: session.blobState)
+        return base.withDone(showsDone)
+    }
+
+    private var palette: VoiceOrbPalette {
+        VoiceOrbPalette(
+            theme: theme, increaseContrast: contrast == .increased,
+            reduceTransparency: reduceTransparency)
+    }
+
+    /// One sleep for each completed task; nothing loops.
+    private func showDone() async {
+        guard doneSerial > 0 else { return }
+        showsDone = true
+        do {
+            try await Task.sleep(for: VoiceOrbFace.doneHold)
+        } catch {
+            return
+        }
+        showsDone = false
     }
 
     private var animated: Bool { motionAllowed && !reduceMotion }
@@ -648,11 +667,8 @@ struct VoiceLiveOrb: View {
         let face = face
         let animated = animated
         VoiceOrbView(
-            frame: animator.frame,
-            palette: VoiceOrbPalette(
-                theme: theme, increaseContrast: contrast == .increased,
-                reduceTransparency: reduceTransparency),
-            size: size, showsFace: !isCompact, showsBadge: !isCompact
+            frame: animator.frame, palette: palette, size: size, showsFace: !isCompact,
+            showsBadge: !isCompact
         )
         .onContinuousHover(coordinateSpace: .local) { phase in
             guard animated, !isCompact else { return }
@@ -666,17 +682,7 @@ struct VoiceLiveOrb: View {
         .onChange(of: session.completedTasks) { old, new in
             if new > old { doneSerial &+= 1 }
         }
-        .task(id: doneSerial) {
-            // One sleep for each completed task; nothing loops.
-            guard doneSerial > 0 else { return }
-            showsDone = true
-            do {
-                try await Task.sleep(for: VoiceOrbFace.doneHold)
-            } catch {
-                return
-            }
-            showsDone = false
-        }
+        .task(id: doneSerial) { await showDone() }
         .task(id: RunKey(face: face, animated: animated)) {
             let session = session
             await animator.run(face: face, animated: animated) { () -> (Double, Double) in

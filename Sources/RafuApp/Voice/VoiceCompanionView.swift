@@ -65,6 +65,14 @@ final class VoiceCompanionModel {
 
     func move(_ direction: VoiceCompanionCorner.Move) { snap(to: corner.moved(direction)) }
 
+    /// The host's global frame; writes only what changed.
+    func noteHostFrame(_ frame: CGRect) {
+        let size: CGSize = frame.size
+        let origin: CGPoint = frame.origin
+        if containerSize != size { containerSize = size }
+        if hostOrigin != origin { hostOrigin = origin }
+    }
+
     /// Chrome reports its rect (global), or nil when it leaves.
     func setAvoidRect(_ rect: CGRect?, for key: String) {
         guard avoidRects[key] != rect else { return }
@@ -148,8 +156,7 @@ struct VoiceCompanionHost: View {
         .onGeometryChange(for: CGRect.self) {
             $0.frame(in: .global)
         } action: { frame in
-            if model.containerSize != frame.size { model.containerSize = frame.size }
-            if model.hostOrigin != frame.origin { model.hostOrigin = frame.origin }
+            model.noteHostFrame(frame)
         }
         .onChange(of: workspace.rootURL?.path, initial: true) { _, path in
             model.load(workspacePath: path)
@@ -238,30 +245,10 @@ private struct VoiceCompanionView: View {
 
     // MARK: Orb
 
+    // Three parts, not one chain: Swift 6.3 (CI) cannot type-check the
+    // whole modifier chain in reasonable time.
     private var orbSlot: some View {
-        VoiceLiveOrb(session: session, size: orbSize)
-            .contentShape(Circle())
-            .gesture(dragGesture.exclusively(before: TapGesture().onEnded { activate() }))
-            .focusable(interactions: .activate)
-            .focused($orbFocused)
-            .onChange(of: orbFocused) { _, focused in
-                withAnimation(RafuMotion.resolve(RafuMotion.pillShow, reduceMotion: reduceMotion)) {
-                    model.showsPill = focused || isHovering
-                }
-            }
-            .onKeyPress(phases: .down) { press in handleKey(press) }
-            .onHover { hovering in hoverIntent = hovering }
-            .help(orbHelp)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Rafu voice")
-            .accessibilityValue(session.blobState.accessibilityLabel)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityAction { activate() }
-            .accessibilityAction(named: "Start or stop listening") { session.toggleLatched() }
-            .accessibilityAction(named: "Stop speaking") { session.stopSpeaking() }
-            .accessibilityAction(named: "End session") { endSession() }
-            .accessibilityAction(named: "Show timeline") { model.showsTimeline = true }
-            .accessibilityAction(named: "Move to the next corner") { model.moveToNextCorner() }
+        orbAccessible
             .popover(
                 isPresented: Binding(
                     get: { model.showsTimeline }, set: { model.showsTimeline = $0 }),
@@ -283,6 +270,38 @@ private struct VoiceCompanionView: View {
             } action: { frame in
                 model.slotFrame = frame
             }
+    }
+
+    /// The orb with its pointer and keyboard input.
+    private var orbControl: some View {
+        VoiceLiveOrb(session: session, size: orbSize)
+            .contentShape(Circle())
+            .gesture(dragGesture.exclusively(before: TapGesture().onEnded { activate() }))
+            .focusable(interactions: .activate)
+            .focused($orbFocused)
+            .onChange(of: orbFocused) { _, focused in
+                withAnimation(RafuMotion.resolve(RafuMotion.pillShow, reduceMotion: reduceMotion)) {
+                    model.showsPill = focused || isHovering
+                }
+            }
+            .onKeyPress(phases: .down) { press in handleKey(press) }
+            .onHover { hovering in hoverIntent = hovering }
+            .help(orbHelp)
+    }
+
+    /// The orb as one VoiceOver button with named actions.
+    private var orbAccessible: some View {
+        orbControl
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Rafu voice")
+            .accessibilityValue(session.blobState.accessibilityLabel)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { activate() }
+            .accessibilityAction(named: "Start or stop listening") { session.toggleLatched() }
+            .accessibilityAction(named: "Stop speaking") { session.stopSpeaking() }
+            .accessibilityAction(named: "End session") { endSession() }
+            .accessibilityAction(named: "Show timeline") { model.showsTimeline = true }
+            .accessibilityAction(named: "Move to the next corner") { model.moveToNextCorner() }
     }
 
     private var dragGesture: some Gesture {
