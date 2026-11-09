@@ -147,6 +147,11 @@ final class VoiceSession {
     /// transcript is on, and written as one entry each.
     @ObservationIgnored private var userUtterance = ""
     @ObservationIgnored private var replyText = ""
+    /// The `end_ms` of the newest transcript delta of each stream.
+    @ObservationIgnored private var lastInputEndMS: Int?
+    @ObservationIgnored private var lastOutputEndMS: Int?
+    /// Why the server closed the session; read by `close` for the error text.
+    @ObservationIgnored private var remoteCloseReason: String?
 
     init(dependencies: Dependencies = .live) {
         self.dependencies = dependencies
@@ -227,11 +232,31 @@ final class VoiceSession {
     func close(reason: VoiceCloseReason = .user, closeTimeout: Duration? = nil) async {
         guard hasOpenSession else { return }
         transcript?.record(.sessionClosed(reason: "\(reason)"))
+        let serverReason = remoteCloseReason
+        remoteCloseReason = nil
         generation += 1
         openTask?.cancel()
         openTask = nil
         await teardown(sendClose: isStarted, closeTimeout: closeTimeout)
-        if reason != .failure { machine.apply(.closed) }
+        if reason == .failure { return }
+        if reason == .remote, let message = Self.remoteCloseMessage(serverReason) {
+            lastError = message
+            machine.apply(.failed(message))
+        } else {
+            machine.apply(.closed)
+        }
+    }
+
+    /// What the user reads when the server ends the session. The user's own
+    /// close and the answer to it say nothing. The reason is cut to 40 plain
+    /// characters: it is server text.
+    nonisolated static func remoteCloseMessage(_ reason: String?) -> String? {
+        let allowed = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_- .")
+        let plain = String((reason ?? "").filter { allowed.contains($0) }.prefix(40))
+        guard plain != "user", plain != "close_requested" else { return nil }
+        return plain.isEmpty
+            ? "The voice service closed the session."
+            : "The voice service closed the session (\(plain))."
     }
 
     /// Quit, from `applicationShouldTerminate`: sends `session.close` and
@@ -286,6 +311,7 @@ final class VoiceSession {
         clock = VoiceActivityClock()
         clock.setLatched(machine.mic == .latched, at: .zero)
         lastError = nil
+        remoteCloseReason = nil
         timeline.clear()
         startTranscript()
         openTask = Task { await self.runOpen(ticket) }
@@ -465,7 +491,6 @@ final class VoiceSession {
         youRow = nil
         replyRow = nil
         inputLevel = 0
-        timeline.clear()
         isClosing = false
     }
 
@@ -588,8 +613,10 @@ final class VoiceSession {
             resumeStart(true)
         case .outputAudioDelta(let pcm):
             handleOutputAudio(pcm)
-        case .inputTranscriptDelta(let text):
-            if transcript != nil { Self.append(text, to: &userUtterance) }
+        case .inputTranscriptDelta(let text, let startMS, let endMS):
+            if transcript != nil {
+                noteInputTranscript(text, startMS: startMS, endMS: endMS)
+            }
             if let youRow {
                 timeline.appendDetail(text, to: youRow)
             } else {
@@ -597,9 +624,11 @@ final class VoiceSession {
                     lane: .you, startMS: milliseconds(elapsed()), persona: personaName,
                     title: "You", detail: text)
             }
-        case .outputTranscriptDelta(let text):
+        case .outputTranscriptDelta(let text, let startMS, let endMS):
             replyCharacters += text.count
-            if transcript != nil { Self.append(text, to: &replyText) }
+            if transcript != nil {
+                noteOutputTranscript(text, startMS: startMS, endMS: endMS)
+            }
         case .delegationCreated(let id, let target):
             flushTranscriptText()
             transcript?.record(.delegation(id: id, target: target))
@@ -620,7 +649,9 @@ final class VoiceSession {
             let measure = functionCallFinished(callID: callID, name: name)
             runCall(callID: callID, name: name, arguments: arguments, measure: measure)
         case .responseCompleted:
-            flushReply()
+            // Transcript deltas trail the audio by a fraction of a second.
+            // While the reply is still audible `endReply` writes it.
+            if lastAudibleAt == nil { flushReply() }
             cancelOrphanViewStreams()
             if inFlightCalls > 0 {
                 completedWhileInFlight = true
@@ -634,7 +665,10 @@ final class VoiceSession {
             if let sessionID, let seconds {
                 costStore.recordUsage(sessionID: sessionID, seconds: Double(seconds))
             }
-            if !isClosing, isStarted { Task { await self.close(reason: .remote) } }
+            if !isClosing, isStarted {
+                remoteCloseReason = reason
+                Task { await self.close(reason: .remote) }
+            }
         case .error(let code, let message):
             transcript?.record(.serverError(code: code, message: message))
             if !isStarted {
@@ -687,6 +721,7 @@ final class VoiceSession {
                 replyRow, endMS: milliseconds(elapsed()), detail: "\(replyCharacters) characters")
         }
         replyRow = nil
+        flushReply()
         machine.apply(.replyEnded)
     }
 
@@ -891,14 +926,44 @@ final class VoiceSession {
         transcript = nil
         userUtterance = ""
         replyText = ""
+        lastInputEndMS = nil
+        lastOutputEndMS = nil
     }
 
+    /// The reply goes first: a reply still pending belongs to the turn
+    /// before the user words that are pending now.
     private func flushTranscriptText() {
-        if !userUtterance.isEmpty {
-            transcript?.record(.userSaid(userUtterance))
-            userUtterance = ""
-        }
         flushReply()
+        flushUserTurn()
+    }
+
+    private func flushUserTurn() {
+        guard !userUtterance.isEmpty else { return }
+        transcript?.record(.userSaid(userUtterance))
+        userUtterance = ""
+    }
+
+    /// A pause longer than this inside the transcript text starts a new turn
+    /// (server `start_ms` against the last `end_ms`).
+    private static let userTurnGapMS = 1_500
+    private static let replyGapMS = 1_200
+
+    private func noteInputTranscript(_ text: String, startMS: Int?, endMS: Int?) {
+        if let startMS, let last = lastInputEndMS, startMS - last > Self.userTurnGapMS {
+            flushUserTurn()
+        }
+        // The reply to the turn before is complete once the user speaks again.
+        if userUtterance.isEmpty { flushReply() }
+        Self.append(text, to: &userUtterance)
+        if let endMS { lastInputEndMS = endMS }
+    }
+
+    private func noteOutputTranscript(_ text: String, startMS: Int?, endMS: Int?) {
+        if let startMS, let last = lastOutputEndMS, startMS - last > Self.replyGapMS {
+            flushReply()
+        }
+        Self.append(text, to: &replyText)
+        if let endMS { lastOutputEndMS = endMS }
     }
 
     private func flushReply() {

@@ -92,11 +92,11 @@ struct VoiceLiveEventsTests {
             ),
             (
                 #"{"type":"session.input_transcript.delta","delta":"add","start_ms":0,"end_ms":40}"#,
-                .inputTranscriptDelta("add")
+                .inputTranscriptDelta("add", startMS: 0, endMS: 40)
             ),
             (
                 #"{"type":"session.output_transcript.delta","delta":"Done","start_ms":0,"end_ms":40}"#,
-                .outputTranscriptDelta("Done")
+                .outputTranscriptDelta("Done", startMS: 0, endMS: 40)
             ),
             (
                 #"{"type":"session.delegation.created","offset_ms":10,"delegation":{"id":"del_1","type":"delegation","target":"responses","response_id":"resp_1"}}"#,
@@ -135,6 +135,24 @@ struct VoiceLiveEventsTests {
         for (text, expected) in cases {
             #expect(VoiceLiveServerEvent.decode(text) == expected, Comment(rawValue: text))
         }
+    }
+
+    @Test("Transcript deltas carry their times; missing or bad times become nil")
+    func transcriptTimes() throws {
+        func decode(_ line: String) throws -> VoiceLiveServerEvent {
+            try JSONDecoder().decode(VoiceLiveServerEvent.self, from: Data(line.utf8))
+        }
+        #expect(
+            try decode(#"{"type":"session.input_transcript.delta","delta":"hi"}"#)
+                == .inputTranscriptDelta("hi", startMS: nil, endMS: nil))
+        #expect(
+            try decode(
+                #"{"type":"session.output_transcript.delta","delta":"ok","start_ms":1200.5,"end_ms":"1300"}"#
+            ) == .outputTranscriptDelta("ok", startMS: 1200, endMS: 1300))
+        #expect(
+            try decode(
+                #"{"type":"session.input_transcript.delta","delta":"x","start_ms":"soon","end_ms":null}"#
+            ) == .inputTranscriptDelta("x", startMS: nil, endMS: nil))
     }
 
     @Test("Unknown types become other; nested noise is filtered by its type")

@@ -2,8 +2,9 @@ import RafuCore
 import SwiftUI
 
 /// The voice session timeline (VPLAN section 11): five lanes from the
-/// session's in-memory `VoiceTimeline`, live while the session is open and
-/// empty after it closes. Rows show ids, tool names, counts and times; the
+/// session's in-memory `VoiceTimeline`, live while the session is open. The
+/// rows stay after the session closes, so the user can read the last
+/// session; the next open clears them. Rows show ids, tool names, counts and times; the
 /// You lane shows at most 120 characters of the user's own words.
 struct VoiceTimelinePopover: View {
     let session: VoiceSession
@@ -25,9 +26,12 @@ struct VoiceTimelinePopover: View {
             HStack {
                 Text("Voice Timeline").font(.headline)
                 Spacer()
-                Text(session.blobState.word)
-                    .font(.caption)
-                    .foregroundStyle(theme.palette.textSecondary)
+                Text(
+                    !session.blobState.isOpen && !events.isEmpty
+                        ? "Last session ended" : session.blobState.word
+                )
+                .font(.caption)
+                .foregroundStyle(theme.palette.textSecondary)
             }
             .padding(12)
             Divider()

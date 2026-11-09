@@ -103,8 +103,10 @@ public nonisolated enum VoiceLiveClientEvent: Equatable, Sendable {
 public nonisolated enum VoiceLiveServerEvent: Decodable, Equatable, Sendable {
     case sessionStarted(id: String, expiresAt: Int?)
     case outputAudioDelta(Data)
-    case inputTranscriptDelta(String)
-    case outputTranscriptDelta(String)
+    /// A transcript fragment with the optional `start_ms` / `end_ms` the
+    /// server sends; absent or malformed values decode to nil.
+    case inputTranscriptDelta(String, startMS: Int?, endMS: Int?)
+    case outputTranscriptDelta(String, startMS: Int?, endMS: Int?)
     case delegationCreated(id: String, target: String?)
     case functionCall(callID: String, name: String, argumentsJSON: String)
     /// `response.output_item.added` for a function call: the arguments follow
@@ -125,6 +127,8 @@ public nonisolated enum VoiceLiveServerEvent: Decodable, Equatable, Sendable {
     private enum Keys: String, CodingKey {
         case type, session, delta, delegation, event, usage, reason, error
         case contextWindow = "context_window"
+        case startMS = "start_ms"
+        case endMS = "end_ms"
     }
     private struct Session: Decodable {
         let id: String?
@@ -187,6 +191,16 @@ public nonisolated enum VoiceLiveServerEvent: Decodable, Equatable, Sendable {
         }
     }
 
+    /// A millisecond offset, whole or fractional; missing or bad becomes nil.
+    private static func milliseconds(
+        _ container: KeyedDecodingContainer<Keys>, _ key: Keys
+    ) -> Int? {
+        guard let number = try? container.decodeIfPresent(FlexibleNumber.self, forKey: key),
+            number.value.isFinite, abs(number.value) < 1e12
+        else { return nil }
+        return Int(number.value)
+    }
+
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: Keys.self)
         let type = try container.decode(String.self, forKey: .type)
@@ -200,10 +214,14 @@ public nonisolated enum VoiceLiveServerEvent: Decodable, Equatable, Sendable {
             self = .outputAudioDelta(Data(base64Encoded: text) ?? Data())
         case "session.input_transcript.delta":
             self = .inputTranscriptDelta(
-                try container.decodeIfPresent(String.self, forKey: .delta) ?? "")
+                try container.decodeIfPresent(String.self, forKey: .delta) ?? "",
+                startMS: Self.milliseconds(container, .startMS),
+                endMS: Self.milliseconds(container, .endMS))
         case "session.output_transcript.delta":
             self = .outputTranscriptDelta(
-                try container.decodeIfPresent(String.self, forKey: .delta) ?? "")
+                try container.decodeIfPresent(String.self, forKey: .delta) ?? "",
+                startMS: Self.milliseconds(container, .startMS),
+                endMS: Self.milliseconds(container, .endMS))
         case "session.delegation.created":
             let delegation = try container.decodeIfPresent(Delegation.self, forKey: .delegation)
             self = .delegationCreated(id: delegation?.id ?? "", target: delegation?.target)
