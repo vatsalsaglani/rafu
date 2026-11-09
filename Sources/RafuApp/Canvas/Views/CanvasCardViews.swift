@@ -10,6 +10,8 @@ struct CanvasCardShell: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(CanvasInteractionState.self) private var interaction
+    /// The window's voice companion tucks away while a card is dragged over it.
+    @Environment(VoiceCompanionModel.self) private var voiceCompanion: VoiceCompanionModel?
     let card: CanvasCard
     let board: CanvasBoardState
     let session: WorkspaceSession
@@ -669,7 +671,10 @@ struct CanvasCardShell: View {
                 {
                     startMove()
                 }
-                if !moveOrigins.isEmpty { updateMove(value.translation) }
+                if !moveOrigins.isEmpty {
+                    updateMove(value.translation)
+                    voiceCompanion?.noteBoardDrag(at: value.location)
+                }
             }
             .onEnded { value in
                 isPressed = false
@@ -677,6 +682,7 @@ struct CanvasCardShell: View {
                     finishClick(at: value.startLocation)
                 } else {
                     finishMove()
+                    voiceCompanion?.boardDragEnded()
                 }
             }
     }

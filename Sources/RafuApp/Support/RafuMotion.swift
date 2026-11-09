@@ -46,6 +46,17 @@ enum RafuMotion {
     static let successHold: TimeInterval = 1.2
     static let guideFadeOut: Animation = .easeOut(duration: 0.15)
 
+    // The voice companion (voice-presence.md). Under Reduce Motion the snap
+    // and the tuck are instant, and the card and the pill only cross-fade.
+    /// The orb settles into the corner picked at the end of a drag.
+    static let companionSnap: Animation = .spring(response: 0.38, dampingFraction: 0.78)
+    /// The orb shrinks to a dot under a dragged board card, and returns.
+    static let companionTuck: Animation = .spring(response: 0.25, dampingFraction: 0.9)
+    static let cardShow: Animation = .easeOut(duration: 0.18)
+    /// A newer card line replaces the older one.
+    static let cardSwap: Animation = .easeInOut(duration: 0.16)
+    static let pillShow: Animation = .easeOut(duration: 0.12)
+
     /// The Reduce Motion replacement for travel, scale and spring motion.
     static let reducedFade: Animation = .easeOut(duration: 0.12)
 

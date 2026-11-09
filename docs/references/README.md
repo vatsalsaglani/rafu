@@ -117,6 +117,7 @@ A task that discovers a reusable platform, SDK, toolchain, lifecycle, concurrenc
 | [`voice-compose-view.md`](voice-compose-view.md) | Changing voice `compose_view`: when it runs, what is sent to the Decisions API and what never leaves, candidates, the preview-then-final undo rule, stop reasons, known gaps |
 | [`view-tools-and-vocabulary.md`](view-tools-and-vocabulary.md) | Changing `view_render` / `view_update`: MCP shapes and caps, the 48 KiB rule, why the schema is not strict, how to regenerate the vocabulary constant, and the two-skill install |
 | [`swift-6-4-2-catalog-registration-traps.md`](swift-6-4-2-catalog-registration-traps.md) | Registering json-render catalog entries: the Swift 6.4.2 SILGen crash with `inout Catalog` plus typed throws in a `@Sendable` closure, `nonisolated` component shells, and the `JSONRenderCore.JSONValue` name clash |
+| [`voice-presence.md`](voice-presence.md) | Changing the voice companion: the per-window root overlay, corner memory key (FNV-1a of the path), drag/snap/⌥-arrow keys, the card-drag tuck hook, the pure orb inputs and theme palette (custom themes, Increase Contrast), the 20 Hz sampler gate (no task while still), the card order and hide rules, the inline Confirm (`answerConfirm` vs spoken `resolveConfirm`), the status dot, the notch orb, and the Rafu menu shortcuts |
 | [`microphone-permission-listing.md`](microphone-permission-listing.md) | Why Rafu is absent from Privacy ▸ Microphone until `requestAccess` runs, and the "Allow Microphone…" button in Settings ▸ Voice |
 
 ## Reference-note template

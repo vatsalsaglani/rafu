@@ -5,6 +5,7 @@ struct RafuAppCommands: Commands {
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
     @FocusedValue(\.workspaceSession) private var workspaceSession
+    @FocusedValue(\.voiceCompanion) private var voiceCompanion
 
     var body: some Commands {
         CommandGroup(replacing: .appSettings) {
@@ -196,7 +197,45 @@ struct RafuAppCommands: Commands {
             Button("Stop Speaking") {
                 VoiceSession.shared.stopSpeaking()
             }
+            .keyboardShortcut(".", modifiers: [.control, .option, .shift])
             .disabled(VoiceSession.shared.blobState != .speaking)
+
+            Button("End Voice Session") {
+                Task { await VoiceSession.shared.close(reason: .user) }
+            }
+            .keyboardShortcut("e", modifiers: [.control, .option, .shift])
+            .disabled(!VoiceSession.shared.blobState.isOpen)
+
+            // The waiting Confirm card, from the keyboard. A removal gets no
+            // shortcut (ADR 0033: Return never runs one); its menu item stays.
+            Button(
+                VoiceSession.shared.pendingConfirm?.isDestructive == true
+                    ? "Approve Voice Removal" : "Approve Voice Request"
+            ) {
+                VoiceSession.shared.answerConfirm(.allowOnce)
+            }
+            .keyboardShortcut(
+                VoiceSession.shared.pendingConfirm?.isDestructive == true
+                    ? nil : KeyboardShortcut(.return, modifiers: [.control, .option, .shift])
+            )
+            .disabled(VoiceSession.shared.pendingConfirm == nil)
+
+            Button("Cancel Voice Request") {
+                VoiceSession.shared.answerConfirm(.cancel)
+            }
+            .keyboardShortcut(.escape, modifiers: [.control, .option, .shift])
+            .disabled(VoiceSession.shared.pendingConfirm == nil)
+
+            Button("Show Voice Timeline") {
+                voiceCompanion?.showsTimeline = true
+            }
+            .keyboardShortcut("t", modifiers: [.control, .option, .shift])
+            .disabled(voiceCompanion == nil)
+
+            Button("Move Voice Companion to Next Corner") {
+                voiceCompanion?.moveToNextCorner()
+            }
+            .disabled(voiceCompanion == nil)
 
             Divider()
 

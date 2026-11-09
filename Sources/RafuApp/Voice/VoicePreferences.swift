@@ -10,6 +10,7 @@ nonisolated struct VoicePreferences: Sendable {
     static let monthlyCapKey = "voice.monthlyCapUSD"
     static let debugTranscriptKey = "voice.debugTranscript"
     static let agentUpdatesKey = "voice.agentUpdates"
+    static let keepsCompanionKey = "voice.companion.keepOnCanvas"
 
     static let capRange = 1...50
 
@@ -48,6 +49,9 @@ nonisolated struct VoicePreferences: Sendable {
     var speaksAgentUpdates: Bool {
         defaults.object(forKey: Self.agentUpdatesKey) as? Bool ?? true
     }
+
+    /// Default off: the companion shows only while a session is open.
+    var keepsCompanion: Bool { defaults.bool(forKey: Self.keepsCompanionKey) }
 
     var monthlyCapDollars: Double {
         let stored = defaults.object(forKey: Self.monthlyCapKey) as? Int

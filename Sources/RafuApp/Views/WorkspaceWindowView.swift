@@ -12,6 +12,8 @@ struct WorkspaceWindowView: View {
     /// Settings → Workspace → "Coloured file icons": read once per window
     /// and handed down, never per row.
     @AppStorage(FileIconProvider.colouredFileIconsKey) private var colouredFileIcons = false
+    /// This window's voice companion: its corner, tuck and toggles.
+    @State private var voiceCompanion = VoiceCompanionModel()
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -61,6 +63,7 @@ struct WorkspaceWindowView: View {
         .frame(minWidth: 774, minHeight: 480)
         .navigationTitle(session.windowTitle)
         .focusedSceneValue(\.workspaceSession, session)
+        .focusedSceneValue(\.voiceCompanion, voiceCompanion)
         .onChange(of: session.terminal.terminalGroupRevision) { _, _ in
             session.canvas.refreshResourceSnapshots()
         }
@@ -72,6 +75,8 @@ struct WorkspaceWindowView: View {
         .modifier(WorkspaceWindowPresentations(session: session))
         // Outermost, so sheets and popovers inherit it too.
         .environment(\.rafuColouredFileIcons, colouredFileIcons)
+        // Board cards report their drags, so the orb tucks away.
+        .environment(voiceCompanion)
     }
 
     private var showsWelcome: Bool {
@@ -184,6 +189,13 @@ struct WorkspaceWindowView: View {
                 .layoutPriority(1)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            // The voice companion: fixed in a corner of the workbench (it
+            // does not pan or zoom with a board), above the editor and below
+            // sheets, on every tab (voice-presence.md).
+            .overlay(alignment: .topLeading) {
+                VoiceCompanionHost(
+                    model: voiceCompanion, session: VoiceSession.shared, workspace: session)
+            }
 
             // The status bar owns its top boundary.
             WorkspaceStatusBar(session: session)

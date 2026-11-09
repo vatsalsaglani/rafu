@@ -275,6 +275,25 @@ finishes or needs you"); it includes "needs your approval".
   [`gpt-live-protocol.md`](../references/gpt-live-protocol.md)). If it fails, a fallback (a `response.create` turn
   with a fixed prompt) must be added; the policy and the gates stay.
 
+## Amendment (2026-11-10): the companion replaces the blob; the status item is a dot
+
+The user approved the floating voice companion (the orb's exact look stays open). Decision:
+
+- **The companion is the window's voice surface.** One overlay per workspace window, at the window root above the
+  editor and below sheets, on every tab, fixed while a board pans or zooms (not an `NSPanel`, not in the board
+  layer). It shows while a session is open or failed; when idle only with "Keep Rafu on the canvas when voice is
+  off" (`voice.companion.keepOnCanvas`, default off). Its corner is remembered per workspace.
+- **The orb replaces the blob.** `VoiceBlobView` is removed. The notch wing shows a 20 pt orb; real audio levels
+  drive it (input while listening, output while speaking); Thinking turns slowly; every other state is one still
+  frame with no task. Colours come only from the active theme palette, custom themes included.
+- **The status item is a dot.** A 7 pt dot (filled while open, a ring while idle), the state word in its help text
+  and accessibility value; the menu with every voice action stays.
+- **One speech card and an icon-only pill.** The card shows live captions (in memory, 160 scalars, cleared on
+  close), the state's words, the newest spoken agent update, the inline Confirm, or the error. ✓ and ✕ resolve the
+  same Confirm gate as the sheet, once (`answerConfirm`); a spoken confirmation still needs a later backend turn.
+  The Rafu menu keeps the words and shortcuts (Approve has no shortcut for a removal, per ADR 0033).
+- No protocol or state-machine change. Details: [`voice-presence.md`](../references/voice-presence.md).
+
 ## Related
 
 - Code: `Sources/RafuCore/Voice/`, `Sources/RafuApp/Voice/`,

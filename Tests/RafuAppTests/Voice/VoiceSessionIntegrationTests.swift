@@ -1734,3 +1734,138 @@ struct VoiceAgentUpdateSessionTests {
         try await until("closed") { voice.blobState == .idle }
     }
 }
+
+// MARK: Presence (the voice companion)
+
+@Suite("Voice presence in a session")
+@MainActor
+struct VoicePresenceSessionTests {
+    @Test("The output level follows audible replies and goes to 0 when the reply ends")
+    func outputLevel() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        let voice = fixture.voice
+        try await fixture.openLatched()
+        #expect(voice.outputLevel == 0)
+        var loud = Data()
+        for _ in 0..<2_400 { loud.append(contentsOf: [0x00, 0x10]) }
+        fixture.transport.push(
+            #"{"type":"session.output_audio.delta","delta":"\#(loud.base64EncodedString())"}"#)
+        try await until("speaking") { voice.blobState == .speaking }
+        #expect(voice.outputLevel > 0)
+        voice.stopSpeaking()
+        #expect(voice.outputLevel == 0)
+        await voice.close()
+        #expect(voice.outputLevel == 0)
+    }
+
+    @Test("Captions follow the speaker, stay bounded, and clear on close")
+    func captions() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        let voice = fixture.voice
+        try await fixture.openLatched()
+        #expect(voice.liveCaption == nil)
+        fixture.transport.push(
+            #"{"type":"session.input_transcript.delta","delta":"make a ","start_ms":0,"end_ms":300}"#
+        )
+        fixture.transport.push(
+            #"{"type":"session.input_transcript.delta","delta":"note","start_ms":300,"end_ms":600}"#
+        )
+        try await until("you") { voice.liveCaption?.text == "make a note" }
+        #expect(voice.liveCaption?.speaker == .you)
+        let youRevision = try #require(voice.liveCaption?.revision)
+        fixture.transport.push(
+            #"{"type":"session.output_transcript.delta","delta":"Done.","start_ms":900,"end_ms":1200}"#
+        )
+        try await until("rafu") { voice.liveCaption?.speaker == .rafu }
+        #expect(voice.liveCaption?.text == "Done.")
+        #expect(voice.liveCaption?.revision != youRevision)
+        let long = String(repeating: "word ", count: 80)
+        fixture.transport.push(
+            #"{"type":"session.output_transcript.delta","delta":"\#(long)"}"#)
+        try await until("bounded") {
+            (voice.liveCaption?.text.unicodeScalars.count ?? 0) > 100
+        }
+        #expect(
+            (voice.liveCaption?.text.unicodeScalars.count ?? 0) <= VoiceCaption.maximumScalars)
+        await voice.close()
+        #expect(voice.liveCaption == nil)
+    }
+
+    @Test("The inline Confirm answers the same gate once and closes the sheet")
+    func inlineConfirm() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        let voice = fixture.voice
+        try await fixture.openLatched()
+        #expect(!voice.answerConfirm(.allowOnce))
+        let pending = Task { await fixture.run("node_remove", #"{"node_id":"Review"}"#) }
+        try await until("card") { voice.confirmGate.isPending }
+        #expect(voice.pendingConfirm?.tool == .nodeRemove)
+        // A click needs no new backend turn (a spoken answer would).
+        #expect(voice.answerConfirm(.cancel))
+        #expect(!voice.answerConfirm(.allowOnce))
+        let outcome = await pending.value
+        #expect(outcome.output.contains("cancelled"))
+        #expect(fixture.confirm.dismissals == 1)
+        #expect(voice.pendingConfirm == nil)
+        #expect(fixture.board.cards.count == 2)
+
+        let allowed = Task { await fixture.run("node_remove", #"{"node_id":"Review"}"#) }
+        try await until("second card") { voice.confirmGate.isPending }
+        #expect(voice.answerConfirm(.allowOnce))
+        #expect(!(await allowed.value).isError)
+        #expect(fixture.board.cards.count == 1)
+        #expect(voice.pendingConfirm == nil)
+        await voice.close()
+    }
+
+    @Test("Turn progress counts the delegation's calls; a new delegation resets it")
+    func turnProgress() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        let voice = fixture.voice
+        try await fixture.openLatched()
+        fixture.transport.push(#"{"type":"session.delegation.created","delegation":{"id":"d1"}}"#)
+        for index in 1...2 {
+            fixture.transport.push(
+                #"{"type":"response.event","event":{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_\#(index)","name":"note_create","arguments":"{\"title\":\"Idea \#(index)\"}"}}}"#
+            )
+        }
+        try await until("calls done") {
+            voice.turnProgress == VoiceTurnProgress(done: 2, total: 2)
+        }
+        #expect(voice.turnProgress.chip == "2/2")
+        fixture.transport.push(#"{"type":"session.delegation.created","delegation":{"id":"d2"}}"#)
+        try await until("reset") { voice.turnProgress.total == 0 }
+        await voice.close()
+        #expect(voice.turnProgress == VoiceTurnProgress())
+    }
+
+    @Test("A spoken agent update becomes the card's agent line")
+    func agentLine() async throws {
+        let fake = FakeAgentActivity()
+        let row = UUID()
+        fake.signals = [
+            FakeAgentActivity.signal(
+                "n1", title: "Tests", agent: "Codex", state: .working, row: row)
+        ]
+        let fixture = try await VoiceFixture(agentActivity: fake.source)
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        let voice = fixture.voice
+        try await fixture.openLatched()
+        fake.publish([
+            FakeAgentActivity.signal(
+                "n1", title: "Tests", agent: "Codex", state: .finished, reply: UUID(), row: row)
+        ])
+        try await until("queued") { voice.queuedAgentUpdates == 1 }
+        #expect(voice.agentLine == nil)
+        voice.tick(at: .seconds(5))
+        try await until("line") { voice.agentLine != nil }
+        #expect(voice.agentLine?.text == "Codex in Tests is done")
+        #expect(voice.agentLine?.cardID == "n1")
+        await voice.close()
+        #expect(voice.agentLine == nil)
+    }
+}

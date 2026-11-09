@@ -1,10 +1,12 @@
+import AppKit
 import RafuCore
 import SwiftUI
 
-/// The voice item in every workspace window's status bar: the one visible
-/// voice surface on a Mac without a notch. A symbol at rest; a symbol and a
-/// short word while a session is open. Its menu holds every voice action, so
-/// none needs the key chord.
+/// The voice item in every workspace window's status bar: a 7 pt dot, the
+/// accent while a session is open and muted while idle. The state word is in
+/// the help text and the accessibility value; the companion orb is the
+/// window's main voice surface (voice-presence.md). Its menu holds every
+/// voice action, one click away, so none needs the key chord.
 struct VoiceStatusItem: View {
     let session: VoiceSession
     @Environment(\.rafuTheme) private var theme
@@ -36,21 +38,16 @@ struct VoiceStatusItem: View {
                 openSettings()
             }
         } label: {
-            HStack(spacing: 3) {
-                Image(systemName: state.symbol)
-                if state != .idle {
-                    Text(state.word).lineLimit(1)
-                }
-                if session.isMicOpen {
-                    Circle().fill(theme.palette.accent).frame(width: 5, height: 5)
-                        .accessibilityHidden(true)
-                }
-            }
+            Image(nsImage: Self.dot(open: state.isOpen))
+                .renderingMode(.template)
+                .foregroundStyle(state.isOpen ? theme.palette.accent : theme.palette.textMuted)
+                .frame(width: 14, height: 14)
+                .contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .foregroundStyle(state == .idle ? theme.palette.textMuted : theme.palette.textSecondary)
+        .foregroundStyle(state.isOpen ? theme.palette.accent : theme.palette.textMuted)
         .help(helpText)
         .accessibilityLabel("Rafu voice")
         .accessibilityValue(state.accessibilityLabel)
@@ -58,6 +55,31 @@ struct VoiceStatusItem: View {
         .popover(isPresented: $showsTimeline, arrowEdge: .top) {
             VoiceTimelinePopover(session: session)
         }
+    }
+
+    static let dotDiameter: CGFloat = 7
+
+    /// A 7 pt circle as a template image (a borderless menu label draws an
+    /// image, not an arbitrary shape): filled while a session is open, a
+    /// ring while idle, so colour is not the only signal. The help text and
+    /// the accessibility value carry the state word.
+    static func dot(open: Bool) -> NSImage {
+        let size = NSSize(width: dotDiameter, height: dotDiameter)
+        let image = NSImage(size: size, flipped: false) { rect in
+            if open {
+                NSColor.black.setFill()
+                NSBezierPath(ovalIn: rect).fill()
+            } else {
+                NSColor.black.setStroke()
+                let ring = NSBezierPath(ovalIn: rect.insetBy(dx: 0.75, dy: 0.75))
+                ring.lineWidth = 1.5
+                ring.stroke()
+            }
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = open ? "Voice session open" : "Voice off"
+        return image
     }
 
     /// Where ⌃⌥Space works: in any app with the global hot key, else only
