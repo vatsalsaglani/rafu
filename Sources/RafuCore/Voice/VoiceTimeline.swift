@@ -8,6 +8,12 @@ public nonisolated struct VoiceTimelineEvent: Equatable, Identifiable, Sendable 
         case you, voice, delegation, tool, board
     }
 
+    /// How a finished row ended. `nil` means the row has no result to show:
+    /// a transcript row, or a row whose writer did not say.
+    public enum Outcome: String, Equatable, Sendable {
+        case ok, failed
+    }
+
     public static let maximumDetailScalars = 120
 
     public let id: String
@@ -19,10 +25,12 @@ public nonisolated struct VoiceTimelineEvent: Equatable, Identifiable, Sendable 
     public let title: String
     public var detail: String
     public var undoStepID: UUID?
+    public var outcome: Outcome?
 
     public init(
         id: String, lane: Lane, startMS: Int, endMS: Int? = nil, delegationID: String? = nil,
-        persona: String, title: String, detail: String = "", undoStepID: UUID? = nil
+        persona: String, title: String, detail: String = "", undoStepID: UUID? = nil,
+        outcome: Outcome? = nil
     ) {
         self.id = id
         self.lane = lane
@@ -33,6 +41,7 @@ public nonisolated struct VoiceTimelineEvent: Equatable, Identifiable, Sendable 
         self.title = CanvasAgentText.singleLine(title, limit: 80)
         self.detail = Self.bounded(detail)
         self.undoStepID = undoStepID
+        self.outcome = outcome
     }
 
     static func bounded(_ text: String) -> String {
@@ -72,9 +81,13 @@ public nonisolated struct VoiceTimeline: Equatable, Sendable {
         events[index].detail = VoiceTimelineEvent.bounded(events[index].detail + text)
     }
 
-    public mutating func finish(_ id: String, endMS: Int, detail: String? = nil) {
+    public mutating func finish(
+        _ id: String, endMS: Int, detail: String? = nil,
+        outcome: VoiceTimelineEvent.Outcome? = nil
+    ) {
         guard let index = events.firstIndex(where: { $0.id == id }) else { return }
         events[index].endMS = endMS
+        if let outcome { events[index].outcome = outcome }
         if let detail { events[index].detail = VoiceTimelineEvent.bounded(detail) }
     }
 
