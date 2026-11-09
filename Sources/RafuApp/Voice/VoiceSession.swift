@@ -122,6 +122,9 @@ final class VoiceSession {
     /// `voice_confirm` counts only in a later turn than the card's, so the
     /// backend can never confirm its own call (ADR 0035, decision 9).
     @ObservationIgnored private var delegationCount = 0
+    /// The delegation the current tool rows belong to, so the timeline groups
+    /// each step under its own delegation (not by time).
+    @ObservationIgnored private var currentDelegationID: String?
     @ObservationIgnored private var cardDelegationIndex = 0
     @ObservationIgnored private let dependencies: Dependencies
     @ObservationIgnored private var client: VoiceLiveClient?
@@ -544,6 +547,7 @@ final class VoiceSession {
         sessionID = nil
         sessionGrants.removeAll()
         delegationCount = 0
+        currentDelegationID = nil
         cardDelegationIndex = 0
         isEngineSuspended = false
         lastEngineUse = .zero
@@ -803,6 +807,7 @@ final class VoiceSession {
             hint = nil
             noteServerTurnEvent(delegation: true)
             delegationCount += 1
+            currentDelegationID = id
             turnProgress = VoiceTurnProgress()
             // A reply is coming: have the engine ready before its audio.
             _ = resumeEngineIfSuspended()
@@ -948,7 +953,8 @@ final class VoiceSession {
         noteEngineUse()
         let ticket = generation
         let row = timeline.append(
-            lane: .tool, startMS: milliseconds(elapsed()), persona: personaName, title: name)
+            lane: .tool, startMS: milliseconds(elapsed()), delegationID: currentDelegationID,
+            persona: personaName, title: name)
         if VoiceToolSchema.confirmNames.contains(name) {
             // The answer to a waiting card: run now, not behind that call.
             Task {
@@ -992,8 +998,9 @@ final class VoiceSession {
         // timeline cuts the line to 120 scalars.
         let base = outcome.message.map { "\(outcome.summary): \($0)" } ?? outcome.summary
         let detail = measure.map { "\(base); \($0)" } ?? base
-        // TODO(merge): pass outcome: outcome.isError ? .failed : .ok
-        timeline.finish(row, endMS: milliseconds(elapsed()), detail: detail)
+        timeline.finish(
+            row, endMS: milliseconds(elapsed()), detail: detail,
+            outcome: outcome.isError ? .failed : .ok)
         turnProgress.done += 1
         clock.noteServerActivity(at: elapsed())
         noteServerTurnEvent(delegation: true)

@@ -182,6 +182,14 @@ not a clean pass, no code change. Suspect it, with the tests above, when a
 parallel run fails only under machine load. The handoff did not state the
 parallel test count of that run.
 
+**Added 2026-11-10: `LSPNavigationProviderTests`.** Three of its tests
+(`definition resolves a same-file target…`, `a bogus symbolName…`, `an
+authoritative empty ([]) result…`) failed on `await answerCall` in a parallel run
+of 3,480 tests that took 58 s instead of the usual ~35 s, while two agent
+worktrees were building at the same time. They passed alone (25 tests with
+`AgentActivityStoreTests`, 0.15 s) and the same tree passed `--no-parallel`
+(3,480 tests). Row two of the triage table: machine load, no code change.
+
 **A background wrapper can exit while its SwiftPM child keeps running (2026-11-08).**
 A backgrounded Bash wrapper around `swift build` or `swift test` can report
 "failed" or "completed" while the SwiftPM child process still runs and still holds

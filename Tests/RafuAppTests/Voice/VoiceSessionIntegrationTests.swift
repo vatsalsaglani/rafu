@@ -1008,6 +1008,9 @@ struct VoiceArgumentsAndTranscriptTests {
         defer { TestDefaultsSuite.remove(fixture.suite) }
         try await fixture.openLatched()
         fixture.transport.push(
+            #"{"type":"session.delegation.created","delegation":{"id":"del_w","target":"responses"}}"#
+        )
+        fixture.transport.push(
             #"{"type":"response.event","event":{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_w","name":"node_update","arguments":"{\"node_id\":\"Plan\",\"width\":5}"}}}"#
         )
         try await until("output") {
@@ -1015,6 +1018,9 @@ struct VoiceArgumentsAndTranscriptTests {
         }
         let row = try #require(fixture.voice.timeline.rows(lane: .tool).first)
         #expect(row.detail.hasPrefix(#"invalid_arguments: Invalid value for "width""#))
+        // The capsule timeline shows it as Failed, grouped under its delegation.
+        #expect(row.outcome == .failed)
+        #expect(row.delegationID == "del_w")
         await fixture.voice.close()
     }
 
