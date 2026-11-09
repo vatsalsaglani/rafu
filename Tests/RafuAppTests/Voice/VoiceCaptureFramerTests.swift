@@ -61,4 +61,42 @@ struct VoiceCaptureFramerTests {
         // A 0.25 sine is about 5,800 RMS in PCM16; zeros would be 0.
         #expect(loudest > VoiceAudioFormat.localSpeechRMS)
     }
+
+    @Test("The framer counts yielded frames and the ones a full buffer dropped")
+    func dropCounts() async throws {
+        let rate = 48_000.0
+        let mono = try #require(
+            AVAudioFormat(
+                commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 1, interleaved: false))
+        let output = try #require(
+            AVAudioFormat(
+                commonFormat: .pcmFormatInt16, sampleRate: VoiceAudioFormat.sampleRate,
+                channels: 1, interleaved: true))
+        let converter = try #require(AVAudioConverter(from: mono, to: output))
+        // Room for two frames; nothing reads while the tap feeds.
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: Data.self, bufferingPolicy: .bufferingNewest(2))
+        let framer = VoiceCaptureFramer(
+            converter: converter, monoFormat: mono, outputFormat: output,
+            continuation: continuation)
+        for _ in 0..<4 {
+            let buffer = try #require(AVAudioPCMBuffer(pcmFormat: mono, frameCapacity: 2_400))
+            buffer.frameLength = 2_400
+            framer.consume(buffer)
+        }
+        let stats = framer.takeStats()
+        #expect(stats.yielded >= 8)
+        #expect(stats.dropped == stats.yielded - 2)
+        // Taking restarts the counts.
+        #expect(framer.takeStats() == VoiceCaptureStats())
+        continuation.finish()
+        var kept = 0
+        for await _ in stream { kept += 1 }
+        #expect(kept == 2)
+    }
+
+    @Test("The capture buffer holds 15 s of 20 ms frames")
+    func bufferHolds15Seconds() {
+        #expect(VoiceAudioIO.bufferedFrames * 20 == 15_000)
+    }
 }

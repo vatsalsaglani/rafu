@@ -7,7 +7,8 @@
   the user's key (Phase 0 spike, native Swift `URLSessionWebSocketTask`).
   Implementation facts 2026-11-07, Apple Swift 6.4.2 (swiftlang-6.4.2.1.9),
   macOS 27 SDK 27.2, deployment target macOS 15. Phase 1b facts the same
-  day and toolchain. The microphone, echo cancellation, spoken check-in,
+  day and toolchain. The "stuck on Thinking" facts 2026-11-09, same
+  toolchain, by tests with fakes. The microphone, echo cancellation, spoken check-in,
   spoken confirm and the global hot key at run time are **not** verified yet
   (manual checks below).
 
@@ -171,9 +172,11 @@ other than `response.output_item.done` with `item.type == "function_call"` and
   program that enables voice processing before and after connecting an
   `AVAudioSourceNode` to the main mixer.
 - **Capture starts at the key press, not at `session.started`.** The socket
-  needs ~1.2 s; a push-to-talk user speaks at once. The capture stream buffers
-  the newest 2 s (100 frames) and is sent after `session.started`, even when
-  the key was already released. Each capture stream has one sender, chained
+  needs ~1.2 s warm, but much more on the first open after launch (see
+  "Stuck on Thinking" below). The capture stream buffers the newest 15 s
+  (`VoiceAudioIO.bufferedFrames` = 750 frames, about 720 KB, freed when the
+  stream ends) and is sent after `session.started`, even when the key was
+  already released. It was 2 s (100 frames) until 2026-11-09. Each capture stream has one sender, chained
   after the previous one, so the socket always sees `unmute`, frames, `mute`
   in that order; a `mute` never overtakes speech.
 - `installTap(onBus:bufferSize:format:block:)` is deprecated in the macOS 27
@@ -305,7 +308,15 @@ Verified 2026-11-09, same toolchain, by `VoiceDebugTranscriptTests` and
   | `call` | `call_id`, `name`, `arguments` (the raw JSON string) |
   | `call_result` | `call_id`, `name`, `summary`, `message`, `output`, `is_error` |
   | `confirm` | `tool`, `answer` |
+  | `audio_engine` | `voice_processing`, `fallback` (the engine with voice processing did not start), `start_ms`, `input_channels`, `sample_rate`; after every engine start |
+  | `turn_audio` | `held`, `frames` (sent), `max_rms`, `loud_frames` (≥ 600 RMS), `heard_speech`, `buffered_before_start`, `dropped`, `unmute_ms`, `mute_ms` (ms from the open; -1 = did not happen); one per capture stream, after its `mute` |
+  | `silent_turn` | `frames`, `max_rms`, `held_ms`; a held turn that went to Paused (below) |
+  | `no_response` | `after_ms` (from the start of Thinking), `had_delegation`; the Thinking limit fired |
+  | `capture_failed` | `domain`, `code` (the `NSError` of the second failed tap start) |
   | `truncated` | none; the file reached 2 MiB and nothing follows |
+
+  The audio entries hold numbers and type names only: never audio bytes and
+  never words.
 
   Turn boundaries: `session.input_transcript.delta` and
   `session.output_transcript.delta` carry `start_ms` and `end_ms`; Rafu splits a
@@ -339,6 +350,63 @@ Verified 2026-11-09, same toolchain, by `VoiceDebugTranscriptTests` and
   strings or `Authorization`, comments included; the word `Logs` may appear
   only in `VoiceDebugTranscript.swift` (the Settings footer reads
   `VoiceDebugTranscript.displayPath()`).
+
+### Stuck on Thinking after the first press (2026-11-09)
+
+Verified 2026-11-09, same toolchain, by `VoiceSilentTurnTests`,
+`VoiceBlobStateTests`, `VoiceCaptureFramerTests` and
+`VoiceDebugTranscriptTests` (fakes; no live run yet, manual checks 25–27 in
+`voice-control.md`).
+
+- **Symptom.** The first session after launch went Connecting → Thinking at
+  once and stayed there; the user said "hey" a few times and nothing
+  happened, with the macOS microphone indicator on. Debug transcripts:
+  `voice-20261109-180609-a01f.jsonl` open → `session.started` 3.1 s, then
+  nothing for about 109 s, close `user`; `voice-20261109-134114-9103.jsonl`
+  started in 11.7 s, no `user_said`, server close `expired` after 30 s. The
+  next (warm) session started in 2.1 s and worked.
+- **Cause.** Connecting → Thinking happens only when the key is held past
+  `session.started` and then released (`.holdEnded` from `.listeningHeld`).
+  Thinking means the microphone is **off** (`.holdEnded` sets `mic = .off`
+  and the tap is removed), so words said while it shows Thinking are never
+  captured. With no speech in that hold the server got `unmute`, silence,
+  `mute`: no turn, no reply, and nothing ever left Thinking (it had no time
+  limit). The engine stays on until the 10 s quiet suspend, so the orange
+  indicator stays on too. The 2 s pre-start buffer also lost the start of
+  speech on a cold 3.1 s or 11.7 s open.
+- **Push-to-talk rule.** Each sender counts speech in its own stream (3
+  frames in a row at or above `VoiceAudioFormat.localSpeechRMS`, the barge-in
+  rule) and decides only after it sent `mute`, so frames buffered before
+  `session.started` count. A **held** stream with no local speech, while the
+  blob still shows Thinking with the mic off, and with no server event
+  (input transcript, delegation, function call, `response.completed`,
+  audible output) since the stream began, sends `.noResponse`: Thinking →
+  Paused (latched → Listening). The status-item tooltip and the blob's hint
+  read "Hold ⌃⌥Space while you talk, or choose Start Listening.", and one
+  Voice-lane row reads "Rafu did not hear you". A latched stream never
+  triggers it. Nothing is cancelled on the server: a late reply goes
+  Paused → Speaking, a late delegation Paused → Thinking. We chose this over
+  "latch on the first press" to keep the microphone under explicit control.
+- **Thinking limit (safety net).** `tick(at:)` ends Thinking after
+  `thinkingNoHearLimit` (8 s) with no server event, or `thinkingNoReplyLimit`
+  (20 s) after a delegation or call result; every server event in the turn
+  moves the limit forward. A running call or a waiting Confirm card holds it.
+  Rows: "Rafu did not hear anything" (no server event) or "No reply". The
+  limit starts on every entry to Thinking because all blob transitions go
+  through `VoiceSession.apply(_:)`.
+- **Silent capture failure.** `startCapture` used `try?` and returned with
+  nothing recorded while the blob showed Listening. It now stops and
+  restarts the engine and tries once more; a second failure shows a
+  "Microphone did not start" row and a `capture_failed` entry.
+  `VoiceAudioIO.startPlayback` still falls back to no voice processing
+  silently; `audio_engine.fallback` now records it.
+- **Audio-thread counters.** `VoiceCaptureFramer` counts yielded and
+  dropped frames (`continuation.yield(_:)` returns `.dropped` when the
+  buffer is full) in two `Atomic<Int>` values: the tap thread adds with
+  relaxed ordering, the main actor takes them with `exchange(0)`. No lock on
+  the tap thread.
+- **Not verified.** A 15 s burst sent faster than real time after a slow
+  start has not been tried against the server (2 s bursts work).
 
 ## Why it matters
 

@@ -87,6 +87,10 @@ public nonisolated enum VoiceBlobEvent: Equatable, Sendable {
     case pause
     case needsConfirm
     case confirmResolved
+    /// A held turn ended with no speech, or Thinking ran past its limit with
+    /// no reply. Rafu goes back to listening, or to Paused with the mic off.
+    /// Nothing is cancelled on the server; a late reply still plays.
+    case noResponse
     case failed(String)
     case closed
     /// Clears an error; the blob returns to idle.
@@ -174,6 +178,9 @@ public nonisolated struct VoiceBlobMachine: Equatable, Sendable {
         case .confirmResolved:
             guard state == .needsConfirm else { return }
             state = .thinking
+        case .noResponse:
+            guard state == .thinking else { return }
+            state = listening
         case .failed(let reason):
             mic = .off
             state = .error(reason)

@@ -45,6 +45,11 @@ final class VoiceSession {
         /// session that is not latched stops its audio engine, so the macOS
         /// microphone indicator goes out. The next key press restarts it.
         var engineIdleAfter: Duration = .seconds(10)
+        /// Thinking with no server event since it began (or since the
+        /// newest one): back to listening or Paused after this.
+        var thinkingNoHearLimit: Duration = .seconds(8)
+        /// Thinking after a delegation or a call result, with no reply.
+        var thinkingNoReplyLimit: Duration = .seconds(20)
         /// Off in tests, which drive `tick(at:)` directly.
         var runsClock = true
         /// The generated-view card implementation (`show_view`). Tests give a
@@ -78,7 +83,13 @@ final class VoiceSession {
     private(set) var inputLevel = 0.0
     private(set) var timeline = VoiceTimeline()
     private(set) var lastError: String?
+    /// A short tip after a turn Rafu did not hear or answer. Cleared by the
+    /// next press, a reply, a delegation, or close.
+    private(set) var hint: String?
     let costStore: VoiceCostStore
+
+    static let silentTurnHint = "Hold ⌃⌥Space while you talk, or choose Start Listening."
+    static let noReplyHint = "No reply. Hold ⌃⌥Space and try again."
 
     var blobState: VoiceBlobState { machine.state }
     var isMicOpen: Bool { machine.isMicOpen }
@@ -103,7 +114,18 @@ final class VoiceSession {
     @ObservationIgnored private var playback: (any VoiceAudioPlaying)?
     /// Capture streams not yet handed to a sender (while connecting). A
     /// second press during the connect adds a stream; none is dropped.
-    @ObservationIgnored private var pendingFrames: [AsyncStream<Data>] = []
+    @ObservationIgnored private var pendingFrames: [VoiceCaptureTurn] = []
+    /// The stream the tap feeds now; nil while the microphone is off.
+    @ObservationIgnored private var currentTurn: VoiceCaptureTurn?
+    /// Server events that show the turn was heard or answered. A held turn
+    /// with no local speech pauses only if this did not move since it began.
+    @ObservationIgnored private var serverEventCount = 0
+    /// While Thinking: the newest server event (or the entry), the entry,
+    /// and what the server did so far. `tick(at:)` ends a stalled Thinking.
+    @ObservationIgnored private var thinkingSince: Duration?
+    @ObservationIgnored private var thinkingStartedAt: Duration = .zero
+    @ObservationIgnored private var thinkingHadDelegation = false
+    @ObservationIgnored private var thinkingHadServerEvent = false
     @ObservationIgnored private var isCapturing = false
     @ObservationIgnored private var openTask: Task<Void, Never>?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
@@ -137,6 +159,8 @@ final class VoiceSession {
     /// Function calls whose arguments may stream, by output item id.
     @ObservationIgnored private var argumentStreams: [String: ArgumentStream] = [:]
     @ObservationIgnored private var argumentStreamOrder = 0
+    /// Calls not yet answered. Tests read it.
+    var runningCalls: Int { inFlightCalls }
     /// How many function calls are tracked now. Tests read it.
     var argumentStreamCount: Int { argumentStreams.count }
     /// The opt-in debug transcript of the open session; nil when off.
@@ -177,9 +201,10 @@ final class VoiceSession {
 
     /// ⌃⌥Space down, or the blob held.
     func beginHold() {
-        if case .error = blobState { machine.apply(.reset) }
+        hint = nil
+        if case .error = blobState { apply(.reset) }
         let wasOpen = blobState.isOpen
-        machine.apply(.holdBegan)
+        apply(.holdBegan)
         guard machine.mic == .held else { return }
         if wasOpen {
             clock.noteSpeech(at: elapsed())
@@ -192,7 +217,7 @@ final class VoiceSession {
     /// ⌃⌥Space up. The session stays open; the microphone stops.
     func endHold() {
         guard machine.mic == .held else { return }
-        machine.apply(.holdEnded)
+        apply(.holdEnded)
         youRow = nil
         if isStarted { clock.noteSpeech(at: elapsed()) }
         micClosed()
@@ -201,10 +226,13 @@ final class VoiceSession {
     /// The blob click and Start/Stop Listening: keep the microphone open
     /// without the key, visibly, until the check-in, a pause, or a click.
     func toggleLatched() {
-        if case .error = blobState { machine.apply(.reset) }
+        hint = nil
+        if case .error = blobState { apply(.reset) }
         let wasOpen = blobState.isOpen
-        machine.apply(.latchToggled)
+        apply(.latchToggled)
         let latched = machine.mic == .latched
+        // A held stream that becomes latched is no longer a push-to-talk turn.
+        if latched { currentTurn?.audio.held = false }
         if wasOpen {
             clock.setLatched(latched, at: elapsed())
             if latched { micOpened() } else { micClosed() }
@@ -221,7 +249,7 @@ final class VoiceSession {
 
     /// Clears a shown error; the blob returns to idle.
     func dismissError() {
-        if case .error = blobState { machine.apply(.reset) }
+        if case .error = blobState { apply(.reset) }
     }
 
     /// True while a session holds or is opening a socket.
@@ -241,9 +269,9 @@ final class VoiceSession {
         if reason == .failure { return }
         if reason == .remote, let message = Self.remoteCloseMessage(serverReason) {
             lastError = message
-            machine.apply(.failed(message))
+            apply(.failed(message))
         } else {
-            machine.apply(.closed)
+            apply(.closed)
         }
     }
 
@@ -299,7 +327,7 @@ final class VoiceSession {
         eventTask = nil
         pendingFrames = []
         releaseSession()
-        machine.apply(.closed)
+        apply(.closed)
     }
 
     // MARK: Open
@@ -340,6 +368,7 @@ final class VoiceSession {
         } catch {
             return await fail(.audioUnavailable, ticket: ticket)
         }
+        recordEngine()
         // Speech said while the socket connects is buffered and sent after
         // `session.started`.
         if machine.mic != .off { startCapture() }
@@ -374,7 +403,11 @@ final class VoiceSession {
         guard ticket == generation else { return await abandon(client, playback) }
         isStarted = true
         openTask = nil
-        machine.apply(.connected)
+        // Frames the open stream yielded so far were said before the start.
+        if let turn = currentTurn {
+            turn.take(capture.takeCaptureStats(), beforeStart: true)
+        }
+        apply(.connected)
         if !pendingFrames.isEmpty {
             // Sends what was said while connecting; a stream that already
             // ended (key released early) drains and then mutes.
@@ -433,7 +466,7 @@ final class VoiceSession {
         generation += 1
         openTask = nil
         lastError = error.blobReason
-        machine.apply(.failed(error.blobReason))
+        apply(.failed(error.blobReason))
         await teardown(sendClose: isStarted)
     }
 
@@ -492,6 +525,10 @@ final class VoiceSession {
         replyRow = nil
         inputLevel = 0
         isClosing = false
+        hint = nil
+        currentTurn = nil
+        serverEventCount = 0
+        thinkingSince = nil
     }
 
     private func eventsEnded(_ ticket: Int) {
@@ -517,6 +554,7 @@ final class VoiceSession {
             return false
         }
         isEngineSuspended = false
+        recordEngine()
         return true
     }
 
@@ -551,56 +589,142 @@ final class VoiceSession {
         noteEngineUse()
     }
 
+    /// Starts the tap. A failure restarts the engine and tries once more;
+    /// a second failure shows a row and leaves the microphone off. Before
+    /// this, a failed start said nothing and the blob still showed Listening.
     private func startCapture() {
         guard let capture else { return }
         speechFrames = 0
-        guard let stream = try? capture.startCapture() else {
-            isCapturing = false
-            return
+        let stream: AsyncStream<Data>
+        do {
+            stream = try capture.startCapture()
+        } catch {
+            do {
+                stream = try retryCapture(capture)
+            } catch {
+                isCapturing = false
+                let failure = error as NSError
+                transcript?.record(.captureFailed(domain: failure.domain, code: failure.code))
+                let row = timeline.append(
+                    lane: .voice, startMS: milliseconds(elapsed()), persona: personaName,
+                    title: "Microphone did not start")
+                timeline.finish(row, endMS: milliseconds(elapsed()))
+                return
+            }
         }
-        pendingFrames.append(stream)
+        let turn = VoiceCaptureTurn(
+            frames: stream, held: machine.mic == .held, openedAt: elapsed(),
+            eventMark: serverEventCount)
+        currentTurn = turn
+        pendingFrames.append(turn)
         isCapturing = true
     }
 
+    /// A fresh engine, then the tap again.
+    private func retryCapture(_ capture: any VoiceAudioCapturing) throws -> AsyncStream<Data> {
+        if let playback {
+            playback.stopAll()
+            do {
+                try playback.startPlayback()
+            } catch {
+                // The next press restarts the engine.
+                isEngineSuspended = true
+                throw error
+            }
+            recordEngine()
+        }
+        return try capture.startCapture()
+    }
+
+    private func recordEngine() {
+        guard let transcript, let capture else { return }
+        transcript.record(.audioEngine(capture.lastEngineFacts))
+    }
+
     /// One sender per capture stream, chained so the order on the socket is
-    /// always unmute, frames, mute.
+    /// always unmute, frames, mute. Each sender counts speech in its own
+    /// stream, so the decision for a held turn waits until the frames
+    /// buffered before `session.started` went out.
     private func startSendingAudio() {
         guard !pendingFrames.isEmpty, let client else { return }
-        let streams = pendingFrames
+        let turns = pendingFrames
         pendingFrames = []
-        for stream in streams {
+        let ticket = generation
+        for turn in turns {
             let previous = audioTask
             audioTask = Task {
                 await previous?.value
                 try? await client.send(.inputAudioUnmute)
-                for await frame in stream {
-                    self.handleFrame(frame)
+                turn.audio.unmuteMS = self.milliseconds(self.elapsed())
+                for await frame in turn.frames {
+                    turn.note(rms: self.handleFrame(frame))
                     try? await client.send(.inputAudioAppend(frame))
                 }
                 try? await client.send(.inputAudioMute)
+                turn.audio.muteMS = self.milliseconds(self.elapsed())
+                self.turnFinished(turn, ticket: ticket)
             }
         }
     }
 
+    /// The newest sender; it waits for the ones before it. Tests await it
+    /// instead of sleeping.
+    var audioSender: Task<Void, Never>? { audioTask }
+
+    /// Records the turn's numbers. A held turn with no local speech and no
+    /// server event since it began cannot get a reply: the blob would stay
+    /// on Thinking with the microphone off, and words said then are lost.
+    /// It goes to Paused with a hint instead.
+    private func turnFinished(_ turn: VoiceCaptureTurn, ticket: Int) {
+        guard ticket == generation else { return }
+        transcript?.record(.turnAudio(turn.audio))
+        guard turn.audio.held, !turn.audio.heardSpeech, blobState == .thinking,
+            machine.mic == .off, serverEventCount == turn.eventMark
+        else { return }
+        apply(.noResponse)
+        showNoResponse(title: "Rafu did not hear you", hint: Self.silentTurnHint)
+        transcript?.record(
+            .silentTurn(
+                frames: turn.audio.frames, maxRMS: turn.audio.maxRMS,
+                heldMS: milliseconds((turn.closedAt ?? elapsed()) - turn.openedAt)))
+    }
+
+    private func showNoResponse(title: String, hint: String) {
+        self.hint = hint
+        let row = timeline.append(
+            lane: .voice, startMS: milliseconds(elapsed()), persona: personaName, title: title,
+            detail: hint)
+        timeline.finish(row, endMS: milliseconds(elapsed()))
+    }
+
     private func stopCapture() {
-        if isCapturing { capture?.stopCapture() }
+        if isCapturing {
+            capture?.stopCapture()
+            if let turn = currentTurn {
+                if let capture { turn.take(capture.takeCaptureStats(), beforeStart: !isStarted) }
+                turn.closedAt = elapsed()
+            }
+        }
+        currentTurn = nil
         isCapturing = false
         inputLevel = 0
     }
 
-    private func handleFrame(_ frame: Data) {
+    /// Updates the meter and the shared speech run; returns the frame's RMS.
+    private func handleFrame(_ frame: Data) -> Double {
         let rms = VoiceAudioLevel.rms(pcm16: frame)
         levelFrames += 1
         if levelFrames % 3 == 0 { inputLevel = VoiceAudioLevel.meterLevel(rms: rms) }
         speechFrames = rms >= VoiceAudioFormat.localSpeechRMS ? speechFrames + 1 : 0
-        guard speechFrames >= VoiceAudioFormat.localSpeechFrames else { return }
+        guard speechFrames >= VoiceAudioFormat.localSpeechFrames else { return rms }
         clock.noteSpeech(at: elapsed())
-        if blobState == .checkIn { machine.apply(.speechDetected) }
+        if blobState == .checkIn { apply(.speechDetected) }
         // Barge-in: the user talks over Rafu; cut the reply locally at once.
         if lastAudibleAt != nil, capture?.supportsBargeIn == true {
             playback?.flush()
             endReply()
         }
+        return rms
     }
 
     // MARK: Events
@@ -614,6 +738,7 @@ final class VoiceSession {
         case .outputAudioDelta(let pcm):
             handleOutputAudio(pcm)
         case .inputTranscriptDelta(let text, let startMS, let endMS):
+            noteServerTurnEvent()
             if transcript != nil {
                 noteInputTranscript(text, startMS: startMS, endMS: endMS)
             }
@@ -633,22 +758,28 @@ final class VoiceSession {
             flushTranscriptText()
             transcript?.record(.delegation(id: id, target: target))
             youRow = nil
+            hint = nil
+            noteServerTurnEvent(delegation: true)
             delegationCount += 1
             // A reply is coming: have the engine ready before its audio.
             _ = resumeEngineIfSuspended()
             clock.noteServerActivity(at: elapsed())
-            machine.apply(.delegationStarted)
+            apply(.delegationStarted)
             timeline.append(
                 lane: .delegation, startMS: milliseconds(elapsed()), delegationID: id,
                 persona: personaName, title: "Delegation")
         case .functionCallStarted(let itemID, let callID, let name):
+            noteServerTurnEvent(delegation: true)
             functionCallStarted(itemID: itemID, callID: callID, name: name)
         case .functionCallArgumentsDelta(let itemID, let delta):
+            noteServerTurnEvent(delegation: true)
             functionCallArgumentsDelta(itemID: itemID, delta: delta)
         case .functionCall(let callID, let name, let arguments):
+            noteServerTurnEvent(delegation: true)
             let measure = functionCallFinished(callID: callID, name: name)
             runCall(callID: callID, name: name, arguments: arguments, measure: measure)
         case .responseCompleted:
+            noteServerTurnEvent()
             // Transcript deltas trail the audio by a fraction of a second.
             // While the reply is still audible `endReply` writes it.
             if lastAudibleAt == nil { flushReply() }
@@ -699,8 +830,10 @@ final class VoiceSession {
         playback?.enqueue(pcm)
         if audible {
             noteEngineUse()
+            noteServerTurnEvent()
             if lastAudibleAt == nil, blobState != .checkIn {
-                machine.apply(.replyStarted)
+                hint = nil
+                apply(.replyStarted)
                 replyCharacters = 0
                 replyRow = timeline.append(
                     lane: .voice, startMS: milliseconds(now), persona: personaName,
@@ -714,6 +847,16 @@ final class VoiceSession {
         }
     }
 
+    /// Moves the Thinking limit forward. A delegation or a call means a reply
+    /// is being made, so the longer limit applies.
+    private func noteServerTurnEvent(delegation: Bool = false) {
+        serverEventCount += 1
+        guard thinkingSince != nil else { return }
+        thinkingSince = elapsed()
+        thinkingHadServerEvent = true
+        if delegation { thinkingHadDelegation = true }
+    }
+
     private func endReply() {
         lastAudibleAt = nil
         if let replyRow {
@@ -722,7 +865,7 @@ final class VoiceSession {
         }
         replyRow = nil
         flushReply()
-        machine.apply(.replyEnded)
+        apply(.replyEnded)
     }
 
     // MARK: Tool calls
@@ -782,6 +925,7 @@ final class VoiceSession {
         let detail = measure.map { "\(base); \($0)" } ?? base
         timeline.finish(row, endMS: milliseconds(elapsed()), detail: detail)
         clock.noteServerActivity(at: elapsed())
+        noteServerTurnEvent(delegation: true)
         try? await client.send(
             .responseItemCreateFunctionOutput(callID: callID, output: outcome.output))
         guard ticket == generation else { return }
@@ -1000,11 +1144,12 @@ final class VoiceSession {
         guard isStarted else { return }
         // A waiting Confirm card holds the clock; its own 60 s timeout ends it.
         guard !confirmGate.isPending else { return }
+        endThinkingIfStalled(at: now)
         suspendEngineIfQuiet(at: now)
         switch clock.nextAction(at: now) {
         case .checkIn:
             clock.checkedIn = true
-            machine.apply(.checkIn)
+            apply(.checkIn)
             checkInPending = true
             if let client {
                 Task {
@@ -1014,7 +1159,7 @@ final class VoiceSession {
             }
         case .pause:
             clock.paused = true
-            machine.apply(.pause)
+            apply(.pause)
             micClosed()
         case .close:
             Task { await self.close(reason: .idle) }
@@ -1023,11 +1168,51 @@ final class VoiceSession {
         }
     }
 
+    /// The safety net for a Thinking that no reply ends: 8 s with no server
+    /// event, 20 s after a delegation or a call result. A running call or a
+    /// waiting card holds it. Nothing is cancelled on the server.
+    private func endThinkingIfStalled(at now: Duration) {
+        guard blobState == .thinking, let since = thinkingSince, inFlightCalls == 0,
+            !confirmGate.isPending
+        else { return }
+        let limit =
+            thinkingHadDelegation
+            ? dependencies.thinkingNoReplyLimit : dependencies.thinkingNoHearLimit
+        guard now - since >= limit else { return }
+        let heard = thinkingHadServerEvent
+        let hadDelegation = thinkingHadDelegation
+        let afterMS = milliseconds(now - thinkingStartedAt)
+        apply(.noResponse)
+        showNoResponse(
+            title: heard ? "No reply" : "Rafu did not hear anything",
+            hint: heard ? Self.noReplyHint : Self.silentTurnHint)
+        transcript?.record(.noResponse(afterMS: afterMS, hadDelegation: hadDelegation))
+    }
+
+    /// Every blob transition goes through here, so the Thinking limit starts
+    /// on entry from any path and stops on exit.
+    private func apply(_ event: VoiceBlobEvent) {
+        let wasThinking = blobState == .thinking
+        machine.apply(event)
+        guard blobState == .thinking else {
+            thinkingSince = nil
+            return
+        }
+        guard !wasThinking else { return }
+        let now = elapsed()
+        thinkingSince = now
+        thinkingStartedAt = now
+        // Only a released key enters Thinking before the server did anything.
+        thinkingHadDelegation = event != .holdEnded
+        thinkingHadServerEvent = event != .holdEnded
+    }
+
     // MARK: Tool host
 
     func latchFromTool() {
         guard machine.mic != .latched else { return }
-        machine.apply(.latchToggled)
+        currentTurn?.audio.held = false
+        apply(.latchToggled)
         clock.setLatched(true, at: elapsed())
         micOpened()
     }
@@ -1037,11 +1222,11 @@ final class VoiceSession {
         let row = timeline.append(
             lane: .tool, startMS: milliseconds(elapsed()), persona: personaName,
             title: "Confirm \(request.tool.rawValue)")
-        machine.apply(.needsConfirm)
+        apply(.needsConfirm)
         cardDelegationIndex = delegationCount
         let answer = await confirmGate.ask(
             request, timeout: dependencies.confirmTimeout, present: dependencies.presentConfirm)
-        machine.apply(.confirmResolved)
+        apply(.confirmResolved)
         transcript?.record(.confirm(tool: request.tool.rawValue, answer: answer.timelineWord))
         timeline.finish(row, endMS: milliseconds(elapsed()), detail: answer.timelineWord)
         if isStarted { clock.noteServerActivity(at: elapsed()) }
@@ -1149,5 +1334,39 @@ extension VoiceSession: VoiceToolHost {
             status["agent_control"] = .string(board.agentControlMode.rawValue)
         }
         return .object(status)
+    }
+}
+
+/// One capture stream and the numbers its sender collects. Main actor only.
+final class VoiceCaptureTurn {
+    let frames: AsyncStream<Data>
+    let openedAt: Duration
+    /// `serverEventCount` when the stream began.
+    let eventMark: Int
+    var closedAt: Duration?
+    var audio: VoiceDebugTranscript.TurnAudio
+    /// Consecutive frames at or above the speech level.
+    private var run = 0
+
+    init(frames: AsyncStream<Data>, held: Bool, openedAt: Duration, eventMark: Int) {
+        self.frames = frames
+        self.openedAt = openedAt
+        self.eventMark = eventMark
+        audio = VoiceDebugTranscript.TurnAudio(held: held)
+    }
+
+    /// The same rule as the barge-in check, for this stream only.
+    func note(rms: Double) {
+        audio.frames += 1
+        audio.maxRMS = max(audio.maxRMS, Int(rms))
+        let loud = rms >= VoiceAudioFormat.localSpeechRMS
+        if loud { audio.loudFrames += 1 }
+        run = loud ? run + 1 : 0
+        if run >= VoiceAudioFormat.localSpeechFrames { audio.heardSpeech = true }
+    }
+
+    func take(_ stats: VoiceCaptureStats, beforeStart: Bool) {
+        audio.dropped += stats.dropped
+        if beforeStart { audio.bufferedBeforeStart += stats.yielded }
     }
 }

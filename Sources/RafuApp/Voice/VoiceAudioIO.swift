@@ -13,6 +13,28 @@ protocol VoiceAudioCapturing: AnyObject {
     /// speaks is the user and may cut the reply. Without it, Rafu's own
     /// voice from the speakers would cut itself.
     var supportsBargeIn: Bool { get }
+    /// How the newest engine started. Numbers only, for the debug transcript.
+    var lastEngineFacts: VoiceEngineFacts { get }
+    /// Frames the current (or last) capture yielded and dropped since the
+    /// previous call; the counts restart at zero.
+    func takeCaptureStats() -> VoiceCaptureStats
+}
+
+/// How an engine started: for the opt-in debug transcript only.
+nonisolated struct VoiceEngineFacts: Equatable, Sendable {
+    var voiceProcessing = false
+    /// The engine with voice processing did not start; this one runs without it.
+    var fallbackUsed = false
+    var startMS = 0
+    var inputChannels = 0
+    var sampleRate = 0
+}
+
+/// Capture frame counts: for the opt-in debug transcript only.
+nonisolated struct VoiceCaptureStats: Equatable, Sendable {
+    var yielded = 0
+    /// Frames the stream buffer had no room for (the oldest went).
+    var dropped = 0
 }
 
 /// The speaker side. The server streams 100 ms deltas continuously, silence
@@ -47,11 +69,16 @@ final class VoiceAudioIO: VoiceAudioCapturing, VoiceAudioPlaying {
     private var ring: VoicePlaybackRing?
     private var captureContinuation: AsyncStream<Data>.Continuation?
     private var tapInstalled = false
+    /// The current or last capture's framer, kept after `stopCapture` so
+    /// its counts can still be read.
+    private var framer: VoiceCaptureFramer?
     /// Whether voice processing could be turned on. Read by Settings and
     /// recorded in the reference note after the manual check.
     private(set) var voiceProcessingEnabled = false
 
     var supportsBargeIn: Bool { voiceProcessingEnabled }
+
+    private(set) var lastEngineFacts = VoiceEngineFacts()
 
     init() {}
 
@@ -63,13 +90,23 @@ final class VoiceAudioIO: VoiceAudioCapturing, VoiceAudioPlaying {
     /// fails with -10875 (`kAUInitialize` on the output node).
     func startPlayback() throws {
         guard engine == nil else { return }
+        let started = ContinuousClock.now
+        var fallbackUsed = false
         do {
             try startEngine(voiceProcessing: true)
         } catch {
             // Voice writes no logs (VoiceSourcePolicyTests). When this also
             // fails, the session's blob reason is the only report.
+            fallbackUsed = true
             try startEngine(voiceProcessing: false)
         }
+        let time = (ContinuousClock.now - started).components
+        // `startCapture` reads the same input format a moment later.
+        let input = engine?.inputNode.outputFormat(forBus: 0)
+        lastEngineFacts = VoiceEngineFacts(
+            voiceProcessing: voiceProcessingEnabled, fallbackUsed: fallbackUsed,
+            startMS: Int(time.seconds * 1_000 + time.attoseconds / 1_000_000_000_000_000),
+            inputChannels: Int(input?.channelCount ?? 0), sampleRate: Int(input?.sampleRate ?? 0))
     }
 
     private func startEngine(voiceProcessing: Bool) throws {
@@ -130,13 +167,15 @@ final class VoiceAudioIO: VoiceAudioCapturing, VoiceAudioPlaying {
                 channels: 1, interleaved: true),
             let converter = AVAudioConverter(from: monoFormat, to: outputFormat)
         else { throw VoiceAudioError.converter }
-        // 2 s of frames: speech said while the socket connects (about 1.2 s)
-        // is sent once the session starts.
+        // 15 s of frames (at most about 720 KB, freed when the stream ends):
+        // speech said while the session opens is sent after it starts. A cold
+        // first open was measured at 3.1 s and 11.7 s, so 2 s lost the start.
         let (stream, continuation) = AsyncStream.makeStream(
-            of: Data.self, bufferingPolicy: .bufferingNewest(100))
+            of: Data.self, bufferingPolicy: .bufferingNewest(Self.bufferedFrames))
         let framer = VoiceCaptureFramer(
             converter: converter, monoFormat: monoFormat, outputFormat: outputFormat,
             continuation: continuation)
+        self.framer = framer
         Self.installTap(on: input, format: inputFormat, framer: framer)
         tapInstalled = true
         captureContinuation = continuation
@@ -153,6 +192,13 @@ final class VoiceAudioIO: VoiceAudioCapturing, VoiceAudioPlaying {
     }
 
     func stopAll() { teardown() }
+
+    /// 750 frames of 20 ms: 15 s.
+    nonisolated static let bufferedFrames = 750
+
+    func takeCaptureStats() -> VoiceCaptureStats {
+        framer?.takeStats() ?? VoiceCaptureStats()
+    }
 
     /// The render block, built outside the main actor.
     private nonisolated static func makeSource(format: AVAudioFormat, ring: VoicePlaybackRing)
@@ -184,18 +230,22 @@ final class VoiceAudioIO: VoiceAudioCapturing, VoiceAudioPlaying {
         source = nil
         engine = nil
         ring = nil
+        framer = nil
     }
 }
 
 /// Copies channel 0 of each tap buffer, converts it to 24 kHz mono PCM16 and
 /// cuts it into 20 ms frames. Used only on the tap thread; its buffers are
-/// allocated up front.
+/// allocated up front. The two counters are `Atomic`: the tap thread adds,
+/// the main actor takes.
 nonisolated final class VoiceCaptureFramer {
     private let converter: AVAudioConverter
     private let mono: AVAudioPCMBuffer?
     private let converted: AVAudioPCMBuffer?
     private let continuation: AsyncStream<Data>.Continuation
     private var pending: [Int16]
+    private let yielded = Atomic<Int>(0)
+    private let dropped = Atomic<Int>(0)
 
     init(
         converter: AVAudioConverter, monoFormat: AVAudioFormat, outputFormat: AVAudioFormat,
@@ -239,10 +289,20 @@ nonisolated final class VoiceCaptureFramer {
         var offset = 0
         while pending.count - offset >= frame {
             let data = pending[offset..<offset + frame].withUnsafeBytes { Data($0) }
-            continuation.yield(data)
+            if case .dropped = continuation.yield(data) {
+                dropped.add(1, ordering: .relaxed)
+            }
+            yielded.add(1, ordering: .relaxed)
             offset += frame
         }
         if offset > 0 { pending.removeFirst(offset) }
+    }
+
+    /// The counts since the last call; both restart at zero.
+    func takeStats() -> VoiceCaptureStats {
+        VoiceCaptureStats(
+            yielded: yielded.exchange(0, ordering: .relaxed),
+            dropped: dropped.exchange(0, ordering: .relaxed))
     }
 }
 

@@ -66,10 +66,21 @@ final class FakeVoiceAudio: VoiceAudioCapturing, VoiceAudioPlaying {
     private(set) var flushes = 0
     private(set) var playing = false
     var supportsBargeIn = true
+    var lastEngineFacts = VoiceEngineFacts(
+        voiceProcessing: true, startMS: 42, inputChannels: 9, sampleRate: 48_000)
+    /// How many of the next `startCapture` calls throw.
+    var failingCaptureStarts = 0
+    private(set) var playbackStarts = 0
+    private var stats = VoiceCaptureStats()
 
     var isCapturing: Bool { continuation != nil }
 
     func startCapture() throws -> AsyncStream<Data> {
+        if failingCaptureStarts > 0 {
+            failingCaptureStarts -= 1
+            throw VoiceAudioError.noInput
+        }
+        stats = VoiceCaptureStats()
         let (stream, continuation) = AsyncStream.makeStream(of: Data.self)
         self.continuation = continuation
         captureStarts += 1
@@ -82,12 +93,24 @@ final class FakeVoiceAudio: VoiceAudioCapturing, VoiceAudioPlaying {
         captureStops += 1
     }
 
-    func startPlayback() throws { playing = true }
+    func startPlayback() throws {
+        playing = true
+        playbackStarts += 1
+    }
     func enqueue(_ pcm: Data) { enqueued += 1 }
     func flush() { flushes += 1 }
     func stopAll() { playing = false }
 
-    func push(_ frame: Data) { continuation?.yield(frame) }
+    func takeCaptureStats() -> VoiceCaptureStats {
+        defer { stats = VoiceCaptureStats() }
+        return stats
+    }
+
+    func push(_ frame: Data) {
+        guard let continuation else { return }
+        if case .dropped = continuation.yield(frame) { stats.dropped += 1 }
+        stats.yielded += 1
+    }
 }
 
 /// Stands in for the Confirm card: records each request, and answers when
@@ -1194,5 +1217,282 @@ struct VoiceArgumentsAndTranscriptTests {
         #expect(
             VoiceSession.remoteCloseMessage("bad\n<script>")
                 == "The voice service closed the session (badscript).")
+    }
+}
+
+// MARK: Turns Rafu did not hear
+
+/// A held or latched turn that got no reply must not leave the blob on
+/// Thinking with the microphone off (the first-press "stuck on Thinking").
+@Suite("Voice silent turns")
+@MainActor
+struct VoiceSilentTurnTests {
+    private static var silence: Data { Data(count: VoiceAudioFormat.inputFrameBytes) }
+
+    /// 480 samples at 0x2000: about 8,200 RMS, well above the speech level.
+    private static var speech: Data {
+        var frame = Data()
+        for _ in 0..<VoiceAudioFormat.inputFrameSamples { frame.append(contentsOf: [0x00, 0x20]) }
+        return frame
+    }
+
+    /// A fixture with the debug transcript on.
+    private func fixture(
+        transport: ScriptedLiveTransport = ScriptedLiveTransport()
+    ) async throws -> (VoiceFixture, TranscriptFolder) {
+        let folder = TranscriptFolder()
+        let fixture = try await VoiceFixture(transport: transport, transcriptDirectory: folder.url)
+        UserDefaults(suiteName: fixture.suite)?.set(
+            true, forKey: VoicePreferences.debugTranscriptKey)
+        return (fixture, folder)
+    }
+
+    /// Holds after the connect, sends `frames`, and releases.
+    private func hold(_ fixture: VoiceFixture, frames: [Data]) async throws {
+        let voice = fixture.voice
+        voice.beginHold()
+        try await until("listening") { voice.blobState == .listeningHeld }
+        for frame in frames { fixture.audio.push(frame) }
+        try await until("frames") {
+            fixture.transport.sent(type: "session.input_audio.append").count >= frames.count
+        }
+        voice.endHold()
+        #expect(voice.blobState == .thinking)
+    }
+
+    private func transcriptLines(_ fixture: VoiceFixture) async throws -> [[String: Any]] {
+        await fixture.voice.close()
+        let transcript = try #require(fixture.voice.lastDebugTranscript)
+        await transcript.drained()
+        return try VoiceDebugTranscriptTests.lines(transcript.fileURL)
+    }
+
+    private func rows(_ voice: VoiceSession, _ title: String) -> [VoiceTimelineEvent] {
+        voice.timeline.rows(lane: .voice).filter { $0.title == title }
+    }
+
+    @Test("A held turn with no speech goes to Paused with a hint, one row and one silent_turn")
+    func silentHeldTurn() async throws {
+        let (fixture, folder) = try await fixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        _ = folder
+        let voice = fixture.voice
+        try await hold(fixture, frames: Array(repeating: Self.silence, count: 3))
+        await voice.audioSender?.value
+        #expect(voice.blobState == .paused)
+        #expect(!voice.isMicOpen)
+        #expect(voice.hint == VoiceSession.silentTurnHint)
+        let row = try #require(rows(voice, "Rafu did not hear you").first)
+        #expect(rows(voice, "Rafu did not hear you").count == 1)
+        #expect(row.detail == VoiceSession.silentTurnHint)
+        // The next press clears the hint. The session closes while held, so
+        // this second stream never decides anything.
+        voice.beginHold()
+        #expect(voice.hint == nil)
+        let lines = try await transcriptLines(fixture)
+        let silent = lines.filter { $0["type"] as? String == "silent_turn" }
+        #expect(silent.count == 1)
+        #expect(silent.first?["frames"] as? Int == 3)
+        #expect(silent.first?["max_rms"] as? Int == 0)
+        #expect(silent.first?["held_ms"] is Int)
+        let turn = try #require(lines.first { $0["type"] as? String == "turn_audio" })
+        #expect(turn["held"] as? Bool == true)
+        #expect(turn["heard_speech"] as? Bool == false)
+        #expect(turn["frames"] as? Int == 3)
+        #expect(turn["loud_frames"] as? Int == 0)
+        #expect(turn["buffered_before_start"] as? Int == 0)
+        #expect(turn["unmute_ms"] is Int)
+        #expect(turn["mute_ms"] is Int)
+        let engine = try #require(lines.first { $0["type"] as? String == "audio_engine" })
+        #expect(engine["input_channels"] as? Int == 9)
+        #expect(engine["start_ms"] as? Int == 42)
+        // No words in any diagnostic line.
+        for line in lines {
+            let type = line["type"] as? String ?? ""
+            guard ["turn_audio", "silent_turn", "audio_engine"].contains(type) else { continue }
+            #expect(line["text"] == nil)
+        }
+    }
+
+    @Test("A held turn with speech stays on Thinking; with no server event it pauses after 8 s")
+    func spokenTurnTimesOut() async throws {
+        let (fixture, folder) = try await fixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        _ = folder
+        let voice = fixture.voice
+        try await hold(fixture, frames: Array(repeating: Self.speech, count: 3))
+        await voice.audioSender?.value
+        #expect(voice.blobState == .thinking)
+        #expect(voice.hint == nil)
+        voice.tick(at: voice.sessionElapsed + .seconds(5))
+        #expect(voice.blobState == .thinking)
+        voice.tick(at: voice.sessionElapsed + .seconds(9))
+        #expect(voice.blobState == .paused)
+        #expect(voice.hint == VoiceSession.silentTurnHint)
+        #expect(rows(voice, "Rafu did not hear anything").count == 1)
+        #expect(rows(voice, "Rafu did not hear you").isEmpty)
+        let lines = try await transcriptLines(fixture)
+        let turn = try #require(lines.first { $0["type"] as? String == "turn_audio" })
+        #expect(turn["heard_speech"] as? Bool == true)
+        #expect(turn["loud_frames"] as? Int == 3)
+        #expect((turn["max_rms"] as? Int ?? 0) > Int(VoiceAudioFormat.localSpeechRMS))
+        let timeout = try #require(lines.first { $0["type"] as? String == "no_response" })
+        #expect(timeout["had_delegation"] as? Bool == false)
+        #expect((timeout["after_ms"] as? Int ?? 0) >= 9_000)
+        #expect(!lines.contains { $0["type"] as? String == "silent_turn" })
+    }
+
+    @Test("Frames said while connecting and released before the start: Paused, no silent row")
+    func releasedWhileConnecting() async throws {
+        let transport = ScriptedLiveTransport(answersStart: false)
+        let (fixture, folder) = try await fixture(transport: transport)
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        _ = folder
+        let voice = fixture.voice
+        voice.beginHold()
+        try await until("capturing") { fixture.audio.isCapturing }
+        fixture.audio.push(Self.silence)
+        fixture.audio.push(Self.silence)
+        voice.endHold()
+        try await until("start sent") { !transport.sent(type: "session.start").isEmpty }
+        transport.push(#"{"type":"session.started","session":{"id":"sess_late"}}"#)
+        try await until("mute") { !transport.sent(type: "session.input_audio.mute").isEmpty }
+        await voice.audioSender?.value
+        #expect(voice.blobState == .paused)
+        #expect(voice.hint == nil)
+        #expect(rows(voice, "Rafu did not hear you").isEmpty)
+        let lines = try await transcriptLines(fixture)
+        let turn = try #require(lines.first { $0["type"] as? String == "turn_audio" })
+        #expect(turn["buffered_before_start"] as? Int == 2)
+        #expect(turn["frames"] as? Int == 2)
+        #expect(!lines.contains { $0["type"] as? String == "silent_turn" })
+    }
+
+    @Test("A server transcript during the hold stops the silent rule")
+    func serverHeardTheTurn() async throws {
+        let (fixture, folder) = try await fixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        _ = folder
+        let voice = fixture.voice
+        voice.beginHold()
+        try await until("listening") { voice.blobState == .listeningHeld }
+        for _ in 0..<3 { fixture.audio.push(Self.silence) }
+        fixture.transport.push(#"{"type":"session.input_transcript.delta","delta":"hey"}"#)
+        try await until("you row") { !voice.timeline.rows(lane: .you).isEmpty }
+        voice.endHold()
+        await voice.audioSender?.value
+        #expect(voice.blobState == .thinking)
+        #expect(voice.hint == nil)
+        #expect(rows(voice, "Rafu did not hear you").isEmpty)
+        await voice.close()
+    }
+
+    @Test("A latched stream never triggers the silent rule")
+    func latchedStream() async throws {
+        let (fixture, folder) = try await fixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        _ = folder
+        let voice = fixture.voice
+        try await fixture.openLatched()
+        for _ in 0..<3 { fixture.audio.push(Self.silence) }
+        fixture.transport.push(
+            #"{"type":"session.delegation.created","delegation":{"id":"del_1"}}"#)
+        try await until("thinking") { voice.blobState == .thinking }
+        voice.toggleLatched()
+        #expect(!voice.isMicOpen)
+        await voice.audioSender?.value
+        #expect(voice.blobState == .thinking)
+        #expect(voice.hint == nil)
+        #expect(rows(voice, "Rafu did not hear you").isEmpty)
+        await voice.close()
+    }
+
+    @Test("After a delegation the limit is 20 s, and the row says No reply")
+    func delegationExtendsLimit() async throws {
+        let (fixture, folder) = try await fixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        _ = folder
+        let voice = fixture.voice
+        try await hold(fixture, frames: Array(repeating: Self.speech, count: 3))
+        await voice.audioSender?.value
+        fixture.transport.push(
+            #"{"type":"session.delegation.created","delegation":{"id":"del_1"}}"#)
+        try await until("delegation") { !voice.timeline.rows(lane: .delegation).isEmpty }
+        #expect(voice.blobState == .thinking)
+        voice.tick(at: voice.sessionElapsed + .seconds(9))
+        #expect(voice.blobState == .thinking)
+        voice.tick(at: voice.sessionElapsed + .seconds(21))
+        #expect(voice.blobState == .paused)
+        #expect(voice.hint == VoiceSession.noReplyHint)
+        #expect(rows(voice, "No reply").count == 1)
+        // A late reply still plays and clears the hint.
+        var loud = Data()
+        for _ in 0..<2_400 { loud.append(contentsOf: [0x00, 0x10]) }
+        fixture.transport.push(
+            #"{"type":"session.output_audio.delta","delta":"\#(loud.base64EncodedString())"}"#)
+        try await until("speaking") { voice.blobState == .speaking }
+        #expect(voice.hint == nil)
+        let lines = try await transcriptLines(fixture)
+        let timeout = try #require(lines.first { $0["type"] as? String == "no_response" })
+        #expect(timeout["had_delegation"] as? Bool == true)
+    }
+
+    @Test("A waiting card and a running call hold the limit; the confirmed path then times out")
+    func confirmHoldsTheLimit() async throws {
+        let (fixture, folder) = try await fixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        _ = folder
+        let voice = fixture.voice
+        try await fixture.openLatched()
+        fixture.transport.push(
+            #"{"type":"session.delegation.created","delegation":{"id":"del_1"}}"#)
+        fixture.transport.push(
+            #"{"type":"response.event","event":{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_1","name":"node_remove","arguments":"{\"node_id\":\"Review\"}"}}}"#
+        )
+        try await until("card") { voice.confirmGate.isPending }
+        #expect(voice.blobState == .needsConfirm)
+        voice.tick(at: voice.sessionElapsed + .seconds(30))
+        #expect(voice.blobState == .needsConfirm)
+        fixture.confirm.click(.cancel)
+        try await until("output") {
+            !fixture.transport.sent(type: "response.item.create").isEmpty
+        }
+        try await until("call done") { voice.runningCalls == 0 }
+        #expect(voice.blobState == .thinking)
+        voice.tick(at: voice.sessionElapsed + .seconds(9))
+        #expect(voice.blobState == .thinking)
+        voice.tick(at: voice.sessionElapsed + .seconds(21))
+        #expect(voice.blobState == .listeningLatched)
+        #expect(rows(voice, "No reply").count == 1)
+        await voice.close()
+    }
+
+    @Test("A capture that does not start is retried once on a fresh engine")
+    func captureRetry() async throws {
+        let (fixture, folder) = try await fixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        _ = folder
+        fixture.audio.failingCaptureStarts = 1
+        try await fixture.openLatched()
+        #expect(fixture.audio.isCapturing)
+        #expect(fixture.audio.playbackStarts == 2)
+        #expect(rows(fixture.voice, "Microphone did not start").isEmpty)
+        await fixture.voice.close()
+    }
+
+    @Test("A capture that fails twice shows a row and a capture_failed entry")
+    func captureFails() async throws {
+        let (fixture, folder) = try await fixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        _ = folder
+        fixture.audio.failingCaptureStarts = 2
+        try await fixture.openLatched()
+        #expect(!fixture.audio.isCapturing)
+        #expect(rows(fixture.voice, "Microphone did not start").count == 1)
+        let lines = try await transcriptLines(fixture)
+        let failure = try #require(lines.first { $0["type"] as? String == "capture_failed" })
+        #expect((failure["domain"] as? String)?.contains("VoiceAudioError") == true)
+        #expect(failure["code"] is Int)
+        #expect(lines.count(where: { $0["type"] as? String == "audio_engine" }) == 2)
     }
 }

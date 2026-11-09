@@ -73,6 +73,7 @@ struct VoiceStatusItem: View {
 
     private var helpText: String {
         if case .error(let reason) = state { return "Rafu voice: \(reason)" }
+        if let hint = session.hint { return "Rafu voice: \(state.word). \(hint)" }
         return state == .idle
             ? "Rafu voice. \(Self.chordHint), or choose Start Listening."
             : "Rafu voice: \(state.word)"

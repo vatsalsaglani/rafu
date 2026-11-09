@@ -208,6 +208,23 @@ re-checked live):
     end reason and the Claude Code version. Ask Rafu to "answer the dialog":
     it uses `terminal_send`, not `voice_confirm`.
 
+Stuck on Thinking after the first press (2026-11-09; see
+`docs/references/gpt-live-protocol.md`, "Stuck on Thinking"; not yet
+checked live; turn on the debug transcript first):
+
+25. Relaunch Rafu Lightning. Hold ⌃⌥Space through Connecting without
+    speaking, then release: the blob shows Paused (not Thinking), and the
+    status-item tooltip shows "Hold ⌃⌥Space while you talk, or choose Start
+    Listening." Say "hey" with no key: nothing is sent, and the Voice
+    Timeline has one "Rafu did not hear you" row.
+26. Relaunch. Hold, speak at once while Connecting, then release: Rafu
+    answers. If it does not, send the `turn_audio` and `audio_engine` lines
+    of the newest transcript (`buffered_before_start`, `heard_speech`,
+    `max_rms`, `dropped`, `start_ms`, `fallback`).
+27. Stay silent after a hold that has speech but gets no reply: the blob
+    goes back to Paused within about 8 s ("Rafu did not hear anything"), or
+    20 s after a delegation ("No reply").
+
 ### Addition: `compose_view` (2026-11-08)
 
 Delivered on `main`: the voice backend tool `compose_view` composes a view from Rafu-owned candidates with the OpenAI

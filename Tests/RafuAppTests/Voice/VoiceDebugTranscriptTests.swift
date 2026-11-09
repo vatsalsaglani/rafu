@@ -94,6 +94,54 @@ struct VoiceDebugTranscriptTests {
         #expect(try Self.mode(transcript.fileURL) == 0o600)
     }
 
+    @Test("Audio diagnostics are numbers and type names only")
+    func audioEntries() async throws {
+        let folder = TranscriptFolder()
+        let transcript = VoiceDebugTranscript(directory: folder.url)
+        transcript.record(
+            .audioEngine(
+                VoiceEngineFacts(
+                    voiceProcessing: true, fallbackUsed: false, startMS: 812, inputChannels: 9,
+                    sampleRate: 48_000)))
+        transcript.record(
+            .turnAudio(
+                VoiceDebugTranscript.TurnAudio(
+                    held: true, frames: 150, maxRMS: 2_400, loudFrames: 40, heardSpeech: true,
+                    bufferedBeforeStart: 120, dropped: 0, unmuteMS: 3_100, muteMS: 3_400)))
+        transcript.record(.silentTurn(frames: 90, maxRMS: 120, heldMS: 1_800))
+        transcript.record(.noResponse(afterMS: 8_000, hadDelegation: false))
+        transcript.record(.captureFailed(domain: "RafuApp.VoiceAudioError", code: 1))
+        transcript.finish()
+        await transcript.drained()
+        let lines = try Self.lines(transcript.fileURL)
+        #expect(
+            lines.map { $0["type"] as? String } == [
+                "audio_engine", "turn_audio", "silent_turn", "no_response", "capture_failed",
+            ])
+        let engine = lines[0]
+        #expect(engine["voice_processing"] as? Bool == true)
+        #expect(engine["fallback"] as? Bool == false)
+        #expect(engine["start_ms"] as? Int == 812)
+        #expect(engine["input_channels"] as? Int == 9)
+        #expect(engine["sample_rate"] as? Int == 48_000)
+        let turn = lines[1]
+        #expect(turn["held"] as? Bool == true)
+        #expect(turn["frames"] as? Int == 150)
+        #expect(turn["max_rms"] as? Int == 2_400)
+        #expect(turn["loud_frames"] as? Int == 40)
+        #expect(turn["heard_speech"] as? Bool == true)
+        #expect(turn["buffered_before_start"] as? Int == 120)
+        #expect(turn["dropped"] as? Int == 0)
+        #expect(turn["unmute_ms"] as? Int == 3_100)
+        #expect(turn["mute_ms"] as? Int == 3_400)
+        #expect(lines[2]["held_ms"] as? Int == 1_800)
+        #expect(lines[2]["max_rms"] as? Int == 120)
+        #expect(lines[3]["after_ms"] as? Int == 8_000)
+        #expect(lines[3]["had_delegation"] as? Bool == false)
+        #expect(lines[4]["domain"] as? String == "RafuApp.VoiceAudioError")
+        #expect(lines[4]["code"] as? Int == 1)
+    }
+
     @Test("Rafu and Rafu Lightning write to different folders")
     func folders() {
         let path = VoiceDebugTranscript.defaultDirectory().path

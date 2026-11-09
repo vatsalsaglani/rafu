@@ -40,9 +40,9 @@ struct VoiceBlobView: View {
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .help(helpText)
+        .help(hintText)
         .accessibilityLabel(state.accessibilityLabel)
-        .accessibilityHint(helpText)
+        .accessibilityHint(hintText)
         .accessibilityAction(named: "Show Voice Timeline") { showsTimeline = true }
         .contextMenu {
             Button("Show Voice Timeline") { showsTimeline = true }
@@ -60,6 +60,12 @@ struct VoiceBlobView: View {
         case .listeningLatched, .checkIn: "Stop listening"
         default: "Keep listening without the key"
         }
+    }
+
+    /// After a turn Rafu did not hear, the session's tip comes first.
+    private var hintText: String {
+        guard let hint = session.hint else { return helpText }
+        return "\(hint) Click to \(helpText.lowercased())."
     }
 
     private func activate() {

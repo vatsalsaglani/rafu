@@ -97,6 +97,42 @@ struct VoiceBlobStateTests {
         #expect(value.mic == .off)
     }
 
+    @Test("No response: a held turn released after the connect leaves Thinking for Paused")
+    func noResponseFromHeldTurn() {
+        var value = machine([.holdBegan, .connected, .holdEnded])
+        #expect(value.state == .thinking)
+        value.apply(.noResponse)
+        #expect(value.state == .paused)
+        #expect(value.mic == .off)
+        // A late reply still plays, and a late delegation still shows.
+        value.apply(.replyStarted)
+        #expect(value.state == .speaking)
+        value = machine([.holdBegan, .connected, .holdEnded, .noResponse, .delegationStarted])
+        #expect(value.state == .thinking)
+    }
+
+    @Test("No response: latched Thinking goes back to listening")
+    func noResponseLatched() {
+        let value = machine([.latchToggled, .connected, .delegationStarted, .noResponse])
+        #expect(value.state == .listeningLatched)
+        #expect(value.isMicOpen)
+    }
+
+    @Test("No response is a no-op outside Thinking")
+    func noResponseNoOp() {
+        let cases: [[VoiceBlobEvent]] = [
+            [], [.holdBegan], [.holdBegan, .connected], [.holdBegan, .holdEnded, .connected],
+            [.latchToggled, .connected], [.latchToggled, .connected, .needsConfirm],
+            [.latchToggled, .connected, .replyStarted], [.failed("x")],
+        ]
+        for events in cases {
+            let before = machine(events)
+            var after = before
+            after.apply(.noResponse)
+            #expect(after == before)
+        }
+    }
+
     @Test("Every state has a word, a symbol and an accessibility label")
     func presentation() {
         let states: [VoiceBlobState] = [

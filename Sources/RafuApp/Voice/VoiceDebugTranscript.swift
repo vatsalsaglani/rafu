@@ -26,6 +26,28 @@ nonisolated struct VoiceDebugTranscript: Sendable {
             callID: String, name: String, summary: String, message: String?, output: String,
             isError: Bool)
         case confirm(tool: String, answer: String)
+        // Audio diagnostics: numbers and type names only, never audio or text.
+        case audioEngine(VoiceEngineFacts)
+        case turnAudio(TurnAudio)
+        case silentTurn(frames: Int, maxRMS: Int, heldMS: Int)
+        case noResponse(afterMS: Int, hadDelegation: Bool)
+        case captureFailed(domain: String, code: Int)
+    }
+
+    /// One capture stream as its sender saw it. Offsets are milliseconds
+    /// from the session open; -1 means "did not happen".
+    struct TurnAudio: Equatable, Sendable {
+        var held = false
+        var frames = 0
+        var maxRMS = 0
+        /// Frames at or above `VoiceAudioFormat.localSpeechRMS`.
+        var loudFrames = 0
+        var heardSpeech = false
+        /// Frames the capture yielded before `session.started`.
+        var bufferedBeforeStart = 0
+        var dropped = 0
+        var unmuteMS = -1
+        var muteMS = -1
     }
 
     /// One entry with the time it was recorded, not the time it was written.
@@ -223,6 +245,30 @@ nonisolated struct VoiceDebugTranscript: Sendable {
             object["message"] = message.map(clean)
         case .confirm(let tool, let answer):
             object = ["type": "confirm", "tool": clean(tool), "answer": clean(answer)]
+        case .audioEngine(let facts):
+            object = [
+                "type": "audio_engine", "voice_processing": facts.voiceProcessing,
+                "fallback": facts.fallbackUsed, "start_ms": facts.startMS,
+                "input_channels": facts.inputChannels, "sample_rate": facts.sampleRate,
+            ]
+        case .turnAudio(let turn):
+            object = [
+                "type": "turn_audio", "held": turn.held, "frames": turn.frames,
+                "max_rms": turn.maxRMS, "loud_frames": turn.loudFrames,
+                "heard_speech": turn.heardSpeech,
+                "buffered_before_start": turn.bufferedBeforeStart, "dropped": turn.dropped,
+                "unmute_ms": turn.unmuteMS, "mute_ms": turn.muteMS,
+            ]
+        case .silentTurn(let frames, let maxRMS, let heldMS):
+            object = [
+                "type": "silent_turn", "frames": frames, "max_rms": maxRMS, "held_ms": heldMS,
+            ]
+        case .noResponse(let afterMS, let hadDelegation):
+            object = [
+                "type": "no_response", "after_ms": afterMS, "had_delegation": hadDelegation,
+            ]
+        case .captureFailed(let domain, let code):
+            object = ["type": "capture_failed", "domain": clean(domain), "code": code]
         }
         return object
     }
