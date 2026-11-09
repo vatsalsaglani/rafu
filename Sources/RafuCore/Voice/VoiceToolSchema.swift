@@ -59,10 +59,29 @@ public nonisolated enum VoiceToolSchema {
     /// the call that waits, never queued behind it.
     public static let confirmNames: Set<String> = ["voice_confirm", "voice_cancel"]
 
+    /// Voice texts for Ensemble tools whose MCP text speaks to an agent that
+    /// has its own node. Voice has no node on the board (ADR 0035), so these
+    /// never say "your node". The MCP texts stay as they are.
+    public static let voiceDescriptions: [String: String] = [
+        CanvasAgentTool.terminalCreate.rawValue:
+            "Add a terminal node. With agent (claude, codex, opencode, gemini, cursor, kimi, cline) or command (an argument array, never a shell string) Rafu starts the shell in the visible node and types that command. prompt gives claude or codex its first task, typed as one line. Rafu places the node beside the selected or focused node; near names another node. There is no link option by voice. The reply has state: running means the shell is up and Rafu is typing the line; stopped means the node exists and the line is queued, not typed. Starting asks the user unless Agent control is Allow.",
+        CanvasAgentTool.terminalSend.rawValue:
+            "Types text into any terminal for the user: text into an agent terminal (claude, codex), or command (an argument array) into a shell terminal. Rafu presses Return after the line. The reply has state: stopped means the line is queued, not typed. Typing asks the user unless Agent control is Allow.",
+        CanvasAgentTool.edgeCreate.rawValue:
+            "Links two board nodes. You have no node; never use yourself as from or to. kind message links two terminals for agent messages and starts Paused; call link_set_state live to deliver messages. kind relationship is visual only.",
+    ]
+
+    /// Properties voice never offers on a tool that places a new node. `link`
+    /// adds an edge from the caller's node, which voice does not have. `x` and
+    /// `y` place the node; voice places it beside the selection or focus, or
+    /// `near` a node. `node_update` keeps `x` and `y`: there they move a node.
+    public static let voiceDroppedProperties: Set<String> = ["link", "x", "y"]
+
     /// The Ensemble tools, one per `CanvasAgentTool`, from MCP `definitions`
     /// (`name`, `description`, `inputSchema`). `ensemble_describe` gains an
     /// optional `ensemble` (a title or id) so Rafu can read another open board
-    /// without a hand-off.
+    /// without a hand-off. Other tools lose `voiceDroppedProperties`, and
+    /// `voiceDescriptions` replaces three texts.
     public static func ensembleTools(from definitions: [[String: Any]]) -> [VoiceFunctionTool] {
         definitions.compactMap { definition in
             guard let name = definition["name"] as? String,
@@ -71,17 +90,27 @@ public nonisolated enum VoiceToolSchema {
                 !hiddenEnsembleTools.contains(name)
             else { return nil }
             var parameters = VoiceJSON(any: schema)
-            if name == CanvasAgentTool.ensembleDescribe.rawValue,
-                case .object(var object) = parameters,
+            if case .object(var object) = parameters,
                 case .object(var properties) = object["properties"] ?? .object([:])
             {
-                properties["ensemble"] = property(
-                    "string",
-                    "Optional. The title or id of another open Ensemble. Omit for the visible one.")
-                object["properties"] = .object(properties)
-                parameters = .object(object)
+                let before = properties
+                if name == CanvasAgentTool.ensembleDescribe.rawValue {
+                    properties["ensemble"] = property(
+                        "string",
+                        "Optional. The title or id of another open Ensemble. Omit for the visible one."
+                    )
+                }
+                if name != CanvasAgentTool.nodeUpdate.rawValue {
+                    for key in voiceDroppedProperties { properties[key] = nil }
+                }
+                if properties != before {
+                    object["properties"] = .object(properties)
+                    parameters = .object(object)
+                }
             }
-            return VoiceFunctionTool(name: name, description: description, parameters: parameters)
+            return VoiceFunctionTool(
+                name: name, description: voiceDescriptions[name] ?? description,
+                parameters: parameters)
         }
     }
 

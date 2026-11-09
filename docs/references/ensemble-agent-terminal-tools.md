@@ -3,8 +3,10 @@
 - **Applies to:** `Sources/RafuCore/CanvasBridge/CanvasAgentTools.swift`,
   `Sources/RafuApp/Canvas/Integration/CanvasTerminalStarter.swift`,
   `CanvasAgentActions.swift`, `CanvasBoardState.swift`,
-  `CanvasLiveBridge.swift`, `Canvas/Adapters/CanvasTerminalCard.swift`
-- **Last verified:** Swift 6.2 language mode, macOS Darwin 27.0.0, on 2026-10-25
+  `CanvasLiveBridge.swift`, `Canvas/Adapters/CanvasTerminalCard.swift`,
+  `Sources/RafuApp/Terminal/TerminalReplyWriter.swift`,
+  `WorkspaceTerminalController.sendReply`
+- **Last verified:** Swift 6.2 language mode, macOS Darwin 27.0.0, on 2026-11-09
 
 ## Rule or observed behavior
 
@@ -53,7 +55,7 @@ it — and the old code still replied `ok`.
 
 - queues the line first, so a later start still types it;
 - refuses early with a named reason — `leaseCap` (four live Ensemble terminals
-  already hold a presentation lease), `unavailable` (no shell to start, or
+  already hold a presentation lease; see section 9), `unavailable` (no shell to start, or
   `startAvailability` says no), `refused` (the terminal manager put up its alert);
 - reveals the node: `revealCard` pans at live zoom, `zoomToCard` below it. This
   moves the user's view, and the report says so (`viewMoved`);
@@ -76,16 +78,25 @@ The fix is an ordered per-node queue, `CanvasBoardState.pendingTerminalLines`:
 - at most 8 lines per node, 15-minute expiry;
 - `@ObservationIgnored`, never persisted, never logged;
 - pruned when the node is removed and when the board closes (`forgetClosed`);
-- drained once `controller.isProcessRunning` plus a 500 ms settle (5 × 100 ms).
-  A bridge terminal with `hasBootstrap` skips the settle;
+- drained once `controller.isProcessRunning` has held for 500 ms (5 × 100 ms)
+  **and** the terminal has printed nothing for 300 ms
+  (`WorkspaceTerminalController.secondsSinceLastOutput`). A terminal that never
+  goes quiet (an agent redraws a spinner) gets its line 2 s (20 steps) after
+  the drain first saw its process, quiet or not. No terminal skips the settle:
+  the old `hasBootstrap` skip for bridge terminals typed the launch line while
+  zsh was still starting, and the line showed twice (the tty echoes typeahead
+  in cooked mode, then the line editor reads and echoes it again; it still ran
+  once);
 - the drain loop is bounded at about 10 s, one drain per node
   (`terminalLineDrains`); each line leaves the queue before the send and is
   pushed back to the front if the send refuses;
 - `CanvasTerminalCard` drains through `.task(id: pane.sessionID)`, so a later
   `terminal_start` — or the user pressing Start — types the waiting lines.
 
-Queued lines are typed back-to-back after one settle. If line 1 starts an
-interactive program, line 2 lands inside it. That ordering is the agent's
+The drain types **one line per 100 ms step**, and each line waits for quiet
+again. `sendReply` writes a line's Return 50 ms after its text (section 10), so
+the step lets that Return land before the next line's text. If line 1 starts an
+interactive program, line 2 still lands inside it. That ordering is the agent's
 responsibility, not Rafu's.
 
 ### 4. The IPC budget decides how long an in-call wait may be
@@ -131,6 +142,52 @@ and would see each other's writes.
   acknowledged yet" in the message. Failures stay errors.
 - The no-agent error points the caller at `edge_create` plus `link_set_state`.
 
+### 9. Only a terminal that is live (or starting) holds a presentation lease
+
+The ADR 0025 lease cap is four Ensemble terminals per window (ADR 0023). A
+mounted card used to take a lease whenever its board could present, also when
+its pane was stopped. Four stopped cards on screen then filled the cap, and the
+fifth start failed with "Four Ensemble terminals already hold a live view"
+while nothing ran.
+
+Now:
+
+- a card takes a lease on mount only when it has a controller to show
+  (live, or exited with its last output); a stopped card takes none;
+- the card's Start/Restart (`startOrRestart`, which also serves
+  `terminalStartRequest`) takes the lease **before** it starts the pane, through
+  `WorkspaceSession.claimCanvasTerminalLease`. Without that, a card whose lease
+  was released would start and then show "Terminal view is not attached";
+- `.task(id: pane.sessionID)` takes the lease when a session appears by any
+  other path;
+- at the cap, `claimCanvasTerminalLease` and the starter's `leaseBlocked`
+  first call `releaseIdleCanvasTerminalLeases`, which drops the leases of
+  panes that are not `.live` (stopped, exited, unavailable) or whose group is
+  gone. Four **live** terminals still block a fifth; the cap stays four.
+
+### 10. Return is CR, not LF, and it goes in a second write
+
+Every typed line (`terminal_send`, queued launch lines, notch and notification
+replies, Agent History resume, agent hand-off) goes through
+`WorkspaceTerminalController.sendReply`, which uses `TerminalReplyWriter`:
+
+- Return is `"\r"` (0x0D). Agent TUIs put the tty in raw mode, so the kernel
+  does not map CR and LF. Claude Code (ink) and Codex (crossterm) read 0x0A as
+  Ctrl-J, which **inserts a newline** in their prompt; only 0x0D submits. zsh's
+  ZLE accepts both, which is why `text + "\n"` looked right in a shell and
+  failed in every agent: "hi" sat in the prompt with an empty line under it.
+- The text is written first and `"\r"` 50 ms later in a second write. Text and
+  CR that arrive in one read can be taken as a paste, and the CR kept as text.
+- Order: a line that still owes its CR writes it at once when the next line
+  arrives (`flushReturn` before the text), so lines never interleave whoever
+  calls and however fast. The drain also paces one line per step.
+- The owed CR is dropped (`discard`) when the process exits or the controller
+  shuts down, so it never reaches the next process.
+- `sendReply` still returns `true` once the text is written and `false` when
+  no process runs; the delayed CR does not change that.
+- `sendReturn` (channel-prompt confirmer) flushes an owed CR first, then
+  writes one CR.
+
 ## Why it matters
 
 An agent that gets `ok` for a start that never happened, or a `terminal_send`
@@ -156,6 +213,18 @@ off-screen / zoomed-out create; `terminal_start` followed at once by
 cap; Ask mode; the `CanvasTerminalCard` `.task(id: pane.sessionID)` drain; the
 refused-start alert path.
 
+2026-11-09 live voice test (transcript `voice-20261109-134202-a9e3.jsonl`):
+`terminal_send` "hi" into Claude Code and into Codex inserted a newline and did
+not submit (LF); the `claude` launch line showed twice above and in the prompt
+(no settle for a bridge terminal); with four **stopped** cards on screen a
+start failed with the lease-cap message. Fixed by sections 3, 9 and 10. Unit
+evidence: `TerminalReplyWriterTests` (text then CR, never LF; two lines never
+interleave; refused and discarded CR), `CanvasTerminalStartTests`
+(`drainWaitsForQuiet`, `drainTypesAfterTheQuietWait`,
+`stoppedTerminalsDoNotFillTheLeaseCap`, `liveTerminalsKeepTheLeaseCap`). A
+live re-check in Rafu Lightning is still owed (see the voice-control phase
+manual checks).
+
 ## Verification
 
 ```bash
@@ -172,6 +241,9 @@ refused-start alert path.
   `CanvasBridgeMCPServer.swift`
 - `Sources/RafuApp/Canvas/Integration/CanvasTerminalStarter.swift`,
   `CanvasAgentActions.swift`, `CanvasBoardState.swift`, `CanvasLiveBridge.swift`
+- `Sources/RafuApp/Terminal/TerminalReplyWriter.swift`,
+  `WorkspaceTerminalController.swift` (`sendReply`, `sendReturn`,
+  `secondsSinceLastOutput`)
 - ADR 0023 (Terminal Group editor tab), ADR 0025, ADR 0026
 - Phase: [`../plans/phases/ensemble-canvas.md`](../plans/phases/ensemble-canvas.md), workstream X4
 - [`canvas-live-sessions.md`](canvas-live-sessions.md),

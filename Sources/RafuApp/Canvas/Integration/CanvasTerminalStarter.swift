@@ -33,16 +33,18 @@ extension CanvasBoardState {
         pendingTerminalLines[card]?.reduce(0) { $0 + $1.text.utf8.count } ?? 0
     }
 
-    /// Hands the waiting lines to `send`, oldest first. A line leaves the queue
-    /// before it is sent, so two callers never type the same line; a line that
-    /// `send` refuses goes back to the front. Returns how many were typed.
+    /// Hands up to `limit` waiting lines to `send`, oldest first. A line leaves
+    /// the queue before it is sent, so two callers never type the same line; a
+    /// line that `send` refuses goes back to the front. Returns how many were
+    /// typed.
     @discardableResult
     func drainPendingTerminalLines(
-        for card: CanvasCardID, now: Date = Date(), send: (String) -> Bool
+        for card: CanvasCardID, now: Date = Date(), limit: Int = .max,
+        send: (String) -> Bool
     ) -> Int {
         dropExpiredTerminalLines(now: now)
         var typed = 0
-        while let next = pendingTerminalLines[card]?.first {
+        while typed < limit, let next = pendingTerminalLines[card]?.first {
             pendingTerminalLines[card]?.removeFirst()
             if pendingTerminalLines[card]?.isEmpty == true { pendingTerminalLines[card] = nil }
             guard send(next.text) else {
@@ -112,8 +114,15 @@ enum CanvasTerminalStarter {
     static let step: Duration = .milliseconds(100)
     /// After the shell process appears, typing waits this many steps for the
     /// shell to reach its line editor. Input the tty buffered earlier can be lost
-    /// while the shell sets up. A bridge terminal is ready at once.
+    /// while the shell sets up, or echoed twice: once by the tty in cooked mode
+    /// and again by the line editor. This holds for a bridge terminal too.
     static let settleSteps = 5
+    /// The terminal must have printed nothing for this long before a line is
+    /// typed: a shell still printing its startup output is not at its prompt.
+    static let quietInterval: TimeInterval = 0.3
+    /// A terminal that never goes quiet (an agent at work redraws a spinner)
+    /// gets its line this many steps after its process appeared, quiet or not.
+    static let quietWaitSteps = 20
     /// The typing wait is ten seconds, off the reply path.
     static let drainSteps = 100
     /// Mirrors the presentation lease cap in `CanvasTerminalCard.acquire`.
@@ -163,11 +172,20 @@ enum CanvasTerminalStarter {
     /// Types the queued lines once the shell runs. One loop per node. Returns
     /// true when the queue is empty; lines left after a timeout or a stopped
     /// view stay queued for the next drain.
+    ///
+    /// A line is typed when the process has run for `settle` steps and the
+    /// terminal is quiet (`isQuiet`), or once it has run for `quietWait` steps.
+    /// One line per step: `sendReply` writes the line's Return 50 ms after its
+    /// text, and the 100 ms step lets that Return land, and the shell echo the
+    /// line, before the next line's text.
     @discardableResult
     static func drain(
         card: CanvasCardID, groupID: TerminalGroupID, board: CanvasBoardState,
-        session: WorkspaceSession, settle: Int = settleSteps,
+        session: WorkspaceSession, settle: Int = settleSteps, quietWait: Int = quietWaitSteps,
         isReady: (WorkspaceTerminalController) -> Bool = { $0.isProcessRunning },
+        isQuiet: (WorkspaceTerminalController) -> Bool = {
+            ($0.secondsSinceLastOutput ?? 0) >= quietInterval
+        },
         send: (WorkspaceTerminalController, String) -> Bool = { $0.sendReply($1) }
     ) async -> Bool {
         guard board.terminalLineDrains.insert(card).inserted else { return false }
@@ -186,11 +204,11 @@ enum CanvasTerminalStarter {
                 let controller = session.terminal.terminalController(for: current.id),
                 isReady(controller)
             {
-                runningSince = runningSince ?? step
-                if CanvasLiveBridge.shared.hasBootstrap(controllerID: controller.id)
-                    || step - (runningSince ?? step) >= settle
-                {
-                    board.drainPendingTerminalLines(for: card) { send(controller, $0) }
+                let since = runningSince ?? step
+                runningSince = since
+                let running = step - since
+                if running >= quietWait || (running >= settle && isQuiet(controller)) {
+                    board.drainPendingTerminalLines(for: card, limit: 1) { send(controller, $0) }
                     if board.pendingTerminalLines[card] == nil { return true }
                 }
             } else {
@@ -279,10 +297,45 @@ enum CanvasTerminalStarter {
             || (pane.status == .exited && pane.runtimeKind == .ordinaryShell)
     }
 
+    /// True when the node cannot get a presentation lease. A lease held by a
+    /// terminal that is not live is released first, so stopped nodes never
+    /// fill the cap.
     private static func leaseBlocked(
         _ groupID: TerminalGroupID, _ session: WorkspaceSession
     ) -> Bool {
-        session.canvasTerminalOwners[groupID] == nil
-            && session.canvasTerminalOwners.count >= leaseCap
+        guard session.canvasTerminalOwners[groupID] == nil,
+            session.canvasTerminalOwners.count >= leaseCap
+        else { return false }
+        session.releaseIdleCanvasTerminalLeases()
+        return session.canvasTerminalOwners.count >= leaseCap
+    }
+}
+
+extension WorkspaceSession {
+    /// Gives the presentation lease (ADR 0025) of `groupID` to `board`, within
+    /// the cap of `CanvasTerminalStarter.leaseCap` (ADR 0023). At the cap, the
+    /// leases of terminals that are not live are released first. True when
+    /// `board` holds the lease after the call.
+    @discardableResult
+    func claimCanvasTerminalLease(_ groupID: TerminalGroupID, for board: CanvasID) -> Bool {
+        if canvasTerminalOwners[groupID] == board { return true }
+        guard canvasTerminalOwners[groupID] == nil else { return false }
+        if canvasTerminalOwners.count >= CanvasTerminalStarter.leaseCap {
+            releaseIdleCanvasTerminalLeases()
+        }
+        guard canvasTerminalOwners.count < CanvasTerminalStarter.leaseCap else { return false }
+        canvasTerminalOwners[groupID] = board
+        return true
+    }
+
+    /// Releases the leases of terminals whose pane is not live (stopped,
+    /// exited, unavailable) or whose group is gone. Their cards show the
+    /// Start or Restart block, which needs no view; a card takes a lease again
+    /// before it starts.
+    func releaseIdleCanvasTerminalLeases() {
+        for groupID in canvasTerminalOwners.keys
+        where terminal.terminalGroup(groupID)?.panes.first?.status != .live {
+            canvasTerminalOwners[groupID] = nil
+        }
     }
 }

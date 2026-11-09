@@ -1037,6 +1037,11 @@ final class WorkspaceTerminalController: Identifiable {
 
     @ObservationIgnored
     private var terminalView: RafuTerminalView?
+    /// Types a reply line and its Return (CR) in order (`sendReply`).
+    @ObservationIgnored
+    private lazy var replyWriter = TerminalReplyWriter { [weak self] text in
+        self?.writeToLiveProcess(text) ?? false
+    }
     @ObservationIgnored
     private var pendingShellStartup: Task<Void, Never>?
     @ObservationIgnored
@@ -1171,23 +1176,37 @@ final class WorkspaceTerminalController: Identifiable {
         terminalView?.process.running == true
     }
 
-    /// Sends a notification reply's already-sanitized, single-line text
-    /// into this session's live pty, followed by a trailing newline — the
-    /// agent is blocked on a prompt, so exactly one line can ever be
-    /// submitted this way (`TerminalAttentionPolicy.sanitizedReply` is the
-    /// one caller that produces `text`). Returns `false` — never respawns,
-    /// never queues — when there is no live view (parked with nothing
-    /// mounted) or the shell has already exited.
+    /// Types one already-sanitized, single-line `text` into this session's
+    /// live pty and submits it with Return: the text now, then `"\r"` in a
+    /// second write shortly after (`TerminalReplyWriter`). Return is CR, not
+    /// LF, because agent TUIs in raw mode read LF as "insert a newline".
+    /// Callers: notification replies, Ensemble queued lines, agent resume
+    /// and hand-off lines. Returns `false` — never respawns, never queues —
+    /// when there is no live view (parked with nothing mounted) or the shell
+    /// has already exited; `true` once the text is written.
     @discardableResult
     func sendReply(_ text: String) -> Bool {
-        // SwiftTerm's `LocalProcess.send` drops data silently while no child
-        // runs (an ordinary shell starts in a task after the view exists), so
-        // a reply to a process that has not started yet must report failure.
-        guard let terminalView, terminalView.process.running else { return false }
-        if case .exited = status { return false }
-        terminalView.send(txt: text + "\n")
+        guard replyWriter.send(text) else { return false }
         clearAttention()
         return true
+    }
+
+    /// One write to the live pty. SwiftTerm's `LocalProcess.send` drops data
+    /// silently while no child runs (an ordinary shell starts in a task after
+    /// the view exists), so a write to a process that has not started yet
+    /// must report failure.
+    private func writeToLiveProcess(_ text: String) -> Bool {
+        guard let terminalView, terminalView.process.running else { return false }
+        if case .exited = status { return false }
+        terminalView.send(txt: text)
+        return true
+    }
+
+    /// Seconds since the terminal last printed output, or `nil` when it has
+    /// printed nothing since the process started. The Ensemble line drain
+    /// waits for a short quiet spell before it types.
+    var secondsSinceLastOutput: TimeInterval? {
+        lastOutputDate.map { Date().timeIntervalSince($0) }
     }
 
     /// Sends one Return (`"\r"`) and nothing else to the live pty. The only
@@ -1196,10 +1215,8 @@ final class WorkspaceTerminalController: Identifiable {
     /// channel. Returns `false` when no process runs.
     @discardableResult
     func sendReturn() -> Bool {
-        guard let terminalView, terminalView.process.running else { return false }
-        if case .exited = status { return false }
-        terminalView.send(txt: "\r")
-        return true
+        replyWriter.flushReturn()
+        return writeToLiveProcess(TerminalReplyWriter.returnKey)
     }
 
     /// Bounded read of recent on-screen output for an attention
@@ -1394,6 +1411,7 @@ final class WorkspaceTerminalController: Identifiable {
         CanvasLiveBridge.shared.remove(self)
         stopQuiescenceTracking()
         resetForegroundIdentity()
+        replyWriter.discard()
         terminalView?.terminate()
         terminalView = nil
         delegateProxy = nil
@@ -1458,6 +1476,7 @@ final class WorkspaceTerminalController: Identifiable {
         CanvasLiveBridge.shared.remove(self)
         stopQuiescenceTracking()
         resetForegroundIdentity()
+        replyWriter.discard()
         status = .exited(code: exitCode)
         shellProcessID = nil
         terminalView = nil

@@ -135,5 +135,60 @@ struct VoiceToolSchemaTests {
         #expect(VoiceBackendModel.default == .terra)
         #expect(VoiceVoice.default == .marin)
         #expect(VoiceVoice.allCases.count == 25)
+        let rules = VoicePersona.rafu.backendInstructions()
+        #expect(rules.contains("You have no node on the board. Never pass link."))
+        #expect(rules.contains("Never use yourself as from or to in edge_create."))
+        #expect(rules.contains("A dialog inside Claude or Codex is not a Rafu Confirm card."))
+        #expect(rules.contains("Answer a terminal dialog with terminal_send."))
+        #expect(rules.contains("A node's agent is the launched agent, not proof that it runs."))
+        #expect(rules.contains("do not tell the user to close views"))
+    }
+
+    @Test("Voice terminal_create has no link, x or y; node_update keeps x and y")
+    func voiceDropsLinkAndPosition() {
+        let tools = VoiceToolSchema.ensembleTools(from: CanvasAgentToolCatalog.definitions)
+        func properties(_ name: String) -> VoiceJSON? {
+            tools.first { $0.name == name }?.parameters["properties"]
+        }
+        for name in ["terminal_create", "note_create", "node_create", "diagram_build"] {
+            let props = properties(name)
+            #expect(props != nil, Comment(rawValue: name))
+            #expect(props?["link"] == nil, Comment(rawValue: name))
+            #expect(props?["x"] == nil, Comment(rawValue: name))
+            #expect(props?["y"] == nil, Comment(rawValue: name))
+            #expect(props?["near"] != nil, Comment(rawValue: name))
+        }
+        #expect(properties("node_update")?["x"] != nil)
+        #expect(properties("node_update")?["y"] != nil)
+        // The MCP catalog itself keeps link, x and y for agents.
+        let mcp = CanvasAgentToolCatalog.definitions.first {
+            $0["name"] as? String == "terminal_create"
+        }
+        let mcpProperties = (mcp?["inputSchema"] as? [String: Any])?["properties"] as? [String: Any]
+        #expect(mcpProperties?["link"] != nil)
+        #expect(mcpProperties?["x"] != nil)
+    }
+
+    @Test("Voice descriptions never say \"your node\" and name the voice rules")
+    func voiceDescriptions() {
+        let tools = VoiceToolSchema.ensembleTools(from: CanvasAgentToolCatalog.definitions)
+        for tool in tools {
+            #expect(
+                !tool.description.lowercased().contains("your node"), Comment(rawValue: tool.name))
+            #expect(
+                !tool.parameters.jsonString().lowercased().contains("your node"),
+                Comment(rawValue: tool.name))
+        }
+        let create = tools.first { $0.name == "terminal_create" }?.description ?? ""
+        #expect(create.contains("There is no link option by voice"))
+        #expect(create.contains("beside the selected or focused node"))
+        let send = tools.first { $0.name == "terminal_send" }?.description ?? ""
+        #expect(send.contains("into any terminal for the user"))
+        #expect(!send.contains("you created"))
+        let edge = tools.first { $0.name == "edge_create" }?.description ?? ""
+        #expect(edge.contains("never use yourself as from or to"))
+        for name in VoiceToolSchema.voiceDescriptions.keys {
+            #expect(tools.contains { $0.name == name }, Comment(rawValue: name))
+        }
     }
 }

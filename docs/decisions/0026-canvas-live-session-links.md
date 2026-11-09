@@ -112,8 +112,9 @@ Rules:
   inference from output); the Ensemble's Agent control is Allow; and Settings ▸
   Ensemble ▸ "Confirm Rafu's development-channel prompt automatically" is on
   (default on).
-- Watch: at most 30 s after the launch, at most four samples a second of the
-  visible rows only. No timer runs after the window. One attempt per launch.
+- Watch: at most 60 s after the launch (30 s until the 2026-11-09 amendment
+  below), at most four samples a second of the visible rows only. No timer runs
+  after the window. One attempt per launch.
 - Match: the exact dialog for the single channel `server:rafu` with option 1
   selected. Any other channel, extra entry, selected option, or dialog gives no
   match. Folder trust, MCP consent, and tool permission prompts are never
@@ -129,8 +130,14 @@ Rules:
   the "Enter to confirm" row to be the last non-empty row of the sample. An
   agent therefore cannot open or replace a watch for its own Claude, and dialog
   text it prints above a tool-permission prompt does not match.
-- If the folder-trust dialog comes first and the user takes more than 30 s, the
+- If the folder-trust dialog comes first and the user takes more than 60 s, the
   window ends and the channel dialog is not answered.
+
+Amendment, 2026-11-09: the watch window is 60 s, not 30 s. In a live test the
+dialog went unanswered in Allow mode with no notice; a slow Claude start or a
+folder-trust dialog first can use most of 30 s. The watch now logs, with states
+only, whether it started and why it ended (`docs/references/canvas-live-sessions.md`,
+"Diagnostics"). All other rules stand.
 
 ## Cross-reference (2026-11-08): view tools
 

@@ -940,6 +940,23 @@ struct VoiceArgumentsAndTranscriptTests {
         #expect(unrooted["cwd"] as? String == "/tmp")
     }
 
+    @Test("Voice drops link always and x, y when both are zero, except for node_update")
+    func cleanedArgumentsDropLinkAndZeroPosition() {
+        let create = VoiceToolExecutor.cleanedArguments(
+            ["agent": "claude", "link": true, "x": 0, "y": 0], workspaceRoot: nil,
+            tool: "terminal_create")
+        #expect(Set(create.keys) == ["agent"])
+        let placed = VoiceToolExecutor.cleanedArguments(
+            ["x": 0, "y": 240.5], workspaceRoot: nil, tool: "note_create")
+        #expect(placed["x"] as? Int == 0)
+        #expect(placed["y"] as? Double == 240.5)
+        let moved = VoiceToolExecutor.cleanedArguments(
+            ["node_id": "a", "x": 0, "y": 0.0], workspaceRoot: nil, tool: "node_update")
+        #expect(Set(moved.keys) == ["node_id", "x", "y"])
+        let linkOff = VoiceToolExecutor.cleanedArguments(["link": false], workspaceRoot: nil)
+        #expect(linkOff.isEmpty)
+    }
+
     @Test("terminal_create with the backend's empty fields and \"Claude Code\" is accepted")
     func terminalCreateFromVoice() async throws {
         let fixture = try await VoiceFixture()

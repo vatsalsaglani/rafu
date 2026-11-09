@@ -123,8 +123,9 @@ public nonisolated struct CanvasChannelPromptWatch: Sendable {
         case stop
     }
 
-    /// The watch ends this long after the launch.
-    public static let window: TimeInterval = 30
+    /// The watch ends this long after the launch. A slow Claude start, or a
+    /// folder-trust dialog first, can take more than 30 s.
+    public static let window: TimeInterval = 60
     /// After the Return, the dialog may stay this long before Rafu gives up.
     public static let confirmGrace: TimeInterval = 2
     /// At most four samples per second.

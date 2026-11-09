@@ -192,7 +192,9 @@ struct CanvasChannelPromptConfirmerTests {
     @Test func aDialogAfterTheWindowIsNotAnswered() async {
         let terminal = Terminal()
         let confirmer = terminal.confirmer()
-        terminal.onTick = { time in if time >= 31 { terminal.rows = Self.dialog } }
+        terminal.onTick = { time in
+            if time >= CanvasChannelPromptWatch.window + 1 { terminal.rows = Self.dialog }
+        }
         confirmer.recordLaunch(controllerID: terminal.id, hooks: terminal.hooks)
         await confirmer.finishedWatching(terminal.id)
         #expect(terminal.returns == 0)

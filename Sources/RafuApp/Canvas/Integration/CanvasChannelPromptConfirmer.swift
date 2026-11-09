@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import RafuCore
 
 /// Settings ▸ Ensemble: "Confirm Rafu's development-channel prompt automatically".
@@ -19,12 +20,15 @@ nonisolated enum CanvasChannelPromptPreference {
 /// only when Rafu's own `claude` launcher announces a start with the Rafu
 /// channel flag over the terminal's private token. Nothing here starts from
 /// terminal output. From that moment one task samples the terminal's visible
-/// rows at most four times a second for at most 30 s, sends one Return when
+/// rows at most four times a second for at most 60 s, sends one Return when
 /// `CanvasChannelPrompt.matches` sees the exact dialog, and ends. No timer runs
-/// outside that window. It never logs or keeps terminal content.
+/// outside that window. It never logs or keeps terminal content: the log says
+/// only whether the watch started, which gate held it back, and why it ended.
 @MainActor
 final class CanvasChannelPromptConfirmer {
     static let shared = CanvasChannelPromptConfirmer()
+    private static let logger = Logger(
+        subsystem: "dev.vatsalsaglani.rafu", category: "ChannelPrompt")
 
     /// Everything the watch needs from one terminal and its board.
     struct Hooks {
@@ -61,13 +65,19 @@ final class CanvasChannelPromptConfirmer {
     func recordLaunch(controllerID: UUID, hooks: Hooks) {
         end(controllerID)
         launched.insert(controllerID)
+        let mode = hooks.mode()
+        let settingOn = hooks.settingOn()
         guard
             CanvasChannelPrompt.mayConfirm(
-                mode: hooks.mode(), settingOn: hooks.settingOn(), launchedByRafu: true)
+                mode: mode, settingOn: settingOn, launchedByRafu: true)
         else {
             launched.remove(controllerID)
+            Self.logger.info(
+                "Channel prompt watch not started: agent control \(mode.rawValue, privacy: .public), setting \(settingOn ? "on" : "off", privacy: .public)"
+            )
             return
         }
+        Self.logger.info("Channel prompt watch started")
         tasks[controllerID] = Task(name: "Watch for Claude's development-channel prompt") {
             [weak self] in
             await self?.watch(controllerID: controllerID, hooks: hooks)
@@ -93,6 +103,8 @@ final class CanvasChannelPromptConfirmer {
             if !Task.isCancelled { end(controllerID) }
         }
         var watch = CanvasChannelPromptWatch(startedAt: now())
+        var sawView = false
+        var returnRefused = false
         while !Task.isCancelled {
             let eligible = CanvasChannelPrompt.mayConfirm(
                 mode: hooks.mode(), settingOn: hooks.settingOn(),
@@ -100,8 +112,12 @@ final class CanvasChannelPromptConfirmer {
             // The rows are read only while the gates hold, or to see the result
             // of the one Return already sent.
             let lines = eligible || watch.hasSentReturn ? hooks.read() : nil
+            if lines != nil { sawView = true }
             var action = watch.advance(now: now(), lines: lines, eligible: eligible)
-            if action == .sendReturn, !hooks.sendReturn() { action = watch.returnFailed() }
+            if action == .sendReturn, !hooks.sendReturn() {
+                returnRefused = true
+                action = watch.returnFailed()
+            }
             switch action {
             case .wait, .sendReturn:
                 break
@@ -112,8 +128,38 @@ final class CanvasChannelPromptConfirmer {
             case .stop:
                 break
             }
-            if watch.isFinished { return }
+            if watch.isFinished {
+                Self.logEnd(
+                    action, eligible: eligible, sentReturn: watch.hasSentReturn,
+                    returnRefused: returnRefused, sawView: sawView)
+                return
+            }
             await sleep(.milliseconds(Int(CanvasChannelPromptWatch.sampleInterval * 1000)))
         }
+        Self.logger.info("Channel prompt watch ended: cancelled")
+    }
+
+    /// Why the watch ended. States only, never terminal content.
+    private static func logEnd(
+        _ action: CanvasChannelPromptWatch.Action, eligible: Bool, sentReturn: Bool,
+        returnRefused: Bool, sawView: Bool
+    ) {
+        let reason: String
+        switch action {
+        case .confirmed: reason = "confirmed"
+        case .couldNotConfirm:
+            reason = returnRefused ? "could not confirm: Return refused" : "could not confirm"
+        case .wait, .sendReturn, .stop:
+            if sentReturn {
+                reason = "no view after the Return"
+            } else if !eligible {
+                reason = "gate closed"
+            } else if !sawView {
+                reason = "window elapsed, no view"
+            } else {
+                reason = "window elapsed, dialog never matched"
+            }
+        }
+        logger.info("Channel prompt watch ended: \(reason, privacy: .public)")
     }
 }

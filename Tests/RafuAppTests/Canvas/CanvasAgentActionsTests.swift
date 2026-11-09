@@ -716,6 +716,109 @@ struct CanvasTerminalStartTests {
         #expect(typed.lines.count == 2)
     }
 
+    @Test("A line is not typed while output is still arriving")
+    func drainWaitsForQuiet() async throws {
+        let fixture = try await CanvasAgentFixture()
+        let lead = fixture.cards[0]
+        #expect(fixture.board.queueTerminalLine("claude", for: lead.id))
+        var answers = [false, false, false, true]
+        var lastAnswer = false
+        var quietAtSend: [Bool] = []
+        let done = await CanvasTerminalStarter.drain(
+            card: lead.id, groupID: terminalGroupID(of: lead), board: fixture.board,
+            session: fixture.session, settle: 0, isReady: { _ in true },
+            isQuiet: { _ in
+                lastAnswer = answers.isEmpty ? true : answers.removeFirst()
+                return lastAnswer
+            },
+            send: { _, _ in
+                quietAtSend.append(lastAnswer)
+                return true
+            })
+        #expect(done)
+        #expect(quietAtSend == [true])
+        #expect(answers.isEmpty)
+    }
+
+    @Test("A terminal that never goes quiet gets its line after the quiet wait, one line a step")
+    func drainTypesAfterTheQuietWait() async throws {
+        let fixture = try await CanvasAgentFixture()
+        let lead = fixture.cards[0]
+        #expect(fixture.board.queueTerminalLine("one", for: lead.id))
+        #expect(fixture.board.queueTerminalLine("two", for: lead.id))
+        var checks = 0
+        var sentAfterChecks: [Int] = []
+        let done = await CanvasTerminalStarter.drain(
+            card: lead.id, groupID: terminalGroupID(of: lead), board: fixture.board,
+            session: fixture.session, settle: 0, quietWait: 2, isReady: { _ in true },
+            isQuiet: { _ in
+                checks += 1
+                return false
+            },
+            send: { _, _ in
+                sentAfterChecks.append(checks)
+                return true
+            })
+        #expect(done)
+        // Steps 0 and 1 ask and wait; step 2 types "one", step 3 types "two".
+        #expect(sentAfterChecks == [2, 2])
+        #expect(fixture.board.pendingTerminalLines[lead.id] == nil)
+    }
+
+    @Test("Four stopped terminals hold no leases; a fifth start is not held at the cap")
+    func stoppedTerminalsDoNotFillTheLeaseCap() async throws {
+        let fixture = try await CanvasAgentFixture()
+        let session = fixture.session
+        let board = fixture.board
+        for _ in 0..<5 { session.addCanvasStoppedTerminal(board.id) }
+        let lead = fixture.cards[0].id
+        let stopped = board.cards.filter {
+            guard case .terminal = $0.content else { return false }
+            return $0.id != lead
+        }
+        #expect(stopped.count == 5)
+        // Four stopped cards still hold leases, as a card that stopped keeps its own.
+        for card in stopped.prefix(4) {
+            session.canvasTerminalOwners[terminalGroupID(of: card)] = board.id
+        }
+        let fifth = try #require(stopped.last)
+        let report = try await withShortStartWait {
+            try await CanvasTerminalStarter.start(
+                card: fifth, groupID: terminalGroupID(of: fifth), line: nil, board: board,
+                session: session, onGiveUp: {})
+        }
+        #expect(report.hold != .leaseCap)
+        #expect(board.terminalStartRequest == fifth.id)
+        for card in stopped.prefix(4) {
+            #expect(session.canvasTerminalOwners[terminalGroupID(of: card)] == nil)
+        }
+        // The user's start takes a lease first, so the card can show the shell.
+        #expect(session.claimCanvasTerminalLease(terminalGroupID(of: fifth), for: board.id))
+        #expect(session.canvasTerminalOwners[terminalGroupID(of: fifth)] == board.id)
+    }
+
+    @Test("Live terminals keep the cap of four; stopped ones give way")
+    func liveTerminalsKeepTheLeaseCap() async throws {
+        let fixture = try await CanvasAgentFixture()
+        let session = fixture.session
+        let board = fixture.board
+        let shell = TerminalShell(path: "/bin/zsh", name: "zsh", isDefault: true)
+        let profile = TerminalPaneLaunchProfile(shell: .preferredShell, startingFolder: .root)
+        var live = [terminalGroupID(of: fixture.cards[0])]
+        for _ in 0..<3 {
+            let group = try session.terminal.createLiveGroup(
+                instantiation: .ordinaryShell(
+                    startingDirectory: "/tmp", shell: shell, profile: profile))
+            live.append(group.id)
+        }
+        for id in live { #expect(session.claimCanvasTerminalLease(id, for: board.id)) }
+        session.addCanvasStoppedTerminal(board.id)
+        let stopped = try #require(board.cards.last)
+        #expect(!session.claimCanvasTerminalLease(terminalGroupID(of: stopped), for: board.id))
+        #expect(session.canvasTerminalOwners.count == CanvasTerminalStarter.leaseCap)
+        for id in live { #expect(session.canvasTerminalOwners[id] == board.id) }
+    }
+
     @Test("A refused send keeps the line at the front for the next drain")
     func refusedSendStaysQueued() throws {
         let board = CanvasBoardState(document: CanvasDocument(title: "Queue"))
@@ -831,6 +934,12 @@ struct CanvasTerminalStartTests {
         #expect(live.contains("ensemble_describe"))
         #expect(!live.contains("queued, not typed"))
         #expect(CanvasAgentActions.queueFullMessage("Peer").contains("queued lines"))
+        report.running = false
+        report.hold = .leaseCap
+        let voice = CanvasAgentActions.startMessage(
+            report, title: "Peer", kind: .create, lineBytes: 10, isVoice: true)
+        #expect(voice.contains("ask which one to stop"))
+        #expect(!voice.contains("Ensemble terminals"))
     }
 
     private func drain(
@@ -839,7 +948,7 @@ struct CanvasTerminalStartTests {
     ) async -> Bool {
         await CanvasTerminalStarter.drain(
             card: card ?? lead.id, groupID: terminalGroupID(of: lead), board: fixture.board,
-            session: fixture.session, settle: 0, isReady: { _ in true },
+            session: fixture.session, settle: 0, isReady: { _ in true }, isQuiet: { _ in true },
             send: { _, line in
                 typed.lines.append(line)
                 return true

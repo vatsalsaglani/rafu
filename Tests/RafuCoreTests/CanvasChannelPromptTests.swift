@@ -252,8 +252,8 @@ struct CanvasChannelPromptTests {
 
     @Test func watchEndsWhenTheWindowEnds() {
         var watch = CanvasChannelPromptWatch(startedAt: 10)
-        #expect(watch.advance(now: 39.75, lines: ["$ claude"], eligible: true) == .wait)
-        #expect(watch.advance(now: 40, lines: sample, eligible: true) == .stop)
+        #expect(watch.advance(now: 69.75, lines: ["$ claude"], eligible: true) == .wait)
+        #expect(watch.advance(now: 70, lines: sample, eligible: true) == .stop)
         #expect(watch.isFinished)
         #expect(!watch.hasSentReturn)
     }
@@ -277,7 +277,8 @@ struct CanvasChannelPromptTests {
     @Test func watchWithoutAViewWaitsThenEnds() {
         var watch = CanvasChannelPromptWatch(startedAt: 0)
         #expect(watch.advance(now: 1, lines: nil, eligible: true) == .wait)
-        #expect(watch.advance(now: 30, lines: nil, eligible: true) == .stop)
+        #expect(watch.advance(now: 59, lines: nil, eligible: true) == .wait)
+        #expect(watch.advance(now: 60, lines: nil, eligible: true) == .stop)
         var sent = CanvasChannelPromptWatch(startedAt: 0)
         #expect(sent.advance(now: 1, lines: sample, eligible: true) == .sendReturn)
         #expect(sent.advance(now: 1.25, lines: nil, eligible: true) == .wait)
@@ -293,7 +294,7 @@ struct CanvasChannelPromptTests {
 
     @Test func samplingStaysAtOrBelowFourPerSecond() {
         #expect(CanvasChannelPromptWatch.sampleInterval >= 0.25)
-        #expect(CanvasChannelPromptWatch.window <= 30)
+        #expect(CanvasChannelPromptWatch.window <= 60)
     }
 
     // MARK: Launch announcement

@@ -179,12 +179,16 @@ enum VoiceToolExecutor {
     /// values, maps agent names, and makes a `cwd` inside the workspace
     /// relative. String work only; `CanvasAgentActions` still checks that
     /// the folder exists inside the workspace. MCP calls do not come here.
-    nonisolated static func cleanedArguments(_ arguments: [String: Any], workspaceRoot: URL?)
-        -> [String: Any]
-    {
+    ///
+    /// Voice has no node, so `link` always goes. The backend fills `x: 0,
+    /// y: 0` for "no position"; both zero go too, so the node lands beside the
+    /// selection or focus. `node_update` keeps them: there (0, 0) is a move.
+    nonisolated static func cleanedArguments(
+        _ arguments: [String: Any], workspaceRoot: URL?, tool: String? = nil
+    ) -> [String: Any] {
         var cleaned: [String: Any] = [:]
         for (key, value) in arguments {
-            if value is NSNull { continue }
+            if value is NSNull || key == "link" { continue }
             if let text = value as? String, !keepsEmptyString.contains(key),
                 text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             {
@@ -203,6 +207,13 @@ enum VoiceToolExecutor {
         }
         if let cwd = cleaned["cwd"] as? String, let workspaceRoot {
             cleaned["cwd"] = relativeFolder(cwd, root: workspaceRoot)
+        }
+        if tool != CanvasAgentTool.nodeUpdate.rawValue,
+            (cleaned["x"] as? NSNumber)?.doubleValue == 0,
+            (cleaned["y"] as? NSNumber)?.doubleValue == 0
+        {
+            cleaned["x"] = nil
+            cleaned["y"] = nil
         }
         return cleaned
     }
@@ -243,7 +254,7 @@ enum VoiceToolExecutor {
             }
         }
         guard let board else { return failure("no_ensemble", noBoardMessage) }
-        arguments = cleanedArguments(arguments, workspaceRoot: session.rootURL)
+        arguments = cleanedArguments(arguments, workspaceRoot: session.rootURL, tool: name)
         let caller = CanvasAgentCaller.voice(
             session: session, board: board, callerID: host.callerID)
         let tool = CanvasAgentTool(rawValue: name)

@@ -75,7 +75,7 @@ struct CanvasTerminalCard: View {
             .onChange(
                 of: session.canvasResources[board.id]?.canPresent(owner: presentationID) == true,
                 initial: true
-            ) { _, available in if available { acquire(id) } }
+            ) { _, available in if available { acquire(id, forStart: false) } }
             .onChange(of: active) { _, value in if value { focus(id) } }
             .onChange(of: board.terminalStartRequest, initial: true) { _, request in
                 guard request == card.id else { return }
@@ -86,9 +86,10 @@ struct CanvasTerminalCard: View {
             // this card's shell runs, so a later Start (the agent's terminal_start
             // or the user's button) delivers them. The drain is idempotent.
             .task(id: pane.sessionID) {
-                guard pane.sessionID != nil, board.pendingTerminalLines[card.id] != nil else {
-                    return
-                }
+                guard pane.sessionID != nil else { return }
+                // A session appeared (any start path): the card shows it.
+                acquire(id, forStart: false)
+                guard board.pendingTerminalLines[card.id] != nil else { return }
                 await CanvasTerminalStarter.drain(
                     card: card.id, groupID: id, board: board, session: session)
             }
@@ -162,9 +163,11 @@ struct CanvasTerminalCard: View {
     }
 
     /// Start Shell and Restart Shell are explicit user actions: the button,
-    /// the header, the menu, or Return on the selected card.
+    /// the header, the menu, or Return on the selected card. A stopped card
+    /// holds no lease, so the start takes one first.
     private func startOrRestart(_ id: TerminalGroupID) {
-        guard focus(id), let pane = session.terminal.terminalGroup(id)?.panes.first else {
+        guard focus(id, forStart: true), let pane = session.terminal.terminalGroup(id)?.panes.first
+        else {
             return
         }
         if pane.status == .stopped, pane.startAvailability == .available {
@@ -174,22 +177,26 @@ struct CanvasTerminalCard: View {
         }
     }
 
-    private func acquire(_ id: TerminalGroupID) {
+    /// Takes the presentation lease (ADR 0025) for a card that has a terminal
+    /// to show, or that is about to start one (`forStart`). A stopped card
+    /// takes none, so stopped cards never fill the cap of four.
+    private func acquire(_ id: TerminalGroupID, forStart: Bool) {
         guard session.canvasResources[board.id]?.permitsLiveContent == true,
             session.canvasResources[board.id]?.canPresent(owner: presentationID) == true,
             board.cards.first(where: { $0.content == .terminal(groupID: id) })?.id == card.id
         else { return }
-        guard
-            session.canvasTerminalOwners[id] == board.id
-                || (session.canvasTerminalOwners[id] == nil
-                    && session.canvasTerminalOwners.count < 4)
-        else { return }
-        session.canvasTerminalOwners[id] = board.id
+        guard forStart || hasTerminalToShow(id) else { return }
+        session.claimCanvasTerminalLease(id, for: board.id)
+    }
+
+    private func hasTerminalToShow(_ id: TerminalGroupID) -> Bool {
+        guard let pane = session.terminal.terminalGroup(id)?.panes.first else { return false }
+        return session.terminal.terminalController(for: pane.id) != nil
     }
 
     @discardableResult
-    private func focus(_ id: TerminalGroupID) -> Bool {
-        acquire(id)
+    private func focus(_ id: TerminalGroupID, forStart: Bool = false) -> Bool {
+        acquire(id, forStart: forStart)
         guard session.canvasTerminalOwners[id] == board.id else { return false }
         if !active { board.focus(card.id) }
         _ = try? session.terminal.perform(.revealGroup(id))

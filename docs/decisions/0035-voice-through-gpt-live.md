@@ -233,6 +233,19 @@ them): one ordered `AsyncStream` from the main actor and one `@concurrent` drain
 of the setting applies from the next session. See
 [`gpt-live-protocol.md`](../references/gpt-live-protocol.md) "Debug transcript and argument cleanup".
 
+## Amendment (2026-11-09): voice has no node on the board
+
+The voice caller's card is synthetic and never on the board (`CanvasAgentCaller.voice`). Voice therefore gets no
+`link` property on any tool, and no `x` or `y` on the tools that place a new node (`terminal_create`, `note_create`,
+`node_create`, `diagram_build`; `node_update` keeps them to move a node). Rafu places a new node beside the selection
+or focus, or `near` a named node. `terminal_create`, `terminal_send` and `edge_create` have voice texts that never
+say "your node" (`VoiceToolSchema.voiceDescriptions`); the MCP texts and schemas for agents are unchanged.
+`VoiceToolExecutor.cleanedArguments` also drops `link`, and `x`/`y` when both are 0. `send_message` stays declared
+and answers "Not available by voice." The voice result for `terminal_create` does not suggest `edge_create`, and
+the lease-cap advice tells Rafu to ask the user which terminal to stop. Reason: in the 2026-11-09 live test the
+backend sent `"link":true,"x":0,"y":0`; the link failed on the missing node, the node landed at the board origin,
+and the model said "my node isn't available".
+
 ## Related
 
 - Code: `Sources/RafuCore/Voice/`, `Sources/RafuApp/Voice/`,

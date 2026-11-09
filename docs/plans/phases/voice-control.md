@@ -184,6 +184,30 @@ Debug transcript and argument cleanup (2026-11-09):
     value for "width".`
 19. Turn the setting off: the next session writes no new file.
 
+Terminal typing, placement and leases (2026-11-09 live-test fixes; not yet
+re-checked live):
+
+20. Allow mode: say "start a Claude session", then "send hi to Claude". "hi"
+    is submitted (Claude answers); no empty line stays in the prompt. Repeat
+    with Codex. This is the CR-not-LF fix: it covers MCP `terminal_send`,
+    queued launch lines and notch replies too.
+21. "Start a Claude session" in a fresh terminal node: the `claude` launch
+    line shows once, at the prompt, not also above it.
+22. Select a node and say "start a Claude session": the new node lands beside
+    the selection, not at the board's top-left, and the debug transcript's
+    `call` has no `link`, `x` or `y`. Rafu does not say "my node isn't
+    available".
+23. Put four stopped terminal nodes on screen and ask voice to start a fifth:
+    it starts. With four running terminals on screen, a fifth start is held
+    and Rafu says four terminals show live views and asks which one to stop.
+    Press Start Shell on a stopped node that you stopped earlier: the shell
+    shows in the card (not "Terminal view is not attached").
+24. Allow mode, Claude's development-channel dialog shows: if Rafu does not
+    answer it, read the `ChannelPrompt` log lines (see
+    `docs/references/canvas-live-sessions.md`, "Diagnostics") and record the
+    end reason and the Claude Code version. Ask Rafu to "answer the dialog":
+    it uses `terminal_send`, not `voice_confirm`.
+
 ### Addition: `compose_view` (2026-11-08)
 
 Delivered on `main`: the voice backend tool `compose_view` composes a view from Rafu-owned candidates with the OpenAI

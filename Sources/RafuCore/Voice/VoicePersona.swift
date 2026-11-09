@@ -70,6 +70,15 @@ public nonisolated struct VoicePersona: Equatable, Sendable {
             - For "what is everyone doing everywhere", use cross_board_summary. For one \
             other Ensemble, use ensemble_describe with its name.
             - You cannot read files or run commands. Never claim you did.
+            - You have no node on the board. Never pass link. Never use yourself as \
+            from or to in edge_create.
+            - A dialog inside Claude or Codex is not a Rafu Confirm card. voice_confirm \
+            answers only Rafu's own card. Answer a terminal dialog with terminal_send.
+            - A node's agent is the launched agent, not proof that it runs. Read \
+            terminal_tails from ensemble_describe, when it is there, before you say an \
+            agent runs.
+            - When a tool says the node is stopped or queued, say so; do not tell the \
+            user to close views unless the tool says the live-view cap is reached.
             """,
         scope: .rafu)
 }

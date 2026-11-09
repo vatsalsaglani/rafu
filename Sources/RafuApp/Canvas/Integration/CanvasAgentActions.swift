@@ -780,9 +780,12 @@ enum CanvasAgentActions {
                 queueFullMessage(card.title), state: report.running ? "running" : "stopped",
                 card: card, call: call, caller: caller)
         }
+        let isVoice = caller.provider == CanvasAgentCaller.voiceProvider
         var message = startMessage(
-            report, title: card.title, kind: .create, lineBytes: line.utf8.count)
-        if call.link != true, call.agent == "claude" || call.agent == "codex" {
+            report, title: card.title, kind: .create, lineBytes: line.utf8.count,
+            isVoice: isVoice)
+        // Voice has no node to link from (ADR 0035).
+        if !isVoice, call.link != true, call.agent == "claude" || call.agent == "codex" {
             message += " Next: edge_create kind message to it, then link_set_state live."
         }
         return linked(
@@ -879,7 +882,9 @@ enum CanvasAgentActions {
         let card = try findCard(call.nodeID, in: caller.board)
         let report = try await start(card, line: nil, caller: caller)
         return ok(
-            startMessage(report, title: card.title, kind: .start, lineBytes: nil), node: card.id,
+            startMessage(
+                report, title: card.title, kind: .start, lineBytes: nil,
+                isVoice: caller.provider == CanvasAgentCaller.voiceProvider), node: card.id,
             state: report.running ? "running" : "stopped")
     }
 
@@ -909,10 +914,11 @@ enum CanvasAgentActions {
     enum StartMessageKind { case create, start, send }
 
     /// What an agent is told after a start. It names states and byte counts, never
-    /// the line itself: this text also goes to the activity log.
+    /// the line itself: this text also goes to the activity log. `isVoice`
+    /// words the lease-cap advice for Rafu voice, which speaks to the user.
     static func startMessage(
         _ report: CanvasTerminalStartReport, title: String, kind: StartMessageKind,
-        lineBytes: Int?
+        lineBytes: Int?, isVoice: Bool = false
     ) -> String {
         let moved = report.viewMoved ? " Rafu moved your view to this node." : ""
         let size = lineBytes.map { "\($0)-byte " } ?? ""
@@ -953,7 +959,9 @@ enum CanvasAgentActions {
         switch report.hold {
         case .leaseCap:
             advice =
-                " Four Ensemble terminals already hold a live view. Ask the user to close one, then call terminal_start on this node."
+                isVoice
+                ? " Four terminals already show live views. Tell the user and ask which one to stop; then call terminal_start."
+                : " Four Ensemble terminals already hold a live view. Ask the user to close one, then call terminal_start on this node."
         case .unavailable:
             advice =
                 " This node cannot start a shell now (live-session limit or no saved profile). Ask the user to free a terminal, then call terminal_start."
@@ -1031,7 +1039,9 @@ enum CanvasAgentActions {
         let report = try await start(card, line: line, caller: caller)
         guard !report.queueFull else { return .init(error: queueFullMessage(card.title)) }
         return ok(
-            startMessage(report, title: card.title, kind: .send, lineBytes: line.utf8.count),
+            startMessage(
+                report, title: card.title, kind: .send, lineBytes: line.utf8.count,
+                isVoice: isVoice),
             node: card.id, state: report.running ? "running" : "stopped")
     }
 

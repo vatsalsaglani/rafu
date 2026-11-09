@@ -419,6 +419,11 @@ made for this investigation.
 - Dialog text last seen: Claude Code 2.1.304 (screenshot from the user,
   2026-11-07). The dialog is not a Rafu string; if Claude Code changes it, the
   matcher stops matching and the user answers the dialog by hand.
+- 2.1.319 not yet confirmed. In the 2026-11-09 live voice test (Allow mode)
+  the dialog was not answered and no board notice appeared, so the watch never
+  matched or never started. The cause is not proven: changed dialog text, the
+  window running out, or the setting off. Diagnostics were added (see
+  "Diagnostics" below) and the window went from 30 s to 60 s.
 
 User decision, 2026-11-07: "When we open Claude session on a terminal we see
 that allow thing. Can we write one automation for that terminal where if that
@@ -454,8 +459,8 @@ Window and sampling. There is no terminal content hook, so after the launch one
 task samples the visible rows (`WorkspaceTerminalController.recentOutputLines`
 with `fullViewport: true`: every viewport row, also rows below the cursor, never
 scrollback) at most four times a second for at most
-30 s. It stops at the first match or when the window ends. No timer runs outside
-that window.
+60 s (30 s until 2026-11-09). It stops at the first match or when the window
+ends. No timer runs outside that window.
 
 Matcher (`CanvasChannelPrompt.matches`, pure). Every part must be present:
 a "Loading development channels" title; the
@@ -495,9 +500,26 @@ two rules stop it from steering the watch toward its own Claude:
    that an agent prints, followed by a tool-permission prompt or any other
    output, does not match.
 
-If the folder-trust dialog comes first and the user takes more than 30 s to
+If the folder-trust dialog comes first and the user takes more than 60 s to
 answer it, the window ends and Rafu does not answer the channel dialog; the user
 answers it in the terminal.
+
+Diagnostics (2026-11-09). `CanvasChannelPromptConfirmer` writes `Logger` lines
+(subsystem `dev.vatsalsaglani.rafu`, category `ChannelPrompt`) with states only,
+never terminal content: watch started; watch not started with the Agent
+control mode and the setting; and why it ended — `confirmed`, `could not
+confirm` (also "Return refused"), `gate closed`, `window elapsed, no view`,
+`window elapsed, dialog never matched`, `no view after the Return`, or
+`cancelled`. The no-logging rule for Voice does not cover Canvas code. Read
+them with:
+
+```bash
+log show --last 10m --predicate 'subsystem == "dev.vatsalsaglani.rafu" && category == "ChannelPrompt"' --info
+```
+
+"dialog never matched" with the dialog on screen means Claude Code changed the
+dialog text: update `CanvasChannelPrompt.matches` and its tests from a fresh
+sample.
 
 Verification:
 
