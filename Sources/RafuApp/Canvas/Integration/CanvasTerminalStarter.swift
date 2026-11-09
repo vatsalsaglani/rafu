@@ -175,14 +175,16 @@ enum CanvasTerminalStarter {
     ///
     /// A line is typed when the process has run for `settle` steps and the
     /// terminal is quiet (`isQuiet`), or once it has run for `quietWait` steps.
-    /// One line per step: `sendReply` writes the line's Return 50 ms after its
-    /// text, and the 100 ms step lets that Return land, and the shell echo the
-    /// line, before the next line's text.
+    /// One line per step, and never while the previous line's Return is still
+    /// owed (`isReturnPending`): `sendReply` writes the Return 250 ms after the
+    /// text, so the next line's text never comes right after an early Return.
     @discardableResult
     static func drain(
         card: CanvasCardID, groupID: TerminalGroupID, board: CanvasBoardState,
         session: WorkspaceSession, settle: Int = settleSteps, quietWait: Int = quietWaitSteps,
-        isReady: (WorkspaceTerminalController) -> Bool = { $0.isProcessRunning },
+        isReady: (WorkspaceTerminalController) -> Bool = {
+            $0.isProcessRunning && !$0.isReturnPending
+        },
         isQuiet: (WorkspaceTerminalController) -> Bool = {
             ($0.secondsSinceLastOutput ?? 0) >= quietInterval
         },

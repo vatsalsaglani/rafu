@@ -49,6 +49,25 @@ struct TerminalReplyWriterTests {
         #expect(pty.writes == ["cd /tmp", "\r", "claude", "\r"])
     }
 
+    /// Codex keeps an Enter that follows a fast burst of characters as a
+    /// newline for about 120 ms; an explicit paste plus a later CR submits.
+    @Test("With bracketed paste on, the text is one explicit paste, then CR")
+    func bracketedPasteThenReturn() async {
+        let pty = Pty()
+        let writer = TerminalReplyWriter(
+            write: { pty.write($0) }, isBracketedPaste: { true }, wait: { _ in })
+        #expect(writer.send("hi"))
+        #expect(writer.owesReturn)
+        await writer.pendingReturn?.value
+        #expect(pty.writes == ["\u{1B}[200~hi\u{1B}[201~", "\r"])
+        #expect(!writer.owesReturn)
+    }
+
+    @Test("Return waits well past the Codex paste window")
+    func returnDelayClearsPasteWindow() {
+        #expect(TerminalReplyWriter.returnDelay >= .milliseconds(200))
+    }
+
     @Test("No process: the text is refused and no CR is owed")
     func refusedWhenNotRunning() async {
         let pty = Pty()

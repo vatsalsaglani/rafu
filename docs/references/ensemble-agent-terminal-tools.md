@@ -94,7 +94,7 @@ The fix is an ordered per-node queue, `CanvasBoardState.pendingTerminalLines`:
   `terminal_start` — or the user pressing Start — types the waiting lines.
 
 The drain types **one line per 100 ms step**, and each line waits for quiet
-again. `sendReply` writes a line's Return 50 ms after its text (section 10), so
+again. `sendReply` writes a line's Return 250 ms after its text (section 10), so
 the step lets that Return land before the next line's text. If line 1 starts an
 interactive program, line 2 still lands inside it. That ordering is the agent's
 responsibility, not Rafu's.
@@ -176,8 +176,19 @@ replies, Agent History resume, agent hand-off) goes through
   Ctrl-J, which **inserts a newline** in their prompt; only 0x0D submits. zsh's
   ZLE accepts both, which is why `text + "\n"` looked right in a shell and
   failed in every agent: "hi" sat in the prompt with an empty line under it.
-- The text is written first and `"\r"` 50 ms later in a second write. Text and
-  CR that arrive in one read can be taken as a paste, and the CR kept as text.
+- The text is written first and `"\r"` **250 ms** later in a second write.
+  Codex detects a paste by timing: an Enter that arrives within about 120 ms
+  of a fast burst of characters is kept as a newline. With 50 ms (verified
+  2026-11-09, Codex v0.167.0, voice `terminal_send`), a 335-byte line was
+  submitted and the next 282-byte line was not: the text sat in the prompt with
+  the cursor on a new line.
+- When the program turned bracketed-paste mode on (SwiftTerm
+  `Terminal.bracketedPasteMode`; Claude Code, Codex and zsh do), the text is
+  sent as an explicit paste, `ESC[200~` text `ESC[201~`, so the CR is a key
+  press and never part of a paste. Callers already refuse control characters
+  in a line, so the text cannot end the paste early.
+- The Ensemble drain does not type the next queued line while the previous
+  line still owes its Return (`WorkspaceTerminalController.isReturnPending`).
 - Order: a line that still owes its CR writes it at once when the next line
   arrives (`flushReturn` before the text), so lines never interleave whoever
   calls and however fast. The drain also paces one line per step.

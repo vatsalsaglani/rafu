@@ -1039,9 +1039,11 @@ final class WorkspaceTerminalController: Identifiable {
     private var terminalView: RafuTerminalView?
     /// Types a reply line and its Return (CR) in order (`sendReply`).
     @ObservationIgnored
-    private lazy var replyWriter = TerminalReplyWriter { [weak self] text in
-        self?.writeToLiveProcess(text) ?? false
-    }
+    private lazy var replyWriter = TerminalReplyWriter(
+        write: { [weak self] text in self?.writeToLiveProcess(text) ?? false },
+        isBracketedPaste: { [weak self] in
+            self?.terminalView?.getTerminal().bracketedPasteMode ?? false
+        })
     @ObservationIgnored
     private var pendingShellStartup: Task<Void, Never>?
     @ObservationIgnored
@@ -1201,6 +1203,10 @@ final class WorkspaceTerminalController: Identifiable {
         terminalView.send(txt: text)
         return true
     }
+
+    /// True between a typed line's text and its delayed Return. The Ensemble
+    /// drain waits for it before the next line.
+    var isReturnPending: Bool { replyWriter.owesReturn }
 
     /// Seconds since the terminal last printed output, or `nil` when it has
     /// printed nothing since the process started. The Ensemble line drain
