@@ -39,6 +39,15 @@ public nonisolated enum VoiceOutputScrubber {
         return value
     }
 
+    /// Replaces the known secret shapes (private key blocks, `sk-…`, GitHub
+    /// and Slack tokens, AWS key ids, `Bearer …`, `password=…`) and keeps
+    /// every other character, newlines included. Unlike `scrub`, it does not
+    /// apply the generic long-token rule, so paths stay readable.
+    public static func redactSecrets(_ text: String) -> String {
+        let specific = Array(linePatterns.dropLast())
+        return redact(redact(text, patterns: blockPatterns), patterns: specific)
+    }
+
     /// The last `maxLines` non-empty lines, each at most `maxLineBytes`, the
     /// whole at most `maxBytes`, with secrets replaced and control
     /// characters turned into spaces.

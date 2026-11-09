@@ -12,6 +12,7 @@ struct VoiceSettingsSection: View {
     @AppStorage(VoicePreferences.personalizationKey) private var personalization = false
     @AppStorage(VoicePreferences.monthlyCapKey) private var monthlyCap = Int(
         VoiceCostMeter.defaultCapDollars)
+    @AppStorage(VoicePreferences.debugTranscriptKey) private var keepsDebugTranscript = false
     @State private var microphone = VoiceMicrophonePermission.access
     @State private var isResetPresented = false
     @State private var chordConflict = false
@@ -112,6 +113,17 @@ struct VoiceSettingsSection: View {
             )
         }
 
+        Section {
+            Toggle("Keep a debug transcript", isOn: $keepsDebugTranscript)
+            Button("Show in Finder") { showTranscriptFolder() }
+        } header: {
+            Text("Debugging")
+        } footer: {
+            Text(
+                "Rafu writes what you say, what Rafu says, and every tool call with its arguments and results to \(VoiceDebugTranscript.displayPath()) on this Mac. It can hold text from your notes and terminals. Never the key or audio. Applies from the next voice session. Rafu keeps the newest \(VoiceDebugTranscript.keptFiles) files."
+            )
+        }
+
         Section("Microphone") {
             LabeledContent("Access", value: microphoneText)
             // macOS lists an app under Privacy ▸ Microphone only after the app asks, so
@@ -156,6 +168,17 @@ struct VoiceSettingsSection: View {
         case .notAsked: "Rafu asks the first time you talk"
         case .denied: "Off. Turn it on in System Settings."
         }
+    }
+
+    /// Opens the transcript folder, or the nearest folder above it that
+    /// exists (before the first transcript).
+    private func showTranscriptFolder() {
+        let folder = VoiceDebugTranscript.defaultDirectory()
+        let app = folder.deletingLastPathComponent()
+        let candidates = [folder, app, app.deletingLastPathComponent()]
+        let target =
+            candidates.first { FileManager.default.fileExists(atPath: $0.path) } ?? candidates[2]
+        NSWorkspace.shared.open(target)
     }
 
     private func showProfile() {

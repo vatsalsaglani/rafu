@@ -39,11 +39,13 @@ protocol VoiceToolHost: AnyObject {
     func takeViewStreamHandle(for callID: String)
 }
 
-/// One tool result: the JSON for the backend, and a counts-only line for the
-/// timeline. Neither ever holds a key; the timeline line never holds text.
+/// One tool result: the JSON for the backend, and a short line for the
+/// timeline. Neither ever holds a key. The timeline line is `summary`, plus
+/// `message` on a failure: Rafu's own error text, never the user's text.
 struct VoiceToolOutcome: Equatable {
     let output: String
     let summary: String
+    var message: String? = nil
     var isError: Bool { output.hasPrefix("{\"error\"") }
 }
 
@@ -159,7 +161,64 @@ enum VoiceToolExecutor {
     }
 
     static func failure(_ code: String, _ message: String) -> VoiceToolOutcome {
-        VoiceToolOutcome(output: VoiceJSON.toolError(code, message), summary: code)
+        VoiceToolOutcome(
+            output: VoiceJSON.toolError(code, message), summary: code, message: message)
+    }
+
+    /// Agent names the backend says aloud, mapped to `CanvasAgentLaunch` keys.
+    nonisolated static let agentAliases: [String: String] = [
+        "claude code": "claude", "claude-code": "claude", "claude_code": "claude",
+        "claudecode": "claude", "codex cli": "codex", "gemini cli": "gemini",
+        "cursor agent": "cursor-agent",
+    ]
+    /// Keys where an empty string has its own meaning (an empty body).
+    private nonisolated static let keepsEmptyString: Set<String> = ["text", "markdown", "source"]
+
+    /// Voice only: the backend fills optional fields with `""` or `null`,
+    /// says "Claude Code", and sends an absolute `cwd`. This removes empty
+    /// values, maps agent names, and makes a `cwd` inside the workspace
+    /// relative. String work only; `CanvasAgentActions` still checks that
+    /// the folder exists inside the workspace. MCP calls do not come here.
+    nonisolated static func cleanedArguments(_ arguments: [String: Any], workspaceRoot: URL?)
+        -> [String: Any]
+    {
+        var cleaned: [String: Any] = [:]
+        for (key, value) in arguments {
+            if value is NSNull { continue }
+            if let text = value as? String, !keepsEmptyString.contains(key),
+                text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                continue
+            }
+            if key == "command", let list = value as? [Any], list.isEmpty { continue }
+            cleaned[key] = value
+        }
+        if let agent = cleaned["agent"] as? String {
+            let name = agent.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if let alias = agentAliases[name] {
+                cleaned["agent"] = alias
+            } else if CanvasAgentLaunch.executable(for: name) != nil {
+                cleaned["agent"] = name
+            }
+        }
+        if let cwd = cleaned["cwd"] as? String, let workspaceRoot {
+            cleaned["cwd"] = relativeFolder(cwd, root: workspaceRoot)
+        }
+        return cleaned
+    }
+
+    private nonisolated static func relativeFolder(_ path: String, root: URL) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/") || trimmed.hasPrefix("~") else { return path }
+        let expanded = (trimmed as NSString).expandingTildeInPath
+        let standard = URL(fileURLWithPath: expanded).standardizedFileURL.path
+        var base = root.standardizedFileURL.path
+        while base.count > 1, base.hasSuffix("/") { base.removeLast() }
+        if standard == base { return "." }
+        let prefix = base == "/" ? "/" : base + "/"
+        guard standard.hasPrefix(prefix) else { return path }
+        let rest = String(standard.dropFirst(prefix.count))
+        return rest.isEmpty ? "." : rest
     }
 
     // MARK: Ensemble tools
@@ -184,6 +243,7 @@ enum VoiceToolExecutor {
             }
         }
         guard let board else { return failure("no_ensemble", noBoardMessage) }
+        arguments = cleanedArguments(arguments, workspaceRoot: session.rootURL)
         let caller = CanvasAgentCaller.voice(
             session: session, board: board, callerID: host.callerID)
         let tool = CanvasAgentTool(rawValue: name)
@@ -351,7 +411,8 @@ enum VoiceToolExecutor {
         -> VoiceToolOutcome
     {
         if let error = response.error {
-            return VoiceToolOutcome(output: VoiceJSON.toolError("failed", error), summary: "error")
+            return VoiceToolOutcome(
+                output: VoiceJSON.toolError("failed", error), summary: "error", message: error)
         }
         let result = response.toolResult?.bounded(maximumBytes: CanvasAgentActions.resultBytes)
         let output =

@@ -16,7 +16,8 @@ enum VoiceCloseReason: Equatable {
 ///
 /// Observation exposes small metadata only. The key, audio and transcripts
 /// never reach observable state (the timeline keeps at most 120 scalars of
-/// the user's own words, in memory, cleared on close).
+/// the user's own words, in memory, cleared on close). Only the opt-in debug
+/// transcript (`VoiceDebugTranscript`) writes words to disk.
 @MainActor
 @Observable
 final class VoiceSession {
@@ -51,6 +52,9 @@ final class VoiceSession {
         var viewHost: @MainActor () -> (any GeneratedViewHost)? = {
             GeneratedViewHostRegistry.shared.host
         }
+        /// Where the opt-in debug transcript goes. `nil` means
+        /// `VoiceDebugTranscript.defaultDirectory()`.
+        var debugTranscriptDirectory: URL? = nil
 
         static var live: Dependencies {
             Dependencies(
@@ -135,6 +139,14 @@ final class VoiceSession {
     @ObservationIgnored private var argumentStreamOrder = 0
     /// How many function calls are tracked now. Tests read it.
     var argumentStreamCount: Int { argumentStreams.count }
+    /// The opt-in debug transcript of the open session; nil when off.
+    @ObservationIgnored private var transcript: VoiceDebugTranscript?
+    /// The newest transcript, kept after close so tests can await its drain.
+    @ObservationIgnored private(set) var lastDebugTranscript: VoiceDebugTranscript?
+    /// The current user turn and Rafu reply, collected only while a
+    /// transcript is on, and written as one entry each.
+    @ObservationIgnored private var userUtterance = ""
+    @ObservationIgnored private var replyText = ""
 
     init(dependencies: Dependencies = .live) {
         self.dependencies = dependencies
@@ -214,6 +226,7 @@ final class VoiceSession {
     /// bounds the wait for `session.closed` (default: the dependency's 15 s).
     func close(reason: VoiceCloseReason = .user, closeTimeout: Duration? = nil) async {
         guard hasOpenSession else { return }
+        transcript?.record(.sessionClosed(reason: "\(reason)"))
         generation += 1
         openTask?.cancel()
         openTask = nil
@@ -241,6 +254,8 @@ final class VoiceSession {
     /// The server ends the session when the socket goes.
     func terminateNow() {
         guard hasOpenSession else { return }
+        // The drain cannot be awaited here; the last lines may be lost at quit.
+        transcript?.record(.sessionClosed(reason: "quit"))
         generation += 1
         openTask?.cancel()
         openTask = nil
@@ -272,6 +287,7 @@ final class VoiceSession {
         clock.setLatched(machine.mic == .latched, at: .zero)
         lastError = nil
         timeline.clear()
+        startTranscript()
         openTask = Task { await self.runOpen(ticket) }
     }
 
@@ -387,6 +403,7 @@ final class VoiceSession {
 
     private func fail(_ error: VoiceError, ticket: Int) async {
         guard ticket == generation else { return }
+        transcript?.record(.sessionFailed(reason: error.blobReason))
         generation += 1
         openTask = nil
         lastError = error.blobReason
@@ -424,6 +441,7 @@ final class VoiceSession {
 
     /// Forgets every per-session resource and counter. Idle again after it.
     private func releaseSession() {
+        endTranscript()
         cancelViewStreams()
         callChain = nil
         client = nil
@@ -566,10 +584,12 @@ final class VoiceSession {
         switch event {
         case .sessionStarted(let id, _):
             sessionID = id.isEmpty ? UUID().uuidString : id
+            transcript?.record(.sessionStarted(id: id))
             resumeStart(true)
         case .outputAudioDelta(let pcm):
             handleOutputAudio(pcm)
         case .inputTranscriptDelta(let text):
+            if transcript != nil { Self.append(text, to: &userUtterance) }
             if let youRow {
                 timeline.appendDetail(text, to: youRow)
             } else {
@@ -579,7 +599,10 @@ final class VoiceSession {
             }
         case .outputTranscriptDelta(let text):
             replyCharacters += text.count
-        case .delegationCreated(let id, _):
+            if transcript != nil { Self.append(text, to: &replyText) }
+        case .delegationCreated(let id, let target):
+            flushTranscriptText()
+            transcript?.record(.delegation(id: id, target: target))
             youRow = nil
             delegationCount += 1
             // A reply is coming: have the engine ready before its audio.
@@ -597,6 +620,7 @@ final class VoiceSession {
             let measure = functionCallFinished(callID: callID, name: name)
             runCall(callID: callID, name: name, arguments: arguments, measure: measure)
         case .responseCompleted:
+            flushReply()
             cancelOrphanViewStreams()
             if inFlightCalls > 0 {
                 completedWhileInFlight = true
@@ -605,12 +629,14 @@ final class VoiceSession {
             }
         case .usageUpdated(let seconds, _):
             if let sessionID { costStore.recordUsage(sessionID: sessionID, seconds: seconds) }
-        case .sessionClosed(_, let seconds):
+        case .sessionClosed(let reason, let seconds):
+            transcript?.record(.sessionClosed(reason: reason ?? "remote"))
             if let sessionID, let seconds {
                 costStore.recordUsage(sessionID: sessionID, seconds: Double(seconds))
             }
             if !isClosing, isStarted { Task { await self.close(reason: .remote) } }
-        case .error(let code, _):
+        case .error(let code, let message):
+            transcript?.record(.serverError(code: code, message: message))
             if !isStarted {
                 startErrorCode = code ?? "error"
                 resumeStart(false)
@@ -669,6 +695,7 @@ final class VoiceSession {
     /// Calls run one after another, in arrival order: "make three terminals"
     /// then "link them" must not interleave.
     private func runCall(callID: String, name: String, arguments: String, measure: String?) {
+        transcript?.record(.call(callID: callID, name: name, arguments: arguments))
         inFlightCalls += 1
         clock.noteServerActivity(at: elapsed())
         noteEngineUse()
@@ -681,7 +708,8 @@ final class VoiceSession {
                 let outcome = await VoiceToolExecutor.run(
                     name: name, argumentsJSON: arguments, callID: callID, host: self)
                 await self.finishCall(
-                    callID: callID, row: row, outcome: outcome, measure: measure, ticket: ticket)
+                    callID: callID, name: name, row: row, outcome: outcome, measure: measure,
+                    ticket: ticket)
             }
             return
         }
@@ -691,12 +719,14 @@ final class VoiceSession {
             let outcome = await VoiceToolExecutor.run(
                 name: name, argumentsJSON: arguments, callID: callID, host: self)
             await self.finishCall(
-                callID: callID, row: row, outcome: outcome, measure: measure, ticket: ticket)
+                callID: callID, name: name, row: row, outcome: outcome, measure: measure,
+                ticket: ticket)
         }
     }
 
     private func finishCall(
-        callID: String, row: String, outcome: VoiceToolOutcome, measure: String?, ticket: Int
+        callID: String, name: String, row: String, outcome: VoiceToolOutcome, measure: String?,
+        ticket: Int
     ) async {
         // A skeleton the call did not finish (refused before it reached the
         // view code) never stays on the board.
@@ -707,7 +737,14 @@ final class VoiceSession {
         // A call still running when the session closed: the board change
         // stands (like a late MCP approval); its result is dropped.
         guard ticket == generation, let client else { return }
-        let detail = measure.map { "\(outcome.summary); \($0)" } ?? outcome.summary
+        transcript?.record(
+            .callResult(
+                callID: callID, name: name, summary: outcome.summary, message: outcome.message,
+                output: outcome.output, isError: outcome.isError))
+        // A failure shows Rafu's own message ("invalid_arguments: ..."); the
+        // timeline cuts the line to 120 scalars.
+        let base = outcome.message.map { "\(outcome.summary): \($0)" } ?? outcome.summary
+        let detail = measure.map { "\(base); \($0)" } ?? base
         timeline.finish(row, endMS: milliseconds(elapsed()), detail: detail)
         clock.noteServerActivity(at: elapsed())
         try? await client.send(
@@ -830,6 +867,52 @@ final class VoiceSession {
         argumentStreamOrder = 0
     }
 
+    // MARK: Debug transcript
+
+    private func startTranscript() {
+        endTranscript()
+        guard dependencies.preferences.keepsDebugTranscript else { return }
+        let directory =
+            dependencies.debugTranscriptDirectory ?? VoiceDebugTranscript.defaultDirectory()
+        let transcript = VoiceDebugTranscript(directory: directory)
+        self.transcript = transcript
+        lastDebugTranscript = transcript
+        let preferences = dependencies.preferences
+        transcript.record(
+            .sessionOpened(
+                persona: persona.name, backend: preferences.backend.rawValue,
+                voice: preferences.voice.rawValue))
+    }
+
+    /// Writes what is left and ends the stream; the drain closes the file.
+    private func endTranscript() {
+        flushTranscriptText()
+        transcript?.finish()
+        transcript = nil
+        userUtterance = ""
+        replyText = ""
+    }
+
+    private func flushTranscriptText() {
+        if !userUtterance.isEmpty {
+            transcript?.record(.userSaid(userUtterance))
+            userUtterance = ""
+        }
+        flushReply()
+    }
+
+    private func flushReply() {
+        guard !replyText.isEmpty else { return }
+        transcript?.record(.rafuSaid(replyText))
+        replyText = ""
+    }
+
+    /// Appends up to `maximumFieldBytes`; the transcript cuts the rest anyway.
+    private static func append(_ text: String, to buffer: inout String) {
+        guard buffer.utf8.count < VoiceDebugTranscript.maximumFieldBytes else { return }
+        buffer += text
+    }
+
     // MARK: Timers
 
     private func startClock() {
@@ -894,6 +977,7 @@ final class VoiceSession {
         let answer = await confirmGate.ask(
             request, timeout: dependencies.confirmTimeout, present: dependencies.presentConfirm)
         machine.apply(.confirmResolved)
+        transcript?.record(.confirm(tool: request.tool.rawValue, answer: answer.timelineWord))
         timeline.finish(row, endMS: milliseconds(elapsed()), detail: answer.timelineWord)
         if isStarted { clock.noteServerActivity(at: elapsed()) }
         noteEngineUse()

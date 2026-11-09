@@ -8,6 +8,7 @@ nonisolated struct VoicePreferences: Sendable {
     static let shareTerminalTailKey = "voice.shareTerminalTail"
     static let personalizationKey = "voice.personalization"
     static let monthlyCapKey = "voice.monthlyCapUSD"
+    static let debugTranscriptKey = "voice.debugTranscript"
 
     static let capRange = 1...50
 
@@ -37,6 +38,9 @@ nonisolated struct VoicePreferences: Sendable {
 
     /// Default off (opt-in).
     var personalization: Bool { defaults.bool(forKey: Self.personalizationKey) }
+
+    /// Default off (opt-in). Read when a session opens.
+    var keepsDebugTranscript: Bool { defaults.bool(forKey: Self.debugTranscriptKey) }
 
     var monthlyCapDollars: Double {
         let stored = defaults.object(forKey: Self.monthlyCapKey) as? Int

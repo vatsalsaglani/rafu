@@ -217,6 +217,22 @@ header; a non-https base URL is refused before the key is read. It runs only whe
 fallback after `show_view` validation fails. Ensemble agents in terminals do not have this tool and never receive
 the key. See [`voice-compose-view.md`](../references/voice-compose-view.md).
 
+## Amendment (2026-11-09): opt-in debug transcript
+
+The user asked for a transcript log to debug live voice sessions. Settings ▸ Voice ▸ Debugging has a toggle,
+"Keep a debug transcript", **off by default**. It is the one exception to the voice no-logging rule. When it is on,
+each new voice session writes one JSONL file to `~/Library/Logs/<app name>/Voice/` (`Rafu` or `Rafu Lightning`, so
+the two never share a folder): what the user said, what Rafu said, each delegation, and every tool call with its
+raw arguments and its result. The file can hold note text, board titles and (scrubbed) terminal lines. It never
+holds the OpenAI key, request headers or audio: `VoiceDebugTranscript` never receives them.
+
+Constraints: folder 0700, file 0600; secret shapes (`sk-…`, `Bearer …`, GitHub, Slack and AWS tokens,
+`password=…`) are replaced with `[redacted]`; each field at most 16 KiB, each file at most 2 MiB (then one
+`truncated` line); Rafu keeps the newest 20 files. It is not a logging API (`VoiceSourcePolicyTests` still bans
+them): one ordered `AsyncStream` from the main actor and one `@concurrent` drain task that owns the file. A change
+of the setting applies from the next session. See
+[`gpt-live-protocol.md`](../references/gpt-live-protocol.md) "Debug transcript and argument cleanup".
+
 ## Related
 
 - Code: `Sources/RafuCore/Voice/`, `Sources/RafuApp/Voice/`,

@@ -251,6 +251,78 @@ other than `response.output_item.done` with `item.type == "function_call"` and
   ad-hoc signed without hardened runtime and needs only
   `NSMicrophoneUsageDescription` (added in `script/build_and_run.sh`).
 
+### Debug transcript and argument cleanup (2026-11-09)
+
+Verified 2026-11-09, same toolchain, by `VoiceDebugTranscriptTests` and
+`VoiceArgumentsAndTranscriptTests` (no live run yet; manual check 17).
+
+- **The backend fills optional fields.** In a live session the user said
+  "start a Claude session"; GPT-Live sent `terminal_create` eight times with
+  `invalid_arguments`, then fell back to `node_create` + `terminal_start` (a
+  plain shell). The model sends `""` or `null` for optional fields
+  (`prompt: ""` is refused, `title: ""` too), says the agent as
+  `"Claude Code"` (no such key in `CanvasAgentLaunch.executables`), and may
+  send an absolute `cwd` (refused: only workspace-relative paths).
+  `VoiceToolExecutor.cleanedArguments` fixes this **in the voice path only**,
+  before `CanvasAgentToolCall.parse`: it drops `NSNull`, drops empty or
+  blank strings except `text`, `markdown` and `source` (an empty body has
+  its own meaning), drops an empty `command`, maps agent aliases (`claude
+  code`, `claude-code`, `claude_code`, `claudecode` → `claude`; `codex cli`
+  → `codex`; `gemini cli` → `gemini`; `cursor agent` → `cursor-agent`; a
+  known name in another case is lowercased), and makes an absolute or `~`
+  `cwd` relative when it is inside `session.rootURL` (string work only; the
+  equal root gives `.`). `CanvasAgentActions.startingFolder` still resolves
+  symlinks and checks containment. MCP `parse`/`validate` are unchanged.
+- **Failure text on the timeline.** `VoiceToolOutcome.message` carries
+  Rafu's own error message; the tool row reads `code: message` (for example
+  `invalid_arguments: Invalid value for "width".`), cut to 120 scalars.
+  `summary` stays the code, so tests that assert it still hold.
+- **Debug transcript (opt-in).** Settings ▸ Voice ▸ Debugging ▸ "Keep a
+  debug transcript" (`voice.debugTranscript`, default off; read when a
+  session opens). File: `~/Library/Logs/<Rafu | Rafu Lightning>/Voice/voice-yyyyMMdd-HHmmss-<4 hex>.jsonl`.
+  One JSON object per line, sorted keys: `t` (ISO 8601 with fractional
+  seconds, the time Rafu recorded the entry) and `type`:
+
+  | `type` | Fields |
+  |---|---|
+  | `session_opened` | `persona`, `backend`, `voice` |
+  | `session_started` | `session_id` |
+  | `session_closed` | `reason` (`user`, `idle`, `remote`, `quit`, or the server's reason) |
+  | `session_failed` | `reason` (the blob text) |
+  | `server_error` | `code`, `message` |
+  | `user_said` | `text` (one per user turn, written at `session.delegation.created`) |
+  | `rafu_said` | `text` (one per reply, written at `response.completed`, the next turn, or close) |
+  | `delegation` | `delegation_id`, `target` |
+  | `call` | `call_id`, `name`, `arguments` (the raw JSON string) |
+  | `call_result` | `call_id`, `name`, `summary`, `message`, `output`, `is_error` |
+  | `confirm` | `tool`, `answer` |
+  | `truncated` | none; the file reached 2 MiB and nothing follows |
+
+  ```bash
+  cd ~/Library/Logs/"Rafu Lightning"/Voice
+  ls -t | head -1                                        # newest session
+  jq -c 'select(.type=="call_result" and .is_error)' "$(ls -t | head -1)"
+  jq -r 'select(.type=="user_said" or .type=="rafu_said") | "\(.type): \(.text)"' "$(ls -t | head -1)"
+  ```
+
+  Privacy and limits: folder 0700, file 0600; `VoiceOutputScrubber.redactSecrets`
+  replaces the specific secret shapes but, unlike `scrub`, not the generic
+  40-character token rule, so paths stay readable; each field at most
+  16 KiB (`…[truncated N bytes]`); the newest 20 files are kept (about 40 MiB
+  at worst). The key, headers and audio never reach `VoiceDebugTranscript`.
+- **Transcript ordering and loss.** `record` yields to one `AsyncStream`
+  (`.bufferingNewest(1_024)`) from the main actor, so entries stay in order
+  and the main actor never waits for the disk; one `@concurrent` drain task
+  owns the `FileHandle`. Never a task per write. `terminateNow()` cannot
+  await the drain, so the last lines can be lost at quit. Only a stalled
+  disk fills the buffer, and then the oldest entries go. GPT-Live has no
+  "transcript done" event, so output deltas that arrive after
+  `response.completed` are written with the next turn or at close.
+- **Source policy.** The new file must not contain the banned logging
+  strings or `Authorization`, comments included; the word `Logs` may appear
+  only in `VoiceDebugTranscript.swift` (the Settings footer reads
+  `VoiceDebugTranscript.displayPath()`).
+
 ## Why it matters
 
 The server rejects unknown fields, refuses partial updates, needs a manual

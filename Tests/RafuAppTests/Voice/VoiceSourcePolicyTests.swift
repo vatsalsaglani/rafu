@@ -11,6 +11,9 @@ import Testing
 struct VoiceSourcePolicyTests {
     private static let folders = ["Sources/RafuApp/Voice", "Sources/RafuCore/Voice"]
 
+    /// The opt-in debug transcript (ADR 0035 amendment) is the one exception
+    /// to "no logging": a local file written through `VoiceDebugTranscript`,
+    /// not a logging API, and covered by `VoiceDebugTranscriptTests`.
     @Test("No logging, no TimelineView, no key-window grab in Voice")
     func noLogging() throws {
         let banned = [
@@ -29,6 +32,12 @@ struct VoiceSourcePolicyTests {
     func authorizationInOneFile() throws {
         let holders = try Self.sources().filter { $0.1.contains("Authorization") }.map(\.0)
         #expect(holders == ["Sources/RafuApp/Voice/VoiceLiveTransport.swift"])
+    }
+
+    @Test("Only the debug transcript names the Logs folder")
+    func logsFolderInOneFile() throws {
+        let holders = try Self.sources().filter { $0.1.contains("Logs") }.map(\.0)
+        #expect(holders == ["Sources/RafuApp/Voice/VoiceDebugTranscript.swift"])
     }
 
     @Test("No UserDefaults write of anything named key, and no spike Keychain item")

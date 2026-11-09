@@ -136,7 +136,7 @@ private struct VoiceFixture {
     init(
         key: String? = "test-key", microphone: Bool = true, capDollars: Int? = nil,
         transport: ScriptedLiveTransport = ScriptedLiveTransport(),
-        confirmTimeout: Duration = .seconds(30)
+        confirmTimeout: Duration = .seconds(30), transcriptDirectory: URL? = nil
     ) async throws {
         let scratch = scratch
         suite = TestDefaultsSuite.name("dev.rafu.voice-tests")
@@ -178,6 +178,7 @@ private struct VoiceFixture {
         dependencies.closeTimeout = .seconds(5)
         dependencies.presentConfirm = confirm.presenter
         dependencies.confirmTimeout = confirmTimeout
+        dependencies.debugTranscriptDirectory = transcriptDirectory
         voice = VoiceSession(dependencies: dependencies)
     }
 
@@ -901,5 +902,140 @@ struct VoiceToolExecutorTests {
         #expect(fixture.voice.machine.mic == .latched)
         #expect(fixture.audio.isCapturing)
         await fixture.voice.close()
+    }
+}
+
+// MARK: Argument cleanup, failure text and the debug transcript
+
+@Suite("Voice arguments and debug transcript")
+@MainActor
+struct VoiceArgumentsAndTranscriptTests {
+    @Test("Empty optional values go, agent names map, an absolute cwd in the root goes relative")
+    func cleanedArguments() {
+        let root = URL(fileURLWithPath: "/Users/me/project", isDirectory: true)
+        let cleaned = VoiceToolExecutor.cleanedArguments(
+            [
+                "prompt": "", "title": "  ", "near": "", "cwd": NSNull(), "command": [String](),
+                "agent": "Claude Code", "text": "",
+            ], workspaceRoot: root)
+        #expect(Set(cleaned.keys) == ["agent", "text"])
+        #expect(cleaned["agent"] as? String == "claude")
+        #expect(cleaned["text"] as? String == "")
+        func cwd(_ value: String) -> String? {
+            VoiceToolExecutor.cleanedArguments(["cwd": value], workspaceRoot: root)["cwd"]
+                as? String
+        }
+        #expect(cwd("/Users/me/project") == ".")
+        #expect(cwd("/Users/me/project/") == ".")
+        #expect(cwd("/Users/me/project/sub/dir") == "sub/dir")
+        #expect(cwd("/Users/me/project-two") == "/Users/me/project-two")
+        #expect(cwd("/etc") == "/etc")
+        #expect(cwd("src") == "src")
+        let agents = ["claude-code", "Codex CLI", "cursor agent", "Claude", "my-tool"].map {
+            VoiceToolExecutor.cleanedArguments(["agent": $0], workspaceRoot: nil)["agent"]
+                as? String
+        }
+        #expect(agents == ["claude", "codex", "cursor-agent", "claude", "my-tool"])
+        let unrooted = VoiceToolExecutor.cleanedArguments(["cwd": "/tmp"], workspaceRoot: nil)
+        #expect(unrooted["cwd"] as? String == "/tmp")
+    }
+
+    @Test("terminal_create with the backend's empty fields and \"Claude Code\" is accepted")
+    func terminalCreateFromVoice() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        fixture.board.setAgentControlMode(.allow)
+        let outcome = await CanvasTerminalStarter.$confirmSteps.withValue(1) {
+            await fixture.run(
+                "terminal_create",
+                #"{"agent":"Claude Code","title":"Claude","prompt":"","near":"","cwd":null,"command":[]}"#
+            )
+        }
+        #expect(!outcome.output.contains("invalid_arguments"), Comment(rawValue: outcome.output))
+        #expect(!outcome.isError, Comment(rawValue: outcome.output))
+        #expect(fixture.board.cards.contains { $0.title == "Claude" })
+    }
+
+    @Test("A failed call shows its code and Rafu's message on the timeline")
+    func failureMessageOnTimeline() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        try await fixture.openLatched()
+        fixture.transport.push(
+            #"{"type":"response.event","event":{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_w","name":"node_update","arguments":"{\"node_id\":\"Plan\",\"width\":5}"}}}"#
+        )
+        try await until("output") {
+            !fixture.transport.sent(type: "response.item.create").isEmpty
+        }
+        let row = try #require(fixture.voice.timeline.rows(lane: .tool).first)
+        #expect(row.detail.hasPrefix(#"invalid_arguments: Invalid value for "width""#))
+        await fixture.voice.close()
+    }
+
+    @Test("No debug transcript unless the user turns it on")
+    func transcriptOffByDefault() async throws {
+        let folder = TranscriptFolder()
+        let fixture = try await VoiceFixture(transcriptDirectory: folder.url)
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        try await fixture.openLatched()
+        fixture.transport.push(
+            #"{"type":"response.event","event":{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_1","name":"note_create","arguments":"{\"title\":\"Ideas\"}"}}}"#
+        )
+        try await until("output") {
+            !fixture.transport.sent(type: "response.item.create").isEmpty
+        }
+        await fixture.voice.close()
+        #expect(fixture.voice.lastDebugTranscript == nil)
+        #expect(!FileManager.default.fileExists(atPath: folder.url.path))
+    }
+
+    @Test("The debug transcript keeps turns and calls, never the key, in a 0600 file")
+    func transcriptOn() async throws {
+        let folder = TranscriptFolder()
+        let fixture = try await VoiceFixture(
+            key: VoiceDebugTranscriptTests.fakeKey, transcriptDirectory: folder.url)
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        UserDefaults(suiteName: fixture.suite)?.set(
+            true, forKey: VoicePreferences.debugTranscriptKey)
+        try await fixture.openLatched()
+        fixture.transport.push(#"{"type":"session.input_transcript.delta","delta":"start a "}"#)
+        fixture.transport.push(#"{"type":"session.input_transcript.delta","delta":"note"}"#)
+        fixture.transport.push(
+            #"{"type":"session.delegation.created","delegation":{"id":"del_1"}}"#)
+        fixture.transport.push(
+            #"{"type":"response.event","event":{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_1","name":"note_create","arguments":"{\"title\":\"Ideas\"}"}}}"#
+        )
+        try await until("output") {
+            !fixture.transport.sent(type: "response.item.create").isEmpty
+        }
+        fixture.transport.push(#"{"type":"session.output_transcript.delta","delta":"Done."}"#)
+        fixture.transport.push(
+            #"{"type":"response.event","event":{"type":"response.completed","response":{}}}"#)
+        try await until("response.create") {
+            !fixture.transport.sent(type: "response.create").isEmpty
+        }
+        await fixture.voice.close()
+        let transcript = try #require(fixture.voice.lastDebugTranscript)
+        await transcript.drained()
+        let text = try String(contentsOf: transcript.fileURL, encoding: .utf8)
+        #expect(!text.contains(VoiceDebugTranscriptTests.fakeKey))
+        #expect(!text.contains("Authorization"))
+        let lines = try VoiceDebugTranscriptTests.lines(transcript.fileURL)
+        let types = lines.compactMap { $0["type"] as? String }
+        for type in [
+            "session_opened", "session_started", "user_said", "delegation", "call", "call_result",
+            "rafu_said", "session_closed",
+        ] {
+            #expect(types.contains(type), Comment(rawValue: type))
+        }
+        #expect(
+            lines.first { $0["type"] as? String == "user_said" }?["text"] as? String
+                == "start a note")
+        let call = try #require(lines.first { $0["type"] as? String == "call" })
+        #expect(call["arguments"] as? String == #"{"title":"Ideas"}"#)
+        let result = try #require(lines.first { $0["type"] as? String == "call_result" })
+        #expect(result["summary"] as? String == "ok")
+        #expect(result["is_error"] as? Bool == false)
+        #expect(try VoiceDebugTranscriptTests.mode(transcript.fileURL) == 0o600)
     }
 }

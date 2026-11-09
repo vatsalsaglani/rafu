@@ -170,6 +170,20 @@ Phase 1b additions:
 16. Quit Rafu Lightning during a session: it quits within about 2 s, and
     Settings ▸ Voice counts the minutes.
 
+Debug transcript and argument cleanup (2026-11-09):
+
+17. Settings ▸ Voice ▸ Debugging: turn on "Keep a debug transcript". Open a
+    session in Allow mode and say "start a Claude session". Expect one
+    `terminal_create` call that starts Claude (no `invalid_arguments` rows on
+    the Voice Timeline). Close the session, click "Show in Finder", and open
+    the newest `voice-*.jsonl`: it has `user_said`, `call` with the raw
+    arguments, `call_result`, and `rafu_said`; the file has no key. Record
+    whether a `rafu_said` line comes one turn late.
+18. Say something the board refuses (for example "make the Plan note 5
+    points wide"): the timeline tool row shows `invalid_arguments: Invalid
+    value for "width".`
+19. Turn the setting off: the next session writes no new file.
+
 ### Addition: `compose_view` (2026-11-08)
 
 Delivered on `main`: the voice backend tool `compose_view` composes a view from Rafu-owned candidates with the OpenAI
