@@ -299,6 +299,36 @@ Verified 2026-11-09, same toolchain, by `VoiceDebugTranscriptTests` and
   Rafu's own error message; the tool row reads `code: message` (for example
   `invalid_arguments: Invalid value for "width".`), cut to 120 scalars.
   `summary` stays the code, so tests that assert it still hold.
+- **Voice Timeline capsules.** (`docs/references/voice-presence.md` does not
+  exist in this tree, so the notes live here.) The popover shows capsules in
+  session order, not five lanes. Pure grouping is
+  `VoiceTimelineGrouping.items(events:sessionOpen:)` in RafuCore: You and
+  Rafu rows stay top level; tool and board rows go under a delegation by
+  `delegationID` when set, else by time (from one delegation's start to the
+  next). `VoiceSession` does not set `delegationID` on tool rows and never
+  finishes a delegation row, so the end of a delegation is inferred: its last
+  step's end, the next delegation's start, or the latest known time when the
+  session is closed; it is running while the session is open and any step is
+  open (or it has no steps yet and no newer delegation). A step that
+  finishes after its group ended makes the group run again.
+  `VoiceTimeline.finish(_:endMS:detail:outcome:)` takes an optional
+  `VoiceTimelineEvent.Outcome` (`.ok`, `.failed`); a row with no outcome shows
+  Completed once finished, so the failure pill is right only where the writer
+  passes `outcome:`. A group is Failed when any step failed.
+  The session's millisecond clock is private, so a running row's "Working
+  N s" counts from the newest time the events know plus wall time since the
+  popover saw it (`VoiceTimelineClock`); a popover opened long after the last
+  event undercounts the gap until the next event. Animation: the ring (20 Hz)
+  and `VoicePixelLoader` (8 Hz) each own one `Task.sleep` loop keyed on
+  "running and `\.rafuMotionAllowed` and not Reduce Motion"; the elapsed text
+  redraws at 4 Hz from one popover loop keyed on "a group is running and
+  `\.rafuMotionAllowed`". No loop runs for a finished timeline. Colours are
+  theme tokens only (`accent`, `success`, `error`, `chipBackground`,
+  `cardBackground`, `borderSubtle`, text tokens). The ring and loader are
+  `accessibilityHidden`; a capsule reads `VoiceTimelineFormat.spoken` plus
+  the outcome word, and a running group leaves the seconds out so its label
+  does not change 4 times a second. Do not name a type `...TimelineView`: the
+  source-policy scan bans that substring.
 - **Debug transcript (opt-in).** Settings ▸ Voice ▸ Debugging ▸ "Keep a
   debug transcript" (`voice.debugTranscript`, default off; read when a
   session opens). File: `~/Library/Logs/<Rafu | Rafu Lightning>/Voice/voice-yyyyMMdd-HHmmss-<4 hex>.jsonl`.
