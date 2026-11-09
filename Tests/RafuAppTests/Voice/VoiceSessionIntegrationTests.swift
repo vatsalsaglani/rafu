@@ -291,7 +291,11 @@ struct VoiceSessionIntegrationTests {
         #expect(row?.title == "note_create")
         #expect(row?.detail == "ok")
         await fixture.voice.close()
+        // The last session stays readable until the next one opens.
+        #expect(fixture.voice.timeline.rows(lane: .tool).first?.title == "note_create")
+        fixture.voice.toggleLatched()
         #expect(fixture.voice.timeline.events.isEmpty)
+        await fixture.voice.close()
     }
 
     @Test("Usage updates feed the cost meter")
@@ -1037,5 +1041,141 @@ struct VoiceArgumentsAndTranscriptTests {
         #expect(result["summary"] as? String == "ok")
         #expect(result["is_error"] as? Bool == false)
         #expect(try VoiceDebugTranscriptTests.mode(transcript.fileURL) == 0o600)
+    }
+
+    // MARK: Transcript turns and remote close
+
+    /// Opens a latched session with the debug transcript on.
+    private func transcriptFixture() async throws -> (VoiceFixture, TranscriptFolder) {
+        let folder = TranscriptFolder()
+        let fixture = try await VoiceFixture(transcriptDirectory: folder.url)
+        UserDefaults(suiteName: fixture.suite)?.set(
+            true, forKey: VoicePreferences.debugTranscriptKey)
+        try await fixture.openLatched()
+        return (fixture, folder)
+    }
+
+    /// Waits until every pushed event ran (an error marker is the last one),
+    /// closes, and returns the `user_said` / `rafu_said` lines in file order.
+    private func spoken(_ fixture: VoiceFixture) async throws -> [(String, String)] {
+        fixture.transport.push(#"{"type":"error","error":{"code":"marker","message":"m"}}"#)
+        try await until("marker") { fixture.voice.lastError == "GPT-Live error marker" }
+        await fixture.voice.close()
+        let transcript = try #require(fixture.voice.lastDebugTranscript)
+        await transcript.drained()
+        return try VoiceDebugTranscriptTests.lines(transcript.fileURL).compactMap { line in
+            guard let type = line["type"] as? String, type == "user_said" || type == "rafu_said",
+                let text = line["text"] as? String
+            else { return nil }
+            return (type, text)
+        }
+    }
+
+    @Test("The transcript keeps turns in speaking order: user, Rafu, user, Rafu")
+    func transcriptOrder() async throws {
+        let (fixture, folder) = try await transcriptFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        _ = folder
+        let transport = fixture.transport
+        transport.push(
+            #"{"type":"session.input_transcript.delta","delta":"start a ","start_ms":0,"end_ms":300}"#
+        )
+        transport.push(
+            #"{"type":"session.input_transcript.delta","delta":"note","start_ms":300,"end_ms":600}"#
+        )
+        transport.push(#"{"type":"session.delegation.created","delegation":{"id":"del_1"}}"#)
+        transport.push(
+            #"{"type":"session.output_transcript.delta","delta":"Done. ","start_ms":1000,"end_ms":1300}"#
+        )
+        transport.push(
+            #"{"type":"session.output_transcript.delta","delta":"It is ready.","start_ms":1300,"end_ms":1700}"#
+        )
+        transport.push(
+            #"{"type":"response.event","event":{"type":"response.completed","response":{}}}"#)
+        transport.push(
+            #"{"type":"session.input_transcript.delta","delta":"thanks","start_ms":5000,"end_ms":5400}"#
+        )
+        transport.push(#"{"type":"session.delegation.created","delegation":{"id":"del_2"}}"#)
+        transport.push(
+            #"{"type":"session.output_transcript.delta","delta":"You are welcome.","start_ms":6000,"end_ms":6500}"#
+        )
+        let lines = try await spoken(fixture)
+        #expect(lines.map(\.0) == ["user_said", "rafu_said", "user_said", "rafu_said"])
+        #expect(
+            lines.map(\.1) == ["start a note", "Done. It is ready.", "thanks", "You are welcome."])
+    }
+
+    @Test("A long pause inside one stream starts a new turn")
+    func transcriptGaps() async throws {
+        let (fixture, folder) = try await transcriptFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        _ = folder
+        let transport = fixture.transport
+        for (delta, start, end) in [
+            ("one", 0, 400), ("two", 2_000, 2_400), ("three", 2_500, 2_800),
+        ] {
+            transport.push(
+                #"{"type":"session.input_transcript.delta","delta":"\#(delta)","start_ms":\#(start),"end_ms":\#(end)}"#
+            )
+        }
+        for (delta, start, end) in [("a", 0, 300), ("b", 1_600, 1_900), ("c", 2_000, 2_200)] {
+            transport.push(
+                #"{"type":"session.output_transcript.delta","delta":"\#(delta)","start_ms":\#(start),"end_ms":\#(end)}"#
+            )
+        }
+        let lines = try await spoken(fixture)
+        #expect(lines.filter { $0.0 == "user_said" }.map(\.1) == ["one", "twothree"])
+        #expect(lines.filter { $0.0 == "rafu_said" }.map(\.1) == ["a", "bc"])
+    }
+
+    @Test("Reply words that arrive after response.completed stay in the same reply")
+    func transcriptReplyTail() async throws {
+        let (fixture, folder) = try await transcriptFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        _ = folder
+        let transport = fixture.transport
+        var loud = Data()
+        for _ in 0..<2_400 { loud.append(contentsOf: [0x00, 0x10]) }
+        transport.push(
+            #"{"type":"session.output_audio.delta","delta":"\#(loud.base64EncodedString())"}"#)
+        transport.push(#"{"type":"session.output_transcript.delta","delta":"Done."}"#)
+        transport.push(
+            #"{"type":"response.event","event":{"type":"response.completed","response":{}}}"#)
+        transport.push(#"{"type":"session.output_transcript.delta","delta":" Tail."}"#)
+        let lines = try await spoken(fixture)
+        #expect(lines.map(\.1) == ["Done. Tail."])
+    }
+
+    @Test("A server close shows its reason as an error; the user's own close does not")
+    func remoteCloseReason() async throws {
+        let fixture = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(fixture.suite) }
+        try await fixture.openLatched()
+        fixture.transport.push(#"{"type":"session.closed","reason":"expired"}"#)
+        let message = "The voice service closed the session (expired)."
+        try await until("error") { fixture.voice.blobState == .error(message) }
+        #expect(fixture.voice.lastError == message)
+        fixture.voice.dismissError()
+        #expect(fixture.voice.blobState == .idle)
+
+        let quiet = try await VoiceFixture()
+        defer { TestDefaultsSuite.remove(quiet.suite) }
+        try await quiet.openLatched()
+        quiet.transport.push(#"{"type":"session.closed","reason":"close_requested"}"#)
+        try await until("closed") { quiet.voice.blobState == .idle }
+        #expect(quiet.voice.lastError == nil)
+    }
+
+    @Test("The close message cuts a long or odd reason to 40 plain characters")
+    func remoteCloseMessage() {
+        #expect(VoiceSession.remoteCloseMessage("user") == nil)
+        #expect(VoiceSession.remoteCloseMessage("close_requested") == nil)
+        #expect(VoiceSession.remoteCloseMessage(nil) == "The voice service closed the session.")
+        let long = VoiceSession.remoteCloseMessage(String(repeating: "x", count: 90) + "\n<b>")
+        #expect(
+            long == "The voice service closed the session (\(String(repeating: "x", count: 40))).")
+        #expect(
+            VoiceSession.remoteCloseMessage("bad\n<script>")
+                == "The voice service closed the session (badscript).")
     }
 }

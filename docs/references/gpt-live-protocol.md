@@ -54,6 +54,14 @@
 | `session.updated` | 230–360 ms after `session.update` | `client_event_id, session` |
 | `session.usage.updated` | about every 15 s | `usage.seconds` (float), `context_window.usage_ratio` |
 | `session.closed` | after `session.close` | `reason`, `usage.seconds` (**int**), `session` |
+
+Close reasons seen: `close_requested` (the answer to Rafu's `session.close`)
+and `expired` (the server ended a session by itself 30 s after start, in a
+session that sent no input audio; the cause is unconfirmed, so recheck after
+the capture fix 56ef2fd). Rafu shows any server-started close other than
+`user` and `close_requested` as "The voice service closed the session
+(<reason>)." in the status item (Voice off, with Dismiss); the reason is cut
+to 40 plain characters.
 | `error` | on a refused command | `error{type, code, message, param, client_event_id}` |
 
 `VoiceLiveServerEvent` keeps only what Rafu uses. Nested `response.event`s
@@ -157,8 +165,9 @@ other than `response.output_item.done` with `item.type == "function_call"` and
   builds the graph first and, when the engine still does not start, builds a
   new engine without voice processing (barge-in off). Voice writes no logs
   (`VoiceSourcePolicyTests`); the only report is the status-item tooltip
-  ("Rafu voice: <reason>"), and the timeline is cleared at teardown, so ask
-  the user to hover over "Voice off". Reproduce with a standalone `swiftc -O`
+  ("Rafu voice: <reason>"). The timeline now stays after close (it is
+  cleared when the next session opens), so the popover shows the last
+  session; ask the user to hover over "Voice off". Reproduce with a standalone `swiftc -O`
   program that enables voice processing before and after connecting an
   `AVAudioSourceNode` to the main mixer.
 - **Capture starts at the key press, not at `session.started`.** The socket
@@ -290,13 +299,21 @@ Verified 2026-11-09, same toolchain, by `VoiceDebugTranscriptTests` and
   | `session_closed` | `reason` (`user`, `idle`, `remote`, `quit`, or the server's reason) |
   | `session_failed` | `reason` (the blob text) |
   | `server_error` | `code`, `message` |
-  | `user_said` | `text` (one per user turn, written at `session.delegation.created`) |
-  | `rafu_said` | `text` (one per reply, written at `response.completed`, the next turn, or close) |
+  | `user_said` | `text` (one per user turn: written at `session.delegation.created`, at a pause of more than 1500 ms in the input transcript, or at close) |
+  | `rafu_said` | `text` (one per reply: written when the reply audio has been silent for 600 ms, at `response.completed` when no reply audio is playing, at a pause of more than 1200 ms in the output transcript, when the user speaks again, or at close) |
   | `delegation` | `delegation_id`, `target` |
   | `call` | `call_id`, `name`, `arguments` (the raw JSON string) |
   | `call_result` | `call_id`, `name`, `summary`, `message`, `output`, `is_error` |
   | `confirm` | `tool`, `answer` |
   | `truncated` | none; the file reached 2 MiB and nothing follows |
+
+  Turn boundaries: `session.input_transcript.delta` and
+  `session.output_transcript.delta` carry `start_ms` and `end_ms`; Rafu splits a
+  turn when a delta starts more than 1500 ms (user) or 1200 ms (reply) after
+  the last `end_ms`. Output transcript deltas trail the audio by 0.2 to
+  0.3 s, so `response.completed` does not close a reply that is still audible.
+  A pending reply is written before pending user words, which keeps the file
+  in speaking order. Without `start_ms` the old rules apply.
 
   ```bash
   cd ~/Library/Logs/"Rafu Lightning"/Voice
